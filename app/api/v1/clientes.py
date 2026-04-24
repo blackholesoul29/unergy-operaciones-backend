@@ -39,9 +39,10 @@ def list_clientes(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    # Ignore: todo delete
-    print("force deploy trick")
-    query = db.query(Cliente)
+    query = db.query(Cliente).options(
+        selectinload(Cliente.servicios),
+        selectinload(Cliente.documentos_comerciales),
+    )
     if q:
         query = query.filter(Cliente.razon_social_nombre.ilike(f"%{q}%"))
     total = query.count()

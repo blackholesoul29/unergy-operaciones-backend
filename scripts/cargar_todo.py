@@ -307,7 +307,7 @@ def main():
         db.commit()
         print(f"Inversionistas: {ok} nuevos, {skip} ya existían, {err} errores")
 
-        print("\n✓ Carga completa sin errores.")
+        print("\nOK Carga completa sin errores.")
 
     except Exception as e:
         db.rollback()

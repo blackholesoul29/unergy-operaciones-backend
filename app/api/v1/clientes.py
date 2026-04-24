@@ -34,7 +34,7 @@ def _get_cliente_or_404(id: int, db: Session) -> Cliente:
 @router.get("", response_model=PaginatedResponse[ClienteOut])
 def list_clientes(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
     q: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),

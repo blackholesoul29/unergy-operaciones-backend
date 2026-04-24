@@ -25,7 +25,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
 @router.get("", response_model=PaginatedResponse[ProyectoOut])
 def list_proyectos(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
     q: str | None = None,
     estado: str | None = None,
     tipo_proyecto: str | None = None,

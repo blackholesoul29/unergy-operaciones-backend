@@ -17,13 +17,17 @@ def add_columns():
             "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
             "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
             "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='rut' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'rut'; END IF; END $$",
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='certificado_bancario' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'certificado_bancario'; END IF; END $$",
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='camara_comercio' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'camara_comercio'; END IF; END $$",
         ]
         for s in stmts:
             conn.execute(text(s))
         conn.commit()
+    # Enum values must be added outside a transaction in PG < 12; use autocommit
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        for val in ("rut", "certificado_bancario", "camara_comercio"):
+            try:
+                conn.execute(text(f"ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS '{val}'"))
+            except Exception:
+                pass
     print("Columns migrated.")
 
 

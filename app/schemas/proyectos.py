@@ -3,6 +3,23 @@ from typing import Optional
 from datetime import datetime, date
 
 
+class ProyectoInversionistaCreate(BaseModel):
+    cliente_id: int
+    porcentaje_participacion: Optional[float] = None
+    es_patrimonio_autonomo: bool = False
+    contrato_ref: Optional[str] = None
+    fecha_inicio: Optional[date] = None
+    fecha_fin: Optional[date] = None
+
+
+class ProyectoInversionistaOut(ProyectoInversionistaCreate):
+    id: int
+    proyecto_id: int
+    cliente_nombre: str = ""
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
     cliente_id: int
@@ -15,6 +32,8 @@ class ProyectoCreate(BaseModel):
     tipo_tecnologia: Optional[str] = None
     tipo_proyecto: Optional[str] = None
     potencia_instalada_kwp: Optional[float] = None
+    cantidad_total_paneles: Optional[int] = None
+    produccion_especifica_kwh_kwp: Optional[float] = None
     estado: Optional[str] = "en_desarrollo"
     departamento: Optional[str] = None
     municipio: Optional[str] = None
@@ -40,6 +59,8 @@ class ProyectoOut(BaseModel):
     tipo_tecnologia: Optional[str]
     tipo_proyecto: Optional[str]
     potencia_instalada_kwp: Optional[float]
+    cantidad_total_paneles: Optional[int]
+    produccion_especifica_kwh_kwp: Optional[float]
     estado: str
     departamento: Optional[str]
     municipio: Optional[str]
@@ -51,6 +72,7 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    inversionistas: list[ProyectoInversionistaOut] = []
     created_at: datetime
     updated_at: datetime
 

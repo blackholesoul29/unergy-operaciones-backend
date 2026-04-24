@@ -1,11 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
+from app.api.v1.auth import get_current_user
 from app.models import Proyecto
-from app.schemas.proyectos import ProyectoCreate, ProyectoUpdate, ProyectoOut
+from app.models.proyectos import ProyectoInversionista
+from app.schemas.proyectos import (
+    ProyectoCreate, ProyectoUpdate, ProyectoOut,
+    ProyectoInversionistaCreate, ProyectoInversionistaOut,
+)
 from app.schemas.common import PaginatedResponse
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
+
+
+def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
+    p = db.query(Proyecto).options(
+        selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente)
+    ).filter(Proyecto.id == id).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    return p
 
 
 @router.get("", response_model=PaginatedResponse[ProyectoOut])
@@ -46,10 +60,7 @@ def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db)):
 
 @router.get("/{id}", response_model=ProyectoOut)
 def get_proyecto(id: int, db: Session = Depends(get_db)):
-    p = db.query(Proyecto).filter(Proyecto.id == id).first()
-    if not p:
-        raise HTTPException(404, "Proyecto no encontrado")
-    return p
+    return _get_proyecto_or_404(id, db)
 
 
 @router.patch("/{id}", response_model=ProyectoOut)
@@ -60,13 +71,11 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(p, k, v)
     db.commit()
-    db.refresh(p)
-    return p
+    return _get_proyecto_or_404(id, db)
 
 
 @router.patch("/{id}/servicios", response_model=ProyectoOut)
 def toggle_servicios(id: int, data: dict, db: Session = Depends(get_db)):
-    """Activar/desactivar servicios de un proyecto."""
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
@@ -75,5 +84,38 @@ def toggle_servicios(id: int, data: dict, db: Session = Depends(get_db)):
         if k in allowed:
             setattr(p, k, v)
     db.commit()
-    db.refresh(p)
-    return p
+    return _get_proyecto_or_404(id, db)
+
+
+# ── Inversionistas ────────────────────────────────────────────────────────────
+
+@router.get("/{id}/inversionistas", response_model=list[ProyectoInversionistaOut])
+def list_inversionistas(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_proyecto_or_404(id, db)
+    return (
+        db.query(ProyectoInversionista)
+        .options(selectinload(ProyectoInversionista.cliente))
+        .filter(ProyectoInversionista.proyecto_id == id)
+        .all()
+    )
+
+
+@router.post("/{id}/inversionistas", response_model=ProyectoInversionistaOut, status_code=201)
+def add_inversionista(id: int, data: ProyectoInversionistaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_proyecto_or_404(id, db)
+    inv = ProyectoInversionista(proyecto_id=id, **data.model_dump())
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+    return db.query(ProyectoInversionista).options(
+        selectinload(ProyectoInversionista.cliente)
+    ).filter(ProyectoInversionista.id == inv.id).first()
+
+
+@router.delete("/{id}/inversionistas/{inv_id}", status_code=204)
+def remove_inversionista(id: int, inv_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    inv = db.query(ProyectoInversionista).filter_by(id=inv_id, proyecto_id=id).first()
+    if not inv:
+        raise HTTPException(404, "Inversionista no encontrado")
+    db.delete(inv)
+    db.commit()

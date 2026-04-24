@@ -80,6 +80,8 @@ class Proyecto(Base):
 
     potencia_instalada_kwp: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     potencia_con_cen_mw: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    produccion_especifica_kwh_kwp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     codigo_cnd: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -213,3 +215,7 @@ class ProyectoInversionista(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="inversionistas")
     cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="participaciones")
+
+    @property
+    def cliente_nombre(self) -> str:
+        return self.cliente.razon_social_nombre if self.cliente else ""

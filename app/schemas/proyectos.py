@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime, date
 
@@ -77,3 +77,8 @@ class ProyectoOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("inversionistas", mode="before")
+    @classmethod
+    def none_to_list(cls, v):
+        return v if v is not None else []

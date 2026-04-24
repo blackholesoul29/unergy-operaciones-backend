@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime, date
 
@@ -85,3 +85,8 @@ class ClienteOut(BaseModel):
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
     model_config = {"from_attributes": True}
+
+    @field_validator("servicios", "documentos_comerciales", mode="before")
+    @classmethod
+    def none_to_list(cls, v):
+        return v if v is not None else []

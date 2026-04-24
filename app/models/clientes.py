@@ -53,10 +53,10 @@ class Cliente(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    proyectos: Mapped[list] = relationship("Proyecto", back_populates="cliente")
-    participaciones: Mapped[list] = relationship("ProyectoInversionista", back_populates="cliente")
-    servicios: Mapped[list] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan")
-    documentos_comerciales: Mapped[list] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan")
+    proyectos: Mapped[list] = relationship("Proyecto", back_populates="cliente", uselist=True)
+    participaciones: Mapped[list] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
+    servicios: Mapped[list] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
+    documentos_comerciales: Mapped[list] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
 
 
 class ClienteServicio(Base):

@@ -80,5 +80,9 @@ class ProyectoOut(BaseModel):
 
     @field_validator("inversionistas", mode="before")
     @classmethod
-    def none_to_list(cls, v):
-        return v if v is not None else []
+    def coerce_to_list(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return list(v) if hasattr(v, "__iter__") else [v]
+        return v

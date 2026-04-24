@@ -33,7 +33,9 @@ def list_proyectos(
     portafolio_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Proyecto)
+    query = db.query(Proyecto).options(
+        selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente)
+    )
     if q:
         query = query.filter(Proyecto.nombre_comercial.ilike(f"%{q}%"))
     if estado:

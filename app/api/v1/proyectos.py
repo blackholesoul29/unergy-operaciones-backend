@@ -56,8 +56,7 @@ def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db)):
     proyecto = Proyecto(**data.model_dump())
     db.add(proyecto)
     db.commit()
-    db.refresh(proyecto)
-    return proyecto
+    return _get_proyecto_or_404(proyecto.id, db)
 
 
 @router.get("/{id}", response_model=ProyectoOut)

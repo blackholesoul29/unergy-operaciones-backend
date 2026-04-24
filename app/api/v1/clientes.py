@@ -54,7 +54,6 @@ def create_cliente(data: ClienteCreate, db: Session = Depends(get_db), _=Depends
     cliente = Cliente(**data.model_dump())
     db.add(cliente)
     db.commit()
-    db.refresh(cliente)
     return _get_cliente_or_404(cliente.id, db)
 
 

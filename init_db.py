@@ -15,6 +15,11 @@ def add_columns():
         stmts = [
             "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
             "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
+            "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
+            "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='rut' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'rut'; END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='certificado_bancario' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'certificado_bancario'; END IF; END $$",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel='camara_comercio' AND enumtypid=(SELECT oid FROM pg_type WHERE typname='tipo_documento_cliente_enum')) THEN ALTER TYPE tipo_documento_cliente_enum ADD VALUE 'camara_comercio'; END IF; END $$",
         ]
         for s in stmts:
             conn.execute(text(s))

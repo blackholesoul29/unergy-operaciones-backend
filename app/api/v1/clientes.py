@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import uuid
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -9,6 +13,10 @@ from app.schemas.clientes import (
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
 )
 from app.schemas.common import PaginatedResponse
+
+UPLOADS_DIR = Path("uploads/clientes")
+ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
@@ -141,5 +149,49 @@ def delete_documento(id: int, doc_id: int, db: Session = Depends(get_db), _=Depe
     doc = db.query(ClienteDocumentoComercial).filter_by(id=doc_id, cliente_id=id).first()
     if not doc:
         raise HTTPException(404, "Documento no encontrado")
+    # Borrar archivo físico si existe
+    if doc.archivo_url and doc.archivo_url.startswith("/static/uploads/"):
+        ruta = Path(doc.archivo_url.lstrip("/").replace("static/", "", 1))
+        if ruta.exists():
+            ruta.unlink(missing_ok=True)
     db.delete(doc)
     db.commit()
+
+
+@router.post("/{id}/documentos/{doc_id}/archivo", response_model=ClienteDocumentoOut)
+async def upload_archivo_documento(
+    id: int,
+    doc_id: int,
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    doc = db.query(ClienteDocumentoComercial).filter_by(id=doc_id, cliente_id=id).first()
+    if not doc:
+        raise HTTPException(404, "Documento no encontrado")
+
+    if archivo.content_type not in ALLOWED_MIME:
+        raise HTTPException(400, f"Tipo de archivo no permitido. Use PDF, JPG o PNG.")
+
+    contenido = await archivo.read()
+    if len(contenido) > MAX_FILE_SIZE:
+        raise HTTPException(400, "El archivo supera el límite de 20 MB")
+
+    # Borrar archivo anterior si existe
+    if doc.archivo_url and doc.archivo_url.startswith("/static/uploads/"):
+        ruta_ant = Path(doc.archivo_url.lstrip("/").replace("static/", "", 1))
+        ruta_ant.unlink(missing_ok=True)
+
+    # Guardar nuevo archivo
+    ext = Path(archivo.filename).suffix.lower() if archivo.filename else ".pdf"
+    nombre_guardado = f"{uuid.uuid4().hex}{ext}"
+    carpeta = UPLOADS_DIR / str(id)
+    carpeta.mkdir(parents=True, exist_ok=True)
+    ruta_nueva = carpeta / nombre_guardado
+    ruta_nueva.write_bytes(contenido)
+
+    doc.archivo_url = f"/static/uploads/clientes/{id}/{nombre_guardado}"
+    doc.archivo_nombre = archivo.filename or nombre_guardado
+    db.commit()
+    db.refresh(doc)
+    return doc

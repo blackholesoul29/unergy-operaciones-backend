@@ -19,6 +19,9 @@ class TipoServicioClienteEnum(str, enum.Enum):
 
 
 class TipoDocumentoClienteEnum(str, enum.Enum):
+    rut = "rut"
+    certificado_bancario = "certificado_bancario"
+    camara_comercio = "camara_comercio"
     oferta = "oferta"
     contrato = "contrato"
 
@@ -83,8 +86,11 @@ class ClienteDocumentoComercial(Base):
         nullable=False, default="borrador"
     )
     archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    archivo_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="documentos_comerciales")
+    servicio: Mapped["ClienteServicio | None"] = relationship("ClienteServicio")

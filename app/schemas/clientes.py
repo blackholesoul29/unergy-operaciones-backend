@@ -42,6 +42,8 @@ class ClienteDocumentoCreate(BaseModel):
     fecha: Optional[date] = None
     estado: Optional[str] = "borrador"
     archivo_url: Optional[str] = None
+    archivo_nombre: Optional[str] = None
+    servicio_id: Optional[int] = None
     notas: Optional[str] = None
 
 
@@ -51,6 +53,8 @@ class ClienteDocumentoUpdate(BaseModel):
     fecha: Optional[date] = None
     estado: Optional[str] = None
     archivo_url: Optional[str] = None
+    archivo_nombre: Optional[str] = None
+    servicio_id: Optional[int] = None
     notas: Optional[str] = None
 
 

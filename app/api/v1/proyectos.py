@@ -105,6 +105,11 @@ def list_inversionistas(id: int, db: Session = Depends(get_db), _=Depends(get_cu
 @router.post("/{id}/inversionistas", response_model=ProyectoInversionistaOut, status_code=201)
 def add_inversionista(id: int, data: ProyectoInversionistaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
+    duplicate = db.query(ProyectoInversionista).filter_by(
+        proyecto_id=id, cliente_id=data.cliente_id
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "Este cliente ya es inversionista de este proyecto")
     inv = ProyectoInversionista(proyecto_id=id, **data.model_dump())
     db.add(inv)
     db.commit()

@@ -4,10 +4,13 @@ Upsert clientes por nit_cedula, proyectos por topic_slug,
 inversionistas por par (proyecto_id, cliente_id).
 
 Uso:
-    # Con la BD de Railway (obtener URL del dashboard):
+    # Con la BD de Railway — URL como argumento:
+    python scripts/cargar_todo.py "postgresql+psycopg://user:pass@host:port/db"
+
+    # O como variable de entorno:
     DATABASE_URL="postgresql+psycopg://..." python scripts/cargar_todo.py
 
-    # Con la BD local:
+    # Con la BD local (.env):
     python scripts/cargar_todo.py
 """
 import os
@@ -18,9 +21,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Permite sobreescribir DATABASE_URL desde entorno (ej: Railway)
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# Prioridad: argumento CLI > variable de entorno > config local
+DATABASE_URL = (sys.argv[1] if len(sys.argv) > 1 else None) or os.environ.get("DATABASE_URL")
 if DATABASE_URL:
+    # Railway usa postgresql://, pero psycopg necesita postgresql+psycopg://
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 else:
     from app.core.database import engine  # usa la config local (.env)

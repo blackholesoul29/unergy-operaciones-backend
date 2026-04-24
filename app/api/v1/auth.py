@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
@@ -42,3 +42,20 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 @router.get("/me")
 def me(current: Usuario = Depends(get_current_user)):
     return UsuarioOut.model_validate(current).model_dump(mode="json")
+
+
+# Separate router for user listing (not under /auth prefix)
+usuarios_router = APIRouter(prefix="/usuarios", tags=["Usuarios"])
+
+
+@usuarios_router.get("")
+def list_usuarios(
+    size: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    users = db.query(Usuario).filter(Usuario.activo == True).order_by(Usuario.nombre).limit(size).all()
+    return {
+        "items": [{"id": u.id, "nombre": u.nombre, "email": u.email, "rol": u.rol.value} for u in users],
+        "total": len(users),
+    }

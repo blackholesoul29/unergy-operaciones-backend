@@ -11,23 +11,29 @@ from app.seeds.seed_data import seed
 
 
 def add_columns():
-    with engine.connect() as conn:
-        stmts = [
-            "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
-            "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
-            "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
-            "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
-        ]
-        for s in stmts:
-            conn.execute(text(s))
-        conn.commit()
-    # Enum values must be added outside a transaction in PG < 12; use autocommit
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        for val in ("rut", "certificado_bancario", "camara_comercio"):
-            try:
+    stmts = [
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
+        "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
+        "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
+    ]
+    for s in stmts:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(s))
+                conn.commit()
+        except Exception as e:
+            print(f"  WARN column migration skipped: {e}")
+
+    enum_vals = ("rut", "certificado_bancario", "camara_comercio")
+    for val in enum_vals:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("COMMIT"))
                 conn.execute(text(f"ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS '{val}'"))
-            except Exception:
-                pass
+                conn.execute(text("COMMIT"))
+        except Exception as e:
+            print(f"  WARN enum migration skipped: {e}")
     print("Columns migrated.")
 
 

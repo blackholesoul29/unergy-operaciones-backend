@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 
 class ClienteCreate(BaseModel):
@@ -15,10 +15,51 @@ class ClienteCreate(BaseModel):
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
+    rut_url: Optional[str] = None
 
 
 class ClienteUpdate(ClienteCreate):
     razon_social_nombre: Optional[str] = None
+
+
+class ClienteServicioCreate(BaseModel):
+    tipo: str
+    fecha_inicio: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class ClienteServicioOut(ClienteServicioCreate):
+    id: int
+    cliente_id: int
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ClienteDocumentoCreate(BaseModel):
+    tipo: str
+    nombre: str
+    numero: Optional[str] = None
+    fecha: Optional[date] = None
+    estado: Optional[str] = "borrador"
+    archivo_url: Optional[str] = None
+    notas: Optional[str] = None
+
+
+class ClienteDocumentoUpdate(BaseModel):
+    nombre: Optional[str] = None
+    numero: Optional[str] = None
+    fecha: Optional[date] = None
+    estado: Optional[str] = None
+    archivo_url: Optional[str] = None
+    notas: Optional[str] = None
+
+
+class ClienteDocumentoOut(ClienteDocumentoCreate):
+    id: int
+    cliente_id: int
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
 
 
 class ClienteOut(BaseModel):
@@ -34,7 +75,9 @@ class ClienteOut(BaseModel):
     iva_pct: Optional[float]
     retencion_pct: Optional[float]
     reteica_pct: Optional[float]
+    rut_url: Optional[str]
     created_at: datetime
     updated_at: datetime
-
+    servicios: list[ClienteServicioOut] = []
+    documentos_comerciales: list[ClienteDocumentoOut] = []
     model_config = {"from_attributes": True}

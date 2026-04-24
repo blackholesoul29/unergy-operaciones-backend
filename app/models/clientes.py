@@ -1,6 +1,6 @@
 import enum
-from datetime import datetime
-from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime
+from datetime import datetime, date
+from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -9,6 +9,26 @@ from app.models.base import Base
 class TipoPersonaEnum(str, enum.Enum):
     natural = "natural"
     juridica = "juridica"
+
+
+class TipoServicioClienteEnum(str, enum.Enum):
+    operacion = "operacion"
+    representacion = "representacion"
+    cgm = "cgm"
+    promotor = "promotor"
+
+
+class TipoDocumentoClienteEnum(str, enum.Enum):
+    oferta = "oferta"
+    contrato = "contrato"
+
+
+class EstadoDocumentoClienteEnum(str, enum.Enum):
+    borrador = "borrador"
+    enviado = "enviado"
+    aceptado = "aceptado"
+    firmado = "firmado"
+    rechazado = "rechazado"
 
 
 class Cliente(Base):
@@ -26,8 +46,45 @@ class Cliente(Base):
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    rut_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyectos: Mapped[list] = relationship("Proyecto", back_populates="cliente")
     participaciones: Mapped[list] = relationship("ProyectoInversionista", back_populates="cliente")
+    servicios: Mapped[list] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan")
+    documentos_comerciales: Mapped[list] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan")
+
+
+class ClienteServicio(Base):
+    __tablename__ = "cliente_servicios"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(SAEnum(TipoServicioClienteEnum, name="tipo_servicio_cliente_enum"), nullable=False)
+    fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="servicios")
+
+
+class ClienteDocumentoComercial(Base):
+    __tablename__ = "cliente_documentos_comerciales"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(SAEnum(TipoDocumentoClienteEnum, name="tipo_documento_cliente_enum"), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(255), nullable=False)
+    numero: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    estado: Mapped[str] = mapped_column(
+        SAEnum(EstadoDocumentoClienteEnum, name="estado_documento_cliente_enum"),
+        nullable=False, default="borrador"
+    )
+    archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="documentos_comerciales")

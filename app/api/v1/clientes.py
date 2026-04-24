@@ -39,6 +39,8 @@ def list_clientes(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    # Ignore: todo delete
+    print("force deploy trick")
     query = db.query(Cliente)
     if q:
         query = query.filter(Cliente.razon_social_nombre.ilike(f"%{q}%"))

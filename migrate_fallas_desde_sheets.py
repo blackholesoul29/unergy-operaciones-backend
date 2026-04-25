@@ -1,5 +1,5 @@
 """
-Migración completa: Google Apps Script → Plataforma Operaciones
+Migración completa: Google Apps Script -> Plataforma Operaciones
 
 Pasos que ejecuta:
   1. Crea proyectos faltantes en la plataforma (idempotente)
@@ -24,7 +24,7 @@ from typing import Optional
 
 import requests
 
-# ── Configuración ──────────────────────────────────────────────────────────────
+# -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
@@ -36,7 +36,7 @@ API_PASS  = "Unergy2025!"
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26
 
-# ── Mapeo manual confirmado: nombre antiguo → proyecto_id en plataforma ────────
+# -- Mapeo manual confirmado: nombre antiguo -> proyecto_id en plataforma --------
 PROYECTO_MAP: dict[str, int] = {
     "Cañahuate":             10,   # MGS 0005 Canahuate
     "Uruaco":                49,   # Minigranja Solar Uruaco
@@ -67,7 +67,7 @@ PROYECTO_MAP: dict[str, int] = {
     "Valencia 2":            50,   # MGS 0027 Valencia Oriente 2
 }
 
-# Proyectos a crear si no existen (nombre antiguo → nombre_comercial en plataforma)
+# Proyectos a crear si no existen (nombre antiguo -> nombre_comercial en plataforma)
 PROYECTOS_CREAR = [
     "Cedillanos",
     "La Reserva",
@@ -98,7 +98,7 @@ PROYECTOS_CREAR = [
     "Somer Torre 2",
 ]
 
-# ── Mapeo de estados (etiqueta antigua → código nuevo) ─────────────────────────
+# -- Mapeo de estados (etiqueta antigua -> código nuevo) -------------------------
 ESTADO_MAP = {
     "activa":      "abierta",
     "revision":    "en_gestion",
@@ -111,7 +111,7 @@ ESTADO_MAP = {
     "Terminada":   "cerrada",
 }
 
-# Mapeo prioridad (texto libre → código)
+# Mapeo prioridad (texto libre -> código)
 PRIO_MAP = {
     "alta":    "critica",
     "media":   "media",
@@ -121,7 +121,7 @@ PRIO_MAP = {
     "grave":   "grave",
 }
 
-# Mapeo resolución (texto libre → código catálogo)
+# Mapeo resolución (texto libre -> código catálogo)
 RESOLUCION_KEYWORDS = [
     (["reinicio", "reset", "inversor"],          "reinicio_inversor"),
     (["visita", "técnica", "tecnica"],           "visita_tecnica"),
@@ -132,7 +132,7 @@ RESOLUCION_KEYWORDS = [
     (["sin acción", "no aplica", "sin accion"],  "sin_accion"),
 ]
 
-# Mapeo tipo de falla: prefijo del código antiguo → código de categoría nueva
+# Mapeo tipo de falla: prefijo del código antiguo -> código de categoría nueva
 CATEGORIA_PREFIJO = {
     "1": "medicion",    # Fallas de Medición
     "2": "inversor",    # Fallas Eléctricas / Inversores
@@ -141,7 +141,7 @@ CATEGORIA_PREFIJO = {
     "5": "red",         # Civiles / Estructurales / Red
 }
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------------------------
 
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
@@ -174,7 +174,7 @@ def parse_datetime(raw: str) -> Optional[str]:
     return None
 
 
-# ── Autenticación ──────────────────────────────────────────────────────────────
+# -- Autenticación --------------------------------------------------------------
 
 def get_token() -> str:
     r = requests.post(f"{API_BASE}/auth/token",
@@ -187,7 +187,7 @@ def hdrs(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-# ── Catálogos ──────────────────────────────────────────────────────────────────
+# -- Catálogos ------------------------------------------------------------------
 
 def cargar_catalogos(token: str) -> dict:
     r = requests.get(f"{API_BASE}/fallas/catalogos", headers=hdrs(token))
@@ -202,7 +202,7 @@ def cargar_proyectos(token: str) -> dict[str, int]:
     return {p["nombre_comercial"]: p["id"] for p in r.json()["items"]}
 
 
-# ── Crear proyectos faltantes ──────────────────────────────────────────────────
+# -- Crear proyectos faltantes --------------------------------------------------
 
 def asegurar_proyectos(token: str, dry_run: bool) -> dict[str, int]:
     """
@@ -210,7 +210,7 @@ def asegurar_proyectos(token: str, dry_run: bool) -> dict[str, int]:
     Devuelve el mapa completo {nombre_antiguo: proyecto_id}.
     """
     existentes = cargar_proyectos(token)
-    # nombre exacto → id (para los ya mapeados en PROYECTO_MAP)
+    # nombre exacto -> id (para los ya mapeados en PROYECTO_MAP)
     mapa = dict(PROYECTO_MAP)
 
     creados = 0
@@ -226,7 +226,7 @@ def asegurar_proyectos(token: str, dry_run: bool) -> dict[str, int]:
 
         if pid is not None:
             mapa[nombre] = pid
-            print(f"  [EXISTE] '{nombre}' → id={pid}")
+            print(f"  [EXISTE] '{nombre}' -> id={pid}")
         else:
             if dry_run:
                 print(f"  [DRY] Crearía proyecto '{nombre}'")
@@ -245,7 +245,7 @@ def asegurar_proyectos(token: str, dry_run: bool) -> dict[str, int]:
                     mapa[nombre] = nuevo_id
                     existentes[nombre] = nuevo_id
                     creados += 1
-                    print(f"  [CREADO] '{nombre}' → id={nuevo_id}")
+                    print(f"  [CREADO] '{nombre}' -> id={nuevo_id}")
                 else:
                     print(f"  [ERROR] No se pudo crear '{nombre}': {r.status_code} {r.text[:100]}")
 
@@ -254,7 +254,7 @@ def asegurar_proyectos(token: str, dry_run: bool) -> dict[str, int]:
     return mapa
 
 
-# ── Mapeo de catálogos ─────────────────────────────────────────────────────────
+# -- Mapeo de catálogos ---------------------------------------------------------
 
 def map_estado(raw: str, estados: list) -> int:
     codigo = ESTADO_MAP.get(raw.strip(), "abierta")
@@ -301,7 +301,7 @@ def map_tipo(fault_code: str, tipos: list) -> int:
     return tipos[0]["id"]
 
 
-# ── Descarga fallas ────────────────────────────────────────────────────────────
+# -- Descarga fallas ------------------------------------------------------------
 
 def fetch_fallas() -> list:
     print("\nDescargando fallas desde Apps Script...")
@@ -318,7 +318,7 @@ def fetch_fallas() -> list:
     return fallas
 
 
-# ── Verificar duplicado ────────────────────────────────────────────────────────
+# -- Verificar duplicado --------------------------------------------------------
 
 def ya_existe(codigo_legado: str, token: str) -> bool:
     r = requests.get(f"{API_BASE}/fallas",
@@ -327,7 +327,7 @@ def ya_existe(codigo_legado: str, token: str) -> bool:
     return r.ok and r.json().get("total", 0) > 0
 
 
-# ── Migrar falla ───────────────────────────────────────────────────────────────
+# -- Migrar falla ---------------------------------------------------------------
 
 def migrar_falla(raw: dict, proyecto_id: int, catalogos: dict,
                  token: str, dry_run: bool) -> bool:
@@ -415,7 +415,7 @@ def migrar_falla(raw: dict, proyecto_id: int, catalogos: dict,
     return True
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# -- Main -----------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
@@ -425,7 +425,7 @@ def main():
     dry_run = args.dry_run
 
     print("=" * 65)
-    print("  Migración fallas-unergy → Plataforma Operaciones Unergy")
+    print("  Migracion fallas-unergy -> Plataforma Operaciones Unergy")
     if dry_run:
         print("  MODO DRY-RUN — no se escribirá nada")
     print("=" * 65)
@@ -433,24 +433,24 @@ def main():
     token = get_token()
     print(f"Autenticado como {API_EMAIL}\n")
 
-    # ── 1. Proyectos ──────────────────────────────────────────────
-    print("── Paso 1: Verificando / creando proyectos ──────────────────")
+    # -- 1. Proyectos ----------------------------------------------
+    print("-- Paso 1: Verificando / creando proyectos ------------------")
     proyecto_map = asegurar_proyectos(token, dry_run)
 
-    # ── 2. Catálogos ──────────────────────────────────────────────
-    print("\n── Paso 2: Cargando catálogos de fallas ─────────────────────")
+    # -- 2. Catálogos ----------------------------------------------
+    print("\n-- Paso 2: Cargando catálogos de fallas ---------------------")
     catalogos = cargar_catalogos(token)
     print(f"  {len(catalogos['estados'])} estados | "
           f"{len(catalogos['prioridades'])} prioridades | "
           f"{len(catalogos['tipos'])} tipos | "
           f"{len(catalogos['resoluciones'])} resoluciones")
 
-    # ── 3. Fallas desde Apps Script ───────────────────────────────
-    print("\n── Paso 3: Descargando fallas ───────────────────────────────")
+    # -- 3. Fallas desde Apps Script -------------------------------
+    print("\n-- Paso 3: Descargando fallas -------------------------------")
     fallas_raw = fetch_fallas()
 
-    # ── 4. Migración ──────────────────────────────────────────────
-    print("\n── Paso 4: Migrando fallas ──────────────────────────────────")
+    # -- 4. Migración ----------------------------------------------
+    print("\n-- Paso 4: Migrando fallas ----------------------------------")
     ok = skipped = sin_proyecto = ya_migrado = error = 0
     proyectos_sin_match: set[str] = set()
 
@@ -477,7 +477,7 @@ def main():
         else:
             error += 1
 
-    # ── Reporte final ─────────────────────────────────────────────
+    # -- Reporte final ---------------------------------------------
     print("\n" + "=" * 65)
     print(f"  RESULTADO FINAL")
     print(f"  Migradas:        {ok}")
@@ -488,7 +488,7 @@ def main():
     if proyectos_sin_match:
         print(f"\n  Proyectos no encontrados:")
         for p in sorted(proyectos_sin_match):
-            print(f"    · {p}")
+            print(f"    * {p}")
     print("=" * 65)
 
 

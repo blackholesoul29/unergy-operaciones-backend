@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, computed_field
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from datetime import datetime, date, time
 
@@ -127,25 +127,24 @@ class FallaOut(BaseModel):
     sla_limite_horas: Optional[int]
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
+    dias_abierta: Optional[int] = None
+    sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
 
-    @computed_field
-    @property
-    def dias_abierta(self) -> Optional[int]:
-        if not self.fecha_identificacion:
-            return None
-        if self.estado and self.estado.es_estado_final and self.fecha_resolucion:
-            end = self.fecha_resolucion.date()
-            return max(0, (end - self.fecha_identificacion).days)
-        return max(0, (date.today() - self.fecha_identificacion).days)
-
-    @computed_field
-    @property
-    def sla_limite_dias(self) -> Optional[int]:
-        return self.sla_limite_horas // 24 if self.sla_limite_horas else None
+    @model_validator(mode="after")
+    def _compute_derived(self) -> "FallaOut":
+        if self.fecha_identificacion:
+            if self.estado and self.estado.es_estado_final and self.fecha_resolucion:
+                end = self.fecha_resolucion.date()
+                self.dias_abierta = max(0, (end - self.fecha_identificacion).days)
+            else:
+                self.dias_abierta = max(0, (date.today() - self.fecha_identificacion).days)
+        if self.sla_limite_horas:
+            self.sla_limite_dias = self.sla_limite_horas // 24
+        return self
 
     @field_validator("seguimientos", mode="before")
     @classmethod

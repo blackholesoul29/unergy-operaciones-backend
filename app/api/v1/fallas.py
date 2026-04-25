@@ -18,6 +18,11 @@ from app.schemas.common import PaginatedResponse
 
 router = APIRouter(prefix="/fallas", tags=["Fallas"])
 
+_SEGS_LOAD = selectinload(Falla.seguimientos).options(
+    selectinload(FallaSeguimiento.usuario),
+    selectinload(FallaSeguimiento.estado_nuevo),
+)
+
 _FALLA_LOAD = [
     selectinload(Falla.proyecto),
     selectinload(Falla.tipo).selectinload(FallaCatTipo.categoria),
@@ -26,8 +31,7 @@ _FALLA_LOAD = [
     selectinload(Falla.resolucion),
     selectinload(Falla.registrado_por),
     selectinload(Falla.asignado_a),
-    selectinload(Falla.seguimientos).selectinload(FallaSeguimiento.usuario),
-    selectinload(Falla.seguimientos).selectinload(FallaSeguimiento.estado_nuevo),
+    _SEGS_LOAD,
 ]
 
 

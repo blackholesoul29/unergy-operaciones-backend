@@ -103,6 +103,21 @@ class Falla(Base):
     asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
     seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="falla")
 
+    @property
+    def dias_abierta(self) -> int | None:
+        if not self.fecha_identificacion:
+            return None
+        end = self.fecha_resolucion.date() if self.fecha_resolucion else date.today()
+        return max(0, (end - self.fecha_identificacion).days)
+
+    @property
+    def sla_limite_dias(self) -> int | None:
+        return self.sla_limite_horas // 24 if self.sla_limite_horas else None
+
+    @property
+    def tiene_fotos(self) -> bool:
+        return False
+
 
 class FallaSeguimiento(Base):
     __tablename__ = "fallas_seguimientos"

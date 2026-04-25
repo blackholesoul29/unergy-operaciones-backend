@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime, date, time
 
@@ -133,18 +133,6 @@ class FallaOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
-
-    @model_validator(mode="after")
-    def _compute_derived(self) -> "FallaOut":
-        if self.fecha_identificacion:
-            if self.estado and self.estado.es_estado_final and self.fecha_resolucion:
-                end = self.fecha_resolucion.date()
-                self.dias_abierta = max(0, (end - self.fecha_identificacion).days)
-            else:
-                self.dias_abierta = max(0, (date.today() - self.fecha_identificacion).days)
-        if self.sla_limite_horas:
-            self.sla_limite_dias = self.sla_limite_horas // 24
-        return self
 
     @field_validator("seguimientos", mode="before")
     @classmethod

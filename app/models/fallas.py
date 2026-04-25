@@ -76,6 +76,7 @@ class Falla(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo_interno: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    codigo_legado: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
     tipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_tipos.id"), nullable=False)
     estado_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=False)

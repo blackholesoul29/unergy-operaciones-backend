@@ -74,6 +74,7 @@ class FallaCreate(BaseModel):
     fecha_ocurrencia: Optional[datetime] = None
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
+    codigo_legado: Optional[str] = None
 
 
 class FallaUpdate(BaseModel):
@@ -109,6 +110,7 @@ class FallaSeguimientoOut(BaseModel):
 class FallaOut(BaseModel):
     id: int
     codigo_interno: str
+    codigo_legado: Optional[str]
     proyecto_id: int
     proyecto: ProyectoResumen
     tipo: FallaCatTipoOut

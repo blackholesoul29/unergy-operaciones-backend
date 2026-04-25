@@ -68,6 +68,7 @@ def list_fallas(
     prioridad_id: int | None = None,
     proyecto_id: int | None = None,
     asignado_a_id: int | None = None,
+    codigo_legado: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -82,6 +83,8 @@ def list_fallas(
         query = query.filter(Falla.proyecto_id == proyecto_id)
     if asignado_a_id:
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
+    if codigo_legado:
+        query = query.filter(Falla.codigo_legado == codigo_legado)
     total = query.count()
     items = query.order_by(Falla.created_at.desc()).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}

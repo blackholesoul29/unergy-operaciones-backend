@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
@@ -59,35 +59,93 @@ def get_catalogos(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return {"estados": estados, "prioridades": prioridades, "tipos": tipos, "resoluciones": resoluciones}
 
 
+@router.get("/stats/resumen")
+def stats_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    today = date.today()
+    alert_cutoff = today - timedelta(days=7)
+
+    def _count(*filters):
+        q = db.query(func.count(Falla.id)).join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        for f in filters:
+            q = q.filter(f)
+        return q.scalar() or 0
+
+    total_activas = _count(~FallaCatEstado.es_estado_final)
+    en_revision   = _count(FallaCatEstado.codigo == "en_gestion")
+    resueltas_mes = _count(FallaCatEstado.es_estado_final == True, Falla.updated_at >= today.replace(day=1))
+    sla_base = _count(FallaCatEstado.es_estado_final == True,
+                      Falla.updated_at >= today - timedelta(days=30),
+                      Falla.sla_cumplido.isnot(None))
+    sla_ok   = _count(FallaCatEstado.es_estado_final == True,
+                      Falla.updated_at >= today - timedelta(days=30),
+                      Falla.sla_cumplido == True)
+    alerta   = _count(~FallaCatEstado.es_estado_final, Falla.fecha_identificacion <= alert_cutoff)
+
+    return {
+        "total_activas": total_activas,
+        "en_revision": en_revision,
+        "resueltas_mes": resueltas_mes,
+        "cumplimiento_sla_pct": round(sla_ok / sla_base * 100) if sla_base else None,
+        "alerta_7_dias": alerta,
+    }
+
+
 @router.get("", response_model=PaginatedResponse[FallaOut])
 def list_fallas(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=200),
+    page_size: int | None = Query(None, ge=1, le=200),
     q: str | None = None,
+    buscar: str | None = None,
     estado_id: int | None = None,
+    estado_codigo: str | None = None,
     prioridad_id: int | None = None,
+    prioridad_codigo: str | None = None,
+    tipo_codigo: str | None = None,
     proyecto_id: int | None = None,
     asignado_a_id: int | None = None,
     codigo_legado: str | None = None,
+    solo_alerta: bool = False,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    effective_size = page_size or size
+    search = q or buscar
+    estado_joined = False
+
     query = db.query(Falla).options(*_FALLA_LOAD)
-    if q:
-        query = query.filter(Falla.descripcion.ilike(f"%{q}%") | Falla.codigo_interno.ilike(f"%{q}%"))
+
+    if search:
+        query = query.filter(Falla.descripcion.ilike(f"%{search}%") | Falla.codigo_interno.ilike(f"%{search}%"))
     if estado_id:
         query = query.filter(Falla.estado_id == estado_id)
+    if estado_codigo:
+        query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        estado_joined = True
+        query = query.filter(FallaCatEstado.codigo == estado_codigo)
     if prioridad_id:
         query = query.filter(Falla.prioridad_id == prioridad_id)
+    if prioridad_codigo:
+        query = (query.join(FallaCatPrioridad, Falla.prioridad_id == FallaCatPrioridad.id)
+                      .filter(FallaCatPrioridad.codigo == prioridad_codigo))
+    if tipo_codigo:
+        query = (query.join(FallaCatTipo, Falla.tipo_id == FallaCatTipo.id)
+                      .filter(FallaCatTipo.codigo == tipo_codigo))
     if proyecto_id:
         query = query.filter(Falla.proyecto_id == proyecto_id)
     if asignado_a_id:
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
     if codigo_legado:
         query = query.filter(Falla.codigo_legado == codigo_legado)
+    if solo_alerta:
+        alert_cutoff = date.today() - timedelta(days=7)
+        if not estado_joined:
+            query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        query = query.filter(~FallaCatEstado.es_estado_final, Falla.fecha_identificacion <= alert_cutoff)
+
     total = query.count()
-    items = query.order_by(Falla.created_at.desc()).offset((page - 1) * size).limit(size).all()
-    return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
+    items = query.order_by(Falla.created_at.desc()).offset((page - 1) * effective_size).limit(effective_size).all()
+    return {"items": items, "total": total, "page": page, "size": effective_size, "pages": -(-total // effective_size)}
 
 
 @router.post("", response_model=FallaOut, status_code=201)

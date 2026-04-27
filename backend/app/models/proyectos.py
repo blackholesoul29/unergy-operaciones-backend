@@ -80,6 +80,8 @@ class Proyecto(Base):
 
     potencia_instalada_kwp: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     potencia_con_cen_mw: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    produccion_especifica_kwh_kwp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     codigo_cnd: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -101,6 +103,9 @@ class Proyecto(Base):
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Integración monitoreo: nombres alternativos separados por | para matching fuzzy
+    alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -113,23 +118,24 @@ class Proyecto(Base):
     # Relaciones
     cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="proyectos")
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
-    subproyectos: Mapped[list] = relationship("Proyecto", foreign_keys=[proyecto_padre_id])
+    subproyectos: Mapped[list] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
-    grupos_panel: Mapped[list] = relationship("ProyectoGrupoPanel", back_populates="proyecto")
-    inversores: Mapped[list] = relationship("ProyectoInversor", back_populates="proyecto")
-    contactos: Mapped[list] = relationship("ProyectoContacto", back_populates="proyecto")
-    inversionistas: Mapped[list] = relationship("ProyectoInversionista", back_populates="proyecto")
-    fronteras: Mapped[list] = relationship("Frontera", back_populates="proyecto")
-    fallas: Mapped[list] = relationship("Falla", back_populates="proyecto")
-    mantenimientos: Mapped[list] = relationship("Mantenimiento", back_populates="proyecto")
-    liquidaciones: Mapped[list] = relationship("Liquidacion", back_populates="proyecto")
-    contratos_arriendo: Mapped[list] = relationship("ContratoArriendo", back_populates="proyecto")
-    asic_solicitudes: Mapped[list] = relationship("AsicSolicitud", back_populates="proyecto")
-    rec_procesos: Mapped[list] = relationship("RecProceso", back_populates="proyecto")
-    promotor_seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="proyecto")
-    contratos_servicio: Mapped[list] = relationship("ContratoServicio", back_populates="proyecto")
-    ppa_contratos: Mapped[list] = relationship("PPAContrato", back_populates="proyecto")
-    kpis: Mapped[list] = relationship("OperacionKPI", back_populates="proyecto")
+    grupos_panel: Mapped[list] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
+    inversores: Mapped[list] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
+    contactos: Mapped[list] = relationship("ProyectoContacto", back_populates="proyecto", uselist=True)
+    inversionistas: Mapped[list] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
+    fronteras: Mapped[list] = relationship("Frontera", back_populates="proyecto", uselist=True)
+    fallas: Mapped[list] = relationship("Falla", back_populates="proyecto", uselist=True)
+    generaciones: Mapped[list] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
+    mantenimientos: Mapped[list] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
+    liquidaciones: Mapped[list] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
+    contratos_arriendo: Mapped[list] = relationship("ContratoArriendo", back_populates="proyecto", uselist=True)
+    asic_solicitudes: Mapped[list] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
+    rec_procesos: Mapped[list] = relationship("RecProceso", back_populates="proyecto", uselist=True)
+    promotor_seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
+    contratos_servicio: Mapped[list] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
+    ppa_contratos: Mapped[list] = relationship("PPAContrato", back_populates="proyecto", uselist=True)
+    kpis: Mapped[list] = relationship("OperacionKPI", back_populates="proyecto", uselist=True)
     servicio_operacion: Mapped["ServicioOperacion | None"] = relationship("ServicioOperacion", back_populates="proyecto", uselist=False)
     servicio_representacion: Mapped["ServicioRepresentacion | None"] = relationship("ServicioRepresentacion", back_populates="proyecto", uselist=False)
     servicio_cgm: Mapped["ServicioCGM | None"] = relationship("ServicioCGM", back_populates="proyecto", uselist=False)
@@ -213,3 +219,7 @@ class ProyectoInversionista(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="inversionistas")
     cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="participaciones")
+
+    @property
+    def cliente_nombre(self) -> str:
+        return self.cliente.razon_social_nombre if self.cliente else ""

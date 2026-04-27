@@ -1,6 +1,6 @@
 from app.models.base import Base
 from app.models.usuarios import Usuario, RolEnum
-from app.models.clientes import Cliente, TipoPersonaEnum
+from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, ClienteDocumentoComercial
 from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
     ProyectoInversor, ProyectoContacto, ProyectoInversionista, Portafolio,
@@ -25,6 +25,7 @@ from app.models.rec import RecProceso, RecCertificado
 from app.models.asic import AsicSolicitud, AsicCambioContrato
 from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
+from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -40,4 +41,5 @@ __all__ = [
     "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato",
     "Documento", "Mantenimiento",
+    "GeneracionDiaria", "MonitoreoVerificacion",
 ]

@@ -6,7 +6,7 @@
     <AppSidebar />
     <div class="flex flex-col flex-1 overflow-hidden">
       <AppTopbar />
-      <main class="flex-1 overflow-y-auto p-6">
+      <main :class="isMonitoreo ? 'flex-1 overflow-hidden p-0' : 'flex-1 overflow-y-auto p-6'">
         <RouterView />
       </main>
     </div>
@@ -25,4 +25,6 @@ import AppTopbar from '@/components/AppTopbar.vue'
 
 const route = useRoute()
 const isLoginPage = computed(() => route.name === 'Login')
+// En la vista de monitoreo quitamos el padding del main para que el iframe llene todo
+const isMonitoreo = computed(() => route.name === 'Fallas')
 </script>

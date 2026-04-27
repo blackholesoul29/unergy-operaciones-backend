@@ -1,4 +1,5 @@
 import enum
+import json
 from datetime import datetime, date, time
 from sqlalchemy import (BigInteger, String, Boolean, Date, Time,
                         DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
@@ -76,6 +77,7 @@ class Falla(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo_interno: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    codigo_legado: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
     tipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_tipos.id"), nullable=False)
     estado_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=False)
@@ -90,6 +92,10 @@ class Falla(Base):
     fecha_resolucion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_limite_horas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sla_cumplido: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # campos integración monitoreo
+    fotos_urls: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array de URLs Drive
+    centinela: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -101,6 +107,30 @@ class Falla(Base):
     registrado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[registrado_por_id], back_populates="fallas_registradas")
     asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
     seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="falla")
+
+    @property
+    def dias_abierta(self) -> int | None:
+        if not self.fecha_identificacion:
+            return None
+        end = self.fecha_resolucion.date() if self.fecha_resolucion else date.today()
+        return max(0, (end - self.fecha_identificacion).days)
+
+    @property
+    def sla_limite_dias(self) -> int | None:
+        return self.sla_limite_horas // 24 if self.sla_limite_horas else None
+
+    @property
+    def tiene_fotos(self) -> bool:
+        return bool(self.fotos_urls)
+
+    @property
+    def fotos_lista(self) -> list[str]:
+        if not self.fotos_urls:
+            return []
+        try:
+            return json.loads(self.fotos_urls)
+        except (json.JSONDecodeError, TypeError):
+            return []
 
 
 class FallaSeguimiento(Base):

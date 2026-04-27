@@ -12,11 +12,13 @@ from app.models import (
 
 USUARIOS = [
     {"email": "juanjose@unergy.io", "nombre": "Juan José Pacheco Arias", "rol": "admin"},
-    {"email": "laurah@unergy.io",   "nombre": "Laura Vanessa Hurtado",    "rol": "monitoreo"},
-    {"email": "jessica@unergy.io",  "nombre": "Jessica",                  "rol": "cgm"},
+    {"email": "laurah@unergy.io",   "nombre": "Laura Vanessa Hurtado",    "rol": "admin"},
+    {"email": "jessica@unergy.io",  "nombre": "Jessica",                  "rol": "admin"},
     {"email": "nicolas@unergy.io",  "nombre": "Nicolás Villegas",         "rol": "operaciones"},
     {"email": "eduardo@unergy.io",  "nombre": "Eduardo",                  "rol": "operaciones"},
-    {"email": "victor@unergy.io",   "nombre": "Víctor",                   "rol": "liquidaciones"},
+    {"email": "victor@unergy.io",   "nombre": "Víctor",                   "rol": "admin"},
+    {"email": "camilo@unergy.io",   "nombre": "Camilo",                   "rol": "operaciones"},
+    {"email": "danielg@unergy.io",  "nombre": "Daniel G.",                "rol": "operaciones"},
 ]
 
 CATEGORIAS_FALLA = [
@@ -99,9 +101,13 @@ REQUISITOS_PROMOTOR = [
 def seed():
     db = SessionLocal()
     try:
-        # Usuarios
+        # Usuarios — inserta si no existe, actualiza rol si cambió
         for u in USUARIOS:
-            if not db.query(Usuario).filter_by(email=u["email"]).first():
+            existing = db.query(Usuario).filter_by(email=u["email"]).first()
+            if existing:
+                existing.rol = u["rol"]
+                existing.nombre = u["nombre"]
+            else:
                 db.add(Usuario(
                     email=u["email"],
                     nombre=u["nombre"],
@@ -150,10 +156,10 @@ def seed():
                 db.add(PromoterCatalogoRequisito(**req))
 
         db.commit()
-        print("✓ Datos semilla insertados correctamente")
+        print("OK Datos semilla insertados correctamente")
     except Exception as e:
         db.rollback()
-        print(f"✗ Error en seed: {e}")
+        print(f"ERROR en seed: {e}")
         raise
     finally:
         db.close()

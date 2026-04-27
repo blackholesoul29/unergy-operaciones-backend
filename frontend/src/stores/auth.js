@@ -14,19 +14,20 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email, password) {
-    const form = new URLSearchParams({ username: email, password })
-    const { data } = await api.post('/auth/token', form, {
+    const resp = await fetch('/api/v1/auth/token', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ username: email, password }),
     })
+    const data = await resp.json()
+    if (!resp.ok) throw { response: { data } }
     token.value = data.access_token
     localStorage.setItem('token', data.access_token)
-    await fetchMe()
-  }
-
-  async function fetchMe() {
-    const { data } = await api.get('/auth/me')
-    user.value = data
-    localStorage.setItem('user', JSON.stringify(data))
+    // JWT usa base64URL — hay que convertir antes de atob
+    const b64 = data.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const payload = JSON.parse(atob(b64.padEnd(b64.length + (4 - b64.length % 4) % 4, '=')))
+    user.value = { id: payload.sub, rol: payload.rol, nombre: payload.nombre, email: payload.email }
+    localStorage.setItem('user', JSON.stringify(user.value))
   }
 
   function logout() {
@@ -36,5 +37,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, isAuthenticated, role, can, login, fetchMe, logout }
+  return { token, user, isAuthenticated, role, can, login, logout }
 })

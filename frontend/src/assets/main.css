@@ -1,8 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Inter', system-ui, sans-serif;
-  background-color: #f8f9fa;
+@layer base {
+  body {
+    font-family: 'Lato', system-ui, sans-serif;
+    background-color: #FDFAF7;
+    color: #2C2039;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Lato', system-ui, sans-serif;
+    font-weight: 700;
+  }
+}
+
+@layer utilities {
+  .sidebar-nav-active {
+    background-color: rgba(145, 91, 216, 0.15);
+    color: #FDFAF7;
+    border-left: 3px solid #915BD8;
+  }
 }

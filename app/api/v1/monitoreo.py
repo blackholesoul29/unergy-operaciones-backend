@@ -626,16 +626,17 @@ def _action_get_projects(db: Session) -> dict:
 
 
 def _action_get_portfolios(db: Session) -> dict:
-    portafolios = db.query(Portafolio).filter(Portafolio.activo == True).all()
+    from app.models.clientes import Cliente
+    clientes = db.query(Cliente).order_by(Cliente.razon_social_nombre).all()
     portfolios: dict = {}
-    for pf in portafolios:
+    for c in clientes:
         names = [
             p.nombre_clientes or p.nombre_comercial
-            for p in pf.proyectos
-            if p.sub_project or p.alias_monitoreo
+            for p in c.proyectos
+            if (p.sub_project or p.alias_monitoreo) and p.estado == "en_operacion"
         ]
         if names:
-            portfolios[pf.nombre] = names
+            portfolios[c.razon_social_nombre] = names
     return {"ok": True, "portfolios": portfolios}
 
 

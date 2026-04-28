@@ -407,7 +407,6 @@ body.client-mode #tab-inf{display:none!important}
   <div class="acts">
     <button class="cbadge hmob" id="cbtn"><span style="width:7px;height:7px;border-radius:50%;background:var(--gr);display:block"></span><span id="clbl">…</span></button>
     <span class="client-badge" id="client-badge-lbl" style="display:none">👁 Cliente</span>
-    <button class="btn btn-gh btn-sm hmob" id="btn-addproj">+ Proyecto</button>
     <button class="btn btn-gh btn-sm hmob" id="btn-addfault">+ Falla</button>
     <button class="btn-theme hmob" id="btn-theme">🌙</button><button class="btn-exp hmob" id="btn-export" title="Descargar informe Excel">⬇ Excel</button><button class="btn btn-gr btn-sm" id="btn-sync">↻</button>
     <button class="btn btn-ye" id="btn-new">✚ Nueva Falla</button>
@@ -438,8 +437,12 @@ body.client-mode #tab-inf{display:none!important}
     <div id="board"></div>
   </div>
   <div id="charts">
+    <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-bottom:4px">
+      <span style="font-size:12px;color:var(--fa)">Proyecto:</span>
+      <select class="fi" style="width:220px;font-size:12px;padding:5px 8px" id="chart-proj"><option value="">Todos los proyectos</option></select>
+    </div>
     <div class="chart-card"><div class="chart-title">Estado General</div><div class="chart-sub">Distribución por estado</div><div class="chart-wrap"><canvas id="pieC"></canvas></div><div class="legend" id="pie-leg"></div></div>
-    <div class="chart-card"><div class="chart-hd"><div><div class="chart-title">Fallas más Frecuentes</div><div class="chart-sub">Top 8 por ocurrencias</div></div><select class="fi" style="width:170px;font-size:11px;padding:5px 8px" id="chart-proj"><option value="">Todos los proyectos</option></select></div><div class="chart-wrap"><canvas id="barC"></canvas></div></div>
+    <div class="chart-card"><div class="chart-hd"><div><div class="chart-title">Fallas más Frecuentes</div><div class="chart-sub">Top 8 por ocurrencias</div></div></div><div class="chart-wrap"><canvas id="barC"></canvas></div></div>
     <div class="chart-card chart-full"><div class="chart-title">Fallas por Área de Impacto</div><div class="chart-sub" style="font-size:11px;color:var(--fa);margin-bottom:13px">Fallas abiertas por categoría de impacto</div><div style="position:relative;height:200px"><canvas id="impC"></canvas></div><div class="legend" id="imp-leg" style="display:flex;flex-wrap:wrap;gap:9px;margin-top:11px"></div></div>
   </div>
 </div>
@@ -495,7 +498,13 @@ body.client-mode #tab-inf{display:none!important}
         </div>
         <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
       </div>
-      <div id="gen-compare-sel" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px"></div>
+      <div id="gen-compare-sel" style="margin-bottom:14px;position:relative">
+        <div id="gen-cmp-trigger" onclick="toggleCmpDropdown()" style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--s1);border:1px solid var(--br);border-radius:8px;cursor:pointer;font-size:12px;color:var(--mu);user-select:none;min-width:260px;max-width:400px">
+          <span id="gen-cmp-label">Selecciona proyectos…</span>
+          <span style="font-size:10px;margin-left:8px">▾</span>
+        </div>
+        <div id="gen-cmp-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:300px;max-width:420px;max-height:260px;overflow-y:auto;background:var(--s1);border:1px solid var(--br);border-radius:8px;z-index:200;box-shadow:0 4px 20px #0006;padding:6px 0"></div>
+      </div>
       <div id="gen-compare-chart-wrap" style="position:relative;height:260px;display:none"><canvas id="genCompareC"></canvas></div>
       <div id="gen-compare-empty" style="text-align:center;padding:30px;color:var(--fa);font-size:12px">
         Selecciona proyectos arriba y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
@@ -619,7 +628,7 @@ body.client-mode #tab-inf{display:none!important}
         <div id="inf-oper-toggles" style="display:flex;gap:8px;flex-wrap:wrap">
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-mode-btn" data-m="proyecto" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Por Proyecto</button>
-            <button class="inf-mode-btn" data-m="portafolio" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Portafolio</button>
+            <button class="inf-mode-btn" data-m="portafolio" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Cliente</button>
           </div>
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-period-btn" data-p="mes" style="padding:7px 12px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Mensual</button>
@@ -631,7 +640,7 @@ body.client-mode #tab-inf{display:none!important}
     <!-- Operacional controls -->
     <div id="inf-oper-controls" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
       <select class="fi fsel" id="inf-proj" style="min-width:190px;font-size:13px"><option value="">Selecciona proyecto…</option></select>
-      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona portafolio…</option></select>
+      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona cliente…</option></select>
       <input type="month" class="fi" id="inf-month" style="width:150px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-from" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-to" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
@@ -755,39 +764,51 @@ function _loadCatIds() {
   }).catch(function(e){console.warn('[Bridge] catIds:',e);});
 }
 
-/* OVERRIDE loadFaults — usa /api/v1/fallas (evita el 500 de /monitoreo/fallas) */
+/* OVERRIDE loadFaults — carga todas las páginas de /api/v1/fallas */
+function _mapFault(f){
+  return {
+    id:f.codigo_interno||String(f.id), _db_id:f.id,
+    proj:(f.proyecto||{}).nombre_comercial||"",
+    code:(f.tipo||{}).codigo||"otro_general",
+    faultLabel:(f.tipo||{}).etiqueta||"",
+    st:_ST_MAP[(f.estado||{}).codigo]||"activa",
+    date:f.fecha_identificacion||"",
+    time:f.hora_identificacion||"",
+    occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
+    res:(f.resolucion||{}).etiqueta||"",
+    desc:f.descripcion||"",
+    flw:(f.seguimientos||[]).map(function(s){
+      return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
+    }).join("\n"),
+    driveUrl:"",driveUrls:[],
+    endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
+    centinela:"",notify:false,
+    prio:(f.prioridad||{}).codigo||"media"
+  };
+}
 function loadFaults() {
   setSync("spin","Sincronizando…");
-  _apiFetch('GET','/api/v1/fallas?size=500&page=1').then(function(res) {
-    var items=(res&&res.items)||[];
-    faults=items.map(function(f) {
-      return {
-        id:f.codigo_interno||String(f.id), _db_id:f.id,
-        proj:(f.proyecto||{}).nombre_comercial||"",
-        code:(f.tipo||{}).codigo||"otro_general",
-        faultLabel:(f.tipo||{}).etiqueta||"",
-        st:_ST_MAP[(f.estado||{}).codigo]||"activa",
-        date:f.fecha_identificacion||"",
-        time:f.hora_identificacion||"",
-        occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
-        res:(f.resolucion||{}).etiqueta||"",
-        desc:f.descripcion||"",
-        flw:(f.seguimientos||[]).map(function(s){
-          return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
-        }).join("\n"),
-        driveUrl:"",driveUrls:[],
-        endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
-        centinela:"",notify:false,
-        prio:(f.prioridad||{}).codigo||"media"
-      };
+  var acc=[];
+  function loadPage(page){
+    _apiFetch('GET','/api/v1/fallas?size=500&page='+page).then(function(res){
+      var items=(res&&res.items)||[];
+      acc=acc.concat(items);
+      var totalPages=res&&res.pages?res.pages:1;
+      if(page<totalPages){
+        setSync("spin","Cargando… ("+acc.length+" de "+(res.total||"??")+")");
+        loadPage(page+1);
+      } else {
+        faults=acc.map(_mapFault);
+        faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
+        setSync("ok","Sincronizado ✓");hideLoader();renderAll();
+        toast("✓ "+faults.length+" fallas cargadas");
+      }
+    }).catch(function(e){
+      setSync("err","Sin conexión");hideLoader();renderAll();
+      toast("⚠ Error al cargar: "+e.message);
     });
-    faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
-    setSync("ok","Sincronizado ✓");hideLoader();renderAll();
-    toast("✓ "+faults.length+" fallas cargadas");
-  }).catch(function(e){
-    setSync("err","Sin conexión");hideLoader();renderAll();
-    toast("⚠ Error al cargar: "+e.message);
-  });
+  }
+  loadPage(1);
 }
 
 /* OVERRIDE serverDel — usa DELETE /api/v1/fallas/{id} */
@@ -1539,7 +1560,7 @@ function loadCatalog(){
       /* reconstruir DEFAULT_CATS con datos de la BD */
       DEFAULT_CATS=cats.map(function(c){
         return{id:c.id,lbl:c.lbl,ico:c.ico,col:c.col,
-          faults:(c.faults||[]).map(function(f){return{code:f.code,label:f.label};})};
+          faults:(c.faults||[]).map(function(f){return{c:f.code,l:f.label};})};
       });
       rebuildF();updateFcatFilter();CATALOG_READY=true;
       toast("✓ Catálogo actualizado",2000);
@@ -1551,10 +1572,15 @@ function loadCatalog(){
   });
 }
 function renderCharts(){renderPie();renderBar();renderImpactChart();}
+function _chartsBase(){
+  var fp=document.getElementById("chart-proj")?document.getElementById("chart-proj").value||"":" ";fp=fp.trim();
+  var base=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
+  return fp?base.filter(function(f){return f.proj===fp;}):base;
+}
 function renderImpactChart(){
   var cv=document.getElementById("impC");if(!cv)return;
   var agg={};
-  var _if=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
+  var _if=_chartsBase();
   _if.forEach(function(f){if(f.st==="terminada")return;var imp=getImpStyle(f.code);var k=imp.l;if(!agg[k])agg[k]={l:imp.l,i:imp.i,c:imp.c,v:0};agg[k].v++;});
   var items=Object.values(agg).sort(function(a,b){return b.v-a.v;});
   if(!items.length)return;
@@ -1565,7 +1591,7 @@ function renderImpactChart(){
 }
 function renderPie(){
   var d={activa:0,revision:0,programada:0,terminada:0};
-  var _pf=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
+  var _pf=_chartsBase();
   _pf.forEach(function(f){if(d[f.st]!==undefined)d[f.st]++;});
   var lb=["Activas","En Revisión","Programadas","Terminadas"],co=["#FF5757","#F6FF72","#915BD8","#4ADE80"],da=[d.activa,d.revision,d.programada,d.terminada];
   if(pieInst)pieInst.destroy();
@@ -1574,9 +1600,7 @@ function renderPie(){
   document.getElementById("pie-leg").innerHTML=leg;
 }
 function renderBar(){
-  var fp=document.getElementById("chart-proj").value||"";
-  var _base=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
-  var src=fp?_base.filter(function(f){return f.proj===fp;}):_base;
+  var src=_chartsBase();
   var map={};src.forEach(function(f){var d=fd(f.code);if(!d)return;var k=f.code+" · "+(d.label.length>28?d.label.slice(0,28)+"…":d.label);map[k]=(map[k]||0)+1;});
   var s=Object.keys(map).map(function(k){return{n:k,v:map[k]};}).sort(function(a,b){return b.v-a.v;}).slice(0,8);
   if(barInst)barInst.destroy();
@@ -1861,13 +1885,30 @@ var genCompareChart    = null;
 var genCompareSelected = {};   // { sub_project: true/false }
 var genCompareColors   = {};   // { sub_project: color }
 
+function toggleCmpDropdown(){
+  var dd=document.getElementById("gen-cmp-dropdown");
+  if(!dd)return;
+  dd.style.display=dd.style.display==="none"?"block":"none";
+}
+document.addEventListener("click",function(e){
+  var dd=document.getElementById("gen-cmp-dropdown");
+  var tr=document.getElementById("gen-cmp-trigger");
+  if(dd&&dd.style.display==="block"&&!dd.contains(e.target)&&tr&&!tr.contains(e.target))dd.style.display="none";
+});
+function _updateCmpLabel(){
+  var sel=Object.keys(genCompareSelected).filter(function(sp){return genCompareSelected[sp];});
+  var lbl=document.getElementById("gen-cmp-label");
+  if(!lbl)return;
+  if(!sel.length){lbl.textContent="Selecciona proyectos…";return;}
+  var names=sel.map(function(sp){var p=genProjects.find(function(x){return x.sub_project===sp;});return p?(p.nombre_clientes||p.nombre_display):sp;});
+  lbl.textContent=names.length<=2?names.join(", "):names.slice(0,2).join(", ")+" + "+(names.length-2)+" más";
+}
 function renderGenCompareSelector() {
-  var sel     = document.getElementById("gen-compare-sel");
+  var dd      = document.getElementById("gen-cmp-dropdown");
   var section = document.getElementById("gen-compare-section");
-  if (!sel || !genProjects.length) return;
+  if (!dd || !genProjects.length) return;
   if (section) section.style.display = "block";
 
-  // Filtrar por proyectos del cliente si aplica
   var visProjs = (userRole === "cliente" && clientProjects.length > 0)
     ? genProjects.filter(function(p) {
         return clientProjects.some(function(cp) {
@@ -1885,27 +1926,27 @@ function renderGenCompareSelector() {
       genCompareColors[p.sub_project] = portColorPalette[i % portColorPalette.length];
   });
 
-  sel.innerHTML = visProjs.map(function(p) {
+  dd.innerHTML = visProjs.map(function(p) {
     var sp  = p.sub_project;
     var col = genCompareColors[sp];
-    var on  = genCompareSelected[sp];
-    return '<button class="gen-cmp-pill" data-sp="' + esc(sp) + '" style="' +
-      'display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;' +
-      'border:1.5px solid ' + (on ? col : 'var(--br)') + ';' +
-      'background:' + (on ? col + '22' : 'var(--s1)') + ';' +
-      'color:' + (on ? col : 'var(--mu)') + ';' +
-      'font-size:11px;font-weight:700;font-family:\'Sora\',sans-serif;transition:all .2s">' +
-      '<div style="width:7px;height:7px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
+    var on  = !!genCompareSelected[sp];
+    return '<label style="display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;' +
+      'font-size:12px;color:'+(on?'var(--cr)':'var(--mu)')+';' +
+      'background:'+(on?col+'18':'transparent')+';transition:background .15s">' +
+      '<input type="checkbox" data-sp="'+esc(sp)+'" '+(on?'checked':'')+' style="accent-color:'+col+';width:14px;height:14px;cursor:pointer"/>' +
+      '<div style="width:8px;height:8px;border-radius:50%;background:'+col+';flex-shrink:0"></div>' +
       esc(p.nombre_clientes || p.nombre_display) +
-      '</button>';
+      '</label>';
   }).join("");
 
-  sel.querySelectorAll(".gen-cmp-pill").forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      genCompareSelected[this.dataset.sp] = !genCompareSelected[this.dataset.sp];
+  dd.querySelectorAll("input[type=checkbox]").forEach(function(cb) {
+    cb.addEventListener("change", function() {
+      genCompareSelected[this.dataset.sp] = this.checked;
       renderGenCompareSelector();
+      _updateCmpLabel();
     });
   });
+  _updateCmpLabel();
 }
 
 function loadGenCompare() {
@@ -2246,7 +2287,7 @@ function loadPortfolios() {
     Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
     // ── Poblar también el selector de informe ──
     var infPort=document.getElementById("inf-port");
-    if(infPort){infPort.innerHTML='<option value="">Selecciona portafolio…</option>';Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});}
+    if(infPort){infPort.innerHTML='<option value="">Selecciona cliente…</option>';Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});}
   }).catch(function(e){ console.error("loadPortfolios:", e); });
 }
 function getPortDateRange() {
@@ -2387,16 +2428,20 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("cbtn").addEventListener("click",function(){
     if(userRole==="cliente"){if(confirm("¿Cerrar sesión?")){ clearSession(); location.reload(); }} else { openSetup(true); }
   });
-  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";});
-  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";renderCharts();});
+  function _hideAll(){var ip=document.getElementById("inf-panel");if(ip)ip.style.display="none";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";}
+  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";_hideAll();});
+  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";_hideAll();renderCharts();});
   var _tg=document.getElementById("tab-gen");
   if(_tg)_tg.addEventListener("click",function(){
     curTab="gen";
     document.querySelectorAll(".tab").forEach(function(t){t.className="tab";});
     this.className="tab on";
     document.getElementById("app").style.display="none";
+    document.getElementById("board-panel").style.display="none";
+    document.getElementById("frow").style.display="none";
+    document.getElementById("charts").style.display="none";
+    _hideAll();
     document.getElementById("gen-panel").style.display="block";
-    document.getElementById("port-panel").style.display="none";
     loadGenProjects();
   });
   var _tp = document.getElementById("tab-port");
@@ -2405,7 +2450,10 @@ document.addEventListener("DOMContentLoaded",function(){
     document.querySelectorAll(".tab").forEach(function(t){ t.className="tab"; });
     this.className = "tab on";
     document.getElementById("app").style.display = "none";
-    document.getElementById("gen-panel").style.display = "none";
+    document.getElementById("board-panel").style.display="none";
+    document.getElementById("frow").style.display="none";
+    document.getElementById("charts").style.display="none";
+    _hideAll();
     document.getElementById("port-panel").style.display = "block";
     if (!genProjects.length) loadGenProjects();
     loadPortfolios();
@@ -2445,10 +2493,9 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});
   document.getElementById("fproject").addEventListener("change",function(){renderBoard();});
   document.getElementById("fcat").addEventListener("change",function(){renderBoard();});
-  document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderBar();});
+  document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderCharts();});
   document.getElementById("btn-new").addEventListener("click",openNewFault);
   document.getElementById("btn-sync").addEventListener("click",loadFaults);
-  document.getElementById("btn-addproj").addEventListener("click",openProjModal);
   document.getElementById("btn-addfault").addEventListener("click",openAddFaultM);
   document.getElementById("fab").addEventListener("click",openNewFault);
   document.getElementById("btn-empty-new").addEventListener("click",openNewFault);
@@ -2915,9 +2962,9 @@ function generateInforme(){
 
   }else{
     var pname=(document.getElementById("inf-port")||{}).value||"";
-    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un portafolio");return;}
+    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un cliente");return;}
     var portList=portPortfolios[pname]||[];
-    if(!portList.length){toast("⚠ Portafolio vacío");return;}
+    if(!portList.length){toast("⚠ Cliente sin proyectos");return;}
     var cfgs=[];
     portList.forEach(function(name){
       var c=genProjects.find(function(p){
@@ -2926,7 +2973,7 @@ function generateInforme(){
       });
       if(c)cfgs.push(c);
     });
-    if(!cfgs.length){toast("⚠ Proyectos del portafolio no encontrados");return;}
+    if(!cfgs.length){toast("⚠ Proyectos del cliente no encontrados");return;}
     var results=[],done=0;
     document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyectos…";
     cfgs.forEach(function(c,i){

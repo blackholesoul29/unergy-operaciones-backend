@@ -210,7 +210,7 @@ class ProyectoOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", mode="before")
+    @field_validator("inversionistas", "grupos_panel", "inversores", "contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:

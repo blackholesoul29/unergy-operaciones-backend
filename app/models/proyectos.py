@@ -103,6 +103,9 @@ class Proyecto(Base):
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Monitoreo
+    alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)

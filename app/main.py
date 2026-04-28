@@ -8,15 +8,44 @@ from app.core.config import settings
 from app.core.database import engine
 from app.api.v1.router import api_router
 
-# Columnas que pueden no existir en bases de datos anteriores al deploy
-_PENDING_COLUMNS = [
+# Idempotent DDL run at startup — safe to run on every boot
+_PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS codigo_legado VARCHAR(30)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_fallas_codigo_legado_unique ON fallas (codigo_legado) WHERE codigo_legado IS NOT NULL",
+    # migration 003 — monitoreo fields
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls TEXT",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
+    """CREATE TABLE IF NOT EXISTS generacion_diaria (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        kwh_real NUMERIC(14,3),
+        kwh_p90 NUMERIC(14,3),
+        kwh_autoconsumo NUMERIC(14,3),
+        fuente VARCHAR(50) NOT NULL DEFAULT 'manual',
+        notas TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
+    "CREATE INDEX IF NOT EXISTS ix_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
+    "CREATE INDEX IF NOT EXISTS ix_generacion_fecha ON generacion_diaria (fecha)",
+    """CREATE TABLE IF NOT EXISTS monitoreo_verificaciones (
+        id BIGSERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        codigo VARCHAR(6) NOT NULL,
+        usado BOOLEAN NOT NULL DEFAULT FALSE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
 ]
 
 
 def _run_column_migrations() -> None:
-    for stmt in _PENDING_COLUMNS:
+    for stmt in _PENDING_DDLS:
         try:
             with engine.connect() as conn:
                 conn.execute(text(stmt))

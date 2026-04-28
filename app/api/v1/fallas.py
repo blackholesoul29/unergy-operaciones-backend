@@ -110,8 +110,8 @@ def stats_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)):
 @router.get("", response_model=PaginatedResponse[FallaOut])
 def list_fallas(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=200),
-    page_size: int | None = Query(None, ge=1, le=200),
+    size: int = Query(20, ge=1, le=1000),
+    page_size: int | None = Query(None, ge=1, le=1000),
     q: str | None = None,
     buscar: str | None = None,
     estado_id: int | None = None,

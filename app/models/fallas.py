@@ -1,4 +1,5 @@
 import enum
+import json
 from datetime import datetime, date, time
 from sqlalchemy import (BigInteger, String, Boolean, Date, Time,
                         DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
@@ -91,6 +92,9 @@ class Falla(Base):
     fecha_resolucion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_limite_horas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sla_cumplido: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fotos_urls: Mapped[str | None] = mapped_column(Text, nullable=True)
+    centinela: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -116,7 +120,16 @@ class Falla(Base):
 
     @property
     def tiene_fotos(self) -> bool:
-        return False
+        return bool(self.fotos_urls)
+
+    @property
+    def fotos_lista(self) -> list[str]:
+        if not self.fotos_urls:
+            return []
+        try:
+            return json.loads(self.fotos_urls)
+        except (json.JSONDecodeError, TypeError):
+            return []
 
 
 class FallaSeguimiento(Base):

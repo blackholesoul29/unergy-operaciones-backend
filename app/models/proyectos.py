@@ -57,7 +57,7 @@ class Portafolio(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    proyectos: Mapped[list] = relationship("Proyecto", back_populates="portafolio")
+    proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", back_populates="portafolio")
 
 
 class Proyecto(Base):

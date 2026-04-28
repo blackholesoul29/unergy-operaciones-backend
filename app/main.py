@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.core.config import settings
@@ -76,6 +77,17 @@ app.include_router(api_router)
 _uploads_path = Path("uploads")
 _uploads_path.mkdir(exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=str(_uploads_path)), name="uploads")
+
+# Servir la app de monitoreo (fallas-unergy adaptado)
+_monitoreo_index = Path("static/monitoreo/index.html")
+
+
+@app.get("/monitoreo", include_in_schema=False)
+@app.get("/monitoreo/", include_in_schema=False)
+async def serve_monitoreo():
+    if _monitoreo_index.exists():
+        return FileResponse(str(_monitoreo_index), media_type="text/html")
+    return {"error": "Monitoreo no desplegado"}
 
 
 @app.get("/health")

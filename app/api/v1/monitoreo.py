@@ -54,10 +54,8 @@ _FALLA_EAGER = [
     selectinload(Falla.resolucion),
     selectinload(Falla.registrado_por),
     selectinload(Falla.asignado_a),
-    selectinload(Falla.seguimientos).options(
-        selectinload(FallaSeguimiento.usuario),
-        selectinload(FallaSeguimiento.estado_nuevo),
-    ),
+    selectinload(Falla.seguimientos).selectinload(FallaSeguimiento.usuario),
+    selectinload(Falla.seguimientos).selectinload(FallaSeguimiento.estado_nuevo),
 ]
 
 
@@ -67,9 +65,10 @@ def _falla_to_fault(f: Falla) -> dict:
     st = _CODIGO_A_ST.get(f.estado.codigo if f.estado else "abierta", "activa")
 
     seguimiento_txt = ""
-    if f.seguimientos:
+    segs = f.seguimientos if isinstance(f.seguimientos, list) else []
+    if segs:
         lineas = []
-        for seg in sorted(f.seguimientos, key=lambda s: s.created_at):
+        for seg in sorted(segs, key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc)):
             ts = seg.created_at.strftime("%d/%m/%Y %H:%M") if seg.created_at else ""
             quien = seg.usuario.nombre if seg.usuario else "—"
             lineas.append(f"{ts} - {quien}: {seg.nota or ''}")
@@ -261,7 +260,8 @@ def save_falla_monitoreo(
         falla.notificacion = bool(payload.get("notify", False))
 
         if followup_nuevo:
-            segs_sorted = sorted(falla.seguimientos, key=lambda s: s.created_at)
+            segs_list = falla.seguimientos if isinstance(falla.seguimientos, list) else []
+            segs_sorted = sorted(segs_list, key=lambda s: s.created_at or datetime.min.replace(tzinfo=timezone.utc))
             if not segs_sorted or segs_sorted[-1].nota != followup_nuevo:
                 db.add(FallaSeguimiento(
                     falla_id=falla.id,

@@ -42,6 +42,9 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
+    # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh TEXT",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh TEXT",
 ]
 
 

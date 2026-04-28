@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str = ""
     S3_SECRET_KEY: str = ""
 
+    # Unergy API credentials (used by _legacy bridge)
+    UNERGY_API_URL: str = "https://api.unergy.io"
+    UNERGY_ACCOUNT_ID: str = "XFtY7e"
+    UNERGY_LOGIN: str = "admin_junior"
+    UNERGY_PASSWORD: str = "#rqBSr5Ce#TDxo&o"
+
+    # Solenium API (optional — FMO inverter data)
+    SOLENIUM_API_KEY: str = ""
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:

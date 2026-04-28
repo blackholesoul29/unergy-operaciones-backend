@@ -45,8 +45,6 @@ _ST_A_CODIGO = {
 }
 
 # ── Eager loading ─────────────────────────────────────────────────────────────
-# Single chained selectinload — two separate selectinload(Falla.seguimientos)
-# calls cause SQLAlchemy to return a scalar instead of a list.
 
 _FALLA_EAGER = [
     selectinload(Falla.proyecto),

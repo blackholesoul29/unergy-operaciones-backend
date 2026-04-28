@@ -19,7 +19,7 @@ class FallaCatCategoria(Base):
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    tipos: Mapped[list] = relationship("FallaCatTipo", back_populates="categoria")
+    tipos: Mapped[list["FallaCatTipo"]] = relationship("FallaCatTipo", back_populates="categoria")
 
 
 class FallaCatTipo(Base):
@@ -33,7 +33,7 @@ class FallaCatTipo(Base):
     activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     categoria: Mapped["FallaCatCategoria"] = relationship("FallaCatCategoria", back_populates="tipos")
-    fallas: Mapped[list] = relationship("Falla", back_populates="tipo")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="tipo")
 
 
 class FallaCatEstado(Base):
@@ -46,8 +46,8 @@ class FallaCatEstado(Base):
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     es_estado_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="estado")
-    seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="estado_nuevo")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="estado")
+    seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="estado_nuevo")
 
 
 class FallaCatPrioridad(Base):
@@ -59,7 +59,7 @@ class FallaCatPrioridad(Base):
     color_hex: Mapped[str | None] = mapped_column(String(7), nullable=True)
     nivel: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="prioridad")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="prioridad")
 
 
 class FallaCatResolucion(Base):
@@ -69,7 +69,7 @@ class FallaCatResolucion(Base):
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="resolucion")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="resolucion")
 
 
 class Falla(Base):
@@ -105,7 +105,7 @@ class Falla(Base):
     resolucion: Mapped["FallaCatResolucion | None"] = relationship("FallaCatResolucion", back_populates="fallas")
     registrado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[registrado_por_id], back_populates="fallas_registradas")
     asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
-    seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="falla")
+    seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="falla")
 
     @property
     def dias_abierta(self) -> int | None:

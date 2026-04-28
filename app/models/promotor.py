@@ -26,7 +26,7 @@ class PromoterCatalogoRequisito(Base):
     plazo_dias: Mapped[int | None] = mapped_column(Integer, nullable=True)  # NULL para FDOC
     descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="requisito")
+    seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="requisito")
 
 
 class PromoterSeguimiento(Base):

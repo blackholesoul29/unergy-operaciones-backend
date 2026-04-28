@@ -572,7 +572,10 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
 
     # P50/P90 simulation from project record
     simulation = None
-    proyecto = db.query(Proyecto).filter(Proyecto.sub_project == sub_project).first()
+    from sqlalchemy import or_
+    proyecto = db.query(Proyecto).filter(
+        or_(Proyecto.sub_project == sub_project, Proyecto.alias_monitoreo == sub_project)
+    ).first()
     if proyecto and (proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh):
         try:
             month = d_from_date.month
@@ -593,9 +596,10 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
 
 
 def _action_get_projects(db: Session) -> dict:
+    from sqlalchemy import or_
     proyectos = (
         db.query(Proyecto)
-        .filter(Proyecto.sub_project.isnot(None))
+        .filter(or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)))
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
@@ -603,7 +607,7 @@ def _action_get_projects(db: Session) -> dict:
         "ok": True,
         "projects": [
             {
-                "sub_project": p.sub_project,
+                "sub_project": p.sub_project or p.alias_monitoreo,
                 "nombre_comercial": p.nombre_comercial,
                 "nombre_clientes": p.nombre_clientes or p.nombre_comercial,
                 "nombre_bitacora": p.nombre_bitacora or "",
@@ -623,7 +627,11 @@ def _action_get_portfolios(db: Session) -> dict:
     portafolios = db.query(Portafolio).filter(Portafolio.activo == True).all()
     portfolios: dict = {}
     for pf in portafolios:
-        names = [p.nombre_clientes or p.nombre_comercial for p in pf.proyectos if p.sub_project]
+        names = [
+            p.nombre_clientes or p.nombre_comercial
+            for p in pf.proyectos
+            if p.sub_project or p.alias_monitoreo
+        ]
         if names:
             portfolios[pf.nombre] = names
     return {"ok": True, "portfolios": portfolios}
@@ -642,10 +650,11 @@ def _action_get_all_contratos(db: Session) -> dict:
     contratos = []
     for c in rows:
         p = c.proyecto
-        if not p or not p.sub_project:
+        slug = (p.sub_project or p.alias_monitoreo) if p else None
+        if not slug:
             continue
         contratos.append({
-            "sub_project": p.sub_project,
+            "sub_project": slug,
             "nombre_clientes": p.nombre_clientes or p.nombre_comercial,
             "disponibilidad_garantizada_pct": "97",
             "contratista": c.prestador_nombre or "Unergy S.A.S.",
@@ -750,7 +759,10 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
     if not sub_project:
         return {"ok": False, "error": "sub_project requerido"}
 
-    proyecto = db.query(Proyecto).filter(Proyecto.sub_project == sub_project).first()
+    from sqlalchemy import or_
+    proyecto = db.query(Proyecto).filter(
+        or_(Proyecto.sub_project == sub_project, Proyecto.alias_monitoreo == sub_project)
+    ).first()
 
     # Contract details
     contrato = None
@@ -810,35 +822,170 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
     }
 
 
-# ── P50/P90 seed data (extracted from Apps Script PROJ_ROWS) ─────────────────
-_SEED_P50_P90 = [
-    # (sub_project, p50[jan..dec], p90[jan..dec])
-    ("verso",            [206181,197655,210695,155611,192449,193107,218885,203993,182065,162304,153812,207684], [191167,183262,195352,144279,178435,179045,202946,189138,168807,150485,142611,192560]),
-    ("perija",           [213966,223719,233630,214607,242503,241499,240207,224538,194680,175379,188780,235821], [202906,212155,221553,203514,229968,229016,227790,212931,184617,166313,179022,223631]),
-    ("puya",             [199700,232800,245000,227100,250100,253500,256900,238800,207400,174900,183100,244200], [187048,218051,229478,212712,234255,237440,240624,223671,194260,163819,171500,228729]),
-    ("jerico_el_son",    [252487,240733,233928,238064,233263,267168,270670,250967,217358,181428,198372,240864], [234101,223203,216893,220728,216277,247713,250960,232692,201530,168216,183927,223324]),
-    ("elmolino",         [200772,150636,203829,192394,216277,190894,195267,206451,182565,147987,175731,203598], [186152,139667,188986,178384,200528,176993,181048,191417,169271,137211,162934,188772]),
-    ("vallenata",        [246091,210697,249444,206881,234130,259056,261594,242907,214914,194310,205150,202767], [228786,195881,231903,192333,217666,240840,243199,225826,199802,180646,190724,188509]),
-    ("villanueva",       [174832,186643,195820,168665,189603,186608,215995,203933,180583,170050,170417,198943], [156967,167571,175811,151431,170229,167540,193924,183095,162131,152674,153003,178615]),
-    ("cañahuate",        [247595,221129,248817,230879,261510,261747,237801,242671,211167,193666,192819,251923], [216886,193703,217956,202243,229075,229283,208307,212573,184976,169646,168904,220677]),
-    ("gandalf",          [201758,193423,204798,191059,211782,212502,194000,182546,162850,157642,166494,202331], [176734,169433,179397,167362,185515,186146,169938,159905,142652,138090,145844,177236]),
-    ("esmeralda",        [209185,243783,253137,238505,245536,271718,247503,253708,216587,203251,215016,238358], [192544,224389,232999,219531,226003,250102,227813,233525,199357,187082,197911,219396]),
-    ("lamesa",           [190900,171700,176000,180500,195200,179700,185700,181400,165900,166800,163400,193400], [177000,159198,163185,167357,180987,166615,172179,168192,153820,154655,151502,179318]),
-    ("olimpo",           [183400,139000,168400,178400,192400,159600,170800,169900,164200,161400,162200,182300], [170043,128876,156135,165407,178387,147976,158360,157526,152241,149645,150387,169023]),
-    ("reserva",          [241869,194044,228634,217270,222202,251027,261948,229577,205484,202765,203325,237037], [215828,173152,204018,193877,198278,224000,233745,204859,183360,180934,181434,211516]),
-    ("uruaco_gd",        [244124,231569,266507,242744,248162,236534,243712,238434,198697,196090,204872,231497], [211666,200781,231073,210470,215167,205085,211309,206733,172279,170019,177633,200718]),
-    ("baraya",           [248107,227365,251174,233011,225486,249967,252606,249039,205583,177108,216549,229822], [226033,207137,228827,212280,205425,227728,230132,226882,187292,161351,197283,209375]),
-    ("leyenda",          [253311,244005,256516,210295,262780,206326,252976,250028,220754,188392,212067,259285], [234368,225758,237334,194569,243129,190897,234058,231331,204246,174304,196209,239896]),
-    ("ibirico",          [229000,204400,252400,245900,259400,227100,258400,220800,209500,206000,212300,216100], [201524,179875,222116,216396,228276,199852,227396,194308,184364,181283,186828,190172]),
-    ("cacica",           [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
-    ("jerico_merengue",  [252609,246190,228221,238061,232811,267432,270919,251113,217430,181405,198054,240888], [194569,226750,235450,221841,228380,252733,230210,235982,201454,189050,199993,221704]),
-    ("piloneras",        [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
-    ("cumbia",           [252747,246043,229042,209100,252234,246289,270706,250865,217134,198249,181487,238131], [235638,229387,213537,194945,235159,229617,252381,233883,202435,184829,169201,222011]),
-    ("copey",            [246438,209547,229367,238571,256862,254999,231928,242260,206926,188089,183973,241429], [223807,190304,208303,216662,233273,231582,210629,220012,187923,170816,167078,219258]),
-    ("valenciaoriente",  [195438,241270,253896,213443,258481,260767,235661,218270,211470,189944,205555,251316], [181206,223701,235407,197900,239658,241778,218500,202376,196071,176112,190586,233015]),
-    ("valencia_oriente_2",[194987,240650,253374,213173,258077,260306,235288,218011,211189,189804,205292,250663],[183329,226262,238225,200428,242647,244743,221221,204977,198562,178456,193018,235676]),
-    ("san_diego_sur",    [0]*12, [0]*12),
+# ── Seed data: topic, nombre oficial, TSF, P50[ene..dic], P90[ene..dic] ───────
+# Nombres y TSF extraídos del mapeo topic↔project y proyecto↔TSF compartido.
+_SEED_PROYECTOS = [
+    # (sub_project, nombre_oficial, codigo_tsf, p50[12], p90[12])
+    ("verso",             "MGS 0008 La Paz Verso",        "COLCEST2P3",   [206181,197655,210695,155611,192449,193107,218885,203993,182065,162304,153812,207684], [191167,183262,195352,144279,178435,179045,202946,189138,168807,150485,142611,192560]),
+    ("perija",            "MGS 0006 Perijá",               "COLCEST58P2",  [213966,223719,233630,214607,242503,241499,240207,224538,194680,175379,188780,235821], [202906,212155,221553,203514,229968,229016,227790,212931,184617,166313,179022,223631]),
+    ("puya",              "MGS 0016 - Puya",               "COLCEST45P5",  [199700,232800,245000,227100,250100,253500,256900,238800,207400,174900,183100,244200], [187048,218051,229478,212712,234255,237440,240624,223671,194260,163819,171500,228729]),
+    ("jerico_el_son",     "Minigranja Solar El Son",       "COLCEST45P1",  [252487,240733,233928,238064,233263,267168,270670,250967,217358,181428,198372,240864], [234101,223203,216893,220728,216277,247713,250960,232692,201530,168216,183927,223324]),
+    ("elmolino",          "MGS 0009 El Molino",            "COLLAGT19P2",  [200772,150636,203829,192394,216277,190894,195267,206451,182565,147987,175731,203598], [186152,139667,188986,178384,200528,176993,181048,191417,169271,137211,162934,188772]),
+    ("vallenata",         "MGS 0007 La Paz Vallenata",     "COLCEST9P1",   [246091,210697,249444,206881,234130,259056,261594,242907,214914,194310,205150,202767], [228786,195881,231903,192333,217666,240840,243199,225826,199802,180646,190724,188509]),
+    ("villanueva",        "MGS 0010 - Villanueva",         "COLLAGT27P2",  [174832,186643,195820,168665,189603,186608,215995,203933,180583,170050,170417,198943], [156967,167571,175811,151431,170229,167540,193924,183095,162131,152674,153003,178615]),
+    ("cañahuate",         "MGS 0005 Cañahuate",            "COLCEST61P1",  [247595,221129,248817,230879,261510,261747,237801,242671,211167,193666,192819,251923], [216886,193703,217956,202243,229075,229283,208307,212573,184976,169646,168904,220677]),
+    ("gandalf",           "MGS 0004 Valle de Gandalf",     "COLCEST61P3",  [201758,193423,204798,191059,211782,212502,194000,182546,162850,157642,166494,202331], [176734,169433,179397,167362,185515,186146,169938,159905,142652,138090,145844,177236]),
+    ("esmeralda",         "MGS 0017 Esmeralda",            "COLCEST17P1",  [209185,243783,253137,238505,245536,271718,247503,253708,216587,203251,215016,238358], [192544,224389,232999,219531,226003,250102,227813,233525,199357,187082,197911,219396]),
+    ("lamesa",            "MGS 0013 La Mesa",              "COLSANT10P1",  [190900,171700,176000,180500,195200,179700,185700,181400,165900,166800,163400,193400], [177000,159198,163185,167357,180987,166615,172179,168192,153820,154655,151502,179318]),
+    ("olimpo",            "MGS 0014 - El Olimpo",          "COLSANT4P2",   [183400,139000,168400,178400,192400,159600,170800,169900,164200,161400,162200,182300], [170043,128876,156135,165407,178387,147976,158360,157526,152241,149645,150387,169023]),
+    ("reserva",           "Minigranja Solar La Palma",     "COLSANT9P1",   [241869,194044,228634,217270,222202,251027,261948,229577,205484,202765,203325,237037], [215828,173152,204018,193877,198278,224000,233745,204859,183360,180934,181434,211516]),
+    ("uruaco_gd",         "Minigranja Solar Uruaco",       "COLATLT14P2",  [244124,231569,266507,242744,248162,236534,243712,238434,198697,196090,204872,231497], [211666,200781,231073,210470,215167,205085,211309,206733,172279,170019,177633,200718]),
+    ("baraya",            "Minigranja Solar Baraya",       "COLSUCT17P2",  [248107,227365,251174,233011,225486,249967,252606,249039,205583,177108,216549,229822], [226033,207137,228827,212280,205425,227728,230132,226882,187292,161351,197283,209375]),
+    ("leyenda",           "MGS 0018 La Paz Leyenda",       "COLCEST53P1",  [253311,244005,256516,210295,262780,206326,252976,250028,220754,188392,212067,259285], [234368,225758,237334,194569,243129,190897,234058,231331,204246,174304,196209,239896]),
+    ("ibirico",           "MGS 0021 Ibirico",              "COLCEST49P2",  [229000,204400,252400,245900,259400,227100,258400,220800,209500,206000,212300,216100], [201524,179875,222116,216396,228276,199852,227396,194308,184364,181283,186828,190172]),
+    ("cacica",            "MGS 0040 Cacica",               "COLCEST55P1",  [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
+    ("jerico_merengue",   "MGS 0019 El Merengue",          "COLCEST45P7",  [252609,246190,228221,238061,232811,267432,270919,251113,217430,181405,198054,240888], [194569,226750,235450,221841,228380,252733,230210,235982,201454,189050,199993,221704]),
+    ("piloneras",         "MGS 0041 Piloneras",            "COLCEST55P2",  [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
+    ("cumbia",            "MGS 0022 - La Cumbia",          "COLCEST45P4",  [252747,246043,229042,209100,252234,246289,270706,250865,217134,198249,181487,238131], [235638,229387,213537,194945,235159,229617,252381,233883,202435,184829,169201,222011]),
+    ("copey_occidente",   "MGS 0025 - El Copey Occidente", "COLCEST39P1",  [246438,209547,229367,238571,256862,254999,231928,242260,206926,188089,183973,241429], [223807,190304,208303,216662,233273,231582,210629,220012,187923,170816,167078,219258]),
+    ("valenciaoriente",   "MGS 0026 Valencia Oriente 1",   "COLCEST74P1",  [195438,241270,253896,213443,258481,260767,235661,218270,211470,189944,205555,251316], [181206,223701,235407,197900,239658,241778,218500,202376,196071,176112,190586,233015]),
+    ("valencia_oriente_2","MGS 0027 Valencia Oriente 2",   "COLCEST74P2",  [194987,240650,253374,213173,258077,260306,235288,218011,211189,189804,205292,250663], [183329,226262,238225,200428,242647,244743,221221,204977,198562,178456,193018,235676]),
+    ("san_diego_sur",     "MGS 0024 - San Diego Sur",      "COLCEST38P1",  [0]*12, [0]*12),
 ]
+
+
+# ── Mapeo completo topic → nombre oficial (106 proyectos Unergy) ──────────────
+_TOPIC_MAP = {
+    "zofiva": "Zona Franca V.A.",
+    "yurbaqua": "PSF - Yurbaqua",
+    "yuan_solar": "GD Yuan Solar",
+    "villanueva": "MGS 0010 - Villanueva",
+    "verso": "MGS 0008 La Paz Verso",
+    "vallenata": "MGS 0007 La Paz Vallenata",
+    "valenciaoriente": "MGS 0026 Valencia Oriente 1",
+    "valencia_oriente_2": "MGS 0027 Valencia Oriente 2",
+    "uruaco_gd": "Minigranja Solar Uruaco",
+    "tierraalta": "Granja Solar Tierra Alta",
+    "taurus_x": "Taurus X",
+    "taurus_viii": "Taurus VIII",
+    "taurus_ix": "Taurus IX",
+    "tamalacue": "Minigranja Solar Tamalacué",
+    "somer_torre_2": "Clínica Somer",
+    "somer_torre_1": "Clínica Somer",
+    "sirius": "GD Sirius",
+    "seridme": "Seridme",
+    "savannaplaza": "Centro Comercial Savanna Plaza",
+    "sansimon": "Ladrillera Arcillas San Simón",
+    "sanpedro": "Minigranja Solar San Pedro",
+    "sanjose": "Centro de atención al desamparado San José",
+    "sanesteban3": "San Esteban del Poblado",
+    "sanesteban2": "San Esteban del Poblado",
+    "sanesteban": "San Esteban del Poblado",
+    "sanagustin_elektra": "GRANJA SOLAR SAN AGUSTIN",
+    "san_pelayo": "GD San Pelayo",
+    "san_onofre": "GD 1MVA SAN ONOFRE",
+    "san_diego_sur": "MGS 0024 - San Diego Sur",
+    "salud_vegas": "Salud Vegas - Torre Médica",
+    "sabana_de_torres": "Minigranja Solar Sabana de Torres",
+    "reserva": "Minigranja Solar La Palma",
+    "puya": "MGS 0016 - Puya",
+    "polikem": "Polikem",
+    "polaris_2": "GD Polaris 2",
+    "polaris_1": "GD Polaris 1",
+    "poladelpub": "Pola del Pub",
+    "piloneras": "MGS 0041 Piloneras",
+    "perija": "MGS 0006 Perijá",
+    "pazderio": "Triturados Paz de Río",
+    "olimpo": "MGS 0014 - El Olimpo",
+    "obelisco": "Centro Comercial Obelisco",
+    "nuestroatlantico": "Centro Comercial Nuestro Atlántico",
+    "ngs": "Nuevo Gimnasio School",
+    "nestle_valledupar": "Nestlé Cicolac Valledupar",
+    "naos3": "MGS Naos 3",
+    "naos2": "MGS Naos 2",
+    "naos1": "GD NAOS 1",
+    "mdm": "MDM Científica",
+    "marimonda": "GD Marimonda",
+    "maderas": "Central de Maderas",
+    "loscoches": "Los Coches",
+    "leyenda": "MGS 0018 La Paz Leyenda",
+    "laurelescampestre_parques": "Unidad Residencial Laureles Campestre",
+    "laurelescampestre_fuentes_torre_3": "Unidad Residencial Laureles Campestre",
+    "laurelescampestre_fuentes_torre_2": "Unidad Residencial Laureles Campestre",
+    "laurelescampestre_aires_torre4": "Unidad Residencial Laureles Campestre",
+    "laurelescampestre_aires_123": "Unidad Residencial Laureles Campestre",
+    "lamesa": "MGS 0013 La Mesa",
+    "joropo": "MGS 0023 Joropo",
+    "jerico_merengue": "MGS 0019 El Merengue",
+    "jerico_el_son": "Minigranja Solar El Son",
+    "iml_etiquetas": "IML",
+    "iml_empaques": "IML",
+    "ibirico": "MGS 0021 Ibirico",
+    "ibes": "Instituto Bolivariano Esdiseños",
+    "gimsanangelo": "Gimnasio San Angelo",
+    "gimcampreibri_comedor": "Gimnasio Campestre Reino Británico",
+    "gimcampreibri_bloque4": "Gimnasio Campestre Reino Británico",
+    "gandalf": "MGS 0004 Valle de Gandalf",
+    "esmeralda": "MGS 0017 Esmeralda",
+    "elroble": "MGS 0011 El Roble",
+    "elmolino": "MGS 0009 El Molino",
+    "ecoimagenips": "Ecoimagen IPS",
+    "delta_2": "GD delta 2",
+    "delta_1": "GD Delta 1",
+    "cumbia": "MGS 0022 - La Cumbia",
+    "cross": "Cross Business Center",
+    "cristorey": "Colegio Cristo Rey Bogotá",
+    "copey_occidente": "MGS 0025 - El Copey Occidente",
+    "coopsana2": "IPS Coopsana",
+    "coopsana": "IPS Coopsana",
+    "colaboratec": "Colaboratec (Piloto)",
+    "cienaga": "Sol&Cielo 9 - Ciénaga",
+    "chiriguana_norte_4": "MGS 0077 - Chiriguaná Norte 4",
+    "chiriguana_norte_2": "MGS 0075 - Chiriguaná Norte 2",
+    "chima": "MGS 0030 Chimá Oriente",
+    "cedillanosexc": "Cedillanos_excedentes",
+    "cedillanos": "Complejo Industrial Cedillanos",
+    "cañahuate": "MGS 0005 Cañahuate",
+    "catedral": "La Catedral",
+    "cacica": "MGS 0040 Cacica",
+    "bongos": "Sol Y Cielo 7 Los Bongos",
+    "biosolar": "GD Biosolar",
+    "bayunca": "Bayunca",
+    "baraya": "Minigranja Solar Baraya",
+    "astrolumen": "GD Astrolumen La Garita",
+    "asprolesa": "Asociación Asprolesa",
+    "arboleda": "Arboleda de Castilla",
+    "amc": "Almacenes AMC",
+    "almagran": "Torre Almagrán",
+    "agustin_3": "Agustín 3",
+    "agustin_2": "Agustín 2",
+    "agustin_1": "GD Agustin 1",
+    "acanto": "Unidad Residencial Acanto",
+}
+
+
+@router.post("/_seed-topics")
+def seed_topics(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    """Pobla sub_project en todos los proyectos usando el mapeo topic→nombre.
+    Busca por nombre fuzzy; no sobreescribe si sub_project ya está seteado."""
+    updated, not_found, skipped = [], [], []
+    for topic, nombre in _TOPIC_MAP.items():
+        # Skip if any project already has this topic assigned
+        existing = db.query(Proyecto).filter(Proyecto.sub_project == topic).first()
+        if existing:
+            skipped.append({"topic": topic, "proyecto": existing.nombre_comercial})
+            continue
+        p = find_proyecto_by_name(db, nombre)
+        if not p:
+            not_found.append({"topic": topic, "nombre": nombre})
+            continue
+        p.sub_project = topic
+        updated.append({"topic": topic, "nombre": nombre, "proyecto": p.nombre_comercial, "id": p.id})
+    db.commit()
+    return {"ok": True, "updated": updated, "skipped": skipped, "not_found": not_found}
 
 
 @router.post("/_seed-p50p90")
@@ -846,16 +993,29 @@ def seed_p50_p90(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
-    """Seed P50/P90 monthly values from the original Apps Script PROJ_ROWS."""
+    """Seed sub_project, codigo_tsf y P50/P90 desde el mapeo del Apps Script.
+    Busca por sub_project → alias_monitoreo → nombre fuzzy. Auto-asigna sub_project y TSF."""
     updated, not_found = [], []
-    for sub, p50, p90 in _SEED_P50_P90:
-        p = db.query(Proyecto).filter(Proyecto.sub_project == sub).first()
+    for sub, nombre_oficial, tsf, p50, p90 in _SEED_PROYECTOS:
+        # 1. Exact match on sub_project or alias_monitoreo
+        p = (
+            db.query(Proyecto)
+            .filter((Proyecto.sub_project == sub) | (Proyecto.alias_monitoreo == sub))
+            .first()
+        )
+        # 2. Fallback: fuzzy match against nombre_oficial (from topic mapping)
+        if not p:
+            p = find_proyecto_by_name(db, nombre_oficial)
         if not p:
             not_found.append(sub)
             continue
+        if not p.sub_project:
+            p.sub_project = sub
+        if not p.codigo_tsf:
+            p.codigo_tsf = tsf
         p.p50_mensual_kwh = json.dumps(p50)
         p.p90_mensual_kwh = json.dumps(p90)
-        updated.append(sub)
+        updated.append({"sub": sub, "tsf": tsf, "proyecto": p.nombre_comercial, "id": p.id})
     db.commit()
     return {"ok": True, "updated": updated, "not_found": not_found}
 

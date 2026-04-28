@@ -108,6 +108,7 @@ class Proyecto(Base):
     # P50/P90 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
     p90_mensual_kwh: Mapped[str | None] = mapped_column(Text, nullable=True)
     p50_mensual_kwh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)

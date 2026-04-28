@@ -157,6 +157,7 @@ class ProyectoCreate(BaseModel):
     generar_liquidacion: Optional[bool] = None
     p90_mensual_kwh: Optional[str] = None
     p50_mensual_kwh: Optional[str] = None
+    codigo_tsf: Optional[str] = None
 
 
 class ProyectoUpdate(ProyectoCreate):
@@ -198,6 +199,7 @@ class ProyectoOut(BaseModel):
     generar_liquidacion: bool
     p90_mensual_kwh: Optional[str] = None
     p50_mensual_kwh: Optional[str] = None
+    codigo_tsf: Optional[str] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool

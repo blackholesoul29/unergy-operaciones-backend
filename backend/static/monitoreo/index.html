@@ -974,7 +974,7 @@ function dayCol(n){return n>14?"#FF5757":n>7?"#F6FF72":"#4ADE80";}
 var ALL_F=[];
 function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(f){ALL_F.push({code:f.c,label:f.l,catId:c.id,catLbl:c.lbl,catCol:c.col,catIco:c.ico});});});}
 rebuildF();
-var PROJS=["Acanto","Almagran","AMC","Arboleda","Cedillanos","Coopsana Sub Proyecto 1","Coopsana Sub Proyecto 2","Cristo Rey","Cross","Ecoimagen","San Angelo","IBES","IML Empaques","IML Etiquetas","Laureles Aires 123","Laureles Aires Torre 4","Laureles Fuentes Torre 2","Laureles Fuentes Torre 3","Laureles Parques","Los Coches","Maderas","MDM","Nuevo Gimnasio School","Obelisco","Pola del Pub","Polikem","Salud Vegas","San Esteban Torre 1","San Esteban Torre 2","San Esteban Torre 3","San Simón","Savana Plaza","Seridme","Somer Torre 1","Somer Torre 2","Perija","El Son","Molino","La Puya","Villanueva","La Reserva","Cañahuate","La Paz Leyenda","La Paz Verso","San Pedro","La Paz Vallenata","Gandalf","Uruaco","Baraya","La Paz Esmeralda","El Merengue","El Olimpo","Ibirico","La Mesa","Cacica","Valencia 1","Valencia 2","Nestlé","San Diego Sur","Cumbia","Pilonera","Chiriguana N°2","Chiriguana N°4","Copey"];
+var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",

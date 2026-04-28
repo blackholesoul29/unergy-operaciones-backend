@@ -721,8 +721,129 @@ document.addEventListener('DOMContentLoaded', function() {
   try { applyRole(); } catch(e) {}
   /* cargar datos */
   loadCatalog();
+  _loadCatIds();
   loadFaults();
+  loadProyectosFromDB();
 });
+
+function loadProyectosFromDB() {
+  _apiFetch('GET', '/api/v1/monitoreo/proyectos').then(function(res) {
+    if (!res || !Array.isArray(res.proyectos) || !res.proyectos.length) return;
+    PROJS = res.proyectos;
+    renderSelects();
+    var detalle = res.proyectos_detalle || res.proyectos.map(function(n) { return {nombre: n}; });
+    ['gen-proj', 'inf-proj', 'fmo-proj'].forEach(function(sid) {
+      var el = document.getElementById(sid);
+      if (!el) return;
+      var cur = el.value;
+      var html = '<option value="">Selecciona proyecto…</option>';
+      detalle.forEach(function(p) { html += '<option value="' + esc(p.nombre) + '">' + esc(p.nombre) + '</option>'; });
+      el.innerHTML = html;
+      if (cur) el.value = cur;
+    });
+    toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
+  }).catch(function(e) {
+    console.warn('[Bridge] proyectos no disponibles desde BD:', e);
+  });
+}
+
+/* ── mapeos de estado ── */
+var _ST_MAP = {"abierta":"activa","en_gestion":"revision","en_espera":"programada","cerrada":"terminada","sin_solucion":"terminada"};
+var _ST_REV = {"activa":"abierta","revision":"en_gestion","programada":"en_espera","terminada":"cerrada"};
+var _catIds = {estados:{},prioridades:{},tipos:{},proyectos:{}};
+
+function _loadCatIds() {
+  Promise.all([
+    _apiFetch('GET','/api/v1/fallas/catalogos'),
+    _apiFetch('GET','/api/v1/proyectos?size=500')
+  ]).then(function(r) {
+    var cat=r[0], projs=r[1];
+    (cat.estados||[]).forEach(function(e){_catIds.estados[e.codigo]=e.id;});
+    (cat.prioridades||[]).forEach(function(p){_catIds.prioridades[p.codigo]=p.id;});
+    (cat.tipos||[]).forEach(function(t){_catIds.tipos[t.codigo]=t.id;});
+    ((projs&&projs.items)||[]).forEach(function(p){_catIds.proyectos[p.nombre_comercial]=p.id;});
+  }).catch(function(e){console.warn('[Bridge] catIds:',e);});
+}
+
+/* OVERRIDE loadFaults — usa /api/v1/fallas (evita el 500 de /monitoreo/fallas) */
+function loadFaults() {
+  setSync("spin","Sincronizando…");
+  _apiFetch('GET','/api/v1/fallas?size=500&page=1').then(function(res) {
+    var items=(res&&res.items)||[];
+    faults=items.map(function(f) {
+      return {
+        id:f.codigo_interno||String(f.id), _db_id:f.id,
+        proj:(f.proyecto||{}).nombre_comercial||"",
+        code:(f.tipo||{}).codigo||"otro_general",
+        faultLabel:(f.tipo||{}).etiqueta||"",
+        st:_ST_MAP[(f.estado||{}).codigo]||"activa",
+        date:f.fecha_identificacion||"",
+        time:f.hora_identificacion||"",
+        occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
+        res:(f.resolucion||{}).etiqueta||"",
+        desc:f.descripcion||"",
+        flw:(f.seguimientos||[]).map(function(s){
+          return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
+        }).join("\n"),
+        driveUrl:"",driveUrls:[],
+        endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
+        centinela:"",notify:false,
+        prio:(f.prioridad||{}).codigo||"media"
+      };
+    });
+    faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
+    setSync("ok","Sincronizado ✓");hideLoader();renderAll();
+    toast("✓ "+faults.length+" fallas cargadas");
+  }).catch(function(e){
+    setSync("err","Sin conexión");hideLoader();renderAll();
+    toast("⚠ Error al cargar: "+e.message);
+  });
+}
+
+/* OVERRIDE serverDel — usa DELETE /api/v1/fallas/{id} */
+function serverDel(id) {
+  var f=faults.find(function(x){return x.id===id;});
+  var dbId=f?f._db_id:null;
+  if(!dbId){toast("⚠ Falla no encontrada");return;}
+  setSync("spin","Eliminando…");
+  fetch('/api/v1/fallas/'+dbId,{method:'DELETE',headers:{'Authorization':'Bearer '+_API_TOKEN}})
+    .then(function(r){
+      if(!r.ok)throw new Error('API '+r.status);
+      faults=faults.filter(function(x){return x.id!==id;});
+      setSync("ok","Eliminado ✓");renderAll();toast("✓ Falla eliminada");
+    }).catch(function(e){setSync("err","Error");toast("⚠ No se pudo eliminar: "+e.message);});
+}
+
+/* OVERRIDE serverSave — usa POST/PATCH /api/v1/fallas */
+function serverSave(f, cb) {
+  setSync("spin","Guardando…");
+  var stCod=_ST_REV[f.st]||"abierta";
+  var eId=_catIds.estados[stCod];
+  var tId=_catIds.tipos[f.code];
+  var pId=_catIds.prioridades[f.prio||"media"];
+  var prId=_catIds.proyectos[f.proj];
+  if(!eId||!tId||!pId||!prId){
+    toast("⚠ Proyecto/tipo/estado/prioridad no encontrados en BD");
+    setSync("err","Error");if(cb)cb(false);return;
+  }
+  if(!f._db_id) {
+    _apiFetch('POST','/api/v1/fallas',{
+      proyecto_id:prId,tipo_id:tId,estado_id:eId,prioridad_id:pId,
+      descripcion:f.desc||"Sin descripción",
+      fecha_identificacion:f.date||new Date().toISOString().slice(0,10)
+    }).then(function(r){
+      f._db_id=r.id;f.id=r.codigo_interno;
+      var idx=faults.findIndex(function(x){return x.id===f.id;});
+      if(idx>=0)faults[idx]=f;else faults.unshift(f);
+      setSync("ok","Guardado ✓");renderAll();if(cb)cb(true);
+    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+  } else {
+    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,{
+      tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc
+    }).then(function(){setSync("ok","Guardado ✓");if(cb)cb(true);})
+      .catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+  }
+}
 /* ════════════════════════════════════════════════════════════════ */
 
 var SCRIPT_URL="" /* neutralizado por bridge */;
@@ -853,7 +974,7 @@ function dayCol(n){return n>14?"#FF5757":n>7?"#F6FF72":"#4ADE80";}
 var ALL_F=[];
 function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(f){ALL_F.push({code:f.c,label:f.l,catId:c.id,catLbl:c.lbl,catCol:c.col,catIco:c.ico});});});}
 rebuildF();
-var PROJS=["Acanto","Almagran","AMC","Arboleda","Cedillanos","Coopsana Sub Proyecto 1","Coopsana Sub Proyecto 2","Cristo Rey","Cross","Ecoimagen","San Angelo","IBES","IML Empaques","IML Etiquetas","Laureles Aires 123","Laureles Aires Torre 4","Laureles Fuentes Torre 2","Laureles Fuentes Torre 3","Laureles Parques","Los Coches","Maderas","MDM","Nuevo Gimnasio School","Obelisco","Pola del Pub","Polikem","Salud Vegas","San Esteban Torre 1","San Esteban Torre 2","San Esteban Torre 3","San Simón","Savana Plaza","Seridme","Somer Torre 1","Somer Torre 2","Perija","El Son","Molino","La Puya","Villanueva","La Reserva","Cañahuate","La Paz Leyenda","La Paz Verso","San Pedro","La Paz Vallenata","Gandalf","Uruaco","Baraya","La Paz Esmeralda","El Merengue","El Olimpo","Ibirico","La Mesa","Cacica","Valencia 1","Valencia 2","Nestlé","San Diego Sur","Cumbia","Pilonera","Chiriguana N°2","Chiriguana N°4","Copey"];
+var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",
@@ -1146,7 +1267,7 @@ function hideLoader(){document.getElementById("loader").style.display="none";}
 function apiGet(p,timeout){ return _apiFetch('GET', '/api/v1/monitoreo/_legacy?action='+(p.action||''), p); }
 function apiPost(body){ return _apiFetch('POST', '/api/v1/monitoreo/_legacy', body); }
 /* ══ CARGAR FALLAS ══ */
-function loadFaults(){
+function _loadFaults_legacy(){
   setSync("spin","Sincronizando…");
   _apiFetch('GET','/api/v1/monitoreo/fallas').then(function(res){
     if(res&&res.ok&&res.faults){
@@ -1164,7 +1285,7 @@ function loadFaults(){
   });
 }
 /* ══ GUARDAR ══ */
-function serverSave(f,cb){
+function _serverSave_legacy(f,cb){
   setSync("spin","Guardando…");
   var fdd=fd(f.code)||{};
   var cleanRes=(f.res&&f.res.trim()&&f.res.length>3&&!/^\d/.test(f.res)&&
@@ -1196,7 +1317,7 @@ function serverSave(f,cb){
     if(cb)cb(false);
   });
 }
-function serverDel(id){
+function _serverDel_legacy(id){
   _apiFetch('POST','/api/v1/monitoreo/fallas/delete',{id:id}).then(function(r){
     setSync(r&&r.ok?"ok":"err",r&&r.ok?"Eliminado ✓":"Error al eliminar");
   }).catch(function(e){

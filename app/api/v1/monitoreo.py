@@ -495,9 +495,8 @@ async def _fetch_unergy_raw(token: str, sub_project: str, from_iso: str, to_iso:
     }
     if verified_only:
         params["verified_by_operator"] = "True"
-    data_url = f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation"
-    async with httpx.AsyncClient(timeout=60) as c:
-        # Apps Script uses Bearer — matches the token returned by the auth endpoint
+    data_url = f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/"
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
         r = await c.get(data_url, params=params, headers={"Authorization": f"Bearer {token}"})
         if r.status_code == 401:
             return []
@@ -599,7 +598,10 @@ def _action_get_projects(db: Session) -> dict:
     from sqlalchemy import or_
     proyectos = (
         db.query(Proyecto)
-        .filter(or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)))
+        .filter(
+            or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
+            Proyecto.estado == "en_operacion",
+        )
         .order_by(Proyecto.nombre_comercial)
         .all()
     )

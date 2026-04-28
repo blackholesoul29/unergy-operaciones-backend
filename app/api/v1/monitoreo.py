@@ -1042,3 +1042,46 @@ async def legacy_bridge(
     if action == "sendCode":
         return {"ok": True}
     raise HTTPException(400, f"Acción no reconocida: {action}")
+
+
+@router.post("/_legacy")
+async def legacy_bridge_post(
+    payload: dict,
+    current_user: Usuario = Depends(get_current_user),
+):
+    action = payload.get("action", "")
+
+    if action == "savePhoto":
+        import base64
+        import re
+        from pathlib import Path as _Path
+
+        fault_id = re.sub(r"[^\w\-]", "_", str(payload.get("faultId") or "unknown"))
+        photo_name = re.sub(r"[^\w\-\.]", "_", str(payload.get("photoName") or "foto.jpg"))
+        b64 = payload.get("b64") or ""
+        mime = payload.get("mimeType") or "image/jpeg"
+
+        ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+        ext = ext_map.get(mime, ".jpg")
+        if not photo_name.lower().endswith(ext):
+            photo_name = photo_name.rsplit(".", 1)[0] + ext
+
+        try:
+            img_bytes = base64.b64decode(b64)
+        except Exception:
+            return {"ok": False, "error": "Base64 inválido"}
+
+        folder = _Path("uploads/fotos") / fault_id
+        folder.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"{ts}_{photo_name}"
+        (folder / filename).write_bytes(img_bytes)
+
+        url = f"/static/uploads/fotos/{fault_id}/{filename}"
+        return {"ok": True, "folderUrl": url, "photoUrl": url}
+
+    if action == "sendCode":
+        return {"ok": True}
+
+    raise HTTPException(400, f"Acción POST no reconocida: {action}")

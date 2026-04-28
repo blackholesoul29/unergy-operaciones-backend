@@ -472,19 +472,24 @@ def verify_code(payload: dict, db: Session = Depends(get_db)):
 
 # ── Legacy bridge — replaces Google Apps Script ───────────────────────────────
 
+# Colombia is UTC-5 (no DST)
+_COL_TZ = timezone(timedelta(hours=-5))
+
+# ── Unergy API ────────────────────────────────────────────────────────────────
+
 async def _unergy_token() -> str:
     auth_url = f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(auth_url, json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD})
         r.raise_for_status()
         data = r.json()
-        return data.get("token") or data.get("key") or data.get("access") or ""
+        return data.get("token") or data.get("access") or data.get("key") or ""
 
 
-async def _fetch_unergy_raw(token: str, sub_project: str, date_from: str, date_to: str, verified_only: bool) -> list:
+async def _fetch_unergy_raw(token: str, sub_project: str, from_iso: str, to_iso: str, verified_only: bool) -> list:
     params: dict = {
-        "time_stamp__gte": date_from,
-        "time_stamp__lte": date_to,
+        "time_stamp__gte": from_iso,
+        "time_stamp__lte": to_iso,
         "sub_project": sub_project,
         "limit": "10000",
     }
@@ -492,30 +497,48 @@ async def _fetch_unergy_raw(token: str, sub_project: str, date_from: str, date_t
         params["verified_by_operator"] = "True"
     data_url = f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation"
     async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.get(data_url, params=params, headers={"Authorization": f"Token {token}"})
+        # Apps Script uses Bearer — matches the token returned by the auth endpoint
+        r = await c.get(data_url, params=params, headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 401:
+            return []
         r.raise_for_status()
         body = r.json()
         return body if isinstance(body, list) else body.get("results", [])
 
 
-def _compute_deltas(readings: list) -> list:
+def _compute_deltas(readings: list, d_from_dt: datetime, d_to_dt: datetime) -> list:
     readings.sort(key=lambda x: x.get("time_stamp") or x.get("timestamp") or "")
-    result = []
-    for i in range(1, len(readings)):
-        prev, curr = readings[i - 1], readings[i]
-        gen_curr = float(curr.get("generacion") or curr.get("generation") or 0)
-        gen_prev = float(prev.get("generacion") or prev.get("generation") or 0)
-        delta = max(0.0, gen_curr - gen_prev)
-        ts_raw = curr.get("time_stamp") or curr.get("timestamp") or ""
+    # Separate: prior readings (for baseline) and period readings
+    before, period = [], []
+    for r in readings:
+        ts_raw = r.get("time_stamp") or r.get("timestamp") or ""
         try:
-            dt = (
-                datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                if "T" in ts_raw
-                else datetime.strptime(ts_raw[:16], "%Y-%m-%d %H:%M")
-            )
+            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if "T" in ts_raw else datetime.strptime(ts_raw[:16], "%Y-%m-%d %H:%M").replace(tzinfo=_COL_TZ)
         except Exception:
             continue
-        result.append({"time": dt.strftime("%Y-%m-%d %H:%M"), "date": dt.strftime("%Y-%m-%d"), "kwh": round(delta, 3)})
+        if ts < d_from_dt:
+            before.append((ts, r))
+        elif ts <= d_to_dt:
+            period.append((ts, r))
+
+    if not period:
+        return []
+
+    working = ([before[-1]] if before else []) + period
+    result = []
+    for i in range(1, len(working)):
+        ts_prev, r_prev = working[i - 1]
+        ts_curr, r_curr = working[i]
+        gen_curr = float(r_curr.get("generacion") or r_curr.get("generation") or 0)
+        gen_prev = float(r_prev.get("generacion") or r_prev.get("generation") or 0)
+        delta = max(0.0, gen_curr - gen_prev)
+        # Format in Colombia local time
+        ts_local = ts_curr.astimezone(_COL_TZ)
+        result.append({
+            "time": ts_local.strftime("%Y-%m-%d %H:%M"),
+            "date": ts_local.strftime("%Y-%m-%d"),
+            "kwh": round(delta, 3),
+        })
     return result
 
 
@@ -524,38 +547,40 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
         return {"ok": False, "error": "sub_project requerido"}
 
     try:
-        d_from = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else date.today().replace(day=1)
-        d_to = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else date.today()
+        d_from_date = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else date.today().replace(day=1)
+        d_to_date = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else date.today()
     except Exception:
         return {"ok": False, "error": "Formato de fecha inválido (YYYY-MM-DD)"}
 
-    # Extend window by 2 days before to capture prior cumulative reading
-    fetch_from = (d_from - timedelta(days=2)).strftime("%Y-%m-%d")
-    fetch_to = (d_to + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Colombia-aware datetimes (matches Apps Script behavior)
+    d_from_dt = datetime(d_from_date.year, d_from_date.month, d_from_date.day, 0, 0, 0, tzinfo=_COL_TZ)
+    d_to_dt = datetime(d_to_date.year, d_to_date.month, d_to_date.day, 23, 59, 59, tzinfo=_COL_TZ)
+    # Extend start by 2 days to capture prior cumulative baseline
+    fetch_from_dt = d_from_dt - timedelta(days=2)
+    from_iso = fetch_from_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    to_iso = d_to_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         token = await _unergy_token()
-        readings = await _fetch_unergy_raw(token, sub_project, fetch_from, fetch_to, verified_only=True)
+        readings = await _fetch_unergy_raw(token, sub_project, from_iso, to_iso, verified_only=True)
         if not readings:
-            readings = await _fetch_unergy_raw(token, sub_project, fetch_from, fetch_to, verified_only=False)
+            readings = await _fetch_unergy_raw(token, sub_project, from_iso, to_iso, verified_only=False)
     except Exception as e:
         return {"ok": False, "error": f"Error API Unergy: {e}"}
 
-    deltas = _compute_deltas(readings)
-    d_from_str, d_to_str = d_from.strftime("%Y-%m-%d"), d_to.strftime("%Y-%m-%d")
-    filtered = [d for d in deltas if d_from_str <= d["date"] <= d_to_str]
+    filtered = _compute_deltas(readings, d_from_dt, d_to_dt)
 
     # P50/P90 simulation from project record
     simulation = None
     proyecto = db.query(Proyecto).filter(Proyecto.sub_project == sub_project).first()
     if proyecto and (proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh):
         try:
-            month = d_from.month
+            month = d_from_date.month
             p90_list = json.loads(proyecto.p90_mensual_kwh) if proyecto.p90_mensual_kwh else [None] * 12
             p50_list = json.loads(proyecto.p50_mensual_kwh) if proyecto.p50_mensual_kwh else [None] * 12
             p90m = p90_list[month - 1] if len(p90_list) >= month else None
             p50m = p50_list[month - 1] if len(p50_list) >= month else None
-            days_in_month = calendar.monthrange(d_from.year, month)[1]
+            days_in_month = calendar.monthrange(d_from_date.year, month)[1]
             simulation = {
                 "p90_monthly": p90m,
                 "p50_monthly": p50m,
@@ -587,6 +612,7 @@ def _action_get_projects(db: Session) -> dict:
                 "departamento": p.departamento or "—",
                 "potencia_instalada_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
                 "estado": p.estado,
+                "project_id_solenium": p.project_id_solenium or "",
             }
             for p in proyectos
         ],
@@ -628,8 +654,96 @@ def _action_get_all_contratos(db: Session) -> dict:
             "numero_contrato": c.numero_contrato or "",
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else "",
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else "",
+            "project_id_solenium": p.project_id_solenium or "",
         })
     return {"ok": True, "contratos": contratos}
+
+
+# ── Solenium token cache (module-level, resets on dyno restart) ───────────────
+_sol_cache: dict = {"token": None, "expires_at": 0.0}
+
+
+async def _solenium_token() -> str | None:
+    import time
+    if _sol_cache["token"] and time.time() < _sol_cache["expires_at"]:
+        return _sol_cache["token"]
+    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                settings.SOLENIUM_AUTH_URL,
+                json={"username": settings.SOLENIUM_USER, "password": settings.SOLENIUM_PASS},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            token = data.get("access") or data.get("token") or data.get("key") or ""
+            if token:
+                import time as _t
+                _sol_cache["token"] = token
+                _sol_cache["expires_at"] = _t.time() + 20 * 3600
+            return token or None
+    except Exception:
+        return None
+
+
+async def _solenium_inverters(proyecto: Proyecto) -> tuple[list, str | None]:
+    token = await _solenium_token()
+    if not token:
+        return [], "Solenium no configurado o sin credenciales"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            # Step 1: get Solenium project list to find the ID
+            r = await c.get(
+                f"{settings.SOLENIUM_DATA_URL}/project/",
+                params={"menu": "1"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 401:
+                _sol_cache["token"] = None
+                return [], "Solenium: sesión expirada"
+            projs = r.json() if r.status_code == 200 else []
+            projs = projs if isinstance(projs, list) else projs.get("results", [])
+
+            # Resolve Solenium project ID
+            sol_id = proyecto.project_id_solenium or ""
+            if not sol_id:
+                candidates = [
+                    (proyecto.nombre_clientes or "").lower(),
+                    (proyecto.nombre_bitacora or "").lower(),
+                    (proyecto.nombre_comercial or "").lower(),
+                    (proyecto.sub_project or "").lower(),
+                ]
+                for sp in projs:
+                    sp_name = (sp.get("name") or sp.get("nombre") or "").lower()
+                    sp_words = [w for w in sp_name.split() if len(w) > 2]
+                    for cand in candidates:
+                        if not cand:
+                            continue
+                        cand_words = [w for w in cand.split() if len(w) > 2]
+                        if cand_words and sum(1 for w in cand_words if w in sp_name) / len(cand_words) >= 0.5:
+                            sol_id = str(sp.get("id") or "")
+                            break
+                    if sol_id:
+                        break
+
+            if not sol_id:
+                return [], "No se encontró el proyecto en Solenium (configura project_id_solenium en el proyecto)"
+
+            # Step 2: get inverters
+            r2 = await c.get(
+                f"{settings.SOLENIUM_DATA_URL}/project/{sol_id}/inverter/",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r2.status_code != 200:
+                return [], f"Solenium inversores HTTP {r2.status_code}"
+            body = r2.json()
+            inverters = body if isinstance(body, list) else body.get("results", body.get("inverters", []))
+            return inverters, None
+    except Exception as e:
+        return [], str(e)
 
 
 async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, date_to: str | None, db: Session) -> dict:
@@ -669,7 +783,6 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
             d_to = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else None
         except Exception:
             d_from = d_to = None
-
         mq = db.query(Mantenimiento).filter(Mantenimiento.proyecto_id == proyecto.id)
         if d_from:
             mq = mq.filter(Mantenimiento.fecha >= d_from)
@@ -677,32 +790,16 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
             mq = mq.filter(Mantenimiento.fecha <= d_to)
         for m in mq.order_by(Mantenimiento.fecha).all():
             mantenimientos.append({
-                "id": m.id,
-                "tipo": m.tipo or "",
-                "descripcion": m.descripcion or "",
+                "id": m.id, "tipo": m.tipo or "", "descripcion": m.descripcion or "",
                 "fecha": m.fecha.isoformat() if m.fecha else "",
-                "estado": m.estado or "",
-                "observaciones": m.observaciones or "",
+                "estado": m.estado or "", "observaciones": m.observaciones or "",
             })
 
-    # Inverter data from Solenium (optional)
+    # Inverters from Solenium
     inverters: list = []
     inverters_error: str | None = None
-    if settings.SOLENIUM_API_KEY and proyecto and proyecto.project_id_solenium:
-        try:
-            async with httpx.AsyncClient(timeout=30) as c:
-                r = await c.get(
-                    f"https://api.solenium.co/v1/projects/{proyecto.project_id_solenium}/inverters",
-                    headers={"Authorization": f"Bearer {settings.SOLENIUM_API_KEY}"},
-                    params={"date_from": date_from or "", "date_to": date_to or ""},
-                )
-                if r.status_code == 200:
-                    body = r.json()
-                    inverters = body if isinstance(body, list) else body.get("results", [])
-                else:
-                    inverters_error = f"Solenium HTTP {r.status_code}"
-        except Exception as e:
-            inverters_error = str(e)
+    if proyecto:
+        inverters, inverters_error = await _solenium_inverters(proyecto)
 
     return {
         "ok": True,
@@ -711,6 +808,56 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
         "inverters_error": inverters_error,
         "mantenimientos": mantenimientos,
     }
+
+
+# ── P50/P90 seed data (extracted from Apps Script PROJ_ROWS) ─────────────────
+_SEED_P50_P90 = [
+    # (sub_project, p50[jan..dec], p90[jan..dec])
+    ("verso",            [206181,197655,210695,155611,192449,193107,218885,203993,182065,162304,153812,207684], [191167,183262,195352,144279,178435,179045,202946,189138,168807,150485,142611,192560]),
+    ("perija",           [213966,223719,233630,214607,242503,241499,240207,224538,194680,175379,188780,235821], [202906,212155,221553,203514,229968,229016,227790,212931,184617,166313,179022,223631]),
+    ("puya",             [199700,232800,245000,227100,250100,253500,256900,238800,207400,174900,183100,244200], [187048,218051,229478,212712,234255,237440,240624,223671,194260,163819,171500,228729]),
+    ("jerico_el_son",    [252487,240733,233928,238064,233263,267168,270670,250967,217358,181428,198372,240864], [234101,223203,216893,220728,216277,247713,250960,232692,201530,168216,183927,223324]),
+    ("elmolino",         [200772,150636,203829,192394,216277,190894,195267,206451,182565,147987,175731,203598], [186152,139667,188986,178384,200528,176993,181048,191417,169271,137211,162934,188772]),
+    ("vallenata",        [246091,210697,249444,206881,234130,259056,261594,242907,214914,194310,205150,202767], [228786,195881,231903,192333,217666,240840,243199,225826,199802,180646,190724,188509]),
+    ("villanueva",       [174832,186643,195820,168665,189603,186608,215995,203933,180583,170050,170417,198943], [156967,167571,175811,151431,170229,167540,193924,183095,162131,152674,153003,178615]),
+    ("cañahuate",        [247595,221129,248817,230879,261510,261747,237801,242671,211167,193666,192819,251923], [216886,193703,217956,202243,229075,229283,208307,212573,184976,169646,168904,220677]),
+    ("gandalf",          [201758,193423,204798,191059,211782,212502,194000,182546,162850,157642,166494,202331], [176734,169433,179397,167362,185515,186146,169938,159905,142652,138090,145844,177236]),
+    ("esmeralda",        [209185,243783,253137,238505,245536,271718,247503,253708,216587,203251,215016,238358], [192544,224389,232999,219531,226003,250102,227813,233525,199357,187082,197911,219396]),
+    ("lamesa",           [190900,171700,176000,180500,195200,179700,185700,181400,165900,166800,163400,193400], [177000,159198,163185,167357,180987,166615,172179,168192,153820,154655,151502,179318]),
+    ("olimpo",           [183400,139000,168400,178400,192400,159600,170800,169900,164200,161400,162200,182300], [170043,128876,156135,165407,178387,147976,158360,157526,152241,149645,150387,169023]),
+    ("reserva",          [241869,194044,228634,217270,222202,251027,261948,229577,205484,202765,203325,237037], [215828,173152,204018,193877,198278,224000,233745,204859,183360,180934,181434,211516]),
+    ("uruaco_gd",        [244124,231569,266507,242744,248162,236534,243712,238434,198697,196090,204872,231497], [211666,200781,231073,210470,215167,205085,211309,206733,172279,170019,177633,200718]),
+    ("baraya",           [248107,227365,251174,233011,225486,249967,252606,249039,205583,177108,216549,229822], [226033,207137,228827,212280,205425,227728,230132,226882,187292,161351,197283,209375]),
+    ("leyenda",          [253311,244005,256516,210295,262780,206326,252976,250028,220754,188392,212067,259285], [234368,225758,237334,194569,243129,190897,234058,231331,204246,174304,196209,239896]),
+    ("ibirico",          [229000,204400,252400,245900,259400,227100,258400,220800,209500,206000,212300,216100], [201524,179875,222116,216396,228276,199852,227396,194308,184364,181283,186828,190172]),
+    ("cacica",           [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
+    ("jerico_merengue",  [252609,246190,228221,238061,232811,267432,270919,251113,217430,181405,198054,240888], [194569,226750,235450,221841,228380,252733,230210,235982,201454,189050,199993,221704]),
+    ("piloneras",        [237322,222326,238786,217741,242920,245143,248063,233540,206816,184167,197056,238366], [217079,203362,218418,199168,222199,224233,226904,213619,189175,168458,180247,218034]),
+    ("cumbia",           [252747,246043,229042,209100,252234,246289,270706,250865,217134,198249,181487,238131], [235638,229387,213537,194945,235159,229617,252381,233883,202435,184829,169201,222011]),
+    ("copey",            [246438,209547,229367,238571,256862,254999,231928,242260,206926,188089,183973,241429], [223807,190304,208303,216662,233273,231582,210629,220012,187923,170816,167078,219258]),
+    ("valenciaoriente",  [195438,241270,253896,213443,258481,260767,235661,218270,211470,189944,205555,251316], [181206,223701,235407,197900,239658,241778,218500,202376,196071,176112,190586,233015]),
+    ("valencia_oriente_2",[194987,240650,253374,213173,258077,260306,235288,218011,211189,189804,205292,250663],[183329,226262,238225,200428,242647,244743,221221,204977,198562,178456,193018,235676]),
+    ("san_diego_sur",    [0]*12, [0]*12),
+]
+
+
+@router.post("/_seed-p50p90")
+def seed_p50_p90(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    """Seed P50/P90 monthly values from the original Apps Script PROJ_ROWS."""
+    updated, not_found = [], []
+    for sub, p50, p90 in _SEED_P50_P90:
+        p = db.query(Proyecto).filter(Proyecto.sub_project == sub).first()
+        if not p:
+            not_found.append(sub)
+            continue
+        p.p50_mensual_kwh = json.dumps(p50)
+        p.p90_mensual_kwh = json.dumps(p90)
+        updated.append(sub)
+    db.commit()
+    return {"ok": True, "updated": updated, "not_found": not_found}
 
 
 @router.get("/_legacy")

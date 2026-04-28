@@ -28,8 +28,11 @@ class Settings(BaseSettings):
     UNERGY_LOGIN: str = "admin_junior"
     UNERGY_PASSWORD: str = "#rqBSr5Ce#TDxo&o"
 
-    # Solenium API (optional — FMO inverter data)
-    SOLENIUM_API_KEY: str = ""
+    # Solenium API (FMO inverter data) — OAuth2 username/password
+    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
+    SOLENIUM_USER: str = "laura.hurtado"
+    SOLENIUM_PASS: str = "1000899435"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

@@ -155,6 +155,8 @@ class ProyectoCreate(BaseModel):
     estado_resultados_url: Optional[str] = None
     income_distribution_method: Optional[str] = None
     generar_liquidacion: Optional[bool] = None
+    p90_mensual_kwh: Optional[str] = None
+    p50_mensual_kwh: Optional[str] = None
 
 
 class ProyectoUpdate(ProyectoCreate):
@@ -194,6 +196,8 @@ class ProyectoOut(BaseModel):
     estado_resultados_url: Optional[str]
     income_distribution_method: Optional[str]
     generar_liquidacion: bool
+    p90_mensual_kwh: Optional[str] = None
+    p50_mensual_kwh: Optional[str] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool

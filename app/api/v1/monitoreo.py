@@ -33,6 +33,31 @@ from app.utils.proyecto_matching import find_proyecto_by_name
 
 router = APIRouter(prefix="/monitoreo", tags=["Monitoreo"])
 
+# ── JSON catalog lookup (loaded once at import) ───────────────────────────────
+_JSON_LABEL: dict[str, str] = {}
+
+def _load_json_labels() -> None:
+    from pathlib import Path as _P
+    import json as _j
+    p = _P("data/fallas_clasificadas_unergy.json")
+    if not p.exists():
+        return
+    try:
+        for entry in _j.loads(p.read_text(encoding="utf-8")):
+            code = entry.get("Código de Falla", "").strip()
+            evento = entry.get("Evento", "").strip()
+            if code and evento:
+                _JSON_LABEL[code] = evento
+    except Exception:
+        pass
+
+_load_json_labels()
+
+_OLD_CAT_NUM = {
+    "inversor": "2", "comunicacion": "1", "produccion": "4",
+    "red": "2", "estructura": "5", "medicion": "1", "otro": "p",
+}
+
 # ── Estado mappings ────────────────────────────────────────────────────────────
 
 _CODIGO_A_ST = {
@@ -81,11 +106,24 @@ def _falla_to_fault(f: Falla) -> dict:
 
     fotos_lista: list[str] = f.fotos_lista  # property handles JSON parsing + empty fallback
 
+    tipo_code = f.tipo.codigo if f.tipo else ""
+    tipo_etiqueta = f.tipo.etiqueta if f.tipo else ""
+    # Prefer JSON catalog label; fallback to DB etiqueta; last resort humanize the code
+    fault_label = _JSON_LABEL.get(tipo_code) or tipo_etiqueta or ""
+    if fault_label and " " not in fault_label and "_" in fault_label:
+        fault_label = fault_label.replace("_", " ").title()
+
+    cat_codigo = f.tipo.categoria.codigo if f.tipo and f.tipo.categoria else ""
+    cat_num = cat_codigo if cat_codigo.isdigit() else _OLD_CAT_NUM.get(cat_codigo, "")
+
+    drive_url = fotos_lista[0] if fotos_lista else ""
+
     return {
         "id": f.codigo_interno,
         "proj": f.proyecto.nombre_comercial if f.proyecto else "",
-        "code": f.tipo.codigo if f.tipo else "",
-        "faultLabel": f.tipo.etiqueta if f.tipo else "",
+        "code": tipo_code,
+        "faultLabel": fault_label,
+        "catNum": cat_num,
         "st": st,
         "date": f.fecha_identificacion.isoformat() if f.fecha_identificacion else "",
         "time": f.hora_identificacion.strftime("%H:%M") if f.hora_identificacion else "",
@@ -93,7 +131,9 @@ def _falla_to_fault(f: Falla) -> dict:
         "res": f.resolucion.etiqueta if f.resolucion else "",
         "desc": f.descripcion or "",
         "flw": seguimiento_txt,
-        "driUe": fotos_lista[0] if fotos_lista else "",
+        "driveUrl": drive_url,
+        "driveUrls": fotos_lista,
+        "driUe": drive_url,
         "driUes": fotos_lista,
         "endDT": f.fecha_resolucion.strftime("%d/%m/%Y %H:%M") if f.fecha_resolucion else "",
         "centinela": f.centinela or "",
@@ -102,7 +142,7 @@ def _falla_to_fault(f: Falla) -> dict:
         "photos": [],
         "_db_id": f.id,
         "_dias_abierta": f.dias_abierta,
-        "_categoria_id": f.tipo.categoria.codigo if f.tipo and f.tipo.categoria else "",
+        "_categoria_id": cat_codigo,
         "_categoria_lbl": f.tipo.categoria.etiqueta if f.tipo and f.tipo.categoria else "",
     }
 
@@ -628,7 +668,12 @@ def _action_get_projects(db: Session) -> dict:
 
 def _action_get_portfolios(db: Session) -> dict:
     from app.models.clientes import Cliente
-    clientes = db.query(Cliente).order_by(Cliente.razon_social_nombre).all()
+    clientes = (
+        db.query(Cliente)
+        .options(selectinload(Cliente.proyectos))
+        .order_by(Cliente.razon_social_nombre)
+        .all()
+    )
     portfolios: dict = {}
     for c in clientes:
         names = [

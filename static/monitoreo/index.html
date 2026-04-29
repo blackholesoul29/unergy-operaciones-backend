@@ -846,27 +846,22 @@ function _mapFault(f){
 }
 function loadFaults() {
   setSync("spin","Sincronizando…");
-  var acc=[];
-  function loadPage(page){
-    _apiFetch('GET','/api/v1/fallas?size=500&page='+page).then(function(res){
-      var items=(res&&res.items)||[];
-      acc=acc.concat(items);
-      var totalPages=res&&res.pages?res.pages:1;
-      if(page<totalPages){
-        setSync("spin","Cargando… ("+acc.length+" de "+(res.total||"??")+")");
-        loadPage(page+1);
-      } else {
-        faults=acc.map(_mapFault);
-        faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
-        setSync("ok","Sincronizado ✓");hideLoader();renderAll();
-        toast("✓ "+faults.length+" fallas cargadas");
-      }
-    }).catch(function(e){
-      setSync("err","Sin conexión");hideLoader();renderAll();
-      toast("⚠ Error al cargar: "+e.message);
-    });
-  }
-  loadPage(1);
+  _apiFetch('GET','/api/v1/monitoreo/fallas').then(function(res){
+    if(res && res.ok && Array.isArray(res.faults)){
+      faults = res.faults;
+      faults.forEach(function(f){
+        var n=parseInt((f.id||"").replace(/\D/g,""));
+        if(!isNaN(n)&&n>=idN)idN=n+1;
+        // normalise prio capitalisation (DB stores lowercase)
+        if(f.prio)f.prio=f.prio.charAt(0).toUpperCase()+f.prio.slice(1);
+      });
+    }
+    setSync("ok","Sincronizado ✓");hideLoader();renderAll();
+    toast("✓ "+faults.length+" fallas cargadas");
+  }).catch(function(e){
+    setSync("err","Sin conexión");hideLoader();renderAll();
+    toast("⚠ Error al cargar: "+e.message);
+  });
 }
 
 /* OVERRIDE serverDel — usa DELETE /api/v1/fallas/{id} */

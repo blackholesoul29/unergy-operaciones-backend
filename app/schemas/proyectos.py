@@ -141,7 +141,6 @@ class ProyectoContactoOut(ProyectoContactoCreate):
 
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
-    cliente_id: int
     portafolio_id: Optional[int] = None
     proyecto_padre_id: Optional[int] = None
     nombre_bitacora: Optional[str] = None
@@ -177,13 +176,11 @@ class ProyectoCreate(BaseModel):
 
 class ProyectoUpdate(ProyectoCreate):
     nombre_comercial: Optional[str] = None
-    cliente_id: Optional[int] = None
 
 
 class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
-    cliente_id: int
     portafolio_id: Optional[int]
     proyecto_padre_id: Optional[int]
     nombre_bitacora: Optional[str]

@@ -47,7 +47,6 @@ def list_proyectos(
     q: str | None = None,
     estado: str | None = None,
     tipo_proyecto: str | None = None,
-    cliente_id: int | None = None,
     portafolio_id: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -64,8 +63,6 @@ def list_proyectos(
         query = query.filter(Proyecto.estado == estado)
     if tipo_proyecto:
         query = query.filter(Proyecto.tipo_proyecto == tipo_proyecto)
-    if cliente_id:
-        query = query.filter(Proyecto.cliente_id == cliente_id)
     if portafolio_id:
         query = query.filter(Proyecto.portafolio_id == portafolio_id)
     total = query.count()

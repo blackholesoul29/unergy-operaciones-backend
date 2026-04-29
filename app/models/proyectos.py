@@ -64,7 +64,7 @@ class Proyecto(Base):
     __tablename__ = "proyectos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True)
     proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
 
@@ -120,7 +120,7 @@ class Proyecto(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relaciones
-    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="proyectos")
+    cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="proyectos")
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
     subproyectos: Mapped[list] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)

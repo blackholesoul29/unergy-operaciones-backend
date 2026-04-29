@@ -159,10 +159,82 @@ def _run_catalog_seed() -> None:
         print(f"[catalog seed] skipped: {e}")
 
 
+# old categoria codigo → best new tipo code (most representative)
+_OLD_CAT_TO_TIPO = {
+    "medicion":    "1.1",   # Pérdida de comunicación de inversores
+    "comunicacion": "1.1",
+    "inversor":    "2.8",   # Falla de inversor
+    "red":         "2.1",   # Pérdida de red eléctrica (utility)
+    "produccion":  "4.6",   # Inversor con derating o eficiencia reducida
+    "estructura":  "5.1",   # Daño en cimentación o anclaje
+    "otro":        "2.0",   # Desconexión sin causa identificada
+}
+
+
+def _run_tipo_migration() -> None:
+    """Re-point faults that use old snake_case tipo codes to the new numeric ones."""
+    import re
+    from sqlalchemy.orm import sessionmaker, joinedload
+    from app.models.fallas import Falla, FallaCatTipo
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        numeric_pattern = re.compile(r'^\d+\.\d+$')
+
+        new_tipos: dict[str, int] = {
+            t.codigo: t.id
+            for t in db.query(FallaCatTipo).filter(FallaCatTipo.activa == True).all()
+            if numeric_pattern.match(t.codigo or "")
+        }
+        if not new_tipos:
+            print("[tipo migration] No new numeric tipos found — run catalog seed first")
+            return
+
+        old_tipos = (
+            db.query(FallaCatTipo)
+            .options(joinedload(FallaCatTipo.categoria))
+            .all()
+        )
+        old_tipos = [t for t in old_tipos if not numeric_pattern.match(t.codigo or "")]
+
+        if not old_tipos:
+            print("[tipo migration] No old tipos found — already clean")
+            return
+
+        updated_total = 0
+        for old_t in old_tipos:
+            cat_code = old_t.categoria.codigo if old_t.categoria else ""
+            target_code = _OLD_CAT_TO_TIPO.get(cat_code, "2.0")
+            new_id = new_tipos.get(target_code) or new_tipos.get("2.0")
+            if not new_id:
+                continue
+            n = (
+                db.query(Falla)
+                .filter(Falla.tipo_id == old_t.id)
+                .update({"tipo_id": new_id}, synchronize_session=False)
+            )
+            if n:
+                print(f"[tipo migration] {n} fallas: {old_t.codigo!r} → {target_code}")
+            updated_total += n
+
+        db.commit()
+        if updated_total:
+            print(f"[tipo migration] ✅ {updated_total} fallas migradas")
+        else:
+            print("[tipo migration] Nada que migrar")
+    except Exception as e:
+        db.rollback()
+        print(f"[tipo migration] ERROR: {e}")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _run_column_migrations()
     _run_catalog_seed()
+    _run_tipo_migration()
     yield
 
 

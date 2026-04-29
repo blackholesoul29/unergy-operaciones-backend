@@ -172,10 +172,17 @@ class ProyectoCreate(BaseModel):
     p90_mensual_kwh: Optional[str] = None
     p50_mensual_kwh: Optional[str] = None
     codigo_tsf: Optional[str] = None
+    srv_operacion: Optional[bool] = None
+    srv_representacion: Optional[bool] = None
+    srv_cgm: Optional[bool] = None
+    srv_ppa: Optional[bool] = None
+    srv_promotor: Optional[bool] = None
+    srv_rec: Optional[bool] = None
 
 
 class ProyectoUpdate(ProyectoCreate):
     nombre_comercial: Optional[str] = None
+    estado: Optional[str] = None
 
 
 class ProyectoOut(BaseModel):

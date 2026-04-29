@@ -78,9 +78,91 @@ def _run_column_migrations() -> None:
             print(f"[startup migration skipped] {e}")
 
 
+_CAT_META = {
+    "Fallas de Medición":                       {"codigo": "1", "icono": "📡", "color": "#60A5FA", "orden": 1},
+    "Fallas Eléctricas":                        {"codigo": "2", "icono": "⚡", "color": "#F6FF72", "orden": 2},
+    "Fallas por Eventos Adversos":              {"codigo": "3", "icono": "🌩️", "color": "#FF5757", "orden": 3},
+    "Fallos por Desgaste / Degradación":        {"codigo": "4", "icono": "🔧", "color": "#F97316", "orden": 4},
+    "Fallas Civiles / Estructurales":           {"codigo": "5", "icono": "🏗️", "color": "#C47AFF", "orden": 5},
+    "Fallas HSE / Seguridad Laboral":           {"codigo": "6", "icono": "🦺", "color": "#4ADE80", "orden": 6},
+    "Fallas BESS / Almacenamiento (si aplica)": {"codigo": "7", "icono": "🔋", "color": "#7EC8E3", "orden": 7},
+    "Fallas Administrativas / Regulatorias":    {"codigo": "8", "icono": "📋", "color": "#F4A460", "orden": 8},
+    "Sin Suministro Eléctrico en el Proyecto":  {"codigo": "9", "icono": "🔌", "color": "#FF6B6B", "orden": 9},
+}
+
+
+def _run_catalog_seed() -> None:
+    import json as _json
+    from sqlalchemy.orm import sessionmaker
+    from app.models.fallas import FallaCatCategoria, FallaCatTipo
+
+    data_file = Path("data/fallas_clasificadas_unergy.json")
+    if not data_file.exists():
+        print("[catalog seed] data/fallas_clasificadas_unergy.json not found, skipping")
+        return
+
+    try:
+        data = _json.loads(data_file.read_text(encoding="utf-8"))
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            for cat_name, meta in _CAT_META.items():
+                existing = db.query(FallaCatCategoria).filter_by(codigo=meta["codigo"]).first()
+                if existing:
+                    existing.etiqueta = cat_name
+                    existing.icono = meta["icono"]
+                    existing.color_hex = meta["color"]
+                    existing.orden = meta["orden"]
+                    existing.activa = True
+                else:
+                    db.add(FallaCatCategoria(
+                        codigo=meta["codigo"], etiqueta=cat_name,
+                        icono=meta["icono"], color_hex=meta["color"],
+                        orden=meta["orden"], activa=True,
+                    ))
+            db.flush()
+
+            for entry in data:
+                cat_name = entry.get("Categoría", "").strip()
+                code = entry.get("Código de Falla", "").strip()
+                evento = entry.get("Evento", "").strip()
+                desc = entry.get(
+                    "Descripción detallada de la actividad (requisitos, controles, documentos)", ""
+                ).strip()
+                if not code or not evento:
+                    continue
+                meta = _CAT_META.get(cat_name)
+                if not meta:
+                    continue
+                cat_obj = db.query(FallaCatCategoria).filter_by(codigo=meta["codigo"]).first()
+                if not cat_obj:
+                    continue
+                existing_tipo = db.query(FallaCatTipo).filter_by(codigo=code).first()
+                if existing_tipo:
+                    existing_tipo.etiqueta = evento
+                    existing_tipo.descripcion = desc
+                    existing_tipo.categoria_id = cat_obj.id
+                    existing_tipo.activa = True
+                else:
+                    db.add(FallaCatTipo(
+                        categoria_id=cat_obj.id, codigo=code,
+                        etiqueta=evento, descripcion=desc, activa=True,
+                    ))
+            db.commit()
+            print(f"[catalog seed] OK — {len(data)} tipos procesados")
+        except Exception as e:
+            db.rollback()
+            print(f"[catalog seed] ERROR: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[catalog seed] skipped: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _run_column_migrations()
+    _run_catalog_seed()
     yield
 
 

@@ -463,9 +463,10 @@ def verify_code(payload: dict, db: Session = Depends(get_db)):
     )
     proyectos_cliente = [
         p.nombre_comercial for p in proyectos
-        if p.cliente
-        and getattr(p.cliente, "correo_electronico", None)
-        and p.cliente.correo_electronico.lower() == email
+        if p.cliente and any(
+            getattr(p.cliente, f, None) and getattr(p.cliente, f, "").lower() == email
+            for f in ("correo_electronico", "correo_monitoreo")
+        )
     ]
     return {"ok": True, "projects": proyectos_cliente, "email": email}
 
@@ -633,7 +634,7 @@ def _action_get_portfolios(db: Session) -> dict:
         names = [
             p.nombre_clientes or p.nombre_comercial
             for p in c.proyectos
-            if (p.sub_project or p.alias_monitoreo) and p.estado == "en_operacion"
+            if p.estado == "en_operacion"
         ]
         if names:
             portfolios[c.razon_social_nombre] = names
@@ -1194,3 +1195,52 @@ def gestion_eliminar_registro(
     db.delete(r)
     db.commit()
     return {"ok": True}
+
+
+# ── Correos de cliente ─────────────────────────────────────────────────────────
+
+@router.get("/clientes")
+def monitoreo_list_clientes(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    from app.models.clientes import Cliente
+    clientes = db.query(Cliente).order_by(Cliente.razon_social_nombre).all()
+    return {
+        "clientes": [
+            {
+                "id": c.id,
+                "nombre": c.razon_social_nombre,
+                "correo_electronico": c.correo_electronico or "",
+                "correo_liquidacion": c.correo_liquidacion or "",
+                "correo_monitoreo": c.correo_monitoreo or "",
+                "correo_soporte": c.correo_soporte or "",
+            }
+            for c in clientes
+        ]
+    }
+
+
+@router.patch("/clientes/{cliente_id}/correos")
+def monitoreo_update_correos(
+    cliente_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    from app.models.clientes import Cliente
+    c = db.query(Cliente).filter_by(id=cliente_id).first()
+    if not c:
+        raise HTTPException(404, "Cliente no encontrado")
+    for field in ("correo_electronico", "correo_liquidacion", "correo_monitoreo", "correo_soporte"):
+        if field in payload:
+            setattr(c, field, (payload[field] or "").strip() or None)
+    db.commit()
+    return {
+        "ok": True,
+        "id": c.id,
+        "correo_electronico": c.correo_electronico or "",
+        "correo_liquidacion": c.correo_liquidacion or "",
+        "correo_monitoreo": c.correo_monitoreo or "",
+        "correo_soporte": c.correo_soporte or "",
+    }

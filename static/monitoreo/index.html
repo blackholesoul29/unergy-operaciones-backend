@@ -604,6 +604,35 @@ body.client-mode #tab-inf{display:none!important}
     <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del cliente…</div>
     <div style="font-size:11px;color:var(--fa);margin-top:6px" id="port-loading-sub"></div>
   </div>
+  <!-- Correos del cliente -->
+  <div id="port-correos-card" style="display:none;margin-top:24px">
+    <div class="chart-card" style="padding:0;overflow:hidden">
+      <div style="padding:14px 20px;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between">
+        <div><div class="chart-title">✉️ Correos del Cliente</div><div style="font-size:11px;color:var(--fa);margin-top:2px">Configuración de notificaciones por correo</div></div>
+        <button class="btn btn-gh btn-sm" id="port-correos-edit-btn" onclick="togglePortCorreosEdit()">✏️ Editar</button>
+      </div>
+      <div style="padding:18px 20px" id="port-correos-body">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Principal</div><div style="font-size:13px;color:var(--cr)" id="pce-principal">—</div></div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Liquidación</div><div style="font-size:13px;color:var(--cr)" id="pce-liquidacion">—</div></div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--pu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔔 Monitoreo (notif. fallas)</div><div style="font-size:13px;color:var(--cr)" id="pce-monitoreo">—</div></div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Soporte</div><div style="font-size:13px;color:var(--cr)" id="pce-soporte">—</div></div>
+        </div>
+      </div>
+      <div style="display:none;padding:18px 20px;border-top:1px solid var(--br)" id="port-correos-form">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px">
+          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Principal</label><input class="fi" type="email" id="pcf-principal" placeholder="correo@empresa.com" style="font-size:12px"/></div>
+          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Liquidación</label><input class="fi" type="email" id="pcf-liquidacion" placeholder="liquidacion@empresa.com" style="font-size:12px"/></div>
+          <div><label style="font-size:11px;font-weight:700;color:var(--pu);display:block;margin-bottom:4px">🔔 Correo Monitoreo (notif. fallas)</label><input class="fi" type="email" id="pcf-monitoreo" placeholder="monitoreo@empresa.com" style="font-size:12px"/></div>
+          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Soporte</label><input class="fi" type="email" id="pcf-soporte" placeholder="soporte@empresa.com" style="font-size:12px"/></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-pu btn-sm" onclick="savePortCorreos()">💾 Guardar correos</button>
+          <button class="btn btn-gh btn-sm" onclick="togglePortCorreosEdit()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 <!-- ══ GESTIÓN PANEL ══ -->
 <div id="gest-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
@@ -2417,6 +2446,59 @@ function renderPortfolio(range) {
   }
   renderPortChart(allDays, sortedKeys, projDayMap);
   document.getElementById("port-chart-section").style.display = "block";
+  loadPortCorreos(portCurrentPortfolio);
+}
+/* ══ CORREOS DE CLIENTE ══ */
+var _portClienteId = null;
+var _portClientesCache = null;
+function loadPortCorreos(clienteName) {
+  var card = document.getElementById("port-correos-card"); if (!card) return;
+  card.style.display = "none";
+  _portClienteId = null;
+  _apiFetch("GET", "/api/v1/monitoreo/clientes").then(function(r) {
+    _portClientesCache = (r && r.clientes) || [];
+    var c = _portClientesCache.find(function(x){ return x.nombre === clienteName; });
+    if (!c) return;
+    _portClienteId = c.id;
+    document.getElementById("pce-principal").textContent = c.correo_electronico || "—";
+    document.getElementById("pce-liquidacion").textContent = c.correo_liquidacion || "—";
+    document.getElementById("pce-monitoreo").textContent = c.correo_monitoreo || "—";
+    document.getElementById("pce-soporte").textContent = c.correo_soporte || "—";
+    document.getElementById("pcf-principal").value = c.correo_electronico || "";
+    document.getElementById("pcf-liquidacion").value = c.correo_liquidacion || "";
+    document.getElementById("pcf-monitoreo").value = c.correo_monitoreo || "";
+    document.getElementById("pcf-soporte").value = c.correo_soporte || "";
+    card.style.display = "block";
+  }).catch(function(e){ console.warn("loadPortCorreos:", e); });
+}
+function togglePortCorreosEdit() {
+  var form = document.getElementById("port-correos-form");
+  var body = document.getElementById("port-correos-body");
+  var btn = document.getElementById("port-correos-edit-btn");
+  if (!form || !body) return;
+  var editing = form.style.display !== "none";
+  form.style.display = editing ? "none" : "block";
+  body.style.display = editing ? "block" : "none";
+  if (btn) btn.textContent = editing ? "✏️ Editar" : "Cancelar";
+}
+function savePortCorreos() {
+  if (!_portClienteId) { toast("⚠ Cliente no identificado"); return; }
+  var payload = {
+    correo_electronico: document.getElementById("pcf-principal").value.trim(),
+    correo_liquidacion: document.getElementById("pcf-liquidacion").value.trim(),
+    correo_monitoreo: document.getElementById("pcf-monitoreo").value.trim(),
+    correo_soporte: document.getElementById("pcf-soporte").value.trim(),
+  };
+  _apiFetch("PATCH", "/api/v1/monitoreo/clientes/" + _portClienteId + "/correos", payload)
+  .then(function(r) {
+    if (!r || !r.ok) { toast("⚠ Error al guardar correos"); return; }
+    document.getElementById("pce-principal").textContent = r.correo_electronico || "—";
+    document.getElementById("pce-liquidacion").textContent = r.correo_liquidacion || "—";
+    document.getElementById("pce-monitoreo").textContent = r.correo_monitoreo || "—";
+    document.getElementById("pce-soporte").textContent = r.correo_soporte || "—";
+    togglePortCorreosEdit();
+    toast("✓ Correos guardados");
+  }).catch(function(e){ toast("⚠ Error: " + e.message); });
 }
 function renderPortChart(allDays, sortedKeys, projDayMap) {
   var cv = document.getElementById("portC"); if (!cv) return;
@@ -3607,7 +3689,7 @@ if(_ti)_ti.addEventListener("click",function(){
   document.getElementById("port-panel").style.display="none";
   document.getElementById("inf-panel").style.display="block";
   if(!genProjects.length)loadGenProjects();
-  if(!Object.keys(portPortfolios).length)loadPortfolios();
+  loadPortfolios();
   if(infType==="fmo")loadContratos();
 });
 

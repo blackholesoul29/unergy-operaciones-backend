@@ -53,9 +53,6 @@ class Cliente(Base):
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     rut_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    tarifa_administracion: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    tarifa_cgm: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    tarifa_representacion: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

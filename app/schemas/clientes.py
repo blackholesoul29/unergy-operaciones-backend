@@ -19,9 +19,6 @@ class ClienteCreate(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     rut_url: Optional[str] = None
-    tarifa_administracion: Optional[float] = None
-    tarifa_cgm: Optional[float] = None
-    tarifa_representacion: Optional[float] = None
 
 
 class ClienteUpdate(ClienteCreate):
@@ -89,9 +86,6 @@ class ClienteOut(BaseModel):
     retencion_pct: Optional[float]
     reteica_pct: Optional[float]
     rut_url: Optional[str]
-    tarifa_administracion: Optional[float]
-    tarifa_cgm: Optional[float]
-    tarifa_representacion: Optional[float]
     created_at: datetime
     updated_at: datetime
     servicios: list[ClienteServicioOut] = []

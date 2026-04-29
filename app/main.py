@@ -70,10 +70,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyecto_inversionistas ADD COLUMN IF NOT EXISTS fecha_inicio DATE",
     "ALTER TABLE proyecto_inversionistas ADD COLUMN IF NOT EXISTS fecha_fin DATE",
     "ALTER TABLE proyecto_inversionistas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-    # migration 009 — tarifas de servicios por cliente (inversionista)
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tarifa_administracion NUMERIC(5,2)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tarifa_cgm NUMERIC(5,2)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tarifa_representacion NUMERIC(5,2)",
 ]
 
 

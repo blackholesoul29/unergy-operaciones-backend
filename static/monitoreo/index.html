@@ -18,16 +18,17 @@ select,input,textarea{font-family:'Sora',sans-serif;color:var(--cr)}
 select option{background:var(--bg)}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#1a1025}::-webkit-scrollbar-thumb{background:var(--br);border-radius:3px}
 input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
-#topbar{position:sticky;top:0;z-index:200;background:#1a1025;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:56px;gap:10px}
+#topbar{position:sticky;top:0;z-index:200;background:linear-gradient(180deg,#1e1430 0%,#160f20 100%);border-bottom:1px solid var(--br);box-shadow:0 2px 20px #00000050;display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:58px;gap:10px}
 .logo{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.logo-icon{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--pu),var(--ye));display:flex;align-items:center;justify-content:center;font-size:17px}
-.logo-brand{font-size:15px;font-weight:800;color:var(--ye);line-height:1}
+.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--pu),var(--ye));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 10px #915BD850}
+.logo-brand{font-size:15px;font-weight:800;color:var(--ye);line-height:1;letter-spacing:-.2px}
 .sync-row{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--fa);margin-top:2px}
 .sdot{width:6px;height:6px;border-radius:50%;background:var(--fa);flex-shrink:0}
 .sdot.ok{background:var(--gr)}.sdot.err{background:var(--re)}.sdot.spin{background:var(--ye);animation:bl .7s infinite}
-.tabs{display:flex;background:#160f20;border:1px solid var(--br);border-radius:8px;overflow:hidden}
-.tab{padding:6px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu)}
-.tab.on{background:var(--pu);color:var(--cr)}
+.tabs{display:flex;background:#0f0a1a;border:1px solid var(--br);border-radius:9px;overflow:hidden;gap:1px;padding:3px}
+.tab{padding:5px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);border-radius:6px;transition:all .18s}
+.tab:hover:not(.on){background:var(--s1);color:var(--cr)}
+.tab.on{background:linear-gradient(135deg,var(--pu),#7040c0);color:var(--cr);box-shadow:0 2px 8px #915BD840}
 .acts{display:flex;gap:7px;flex-shrink:0}
 .btn{border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;border:none;display:inline-flex;align-items:center;gap:5px}
 .btn-pu{background:var(--pu);color:var(--cr)}.btn-pu:hover{background:#7d4ec0}
@@ -45,9 +46,9 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .pill .cn{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--cr)}
 .pill.on .cn{color:currentColor}
 .rcount{margin-left:auto;font-size:11px;color:var(--fa)}
-#frow{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:18px}
-.fi{background:#1a1025;border:1px solid var(--br);border-radius:8px;padding:8px 11px;color:var(--cr);font-size:13px;outline:none;width:100%;transition:border-color .2s}
-.fi:focus{border-color:var(--pu)}
+#frow{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:18px;background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:12px 14px}
+.fi{background:#160f20;border:1px solid var(--br);border-radius:8px;padding:8px 11px;color:var(--cr);font-size:13px;outline:none;width:100%;transition:border-color .2s}
+.fi:focus{border-color:var(--pu);box-shadow:0 0 0 3px #915BD820}
 #fsearch{flex:1;min-width:180px}.fsel{width:200px;flex:none;cursor:pointer}
 #board{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;align-items:start}
 .col-hd{display:flex;align-items:center;gap:7px;margin-bottom:11px}
@@ -56,12 +57,13 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .col-cnt{font-family:'JetBrains Mono',monospace;font-size:11px;border-radius:10px;padding:1px 8px;margin-left:auto}
 .col-bar{height:2px;border-radius:2px;margin-bottom:11px}
 .col-empty{font-size:12px;color:var(--fa);text-align:center;padding:22px 8px;border:1px dashed var(--br);border-radius:10px}
-.card{background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:12px 13px;cursor:pointer;margin-bottom:8px;transition:all .18s;border-left-width:3px}
-.card:hover{background:var(--s2);box-shadow:0 4px 16px #00000040}
+.card{background:var(--s1);border:1px solid var(--br);border-radius:11px;padding:13px 14px;cursor:pointer;margin-bottom:9px;transition:all .2s;border-left-width:3px}
+.card:hover{background:var(--s2);box-shadow:0 6px 22px #00000055,0 0 0 1px var(--card-glow,var(--br));transform:translateY(-1px)}
+.card:active{transform:translateY(0)}
 .card-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700}
-.card-lbl{font-size:12px;font-weight:700;line-height:1.4;margin:3px 0}
-.card-proj{font-size:11px;color:var(--mu)}
-.card-foot{display:flex;gap:9px;font-size:10px;color:var(--fa);margin-top:6px;flex-wrap:wrap;align-items:center}
+.card-lbl{font-size:12px;font-weight:700;line-height:1.45;margin:4px 0 3px}
+.card-proj{font-size:11px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-foot{display:flex;gap:9px;font-size:10px;color:var(--fa);margin-top:7px;flex-wrap:wrap;align-items:center}
 .cat-tag{font-size:10px;border-radius:5px;padding:1px 7px;font-weight:700;border:1px solid}
 .badge{display:inline-flex;align-items:center;gap:4px;border-radius:6px;font-size:10px;font-weight:800;padding:2px 8px;letter-spacing:.7px;text-transform:uppercase;border:1px solid;white-space:nowrap}
 #empty{text-align:center;padding:80px 20px;display:none}
@@ -69,7 +71,8 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 #empty h2{font-size:19px;font-weight:800;color:var(--mu);margin-bottom:8px}
 #empty p{font-size:13px;color:var(--fa);margin-bottom:22px}
 #charts{display:none;grid-template-columns:330px 1fr;gap:15px}
-.chart-card{background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:18px}
+.chart-card{background:linear-gradient(160deg,var(--s2) 0%,var(--s1) 100%);border:1px solid var(--br);border-radius:14px;padding:18px;transition:box-shadow .2s}
+.chart-card:hover{box-shadow:0 4px 20px #00000035}
 .chart-title{font-size:14px;font-weight:800;margin-bottom:2px}
 .chart-sub{font-size:11px;color:var(--fa);margin-bottom:13px}
 .chart-wrap{position:relative;height:195px}
@@ -137,15 +140,15 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .spin{width:32px;height:32px;border:3px solid var(--br);border-top-color:var(--pu);border-radius:50%;animation:sp .7s linear infinite;margin-top:22px}
 /* ── KPI cards ── */
 #kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
-.kpi{background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:15px 17px;transition:box-shadow .2s}
-.kpi:hover{box-shadow:0 4px 20px #00000035}
-.kpi-ico{font-size:20px;margin-bottom:6px}
+.kpi{background:linear-gradient(160deg,var(--s2) 0%,var(--s1) 100%);border:1px solid var(--br);border-radius:14px;padding:16px 18px;transition:all .2s}
+.kpi:hover{box-shadow:0 6px 24px #00000045;transform:translateY(-1px)}
+.kpi-ico{font-size:22px;margin-bottom:7px}
 .kpi-val{font-size:30px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--cr)}
-.kpi-lbl{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.7px;text-transform:uppercase;margin-top:4px}
+.kpi-lbl{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.7px;text-transform:uppercase;margin-top:5px}
 .kpi-sub{font-size:10px;color:var(--fa);margin-top:2px}
-.kpi.kred{border-color:#FF575540}
-.kpi.kye{border-color:#F6FF7240}
-.kpi.kgr{border-color:#4ADE8040}
+.kpi.kred{border-color:#FF575550;background:linear-gradient(160deg,#2a1a1a 0%,var(--s1) 100%)}
+.kpi.kye{border-color:#F6FF7240;background:linear-gradient(160deg,#222010 0%,var(--s1) 100%)}
+.kpi.kgr{border-color:#4ADE8040;background:linear-gradient(160deg,#152210 0%,var(--s1) 100%)}
 /* ── Badges ── */
 .imp-badge,.prio-badge,.days-open{display:inline-flex;align-items:center;gap:3px;border-radius:5px;font-size:9px;font-weight:800;padding:2px 6px;letter-spacing:.4px;border:1px solid;white-space:nowrap}
 /* ── New filter inputs ── */
@@ -403,7 +406,7 @@ body.client-mode #tab-inf{display:none!important}
 <div id="topbar">
   <div class="logo"><div class="logo-icon">☀️</div><div><div class="logo-brand">Unergy <span style="color:var(--mu);font-weight:600;font-size:12px">· Fallas</span></div><div class="sync-row"><span class="sdot" id="sdot"></span><span id="stxt">Cargando…</span></div></div></div>
   <div class="tabs"><button class="tab on" id="tab-board">⊞ Tablero</button><button class="tab" id="tab-charts">📊 Gráficos</button>
-    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🗂 Portafolio</button><button class="tab" id="tab-inf">📄 Informe</button></div>
+    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🏢 Clientes</button><button class="tab" id="tab-inf">📄 Informe</button></div>
   <div class="acts">
     <button class="cbadge hmob" id="cbtn"><span style="width:7px;height:7px;border-radius:50%;background:var(--gr);display:block"></span><span id="clbl">…</span></button>
     <span class="client-badge" id="client-badge-lbl" style="display:none">👁 Cliente</span>
@@ -523,11 +526,11 @@ body.client-mode #tab-inf{display:none!important}
   <!-- Header & filters -->
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
     <div>
-      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Portafolio <span style="color:var(--pu)" id="port-name-title"></span></div>
-      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona portafolio y período</div>
+      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Cliente <span style="color:var(--pu)" id="port-name-title"></span></div>
+      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona cliente y período</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona portafolio…</option></select>
+      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona cliente…</option></select>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button class="port-period-btn on" data-p="week" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Semana</button>
         <button class="port-period-btn" data-p="yesterday" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Ayer</button>
@@ -557,15 +560,15 @@ body.client-mode #tab-inf{display:none!important}
       <div class="kpi-ico">📈</div>
       <div class="kpi-val" id="pkv-avg" style="font-size:26px">—</div>
       <div class="kpi-lbl">Promedio Diario</div>
-      <div class="kpi-sub">kWh/día portafolio total</div>
+      <div class="kpi-sub">kWh/día cliente total</div>
     </div>
   </div>
   <!-- Toggle chart view -->
   <div id="port-chart-section" style="display:none">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
       <div>
-        <div class="chart-title" id="port-chart-title">Generación por día — Portafolio</div>
-        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del portafolio</div>
+        <div class="chart-title" id="port-chart-title">Generación por día — Cliente</div>
+        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del cliente</div>
       </div>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button id="port-view-stacked" class="port-view-btn on" style="padding:6px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer">Apilado</button>
@@ -592,13 +595,13 @@ body.client-mode #tab-inf{display:none!important}
   <!-- Empty state -->
   <div id="port-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
     <div style="font-size:40px;margin-bottom:14px">🗂</div>
-    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un portafolio</div>
-    <div>Elige el portafolio y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
+    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un cliente</div>
+    <div>Elige el cliente y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
   </div>
   <!-- Loading state -->
   <div id="port-loading" style="display:none;text-align:center;padding:60px 20px">
     <div class="spin" style="margin:0 auto 16px"></div>
-    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del portafolio…</div>
+    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del cliente…</div>
     <div style="font-size:11px;color:var(--fa);margin-top:6px" id="port-loading-sub"></div>
   </div>
 </div>
@@ -1428,7 +1431,8 @@ function renderBoard(){
     if(!items.length){html+='<div class="col-empty">Sin registros</div>';}
     else{items.forEach(function(f){
       var fdd=fd(f.code),s=ST[f.st]||ST.activa;
-      var lbl=fdd?(f.code+" · "+(fdd.label.length>42?fdd.label.slice(0,42)+"…":fdd.label)):(f.code||"Sin código");
+      var _flbl=fdd?fdd.label:(f.faultLabel||f.code||"Sin código");
+      var lbl=(f.code?f.code+" · ":"")+(_flbl.length>42?_flbl.slice(0,42)+"…":_flbl);
       var _imp=getImpStyle(f.code);
       var _ibadge='<span class="imp-badge" style="color:'+_imp.c+';background:'+_imp.c+'18;border-color:'+_imp.c+'40">'+_imp.i+" "+_imp.l+'</span>';
       var _pp=getPrio(f.prio);
@@ -1439,7 +1443,7 @@ function renderBoard(){
       var _alertBadge=_overdue?'<span class="alert-overdue">🔴 +7 días</span>':"";
       var ct=fdd?'<span class="cat-tag" style="color:'+fdd.catCol+';background:'+fdd.catCol+'18;border-color:'+fdd.catCol+'40">'+fdd.catIco+' Cat.'+fdd.catId+'</span>':"";
       var driveLink=f.driveUrl&&f.driveUrl.startsWith("http")?'<a href="'+esc(f.driveUrl)+'" target="_blank" onclick="event.stopPropagation()" style="color:var(--bl);text-decoration:none;display:inline-flex;align-items:center;gap:2px;font-weight:700">📁 Drive</a>':'';
-      html+='<div class="card'+(_overdue?' card-alert-strip':'')+'" style="border-left-color:'+s.col+'" data-id="'+esc(f.id)+'">'+
+      html+='<div class="card'+(_overdue?' card-alert-strip':'')+'" style="border-left-color:'+_imp.c+';--card-glow:'+_imp.c+'" data-id="'+esc(f.id)+'">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span class="card-id" style="color:'+s.col+'">'+esc(f.id)+'</span>'+ct+'</div>'+
         '<div class="card-lbl">'+esc(lbl)+'</div><div class="card-proj">'+esc(f.proj)+'</div>'+
         '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px">'+_ibadge+_pbadge+_dbadge+_alertBadge+'</div>'+
@@ -1563,6 +1567,7 @@ function loadCatalog(){
           faults:(c.faults||[]).map(function(f){return{c:f.code,l:f.label};})};
       });
       rebuildF();updateFcatFilter();CATALOG_READY=true;
+      if(faults.length)renderAll();
       toast("✓ Catálogo actualizado",2000);
     }
   }).catch(function(e){
@@ -1601,7 +1606,7 @@ function renderPie(){
 }
 function renderBar(){
   var src=_chartsBase();
-  var map={};src.forEach(function(f){var d=fd(f.code);if(!d)return;var k=f.code+" · "+(d.label.length>28?d.label.slice(0,28)+"…":d.label);map[k]=(map[k]||0)+1;});
+  var map={};src.forEach(function(f){var d=fd(f.code);var lbl=d?d.label:(f.faultLabel||f.code||"Desconocido");var k=(f.code?f.code+" · ":"")+( lbl.length>28?lbl.slice(0,28)+"…":lbl);map[k]=(map[k]||0)+1;});
   var s=Object.keys(map).map(function(k){return{n:k,v:map[k]};}).sort(function(a,b){return b.v-a.v;}).slice(0,8);
   if(barInst)barInst.destroy();
   barInst=new Chart(document.getElementById("barC").getContext("2d"),{type:"bar",data:{labels:s.map(function(x){return x.n;}),datasets:[{data:s.map(function(x){return x.v;}),backgroundColor:"#915BD8BB",borderColor:"#915BD8",borderWidth:1,borderRadius:4}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#6B5F80",font:{size:10}},grid:{color:"#4A356030"},border:{color:"transparent"}},y:{ticks:{color:"#A89EC0",font:{size:10}},grid:{display:false},border:{color:"transparent"}}}}});
@@ -1791,7 +1796,7 @@ function openDetail(id){
   var driveOk=f.driveUrl&&f.driveUrl.startsWith("http");
   var html;
   if(isClient){
-    var faultName=fdd?(f.code+" · "+fdd.label):(f.code||"Falla registrada");
+    var faultName=fdd?(f.code+" · "+fdd.label):((f.code?(f.code+" · "):"")+( f.faultLabel||"Falla registrada"));
     html=
       '<div style="background:'+s.bg+';border:1.5px solid '+s.bdr+';border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
       +'<span class="badge" style="color:'+s.col+';background:'+s.bg+';border-color:'+s.bdr+'">'+s.ico+' '+s.lbl+'</span>'
@@ -2283,7 +2288,7 @@ function loadPortfolios() {
     if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); return; }
     portPortfolios = r.portfolios || {};
     var sel = document.getElementById("port-sel");if (!sel) return;
-    sel.innerHTML = '<option value="">Selecciona portafolio…</option>';
+    sel.innerHTML = '<option value="">Selecciona cliente…</option>';
     Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
     // ── Poblar también el selector de informe ──
     var infPort=document.getElementById("inf-port");
@@ -2301,14 +2306,14 @@ function getPortDateRange() {
 }
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
-  if (!portName) { toast("⚠ Selecciona un portafolio"); return; }
+  if (!portName) { toast("⚠ Selecciona un cliente"); return; }
   var projNames = portPortfolios[portName];
-  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos en este portafolio"); return; }
+  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos en este cliente"); return; }
   var allSysProjs = genProjects.length > 0 ? genProjects : [];
   var projsToLoad = [];
   projNames.forEach(function(nc){
     nc = nc.trim();
-    var found = allSysProjs.find(function(p){ return (p.nombre_clientes||"").trim() === nc || (p.nombre_display||"").trim() === nc || (p.nombre_bitacora||"").trim() === nc; });
+    var found = allSysProjs.find(function(p){ return (p.nombre_clientes||"").trim() === nc || (p.nombre_display||"").trim() === nc || (p.nombre_bitacora||"").trim() === nc || (p.nombre_comercial||"").trim() === nc; });
     if (found) {
       if (userRole === "cliente" && clientProjects.length > 0) {
         var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === (found.nombre_clientes||"").trim().toLowerCase() || cp === (found.nombre_bitacora||"").trim().toLowerCase() || cp === (found.nombre_display||"").trim().toLowerCase() || cp === (found.sub_project||"").trim().toLowerCase(); });
@@ -2317,7 +2322,7 @@ function loadPortfolio() {
       projsToLoad.push(found);
     }
   });
-  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este portafolio"); return; }
+  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este cliente"); return; }
   portCurrentPortfolio = portName;
   var range = getPortDateRange();
   document.getElementById("port-empty").style.display = "none";
@@ -2377,7 +2382,7 @@ function renderPortfolio(range) {
       var pct = maxKwh > 0 ? (kwh / maxKwh * 100) : 0; var portPct = grandTotal > 0 ? (kwh / grandTotal * 100).toFixed(1) : "0.0";
       html += '<div style="padding:12px 20px;border-bottom:1px solid var(--br);display:flex;align-items:center;gap:14px">';
       html += '<div style="width:28px;height:28px;border-radius:50%;background:'+(i===0?"linear-gradient(135deg,#F6FF72,#e6ee62)":i===1?"linear-gradient(135deg,#A89EC0,#8a82a8)":i===2?"linear-gradient(135deg,#F97316,#d96010)":"var(--s2)")+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:'+(i<3?"#1A0F2E":"var(--mu)")+';flex-shrink:0">'+(i+1)+'</div>';
-      html += '<div style="min-width:140px;flex-shrink:0"><div style="display:flex;align-items:center;gap:7px"><div style="width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0"></div><span style="font-size:13px;font-weight:700;color:var(--cr)">'+esc(nombre)+'</span></div><div style="font-size:10px;color:var(--fa);margin-top:3px">'+portPct+'% del portafolio</div></div>';
+      html += '<div style="min-width:140px;flex-shrink:0"><div style="display:flex;align-items:center;gap:7px"><div style="width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0"></div><span style="font-size:13px;font-weight:700;color:var(--cr)">'+esc(nombre)+'</span></div><div style="font-size:10px;color:var(--fa);margin-top:3px">'+portPct+'% del cliente</div></div>';
       html += '<div style="flex:1;min-width:0"><div style="background:var(--br);border-radius:4px;height:8px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px;transition:width .6s ease"></div></div></div>';
       html += '<div style="min-width:100px;text-align:right;flex-shrink:0"><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;color:'+col+'">'+Math.round(kwh).toLocaleString("es-CO")+'</div><div style="font-size:10px;color:var(--fa)">kWh</div></div>';
       html += '</div>';
@@ -2875,11 +2880,11 @@ function buildConsolidatedPage(portName,projsData,range,totalPages){
     +'<svg width="38" height="31" viewBox="0 0 44 36" fill="none"><circle cx="22" cy="4" r="3" fill="white"/><path d="M8 10 L8 24 Q8 34 22 34 Q36 34 36 24 L36 10" stroke="white" stroke-width="5" fill="none" stroke-linecap="round"/></svg>'
     +'<div><div style="color:#fff;font-size:14px;font-weight:800;letter-spacing:.8px">INFORME OPERACIONAL MENSUAL · PORTAFOLIO</div>'
     +'<div style="color:#6B5F80;font-size:10px;letter-spacing:.6px;margin-top:2px">Unergy Energía Digital S.A.S ESP | Operación &amp; Mantenimiento</div></div></div>'
-    +'<div class="rpt-meta-grid">'+rmeta("PORTAFOLIO",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
+    +'<div class="rpt-meta-grid">'+rmeta("CLIENTE",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
     +'</div>'
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 1. Resumen Consolidado – '+esc(range.headerPeriod)+'</div>'
     +'<div class="rpt-kpi-row">'
-    +rkpi("⚡","Generación Total Portafolio",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
+    +rkpi("⚡","Generación Total Cliente",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
     +rkpi("🏭","Proyectos sobre P90",overP90+" / "+projsData.length,overP90===projsData.length?"#4ADE80":"#F6FF72")
     +rkpi("⚠️","Total Eventos del Período",totalEv+" evento(s)",totalEv>0?"#F97316":"#4ADE80")
     +'</div>'
@@ -2969,7 +2974,7 @@ function generateInforme(){
     portList.forEach(function(name){
       var c=genProjects.find(function(p){
         var nl=name.trim().toLowerCase();
-        return nl===(p.nombre_clientes||"").trim().toLowerCase()||nl===(p.nombre_display||"").trim().toLowerCase()||nl===(p.nombre_bitacora||"").trim().toLowerCase();
+        return nl===(p.nombre_clientes||"").trim().toLowerCase()||nl===(p.nombre_display||"").trim().toLowerCase()||nl===(p.nombre_bitacora||"").trim().toLowerCase()||nl===(p.nombre_comercial||"").trim().toLowerCase();
       });
       if(c)cfgs.push(c);
     });

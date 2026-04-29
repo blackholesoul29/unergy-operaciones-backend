@@ -9,6 +9,9 @@ class ClienteCreate(BaseModel):
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
     correo_electronico: Optional[str] = None
+    correo_liquidacion: Optional[str] = None
+    correo_monitoreo: Optional[str] = None
+    correo_soporte: Optional[str] = None
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -73,6 +76,9 @@ class ClienteOut(BaseModel):
     tipo_persona: Optional[str]
     representante_legal: Optional[str]
     correo_electronico: Optional[str]
+    correo_liquidacion: Optional[str]
+    correo_monitoreo: Optional[str]
+    correo_soporte: Optional[str]
     telefono_contacto: Optional[str]
     direccion: Optional[str]
     ciudad: Optional[str]

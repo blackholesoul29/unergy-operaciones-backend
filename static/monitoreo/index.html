@@ -406,7 +406,7 @@ body.client-mode #tab-inf{display:none!important}
 <div id="topbar">
   <div class="logo"><div class="logo-icon">☀️</div><div><div class="logo-brand">Unergy <span style="color:var(--mu);font-weight:600;font-size:12px">· Fallas</span></div><div class="sync-row"><span class="sdot" id="sdot"></span><span id="stxt">Cargando…</span></div></div></div>
   <div class="tabs"><button class="tab on" id="tab-board">⊞ Tablero</button><button class="tab" id="tab-charts">📊 Gráficos</button>
-    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🏢 Clientes</button><button class="tab" id="tab-inf">📄 Informe</button></div>
+    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🏢 Clientes</button><button class="tab" id="tab-gest">📋 Gestión</button><button class="tab" id="tab-inf">📄 Informe</button></div>
   <div class="acts">
     <button class="cbadge hmob" id="cbtn"><span style="width:7px;height:7px;border-radius:50%;background:var(--gr);display:block"></span><span id="clbl">…</span></button>
     <span class="client-badge" id="client-badge-lbl" style="display:none">👁 Cliente</span>
@@ -605,6 +605,31 @@ body.client-mode #tab-inf{display:none!important}
     <div style="font-size:11px;color:var(--fa);margin-top:6px" id="port-loading-sub"></div>
   </div>
 </div>
+<!-- ══ GESTIÓN PANEL ══ -->
+<div id="gest-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+    <div>
+      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Gestión de Proyectos</div>
+      <div style="font-size:12px;color:var(--fa);margin-top:3px">PQR · Mantenimiento Preventivo · Mantenimiento Correctivo</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select class="fi" id="gest-tipo-filter" style="width:170px;font-size:12px">
+        <option value="">Todos los tipos</option>
+        <option value="pqr">PQR</option>
+        <option value="preventivo">Preventivo</option>
+        <option value="correctivo">Correctivo</option>
+      </select>
+      <input class="fi" type="text" id="gest-search" placeholder="🔍 Buscar proyecto…" style="width:200px;font-size:12px"/>
+      <button class="btn btn-gh btn-sm" onclick="loadGestion()">↻ Actualizar</button>
+    </div>
+  </div>
+  <div id="gest-list" style="display:flex;flex-direction:column;gap:10px">
+    <div style="text-align:center;padding:60px 20px;color:var(--fa)">
+      <div style="font-size:36px;margin-bottom:12px">📋</div>
+      <div style="font-size:14px;font-weight:700;color:var(--mu)">Cargando proyectos…</div>
+    </div>
+  </div>
+</div>
 <!-- ══ INFORME PANEL ══ -->
 <div id="inf-panel" style="display:none;max-width:1100px;margin:0 auto;padding:0 16px 90px">
   <!-- Contador de días entrega FMO -->
@@ -774,6 +799,7 @@ function _mapFault(f){
     proj:(f.proyecto||{}).nombre_comercial||"",
     code:(f.tipo||{}).codigo||"otro_general",
     faultLabel:(f.tipo||{}).etiqueta||"",
+    catNum:(function(){var _OLD={inversor:"2",comunicacion:"1",produccion:"4",red:"2",estructura:"5",medicion:"1",otro:"p"};var cc=((f.tipo||{}).categoria||{}).codigo||"";return /^\d$/.test(cc)?cc:(_OLD[cc]||"");})(),
     st:_ST_MAP[(f.estado||{}).codigo]||"activa",
     date:f.fecha_identificacion||"",
     time:f.hora_identificacion||"",
@@ -981,7 +1007,7 @@ var CATALOG_READY=false;
 var IMPACT_STYLES={"1":{l:"Medición",i:"📡",c:"#60A5FA"},"2":{l:"Generación",i:"⚡",c:"#F6FF72"},"3":{l:"Evt.Adverso",i:"🌩️",c:"#FF5757"},"4":{l:"Desgaste",i:"🔧",c:"#F97316"},"5":{l:"Civil",i:"🏗️",c:"#C47AFF"},"6":{l:"HSE",i:"🦺",c:"#4ADE80"},"7":{l:"BESS",i:"🔋",c:"#7EC8E3"},"8":{l:"Admin.",i:"📋",c:"#F4A460"},"9":{l:"Sin Sumin.",i:"🔌",c:"#FF6B6B"}};
 var PRIO_CFG={Alta:{col:"#FF5757",bg:"#FF575715",bdr:"#FF575550"},Media:{col:"#F6FF72",bg:"#F6FF7215",bdr:"#F6FF7250"},Baja:{col:"#4ADE80",bg:"#4ADE8015",bdr:"#4ADE8050"}};
 var impInst=null;var isLight=false;
-function getImpStyle(code){var m=code?String(code).match(/^(\d+)/):null;return m&&IMPACT_STYLES[m[1]]?IMPACT_STYLES[m[1]]:{l:"Otro",i:"⭐",c:"#915BD8"};}
+function getImpStyle(code,catNum){var m=code?String(code).match(/^(\d+)/):null;var k=(m&&m[1])||catNum||"";return k&&IMPACT_STYLES[k]?IMPACT_STYLES[k]:{l:"Otro",i:"⭐",c:"#915BD8"};}
 function getPrio(p){return p&&PRIO_CFG[p]?PRIO_CFG[p]:null;}
 function getDaysOpen(f){if(!f||f.st==="terminada")return 0;var s=String(f.date||"").trim();var d;var m1=s.match(/^(\d{4})-(\d{2})-(\d{2})/);var m2=s.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);if(m1)d=new Date(+m1[1],+m1[2]-1,+m1[3]);else if(m2)d=new Date(+m2[3],+m2[2]-1,+m2[1]);else return 0;var diff=Math.floor((Date.now()-d.getTime())/86400000);return diff>0?diff:0;}
 function dayCol(n){return n>14?"#FF5757":n>7?"#F6FF72":"#4ADE80";}
@@ -1223,7 +1249,7 @@ function exportCSV(){
     if(isClient)return[f.proj,fdd?fdd.label:"",f.code,ST[f.st]?ST[f.st].lbl:"",
       fmtD(f.date)+(f.time?" "+padT(f.time):""),fmtDT(f.occ),fmtDT(f.endDT),
       f.desc||"",f.flw||"",f.res||""];
-    var imp=getImpStyle(f.code);var d=getDaysOpen(f);
+    var imp=getImpStyle(f.code,f.catNum);var d=getDaysOpen(f);
     return[f.id,f.proj,f.code,fdd?fdd.label:"",imp.l,ST[f.st]?ST[f.st].lbl:"",
       f.prio||"",d||"",fmtD(f.date),f.desc||"",f.flw||"",f.centinela||""];
   });
@@ -1405,8 +1431,8 @@ function getFiltered(){
     if(userRole==="cliente"&&clientProjects.length>0&&clientProjects.indexOf(f.proj)<0)return false;
     if(filterSt!=="all"&&f.st!==filterSt)return false;
     if(fp&&f.proj!==fp)return false;
-    if(fc){var di=fd(f.code);if(!di||di.catId!==fc)return false;}
-    if(fim){var m2=String(f.code||"").match(/^(\d+)/);if(!m2||m2[1]!==fim)return false;}
+    if(fc){var di=fd(f.code);var fCatId=di?di.catId:f.catNum;if(!fCatId||fCatId!==fc)return false;}
+    if(fim){var m2=String(f.code||"").match(/^(\d+)/);var fImpId=(m2&&m2[1])||f.catNum||"";if(!fImpId||fImpId!==fim)return false;}
     if(dfrom||dto){
       var ds=String(f.date||"").trim(),iso="";
       var m1=ds.match(/^(\d{4})-(\d{2})-(\d{2})/);var m3=ds.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
@@ -1433,7 +1459,7 @@ function renderBoard(){
       var fdd=fd(f.code),s=ST[f.st]||ST.activa;
       var _flbl=fdd?fdd.label:(f.faultLabel||f.code||"Sin código");
       var lbl=(f.code?f.code+" · ":"")+(_flbl.length>42?_flbl.slice(0,42)+"…":_flbl);
-      var _imp=getImpStyle(f.code);
+      var _imp=getImpStyle(f.code,f.catNum);
       var _ibadge='<span class="imp-badge" style="color:'+_imp.c+';background:'+_imp.c+'18;border-color:'+_imp.c+'40">'+_imp.i+" "+_imp.l+'</span>';
       var _pp=getPrio(f.prio);
       var _pbadge=_pp?'<span class="prio-badge" style="color:'+_pp.col+';background:'+_pp.bg+';border-color:'+_pp.bdr+'">'+esc(f.prio||"")+'</span>':"";
@@ -1586,7 +1612,7 @@ function renderImpactChart(){
   var cv=document.getElementById("impC");if(!cv)return;
   var agg={};
   var _if=_chartsBase();
-  _if.forEach(function(f){if(f.st==="terminada")return;var imp=getImpStyle(f.code);var k=imp.l;if(!agg[k])agg[k]={l:imp.l,i:imp.i,c:imp.c,v:0};agg[k].v++;});
+  _if.forEach(function(f){if(f.st==="terminada")return;var imp=getImpStyle(f.code,f.catNum);var k=imp.l;if(!agg[k])agg[k]={l:imp.l,i:imp.i,c:imp.c,v:0};agg[k].v++;});
   var items=Object.values(agg).sort(function(a,b){return b.v-a.v;});
   if(!items.length)return;
   if(impInst)impInst.destroy();
@@ -1826,7 +1852,7 @@ function openDetail(id){
     (resOk?'<span class="badge" style="color:#4ADE80;background:#4ADE8018;border-color:#4ADE8040">'+esc(f.res)+'</span>':'')+
     '</div>';
   if(fdd){
-    var _di=getImpStyle(f.code);var _dp=getPrio(f.prio);var _dd=getDaysOpen(f);
+    var _di=getImpStyle(f.code,f.catNum);var _dp=getPrio(f.prio);var _dd=getDaysOpen(f);
     html+='<div style="background:#1a1025;border-left:3px solid '+fdd.catCol+';border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:var(--mu)"><b style="color:'+fdd.catCol+'">'+fdd.catIco+' '+fdd.code+' · '+fdd.label+'</b></div>';
     html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">'
       +'<span class="imp-badge" style="color:'+_di.c+';background:'+_di.c+'18;border-color:'+_di.c+'40">'+_di.i+' '+_di.l+'</span>'
@@ -2247,7 +2273,7 @@ function renderGenChart(r,subProj,range){
       html+='</div>';html+='</div>';
       html+='<div style="padding:8px 14px;display:flex;flex-direction:column;gap:7px">';
       dayFaults.forEach(function(f){
-        var fdd=fd(f.code);var s=ST[f.st]||ST.activa;var catStyle=getImpStyle(f.code);
+        var fdd=fd(f.code);var s=ST[f.st]||ST.activa;var catStyle=getImpStyle(f.code,f.catNum);
         html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border-radius:8px;cursor:pointer;border:1px solid var(--br);transition:border-color .2s" onclick="openDetail(\''+esc(f.id)+'\')" onmouseover="this.style.borderColor=\'#915BD8\'" onmouseout="this.style.borderColor=\'\'">';
         html+='<div style="width:34px;height:34px;border-radius:8px;background:'+catStyle.col+'22;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">'+catStyle.ico+'</div>';
         html+='<div style="flex:1;min-width:0">';
@@ -2433,7 +2459,7 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("cbtn").addEventListener("click",function(){
     if(userRole==="cliente"){if(confirm("¿Cerrar sesión?")){ clearSession(); location.reload(); }} else { openSetup(true); }
   });
-  function _hideAll(){var ip=document.getElementById("inf-panel");if(ip)ip.style.display="none";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";}
+  function _hideAll(){var ip=document.getElementById("inf-panel");if(ip)ip.style.display="none";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";var gp=document.getElementById("gest-panel");if(gp)gp.style.display="none";}
   document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";_hideAll();});
   document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";_hideAll();renderCharts();});
   var _tg=document.getElementById("tab-gen");
@@ -2448,6 +2474,19 @@ document.addEventListener("DOMContentLoaded",function(){
     _hideAll();
     document.getElementById("gen-panel").style.display="block";
     loadGenProjects();
+  });
+  var _tgest=document.getElementById("tab-gest");
+  if(_tgest)_tgest.addEventListener("click",function(){
+    curTab="gest";
+    document.querySelectorAll(".tab").forEach(function(t){t.className="tab";});
+    this.className="tab on";
+    document.getElementById("app").style.display="none";
+    document.getElementById("board-panel").style.display="none";
+    document.getElementById("frow").style.display="none";
+    document.getElementById("charts").style.display="none";
+    _hideAll();
+    document.getElementById("gest-panel").style.display="block";
+    loadGestion();
   });
   var _tp = document.getElementById("tab-port");
   if (_tp) _tp.addEventListener("click", function(){
@@ -3571,6 +3610,174 @@ if(_ti)_ti.addEventListener("click",function(){
   if(!Object.keys(portPortfolios).length)loadPortfolios();
   if(infType==="fmo")loadContratos();
 });
+
+/* ══ GESTIÓN DE PROYECTOS ══════════════════════════════════════════════════════ */
+var gestProyectos=[];
+var gestOpenId=null;
+var GEST_TIPO_LBL={pqr:{l:"PQR",c:"#F97316",i:"📌"},preventivo:{l:"Preventivo",c:"#60A5FA",i:"🔧"},correctivo:{l:"Correctivo",c:"#FF5757",i:"⚠️"}};
+
+function loadGestion(){
+  var list=document.getElementById("gest-list");
+  if(list)list.innerHTML='<div style="text-align:center;padding:40px;color:var(--fa)"><div class="spin" style="margin:0 auto 12px"></div><div style="font-size:13px">Cargando proyectos…</div></div>';
+  _apiFetch('GET','/api/v1/monitoreo/gestion/proyectos').then(function(r){
+    gestProyectos=(r&&r.proyectos)||[];
+    renderGestion();
+  }).catch(function(e){
+    if(list)list.innerHTML='<div style="text-align:center;padding:40px;color:var(--re)">Error al cargar proyectos</div>';
+    console.error("loadGestion:",e);
+  });
+}
+
+function renderGestion(){
+  var list=document.getElementById("gest-list");if(!list)return;
+  var tipoF=(document.getElementById("gest-tipo-filter")||{}).value||"";
+  var q=((document.getElementById("gest-search")||{}).value||"").toLowerCase().trim();
+  var projs=gestProyectos.filter(function(p){
+    if(q&&(p.nombre||"").toLowerCase().indexOf(q)<0)return false;
+    if(tipoF&&(!p.conteos||!p.conteos[tipoF]))return false;
+    return true;
+  });
+  if(!projs.length){list.innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--fa)"><div style="font-size:36px;margin-bottom:12px">📭</div><div style="font-weight:700;color:var(--mu)">Sin proyectos</div></div>';return;}
+  list.innerHTML=projs.map(function(p){
+    var cnt=p.conteos||{};
+    var badges=Object.keys(GEST_TIPO_LBL).map(function(t){
+      var n=cnt[t]||0;var ti=GEST_TIPO_LBL[t];
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;background:'+ti.c+'18;color:'+ti.c+';border:1px solid '+ti.c+'40">'+ti.i+' '+ti.l+' '+n+'</span>';
+    }).join("");
+    var isOpen=gestOpenId===p.id;
+    return '<div class="chart-card" style="padding:0;overflow:hidden;margin-bottom:0" id="gp-card-'+p.id+'">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;gap:12px" onclick="toggleGestProj('+p.id+')">'
+      +'<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">'
+      +'<div style="width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--pu),#7040c0);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🏭</div>'
+      +'<div style="min-width:0"><div style="font-size:13px;font-weight:700;color:var(--cr);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.nombre)+'</div>'
+      +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">'+badges+'</div></div></div>'
+      +'<div style="font-size:18px;color:var(--mu);flex-shrink:0;transition:transform .2s" id="gp-arr-'+p.id+'">'+(isOpen?'▲':'▼')+'</div></div>'
+      +'<div id="gp-body-'+p.id+'" style="display:'+(isOpen?'block':'none')+';border-top:1px solid var(--br);padding:16px 18px">'
+      +(isOpen?'<div style="text-align:center;padding:20px;color:var(--fa)"><div class="spin" style="margin:0 auto"></div></div>':'')
+      +'</div></div>';
+  }).join("");
+  // Recargar si hay uno abierto
+  if(gestOpenId){var p=projs.find(function(x){return x.id===gestOpenId;});if(p)loadGestRegistros(gestOpenId);}
+}
+
+function toggleGestProj(id){
+  if(gestOpenId===id){gestOpenId=null;renderGestion();return;}
+  gestOpenId=id;renderGestion();loadGestRegistros(id);
+}
+
+function loadGestRegistros(proyId){
+  var tipoF=(document.getElementById("gest-tipo-filter")||{}).value||"";
+  var url='/api/v1/monitoreo/gestion/'+proyId+'/registros'+(tipoF?'?tipo='+tipoF:'');
+  _apiFetch('GET',url).then(function(r){
+    renderGestRegistros(proyId,r&&r.registros||[]);
+  }).catch(function(e){
+    var body=document.getElementById("gp-body-"+proyId);
+    if(body)body.innerHTML='<div style="color:var(--re);padding:12px">Error al cargar registros</div>';
+  });
+}
+
+function renderGestRegistros(proyId,registros){
+  var body=document.getElementById("gp-body-"+proyId);if(!body)return;
+  var tiposHtml=Object.keys(GEST_TIPO_LBL).map(function(t){
+    var ti=GEST_TIPO_LBL[t];
+    return '<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:5px 10px;border-radius:7px;border:1.5px solid '+ti.c+'40;background:'+ti.c+'10;color:'+ti.c+';font-size:11px;font-weight:700">'
+      +'<input type="radio" name="gest-tipo-'+proyId+'" value="'+t+'" style="accent-color:'+ti.c+'"/> '+ti.i+' '+ti.l+'</label>';
+  }).join("");
+  var html='<div style="margin-bottom:16px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:.7px;text-transform:uppercase;margin-bottom:8px">Nuevo Registro</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+tiposHtml+'</div>'
+    +'<input class="fi" type="text" id="gest-titulo-'+proyId+'" placeholder="Título del registro…" style="margin-bottom:8px;font-size:13px"/>'
+    +'<textarea class="fi" id="gest-desc-'+proyId+'" placeholder="Descripción (opcional)…" style="min-height:80px;resize:vertical;font-size:13px;margin-bottom:8px"></textarea>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<button class="btn btn-pu btn-sm" onclick="saveGestRegistro('+proyId+')">Guardar registro</button>'
+    +'<label class="btn btn-gh btn-sm" style="cursor:pointer">📎 Adjuntar archivo<input type="file" id="gest-file-'+proyId+'" style="display:none" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onchange="handleGestFile('+proyId+',this)"/></label>'
+    +'<span id="gest-file-lbl-'+proyId+'" style="font-size:11px;color:var(--mu)"></span>'
+    +'</div></div>';
+  if(registros.length){
+    html+='<div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px;margin-top:4px;padding-top:14px;border-top:1px solid var(--br)">Historial ('+registros.length+')</div>';
+    html+=registros.map(function(r){
+      var ti=GEST_TIPO_LBL[r.tipo]||{l:r.tipo,c:"#915BD8",i:"📄"};
+      var arch=r.archivos||[];
+      return '<div style="background:#160f20;border:1px solid var(--br);border-left:3px solid '+ti.c+';border-radius:9px;padding:12px 14px;margin-bottom:8px">'
+        +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'
+        +'<div style="flex:1;min-width:0">'
+        +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
+        +'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;background:'+ti.c+'18;color:'+ti.c+';border:1px solid '+ti.c+'40">'+ti.i+' '+ti.l+'</span>'
+        +'<span style="font-size:10px;color:var(--fa)">'+esc(r.created_at?r.created_at.slice(0,16).replace('T',' '):'')+'</span>'
+        +(r.created_by?'<span style="font-size:10px;color:var(--fa)">· '+esc(r.created_by)+'</span>':'')
+        +'</div>'
+        +'<div style="font-size:13px;font-weight:700;color:var(--cr);margin-bottom:4px">'+esc(r.titulo)+'</div>'
+        +(r.descripcion?'<div style="font-size:12px;color:var(--mu);line-height:1.55">'+esc(r.descripcion)+'</div>':'')
+        +(arch.length?'<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">'+arch.map(function(a){return '<a href="'+esc(a.url||a)+'" target="_blank" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--bl);background:#0d1b2a;border:1px solid var(--bl);border-radius:6px;padding:2px 8px;text-decoration:none">📎 '+esc(a.nombre||'Archivo')+'</a>';}).join("")+'</div>':'')
+        +'</div>'
+        +'<button onclick="deleteGestRegistro('+r.id+','+proyId+')" style="background:transparent;border:none;color:var(--fa);cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0" title="Eliminar">🗑</button>'
+        +'</div></div>';
+    }).join("");
+  }else{
+    html+='<div style="text-align:center;padding:22px;color:var(--fa);font-size:13px;border-top:1px solid var(--br);margin-top:4px">Sin registros aún</div>';
+  }
+  body.innerHTML=html;
+  // Seleccionar primer tipo por defecto
+  var firstRadio=body.querySelector('input[type=radio]');if(firstRadio)firstRadio.checked=true;
+}
+
+var _gestPendingFile={};
+function handleGestFile(proyId,input){
+  var file=input.files[0];if(!file)return;
+  var lbl=document.getElementById("gest-file-lbl-"+proyId);
+  if(lbl)lbl.textContent=file.name;
+  _gestPendingFile[proyId]={name:file.name,file:file};
+}
+
+function saveGestRegistro(proyId){
+  var tipoEl=document.querySelector('input[name="gest-tipo-'+proyId+'"]:checked');
+  var tipo=tipoEl?tipoEl.value:"pqr";
+  var titulo=(document.getElementById("gest-titulo-"+proyId)||{}).value||"";
+  var desc=(document.getElementById("gest-desc-"+proyId)||{}).value||"";
+  if(!titulo.trim()){toast("⚠ Escribe un título");return;}
+  var pending=_gestPendingFile[proyId];
+  function doSave(archivos){
+    _apiFetch('POST','/api/v1/monitoreo/gestion/'+proyId+'/registros',{tipo:tipo,titulo:titulo.trim(),descripcion:desc.trim()||null,archivos:archivos||[]})
+    .then(function(r){
+      if(r&&r.ok){
+        toast("✓ Registro guardado");
+        delete _gestPendingFile[proyId];
+        // Actualizar contador en gestProyectos
+        var gp=gestProyectos.find(function(p){return p.id===proyId;});
+        if(gp&&gp.conteos){gp.conteos[tipo]=(gp.conteos[tipo]||0)+1;gp.total_registros=(gp.total_registros||0)+1;}
+        loadGestRegistros(proyId);
+      }else{toast("⚠ Error al guardar");}
+    }).catch(function(){toast("⚠ Error al guardar");});
+  }
+  if(pending&&pending.file){
+    // Subir archivo como base64 al endpoint de fotos reutilizando la misma lógica
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var b64=ev.target.result.split(',')[1]||"";
+      var archivos=[{nombre:pending.name,url:"data:file;base64,..."}];
+      // Guardamos solo metadata por ahora; archivo queda en memoria del cliente
+      // Para producción usar endpoint de upload dedicado
+      doSave([{nombre:pending.name,nota:"adjunto pendiente de subida"}]);
+    };
+    reader.readAsDataURL(pending.file);
+  }else{doSave([]);}
+}
+
+function deleteGestRegistro(regId,proyId){
+  if(!confirm("¿Eliminar este registro?"))return;
+  _apiFetch('DELETE','/api/v1/monitoreo/gestion/registros/'+regId)
+  .then(function(r){
+    if(r&&r.ok){
+      toast("✓ Registro eliminado");
+      var gp=gestProyectos.find(function(p){return p.id===proyId;});
+      if(gp&&gp.total_registros>0)gp.total_registros--;
+      loadGestRegistros(proyId);
+    }
+  }).catch(function(){toast("⚠ Error al eliminar");});
+}
+
+document.getElementById("gest-tipo-filter")&&document.getElementById("gest-tipo-filter").addEventListener("change",function(){if(curTab==="gest")renderGestion();});
+document.getElementById("gest-search")&&document.getElementById("gest-search").addEventListener("input",function(){if(curTab==="gest")renderGestion();});
 
 // Mes por defecto
 (function(){

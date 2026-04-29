@@ -26,6 +26,7 @@ from app.models.asic import AsicSolicitud, AsicCambioContrato
 from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
+from app.models.gestion import GestionRegistro
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -42,4 +43,5 @@ __all__ = [
     "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato",
     "Documento", "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
+    "GestionRegistro",
 ]

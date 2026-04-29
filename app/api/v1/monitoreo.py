@@ -23,7 +23,7 @@ from app.api.v1.auth import get_current_user
 from app.models import (
     Falla, FallaSeguimiento,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
-    GeneracionDiaria, MonitoreoVerificacion,
+    GeneracionDiaria, MonitoreoVerificacion, GestionRegistro,
 )
 from app.models.usuarios import Usuario
 from app.models.proyectos import Proyecto, Portafolio
@@ -1088,3 +1088,109 @@ async def legacy_bridge_post(
         return {"ok": True}
 
     raise HTTPException(400, f"Acción POST no reconocida: {action}")
+
+
+# ── Gestión de proyectos ───────────────────────────────────────────────────────
+
+@router.get("/gestion/proyectos")
+def gestion_list_proyectos(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    proyectos = (
+        db.query(Proyecto)
+        .filter(Proyecto.estado == "en_operacion")
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    result = []
+    for p in proyectos:
+        conteos = {
+            "pqr": db.query(GestionRegistro).filter_by(proyecto_id=p.id, tipo="pqr").count(),
+            "preventivo": db.query(GestionRegistro).filter_by(proyecto_id=p.id, tipo="preventivo").count(),
+            "correctivo": db.query(GestionRegistro).filter_by(proyecto_id=p.id, tipo="correctivo").count(),
+        }
+        result.append({
+            "id": p.id,
+            "nombre": p.nombre_clientes or p.nombre_comercial,
+            "nombre_comercial": p.nombre_comercial,
+            "total_registros": sum(conteos.values()),
+            "conteos": conteos,
+        })
+    return {"proyectos": result}
+
+
+@router.get("/gestion/{proyecto_id}/registros")
+def gestion_list_registros(
+    proyecto_id: int,
+    tipo: str | None = None,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    q = db.query(GestionRegistro).filter_by(proyecto_id=proyecto_id)
+    if tipo:
+        q = q.filter(GestionRegistro.tipo == tipo)
+    registros = q.order_by(GestionRegistro.created_at.desc()).all()
+    return {
+        "registros": [
+            {
+                "id": r.id,
+                "tipo": r.tipo,
+                "titulo": r.titulo,
+                "descripcion": r.descripcion or "",
+                "archivos": json.loads(r.archivos_json) if r.archivos_json else [],
+                "created_by": r.created_by or "",
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in registros
+        ]
+    }
+
+
+@router.post("/gestion/{proyecto_id}/registros", status_code=201)
+def gestion_crear_registro(
+    proyecto_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    tipo = (payload.get("tipo") or "pqr").strip()
+    titulo = (payload.get("titulo") or "").strip()
+    if not titulo:
+        raise HTTPException(400, "El campo 'titulo' es requerido")
+    if tipo not in ("pqr", "preventivo", "correctivo"):
+        raise HTTPException(400, "tipo debe ser: pqr, preventivo o correctivo")
+
+    archivos = payload.get("archivos") or []
+    registro = GestionRegistro(
+        proyecto_id=proyecto_id,
+        tipo=tipo,
+        titulo=titulo,
+        descripcion=(payload.get("descripcion") or "").strip() or None,
+        archivos_json=json.dumps(archivos) if archivos else None,
+        created_by=current_user.nombre or current_user.email,
+    )
+    db.add(registro)
+    db.commit()
+    db.refresh(registro)
+    return {
+        "ok": True,
+        "id": registro.id,
+        "tipo": registro.tipo,
+        "titulo": registro.titulo,
+        "created_at": registro.created_at.isoformat(),
+    }
+
+
+@router.delete("/gestion/registros/{registro_id}", status_code=200)
+def gestion_eliminar_registro(
+    registro_id: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    r = db.query(GestionRegistro).filter_by(id=registro_id).first()
+    if not r:
+        raise HTTPException(404, "Registro no encontrado")
+    db.delete(r)
+    db.commit()
+    return {"ok": True}

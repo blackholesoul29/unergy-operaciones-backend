@@ -47,6 +47,24 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh TEXT",
     # migration 005 — código TSF (frontera CREG) por proyecto
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_tsf VARCHAR(100)",
+    # migration 006 — múltiples correos por cliente (T14)
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
+    # migration 007 — tabla de gestión de proyectos (T16)
+    """CREATE TABLE IF NOT EXISTS gestion_registros (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        tipo VARCHAR(50) NOT NULL,
+        titulo VARCHAR(500) NOT NULL,
+        descripcion TEXT,
+        archivos_json TEXT,
+        created_by VARCHAR(255),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_gestion_proyecto ON gestion_registros (proyecto_id)",
+    "CREATE INDEX IF NOT EXISTS ix_gestion_tipo ON gestion_registros (tipo)",
 ]
 
 

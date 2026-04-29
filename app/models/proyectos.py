@@ -217,9 +217,6 @@ class ProyectoInversionista(Base):
     es_patrimonio_autonomo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin: Mapped[date | None] = mapped_column(Date, nullable=True)
-    tarifa_administracion: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    tarifa_cgm: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    tarifa_representacion: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

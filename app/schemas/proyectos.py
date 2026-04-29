@@ -27,6 +27,7 @@ class ProyectoInversionistaOut(ProyectoInversionistaCreate):
     proyecto_id: int
     cliente_nombre: str = ""
     created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 

@@ -13,6 +13,13 @@ class ProyectoInversionistaCreate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+    @field_validator("porcentaje_participacion")
+    @classmethod
+    def validar_porcentaje(cls, v):
+        if v is not None and not (0 <= v <= 1):
+            raise ValueError("El porcentaje de participación debe estar entre 0 y 1 (equivale a 0%–100%)")
+        return v
+
 
 class ProyectoInversionistaUpdate(BaseModel):
     porcentaje_participacion: Optional[float] = None
@@ -20,6 +27,13 @@ class ProyectoInversionistaUpdate(BaseModel):
     contrato_ref: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
+
+    @field_validator("porcentaje_participacion")
+    @classmethod
+    def validar_porcentaje(cls, v):
+        if v is not None and not (0 <= v <= 1):
+            raise ValueError("El porcentaje de participación debe estar entre 0 y 1 (equivale a 0%–100%)")
+        return v
 
 
 class ProyectoInversionistaOut(ProyectoInversionistaCreate):

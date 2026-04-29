@@ -12,6 +12,9 @@ class ProyectoInversionistaCreate(BaseModel):
     contrato_ref: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
+    tarifa_administracion: Optional[float] = None
+    tarifa_cgm: Optional[float] = None
+    tarifa_representacion: Optional[float] = None
 
     @field_validator("porcentaje_participacion")
     @classmethod
@@ -27,6 +30,9 @@ class ProyectoInversionistaUpdate(BaseModel):
     contrato_ref: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
+    tarifa_administracion: Optional[float] = None
+    tarifa_cgm: Optional[float] = None
+    tarifa_representacion: Optional[float] = None
 
     @field_validator("porcentaje_participacion")
     @classmethod

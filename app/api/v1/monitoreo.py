@@ -379,8 +379,11 @@ def get_proyectos_monitoreo(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
-    """Proyectos en operación (srv_operacion o estado=en_operacion), con cliente."""
+    """Proyectos en operación (srv_operacion o estado=en_operacion), con cliente.
+    Incluye lista completa de clientes para poblar filtros en el frontend."""
     from sqlalchemy import or_ as _or2
+    from app.models.clientes import Cliente as ClienteM
+
     proyectos = (
         db.query(Proyecto)
         .filter(
@@ -390,6 +393,7 @@ def get_proyectos_monitoreo(
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
+    clientes = db.query(ClienteM).order_by(ClienteM.razon_social_nombre).all()
     return {
         "proyectos": [p.nombre_comercial for p in proyectos],
         "proyectos_detalle": [
@@ -401,6 +405,10 @@ def get_proyectos_monitoreo(
                 "cliente_nombre": p.cliente.razon_social_nombre if p.cliente else "",
             }
             for p in proyectos
+        ],
+        "clientes": [
+            {"id": c.id, "nombre": c.razon_social_nombre}
+            for c in clientes
         ],
     }
 

@@ -797,6 +797,17 @@ function loadProyectosFromDB() {
     if (!res) return;
     if (Array.isArray(res.proyectos) && res.proyectos.length) PROJS = res.proyectos;
     if (Array.isArray(res.proyectos_detalle) && res.proyectos_detalle.length) PROJS_DETALLE = res.proyectos_detalle;
+    /* Clientes incluidos en la misma respuesta — sin llamada extra ni race condition */
+    if (Array.isArray(res.clientes) && res.clientes.length) {
+      _allClientes = res.clientes;
+      /* Poblar #inf-port (selector de cliente en la pestaña Informe) */
+      var infPort = document.getElementById('inf-port');
+      if (infPort) {
+        var h = '<option value="">Selecciona cliente…</option>';
+        res.clientes.forEach(function(c){ h += '<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>'; });
+        infPort.innerHTML = h;
+      }
+    }
     renderSelects();
     toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
   }).catch(function(e) {
@@ -1051,21 +1062,18 @@ function loadClientesForFilters(){
   _apiFetch('GET','/api/v1/monitoreo/clientes').then(function(r){
     if(!r||!r.clientes)return;
     _allClientes=r.clientes;
-    /* Poblar #fclient */
+    /* Poblar #fclient directamente (renderSelects también lo hace vía _allClientes) */
+    var saved='';
     var fclientEl=document.getElementById('fclient');
-    if(fclientEl){
-      var saved=fclientEl.value;
-      var h='<option value="">Todos los clientes</option>';
-      r.clientes.forEach(function(c){h+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
-      fclientEl.innerHTML=h;
-      if(saved)fclientEl.value=saved;
-    }
-    /* Poblar #inf-port solo si portPortfolios no lo hizo ya */
+    if(fclientEl){saved=fclientEl.value;}
+    renderSelects();
+    if(fclientEl&&saved)fclientEl.value=saved;
+    /* Poblar #inf-port siempre con la lista completa de clientes */
     var infPort=document.getElementById('inf-port');
-    if(infPort&&infPort.options.length<=1){
-      var h2='<option value="">Selecciona cliente…</option>';
-      r.clientes.forEach(function(c){h2+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
-      infPort.innerHTML=h2;
+    if(infPort){
+      var h='<option value="">Selecciona cliente…</option>';
+      r.clientes.forEach(function(c){h+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
+      infPort.innerHTML=h;
     }
   }).catch(function(e){console.warn('[loadClientesForFilters]',e);});
 }

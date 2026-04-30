@@ -118,13 +118,17 @@ def valor(row, idx: int):
 
 
 # ── Leer hoja XLSX preservando hipervínculos ──────────────────────────────────
-def leer_hoja(xlsx_path: str, hoja: str) -> list[dict]:
+def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
     """
-    Devuelve lista de dicts con todos los campos + hipervínculos de cada fila.
-    Índices de columna (0-based):
-      0=Proyecto  1=Inversionista  2=DocContable  3=Contacto1  4=Contacto2
-      5=Concepto  6=Total  7=RefFactura  8=ConsIng  9=ConsCostos  10=Comprobante
-      13=ProyectoER  14=EstadoResultados  15=CarpetaProyecto
+    Devuelve (filas, er_map) donde:
+    - filas: lista de dicts con datos de la tabla principal (cols A-K)
+    - er_map: dict {nombre_proyecto_normalizado: er_url} leído de la tabla
+              lateral derecha (col N = proyecto, col O = ER URL)
+
+    Índices 0-based:
+      0=Proyecto  1=Inversionista  2=DocContable  5=Concepto  6=Total
+      7=RefFactura  8=ConsIng(soporte_url)  9=ConsCostos  10=Comprobante
+      13=ProyectoER  14=EstadoResultados(URL)  15=CarpetaProyecto
     """
     wb = load_workbook(xlsx_path, data_only=True)
     if hoja not in wb.sheetnames:
@@ -132,27 +136,39 @@ def leer_hoja(xlsx_path: str, hoja: str) -> list[dict]:
     sh = wb[hoja]
 
     rows = []
+    er_map: dict[str, str] = {}
+
     for xl_row in sh.iter_rows(min_row=2, max_row=sh.max_row):
+        # ── Tabla lateral: col N → proyecto, col O → ER URL ──
+        if len(xl_row) > 14:
+            n_val = valor(xl_row, 13)
+            o_cell = xl_row[14]
+            if n_val:
+                er_url = (o_cell.hyperlink.target if o_cell.hyperlink else None) \
+                         or str(o_cell.value or "").strip()
+                if er_url and er_url.startswith("http"):
+                    er_map[normalizar(str(n_val).strip())] = er_url
+
+        # ── Tabla principal: col A debe tener proyecto ──
         proy = valor(xl_row, 0)
         if not proy:
             continue
         rows.append({
-            "proyecto":         str(proy).strip(),
-            "inversionista":    str(valor(xl_row, 1) or "").strip(),
-            "doc_contable":     str(valor(xl_row, 2) or "").strip(),
-            "concepto":         str(valor(xl_row, 5) or "").strip(),
-            "total":            parse_valor(valor(xl_row, 6)),
-            "ref_factura":      str(valor(xl_row, 7) or "").strip(),
-            "ref_factura_url":  link(xl_row, 7),
-            "cons_ing_txt":     str(valor(xl_row, 8) or "").strip(),
-            "cons_ing_url":     link(xl_row, 8),   # ← link al PDF en Drive
-            "cons_cos_txt":     str(valor(xl_row, 9) or "").strip() if len(xl_row) > 9 else "",
-            "comprobante":      str(valor(xl_row, 10) or "").strip() if len(xl_row) > 10 else "",
-            "er_url":           link(xl_row, 14) or str(valor(xl_row, 14) or "").strip() or None,
-            "carpeta_url":      link(xl_row, 15),
+            "proyecto":        str(proy).strip(),
+            "inversionista":   str(valor(xl_row, 1) or "").strip(),
+            "doc_contable":    str(valor(xl_row, 2) or "").strip(),
+            "concepto":        str(valor(xl_row, 5) or "").strip(),
+            "total":           parse_valor(valor(xl_row, 6)),
+            "ref_factura":     str(valor(xl_row, 7) or "").strip(),
+            "ref_factura_url": link(xl_row, 7),
+            "cons_ing_txt":    str(valor(xl_row, 8) or "").strip(),
+            "cons_ing_url":    link(xl_row, 8),    # ← link directo al PDF en Drive
+            "cons_cos_txt":    str(valor(xl_row, 9) or "").strip() if len(xl_row) > 9 else "",
+            "comprobante":     str(valor(xl_row, 10) or "").strip() if len(xl_row) > 10 else "",
+            "carpeta_url":     link(xl_row, 15),
         })
     wb.close()
-    return rows
+    return rows, er_map
 
 
 # ── API client ────────────────────────────────────────────────────────────────
@@ -162,7 +178,7 @@ class API:
         self.token = None
 
     def login(self, usuario: str, password: str):
-        r = requests.post(f"{self.base}/api/v1/auth/login",
+        r = requests.post(f"{self.base}/api/v1/auth/token",
                           data={"username": usuario, "password": password})
         r.raise_for_status()
         self.token = r.json()["access_token"]
@@ -221,7 +237,7 @@ def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
 
 
 # ── Carga principal ───────────────────────────────────────────────────────────
-def cargar(api: API, filas: list[dict], periodo_date: str, dry_run: bool):
+def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: str, dry_run: bool):
     me = api.get("/api/v1/auth/me")
     usuario_id = me["id"]
 
@@ -230,12 +246,9 @@ def cargar(api: API, filas: list[dict], periodo_date: str, dry_run: bool):
 
     # Agrupar filas: proyecto → inversionista → lista de filas
     grupos: dict[str, dict[str, list]] = {}
-    er_map: dict[str, str] = {}   # nombre_proyecto_norm → er_url
 
     for f in filas:
         grupos.setdefault(f["proyecto"], {}).setdefault(f["inversionista"], []).append(f)
-        if f["er_url"]:
-            er_map[normalizar(f["proyecto"])] = f["er_url"]
 
     stats = {"ok": 0, "sin_match": [], "liq": 0,
              "mandatos": 0, "lineas": 0, "costos": 0, "facturas": 0}
@@ -249,7 +262,7 @@ def cargar(api: API, filas: list[dict], periodo_date: str, dry_run: bool):
 
         pid = proy_db["id"]
         er_url = er_map.get(normalizar(nombre_proy))
-        print(f"\n→ {nombre_proy} (id={pid})")
+        print(f"\n-> {nombre_proy} (id={pid})")
 
         if dry_run:
             invs = list(inv_grupos.keys())
@@ -461,22 +474,18 @@ def main():
     periodo_date = f"{y}-{m.zfill(2)}-01"
 
     print(f"Leyendo hoja '{args.hoja}' de {args.xlsx} ...")
-    filas = leer_hoja(args.xlsx, args.hoja)
-    print(f"  {len(filas)} filas leídas")
+    filas, er_map = leer_hoja(args.xlsx, args.hoja)
+    print(f"  {len(filas)} filas leídas, {len(er_map)} proyectos con ER URL")
 
     if args.dry_run:
-        print("\n[DRY RUN — no se escribe nada en la API]\n")
-    else:
-        print(f"\nAutenticando en {args.api_url}...")
+        print("\n[DRY RUN — no se escribira nada en la API]\n")
 
+    print(f"Autenticando en {args.api_url}...")
     api = API(args.api_url)
-    if not args.dry_run:
-        api.login(args.usuario, args.password)
-        print("✓ Autenticado\n")
-    else:
-        api.token = "dry"
+    api.login(args.usuario, args.password)
+    print("Autenticado\n")
 
-    cargar(api, filas, periodo_date, dry_run=args.dry_run)
+    cargar(api, filas, er_map, periodo_date, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

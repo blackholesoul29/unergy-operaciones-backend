@@ -32,6 +32,7 @@ class LiquidacionCreate(BaseModel):
 
 class LiquidacionUpdate(BaseModel):
     estado: str | None = None
+    estado_resultados_url: str | None = None
     fecha_inicio_proceso: date | None = None
     fecha_firma: date | None = None
     consecutivo_inicial_ingresos: int | None = None
@@ -244,6 +245,7 @@ def _serializar_liquidacion_base(liq: Liquidacion) -> dict:
         "consecutivo_inicial_ingresos": liq.consecutivo_inicial_ingresos,
         "consecutivo_inicial_costos": liq.consecutivo_inicial_costos,
         "comprobante_contable_ref": liq.comprobante_contable_ref,
+        "estado_resultados_url": liq.estado_resultados_url,
         "ingresos_energia_cop": float(liq.ingresos_energia_cop) if liq.ingresos_energia_cop is not None else None,
         "costos_comercializacion_xm_cop": float(liq.costos_comercializacion_xm_cop) if liq.costos_comercializacion_xm_cop is not None else None,
         "costos_operativos_cop": float(liq.costos_operativos_cop) if liq.costos_operativos_cop is not None else None,

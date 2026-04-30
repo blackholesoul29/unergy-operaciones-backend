@@ -112,6 +112,7 @@ class Liquidacion(Base):
     consecutivo_inicial_ingresos: Mapped[int | None] = mapped_column(Integer, nullable=True)
     consecutivo_inicial_costos: Mapped[int | None] = mapped_column(Integer, nullable=True)
     comprobante_contable_ref: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Estado de resultados embebido
     ingresos_energia_cop: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     costos_comercializacion_xm_cop: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)

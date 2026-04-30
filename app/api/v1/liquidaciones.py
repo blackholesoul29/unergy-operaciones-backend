@@ -534,13 +534,28 @@ def vista_por_proyecto(
     Retorna TODOS los proyectos con sus inversionistas registrados y sus liquidaciones.
     Las liquidaciones se filtran por período y estado si se proporcionan.
     """
-    proy_q = db.query(Proyecto).options(
-        selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente)
-    )
+    proy_q = db.query(Proyecto)
     if proyecto_id:
         proy_q = proy_q.filter(Proyecto.id == proyecto_id)
     todos_proyectos = proy_q.order_by(Proyecto.nombre_comercial).all()
     proy_ids = [p.id for p in todos_proyectos]
+
+    # Cargar inversionistas de cada proyecto por separado (evita problemas con Mapped[list])
+    inv_registrados_map: dict[int, list] = {pid: [] for pid in proy_ids}
+    if proy_ids:
+        for pi in (
+            db.query(ProyectoInversionista)
+            .options(selectinload(ProyectoInversionista.cliente))
+            .filter(ProyectoInversionista.proyecto_id.in_(proy_ids))
+            .all()
+        ):
+            inv_registrados_map[pi.proyecto_id].append({
+                "proyecto_inversionista_id": pi.id,
+                "cliente_id": pi.cliente_id,
+                "inversionista_nombre": pi.cliente.razon_social_nombre if pi.cliente else "—",
+                "porcentaje_participacion": float(pi.porcentaje_participacion or 0) if pi.porcentaje_participacion is not None else None,
+                "es_patrimonio_autonomo": pi.es_patrimonio_autonomo,
+            })
 
     liq_q = (
         db.query(Liquidacion)
@@ -625,20 +640,11 @@ def vista_por_proyecto(
 
     result = []
     for proy in todos_proyectos:
-        inv_registrados = []
-        for pi in proy.inversionistas:
-            inv_registrados.append({
-                "proyecto_inversionista_id": pi.id,
-                "cliente_id": pi.cliente_id,
-                "inversionista_nombre": pi.cliente.razon_social_nombre if pi.cliente else "—",
-                "porcentaje_participacion": float(pi.porcentaje_participacion or 0) if pi.porcentaje_participacion is not None else None,
-                "es_patrimonio_autonomo": pi.es_patrimonio_autonomo,
-            })
         result.append({
             "proyecto_id": proy.id,
             "proyecto_nombre": proy.nombre_comercial,
             "estado": proy.estado,
-            "inversionistas_registrados": inv_registrados,
+            "inversionistas_registrados": inv_registrados_map.get(proy.id, []),
             "liquidaciones": liq_por_proyecto.get(proy.id, []),
         })
     return result

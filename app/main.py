@@ -313,8 +313,19 @@ def _run_srv_operacion_sync() -> None:
             print(f"[srv_operacion sync] skipped: {e}")
 
 
+def _run_create_tables() -> None:
+    """Create any missing tables (idempotent — skips existing tables)."""
+    try:
+        from app.models import Base
+        Base.metadata.create_all(bind=engine)
+        print("[startup] Tables ensured OK")
+    except Exception as e:
+        print(f"[startup] create_all skipped: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _run_create_tables()
     _run_column_migrations()
     _run_catalog_seed()
     _run_tipo_migration()

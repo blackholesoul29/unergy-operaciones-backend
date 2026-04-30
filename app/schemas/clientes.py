@@ -69,7 +69,7 @@ class ClienteDocumentoOut(ClienteDocumentoCreate):
     model_config = {"from_attributes": True}
 
 
-class ClienteOut(BaseModel):
+class ClienteBase(BaseModel):
     id: int
     razon_social_nombre: str
     nit_cedula: Optional[str]
@@ -88,9 +88,16 @@ class ClienteOut(BaseModel):
     rut_url: Optional[str]
     created_at: datetime
     updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ClienteListOut(ClienteBase):
+    pass
+
+
+class ClienteOut(ClienteBase):
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
-    model_config = {"from_attributes": True}
 
     @field_validator("servicios", "documentos_comerciales", mode="before")
     @classmethod

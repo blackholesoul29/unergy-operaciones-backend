@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
 from app.schemas.clientes import (
-    ClienteCreate, ClienteUpdate, ClienteOut,
+    ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
     ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
 )
@@ -31,7 +31,7 @@ def _get_cliente_or_404(id: int, db: Session) -> Cliente:
     return c
 
 
-@router.get("", response_model=PaginatedResponse[ClienteOut])
+@router.get("", response_model=PaginatedResponse[ClienteListOut])
 def list_clientes(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=500),
@@ -39,10 +39,7 @@ def list_clientes(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    query = db.query(Cliente).options(
-        selectinload(Cliente.servicios),
-        selectinload(Cliente.documentos_comerciales),
-    )
+    query = db.query(Cliente)
     if q:
         query = query.filter(Cliente.razon_social_nombre.ilike(f"%{q}%"))
     total = query.count()

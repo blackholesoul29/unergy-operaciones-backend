@@ -787,6 +787,8 @@ document.addEventListener('DOMContentLoaded', function() {
   loadCatalog();
   _loadCatIds();
   loadFaults();
+  loadPortfolios();
+  loadClientesForFilters();
   loadProyectosFromDB();
 });
 
@@ -1044,6 +1046,29 @@ function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(
 rebuildF();
 var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
 var PROJS_DETALLE=[]; /* [{id,nombre,alias,cliente_id,cliente_nombre}] */
+var _allClientes=[]; /* [{id,nombre,...}] cargado desde /api/v1/monitoreo/clientes */
+function loadClientesForFilters(){
+  _apiFetch('GET','/api/v1/monitoreo/clientes').then(function(r){
+    if(!r||!r.clientes)return;
+    _allClientes=r.clientes;
+    /* Poblar #fclient */
+    var fclientEl=document.getElementById('fclient');
+    if(fclientEl){
+      var saved=fclientEl.value;
+      var h='<option value="">Todos los clientes</option>';
+      r.clientes.forEach(function(c){h+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
+      fclientEl.innerHTML=h;
+      if(saved)fclientEl.value=saved;
+    }
+    /* Poblar #inf-port solo si portPortfolios no lo hizo ya */
+    var infPort=document.getElementById('inf-port');
+    if(infPort&&infPort.options.length<=1){
+      var h2='<option value="">Selecciona cliente…</option>';
+      r.clientes.forEach(function(c){h2+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
+      infPort.innerHTML=h2;
+    }
+  }).catch(function(e){console.warn('[loadClientesForFilters]',e);});
+}
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",
@@ -1160,7 +1185,7 @@ function loginEmailGo(){
       if(r&&r.ok){
         saveSession('monitor',email,r.nombre||email,[]);
         document.getElementById("login-ov").className="";
-        applyRole();loadFaults();
+        applyRole();loadFaults();loadPortfolios();loadClientesForFilters();
       } else {
         showLoginStep("email");
         err.textContent="⚠ Correo no registrado en la plataforma.";
@@ -1189,7 +1214,7 @@ function loginNameGo(){
   err.textContent="";
   saveSession("monitor",pendingEmail,name,[]);
   document.getElementById("login-ov").className="";
-  applyRole();loadFaults();
+  applyRole();loadFaults();loadPortfolios();loadClientesForFilters();
 }
 function loginCodeGo(){
   var code=(document.getElementById("li-code").value||"").trim();
@@ -1205,7 +1230,7 @@ function loginCodeGo(){
         toast("⚠ Tu cuenta no tiene proyectos asignados.",6000);
         hideLoader();renderAll();
       } else {
-        toast("✓ Acceso concedido",3000);loadFaults();
+        toast("✓ Acceso concedido",3000);loadFaults();loadPortfolios();loadClientesForFilters();
       }
     } else {
       showLoginStep("code");err.textContent="⚠ Código incorrecto o expirado";
@@ -1458,13 +1483,24 @@ function getFiltered(){
   var dfrom=document.getElementById("fdate-from")?document.getElementById("fdate-from").value||"":" ";
   var dto=document.getElementById("fdate-to")?document.getElementById("fdate-to").value||"":" ";
   fim=fim.trim();dfrom=dfrom.trim();dto=dto.trim();
-  /* mapa proyecto → cliente (construido de PROJS_DETALLE) */
+  /* mapa proyecto → cliente (de PROJS_DETALLE + portPortfolios) */
   var projClientMap={};
-  PROJS_DETALLE.forEach(function(p){projClientMap[p.nombre]=p.cliente_nombre||"";});
+  PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre)projClientMap[p.nombre]=p.cliente_nombre;});
+  /* también indexar portPortfolios para cobertura máxima */
+  Object.keys(portPortfolios).forEach(function(clientName){
+    (portPortfolios[clientName]||[]).forEach(function(p){
+      var pn=p.nombre_comercial||p.nombre;
+      if(pn&&!projClientMap[pn])projClientMap[pn]=clientName;
+    });
+  });
   return faults.filter(function(f){
     if(userRole==="cliente"&&clientProjects.length>0&&clientProjects.indexOf(f.proj)<0)return false;
     if(filterSt!=="all"&&f.st!==filterSt)return false;
-    if(fcli&&projClientMap[f.proj]!==fcli)return false;
+    if(fcli){
+      var mapped=projClientMap[f.proj];
+      /* si tenemos el mapeo, filtrar estrictamente; si no hay mapeo para este proyecto, no excluir */
+      if(mapped&&mapped!==fcli)return false;
+    }
     if(fp&&f.proj!==fp)return false;
     if(fc){var di=fd(f.code);var fCatId=di?di.catId:f.catNum;if(!fCatId||fCatId!==fc)return false;}
     if(fim){var m2=String(f.code||"").match(/^(\d+)/);var fImpId=(m2&&m2[1])||f.catNum||"";if(!fImpId||fImpId!==fim)return false;}
@@ -1539,7 +1575,12 @@ function renderSelects(){
   if(fclientEl){
     var selCliente=fclientEl.value;
     var clienteNames=[];
+    /* Fuente 1: PROJS_DETALLE (si proyecto tiene cliente_id en BD) */
     PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre&&clienteNames.indexOf(p.cliente_nombre)<0)clienteNames.push(p.cliente_nombre);});
+    /* Fuente 2: portPortfolios (clientes con proyectos en operación) */
+    Object.keys(portPortfolios).forEach(function(n){if(clienteNames.indexOf(n)<0)clienteNames.push(n);});
+    /* Fuente 3: _allClientes (todos los clientes de la BD, independiente de proyectos) */
+    _allClientes.forEach(function(c){if(c.nombre&&clienteNames.indexOf(c.nombre)<0)clienteNames.push(c.nombre);});
     clienteNames.sort();
     var oc='<option value="">Todos los clientes</option>';
     clienteNames.forEach(function(n){oc+='<option value="'+esc(n)+'">'+esc(n)+'</option>';});
@@ -2367,15 +2408,25 @@ var portColorPalette = [
 ];
 function loadPortfolios() {
   apiGet({action:"getPortfolios"}, 10000).then(function(r){
-    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); return; }
+    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); loadClientesForFilters(); return; }
     portPortfolios = r.portfolios || {};
-    var sel = document.getElementById("port-sel");if (!sel) return;
-    sel.innerHTML = '<option value="">Selecciona cliente…</option>';
-    Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
-    // ── Poblar también el selector de informe ──
+    /* Poblar port-sel (portafolio/generación) */
+    var sel = document.getElementById("port-sel");
+    if(sel){
+      sel.innerHTML = '<option value="">Selecciona cliente…</option>';
+      Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
+    }
+    /* Poblar #inf-port con portPortfolios; si vacío, loadClientesForFilters cubrirá */
     var infPort=document.getElementById("inf-port");
-    if(infPort){infPort.innerHTML='<option value="">Selecciona cliente…</option>';Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});}
-  }).catch(function(e){ console.error("loadPortfolios:", e); });
+    if(infPort){
+      infPort.innerHTML='<option value="">Selecciona cliente…</option>';
+      Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});
+    }
+    /* Poblar también #fclient con los clientes de portPortfolios */
+    renderSelects();
+    /* Siempre cargar todos los clientes para completar los selectores */
+    loadClientesForFilters();
+  }).catch(function(e){ console.error("loadPortfolios:", e); loadClientesForFilters(); });
 }
 function getPortDateRange() {
   var now = new Date();
@@ -2661,6 +2712,8 @@ document.addEventListener("DOMContentLoaded",function(){
     applyRole();
     document.getElementById("login-ov").className="";
     loadFaults();
+    loadPortfolios();         /* carga portPortfolios + #inf-port + #port-sel */
+    loadClientesForFilters(); /* carga todos los clientes → #fclient + #inf-port fallback */
   } else {
     document.getElementById("loader").style.display="none";
     showLoginStep("email");

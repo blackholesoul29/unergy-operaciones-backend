@@ -317,11 +317,27 @@ def create_liquidacion(
 
 @router.get("/{id}")
 def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    liq = _get_liq_or_404(id, db)
+    liq = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto)).filter(Liquidacion.id == id).first()
+    if not liq:
+        raise HTTPException(404, "Liquidación no encontrada")
+
+    costos = db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id == id).all()
+    facturas = db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id == id).all()
+    mandatos = (
+        db.query(LiquidacionMandato)
+        .options(
+            selectinload(LiquidacionMandato.lineas),
+            selectinload(LiquidacionMandato.inversionista)
+                .selectinload(ProyectoInversionista.cliente),
+        )
+        .filter(LiquidacionMandato.liquidacion_id == id)
+        .all()
+    )
+
     data = _serializar_liquidacion_base(liq)
-    data["costos"] = [_serializar_costo(c) for c in liq.costos]
-    data["facturas"] = [_serializar_factura(f) for f in liq.facturas]
-    data["mandatos"] = [_serializar_mandato(m) for m in liq.mandatos]
+    data["costos"] = [_serializar_costo(c) for c in costos]
+    data["facturas"] = [_serializar_factura(f) for f in facturas]
+    data["mandatos"] = [_serializar_mandato(m) for m in mandatos]
     return data
 
 
@@ -520,18 +536,7 @@ def vista_por_proyecto(
     """
     q = (
         db.query(Liquidacion)
-        .options(
-            selectinload(Liquidacion.proyecto)
-                .selectinload(Proyecto.inversionistas)
-                .selectinload(ProyectoInversionista.cliente),
-            selectinload(Liquidacion.costos),
-            selectinload(Liquidacion.facturas),
-            selectinload(Liquidacion.mandatos)
-                .selectinload(LiquidacionMandato.lineas),
-            selectinload(Liquidacion.mandatos)
-                .selectinload(LiquidacionMandato.inversionista)
-                .selectinload(ProyectoInversionista.cliente),
-        )
+        .options(selectinload(Liquidacion.proyecto))
     )
     if proyecto_id:
         q = q.filter(Liquidacion.proyecto_id == proyecto_id)
@@ -541,6 +546,28 @@ def vista_por_proyecto(
         q = q.filter(Liquidacion.periodo <= periodo_hasta)
 
     liquidaciones = q.order_by(Liquidacion.periodo.desc()).all()
+    liq_ids = [liq.id for liq in liquidaciones]
+
+    # Load sub-resources directly to avoid Mapped[list] relationship issues
+    costos_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
+    for c in db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id.in_(liq_ids)).all():
+        costos_map[c.liquidacion_id].append(c)
+
+    facturas_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
+    for f in db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id.in_(liq_ids)).all():
+        facturas_map[f.liquidacion_id].append(f)
+
+    mandatos_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
+    for m in (
+        db.query(LiquidacionMandato)
+        .options(
+            selectinload(LiquidacionMandato.lineas),
+            selectinload(LiquidacionMandato.inversionista).selectinload(ProyectoInversionista.cliente),
+        )
+        .filter(LiquidacionMandato.liquidacion_id.in_(liq_ids))
+        .all()
+    ):
+        mandatos_map[m.liquidacion_id].append(m)
 
     proyectos: dict[int, dict] = {}
     for liq in liquidaciones:
@@ -552,16 +579,17 @@ def vista_por_proyecto(
                 "liquidaciones": [],
             }
 
-        mandatos_ingresos = [m for m in liq.mandatos if m.tipo == "ingresos"]
-        mandatos_costos = [m for m in liq.mandatos if m.tipo == "costos"]
+        liq_mandatos = mandatos_map[liq.id]
+        mandatos_ingresos = [m for m in liq_mandatos if m.tipo == "ingresos"]
+        mandatos_costos = [m for m in liq_mandatos if m.tipo == "costos"]
 
         # Totales del proyecto para el período
         total_ingresos = sum(float(m.total_ingresos_cop or 0) for m in mandatos_ingresos)
         total_costos = sum(float(m.total_costos_cop or 0) for m in mandatos_costos)
-        total_facturas = sum(float(f.valor_cop) for f in liq.facturas)
+        total_facturas = sum(float(f.valor_cop) for f in facturas_map[liq.id])
 
         # Construir filas por inversionista
-        inversionistas_ids = {m.inversionista_id for m in liq.mandatos if m.inversionista_id}
+        inversionistas_ids = {m.inversionista_id for m in liq_mandatos if m.inversionista_id}
         inversionistas_rows = []
         for inv_id in inversionistas_ids:
             inv_mandatos_ing = [m for m in mandatos_ingresos if m.inversionista_id == inv_id]
@@ -592,8 +620,8 @@ def vista_por_proyecto(
                 "total_facturas_cop": total_facturas,
                 "ingreso_neto_cop": float(liq.ingreso_neto_cop or 0),
             },
-            "costos_proyecto": [_serializar_costo(c) for c in liq.costos],
-            "facturas_servicio": [_serializar_factura(f) for f in liq.facturas],
+            "costos_proyecto": [_serializar_costo(c) for c in costos_map[liq.id]],
+            "facturas_servicio": [_serializar_factura(f) for f in facturas_map[liq.id]],
             "inversionistas": inversionistas_rows,
         })
 
@@ -619,8 +647,6 @@ def vista_por_inversionista(
         .options(
             selectinload(LiquidacionMandato.liquidacion)
                 .selectinload(Liquidacion.proyecto),
-            selectinload(LiquidacionMandato.liquidacion)
-                .selectinload(Liquidacion.facturas),
             selectinload(LiquidacionMandato.lineas),
             selectinload(LiquidacionMandato.inversionista)
                 .selectinload(ProyectoInversionista.cliente),
@@ -636,6 +662,12 @@ def vista_por_inversionista(
         q = q.join(ProyectoInversionista, isouter=True).filter(ProyectoInversionista.cliente_id == cliente_id)
 
     mandatos = q.all()
+
+    # Load facturas separately to avoid relationship uselist issue
+    liq_ids_inv = list({m.liquidacion_id for m in mandatos})
+    facturas_map_inv: dict[int, list] = {lid: [] for lid in liq_ids_inv}
+    for f in db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id.in_(liq_ids_inv)).all():
+        facturas_map_inv[f.liquidacion_id].append(f)
 
     inversionistas: dict[int, dict] = {}
     for m in mandatos:
@@ -665,7 +697,7 @@ def vista_por_inversionista(
                 "es_patrimonio_autonomo": inv.es_patrimonio_autonomo,
                 "mandatos_ingresos": [],
                 "mandatos_costos": [],
-                "facturas_servicio": [_serializar_factura(f) for f in liq.facturas],
+                "facturas_servicio": [_serializar_factura(f) for f in facturas_map_inv.get(liq.id, [])],
             }
 
         if m.tipo == "ingresos":

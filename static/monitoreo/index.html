@@ -3171,7 +3171,13 @@ function generateInforme(){
   if(userRole==="cliente")return;
   var range=getInfRange();
   if(!range){toast("⚠ Selecciona "+(infPeriodMode==="mes"?"el mes":"el rango de fechas"));return;}
-  if(!genProjects.length){toast("⚠ Cargando proyectos, espera un momento…");loadGenProjects();return;}
+  /* Si genProjects no está cargado, cargar primero y luego reintentar */
+  if(!genProjects.length){
+    toast("⏳ Cargando proyectos…");
+    loadGenProjects();
+    setTimeout(function(){ if(genProjects.length) generateInforme(); }, 2500);
+    return;
+  }
   // Reset
   _obsIdx=0;
   document.getElementById("inf-empty").style.display="none";
@@ -3202,18 +3208,64 @@ function generateInforme(){
   }else{
     var pname=(document.getElementById("inf-port")||{}).value||"";
     if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un cliente");return;}
+
+    /* ── Obtener proyectos del cliente ──────────────────────────────
+       Fuente 1: portPortfolios (requiere cliente_id configurado)
+       Fuente 2: PROJS_DETALLE filtrado por cliente_nombre (fallback)
+    ───────────────────────────────────────────────────────────────── */
     var portList=portPortfolios[pname]||[];
-    if(!portList.length){toast("⚠ Cliente sin proyectos");return;}
+
+    if(!portList.length && PROJS_DETALLE.length){
+      var detItems=PROJS_DETALLE.filter(function(p){
+        return p.cliente_nombre===pname && (p.sub_project||p.alias);
+      });
+      if(detItems.length){
+        portList=detItems.map(function(p){
+          return {
+            nombre: p.nombre,
+            sub_project: p.sub_project||p.alias,
+            nombre_display: p.nombre,
+            nombre_bitacora: "",
+            nombre_comercial: p.nombre
+          };
+        });
+      }
+    }
+
+    if(!portList.length){
+      document.getElementById("inf-loading").style.display="none";
+      document.getElementById("inf-empty").style.display="block";
+      toast("⚠ Este cliente no tiene proyectos con alias de monitoreo configurado");
+      return;
+    }
+
     var cfgs=[];
     portList.forEach(function(item){
       var sp=typeof item==="object"?(item.sub_project||""):"";
       var nombre=typeof item==="object"?(item.nombre||item.nombre_display||""):String(item);
       if(!sp)return;
-      cfgs.push({sub_project:sp,nombre_clientes:nombre,nombre_display:item.nombre_display||nombre,nombre_bitacora:item.nombre_bitacora||"",nombre_comercial:item.nombre_comercial||nombre});
+      /* Enriquecer con datos de genProjects (municipio, potencia, etc.) */
+      var gp=genProjects.find(function(p){return p.sub_project===sp;});
+      cfgs.push({
+        sub_project: sp,
+        nombre_clientes: nombre,
+        nombre_display: item.nombre_display||nombre,
+        nombre_bitacora: item.nombre_bitacora||"",
+        nombre_comercial: item.nombre_comercial||nombre,
+        municipio: (gp&&gp.municipio)||"—",
+        departamento: (gp&&gp.departamento)||"—",
+        potencia_instalada_kwp: (gp&&gp.potencia_instalada_kwp)||null,
+        project_id_solenium: (gp&&gp.project_id_solenium)||""
+      });
     });
-    if(!cfgs.length){toast("⚠ Proyectos del cliente no encontrados");return;}
+    if(!cfgs.length){
+      document.getElementById("inf-loading").style.display="none";
+      document.getElementById("inf-empty").style.display="block";
+      toast("⚠ Proyectos del cliente no tienen alias de monitoreo configurado");
+      return;
+    }
     var results=[],done=0;
-    document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyectos…";
+    document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyecto"+(cfgs.length!==1?"s":"")+" de "+pname+"…";
     cfgs.forEach(function(c,i){
       setTimeout(function(){
         document.getElementById("inf-loading-sub").textContent="("+(done+1)+"/"+cfgs.length+") "+(c.nombre_clientes||c.nombre_display);

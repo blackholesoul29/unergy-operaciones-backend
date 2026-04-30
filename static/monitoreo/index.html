@@ -18,7 +18,8 @@ select,input,textarea{font-family:'Sora',sans-serif;color:var(--cr)}
 select option{background:var(--bg)}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#1a1025}::-webkit-scrollbar-thumb{background:var(--br);border-radius:3px}
 input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
-#topbar{position:sticky;top:0;z-index:200;background:linear-gradient(180deg,#1e1430 0%,#160f20 100%);border-bottom:1px solid var(--br);box-shadow:0 2px 20px #00000050;display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:58px;gap:10px}
+#topbar{position:sticky;top:0;z-index:200;background:linear-gradient(180deg,#1e1430 0%,#160f20 100%);border-bottom:1px solid var(--br);box-shadow:0 2px 20px #00000050;display:flex;align-items:center;justify-content:space-between;padding:0 18px;min-height:58px;gap:10px;flex-wrap:wrap}
+.tabs{flex-wrap:wrap!important;height:auto!important}
 .logo{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--pu),var(--ye));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 10px #915BD850}
 .logo-brand{font-size:15px;font-weight:800;color:var(--ye);line-height:1;letter-spacing:-.2px}
@@ -428,6 +429,7 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <div id="frow">
     <input class="fi" id="fsearch" placeholder="🔍  Buscar ID, proyecto, código…"/>
+    <select class="fi fsel" id="fclient"><option value="">Todos los clientes</option></select>
     <select class="fi fsel" id="fproject"><option value="">Todos los proyectos</option></select>
     <select class="fi fsel" id="fcat"><option value="">Todas las categorías</option></select>
     <select class="fi fimp" id="fimp"><option value="">Todos los impactos</option><option value="1">📡 Medición</option><option value="2">⚡ Generación</option><option value="3">🌩️ Evento Adverso</option><option value="4">🔧 Desgaste</option><option value="5">🏗️ Civil</option><option value="6">🦺 HSE</option><option value="7">🔋 BESS</option><option value="8">📋 Administrativo</option><option value="9">🔌 Sin Suministro</option></select>
@@ -615,16 +617,16 @@ body.client-mode #tab-inf{display:none!important}
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
           <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Principal</div><div style="font-size:13px;color:var(--cr)" id="pce-principal">—</div></div>
           <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Liquidación</div><div style="font-size:13px;color:var(--cr)" id="pce-liquidacion">—</div></div>
-          <div><div style="font-size:10px;font-weight:700;color:var(--pu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔔 Monitoreo (notif. fallas)</div><div style="font-size:13px;color:var(--cr)" id="pce-monitoreo">—</div></div>
-          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Soporte</div><div style="font-size:13px;color:var(--cr)" id="pce-soporte">—</div></div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--pu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔔 Operación (notif. fallas)</div><div style="font-size:13px;color:var(--cr)" id="pce-monitoreo">—</div></div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Atención al Cliente</div><div style="font-size:13px;color:var(--cr)" id="pce-soporte">—</div></div>
         </div>
       </div>
       <div style="display:none;padding:18px 20px;border-top:1px solid var(--br)" id="port-correos-form">
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px">
           <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Principal</label><input class="fi" type="email" id="pcf-principal" placeholder="correo@empresa.com" style="font-size:12px"/></div>
           <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Liquidación</label><input class="fi" type="email" id="pcf-liquidacion" placeholder="liquidacion@empresa.com" style="font-size:12px"/></div>
-          <div><label style="font-size:11px;font-weight:700;color:var(--pu);display:block;margin-bottom:4px">🔔 Correo Monitoreo (notif. fallas)</label><input class="fi" type="email" id="pcf-monitoreo" placeholder="monitoreo@empresa.com" style="font-size:12px"/></div>
-          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Soporte</label><input class="fi" type="email" id="pcf-soporte" placeholder="soporte@empresa.com" style="font-size:12px"/></div>
+          <div><label style="font-size:11px;font-weight:700;color:var(--pu);display:block;margin-bottom:4px">🔔 Correo Operación (notif. fallas)</label><input class="fi" type="email" id="pcf-monitoreo" placeholder="operacion@empresa.com" style="font-size:12px"/></div>
+          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Atención al Cliente</label><input class="fi" type="email" id="pcf-soporte" placeholder="atencion@empresa.com" style="font-size:12px"/></div>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-pu btn-sm" onclick="savePortCorreos()">💾 Guardar correos</button>
@@ -794,8 +796,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function loadProyectosFromDB() {
   _apiFetch('GET', '/api/v1/monitoreo/proyectos').then(function(res) {
-    if (!res || !Array.isArray(res.proyectos) || !res.proyectos.length) return;
-    PROJS = res.proyectos;
+    if (!res) return;
+    if (Array.isArray(res.proyectos) && res.proyectos.length) PROJS = res.proyectos;
+    if (Array.isArray(res.proyectos_detalle) && res.proyectos_detalle.length) PROJS_DETALLE = res.proyectos_detalle;
     renderSelects();
     toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
   }).catch(function(e) {
@@ -878,35 +881,40 @@ function serverDel(id) {
     }).catch(function(e){setSync("err","Error");toast("⚠ No se pudo eliminar: "+e.message);});
 }
 
-/* OVERRIDE serverSave — usa POST/PATCH /api/v1/fallas */
+/* OVERRIDE serverSave — usa /api/v1/monitoreo/fallas/save (acepta nombres, no IDs) */
 function serverSave(f, cb) {
   setSync("spin","Guardando…");
-  var stCod=_ST_REV[f.st]||"abierta";
-  var eId=_catIds.estados[stCod];
-  var tId=_catIds.tipos[f.code];
-  var pId=_catIds.prioridades[f.prio||"media"];
-  var prId=_catIds.proyectos[f.proj];
-  if(!eId||!tId||!pId||!prId){
-    toast("⚠ Proyecto/tipo/estado/prioridad no encontrados en BD");
-    setSync("err","Error");if(cb)cb(false);return;
-  }
-  if(!f._db_id) {
-    _apiFetch('POST','/api/v1/fallas',{
-      proyecto_id:prId,tipo_id:tId,estado_id:eId,prioridad_id:pId,
-      descripcion:f.desc||"Sin descripción",
-      fecha_identificacion:f.date||new Date().toISOString().slice(0,10)
-    }).then(function(r){
-      f._db_id=r.id;f.id=r.codigo_interno;
-      var idx=faults.findIndex(function(x){return x.id===f.id;});
-      if(idx>=0)faults[idx]=f;else faults.unshift(f);
-      setSync("ok","Guardado ✓");renderAll();if(cb)cb(true);
-    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
-  } else {
-    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,{
-      tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc
-    }).then(function(){setSync("ok","Guardado ✓");if(cb)cb(true);})
-      .catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
-  }
+  var fdd=fd(f.code)||{};
+  var cleanRes=(f.res&&f.res.trim()&&f.res.length>3&&!/^\d/.test(f.res)&&!f.res.includes("GMT")&&!f.res.includes("\"")?f.res:"");
+  var payload={
+    id: f.id||"",
+    project: f.proj||"",
+    faultCode: f.code||"",
+    faultLabel: fdd.label||f.faultLabel||f.code||"",
+    categoryId: fdd.catId||f.catNum||f._categoria_id||"1",
+    status: f.st||"activa",
+    identDate: f.date||new Date().toISOString().slice(0,10),
+    occTime: f.occ||"",
+    endTime: f.endDT||"",
+    desc: f.desc||f.faultLabel||"Sin descripción",
+    follwUp: "",
+    resType: cleanRes,
+    driUe: f.driveUrl||f.driUe||"",
+    driUes: f.driveUrls||f.driUes||[],
+    centinela: f.centinela||"",
+    prioridad: (f.prio||"media").toLowerCase(),
+    notify: f.notify===true
+  };
+  _apiFetch('POST','/api/v1/monitoreo/fallas/save',payload).then(function(r){
+    setSync(r&&r.ok?"ok":"err",r&&r.ok?"Guardado ✓":"Error al guardar");
+    if(r&&r.fault){
+      var saved=r.fault;
+      var idx=faults.findIndex(function(x){return x.id===f.id||x.id===saved.id;});
+      if(idx>=0){faults[idx]=saved;}else{faults.unshift(saved);}
+      f._db_id=saved._db_id;f.id=saved.id;
+    }
+    renderAll();if(cb)cb(!!(r&&r.ok));
+  }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
 }
 /* ════════════════════════════════════════════════════════════════ */
 
@@ -1039,6 +1047,7 @@ var ALL_F=[];
 function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(f){ALL_F.push({code:f.c,label:f.l,catId:c.id,catLbl:c.lbl,catCol:c.col,catIco:c.ico});});});}
 rebuildF();
 var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
+var PROJS_DETALLE=[]; /* [{id,nombre,alias,cliente_id,cliente_nombre}] */
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",
@@ -1445,15 +1454,21 @@ function renderPills(){
 }
 function getFiltered(){
   var q=(document.getElementById("fsearch").value||"").toLowerCase();
+  var fcliEl=document.getElementById("fclient");
+  var fcli=fcliEl?fcliEl.value||"":" ";fcli=fcli.trim();
   var fp=document.getElementById("fproject").value||"";
   var fc=document.getElementById("fcat").value||"";
   var fim=document.getElementById("fimp")?document.getElementById("fimp").value||"":" ";
   var dfrom=document.getElementById("fdate-from")?document.getElementById("fdate-from").value||"":" ";
   var dto=document.getElementById("fdate-to")?document.getElementById("fdate-to").value||"":" ";
   fim=fim.trim();dfrom=dfrom.trim();dto=dto.trim();
+  /* mapa proyecto → cliente (construido de PROJS_DETALLE) */
+  var projClientMap={};
+  PROJS_DETALLE.forEach(function(p){projClientMap[p.nombre]=p.cliente_nombre||"";});
   return faults.filter(function(f){
     if(userRole==="cliente"&&clientProjects.length>0&&clientProjects.indexOf(f.proj)<0)return false;
     if(filterSt!=="all"&&f.st!==filterSt)return false;
+    if(fcli&&projClientMap[f.proj]!==fcli)return false;
     if(fp&&f.proj!==fp)return false;
     if(fc){var di=fd(f.code);var fCatId=di?di.catId:f.catNum;if(!fCatId||fCatId!==fc)return false;}
     if(fim){var m2=String(f.code||"").match(/^(\d+)/);var fImpId=(m2&&m2[1])||f.catNum||"";if(!fImpId||fImpId!==fim)return false;}
@@ -1522,8 +1537,29 @@ function renderBoard(){
 }
 function renderSelects(){
   var visProjs=(userRole==="cliente"&&clientProjects.length>0)?clientProjects:PROJS;
+
+  /* ── Selector de cliente ── */
+  var fclientEl=document.getElementById("fclient");
+  if(fclientEl){
+    var selCliente=fclientEl.value;
+    var clienteNames=[];
+    PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre&&clienteNames.indexOf(p.cliente_nombre)<0)clienteNames.push(p.cliente_nombre);});
+    clienteNames.sort();
+    var oc='<option value="">Todos los clientes</option>';
+    clienteNames.forEach(function(n){oc+='<option value="'+esc(n)+'">'+esc(n)+'</option>';});
+    fclientEl.innerHTML=oc;
+    fclientEl.value=selCliente;
+  }
+
+  /* ── Selector de proyecto (respeta filtro de cliente activo) ── */
+  var activeCliente=fclientEl?fclientEl.value:"";
+  var filteredProjs=visProjs;
+  if(activeCliente&&PROJS_DETALLE.length){
+    var clienteProjNames=PROJS_DETALLE.filter(function(p){return p.cliente_nombre===activeCliente;}).map(function(p){return p.nombre;});
+    filteredProjs=visProjs.filter(function(p){return clienteProjNames.indexOf(p)>=0;});
+  }
   var o='<option value="">Todos los proyectos</option>';
-  visProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
+  filteredProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
   ["fproject","chart-proj"].forEach(function(id){var e=document.getElementById(id);if(e){var v=e.value;e.innerHTML=o;e.value=v;}});
 }
 /* ══ KPIs ══ */
@@ -2357,20 +2393,18 @@ function getPortDateRange() {
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
   if (!portName) { toast("⚠ Selecciona un cliente"); return; }
-  var projNames = portPortfolios[portName];
-  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos en este cliente"); return; }
-  var allSysProjs = genProjects.length > 0 ? genProjects : [];
+  var projItems = portPortfolios[portName];
+  if (!projItems || !projItems.length) { toast("⚠ Sin proyectos en este cliente"); return; }
   var projsToLoad = [];
-  projNames.forEach(function(nc){
-    nc = nc.trim();
-    var found = allSysProjs.find(function(p){ return (p.nombre_clientes||"").trim() === nc || (p.nombre_display||"").trim() === nc || (p.nombre_bitacora||"").trim() === nc || (p.nombre_comercial||"").trim() === nc; });
-    if (found) {
-      if (userRole === "cliente" && clientProjects.length > 0) {
-        var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === (found.nombre_clientes||"").trim().toLowerCase() || cp === (found.nombre_bitacora||"").trim().toLowerCase() || cp === (found.nombre_display||"").trim().toLowerCase() || cp === (found.sub_project||"").trim().toLowerCase(); });
-        if (!has) return;
-      }
-      projsToLoad.push(found);
+  projItems.forEach(function(item){
+    var sp = typeof item === "object" ? (item.sub_project||"") : "";
+    var nombre = typeof item === "object" ? (item.nombre||item.nombre_display||"") : String(item);
+    if (!sp) return; // skip projects without a monitoring alias
+    if (userRole === "cliente" && clientProjects.length > 0) {
+      var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === nombre.trim().toLowerCase() || cp === sp.trim().toLowerCase(); });
+      if (!has) return;
     }
+    projsToLoad.push({sub_project: sp, nombre_clientes: nombre, nombre_display: item.nombre_display||nombre, nombre_bitacora: item.nombre_bitacora||"", nombre_comercial: item.nombre_comercial||nombre});
   });
   if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este cliente"); return; }
   portCurrentPortfolio = portName;
@@ -2602,6 +2636,7 @@ document.addEventListener("DOMContentLoaded",function(){
     if (Object.keys(portData).length) { var daySet2={}; Object.keys(portData).forEach(function(sp){ portData[sp].data.forEach(function(d){ daySet2[d.date]=true; }); }); var allDays2=Object.keys(daySet2).sort(); var sortedKeys2=Object.keys(portData).sort(function(a,b){ return portData[b].totalKwh-portData[a].totalKwh; }); var projDayMap2={}; sortedKeys2.forEach(function(sp){ projDayMap2[sp]={}; portData[sp].data.forEach(function(d){ if(!projDayMap2[sp][d.date])projDayMap2[sp][d.date]=0; projDayMap2[sp][d.date]+=d.kwh; }); }); renderPortChart(allDays2,sortedKeys2,projDayMap2); }
   });
   var _pl = document.getElementById("port-load"); if (_pl) _pl.addEventListener("click", loadPortfolio);
+  var _ps = document.getElementById("port-sel"); if (_ps) _ps.addEventListener("change", function(){ if(this.value) loadPortCorreos(this.value); });
   var _gl=document.getElementById("gen-load");if(_gl)_gl.addEventListener("click",loadGeneracion);
   // ── NUEVO: listener comparación ──
   var _gcl=document.getElementById("gen-compare-load");if(_gcl)_gcl.addEventListener("click",loadGenCompare);
@@ -2612,6 +2647,7 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   ["all","activa","revision","programada","terminada"].forEach(function(k){document.getElementById("pill-"+k).addEventListener("click",function(){filterSt=k;renderPills();renderBoard();});});
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});
+  var _fcli=document.getElementById("fclient");if(_fcli)_fcli.addEventListener("change",function(){renderSelects();renderBoard();});
   document.getElementById("fproject").addEventListener("change",function(){renderBoard();});
   document.getElementById("fcat").addEventListener("change",function(){renderBoard();});
   document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderCharts();});
@@ -3087,12 +3123,11 @@ function generateInforme(){
     var portList=portPortfolios[pname]||[];
     if(!portList.length){toast("⚠ Cliente sin proyectos");return;}
     var cfgs=[];
-    portList.forEach(function(name){
-      var c=genProjects.find(function(p){
-        var nl=name.trim().toLowerCase();
-        return nl===(p.nombre_clientes||"").trim().toLowerCase()||nl===(p.nombre_display||"").trim().toLowerCase()||nl===(p.nombre_bitacora||"").trim().toLowerCase()||nl===(p.nombre_comercial||"").trim().toLowerCase();
-      });
-      if(c)cfgs.push(c);
+    portList.forEach(function(item){
+      var sp=typeof item==="object"?(item.sub_project||""):"";
+      var nombre=typeof item==="object"?(item.nombre||item.nombre_display||""):String(item);
+      if(!sp)return;
+      cfgs.push({sub_project:sp,nombre_clientes:nombre,nombre_display:item.nombre_display||nombre,nombre_bitacora:item.nombre_bitacora||"",nombre_comercial:item.nombre_comercial||nombre});
     });
     if(!cfgs.length){toast("⚠ Proyectos del cliente no encontrados");return;}
     var results=[],done=0;

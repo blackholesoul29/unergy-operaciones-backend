@@ -379,8 +379,12 @@ def get_proyectos_monitoreo(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
+    """Devuelve proyectos con servicio de operación activo, con cliente asociado."""
+    from app.models.clientes import Cliente as _Cliente
     proyectos = (
         db.query(Proyecto)
+        .filter(Proyecto.srv_operacion == True)  # noqa: E712
+        .options(selectinload(Proyecto.cliente))
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
@@ -391,6 +395,8 @@ def get_proyectos_monitoreo(
                 "id": p.id,
                 "nombre": p.nombre_comercial,
                 "alias": p.alias_monitoreo or "",
+                "cliente_id": p.cliente_id,
+                "cliente_nombre": p.cliente.razon_social_nombre if p.cliente else "",
             }
             for p in proyectos
         ],
@@ -641,6 +647,7 @@ def _action_get_projects(db: Session) -> dict:
         db.query(Proyecto)
         .filter(
             or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
+            Proyecto.srv_operacion == True,  # noqa: E712
             Proyecto.estado == "en_operacion",
         )
         .order_by(Proyecto.nombre_comercial)
@@ -667,6 +674,7 @@ def _action_get_projects(db: Session) -> dict:
 
 
 def _action_get_portfolios(db: Session) -> dict:
+    """Clientes con al menos un proyecto de operación activo (srv_operacion=True)."""
     from app.models.clientes import Cliente
     clientes = (
         db.query(Cliente)
@@ -676,13 +684,19 @@ def _action_get_portfolios(db: Session) -> dict:
     )
     portfolios: dict = {}
     for c in clientes:
-        names = [
-            p.nombre_clientes or p.nombre_comercial
+        projs = [
+            {
+                "nombre": p.nombre_clientes or p.nombre_comercial,
+                "sub_project": p.sub_project or p.alias_monitoreo or "",
+                "nombre_display": p.nombre_clientes or p.nombre_bitacora or p.nombre_comercial,
+                "nombre_bitacora": p.nombre_bitacora or "",
+                "nombre_comercial": p.nombre_comercial or "",
+            }
             for p in c.proyectos
-            if p.estado == "en_operacion"
+            if p.srv_operacion and p.estado == "en_operacion"
         ]
-        if names:
-            portfolios[c.razon_social_nombre] = names
+        if projs:
+            portfolios[c.razon_social_nombre] = projs
     return {"ok": True, "portfolios": portfolios}
 
 

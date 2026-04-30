@@ -455,7 +455,7 @@ body.client-mode #tab-inf{display:none!important}
 <div id="toast"></div>
 <div id="lb"><img id="lb-img" src="" alt=""/></div>
 <!-- ══ GEN PANEL — outside #lb, inside #app flow ══ -->
-<div id="gen-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
+<div id="gen-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
   <div id="gen-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
     <div class="kpi"><div class="kpi-ico">☀️</div><div class="kpi-val" id="gkv-hoy">—</div><div class="kpi-lbl">Generación Ayer</div><div class="kpi-sub" id="gks-hoy">kWh generados ayer</div></div>
     <div class="kpi kgr"><div class="kpi-ico">📊</div><div class="kpi-val" id="gkv-pct">—</div><div class="kpi-lbl">% vs P90 Mes</div><div class="kpi-sub" id="gks-pct">—</div></div>
@@ -524,7 +524,7 @@ body.client-mode #tab-inf{display:none!important}
   </div>
 </div>
 <!-- ══ PORTFOLIO PANEL ══ -->
-<div id="port-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
+<div id="port-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
   <!-- Header & filters -->
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
     <div>
@@ -633,7 +633,7 @@ body.client-mode #tab-inf{display:none!important}
   </div>
 </div>
 <!-- ══ GESTIÓN PANEL ══ -->
-<div id="gest-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
+<div id="gest-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
     <div>
       <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Gestión de Proyectos</div>
@@ -658,7 +658,7 @@ body.client-mode #tab-inf{display:none!important}
   </div>
 </div>
 <!-- ══ INFORME PANEL ══ -->
-<div id="inf-panel" style="display:none;max-width:1100px;margin:0 auto;padding:0 16px 90px">
+<div id="inf-panel" style="display:none;max-width:1100px;margin:0 auto;padding:18px 16px 90px">
   <!-- Contador de días entrega FMO -->
   <div id="fmo-deadline-bar" style="display:none;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:9px 16px;margin-bottom:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu)">
@@ -800,19 +800,45 @@ function loadProyectosFromDB() {
     /* Clientes incluidos en la misma respuesta — sin llamada extra ni race condition */
     if (Array.isArray(res.clientes) && res.clientes.length) {
       _allClientes = res.clientes;
-      /* Poblar #inf-port (selector de cliente en la pestaña Informe) */
-      var infPort = document.getElementById('inf-port');
-      if (infPort) {
-        var h = '<option value="">Selecciona cliente…</option>';
-        res.clientes.forEach(function(c){ h += '<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>'; });
-        infPort.innerHTML = h;
-      }
+      /* Poblar selectores de cliente */
+      populateClienteSelects();
     }
     renderSelects();
     toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
   }).catch(function(e) {
     console.warn('[Bridge] proyectos no disponibles desde BD:', e);
   });
+}
+
+/* Pobla #port-sel, #inf-port y contribuye a #fclient via _allClientes */
+function populateClienteSelects() {
+  /* Unión de clientes: portPortfolios + _allClientes */
+  var portNames = Object.keys(portPortfolios);
+  var allNames = _allClientes.map(function(c){ return c.nombre; });
+  /* Merge: portPortfolios first (have generation data), then rest */
+  var merged = portNames.slice();
+  allNames.forEach(function(n){ if(merged.indexOf(n) < 0) merged.push(n); });
+  merged.sort();
+
+  /* #port-sel (tab Clientes) */
+  var portSel = document.getElementById('port-sel');
+  if (portSel) {
+    var saved = portSel.value;
+    var h = '<option value="">Selecciona cliente…</option>';
+    merged.forEach(function(n){ h += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
+    portSel.innerHTML = h;
+    if (saved) portSel.value = saved;
+  }
+
+  /* #inf-port (tab Informe → Por Cliente) */
+  var infPort = document.getElementById('inf-port');
+  if (infPort) {
+    var saved2 = infPort.value;
+    var h2 = '<option value="">Selecciona cliente…</option>';
+    merged.forEach(function(n){ h2 += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
+    infPort.innerHTML = h2;
+    if (saved2) infPort.value = saved2;
+  }
 }
 
 /* ── mapeos de estado ── */
@@ -1062,19 +1088,14 @@ function loadClientesForFilters(){
   _apiFetch('GET','/api/v1/monitoreo/clientes').then(function(r){
     if(!r||!r.clientes)return;
     _allClientes=r.clientes;
-    /* Poblar #fclient directamente (renderSelects también lo hace vía _allClientes) */
+    /* Actualizar todos los selectores de cliente */
+    populateClienteSelects();
+    /* Actualizar #fclient via renderSelects (usa _allClientes) */
     var saved='';
     var fclientEl=document.getElementById('fclient');
     if(fclientEl){saved=fclientEl.value;}
     renderSelects();
     if(fclientEl&&saved)fclientEl.value=saved;
-    /* Poblar #inf-port siempre con la lista completa de clientes */
-    var infPort=document.getElementById('inf-port');
-    if(infPort){
-      var h='<option value="">Selecciona cliente…</option>';
-      r.clientes.forEach(function(c){h+='<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>';});
-      infPort.innerHTML=h;
-    }
   }).catch(function(e){console.warn('[loadClientesForFilters]',e);});
 }
 var RESOLS=[
@@ -2416,25 +2437,13 @@ var portColorPalette = [
 ];
 function loadPortfolios() {
   apiGet({action:"getPortfolios"}, 10000).then(function(r){
-    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); loadClientesForFilters(); return; }
+    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); populateClienteSelects(); return; }
     portPortfolios = r.portfolios || {};
-    /* Poblar port-sel (portafolio/generación) */
-    var sel = document.getElementById("port-sel");
-    if(sel){
-      sel.innerHTML = '<option value="">Selecciona cliente…</option>';
-      Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
-    }
-    /* Poblar #inf-port con portPortfolios; si vacío, loadClientesForFilters cubrirá */
-    var infPort=document.getElementById("inf-port");
-    if(infPort){
-      infPort.innerHTML='<option value="">Selecciona cliente…</option>';
-      Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});
-    }
-    /* Poblar también #fclient con los clientes de portPortfolios */
+    /* Poblar todos los selectores de cliente (port-sel, inf-port) */
+    populateClienteSelects();
+    /* Contribuir a #fclient con clientes de portPortfolios */
     renderSelects();
-    /* Siempre cargar todos los clientes para completar los selectores */
-    loadClientesForFilters();
-  }).catch(function(e){ console.error("loadPortfolios:", e); loadClientesForFilters(); });
+  }).catch(function(e){ console.error("loadPortfolios:", e); populateClienteSelects(); });
 }
 function getPortDateRange() {
   var now = new Date();
@@ -2448,13 +2457,36 @@ function getPortDateRange() {
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
   if (!portName) { toast("⚠ Selecciona un cliente"); return; }
-  var projItems = portPortfolios[portName];
-  if (!projItems || !projItems.length) { toast("⚠ Sin proyectos en este cliente"); return; }
+
+  /* Fuente 1: portPortfolios (clientes con proyectos enlazados vía legado) */
+  var projItems = portPortfolios[portName] || [];
+
+  /* Fuente 2 (fallback): PROJS_DETALLE filtrado por cliente_nombre */
+  if (!projItems.length && PROJS_DETALLE.length) {
+    var detalleItems = PROJS_DETALLE.filter(function(p){ return p.cliente_nombre === portName && (p.sub_project || p.alias); });
+    if (detalleItems.length) {
+      projItems = detalleItems.map(function(p){
+        return {
+          nombre: p.nombre,
+          sub_project: p.sub_project || p.alias,
+          nombre_display: p.nombre,
+          nombre_bitacora: "",
+          nombre_comercial: p.nombre
+        };
+      });
+    }
+  }
+
+  if (!projItems.length) {
+    toast("⚠ Este cliente no tiene proyectos con alias de monitoreo configurado");
+    return;
+  }
+
   var projsToLoad = [];
   projItems.forEach(function(item){
     var sp = typeof item === "object" ? (item.sub_project||"") : "";
     var nombre = typeof item === "object" ? (item.nombre||item.nombre_display||"") : String(item);
-    if (!sp) return; // skip projects without a monitoring alias
+    if (!sp) return; // sin alias de monitoreo no se puede consultar generación
     if (userRole === "cliente" && clientProjects.length > 0) {
       var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === nombre.trim().toLowerCase() || cp === sp.trim().toLowerCase(); });
       if (!has) return;
@@ -3224,7 +3256,11 @@ document.querySelectorAll(".inf-mode-btn").forEach(function(btn){
     var ps=document.getElementById("inf-proj"),pp=document.getElementById("inf-port");
     if(ps)ps.style.display=infMode==="proyecto"?"":"none";
     if(pp)pp.style.display=infMode==="portafolio"?"":"none";
-    if(infMode==="portafolio"&&!Object.keys(portPortfolios).length)loadPortfolios();
+    if(infMode==="portafolio"){
+      /* Siempre asegurar que #inf-port esté poblado */
+      populateClienteSelects();
+      if(!Object.keys(portPortfolios).length)loadPortfolios();
+    }
   });
 });
 document.querySelectorAll(".inf-period-btn").forEach(function(btn){

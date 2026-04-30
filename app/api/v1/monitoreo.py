@@ -401,6 +401,7 @@ def get_proyectos_monitoreo(
                 "id": p.id,
                 "nombre": p.nombre_comercial,
                 "alias": p.alias_monitoreo or "",
+                "sub_project": p.sub_project or p.alias_monitoreo or "",
                 "cliente_id": p.cliente_id,
                 "cliente_nombre": p.cliente.razon_social_nombre if p.cliente else "",
             }

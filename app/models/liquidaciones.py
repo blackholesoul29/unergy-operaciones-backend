@@ -126,10 +126,10 @@ class Liquidacion(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="liquidaciones")
     generado_por: Mapped["Usuario"] = relationship("Usuario", back_populates="liquidaciones")
-    costos: Mapped[list] = relationship("LiquidacionCosto", back_populates="liquidacion")
-    xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="liquidacion")
-    mandatos: Mapped[list] = relationship("LiquidacionMandato", back_populates="liquidacion")
-    facturas: Mapped[list] = relationship("LiquidacionFactura", back_populates="liquidacion")
+    costos: Mapped[list] = relationship("LiquidacionCosto", back_populates="liquidacion", uselist=True)
+    xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="liquidacion", uselist=True)
+    mandatos: Mapped[list] = relationship("LiquidacionMandato", back_populates="liquidacion", uselist=True)
+    facturas: Mapped[list] = relationship("LiquidacionFactura", back_populates="liquidacion", uselist=True)
 
 
 class LiquidacionCosto(Base):
@@ -196,7 +196,7 @@ class LiquidacionMandato(Base):
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="mandatos")
     inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
-    lineas: Mapped[list] = relationship("LiquidacionMandatoLinea", back_populates="mandato")
+    lineas: Mapped[list] = relationship("LiquidacionMandatoLinea", back_populates="mandato", uselist=True)
 
 
 class LiquidacionMandatoLinea(Base):

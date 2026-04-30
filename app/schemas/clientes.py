@@ -72,22 +72,22 @@ class ClienteDocumentoOut(ClienteDocumentoCreate):
 class ClienteBase(BaseModel):
     id: int
     razon_social_nombre: str
-    nit_cedula: Optional[str]
-    tipo_persona: Optional[str]
-    representante_legal: Optional[str]
-    correo_electronico: Optional[str]
-    correo_liquidacion: Optional[str]
-    correo_monitoreo: Optional[str]
-    correo_soporte: Optional[str]
-    telefono_contacto: Optional[str]
-    direccion: Optional[str]
-    ciudad: Optional[str]
-    iva_pct: Optional[float]
-    retencion_pct: Optional[float]
-    reteica_pct: Optional[float]
-    rut_url: Optional[str]
-    created_at: datetime
-    updated_at: datetime
+    nit_cedula: Optional[str] = None
+    tipo_persona: Optional[str] = None
+    representante_legal: Optional[str] = None
+    correo_electronico: Optional[str] = None
+    correo_liquidacion: Optional[str] = None
+    correo_monitoreo: Optional[str] = None
+    correo_soporte: Optional[str] = None
+    telefono_contacto: Optional[str] = None
+    direccion: Optional[str] = None
+    ciudad: Optional[str] = None
+    iva_pct: Optional[float] = None
+    retencion_pct: Optional[float] = None
+    reteica_pct: Optional[float] = None
+    rut_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 

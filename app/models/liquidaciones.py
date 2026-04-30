@@ -31,6 +31,7 @@ class TipoCostoEnum(str, enum.Enum):
     polizas = "polizas"
     comercializacion_xm = "comercializacion_xm"
     servicios_publicos = "servicios_publicos"
+    cambio_equipos_medida = "cambio_equipos_medida"
     otro = "otro"
 
 
@@ -47,28 +48,39 @@ class EstadoMandatoEnum(str, enum.Enum):
 
 
 class TipoLineaMandatoEnum(str, enum.Enum):
+    # Ingresos — estructura simple (PPA / bolsa directa)
     ingreso_bruto = "ingreso_bruto"
     ajuste_xm = "ajuste_xm"
     ajuste_unergy = "ajuste_unergy"
     ajuste_comercializacion = "ajuste_comercializacion"
     intereses = "intereses"
     otro_ingreso = "otro_ingreso"
+    # Ingresos — estructura mercado (despacho XM)
+    despacho = "despacho"
+    ventas_en_bolsa = "ventas_en_bolsa"
+    compras_en_bolsa = "compras_en_bolsa"
+    redistribucion_ingresos = "redistribucion_ingresos"
+    # Costos operativos
     mantenimiento = "mantenimiento"
     arriendo = "arriendo"
     servicio_internet = "servicio_internet"
     poliza_cumplimiento = "poliza_cumplimiento"
     servicios_publicos_consumo = "servicios_publicos_consumo"
+    cambio_equipos_medida = "cambio_equipos_medida"
     seguro = "seguro"
     otro_costo = "otro_costo"
+    # Factura servicios
     comercializacion = "comercializacion"
     representacion = "representacion"
     cgm = "cgm"
     administracion = "administracion"
+    # Impuestos / retenciones
     iva = "iva"
     retencion_fuente = "retencion_fuente"
     reteica = "reteica"
     ica_opex = "ica_opex"
     otro_impuesto = "otro_impuesto"
+    # Totales
     porcentaje_participacion = "porcentaje_participacion"
     valor_a_pagar = "valor_a_pagar"
 
@@ -128,6 +140,7 @@ class LiquidacionCosto(Base):
     descripcion: Mapped[str] = mapped_column(String(500), nullable=False)
     proveedor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nro_soporte: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    soporte_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     valor_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -157,6 +170,7 @@ class LiquidacionMandato(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
+    inversionista_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyecto_inversionistas.id"), nullable=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoMandatoEnum, name="tipo_mandato_enum"), nullable=False)
     numero_mandato: Mapped[str | None] = mapped_column(String(50), nullable=True)
     consecutivo: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -180,6 +194,7 @@ class LiquidacionMandato(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="mandatos")
+    inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
     lineas: Mapped[list] = relationship("LiquidacionMandatoLinea", back_populates="mandato")
 
 
@@ -207,6 +222,8 @@ class LiquidacionFactura(Base):
     liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
     tipo_servicio: Mapped[str] = mapped_column(SAEnum(TipoFacturaServicioEnum, name="tipo_factura_servicio_enum"), nullable=False)
     numero_factura: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    nro_soporte: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    soporte_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     valor_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     fecha_emision: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_vencimiento: Mapped[date | None] = mapped_column(Date, nullable=True)

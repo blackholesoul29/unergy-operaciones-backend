@@ -18,6 +18,11 @@ def add_columns():
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
         "ALTER TABLE proyectos ALTER COLUMN cliente_id DROP NOT NULL",
+        # liquidaciones detalle
+        "ALTER TABLE liquidacion_mandatos ADD COLUMN IF NOT EXISTS inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL",
+        "ALTER TABLE liquidacion_costos ADD COLUMN IF NOT EXISTS soporte_url VARCHAR(1000)",
+        "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS nro_soporte VARCHAR(100)",
+        "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS soporte_url VARCHAR(1000)",
     ]
     for s in stmts:
         try:
@@ -27,8 +32,8 @@ def add_columns():
         except Exception as e:
             print(f"  WARN column migration skipped: {e}")
 
-    enum_vals = ("rut", "certificado_bancario", "camara_comercio")
-    for val in enum_vals:
+    enum_vals_cliente = ("rut", "certificado_bancario", "camara_comercio")
+    for val in enum_vals_cliente:
         try:
             with engine.connect() as conn:
                 conn.execute(text("COMMIT"))
@@ -36,6 +41,28 @@ def add_columns():
                 conn.execute(text("COMMIT"))
         except Exception as e:
             print(f"  WARN enum migration skipped: {e}")
+
+    enum_linea_vals = (
+        "despacho", "ventas_en_bolsa", "compras_en_bolsa",
+        "redistribucion_ingresos", "cambio_equipos_medida",
+    )
+    for val in enum_linea_vals:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("COMMIT"))
+                conn.execute(text(f"ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS '{val}'"))
+                conn.execute(text("COMMIT"))
+        except Exception as e:
+            print(f"  WARN enum tipo_linea_mandato_enum skipped: {e}")
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("COMMIT"))
+            conn.execute(text("ALTER TYPE tipo_costo_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida'"))
+            conn.execute(text("COMMIT"))
+    except Exception as e:
+        print(f"  WARN enum tipo_costo_enum skipped: {e}")
+
     print("Columns migrated.")
 
 

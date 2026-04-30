@@ -614,16 +614,14 @@ body.client-mode #tab-inf{display:none!important}
         <button class="btn btn-gh btn-sm" id="port-correos-edit-btn" onclick="togglePortCorreosEdit()">✏️ Editar</button>
       </div>
       <div style="padding:18px 20px" id="port-correos-body">
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
-          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Principal</div><div style="font-size:13px;color:var(--cr)" id="pce-principal">—</div></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
           <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Liquidación</div><div style="font-size:13px;color:var(--cr)" id="pce-liquidacion">—</div></div>
           <div><div style="font-size:10px;font-weight:700;color:var(--pu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔔 Operación (notif. fallas)</div><div style="font-size:13px;color:var(--cr)" id="pce-monitoreo">—</div></div>
           <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Atención al Cliente</div><div style="font-size:13px;color:var(--cr)" id="pce-soporte">—</div></div>
         </div>
       </div>
       <div style="display:none;padding:18px 20px;border-top:1px solid var(--br)" id="port-correos-form">
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px">
-          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Principal</label><input class="fi" type="email" id="pcf-principal" placeholder="correo@empresa.com" style="font-size:12px"/></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">
           <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Liquidación</label><input class="fi" type="email" id="pcf-liquidacion" placeholder="liquidacion@empresa.com" style="font-size:12px"/></div>
           <div><label style="font-size:11px;font-weight:700;color:var(--pu);display:block;margin-bottom:4px">🔔 Correo Operación (notif. fallas)</label><input class="fi" type="email" id="pcf-monitoreo" placeholder="operacion@empresa.com" style="font-size:12px"/></div>
           <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Atención al Cliente</label><input class="fi" type="email" id="pcf-soporte" placeholder="atencion@empresa.com" style="font-size:12px"/></div>
@@ -2493,7 +2491,6 @@ function loadPortCorreos(clienteName) {
     document.getElementById("pce-liquidacion").textContent = c.correo_liquidacion || "—";
     document.getElementById("pce-monitoreo").textContent = c.correo_monitoreo || "—";
     document.getElementById("pce-soporte").textContent = c.correo_soporte || "—";
-    document.getElementById("pcf-principal").value = c.correo_electronico || "";
     document.getElementById("pcf-liquidacion").value = c.correo_liquidacion || "";
     document.getElementById("pcf-monitoreo").value = c.correo_monitoreo || "";
     document.getElementById("pcf-soporte").value = c.correo_soporte || "";
@@ -2513,15 +2510,13 @@ function togglePortCorreosEdit() {
 function savePortCorreos() {
   if (!_portClienteId) { toast("⚠ Cliente no identificado"); return; }
   var payload = {
-    correo_electronico: document.getElementById("pcf-principal").value.trim(),
     correo_liquidacion: document.getElementById("pcf-liquidacion").value.trim(),
-    correo_monitoreo: document.getElementById("pcf-monitoreo").value.trim(),
-    correo_soporte: document.getElementById("pcf-soporte").value.trim(),
+    correo_monitoreo:   document.getElementById("pcf-monitoreo").value.trim(),
+    correo_soporte:     document.getElementById("pcf-soporte").value.trim(),
   };
   _apiFetch("PATCH", "/api/v1/monitoreo/clientes/" + _portClienteId + "/correos", payload)
   .then(function(r) {
     if (!r || !r.ok) { toast("⚠ Error al guardar correos"); return; }
-    document.getElementById("pce-principal").textContent = r.correo_electronico || "—";
     document.getElementById("pce-liquidacion").textContent = r.correo_liquidacion || "—";
     document.getElementById("pce-monitoreo").textContent = r.correo_monitoreo || "—";
     document.getElementById("pce-soporte").textContent = r.correo_soporte || "—";

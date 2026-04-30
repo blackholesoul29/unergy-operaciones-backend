@@ -267,11 +267,44 @@ def _run_tipo_migration() -> None:
         db.close()
 
 
+def _run_srv_operacion_sync() -> None:
+    """Marca srv_operacion=True para proyectos que:
+    - Tienen registro en servicio_operacion (relación explícita), o
+    - Son de tipo autoconsumo/minigranja y están en operación.
+    Idempotente — solo actualiza filas que aún tienen el campo en False/NULL.
+    """
+    stmts = [
+        # Proyectos con ServicioOperacion explícito
+        """
+        UPDATE proyectos SET srv_operacion = TRUE
+        WHERE id IN (SELECT proyecto_id FROM servicio_operacion)
+          AND (srv_operacion IS NULL OR srv_operacion = FALSE)
+        """,
+        # Proyectos autoconsumo y minigranja en operación
+        """
+        UPDATE proyectos SET srv_operacion = TRUE
+        WHERE estado = 'en_operacion'
+          AND tipo_proyecto IN ('autoconsumo', 'minigranja')
+          AND (srv_operacion IS NULL OR srv_operacion = FALSE)
+        """,
+    ]
+    for stmt in stmts:
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text(stmt))
+                conn.commit()
+                if result.rowcount:
+                    print(f"[srv_operacion sync] {result.rowcount} proyectos actualizados")
+        except Exception as e:
+            print(f"[srv_operacion sync] skipped: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _run_column_migrations()
     _run_catalog_seed()
     _run_tipo_migration()
+    _run_srv_operacion_sync()
     yield
 
 

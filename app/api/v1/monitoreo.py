@@ -379,11 +379,13 @@ def get_proyectos_monitoreo(
     db: Session = Depends(get_db),
     _: Usuario = Depends(get_current_user),
 ):
-    """Devuelve proyectos con servicio de operación activo, con cliente asociado."""
-    from app.models.clientes import Cliente as _Cliente
+    """Proyectos en operación (srv_operacion o estado=en_operacion), con cliente."""
+    from sqlalchemy import or_ as _or2
     proyectos = (
         db.query(Proyecto)
-        .filter(Proyecto.srv_operacion == True)  # noqa: E712
+        .filter(
+            _or2(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion")  # noqa: E712
+        )
         .options(selectinload(Proyecto.cliente))
         .order_by(Proyecto.nombre_comercial)
         .all()
@@ -647,7 +649,6 @@ def _action_get_projects(db: Session) -> dict:
         db.query(Proyecto)
         .filter(
             or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
-            Proyecto.srv_operacion == True,  # noqa: E712
             Proyecto.estado == "en_operacion",
         )
         .order_by(Proyecto.nombre_comercial)
@@ -674,8 +675,9 @@ def _action_get_projects(db: Session) -> dict:
 
 
 def _action_get_portfolios(db: Session) -> dict:
-    """Clientes con al menos un proyecto de operación activo (srv_operacion=True)."""
+    """Clientes que tienen al menos un proyecto en operación (srv_operacion o en_operacion)."""
     from app.models.clientes import Cliente
+    from sqlalchemy import or_
     clientes = (
         db.query(Cliente)
         .options(selectinload(Cliente.proyectos))
@@ -693,7 +695,7 @@ def _action_get_portfolios(db: Session) -> dict:
                 "nombre_comercial": p.nombre_comercial or "",
             }
             for p in c.proyectos
-            if p.srv_operacion and p.estado == "en_operacion"
+            if p.estado == "en_operacion" or p.srv_operacion
         ]
         if projs:
             portfolios[c.razon_social_nombre] = projs

@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
 from app.core.database import get_db
@@ -305,7 +306,11 @@ def create_liquidacion(
         observaciones_resultados=body.observaciones_resultados,
     )
     db.add(liq)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una liquidación para este proyecto y período")
     db.refresh(liq)
     return {"id": liq.id, "msg": "Liquidación creada"}
 

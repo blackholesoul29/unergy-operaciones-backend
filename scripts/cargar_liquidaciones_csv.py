@@ -285,7 +285,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
             print(f"  ✓ Liquidación creada id={liq_id}")
             stats["liq"] += 1
         except requests.HTTPError as e:
-            if e.response.status_code in (409, 422):
+            if e.response.status_code in (409, 422, 500):
+                # 409 = duplicate; 500 might also be a duplicate before migration fix
                 resp = api.get("/api/v1/liquidaciones",
                                params={"proyecto_id": pid, "size": 50})
                 y, m = periodo_date[:7].split("-")
@@ -293,7 +294,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     (l["id"] for l in resp["items"]
                      if l["periodo"].startswith(f"{y}-{m.zfill(2)}")), None)
                 if not liq_id:
-                    print(f"  ✗ No se pudo crear ni encontrar liquidación")
+                    print(f"  ✗ No se pudo crear ni encontrar liquidación (status={e.response.status_code})")
                     continue
                 print(f"  ~ Liquidación existente id={liq_id}")
             else:

@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime, date
+from typing import List
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
                         DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -126,10 +127,10 @@ class Liquidacion(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="liquidaciones")
     generado_por: Mapped["Usuario"] = relationship("Usuario", back_populates="liquidaciones")
-    costos: Mapped[list] = relationship("LiquidacionCosto", back_populates="liquidacion", uselist=True)
-    xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="liquidacion", uselist=True)
-    mandatos: Mapped[list] = relationship("LiquidacionMandato", back_populates="liquidacion", uselist=True)
-    facturas: Mapped[list] = relationship("LiquidacionFactura", back_populates="liquidacion", uselist=True)
+    costos: Mapped[List["LiquidacionCosto"]] = relationship("LiquidacionCosto", back_populates="liquidacion")
+    xm_datos: Mapped[List["LiquidacionXMDato"]] = relationship("LiquidacionXMDato", back_populates="liquidacion")
+    mandatos: Mapped[List["LiquidacionMandato"]] = relationship("LiquidacionMandato", back_populates="liquidacion")
+    facturas: Mapped[List["LiquidacionFactura"]] = relationship("LiquidacionFactura", back_populates="liquidacion")
 
 
 class LiquidacionCosto(Base):
@@ -196,7 +197,7 @@ class LiquidacionMandato(Base):
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="mandatos")
     inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
-    lineas: Mapped[list] = relationship("LiquidacionMandatoLinea", back_populates="mandato", uselist=True)
+    lineas: Mapped[List["LiquidacionMandatoLinea"]] = relationship("LiquidacionMandatoLinea", back_populates="mandato")
 
 
 class LiquidacionMandatoLinea(Base):

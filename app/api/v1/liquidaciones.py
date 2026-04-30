@@ -317,18 +317,12 @@ def create_liquidacion(
 
 @router.get("/{id}")
 def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    import traceback as _tb
-    try:
-        liq = _get_liq_or_404(id, db)
-        data = _serializar_liquidacion_base(liq)
-        data["costos"] = [_serializar_costo(c) for c in liq.costos]
-        data["facturas"] = [_serializar_factura(f) for f in liq.facturas]
-        data["mandatos"] = [_serializar_mandato(m) for m in liq.mandatos]
-        return data
-    except HTTPException:
-        raise
-    except Exception as _e:
-        raise HTTPException(500, detail=f"{type(_e).__name__}: {_e}\n{_tb.format_exc()}")
+    liq = _get_liq_or_404(id, db)
+    data = _serializar_liquidacion_base(liq)
+    data["costos"] = [_serializar_costo(c) for c in liq.costos]
+    data["facturas"] = [_serializar_factura(f) for f in liq.facturas]
+    data["mandatos"] = [_serializar_mandato(m) for m in liq.mandatos]
+    return data
 
 
 @router.patch("/{id}")

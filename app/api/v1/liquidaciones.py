@@ -526,87 +526,85 @@ def vista_por_proyecto(
     periodo_desde: date | None = None,
     periodo_hasta: date | None = None,
     proyecto_id: int | None = None,
+    estado: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """
-    Retorna liquidaciones agrupadas por proyecto.
-    Cada proyecto expone sus liquidaciones con el detalle por inversionista:
-    mandato ingresos, mandato costos y facturas de servicio.
+    Retorna TODOS los proyectos con sus inversionistas registrados y sus liquidaciones.
+    Las liquidaciones se filtran por período y estado si se proporcionan.
     """
-    q = (
-        db.query(Liquidacion)
-        .options(selectinload(Liquidacion.proyecto))
+    proy_q = db.query(Proyecto).options(
+        selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente)
     )
     if proyecto_id:
-        q = q.filter(Liquidacion.proyecto_id == proyecto_id)
-    if periodo_desde:
-        q = q.filter(Liquidacion.periodo >= periodo_desde)
-    if periodo_hasta:
-        q = q.filter(Liquidacion.periodo <= periodo_hasta)
+        proy_q = proy_q.filter(Proyecto.id == proyecto_id)
+    todos_proyectos = proy_q.order_by(Proyecto.nombre_comercial).all()
+    proy_ids = [p.id for p in todos_proyectos]
 
-    liquidaciones = q.order_by(Liquidacion.periodo.desc()).all()
+    liq_q = (
+        db.query(Liquidacion)
+        .options(selectinload(Liquidacion.proyecto))
+        .filter(Liquidacion.proyecto_id.in_(proy_ids))
+    )
+    if periodo_desde:
+        liq_q = liq_q.filter(Liquidacion.periodo >= periodo_desde)
+    if periodo_hasta:
+        liq_q = liq_q.filter(Liquidacion.periodo <= periodo_hasta)
+    if estado:
+        liq_q = liq_q.filter(Liquidacion.estado == estado)
+    liquidaciones = liq_q.order_by(Liquidacion.periodo.desc()).all()
     liq_ids = [liq.id for liq in liquidaciones]
 
-    # Load sub-resources directly to avoid Mapped[list] relationship issues
-    costos_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
-    for c in db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id.in_(liq_ids)).all():
-        costos_map[c.liquidacion_id].append(c)
+    costos_map: dict[int, list] = {lid: [] for lid in liq_ids}
+    facturas_map: dict[int, list] = {lid: [] for lid in liq_ids}
+    mandatos_map: dict[int, list] = {lid: [] for lid in liq_ids}
 
-    facturas_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
-    for f in db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id.in_(liq_ids)).all():
-        facturas_map[f.liquidacion_id].append(f)
+    if liq_ids:
+        for c in db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id.in_(liq_ids)).all():
+            costos_map[c.liquidacion_id].append(c)
+        for f in db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id.in_(liq_ids)).all():
+            facturas_map[f.liquidacion_id].append(f)
+        for m in (
+            db.query(LiquidacionMandato)
+            .options(
+                selectinload(LiquidacionMandato.lineas),
+                selectinload(LiquidacionMandato.inversionista).selectinload(ProyectoInversionista.cliente),
+            )
+            .filter(LiquidacionMandato.liquidacion_id.in_(liq_ids))
+            .all()
+        ):
+            mandatos_map[m.liquidacion_id].append(m)
 
-    mandatos_map: dict[int, list] = {liq.id: [] for liq in liquidaciones}
-    for m in (
-        db.query(LiquidacionMandato)
-        .options(
-            selectinload(LiquidacionMandato.lineas),
-            selectinload(LiquidacionMandato.inversionista).selectinload(ProyectoInversionista.cliente),
-        )
-        .filter(LiquidacionMandato.liquidacion_id.in_(liq_ids))
-        .all()
-    ):
-        mandatos_map[m.liquidacion_id].append(m)
-
-    proyectos: dict[int, dict] = {}
+    liq_por_proyecto: dict[int, list] = {p.id: [] for p in todos_proyectos}
     for liq in liquidaciones:
-        pid = liq.proyecto_id
-        if pid not in proyectos:
-            proyectos[pid] = {
-                "proyecto_id": pid,
-                "proyecto_nombre": liq.proyecto.nombre_comercial if liq.proyecto else str(pid),
-                "liquidaciones": [],
-            }
-
-        liq_mandatos = mandatos_map[liq.id]
+        if liq.proyecto_id not in liq_por_proyecto:
+            continue
+        liq_mandatos = mandatos_map.get(liq.id, [])
         mandatos_ingresos = [m for m in liq_mandatos if m.tipo == "ingresos"]
         mandatos_costos = [m for m in liq_mandatos if m.tipo == "costos"]
 
-        # Totales del proyecto para el período
         total_ingresos = sum(float(m.total_ingresos_cop or 0) for m in mandatos_ingresos)
         total_costos = sum(float(m.total_costos_cop or 0) for m in mandatos_costos)
-        total_facturas = sum(float(f.valor_cop) for f in facturas_map[liq.id])
+        total_facturas = sum(float(f.valor_cop) for f in facturas_map.get(liq.id, []))
 
-        # Construir filas por inversionista
         inversionistas_ids = {m.inversionista_id for m in liq_mandatos if m.inversionista_id}
         inversionistas_rows = []
         for inv_id in inversionistas_ids:
-            inv_mandatos_ing = [m for m in mandatos_ingresos if m.inversionista_id == inv_id]
-            inv_mandatos_cos = [m for m in mandatos_costos if m.inversionista_id == inv_id]
-            inv_obj = inv_mandatos_ing[0].inversionista if inv_mandatos_ing else (
-                inv_mandatos_cos[0].inversionista if inv_mandatos_cos else None
-            )
+            inv_m_ing = [m for m in mandatos_ingresos if m.inversionista_id == inv_id]
+            inv_m_cos = [m for m in mandatos_costos if m.inversionista_id == inv_id]
+            inv_obj = (inv_m_ing[0] if inv_m_ing else (inv_m_cos[0] if inv_m_cos else None))
+            inv_obj = inv_obj.inversionista if inv_obj else None
             inversionistas_rows.append({
                 "inversionista_id": inv_id,
                 "inversionista_nombre": inv_obj.cliente.razon_social_nombre if (inv_obj and inv_obj.cliente) else "—",
                 "porcentaje_participacion": float(inv_obj.porcentaje_participacion or 0) if inv_obj else None,
                 "es_patrimonio_autonomo": inv_obj.es_patrimonio_autonomo if inv_obj else False,
-                "mandatos_ingresos": [_serializar_mandato(m) for m in inv_mandatos_ing],
-                "mandatos_costos": [_serializar_mandato(m) for m in inv_mandatos_cos],
+                "mandatos_ingresos": [_serializar_mandato(m) for m in inv_m_ing],
+                "mandatos_costos": [_serializar_mandato(m) for m in inv_m_cos],
             })
 
-        proyectos[pid]["liquidaciones"].append({
+        liq_por_proyecto[liq.proyecto_id].append({
             "liquidacion_id": liq.id,
             "periodo": liq.periodo.isoformat(),
             "estado": liq.estado,
@@ -620,12 +618,30 @@ def vista_por_proyecto(
                 "total_facturas_cop": total_facturas,
                 "ingreso_neto_cop": float(liq.ingreso_neto_cop or 0),
             },
-            "costos_proyecto": [_serializar_costo(c) for c in costos_map[liq.id]],
-            "facturas_servicio": [_serializar_factura(f) for f in facturas_map[liq.id]],
+            "costos_proyecto": [_serializar_costo(c) for c in costos_map.get(liq.id, [])],
+            "facturas_servicio": [_serializar_factura(f) for f in facturas_map.get(liq.id, [])],
             "inversionistas": inversionistas_rows,
         })
 
-    return list(proyectos.values())
+    result = []
+    for proy in todos_proyectos:
+        inv_registrados = []
+        for pi in proy.inversionistas:
+            inv_registrados.append({
+                "proyecto_inversionista_id": pi.id,
+                "cliente_id": pi.cliente_id,
+                "inversionista_nombre": pi.cliente.razon_social_nombre if pi.cliente else "—",
+                "porcentaje_participacion": float(pi.porcentaje_participacion or 0) if pi.porcentaje_participacion is not None else None,
+                "es_patrimonio_autonomo": pi.es_patrimonio_autonomo,
+            })
+        result.append({
+            "proyecto_id": proy.id,
+            "proyecto_nombre": proy.nombre_comercial,
+            "estado": proy.estado,
+            "inversionistas_registrados": inv_registrados,
+            "liquidaciones": liq_por_proyecto.get(proy.id, []),
+        })
+    return result
 
 
 # ── Vista Por Inversionista ────────────────────────────────────────────────────
@@ -635,81 +651,65 @@ def vista_por_inversionista(
     periodo_desde: date | None = None,
     periodo_hasta: date | None = None,
     cliente_id: int | None = None,
+    estado: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """
-    Retorna liquidaciones agrupadas por inversionista.
-    Cada inversionista expone todos sus proyectos con el detalle de mandatos.
+    Retorna TODOS los inversionistas (clientes con participaciones) con sus proyectos.
+    Las liquidaciones se filtran por período y estado si se proporcionan.
     """
-    q = (
-        db.query(LiquidacionMandato)
+    pi_q = (
+        db.query(ProyectoInversionista)
         .options(
-            selectinload(LiquidacionMandato.liquidacion)
-                .selectinload(Liquidacion.proyecto),
-            selectinload(LiquidacionMandato.lineas),
-            selectinload(LiquidacionMandato.inversionista)
-                .selectinload(ProyectoInversionista.cliente),
+            selectinload(ProyectoInversionista.cliente),
+            selectinload(ProyectoInversionista.proyecto),
         )
-        .filter(LiquidacionMandato.inversionista_id.isnot(None))
     )
-
-    if periodo_desde:
-        q = q.join(Liquidacion).filter(Liquidacion.periodo >= periodo_desde)
-    if periodo_hasta:
-        q = q.join(Liquidacion, isouter=True).filter(Liquidacion.periodo <= periodo_hasta)
     if cliente_id:
-        q = q.join(ProyectoInversionista, isouter=True).filter(ProyectoInversionista.cliente_id == cliente_id)
+        pi_q = pi_q.filter(ProyectoInversionista.cliente_id == cliente_id)
+    all_pi = pi_q.all()
 
-    mandatos = q.all()
+    proy_ids = list({pi.proyecto_id for pi in all_pi})
 
-    # Load facturas separately to avoid relationship uselist issue
-    liq_ids_inv = list({m.liquidacion_id for m in mandatos})
-    facturas_map_inv: dict[int, list] = {lid: [] for lid in liq_ids_inv}
-    for f in db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id.in_(liq_ids_inv)).all():
-        facturas_map_inv[f.liquidacion_id].append(f)
+    liq_por_proyecto: dict[int, list] = {pid: [] for pid in proy_ids}
+    if proy_ids:
+        liq_q = db.query(Liquidacion).filter(Liquidacion.proyecto_id.in_(proy_ids))
+        if periodo_desde:
+            liq_q = liq_q.filter(Liquidacion.periodo >= periodo_desde)
+        if periodo_hasta:
+            liq_q = liq_q.filter(Liquidacion.periodo <= periodo_hasta)
+        if estado:
+            liq_q = liq_q.filter(Liquidacion.estado == estado)
+        for liq in liq_q.order_by(Liquidacion.periodo.desc()).all():
+            if liq.proyecto_id in liq_por_proyecto:
+                liq_por_proyecto[liq.proyecto_id].append({
+                    "liquidacion_id": liq.id,
+                    "periodo": liq.periodo.isoformat(),
+                    "estado": liq.estado,
+                    "tipo_venta": liq.tipo_venta,
+                    "ingreso_neto_cop": float(liq.ingreso_neto_cop or 0),
+                })
 
-    inversionistas: dict[int, dict] = {}
-    for m in mandatos:
-        if not m.inversionista:
-            continue
-        inv = m.inversionista
-        cid = inv.cliente_id
-        if cid not in inversionistas:
-            inversionistas[cid] = {
+    clientes: dict[int, dict] = {}
+    for pi in all_pi:
+        cid = pi.cliente_id
+        if cid not in clientes:
+            clientes[cid] = {
                 "cliente_id": cid,
-                "cliente_nombre": inv.cliente.razon_social_nombre if inv.cliente else str(cid),
-                "proyectos": {},
+                "cliente_nombre": pi.cliente.razon_social_nombre if pi.cliente else str(cid),
+                "proyectos": [],
             }
+        clientes[cid]["proyectos"].append({
+            "proyecto_id": pi.proyecto_id,
+            "proyecto_nombre": pi.proyecto.nombre_comercial if pi.proyecto else str(pi.proyecto_id),
+            "proyecto_inversionista_id": pi.id,
+            "porcentaje_participacion": float(pi.porcentaje_participacion or 0) if pi.porcentaje_participacion is not None else None,
+            "es_patrimonio_autonomo": pi.es_patrimonio_autonomo,
+            "liquidaciones": liq_por_proyecto.get(pi.proyecto_id, []),
+        })
 
-        liq = m.liquidacion
-        pid = liq.proyecto_id
-        proj_key = f"{pid}_{liq.periodo.isoformat()}"
-        proyectos_inv = inversionistas[cid]["proyectos"]
-        if proj_key not in proyectos_inv:
-            proyectos_inv[proj_key] = {
-                "proyecto_id": pid,
-                "proyecto_nombre": liq.proyecto.nombre_comercial if liq.proyecto else str(pid),
-                "liquidacion_id": liq.id,
-                "periodo": liq.periodo.isoformat(),
-                "estado": liq.estado,
-                "porcentaje_participacion": float(inv.porcentaje_participacion or 0),
-                "es_patrimonio_autonomo": inv.es_patrimonio_autonomo,
-                "mandatos_ingresos": [],
-                "mandatos_costos": [],
-                "facturas_servicio": [_serializar_factura(f) for f in facturas_map_inv.get(liq.id, [])],
-            }
-
-        if m.tipo == "ingresos":
-            proyectos_inv[proj_key]["mandatos_ingresos"].append(_serializar_mandato(m))
-        else:
-            proyectos_inv[proj_key]["mandatos_costos"].append(_serializar_mandato(m))
-
-    result = []
-    for inv_data in inversionistas.values():
-        inv_data["proyectos"] = list(inv_data["proyectos"].values())
-        result.append(inv_data)
-    return result
+    return list(clientes.values())
 
 
 # ── Catálogos de enums ─────────────────────────────────────────────────────────

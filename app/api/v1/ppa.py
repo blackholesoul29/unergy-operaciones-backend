@@ -1,3 +1,4 @@
+import traceback
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
@@ -62,11 +63,14 @@ def list_contratos(
             | PPAContrato.numero_codigo_contrato.ilike(like)
             | PPAContrato.comprador_nombre.ilike(like)
         ).distinct()
-    return (
-        query
-        .order_by(PPAContrato.fecha_inicio.desc().nullslast(), PPAContrato.id.desc())
-        .all()
-    )
+    try:
+        return (
+            query
+            .order_by(PPAContrato.fecha_inicio.desc().nullslast(), PPAContrato.id.desc())
+            .all()
+        )
+    except Exception:
+        raise HTTPException(500, detail=traceback.format_exc())
 
 
 @router.post("", response_model=PPAContratoOut, status_code=201)

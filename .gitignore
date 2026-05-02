@@ -21,8 +21,7 @@ frontend/.vite/
 backend/uploads/
 
 # Alembic
-backend/alembic/versions/*.py
-!backend/alembic/versions/.gitkeep
+!backend/alembic/versions/*.py
 
 # IDE
 .vscode/

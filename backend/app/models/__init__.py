@@ -9,7 +9,7 @@ from app.models.servicios import (
     ServicioOperacion, OperacionKPI, ServicioRepresentacion,
     RepresentacionGescon, ServicioCGM,
 )
-from app.models.contratos import ContratoServicio, PPAContrato, ContratoArriendo
+from app.models.contratos import ContratoServicio, PPAContrato, ContratoArriendo, PPATarifa, PPACompromisoEnergia
 from app.models.fronteras import Frontera, FronteraLectura
 from app.models.equipos import Equipo, EquipoSello
 from app.models.fallas import (
@@ -32,7 +32,7 @@ __all__ = [
     "ProyectoGrupoPanel", "ProyectoInversor", "ProyectoContacto",
     "ProyectoInversionista", "Portafolio", "ServicioOperacion", "OperacionKPI",
     "ServicioRepresentacion", "RepresentacionGescon", "ServicioCGM",
-    "ContratoServicio", "PPAContrato", "ContratoArriendo",
+    "ContratoServicio", "PPAContrato", "ContratoArriendo", "PPATarifa", "PPACompromisoEnergia",
     "Frontera", "FronteraLectura", "Equipo", "EquipoSello",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento",

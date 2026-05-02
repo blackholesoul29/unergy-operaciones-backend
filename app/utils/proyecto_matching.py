@@ -1,55 +1,80 @@
+"""
+Matching fuzzy entre nombres de proyectos externos (Excel / fallas-unergy)
+y los registros en la tabla proyectos.
+
+Estrategia por orden de prioridad:
+  1. Exacto sobre nombre_comercial (case-insensitive)
+  2. Exacto sobre alguno de los alias_monitoreo (separados por |)
+  3. Exacto sobre nombre_bitacora o nombre_clientes (si existen)
+  4. Coincidencia parcial: el término externo contiene nombre_comercial o viceversa
+  5. Similitud SequenceMatcher ≥ 0.75 sobre nombre_comercial
+"""
+import re
 import unicodedata
 from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
 from app.models.proyectos import Proyecto
 
-_SIMILARITY_THRESHOLD = 0.75
+
+def _normalize(text: str) -> str:
+    """Quita tildes, pone minúsculas, elimina caracteres no alfanuméricos."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9\s]", " ", ascii_str.lower()).strip()
 
 
-def _normalize(s: str) -> str:
-    """Lowercase, strip, remove accents — so 'Perijá' == 'perija'."""
-    s = s.lower().strip()
-    return "".join(
-        c for c in unicodedata.normalize("NFD", s)
-        if unicodedata.category(c) != "Mn"
-    )
+def _all_names(proyecto: Proyecto) -> list[str]:
+    names = [proyecto.nombre_comercial or ""]
+    if proyecto.nombre_bitacora:
+        names.append(proyecto.nombre_bitacora)
+    if proyecto.nombre_clientes:
+        names.append(proyecto.nombre_clientes)
+    if proyecto.alias_monitoreo:
+        for alias in proyecto.alias_monitoreo.split("|"):
+            a = alias.strip()
+            if a:
+                names.append(a)
+    return [n for n in names if n]
 
 
-def _candidates(p: Proyecto) -> list[str]:
-    seen: set[str] = set()
-    result = []
-    for raw in [p.nombre_comercial, p.alias_monitoreo, p.sub_project, p.nombre_clientes, p.nombre_bitacora]:
-        if raw:
-            n = _normalize(raw)
-            if n not in seen:
-                seen.add(n)
-                result.append(n)
-    return result
-
-
-def find_proyecto_by_name(db: Session, nombre: str) -> Proyecto | None:
-    """Find a Proyecto by exact or fuzzy name match.
-    Checks nombre_comercial, alias_monitoreo, sub_project, nombre_clientes, nombre_bitacora.
-    Accent-insensitive."""
-    if not nombre:
+def find_proyecto_by_name(db: Session, nombre_externo: str) -> Proyecto | None:
+    """Devuelve el Proyecto que mejor coincide con nombre_externo, o None."""
+    if not nombre_externo or not nombre_externo.strip():
         return None
 
-    norm = _normalize(nombre)
     proyectos = db.query(Proyecto).all()
+    norm_ext = _normalize(nombre_externo)
 
-    # 1. Exact match on any candidate field
-    for p in proyectos:
-        if norm in _candidates(p):
-            return p
+    # Paso 1 y 2 y 3: coincidencia exacta normalizada
+    for proy in proyectos:
+        for name in _all_names(proy):
+            if _normalize(name) == norm_ext:
+                return proy
 
-    # 2. Fuzzy match — best score across all candidate fields
-    best: Proyecto | None = None
+    # Paso 4: coincidencia parcial (uno contiene al otro)
+    best_partial: Proyecto | None = None
+    best_partial_len = 0
+    for proy in proyectos:
+        for name in _all_names(proy):
+            norm_db = _normalize(name)
+            if norm_ext in norm_db or norm_db in norm_ext:
+                # preferir el match más largo (más específico)
+                matched_len = max(len(norm_ext), len(norm_db))
+                if matched_len > best_partial_len:
+                    best_partial = proy
+                    best_partial_len = matched_len
+
+    if best_partial:
+        return best_partial
+
+    # Paso 5: similitud SequenceMatcher
     best_score = 0.0
-    for p in proyectos:
-        for candidate in _candidates(p):
-            score = SequenceMatcher(None, norm, candidate).ratio()
+    best_fuzzy: Proyecto | None = None
+    for proy in proyectos:
+        for name in _all_names(proy):
+            score = SequenceMatcher(None, norm_ext, _normalize(name)).ratio()
             if score > best_score:
                 best_score = score
-                best = p
+                best_fuzzy = proy
 
-    return best if best_score >= _SIMILARITY_THRESHOLD else None
+    return best_fuzzy if best_score >= 0.75 else None

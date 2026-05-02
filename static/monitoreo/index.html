@@ -18,18 +18,16 @@ select,input,textarea{font-family:'Sora',sans-serif;color:var(--cr)}
 select option{background:var(--bg)}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#1a1025}::-webkit-scrollbar-thumb{background:var(--br);border-radius:3px}
 input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
-#topbar{position:sticky;top:0;z-index:200;background:linear-gradient(180deg,#1e1430 0%,#160f20 100%);border-bottom:1px solid var(--br);box-shadow:0 2px 20px #00000050;display:flex;align-items:center;justify-content:space-between;padding:0 18px;min-height:58px;gap:10px;flex-wrap:wrap}
-.tabs{flex-wrap:wrap!important;height:auto!important}
+#topbar{position:sticky;top:0;z-index:200;background:#1a1025;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:56px;gap:10px}
 .logo{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--pu),var(--ye));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 10px #915BD850}
-.logo-brand{font-size:15px;font-weight:800;color:var(--ye);line-height:1;letter-spacing:-.2px}
+.logo-icon{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--pu),var(--ye));display:flex;align-items:center;justify-content:center;font-size:17px}
+.logo-brand{font-size:15px;font-weight:800;color:var(--ye);line-height:1}
 .sync-row{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--fa);margin-top:2px}
 .sdot{width:6px;height:6px;border-radius:50%;background:var(--fa);flex-shrink:0}
 .sdot.ok{background:var(--gr)}.sdot.err{background:var(--re)}.sdot.spin{background:var(--ye);animation:bl .7s infinite}
-.tabs{display:flex;background:#0f0a1a;border:1px solid var(--br);border-radius:9px;overflow:hidden;gap:1px;padding:3px}
-.tab{padding:5px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);border-radius:6px;transition:all .18s}
-.tab:hover:not(.on){background:var(--s1);color:var(--cr)}
-.tab.on{background:linear-gradient(135deg,var(--pu),#7040c0);color:var(--cr);box-shadow:0 2px 8px #915BD840}
+.tabs{display:flex;background:#160f20;border:1px solid var(--br);border-radius:8px;overflow:hidden}
+.tab{padding:6px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu)}
+.tab.on{background:var(--pu);color:var(--cr)}
 .acts{display:flex;gap:7px;flex-shrink:0}
 .btn{border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;border:none;display:inline-flex;align-items:center;gap:5px}
 .btn-pu{background:var(--pu);color:var(--cr)}.btn-pu:hover{background:#7d4ec0}
@@ -47,9 +45,9 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .pill .cn{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--cr)}
 .pill.on .cn{color:currentColor}
 .rcount{margin-left:auto;font-size:11px;color:var(--fa)}
-#frow{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:18px;background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:12px 14px}
-.fi{background:#160f20;border:1px solid var(--br);border-radius:8px;padding:8px 11px;color:var(--cr);font-size:13px;outline:none;width:100%;transition:border-color .2s}
-.fi:focus{border-color:var(--pu);box-shadow:0 0 0 3px #915BD820}
+#frow{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:18px}
+.fi{background:#1a1025;border:1px solid var(--br);border-radius:8px;padding:8px 11px;color:var(--cr);font-size:13px;outline:none;width:100%;transition:border-color .2s}
+.fi:focus{border-color:var(--pu)}
 #fsearch{flex:1;min-width:180px}.fsel{width:200px;flex:none;cursor:pointer}
 #board{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;align-items:start}
 .col-hd{display:flex;align-items:center;gap:7px;margin-bottom:11px}
@@ -58,13 +56,12 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .col-cnt{font-family:'JetBrains Mono',monospace;font-size:11px;border-radius:10px;padding:1px 8px;margin-left:auto}
 .col-bar{height:2px;border-radius:2px;margin-bottom:11px}
 .col-empty{font-size:12px;color:var(--fa);text-align:center;padding:22px 8px;border:1px dashed var(--br);border-radius:10px}
-.card{background:var(--s1);border:1px solid var(--br);border-radius:11px;padding:13px 14px;cursor:pointer;margin-bottom:9px;transition:all .2s;border-left-width:3px}
-.card:hover{background:var(--s2);box-shadow:0 6px 22px #00000055,0 0 0 1px var(--card-glow,var(--br));transform:translateY(-1px)}
-.card:active{transform:translateY(0)}
+.card{background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:12px 13px;cursor:pointer;margin-bottom:8px;transition:all .18s;border-left-width:3px}
+.card:hover{background:var(--s2);box-shadow:0 4px 16px #00000040}
 .card-id{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700}
-.card-lbl{font-size:12px;font-weight:700;line-height:1.45;margin:4px 0 3px}
-.card-proj{font-size:11px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card-foot{display:flex;gap:9px;font-size:10px;color:var(--fa);margin-top:7px;flex-wrap:wrap;align-items:center}
+.card-lbl{font-size:12px;font-weight:700;line-height:1.4;margin:3px 0}
+.card-proj{font-size:11px;color:var(--mu)}
+.card-foot{display:flex;gap:9px;font-size:10px;color:var(--fa);margin-top:6px;flex-wrap:wrap;align-items:center}
 .cat-tag{font-size:10px;border-radius:5px;padding:1px 7px;font-weight:700;border:1px solid}
 .badge{display:inline-flex;align-items:center;gap:4px;border-radius:6px;font-size:10px;font-weight:800;padding:2px 8px;letter-spacing:.7px;text-transform:uppercase;border:1px solid;white-space:nowrap}
 #empty{text-align:center;padding:80px 20px;display:none}
@@ -72,8 +69,7 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 #empty h2{font-size:19px;font-weight:800;color:var(--mu);margin-bottom:8px}
 #empty p{font-size:13px;color:var(--fa);margin-bottom:22px}
 #charts{display:none;grid-template-columns:330px 1fr;gap:15px}
-.chart-card{background:linear-gradient(160deg,var(--s2) 0%,var(--s1) 100%);border:1px solid var(--br);border-radius:14px;padding:18px;transition:box-shadow .2s}
-.chart-card:hover{box-shadow:0 4px 20px #00000035}
+.chart-card{background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:18px}
 .chart-title{font-size:14px;font-weight:800;margin-bottom:2px}
 .chart-sub{font-size:11px;color:var(--fa);margin-bottom:13px}
 .chart-wrap{position:relative;height:195px}
@@ -141,15 +137,15 @@ input[type=datetime-local]{color-scheme:dark}::placeholder{color:var(--fa)}
 .spin{width:32px;height:32px;border:3px solid var(--br);border-top-color:var(--pu);border-radius:50%;animation:sp .7s linear infinite;margin-top:22px}
 /* ── KPI cards ── */
 #kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
-.kpi{background:linear-gradient(160deg,var(--s2) 0%,var(--s1) 100%);border:1px solid var(--br);border-radius:14px;padding:16px 18px;transition:all .2s}
-.kpi:hover{box-shadow:0 6px 24px #00000045;transform:translateY(-1px)}
-.kpi-ico{font-size:22px;margin-bottom:7px}
+.kpi{background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:15px 17px;transition:box-shadow .2s}
+.kpi:hover{box-shadow:0 4px 20px #00000035}
+.kpi-ico{font-size:20px;margin-bottom:6px}
 .kpi-val{font-size:30px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--cr)}
-.kpi-lbl{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.7px;text-transform:uppercase;margin-top:5px}
+.kpi-lbl{font-size:10px;color:var(--mu);font-weight:700;letter-spacing:.7px;text-transform:uppercase;margin-top:4px}
 .kpi-sub{font-size:10px;color:var(--fa);margin-top:2px}
-.kpi.kred{border-color:#FF575550;background:linear-gradient(160deg,#2a1a1a 0%,var(--s1) 100%)}
-.kpi.kye{border-color:#F6FF7240;background:linear-gradient(160deg,#222010 0%,var(--s1) 100%)}
-.kpi.kgr{border-color:#4ADE8040;background:linear-gradient(160deg,#152210 0%,var(--s1) 100%)}
+.kpi.kred{border-color:#FF575540}
+.kpi.kye{border-color:#F6FF7240}
+.kpi.kgr{border-color:#4ADE8040}
 /* ── Badges ── */
 .imp-badge,.prio-badge,.days-open{display:inline-flex;align-items:center;gap:3px;border-radius:5px;font-size:9px;font-weight:800;padding:2px 6px;letter-spacing:.4px;border:1px solid;white-space:nowrap}
 /* ── New filter inputs ── */
@@ -407,10 +403,11 @@ body.client-mode #tab-inf{display:none!important}
 <div id="topbar">
   <div class="logo"><div class="logo-icon">☀️</div><div><div class="logo-brand">Unergy <span style="color:var(--mu);font-weight:600;font-size:12px">· Fallas</span></div><div class="sync-row"><span class="sdot" id="sdot"></span><span id="stxt">Cargando…</span></div></div></div>
   <div class="tabs"><button class="tab on" id="tab-board">⊞ Tablero</button><button class="tab" id="tab-charts">📊 Gráficos</button>
-    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🏢 Clientes</button><button class="tab" id="tab-gest">📋 Gestión</button><button class="tab" id="tab-inf">📄 Informe</button></div>
+    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🗂 Portafolio</button><button class="tab" id="tab-inf">📄 Informe</button></div>
   <div class="acts">
     <button class="cbadge hmob" id="cbtn"><span style="width:7px;height:7px;border-radius:50%;background:var(--gr);display:block"></span><span id="clbl">…</span></button>
     <span class="client-badge" id="client-badge-lbl" style="display:none">👁 Cliente</span>
+    <button class="btn btn-gh btn-sm hmob" id="btn-addproj">+ Proyecto</button>
     <button class="btn btn-gh btn-sm hmob" id="btn-addfault">+ Falla</button>
     <button class="btn-theme hmob" id="btn-theme">🌙</button><button class="btn-exp hmob" id="btn-export" title="Descargar informe Excel">⬇ Excel</button><button class="btn btn-gr btn-sm" id="btn-sync">↻</button>
     <button class="btn btn-ye" id="btn-new">✚ Nueva Falla</button>
@@ -429,7 +426,6 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <div id="frow">
     <input class="fi" id="fsearch" placeholder="🔍  Buscar ID, proyecto, código…"/>
-    <select class="fi fsel" id="fclient"><option value="">Todos los clientes</option></select>
     <select class="fi fsel" id="fproject"><option value="">Todos los proyectos</option></select>
     <select class="fi fsel" id="fcat"><option value="">Todas las categorías</option></select>
     <select class="fi fimp" id="fimp"><option value="">Todos los impactos</option><option value="1">📡 Medición</option><option value="2">⚡ Generación</option><option value="3">🌩️ Evento Adverso</option><option value="4">🔧 Desgaste</option><option value="5">🏗️ Civil</option><option value="6">🦺 HSE</option><option value="7">🔋 BESS</option><option value="8">📋 Administrativo</option><option value="9">🔌 Sin Suministro</option></select>
@@ -442,12 +438,8 @@ body.client-mode #tab-inf{display:none!important}
     <div id="board"></div>
   </div>
   <div id="charts">
-    <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span style="font-size:12px;color:var(--fa)">Proyecto:</span>
-      <select class="fi" style="width:220px;font-size:12px;padding:5px 8px" id="chart-proj"><option value="">Todos los proyectos</option></select>
-    </div>
     <div class="chart-card"><div class="chart-title">Estado General</div><div class="chart-sub">Distribución por estado</div><div class="chart-wrap"><canvas id="pieC"></canvas></div><div class="legend" id="pie-leg"></div></div>
-    <div class="chart-card"><div class="chart-hd"><div><div class="chart-title">Fallas más Frecuentes</div><div class="chart-sub">Top 8 por ocurrencias</div></div></div><div class="chart-wrap"><canvas id="barC"></canvas></div></div>
+    <div class="chart-card"><div class="chart-hd"><div><div class="chart-title">Fallas más Frecuentes</div><div class="chart-sub">Top 8 por ocurrencias</div></div><select class="fi" style="width:170px;font-size:11px;padding:5px 8px" id="chart-proj"><option value="">Todos los proyectos</option></select></div><div class="chart-wrap"><canvas id="barC"></canvas></div></div>
     <div class="chart-card chart-full"><div class="chart-title">Fallas por Área de Impacto</div><div class="chart-sub" style="font-size:11px;color:var(--fa);margin-bottom:13px">Fallas abiertas por categoría de impacto</div><div style="position:relative;height:200px"><canvas id="impC"></canvas></div><div class="legend" id="imp-leg" style="display:flex;flex-wrap:wrap;gap:9px;margin-top:11px"></div></div>
   </div>
 </div>
@@ -455,7 +447,7 @@ body.client-mode #tab-inf{display:none!important}
 <div id="toast"></div>
 <div id="lb"><img id="lb-img" src="" alt=""/></div>
 <!-- ══ GEN PANEL — outside #lb, inside #app flow ══ -->
-<div id="gen-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
+<div id="gen-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
   <div id="gen-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
     <div class="kpi"><div class="kpi-ico">☀️</div><div class="kpi-val" id="gkv-hoy">—</div><div class="kpi-lbl">Generación Ayer</div><div class="kpi-sub" id="gks-hoy">kWh generados ayer</div></div>
     <div class="kpi kgr"><div class="kpi-ico">📊</div><div class="kpi-val" id="gkv-pct">—</div><div class="kpi-lbl">% vs P90 Mes</div><div class="kpi-sub" id="gks-pct">—</div></div>
@@ -503,13 +495,7 @@ body.client-mode #tab-inf{display:none!important}
         </div>
         <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
       </div>
-      <div id="gen-compare-sel" style="margin-bottom:14px;position:relative">
-        <div id="gen-cmp-trigger" onclick="toggleCmpDropdown()" style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--s1);border:1px solid var(--br);border-radius:8px;cursor:pointer;font-size:12px;color:var(--mu);user-select:none;min-width:260px;max-width:400px">
-          <span id="gen-cmp-label">Selecciona proyectos…</span>
-          <span style="font-size:10px;margin-left:8px">▾</span>
-        </div>
-        <div id="gen-cmp-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:300px;max-width:420px;max-height:260px;overflow-y:auto;background:var(--s1);border:1px solid var(--br);border-radius:8px;z-index:200;box-shadow:0 4px 20px #0006;padding:6px 0"></div>
-      </div>
+      <div id="gen-compare-sel" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px"></div>
       <div id="gen-compare-chart-wrap" style="position:relative;height:260px;display:none"><canvas id="genCompareC"></canvas></div>
       <div id="gen-compare-empty" style="text-align:center;padding:30px;color:var(--fa);font-size:12px">
         Selecciona proyectos arriba y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
@@ -524,15 +510,15 @@ body.client-mode #tab-inf{display:none!important}
   </div>
 </div>
 <!-- ══ PORTFOLIO PANEL ══ -->
-<div id="port-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
+<div id="port-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
   <!-- Header & filters -->
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
     <div>
-      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Cliente <span style="color:var(--pu)" id="port-name-title"></span></div>
-      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona cliente y período</div>
+      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Portafolio <span style="color:var(--pu)" id="port-name-title"></span></div>
+      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona portafolio y período</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona cliente…</option></select>
+      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona portafolio…</option></select>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button class="port-period-btn on" data-p="week" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Semana</button>
         <button class="port-period-btn" data-p="yesterday" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Ayer</button>
@@ -562,15 +548,15 @@ body.client-mode #tab-inf{display:none!important}
       <div class="kpi-ico">📈</div>
       <div class="kpi-val" id="pkv-avg" style="font-size:26px">—</div>
       <div class="kpi-lbl">Promedio Diario</div>
-      <div class="kpi-sub">kWh/día cliente total</div>
+      <div class="kpi-sub">kWh/día portafolio total</div>
     </div>
   </div>
   <!-- Toggle chart view -->
   <div id="port-chart-section" style="display:none">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
       <div>
-        <div class="chart-title" id="port-chart-title">Generación por día — Cliente</div>
-        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del cliente</div>
+        <div class="chart-title" id="port-chart-title">Generación por día — Portafolio</div>
+        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del portafolio</div>
       </div>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button id="port-view-stacked" class="port-view-btn on" style="padding:6px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer">Apilado</button>
@@ -597,68 +583,18 @@ body.client-mode #tab-inf{display:none!important}
   <!-- Empty state -->
   <div id="port-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
     <div style="font-size:40px;margin-bottom:14px">🗂</div>
-    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un cliente</div>
-    <div>Elige el cliente y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
+    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un portafolio</div>
+    <div>Elige el portafolio y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
   </div>
   <!-- Loading state -->
   <div id="port-loading" style="display:none;text-align:center;padding:60px 20px">
     <div class="spin" style="margin:0 auto 16px"></div>
-    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del cliente…</div>
+    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del portafolio…</div>
     <div style="font-size:11px;color:var(--fa);margin-top:6px" id="port-loading-sub"></div>
-  </div>
-  <!-- Correos del cliente -->
-  <div id="port-correos-card" style="display:none;margin-top:24px">
-    <div class="chart-card" style="padding:0;overflow:hidden">
-      <div style="padding:14px 20px;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between">
-        <div><div class="chart-title">✉️ Correos del Cliente</div><div style="font-size:11px;color:var(--fa);margin-top:2px">Configuración de notificaciones por correo</div></div>
-        <button class="btn btn-gh btn-sm" id="port-correos-edit-btn" onclick="togglePortCorreosEdit()">✏️ Editar</button>
-      </div>
-      <div style="padding:18px 20px" id="port-correos-body">
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
-          <div><div style="font-size:10px;font-weight:700;color:var(--mu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">Liquidación</div><div style="font-size:13px;color:var(--cr)" id="pce-liquidacion">—</div></div>
-          <div><div style="font-size:10px;font-weight:700;color:var(--pu);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔔 Operacional (notif. fallas)</div><div style="font-size:13px;color:var(--cr)" id="pce-monitoreo">—</div></div>
-        </div>
-      </div>
-      <div style="display:none;padding:18px 20px;border-top:1px solid var(--br)" id="port-correos-form">
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px">
-          <div><label style="font-size:11px;font-weight:700;color:var(--mu);display:block;margin-bottom:4px">Correo Liquidación</label><input class="fi" type="email" id="pcf-liquidacion" placeholder="liquidacion@empresa.com" style="font-size:12px"/></div>
-          <div><label style="font-size:11px;font-weight:700;color:var(--pu);display:block;margin-bottom:4px">🔔 Correo Operacional (notif. fallas)</label><input class="fi" type="email" id="pcf-monitoreo" placeholder="operacion@empresa.com" style="font-size:12px"/></div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-pu btn-sm" onclick="savePortCorreos()">💾 Guardar correos</button>
-          <button class="btn btn-gh btn-sm" onclick="togglePortCorreosEdit()">Cancelar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- ══ GESTIÓN PANEL ══ -->
-<div id="gest-panel" style="display:none;max-width:1380px;margin:0 auto;padding:18px 16px 90px">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
-    <div>
-      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Gestión de Proyectos</div>
-      <div style="font-size:12px;color:var(--fa);margin-top:3px">PQR · Mantenimiento Preventivo · Mantenimiento Correctivo</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select class="fi" id="gest-tipo-filter" style="width:170px;font-size:12px">
-        <option value="">Todos los tipos</option>
-        <option value="pqr">PQR</option>
-        <option value="preventivo">Preventivo</option>
-        <option value="correctivo">Correctivo</option>
-      </select>
-      <input class="fi" type="text" id="gest-search" placeholder="🔍 Buscar proyecto…" style="width:200px;font-size:12px"/>
-      <button class="btn btn-gh btn-sm" onclick="loadGestion()">↻ Actualizar</button>
-    </div>
-  </div>
-  <div id="gest-list" style="display:flex;flex-direction:column;gap:10px">
-    <div style="text-align:center;padding:60px 20px;color:var(--fa)">
-      <div style="font-size:36px;margin-bottom:12px">📋</div>
-      <div style="font-size:14px;font-weight:700;color:var(--mu)">Cargando proyectos…</div>
-    </div>
   </div>
 </div>
 <!-- ══ INFORME PANEL ══ -->
-<div id="inf-panel" style="display:none;max-width:1100px;margin:0 auto;padding:18px 16px 90px">
+<div id="inf-panel" style="display:none;max-width:1100px;margin:0 auto;padding:0 16px 90px">
   <!-- Contador de días entrega FMO -->
   <div id="fmo-deadline-bar" style="display:none;background:var(--s1);border:1px solid var(--br);border-radius:10px;padding:9px 16px;margin-bottom:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu)">
@@ -683,7 +619,7 @@ body.client-mode #tab-inf{display:none!important}
         <div id="inf-oper-toggles" style="display:flex;gap:8px;flex-wrap:wrap">
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-mode-btn" data-m="proyecto" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Por Proyecto</button>
-            <button class="inf-mode-btn" data-m="portafolio" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Cliente</button>
+            <button class="inf-mode-btn" data-m="portafolio" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Portafolio</button>
           </div>
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-period-btn" data-p="mes" style="padding:7px 12px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Mensual</button>
@@ -695,7 +631,7 @@ body.client-mode #tab-inf{display:none!important}
     <!-- Operacional controls -->
     <div id="inf-oper-controls" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
       <select class="fi fsel" id="inf-proj" style="min-width:190px;font-size:13px"><option value="">Selecciona proyecto…</option></select>
-      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona cliente…</option></select>
+      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona portafolio…</option></select>
       <input type="month" class="fi" id="inf-month" style="width:150px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-from" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-to" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
@@ -787,58 +723,28 @@ document.addEventListener('DOMContentLoaded', function() {
   loadCatalog();
   _loadCatIds();
   loadFaults();
-  loadPortfolios();
-  loadClientesForFilters();
   loadProyectosFromDB();
 });
 
 function loadProyectosFromDB() {
   _apiFetch('GET', '/api/v1/monitoreo/proyectos').then(function(res) {
-    if (!res) return;
-    if (Array.isArray(res.proyectos) && res.proyectos.length) PROJS = res.proyectos;
-    if (Array.isArray(res.proyectos_detalle) && res.proyectos_detalle.length) PROJS_DETALLE = res.proyectos_detalle;
-    /* Clientes incluidos en la misma respuesta — sin llamada extra ni race condition */
-    if (Array.isArray(res.clientes) && res.clientes.length) {
-      _allClientes = res.clientes;
-      /* Poblar selectores de cliente */
-      populateClienteSelects();
-    }
+    if (!res || !Array.isArray(res.proyectos) || !res.proyectos.length) return;
+    PROJS = res.proyectos;
     renderSelects();
+    var detalle = res.proyectos_detalle || res.proyectos.map(function(n) { return {nombre: n}; });
+    ['gen-proj', 'inf-proj', 'fmo-proj'].forEach(function(sid) {
+      var el = document.getElementById(sid);
+      if (!el) return;
+      var cur = el.value;
+      var html = '<option value="">Selecciona proyecto…</option>';
+      detalle.forEach(function(p) { html += '<option value="' + esc(p.nombre) + '">' + esc(p.nombre) + '</option>'; });
+      el.innerHTML = html;
+      if (cur) el.value = cur;
+    });
     toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
   }).catch(function(e) {
     console.warn('[Bridge] proyectos no disponibles desde BD:', e);
   });
-}
-
-/* Pobla #port-sel, #inf-port y contribuye a #fclient via _allClientes */
-function populateClienteSelects() {
-  /* Unión de clientes: portPortfolios + _allClientes */
-  var portNames = Object.keys(portPortfolios);
-  var allNames = _allClientes.map(function(c){ return c.nombre; });
-  /* Merge: portPortfolios first (have generation data), then rest */
-  var merged = portNames.slice();
-  allNames.forEach(function(n){ if(merged.indexOf(n) < 0) merged.push(n); });
-  merged.sort();
-
-  /* #port-sel (tab Clientes) */
-  var portSel = document.getElementById('port-sel');
-  if (portSel) {
-    var saved = portSel.value;
-    var h = '<option value="">Selecciona cliente…</option>';
-    merged.forEach(function(n){ h += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
-    portSel.innerHTML = h;
-    if (saved) portSel.value = saved;
-  }
-
-  /* #inf-port (tab Informe → Por Cliente) */
-  var infPort = document.getElementById('inf-port');
-  if (infPort) {
-    var saved2 = infPort.value;
-    var h2 = '<option value="">Selecciona cliente…</option>';
-    merged.forEach(function(n){ h2 += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
-    infPort.innerHTML = h2;
-    if (saved2) infPort.value = saved2;
-  }
 }
 
 /* ── mapeos de estado ── */
@@ -859,41 +765,33 @@ function _loadCatIds() {
   }).catch(function(e){console.warn('[Bridge] catIds:',e);});
 }
 
-/* OVERRIDE loadFaults — carga todas las páginas de /api/v1/fallas */
-function _mapFault(f){
-  return {
-    id:f.codigo_interno||String(f.id), _db_id:f.id,
-    proj:(f.proyecto||{}).nombre_comercial||"",
-    code:(f.tipo||{}).codigo||"otro_general",
-    faultLabel:(f.tipo||{}).etiqueta||"",
-    catNum:(function(){var _OLD={inversor:"2",comunicacion:"1",produccion:"4",red:"2",estructura:"5",medicion:"1",otro:"p"};var cc=((f.tipo||{}).categoria||{}).codigo||"";return /^\d$/.test(cc)?cc:(_OLD[cc]||"");})(),
-    st:_ST_MAP[(f.estado||{}).codigo]||"activa",
-    date:f.fecha_identificacion||"",
-    time:f.hora_identificacion||"",
-    occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
-    res:(f.resolucion||{}).etiqueta||"",
-    desc:f.descripcion||"",
-    flw:(f.seguimientos||[]).map(function(s){
-      return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
-    }).join("\n"),
-    driveUrl:"",driveUrls:[],
-    endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
-    centinela:"",notify:false,
-    prio:(f.prioridad||{}).codigo||"media"
-  };
-}
+/* OVERRIDE loadFaults — usa /api/v1/fallas (evita el 500 de /monitoreo/fallas) */
 function loadFaults() {
   setSync("spin","Sincronizando…");
-  _apiFetch('GET','/api/v1/monitoreo/fallas').then(function(res){
-    if(res && res.ok && Array.isArray(res.faults)){
-      faults = res.faults;
-      faults.forEach(function(f){
-        var n=parseInt((f.id||"").replace(/\D/g,""));
-        if(!isNaN(n)&&n>=idN)idN=n+1;
-        // normalise prio capitalisation (DB stores lowercase)
-        if(f.prio)f.prio=f.prio.charAt(0).toUpperCase()+f.prio.slice(1);
-      });
-    }
+  _apiFetch('GET','/api/v1/fallas?size=500&page=1').then(function(res) {
+    var items=(res&&res.items)||[];
+    faults=items.map(function(f) {
+      return {
+        id:f.codigo_interno||String(f.id), _db_id:f.id,
+        proj:(f.proyecto||{}).nombre_comercial||"",
+        code:(f.tipo||{}).codigo||"otro_general",
+        faultLabel:(f.tipo||{}).etiqueta||"",
+        st:_ST_MAP[(f.estado||{}).codigo]||"activa",
+        date:f.fecha_identificacion||"",
+        time:f.hora_identificacion||"",
+        occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
+        res:(f.resolucion||{}).etiqueta||"",
+        desc:f.descripcion||"",
+        flw:(f.seguimientos||[]).map(function(s){
+          return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
+        }).join("\n"),
+        driveUrl:"",driveUrls:[],
+        endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
+        centinela:"",notify:false,
+        prio:(f.prioridad||{}).codigo||"media"
+      };
+    });
+    faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
     setSync("ok","Sincronizado ✓");hideLoader();renderAll();
     toast("✓ "+faults.length+" fallas cargadas");
   }).catch(function(e){
@@ -916,40 +814,35 @@ function serverDel(id) {
     }).catch(function(e){setSync("err","Error");toast("⚠ No se pudo eliminar: "+e.message);});
 }
 
-/* OVERRIDE serverSave — usa /api/v1/monitoreo/fallas/save (acepta nombres, no IDs) */
+/* OVERRIDE serverSave — usa POST/PATCH /api/v1/fallas */
 function serverSave(f, cb) {
   setSync("spin","Guardando…");
-  var fdd=fd(f.code)||{};
-  var cleanRes=(f.res&&f.res.trim()&&f.res.length>3&&!/^\d/.test(f.res)&&!f.res.includes("GMT")&&!f.res.includes("\"")?f.res:"");
-  var payload={
-    id: f.id||"",
-    project: f.proj||"",
-    faultCode: f.code||"",
-    faultLabel: fdd.label||f.faultLabel||f.code||"",
-    categoryId: fdd.catId||f.catNum||f._categoria_id||"1",
-    status: f.st||"activa",
-    identDate: f.date||new Date().toISOString().slice(0,10),
-    occTime: f.occ||"",
-    endTime: f.endDT||"",
-    desc: f.desc||f.faultLabel||"Sin descripción",
-    follwUp: "",
-    resType: cleanRes,
-    driUe: f.driveUrl||f.driUe||"",
-    driUes: f.driveUrls||f.driUes||[],
-    centinela: f.centinela||"",
-    prioridad: (f.prio||"media").toLowerCase(),
-    notify: f.notify===true
-  };
-  _apiFetch('POST','/api/v1/monitoreo/fallas/save',payload).then(function(r){
-    setSync(r&&r.ok?"ok":"err",r&&r.ok?"Guardado ✓":"Error al guardar");
-    if(r&&r.fault){
-      var saved=r.fault;
-      var idx=faults.findIndex(function(x){return x.id===f.id||x.id===saved.id;});
-      if(idx>=0){faults[idx]=saved;}else{faults.unshift(saved);}
-      f._db_id=saved._db_id;f.id=saved.id;
-    }
-    renderAll();if(cb)cb(!!(r&&r.ok));
-  }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+  var stCod=_ST_REV[f.st]||"abierta";
+  var eId=_catIds.estados[stCod];
+  var tId=_catIds.tipos[f.code];
+  var pId=_catIds.prioridades[f.prio||"media"];
+  var prId=_catIds.proyectos[f.proj];
+  if(!eId||!tId||!pId||!prId){
+    toast("⚠ Proyecto/tipo/estado/prioridad no encontrados en BD");
+    setSync("err","Error");if(cb)cb(false);return;
+  }
+  if(!f._db_id) {
+    _apiFetch('POST','/api/v1/fallas',{
+      proyecto_id:prId,tipo_id:tId,estado_id:eId,prioridad_id:pId,
+      descripcion:f.desc||"Sin descripción",
+      fecha_identificacion:f.date||new Date().toISOString().slice(0,10)
+    }).then(function(r){
+      f._db_id=r.id;f.id=r.codigo_interno;
+      var idx=faults.findIndex(function(x){return x.id===f.id;});
+      if(idx>=0)faults[idx]=f;else faults.unshift(f);
+      setSync("ok","Guardado ✓");renderAll();if(cb)cb(true);
+    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+  } else {
+    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,{
+      tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc
+    }).then(function(){setSync("ok","Guardado ✓");if(cb)cb(true);})
+      .catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+  }
 }
 /* ════════════════════════════════════════════════════════════════ */
 
@@ -1074,7 +967,7 @@ var CATALOG_READY=false;
 var IMPACT_STYLES={"1":{l:"Medición",i:"📡",c:"#60A5FA"},"2":{l:"Generación",i:"⚡",c:"#F6FF72"},"3":{l:"Evt.Adverso",i:"🌩️",c:"#FF5757"},"4":{l:"Desgaste",i:"🔧",c:"#F97316"},"5":{l:"Civil",i:"🏗️",c:"#C47AFF"},"6":{l:"HSE",i:"🦺",c:"#4ADE80"},"7":{l:"BESS",i:"🔋",c:"#7EC8E3"},"8":{l:"Admin.",i:"📋",c:"#F4A460"},"9":{l:"Sin Sumin.",i:"🔌",c:"#FF6B6B"}};
 var PRIO_CFG={Alta:{col:"#FF5757",bg:"#FF575715",bdr:"#FF575550"},Media:{col:"#F6FF72",bg:"#F6FF7215",bdr:"#F6FF7250"},Baja:{col:"#4ADE80",bg:"#4ADE8015",bdr:"#4ADE8050"}};
 var impInst=null;var isLight=false;
-function getImpStyle(code,catNum){var m=code?String(code).match(/^(\d+)/):null;var k=(m&&m[1])||catNum||"";return k&&IMPACT_STYLES[k]?IMPACT_STYLES[k]:{l:"Otro",i:"⭐",c:"#915BD8"};}
+function getImpStyle(code){var m=code?String(code).match(/^(\d+)/):null;return m&&IMPACT_STYLES[m[1]]?IMPACT_STYLES[m[1]]:{l:"Otro",i:"⭐",c:"#915BD8"};}
 function getPrio(p){return p&&PRIO_CFG[p]?PRIO_CFG[p]:null;}
 function getDaysOpen(f){if(!f||f.st==="terminada")return 0;var s=String(f.date||"").trim();var d;var m1=s.match(/^(\d{4})-(\d{2})-(\d{2})/);var m2=s.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);if(m1)d=new Date(+m1[1],+m1[2]-1,+m1[3]);else if(m2)d=new Date(+m2[3],+m2[2]-1,+m2[1]);else return 0;var diff=Math.floor((Date.now()-d.getTime())/86400000);return diff>0?diff:0;}
 function dayCol(n){return n>14?"#FF5757":n>7?"#F6FF72":"#4ADE80";}
@@ -1082,22 +975,6 @@ var ALL_F=[];
 function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(f){ALL_F.push({code:f.c,label:f.l,catId:c.id,catLbl:c.lbl,catCol:c.col,catIco:c.ico});});});}
 rebuildF();
 var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
-var PROJS_DETALLE=[]; /* [{id,nombre,alias,cliente_id,cliente_nombre}] */
-var _allClientes=[]; /* [{id,nombre,...}] cargado desde /api/v1/monitoreo/clientes */
-function loadClientesForFilters(){
-  _apiFetch('GET','/api/v1/monitoreo/clientes').then(function(r){
-    if(!r||!r.clientes)return;
-    _allClientes=r.clientes;
-    /* Actualizar todos los selectores de cliente */
-    populateClienteSelects();
-    /* Actualizar #fclient via renderSelects (usa _allClientes) */
-    var saved='';
-    var fclientEl=document.getElementById('fclient');
-    if(fclientEl){saved=fclientEl.value;}
-    renderSelects();
-    if(fclientEl&&saved)fclientEl.value=saved;
-  }).catch(function(e){console.warn('[loadClientesForFilters]',e);});
-}
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",
@@ -1214,7 +1091,7 @@ function loginEmailGo(){
       if(r&&r.ok){
         saveSession('monitor',email,r.nombre||email,[]);
         document.getElementById("login-ov").className="";
-        applyRole();loadFaults();loadPortfolios();loadClientesForFilters();
+        applyRole();loadFaults();
       } else {
         showLoginStep("email");
         err.textContent="⚠ Correo no registrado en la plataforma.";
@@ -1243,7 +1120,7 @@ function loginNameGo(){
   err.textContent="";
   saveSession("monitor",pendingEmail,name,[]);
   document.getElementById("login-ov").className="";
-  applyRole();loadFaults();loadPortfolios();loadClientesForFilters();
+  applyRole();loadFaults();
 }
 function loginCodeGo(){
   var code=(document.getElementById("li-code").value||"").trim();
@@ -1259,7 +1136,7 @@ function loginCodeGo(){
         toast("⚠ Tu cuenta no tiene proyectos asignados.",6000);
         hideLoader();renderAll();
       } else {
-        toast("✓ Acceso concedido",3000);loadFaults();loadPortfolios();loadClientesForFilters();
+        toast("✓ Acceso concedido",3000);loadFaults();
       }
     } else {
       showLoginStep("code");err.textContent="⚠ Código incorrecto o expirado";
@@ -1332,7 +1209,7 @@ function exportCSV(){
     if(isClient)return[f.proj,fdd?fdd.label:"",f.code,ST[f.st]?ST[f.st].lbl:"",
       fmtD(f.date)+(f.time?" "+padT(f.time):""),fmtDT(f.occ),fmtDT(f.endDT),
       f.desc||"",f.flw||"",f.res||""];
-    var imp=getImpStyle(f.code,f.catNum);var d=getDaysOpen(f);
+    var imp=getImpStyle(f.code);var d=getDaysOpen(f);
     return[f.id,f.proj,f.code,fdd?fdd.label:"",imp.l,ST[f.st]?ST[f.st].lbl:"",
       f.prio||"",d||"",fmtD(f.date),f.desc||"",f.flw||"",f.centinela||""];
   });
@@ -1387,11 +1264,7 @@ function toast(msg,dur){var t=document.getElementById("toast");t.textContent=msg
 function openLb(url){document.getElementById("lb-img").src=url;document.getElementById("lb").className="open";}
 function hideLoader(){document.getElementById("loader").style.display="none";}
 /* ══ API ══ */
-function apiGet(p,timeout){
-  var qs=Object.keys(p).filter(function(k){return k!=='action'&&p[k]!=null;}).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(p[k]);}).join('&');
-  var url='/api/v1/monitoreo/_legacy?action='+(p.action||'')+(qs?'&'+qs:'');
-  return _apiFetch('GET',url);
-}
+function apiGet(p,timeout){ return _apiFetch('GET', '/api/v1/monitoreo/_legacy?action='+(p.action||''), p); }
 function apiPost(body){ return _apiFetch('POST', '/api/v1/monitoreo/_legacy', body); }
 /* ══ CARGAR FALLAS ══ */
 function _loadFaults_legacy(){
@@ -1504,35 +1377,18 @@ function renderPills(){
 }
 function getFiltered(){
   var q=(document.getElementById("fsearch").value||"").toLowerCase();
-  var fcliEl=document.getElementById("fclient");
-  var fcli=fcliEl?fcliEl.value||"":" ";fcli=fcli.trim();
   var fp=document.getElementById("fproject").value||"";
   var fc=document.getElementById("fcat").value||"";
   var fim=document.getElementById("fimp")?document.getElementById("fimp").value||"":" ";
   var dfrom=document.getElementById("fdate-from")?document.getElementById("fdate-from").value||"":" ";
   var dto=document.getElementById("fdate-to")?document.getElementById("fdate-to").value||"":" ";
   fim=fim.trim();dfrom=dfrom.trim();dto=dto.trim();
-  /* mapa proyecto → cliente (de PROJS_DETALLE + portPortfolios) */
-  var projClientMap={};
-  PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre)projClientMap[p.nombre]=p.cliente_nombre;});
-  /* también indexar portPortfolios para cobertura máxima */
-  Object.keys(portPortfolios).forEach(function(clientName){
-    (portPortfolios[clientName]||[]).forEach(function(p){
-      var pn=p.nombre_comercial||p.nombre;
-      if(pn&&!projClientMap[pn])projClientMap[pn]=clientName;
-    });
-  });
   return faults.filter(function(f){
     if(userRole==="cliente"&&clientProjects.length>0&&clientProjects.indexOf(f.proj)<0)return false;
     if(filterSt!=="all"&&f.st!==filterSt)return false;
-    if(fcli){
-      var mapped=projClientMap[f.proj];
-      /* si tenemos el mapeo, filtrar estrictamente; si no hay mapeo para este proyecto, no excluir */
-      if(mapped&&mapped!==fcli)return false;
-    }
     if(fp&&f.proj!==fp)return false;
-    if(fc){var di=fd(f.code);var fCatId=di?di.catId:f.catNum;if(!fCatId||fCatId!==fc)return false;}
-    if(fim){var m2=String(f.code||"").match(/^(\d+)/);var fImpId=(m2&&m2[1])||f.catNum||"";if(!fImpId||fImpId!==fim)return false;}
+    if(fc){var di=fd(f.code);if(!di||di.catId!==fc)return false;}
+    if(fim){var m2=String(f.code||"").match(/^(\d+)/);if(!m2||m2[1]!==fim)return false;}
     if(dfrom||dto){
       var ds=String(f.date||"").trim(),iso="";
       var m1=ds.match(/^(\d{4})-(\d{2})-(\d{2})/);var m3=ds.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
@@ -1557,9 +1413,8 @@ function renderBoard(){
     if(!items.length){html+='<div class="col-empty">Sin registros</div>';}
     else{items.forEach(function(f){
       var fdd=fd(f.code),s=ST[f.st]||ST.activa;
-      var _flbl=fdd?fdd.label:(f.faultLabel||f.code||"Sin código");
-      var lbl=(f.code?f.code+" · ":"")+(_flbl.length>42?_flbl.slice(0,42)+"…":_flbl);
-      var _imp=getImpStyle(f.code,f.catNum);
+      var lbl=fdd?(f.code+" · "+(fdd.label.length>42?fdd.label.slice(0,42)+"…":fdd.label)):(f.code||"Sin código");
+      var _imp=getImpStyle(f.code);
       var _ibadge='<span class="imp-badge" style="color:'+_imp.c+';background:'+_imp.c+'18;border-color:'+_imp.c+'40">'+_imp.i+" "+_imp.l+'</span>';
       var _pp=getPrio(f.prio);
       var _pbadge=_pp?'<span class="prio-badge" style="color:'+_pp.col+';background:'+_pp.bg+';border-color:'+_pp.bdr+'">'+esc(f.prio||"")+'</span>':"";
@@ -1569,7 +1424,7 @@ function renderBoard(){
       var _alertBadge=_overdue?'<span class="alert-overdue">🔴 +7 días</span>':"";
       var ct=fdd?'<span class="cat-tag" style="color:'+fdd.catCol+';background:'+fdd.catCol+'18;border-color:'+fdd.catCol+'40">'+fdd.catIco+' Cat.'+fdd.catId+'</span>':"";
       var driveLink=f.driveUrl&&f.driveUrl.startsWith("http")?'<a href="'+esc(f.driveUrl)+'" target="_blank" onclick="event.stopPropagation()" style="color:var(--bl);text-decoration:none;display:inline-flex;align-items:center;gap:2px;font-weight:700">📁 Drive</a>':'';
-      html+='<div class="card'+(_overdue?' card-alert-strip':'')+'" style="border-left-color:'+_imp.c+';--card-glow:'+_imp.c+'" data-id="'+esc(f.id)+'">'+
+      html+='<div class="card'+(_overdue?' card-alert-strip':'')+'" style="border-left-color:'+s.col+'" data-id="'+esc(f.id)+'">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span class="card-id" style="color:'+s.col+'">'+esc(f.id)+'</span>'+ct+'</div>'+
         '<div class="card-lbl">'+esc(lbl)+'</div><div class="card-proj">'+esc(f.proj)+'</div>'+
         '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px">'+_ibadge+_pbadge+_dbadge+_alertBadge+'</div>'+
@@ -1598,34 +1453,8 @@ function renderBoard(){
 }
 function renderSelects(){
   var visProjs=(userRole==="cliente"&&clientProjects.length>0)?clientProjects:PROJS;
-
-  /* ── Selector de cliente ── */
-  var fclientEl=document.getElementById("fclient");
-  if(fclientEl){
-    var selCliente=fclientEl.value;
-    var clienteNames=[];
-    /* Fuente 1: PROJS_DETALLE (si proyecto tiene cliente_id en BD) */
-    PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre&&clienteNames.indexOf(p.cliente_nombre)<0)clienteNames.push(p.cliente_nombre);});
-    /* Fuente 2: portPortfolios (clientes con proyectos en operación) */
-    Object.keys(portPortfolios).forEach(function(n){if(clienteNames.indexOf(n)<0)clienteNames.push(n);});
-    /* Fuente 3: _allClientes (todos los clientes de la BD, independiente de proyectos) */
-    _allClientes.forEach(function(c){if(c.nombre&&clienteNames.indexOf(c.nombre)<0)clienteNames.push(c.nombre);});
-    clienteNames.sort();
-    var oc='<option value="">Todos los clientes</option>';
-    clienteNames.forEach(function(n){oc+='<option value="'+esc(n)+'">'+esc(n)+'</option>';});
-    fclientEl.innerHTML=oc;
-    fclientEl.value=selCliente;
-  }
-
-  /* ── Selector de proyecto (respeta filtro de cliente activo) ── */
-  var activeCliente=fclientEl?fclientEl.value:"";
-  var filteredProjs=visProjs;
-  if(activeCliente&&PROJS_DETALLE.length){
-    var clienteProjNames=PROJS_DETALLE.filter(function(p){return p.cliente_nombre===activeCliente;}).map(function(p){return p.nombre;});
-    filteredProjs=visProjs.filter(function(p){return clienteProjNames.indexOf(p)>=0;});
-  }
   var o='<option value="">Todos los proyectos</option>';
-  filteredProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
+  visProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
   ["fproject","chart-proj"].forEach(function(id){var e=document.getElementById(id);if(e){var v=e.value;e.innerHTML=o;e.value=v;}});
 }
 /* ══ KPIs ══ */
@@ -1716,10 +1545,9 @@ function loadCatalog(){
       /* reconstruir DEFAULT_CATS con datos de la BD */
       DEFAULT_CATS=cats.map(function(c){
         return{id:c.id,lbl:c.lbl,ico:c.ico,col:c.col,
-          faults:(c.faults||[]).map(function(f){return{c:f.code,l:f.label};})};
+          faults:(c.faults||[]).map(function(f){return{code:f.code,label:f.label};})};
       });
       rebuildF();updateFcatFilter();CATALOG_READY=true;
-      if(faults.length)renderAll();
       toast("✓ Catálogo actualizado",2000);
     }
   }).catch(function(e){
@@ -1729,16 +1557,11 @@ function loadCatalog(){
   });
 }
 function renderCharts(){renderPie();renderBar();renderImpactChart();}
-function _chartsBase(){
-  var fp=document.getElementById("chart-proj")?document.getElementById("chart-proj").value||"":" ";fp=fp.trim();
-  var base=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
-  return fp?base.filter(function(f){return f.proj===fp;}):base;
-}
 function renderImpactChart(){
   var cv=document.getElementById("impC");if(!cv)return;
   var agg={};
-  var _if=_chartsBase();
-  _if.forEach(function(f){if(f.st==="terminada")return;var imp=getImpStyle(f.code,f.catNum);var k=imp.l;if(!agg[k])agg[k]={l:imp.l,i:imp.i,c:imp.c,v:0};agg[k].v++;});
+  var _if=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
+  _if.forEach(function(f){if(f.st==="terminada")return;var imp=getImpStyle(f.code);var k=imp.l;if(!agg[k])agg[k]={l:imp.l,i:imp.i,c:imp.c,v:0};agg[k].v++;});
   var items=Object.values(agg).sort(function(a,b){return b.v-a.v;});
   if(!items.length)return;
   if(impInst)impInst.destroy();
@@ -1748,7 +1571,7 @@ function renderImpactChart(){
 }
 function renderPie(){
   var d={activa:0,revision:0,programada:0,terminada:0};
-  var _pf=_chartsBase();
+  var _pf=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
   _pf.forEach(function(f){if(d[f.st]!==undefined)d[f.st]++;});
   var lb=["Activas","En Revisión","Programadas","Terminadas"],co=["#FF5757","#F6FF72","#915BD8","#4ADE80"],da=[d.activa,d.revision,d.programada,d.terminada];
   if(pieInst)pieInst.destroy();
@@ -1757,8 +1580,10 @@ function renderPie(){
   document.getElementById("pie-leg").innerHTML=leg;
 }
 function renderBar(){
-  var src=_chartsBase();
-  var map={};src.forEach(function(f){var d=fd(f.code);var lbl=d?d.label:(f.faultLabel||f.code||"Desconocido");var k=(f.code?f.code+" · ":"")+( lbl.length>28?lbl.slice(0,28)+"…":lbl);map[k]=(map[k]||0)+1;});
+  var fp=document.getElementById("chart-proj").value||"";
+  var _base=(userRole==="cliente"&&clientProjects.length>0)?faults.filter(function(f){return clientProjects.indexOf(f.proj)>=0;}):faults;
+  var src=fp?_base.filter(function(f){return f.proj===fp;}):_base;
+  var map={};src.forEach(function(f){var d=fd(f.code);if(!d)return;var k=f.code+" · "+(d.label.length>28?d.label.slice(0,28)+"…":d.label);map[k]=(map[k]||0)+1;});
   var s=Object.keys(map).map(function(k){return{n:k,v:map[k]};}).sort(function(a,b){return b.v-a.v;}).slice(0,8);
   if(barInst)barInst.destroy();
   barInst=new Chart(document.getElementById("barC").getContext("2d"),{type:"bar",data:{labels:s.map(function(x){return x.n;}),datasets:[{data:s.map(function(x){return x.v;}),backgroundColor:"#915BD8BB",borderColor:"#915BD8",borderWidth:1,borderRadius:4}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#6B5F80",font:{size:10}},grid:{color:"#4A356030"},border:{color:"transparent"}},y:{ticks:{color:"#A89EC0",font:{size:10}},grid:{display:false},border:{color:"transparent"}}}}});
@@ -1948,7 +1773,7 @@ function openDetail(id){
   var driveOk=f.driveUrl&&f.driveUrl.startsWith("http");
   var html;
   if(isClient){
-    var faultName=fdd?(f.code+" · "+fdd.label):((f.code?(f.code+" · "):"")+( f.faultLabel||"Falla registrada"));
+    var faultName=fdd?(f.code+" · "+fdd.label):(f.code||"Falla registrada");
     html=
       '<div style="background:'+s.bg+';border:1.5px solid '+s.bdr+';border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
       +'<span class="badge" style="color:'+s.col+';background:'+s.bg+';border-color:'+s.bdr+'">'+s.ico+' '+s.lbl+'</span>'
@@ -1978,7 +1803,7 @@ function openDetail(id){
     (resOk?'<span class="badge" style="color:#4ADE80;background:#4ADE8018;border-color:#4ADE8040">'+esc(f.res)+'</span>':'')+
     '</div>';
   if(fdd){
-    var _di=getImpStyle(f.code,f.catNum);var _dp=getPrio(f.prio);var _dd=getDaysOpen(f);
+    var _di=getImpStyle(f.code);var _dp=getPrio(f.prio);var _dd=getDaysOpen(f);
     html+='<div style="background:#1a1025;border-left:3px solid '+fdd.catCol+';border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:var(--mu)"><b style="color:'+fdd.catCol+'">'+fdd.catIco+' '+fdd.code+' · '+fdd.label+'</b></div>';
     html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">'
       +'<span class="imp-badge" style="color:'+_di.c+';background:'+_di.c+'18;border-color:'+_di.c+'40">'+_di.i+' '+_di.l+'</span>'
@@ -2042,30 +1867,13 @@ var genCompareChart    = null;
 var genCompareSelected = {};   // { sub_project: true/false }
 var genCompareColors   = {};   // { sub_project: color }
 
-function toggleCmpDropdown(){
-  var dd=document.getElementById("gen-cmp-dropdown");
-  if(!dd)return;
-  dd.style.display=dd.style.display==="none"?"block":"none";
-}
-document.addEventListener("click",function(e){
-  var dd=document.getElementById("gen-cmp-dropdown");
-  var tr=document.getElementById("gen-cmp-trigger");
-  if(dd&&dd.style.display==="block"&&!dd.contains(e.target)&&tr&&!tr.contains(e.target))dd.style.display="none";
-});
-function _updateCmpLabel(){
-  var sel=Object.keys(genCompareSelected).filter(function(sp){return genCompareSelected[sp];});
-  var lbl=document.getElementById("gen-cmp-label");
-  if(!lbl)return;
-  if(!sel.length){lbl.textContent="Selecciona proyectos…";return;}
-  var names=sel.map(function(sp){var p=genProjects.find(function(x){return x.sub_project===sp;});return p?(p.nombre_clientes||p.nombre_display):sp;});
-  lbl.textContent=names.length<=2?names.join(", "):names.slice(0,2).join(", ")+" + "+(names.length-2)+" más";
-}
 function renderGenCompareSelector() {
-  var dd      = document.getElementById("gen-cmp-dropdown");
+  var sel     = document.getElementById("gen-compare-sel");
   var section = document.getElementById("gen-compare-section");
-  if (!dd || !genProjects.length) return;
+  if (!sel || !genProjects.length) return;
   if (section) section.style.display = "block";
 
+  // Filtrar por proyectos del cliente si aplica
   var visProjs = (userRole === "cliente" && clientProjects.length > 0)
     ? genProjects.filter(function(p) {
         return clientProjects.some(function(cp) {
@@ -2083,27 +1891,27 @@ function renderGenCompareSelector() {
       genCompareColors[p.sub_project] = portColorPalette[i % portColorPalette.length];
   });
 
-  dd.innerHTML = visProjs.map(function(p) {
+  sel.innerHTML = visProjs.map(function(p) {
     var sp  = p.sub_project;
     var col = genCompareColors[sp];
-    var on  = !!genCompareSelected[sp];
-    return '<label style="display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;' +
-      'font-size:12px;color:'+(on?'var(--cr)':'var(--mu)')+';' +
-      'background:'+(on?col+'18':'transparent')+';transition:background .15s">' +
-      '<input type="checkbox" data-sp="'+esc(sp)+'" '+(on?'checked':'')+' style="accent-color:'+col+';width:14px;height:14px;cursor:pointer"/>' +
-      '<div style="width:8px;height:8px;border-radius:50%;background:'+col+';flex-shrink:0"></div>' +
+    var on  = genCompareSelected[sp];
+    return '<button class="gen-cmp-pill" data-sp="' + esc(sp) + '" style="' +
+      'display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;' +
+      'border:1.5px solid ' + (on ? col : 'var(--br)') + ';' +
+      'background:' + (on ? col + '22' : 'var(--s1)') + ';' +
+      'color:' + (on ? col : 'var(--mu)') + ';' +
+      'font-size:11px;font-weight:700;font-family:\'Sora\',sans-serif;transition:all .2s">' +
+      '<div style="width:7px;height:7px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
       esc(p.nombre_clientes || p.nombre_display) +
-      '</label>';
+      '</button>';
   }).join("");
 
-  dd.querySelectorAll("input[type=checkbox]").forEach(function(cb) {
-    cb.addEventListener("change", function() {
-      genCompareSelected[this.dataset.sp] = this.checked;
+  sel.querySelectorAll(".gen-cmp-pill").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      genCompareSelected[this.dataset.sp] = !genCompareSelected[this.dataset.sp];
       renderGenCompareSelector();
-      _updateCmpLabel();
     });
   });
-  _updateCmpLabel();
 }
 
 function loadGenCompare() {
@@ -2399,7 +2207,7 @@ function renderGenChart(r,subProj,range){
       html+='</div>';html+='</div>';
       html+='<div style="padding:8px 14px;display:flex;flex-direction:column;gap:7px">';
       dayFaults.forEach(function(f){
-        var fdd=fd(f.code);var s=ST[f.st]||ST.activa;var catStyle=getImpStyle(f.code,f.catNum);
+        var fdd=fd(f.code);var s=ST[f.st]||ST.activa;var catStyle=getImpStyle(f.code);
         html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border-radius:8px;cursor:pointer;border:1px solid var(--br);transition:border-color .2s" onclick="openDetail(\''+esc(f.id)+'\')" onmouseover="this.style.borderColor=\'#915BD8\'" onmouseout="this.style.borderColor=\'\'">';
         html+='<div style="width:34px;height:34px;border-radius:8px;background:'+catStyle.col+'22;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">'+catStyle.ico+'</div>';
         html+='<div style="flex:1;min-width:0">';
@@ -2437,13 +2245,15 @@ var portColorPalette = [
 ];
 function loadPortfolios() {
   apiGet({action:"getPortfolios"}, 10000).then(function(r){
-    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); populateClienteSelects(); return; }
+    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); return; }
     portPortfolios = r.portfolios || {};
-    /* Poblar todos los selectores de cliente (port-sel, inf-port) */
-    populateClienteSelects();
-    /* Contribuir a #fclient con clientes de portPortfolios */
-    renderSelects();
-  }).catch(function(e){ console.error("loadPortfolios:", e); populateClienteSelects(); });
+    var sel = document.getElementById("port-sel");if (!sel) return;
+    sel.innerHTML = '<option value="">Selecciona portafolio…</option>';
+    Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
+    // ── Poblar también el selector de informe ──
+    var infPort=document.getElementById("inf-port");
+    if(infPort){infPort.innerHTML='<option value="">Selecciona portafolio…</option>';Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});}
+  }).catch(function(e){ console.error("loadPortfolios:", e); });
 }
 function getPortDateRange() {
   var now = new Date();
@@ -2456,44 +2266,23 @@ function getPortDateRange() {
 }
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
-  if (!portName) { toast("⚠ Selecciona un cliente"); return; }
-
-  /* Fuente 1: portPortfolios (clientes con proyectos enlazados vía legado) */
-  var projItems = portPortfolios[portName] || [];
-
-  /* Fuente 2 (fallback): PROJS_DETALLE filtrado por cliente_nombre */
-  if (!projItems.length && PROJS_DETALLE.length) {
-    var detalleItems = PROJS_DETALLE.filter(function(p){ return p.cliente_nombre === portName && (p.sub_project || p.alias); });
-    if (detalleItems.length) {
-      projItems = detalleItems.map(function(p){
-        return {
-          nombre: p.nombre,
-          sub_project: p.sub_project || p.alias,
-          nombre_display: p.nombre,
-          nombre_bitacora: "",
-          nombre_comercial: p.nombre
-        };
-      });
-    }
-  }
-
-  if (!projItems.length) {
-    toast("⚠ Este cliente no tiene proyectos con alias de monitoreo configurado");
-    return;
-  }
-
+  if (!portName) { toast("⚠ Selecciona un portafolio"); return; }
+  var projNames = portPortfolios[portName];
+  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos en este portafolio"); return; }
+  var allSysProjs = genProjects.length > 0 ? genProjects : [];
   var projsToLoad = [];
-  projItems.forEach(function(item){
-    var sp = typeof item === "object" ? (item.sub_project||"") : "";
-    var nombre = typeof item === "object" ? (item.nombre||item.nombre_display||"") : String(item);
-    if (!sp) return; // sin alias de monitoreo no se puede consultar generación
-    if (userRole === "cliente" && clientProjects.length > 0) {
-      var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === nombre.trim().toLowerCase() || cp === sp.trim().toLowerCase(); });
-      if (!has) return;
+  projNames.forEach(function(nc){
+    nc = nc.trim();
+    var found = allSysProjs.find(function(p){ return (p.nombre_clientes||"").trim() === nc || (p.nombre_display||"").trim() === nc || (p.nombre_bitacora||"").trim() === nc; });
+    if (found) {
+      if (userRole === "cliente" && clientProjects.length > 0) {
+        var has = clientProjects.some(function(cp){ cp = cp.trim().toLowerCase(); return cp === (found.nombre_clientes||"").trim().toLowerCase() || cp === (found.nombre_bitacora||"").trim().toLowerCase() || cp === (found.nombre_display||"").trim().toLowerCase() || cp === (found.sub_project||"").trim().toLowerCase(); });
+        if (!has) return;
+      }
+      projsToLoad.push(found);
     }
-    projsToLoad.push({sub_project: sp, nombre_clientes: nombre, nombre_display: item.nombre_display||nombre, nombre_bitacora: item.nombre_bitacora||"", nombre_comercial: item.nombre_comercial||nombre});
   });
-  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este cliente"); return; }
+  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este portafolio"); return; }
   portCurrentPortfolio = portName;
   var range = getPortDateRange();
   document.getElementById("port-empty").style.display = "none";
@@ -2553,7 +2342,7 @@ function renderPortfolio(range) {
       var pct = maxKwh > 0 ? (kwh / maxKwh * 100) : 0; var portPct = grandTotal > 0 ? (kwh / grandTotal * 100).toFixed(1) : "0.0";
       html += '<div style="padding:12px 20px;border-bottom:1px solid var(--br);display:flex;align-items:center;gap:14px">';
       html += '<div style="width:28px;height:28px;border-radius:50%;background:'+(i===0?"linear-gradient(135deg,#F6FF72,#e6ee62)":i===1?"linear-gradient(135deg,#A89EC0,#8a82a8)":i===2?"linear-gradient(135deg,#F97316,#d96010)":"var(--s2)")+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:'+(i<3?"#1A0F2E":"var(--mu)")+';flex-shrink:0">'+(i+1)+'</div>';
-      html += '<div style="min-width:140px;flex-shrink:0"><div style="display:flex;align-items:center;gap:7px"><div style="width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0"></div><span style="font-size:13px;font-weight:700;color:var(--cr)">'+esc(nombre)+'</span></div><div style="font-size:10px;color:var(--fa);margin-top:3px">'+portPct+'% del cliente</div></div>';
+      html += '<div style="min-width:140px;flex-shrink:0"><div style="display:flex;align-items:center;gap:7px"><div style="width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0"></div><span style="font-size:13px;font-weight:700;color:var(--cr)">'+esc(nombre)+'</span></div><div style="font-size:10px;color:var(--fa);margin-top:3px">'+portPct+'% del portafolio</div></div>';
       html += '<div style="flex:1;min-width:0"><div style="background:var(--br);border-radius:4px;height:8px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px;transition:width .6s ease"></div></div></div>';
       html += '<div style="min-width:100px;text-align:right;flex-shrink:0"><div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;color:'+col+'">'+Math.round(kwh).toLocaleString("es-CO")+'</div><div style="font-size:10px;color:var(--fa)">kWh</div></div>';
       html += '</div>';
@@ -2562,52 +2351,6 @@ function renderPortfolio(range) {
   }
   renderPortChart(allDays, sortedKeys, projDayMap);
   document.getElementById("port-chart-section").style.display = "block";
-  loadPortCorreos(portCurrentPortfolio);
-}
-/* ══ CORREOS DE CLIENTE ══ */
-var _portClienteId = null;
-var _portClientesCache = null;
-function loadPortCorreos(clienteName) {
-  var card = document.getElementById("port-correos-card"); if (!card) return;
-  card.style.display = "none";
-  _portClienteId = null;
-  _apiFetch("GET", "/api/v1/monitoreo/clientes").then(function(r) {
-    _portClientesCache = (r && r.clientes) || [];
-    var c = _portClientesCache.find(function(x){ return x.nombre === clienteName; });
-    if (!c) return;
-    _portClienteId = c.id;
-    document.getElementById("pce-principal").textContent = c.correo_electronico || "—";
-    document.getElementById("pce-liquidacion").textContent = c.correo_liquidacion || "—";
-    document.getElementById("pce-monitoreo").textContent = c.correo_monitoreo || "—";
-    document.getElementById("pcf-liquidacion").value = c.correo_liquidacion || "";
-    document.getElementById("pcf-monitoreo").value = c.correo_monitoreo || "";
-    card.style.display = "block";
-  }).catch(function(e){ console.warn("loadPortCorreos:", e); });
-}
-function togglePortCorreosEdit() {
-  var form = document.getElementById("port-correos-form");
-  var body = document.getElementById("port-correos-body");
-  var btn = document.getElementById("port-correos-edit-btn");
-  if (!form || !body) return;
-  var editing = form.style.display !== "none";
-  form.style.display = editing ? "none" : "block";
-  body.style.display = editing ? "block" : "none";
-  if (btn) btn.textContent = editing ? "✏️ Editar" : "Cancelar";
-}
-function savePortCorreos() {
-  if (!_portClienteId) { toast("⚠ Cliente no identificado"); return; }
-  var payload = {
-    correo_liquidacion: document.getElementById("pcf-liquidacion").value.trim(),
-    correo_monitoreo:   document.getElementById("pcf-monitoreo").value.trim(),
-  };
-  _apiFetch("PATCH", "/api/v1/monitoreo/clientes/" + _portClienteId + "/correos", payload)
-  .then(function(r) {
-    if (!r || !r.ok) { toast("⚠ Error al guardar correos"); return; }
-    document.getElementById("pce-liquidacion").textContent = r.correo_liquidacion || "—";
-    document.getElementById("pce-monitoreo").textContent = r.correo_monitoreo || "—";
-    togglePortCorreosEdit();
-    toast("✓ Correos guardados");
-  }).catch(function(e){ toast("⚠ Error: " + e.message); });
 }
 function renderPortChart(allDays, sortedKeys, projDayMap) {
   var cv = document.getElementById("portC"); if (!cv) return;
@@ -2650,34 +2393,17 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("cbtn").addEventListener("click",function(){
     if(userRole==="cliente"){if(confirm("¿Cerrar sesión?")){ clearSession(); location.reload(); }} else { openSetup(true); }
   });
-  function _hideAll(){var ip=document.getElementById("inf-panel");if(ip)ip.style.display="none";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";var gp=document.getElementById("gest-panel");if(gp)gp.style.display="none";}
-  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";_hideAll();});
-  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";_hideAll();renderCharts();});
+  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";});
+  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";renderCharts();});
   var _tg=document.getElementById("tab-gen");
   if(_tg)_tg.addEventListener("click",function(){
     curTab="gen";
     document.querySelectorAll(".tab").forEach(function(t){t.className="tab";});
     this.className="tab on";
     document.getElementById("app").style.display="none";
-    document.getElementById("board-panel").style.display="none";
-    document.getElementById("frow").style.display="none";
-    document.getElementById("charts").style.display="none";
-    _hideAll();
     document.getElementById("gen-panel").style.display="block";
+    document.getElementById("port-panel").style.display="none";
     loadGenProjects();
-  });
-  var _tgest=document.getElementById("tab-gest");
-  if(_tgest)_tgest.addEventListener("click",function(){
-    curTab="gest";
-    document.querySelectorAll(".tab").forEach(function(t){t.className="tab";});
-    this.className="tab on";
-    document.getElementById("app").style.display="none";
-    document.getElementById("board-panel").style.display="none";
-    document.getElementById("frow").style.display="none";
-    document.getElementById("charts").style.display="none";
-    _hideAll();
-    document.getElementById("gest-panel").style.display="block";
-    loadGestion();
   });
   var _tp = document.getElementById("tab-port");
   if (_tp) _tp.addEventListener("click", function(){
@@ -2685,10 +2411,7 @@ document.addEventListener("DOMContentLoaded",function(){
     document.querySelectorAll(".tab").forEach(function(t){ t.className="tab"; });
     this.className = "tab on";
     document.getElementById("app").style.display = "none";
-    document.getElementById("board-panel").style.display="none";
-    document.getElementById("frow").style.display="none";
-    document.getElementById("charts").style.display="none";
-    _hideAll();
+    document.getElementById("gen-panel").style.display = "none";
     document.getElementById("port-panel").style.display = "block";
     if (!genProjects.length) loadGenProjects();
     loadPortfolios();
@@ -2716,7 +2439,6 @@ document.addEventListener("DOMContentLoaded",function(){
     if (Object.keys(portData).length) { var daySet2={}; Object.keys(portData).forEach(function(sp){ portData[sp].data.forEach(function(d){ daySet2[d.date]=true; }); }); var allDays2=Object.keys(daySet2).sort(); var sortedKeys2=Object.keys(portData).sort(function(a,b){ return portData[b].totalKwh-portData[a].totalKwh; }); var projDayMap2={}; sortedKeys2.forEach(function(sp){ projDayMap2[sp]={}; portData[sp].data.forEach(function(d){ if(!projDayMap2[sp][d.date])projDayMap2[sp][d.date]=0; projDayMap2[sp][d.date]+=d.kwh; }); }); renderPortChart(allDays2,sortedKeys2,projDayMap2); }
   });
   var _pl = document.getElementById("port-load"); if (_pl) _pl.addEventListener("click", loadPortfolio);
-  var _ps = document.getElementById("port-sel"); if (_ps) _ps.addEventListener("change", function(){ if(this.value) loadPortCorreos(this.value); });
   var _gl=document.getElementById("gen-load");if(_gl)_gl.addEventListener("click",loadGeneracion);
   // ── NUEVO: listener comparación ──
   var _gcl=document.getElementById("gen-compare-load");if(_gcl)_gcl.addEventListener("click",loadGenCompare);
@@ -2727,12 +2449,12 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   ["all","activa","revision","programada","terminada"].forEach(function(k){document.getElementById("pill-"+k).addEventListener("click",function(){filterSt=k;renderPills();renderBoard();});});
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});
-  var _fcli=document.getElementById("fclient");if(_fcli)_fcli.addEventListener("change",function(){renderSelects();renderBoard();});
   document.getElementById("fproject").addEventListener("change",function(){renderBoard();});
   document.getElementById("fcat").addEventListener("change",function(){renderBoard();});
-  document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderCharts();});
+  document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderBar();});
   document.getElementById("btn-new").addEventListener("click",openNewFault);
   document.getElementById("btn-sync").addEventListener("click",loadFaults);
+  document.getElementById("btn-addproj").addEventListener("click",openProjModal);
   document.getElementById("btn-addfault").addEventListener("click",openAddFaultM);
   document.getElementById("fab").addEventListener("click",openNewFault);
   document.getElementById("btn-empty-new").addEventListener("click",openNewFault);
@@ -2752,8 +2474,6 @@ document.addEventListener("DOMContentLoaded",function(){
     applyRole();
     document.getElementById("login-ov").className="";
     loadFaults();
-    loadPortfolios();         /* carga portPortfolios + #inf-port + #port-sel */
-    loadClientesForFilters(); /* carga todos los clientes → #fclient + #inf-port fallback */
   } else {
     document.getElementById("loader").style.display="none";
     showLoginStep("email");
@@ -3114,11 +2834,11 @@ function buildConsolidatedPage(portName,projsData,range,totalPages){
     +'<svg width="38" height="31" viewBox="0 0 44 36" fill="none"><circle cx="22" cy="4" r="3" fill="white"/><path d="M8 10 L8 24 Q8 34 22 34 Q36 34 36 24 L36 10" stroke="white" stroke-width="5" fill="none" stroke-linecap="round"/></svg>'
     +'<div><div style="color:#fff;font-size:14px;font-weight:800;letter-spacing:.8px">INFORME OPERACIONAL MENSUAL · PORTAFOLIO</div>'
     +'<div style="color:#6B5F80;font-size:10px;letter-spacing:.6px;margin-top:2px">Unergy Energía Digital S.A.S ESP | Operación &amp; Mantenimiento</div></div></div>'
-    +'<div class="rpt-meta-grid">'+rmeta("CLIENTE",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
+    +'<div class="rpt-meta-grid">'+rmeta("PORTAFOLIO",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
     +'</div>'
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 1. Resumen Consolidado – '+esc(range.headerPeriod)+'</div>'
     +'<div class="rpt-kpi-row">'
-    +rkpi("⚡","Generación Total Cliente",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
+    +rkpi("⚡","Generación Total Portafolio",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
     +rkpi("🏭","Proyectos sobre P90",overP90+" / "+projsData.length,overP90===projsData.length?"#4ADE80":"#F6FF72")
     +rkpi("⚠️","Total Eventos del Período",totalEv+" evento(s)",totalEv>0?"#F97316":"#4ADE80")
     +'</div>'
@@ -3171,13 +2891,7 @@ function generateInforme(){
   if(userRole==="cliente")return;
   var range=getInfRange();
   if(!range){toast("⚠ Selecciona "+(infPeriodMode==="mes"?"el mes":"el rango de fechas"));return;}
-  /* Si genProjects no está cargado, cargar primero y luego reintentar */
-  if(!genProjects.length){
-    toast("⏳ Cargando proyectos…");
-    loadGenProjects();
-    setTimeout(function(){ if(genProjects.length) generateInforme(); }, 2500);
-    return;
-  }
+  if(!genProjects.length){toast("⚠ Cargando proyectos, espera un momento…");loadGenProjects();return;}
   // Reset
   _obsIdx=0;
   document.getElementById("inf-empty").style.display="none";
@@ -3207,65 +2921,20 @@ function generateInforme(){
 
   }else{
     var pname=(document.getElementById("inf-port")||{}).value||"";
-    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un cliente");return;}
-
-    /* ── Obtener proyectos del cliente ──────────────────────────────
-       Fuente 1: portPortfolios (requiere cliente_id configurado)
-       Fuente 2: PROJS_DETALLE filtrado por cliente_nombre (fallback)
-    ───────────────────────────────────────────────────────────────── */
+    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un portafolio");return;}
     var portList=portPortfolios[pname]||[];
-
-    if(!portList.length && PROJS_DETALLE.length){
-      var detItems=PROJS_DETALLE.filter(function(p){
-        return p.cliente_nombre===pname && (p.sub_project||p.alias);
-      });
-      if(detItems.length){
-        portList=detItems.map(function(p){
-          return {
-            nombre: p.nombre,
-            sub_project: p.sub_project||p.alias,
-            nombre_display: p.nombre,
-            nombre_bitacora: "",
-            nombre_comercial: p.nombre
-          };
-        });
-      }
-    }
-
-    if(!portList.length){
-      document.getElementById("inf-loading").style.display="none";
-      document.getElementById("inf-empty").style.display="block";
-      toast("⚠ Este cliente no tiene proyectos con alias de monitoreo configurado");
-      return;
-    }
-
+    if(!portList.length){toast("⚠ Portafolio vacío");return;}
     var cfgs=[];
-    portList.forEach(function(item){
-      var sp=typeof item==="object"?(item.sub_project||""):"";
-      var nombre=typeof item==="object"?(item.nombre||item.nombre_display||""):String(item);
-      if(!sp)return;
-      /* Enriquecer con datos de genProjects (municipio, potencia, etc.) */
-      var gp=genProjects.find(function(p){return p.sub_project===sp;});
-      cfgs.push({
-        sub_project: sp,
-        nombre_clientes: nombre,
-        nombre_display: item.nombre_display||nombre,
-        nombre_bitacora: item.nombre_bitacora||"",
-        nombre_comercial: item.nombre_comercial||nombre,
-        municipio: (gp&&gp.municipio)||"—",
-        departamento: (gp&&gp.departamento)||"—",
-        potencia_instalada_kwp: (gp&&gp.potencia_instalada_kwp)||null,
-        project_id_solenium: (gp&&gp.project_id_solenium)||""
+    portList.forEach(function(name){
+      var c=genProjects.find(function(p){
+        var nl=name.trim().toLowerCase();
+        return nl===(p.nombre_clientes||"").trim().toLowerCase()||nl===(p.nombre_display||"").trim().toLowerCase()||nl===(p.nombre_bitacora||"").trim().toLowerCase();
       });
+      if(c)cfgs.push(c);
     });
-    if(!cfgs.length){
-      document.getElementById("inf-loading").style.display="none";
-      document.getElementById("inf-empty").style.display="block";
-      toast("⚠ Proyectos del cliente no tienen alias de monitoreo configurado");
-      return;
-    }
+    if(!cfgs.length){toast("⚠ Proyectos del portafolio no encontrados");return;}
     var results=[],done=0;
-    document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyecto"+(cfgs.length!==1?"s":"")+" de "+pname+"…";
+    document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyectos…";
     cfgs.forEach(function(c,i){
       setTimeout(function(){
         document.getElementById("inf-loading-sub").textContent="("+(done+1)+"/"+cfgs.length+") "+(c.nombre_clientes||c.nombre_display);
@@ -3308,11 +2977,7 @@ document.querySelectorAll(".inf-mode-btn").forEach(function(btn){
     var ps=document.getElementById("inf-proj"),pp=document.getElementById("inf-port");
     if(ps)ps.style.display=infMode==="proyecto"?"":"none";
     if(pp)pp.style.display=infMode==="portafolio"?"":"none";
-    if(infMode==="portafolio"){
-      /* Siempre asegurar que #inf-port esté poblado */
-      populateClienteSelects();
-      if(!Object.keys(portPortfolios).length)loadPortfolios();
-    }
+    if(infMode==="portafolio"&&!Object.keys(portPortfolios).length)loadPortfolios();
   });
 });
 document.querySelectorAll(".inf-period-btn").forEach(function(btn){
@@ -3857,177 +3522,9 @@ if(_ti)_ti.addEventListener("click",function(){
   document.getElementById("port-panel").style.display="none";
   document.getElementById("inf-panel").style.display="block";
   if(!genProjects.length)loadGenProjects();
-  loadPortfolios();
+  if(!Object.keys(portPortfolios).length)loadPortfolios();
   if(infType==="fmo")loadContratos();
 });
-
-/* ══ GESTIÓN DE PROYECTOS ══════════════════════════════════════════════════════ */
-var gestProyectos=[];
-var gestOpenId=null;
-var GEST_TIPO_LBL={pqr:{l:"PQR",c:"#F97316",i:"📌"},preventivo:{l:"Preventivo",c:"#60A5FA",i:"🔧"},correctivo:{l:"Correctivo",c:"#FF5757",i:"⚠️"}};
-
-function loadGestion(){
-  var list=document.getElementById("gest-list");
-  if(list)list.innerHTML='<div style="text-align:center;padding:40px;color:var(--fa)"><div class="spin" style="margin:0 auto 12px"></div><div style="font-size:13px">Cargando proyectos…</div></div>';
-  _apiFetch('GET','/api/v1/monitoreo/gestion/proyectos').then(function(r){
-    gestProyectos=(r&&r.proyectos)||[];
-    renderGestion();
-  }).catch(function(e){
-    if(list)list.innerHTML='<div style="text-align:center;padding:40px;color:var(--re)">Error al cargar proyectos</div>';
-    console.error("loadGestion:",e);
-  });
-}
-
-function renderGestion(){
-  var list=document.getElementById("gest-list");if(!list)return;
-  var tipoF=(document.getElementById("gest-tipo-filter")||{}).value||"";
-  var q=((document.getElementById("gest-search")||{}).value||"").toLowerCase().trim();
-  var projs=gestProyectos.filter(function(p){
-    if(q&&(p.nombre||"").toLowerCase().indexOf(q)<0)return false;
-    if(tipoF&&(!p.conteos||!p.conteos[tipoF]))return false;
-    return true;
-  });
-  if(!projs.length){list.innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--fa)"><div style="font-size:36px;margin-bottom:12px">📭</div><div style="font-weight:700;color:var(--mu)">Sin proyectos</div></div>';return;}
-  list.innerHTML=projs.map(function(p){
-    var cnt=p.conteos||{};
-    var badges=Object.keys(GEST_TIPO_LBL).map(function(t){
-      var n=cnt[t]||0;var ti=GEST_TIPO_LBL[t];
-      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;background:'+ti.c+'18;color:'+ti.c+';border:1px solid '+ti.c+'40">'+ti.i+' '+ti.l+' '+n+'</span>';
-    }).join("");
-    var isOpen=gestOpenId===p.id;
-    return '<div class="chart-card" style="padding:0;overflow:hidden;margin-bottom:0" id="gp-card-'+p.id+'">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;gap:12px" onclick="toggleGestProj('+p.id+')">'
-      +'<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">'
-      +'<div style="width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--pu),#7040c0);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🏭</div>'
-      +'<div style="min-width:0"><div style="font-size:13px;font-weight:700;color:var(--cr);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.nombre)+'</div>'
-      +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">'+badges+'</div></div></div>'
-      +'<div style="font-size:18px;color:var(--mu);flex-shrink:0;transition:transform .2s" id="gp-arr-'+p.id+'">'+(isOpen?'▲':'▼')+'</div></div>'
-      +'<div id="gp-body-'+p.id+'" style="display:'+(isOpen?'block':'none')+';border-top:1px solid var(--br);padding:16px 18px">'
-      +(isOpen?'<div style="text-align:center;padding:20px;color:var(--fa)"><div class="spin" style="margin:0 auto"></div></div>':'')
-      +'</div></div>';
-  }).join("");
-  // Recargar si hay uno abierto
-  if(gestOpenId){var p=projs.find(function(x){return x.id===gestOpenId;});if(p)loadGestRegistros(gestOpenId);}
-}
-
-function toggleGestProj(id){
-  if(gestOpenId===id){gestOpenId=null;renderGestion();return;}
-  gestOpenId=id;renderGestion();loadGestRegistros(id);
-}
-
-function loadGestRegistros(proyId){
-  var tipoF=(document.getElementById("gest-tipo-filter")||{}).value||"";
-  var url='/api/v1/monitoreo/gestion/'+proyId+'/registros'+(tipoF?'?tipo='+tipoF:'');
-  _apiFetch('GET',url).then(function(r){
-    renderGestRegistros(proyId,r&&r.registros||[]);
-  }).catch(function(e){
-    var body=document.getElementById("gp-body-"+proyId);
-    if(body)body.innerHTML='<div style="color:var(--re);padding:12px">Error al cargar registros</div>';
-  });
-}
-
-function renderGestRegistros(proyId,registros){
-  var body=document.getElementById("gp-body-"+proyId);if(!body)return;
-  var tiposHtml=Object.keys(GEST_TIPO_LBL).map(function(t){
-    var ti=GEST_TIPO_LBL[t];
-    return '<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:5px 10px;border-radius:7px;border:1.5px solid '+ti.c+'40;background:'+ti.c+'10;color:'+ti.c+';font-size:11px;font-weight:700">'
-      +'<input type="radio" name="gest-tipo-'+proyId+'" value="'+t+'" style="accent-color:'+ti.c+'"/> '+ti.i+' '+ti.l+'</label>';
-  }).join("");
-  var html='<div style="margin-bottom:16px">'
-    +'<div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:.7px;text-transform:uppercase;margin-bottom:8px">Nuevo Registro</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+tiposHtml+'</div>'
-    +'<input class="fi" type="text" id="gest-titulo-'+proyId+'" placeholder="Título del registro…" style="margin-bottom:8px;font-size:13px"/>'
-    +'<textarea class="fi" id="gest-desc-'+proyId+'" placeholder="Descripción (opcional)…" style="min-height:80px;resize:vertical;font-size:13px;margin-bottom:8px"></textarea>'
-    +'<div style="display:flex;gap:8px;align-items:center">'
-    +'<button class="btn btn-pu btn-sm" onclick="saveGestRegistro('+proyId+')">Guardar registro</button>'
-    +'<label class="btn btn-gh btn-sm" style="cursor:pointer">📎 Adjuntar archivo<input type="file" id="gest-file-'+proyId+'" style="display:none" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onchange="handleGestFile('+proyId+',this)"/></label>'
-    +'<span id="gest-file-lbl-'+proyId+'" style="font-size:11px;color:var(--mu)"></span>'
-    +'</div></div>';
-  if(registros.length){
-    html+='<div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px;margin-top:4px;padding-top:14px;border-top:1px solid var(--br)">Historial ('+registros.length+')</div>';
-    html+=registros.map(function(r){
-      var ti=GEST_TIPO_LBL[r.tipo]||{l:r.tipo,c:"#915BD8",i:"📄"};
-      var arch=r.archivos||[];
-      return '<div style="background:#160f20;border:1px solid var(--br);border-left:3px solid '+ti.c+';border-radius:9px;padding:12px 14px;margin-bottom:8px">'
-        +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'
-        +'<div style="flex:1;min-width:0">'
-        +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
-        +'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;background:'+ti.c+'18;color:'+ti.c+';border:1px solid '+ti.c+'40">'+ti.i+' '+ti.l+'</span>'
-        +'<span style="font-size:10px;color:var(--fa)">'+esc(r.created_at?r.created_at.slice(0,16).replace('T',' '):'')+'</span>'
-        +(r.created_by?'<span style="font-size:10px;color:var(--fa)">· '+esc(r.created_by)+'</span>':'')
-        +'</div>'
-        +'<div style="font-size:13px;font-weight:700;color:var(--cr);margin-bottom:4px">'+esc(r.titulo)+'</div>'
-        +(r.descripcion?'<div style="font-size:12px;color:var(--mu);line-height:1.55">'+esc(r.descripcion)+'</div>':'')
-        +(arch.length?'<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">'+arch.map(function(a){return '<a href="'+esc(a.url||a)+'" target="_blank" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--bl);background:#0d1b2a;border:1px solid var(--bl);border-radius:6px;padding:2px 8px;text-decoration:none">📎 '+esc(a.nombre||'Archivo')+'</a>';}).join("")+'</div>':'')
-        +'</div>'
-        +'<button onclick="deleteGestRegistro('+r.id+','+proyId+')" style="background:transparent;border:none;color:var(--fa);cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0" title="Eliminar">🗑</button>'
-        +'</div></div>';
-    }).join("");
-  }else{
-    html+='<div style="text-align:center;padding:22px;color:var(--fa);font-size:13px;border-top:1px solid var(--br);margin-top:4px">Sin registros aún</div>';
-  }
-  body.innerHTML=html;
-  // Seleccionar primer tipo por defecto
-  var firstRadio=body.querySelector('input[type=radio]');if(firstRadio)firstRadio.checked=true;
-}
-
-var _gestPendingFile={};
-function handleGestFile(proyId,input){
-  var file=input.files[0];if(!file)return;
-  var lbl=document.getElementById("gest-file-lbl-"+proyId);
-  if(lbl)lbl.textContent=file.name;
-  _gestPendingFile[proyId]={name:file.name,file:file};
-}
-
-function saveGestRegistro(proyId){
-  var tipoEl=document.querySelector('input[name="gest-tipo-'+proyId+'"]:checked');
-  var tipo=tipoEl?tipoEl.value:"pqr";
-  var titulo=(document.getElementById("gest-titulo-"+proyId)||{}).value||"";
-  var desc=(document.getElementById("gest-desc-"+proyId)||{}).value||"";
-  if(!titulo.trim()){toast("⚠ Escribe un título");return;}
-  var pending=_gestPendingFile[proyId];
-  function doSave(archivos){
-    _apiFetch('POST','/api/v1/monitoreo/gestion/'+proyId+'/registros',{tipo:tipo,titulo:titulo.trim(),descripcion:desc.trim()||null,archivos:archivos||[]})
-    .then(function(r){
-      if(r&&r.ok){
-        toast("✓ Registro guardado");
-        delete _gestPendingFile[proyId];
-        // Actualizar contador en gestProyectos
-        var gp=gestProyectos.find(function(p){return p.id===proyId;});
-        if(gp&&gp.conteos){gp.conteos[tipo]=(gp.conteos[tipo]||0)+1;gp.total_registros=(gp.total_registros||0)+1;}
-        loadGestRegistros(proyId);
-      }else{toast("⚠ Error al guardar");}
-    }).catch(function(){toast("⚠ Error al guardar");});
-  }
-  if(pending&&pending.file){
-    // Subir archivo como base64 al endpoint de fotos reutilizando la misma lógica
-    var reader=new FileReader();
-    reader.onload=function(ev){
-      var b64=ev.target.result.split(',')[1]||"";
-      var archivos=[{nombre:pending.name,url:"data:file;base64,..."}];
-      // Guardamos solo metadata por ahora; archivo queda en memoria del cliente
-      // Para producción usar endpoint de upload dedicado
-      doSave([{nombre:pending.name,nota:"adjunto pendiente de subida"}]);
-    };
-    reader.readAsDataURL(pending.file);
-  }else{doSave([]);}
-}
-
-function deleteGestRegistro(regId,proyId){
-  if(!confirm("¿Eliminar este registro?"))return;
-  _apiFetch('DELETE','/api/v1/monitoreo/gestion/registros/'+regId)
-  .then(function(r){
-    if(r&&r.ok){
-      toast("✓ Registro eliminado");
-      var gp=gestProyectos.find(function(p){return p.id===proyId;});
-      if(gp&&gp.total_registros>0)gp.total_registros--;
-      loadGestRegistros(proyId);
-    }
-  }).catch(function(){toast("⚠ Error al eliminar");});
-}
-
-document.getElementById("gest-tipo-filter")&&document.getElementById("gest-tipo-filter").addEventListener("change",function(){if(curTab==="gest")renderGestion();});
-document.getElementById("gest-search")&&document.getElementById("gest-search").addEventListener("input",function(){if(curTab==="gest")renderGestion();});
 
 // Mes por defecto
 (function(){

@@ -27,7 +27,7 @@ def list_solicitudes(
     if codigo_sic_contrato:
         q = q.filter(AsicSolicitud.codigo_sic_contrato == codigo_sic_contrato)
     if contrato_interno:
-        q = q.filter(AsicSolicitud.contrato_interno.ilike(f"%{contrato_interno}%"))
+        q = q.filter(AsicSolicitud.contrato_interno == contrato_interno)
     if proyecto_id:
         q = q.filter(AsicSolicitud.proyecto_id == proyecto_id)
     rows = q.order_by(AsicSolicitud.fecha_solicitud.desc().nullslast(), AsicSolicitud.id.desc()).all()

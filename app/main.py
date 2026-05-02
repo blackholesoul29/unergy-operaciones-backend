@@ -148,6 +148,50 @@ _PENDING_DDLS = [
         proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
         PRIMARY KEY (contrato_id, proyecto_id)
     )""",
+    # migration 012 — ASIC / GESCON tables
+    "CREATE TYPE tipo_solicitud_asic_enum AS ENUM ('registro', 'modificacion', 'terminacion', 'desistimiento')",
+    "CREATE TYPE estado_solicitud_asic_enum AS ENUM ('en_proceso', 'publicado', 'rechazado', 'desistido')",
+    """CREATE TABLE IF NOT EXISTS asic_solicitudes (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
+        requerimiento_asic VARCHAR(20),
+        tipo_solicitud tipo_solicitud_asic_enum NOT NULL,
+        prioridad_limitacion INTEGER,
+        codigo_sic_contrato VARCHAR(20),
+        codigo_sic_vendedor VARCHAR(10),
+        codigo_sic_comprador VARCHAR(10),
+        contrato_interno VARCHAR(100),
+        nombre_contacto_solicitante VARCHAR(255),
+        fecha_solicitud DATE,
+        fecha_inicio DATE,
+        fecha_fin DATE,
+        tipo_mercado VARCHAR(50) DEFAULT 'No regulado',
+        tipo_asignacion VARCHAR(100),
+        porcentaje_fncer NUMERIC(5,2),
+        porcentaje_despacho NUMERIC(5,2),
+        estado_solicitud estado_solicitud_asic_enum NOT NULL DEFAULT 'en_proceso',
+        observaciones TEXT,
+        link_archivo VARCHAR(1000),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_asic_codigo_sic ON asic_solicitudes (codigo_sic_contrato)",
+    "CREATE INDEX IF NOT EXISTS ix_asic_proyecto ON asic_solicitudes (proyecto_id)",
+    """CREATE TABLE IF NOT EXISTS asic_cambios_contratos (
+        id BIGSERIAL PRIMARY KEY,
+        solicitud_id BIGINT REFERENCES asic_solicitudes(id) ON DELETE SET NULL,
+        codigo_sic_contrato VARCHAR(20),
+        contrato_interno VARCHAR(100),
+        proyecto_original_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
+        codigo_frt_original VARCHAR(20),
+        energia_mensual_mwh_original NUMERIC(10,3),
+        proyecto_nuevo_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
+        codigo_frt_nuevo VARCHAR(20),
+        energia_mensual_mwh_nuevo NUMERIC(10,3),
+        accion VARCHAR(100),
+        nombre_archivo VARCHAR(500),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
 ]
 
 

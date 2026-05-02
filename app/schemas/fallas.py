@@ -75,6 +75,9 @@ class FallaCreate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     codigo_legado: Optional[str] = None
+    fotos_urls: Optional[list[str]] = None
+    centinela: Optional[str] = None
+    notificacion: bool = False
 
 
 class FallaUpdate(BaseModel):
@@ -90,6 +93,9 @@ class FallaUpdate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     sla_cumplido: Optional[bool] = None
+    fotos_urls: Optional[list[str]] = None
+    centinela: Optional[str] = None
+    notificacion: Optional[bool] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -127,6 +133,9 @@ class FallaOut(BaseModel):
     sla_limite_horas: Optional[int]
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
+    fotos_lista: list[str] = []
+    centinela: Optional[str] = None
+    notificacion: bool = False
     dias_abierta: Optional[int] = None
     sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []

@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -67,11 +68,17 @@ def get_catalogos(db: Session = Depends(get_db), _=Depends(get_current_user)):
 def debug_falla_error(db: Session = Depends(get_db), _=Depends(get_current_user)):
     import traceback
     try:
-        falla = db.query(Falla).options(*_FALLA_LOAD).first()
+        falla = db.query(Falla).options(selectinload(Falla.seguimientos)).first()
         if not falla:
             return {"error": "no fallas en DB"}
+        segs = falla.seguimientos
+        seg_info = {
+            "type": type(segs).__name__,
+            "is_list": isinstance(segs, list),
+            "len": len(segs) if isinstance(segs, list) else "n/a",
+        }
         result = FallaOut.model_validate(falla)
-        return {"ok": True, "codigo": result.codigo_interno}
+        return {"ok": True, "codigo": result.codigo_interno, "seg_info": seg_info}
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__, "trace": traceback.format_exc()}
 
@@ -171,10 +178,14 @@ def create_falla(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    dump = data.model_dump()
+    # fotos_urls viene como list[str] del schema pero el modelo almacena JSON string
+    fotos = dump.pop("fotos_urls", None)
     falla = Falla(
-        **data.model_dump(),
+        **dump,
         codigo_interno=_gen_codigo(db),
         registrado_por_id=current_user.id,
+        fotos_urls=json.dumps(fotos) if fotos else None,
     )
     db.add(falla)
     db.commit()
@@ -196,7 +207,11 @@ def update_falla(
     falla = db.query(Falla).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
-    for k, v in data.model_dump(exclude_none=True).items():
+    dump = data.model_dump(exclude_none=True)
+    # fotos_urls viene como list[str] del schema, convertir a JSON string
+    if "fotos_urls" in dump:
+        dump["fotos_urls"] = json.dumps(dump["fotos_urls"]) if dump["fotos_urls"] else None
+    for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()
     return _get_or_404(id, db)

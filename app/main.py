@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine
@@ -42,6 +43,7 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
+<<<<<<< Updated upstream
     # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh TEXT",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh TEXT",
@@ -126,7 +128,7 @@ def _run_column_migrations() -> None:
                 conn.execute(text(stmt))
                 conn.commit()
         except Exception as e:
-            print(f"[startup migration skipped] {e}")
+            print(f"[startup ddl skipped] {e}")
 
 
 _CAT_META = {
@@ -333,11 +335,27 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.APP_NAME, version="1.0.0", docs_url="/docs", redoc_url="/redoc", lifespan=lifespan)
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# El iframe de monitoreo se sirve desde Railway, por eso su origen no viene
+# del Vercel frontend; las peticiones API son same-origin. Solo necesitamos
+# permitir el Vercel frontend para las demás rutas.
+_ALLOWED_ORIGINS = [
+    settings.FRONTEND_URL,
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -345,13 +363,16 @@ app.add_middleware(
 
 app.include_router(api_router)
 
-# Servir archivos subidos (uploads/)
+# ── archivos estáticos uploads ────────────────────────────────────────────────
 _uploads_path = Path("uploads")
 _uploads_path.mkdir(exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=str(_uploads_path)), name="uploads")
 
-# Servir la app de monitoreo (fallas-unergy adaptado)
-_monitoreo_index = Path("static/monitoreo/index.html")
+# ── monitoreo: servir fallas-unergy como SPA ─────────────────────────────────
+_monitoreo_path = Path("static/monitoreo")
+_monitoreo_path.mkdir(parents=True, exist_ok=True)
+
+_monitoreo_index = _monitoreo_path / "index.html"
 
 
 @app.get("/monitoreo", include_in_schema=False)
@@ -359,7 +380,7 @@ _monitoreo_index = Path("static/monitoreo/index.html")
 async def serve_monitoreo():
     if _monitoreo_index.exists():
         return FileResponse(str(_monitoreo_index), media_type="text/html")
-    return {"error": "Monitoreo no desplegado"}
+    return {"error": "Monitoreo no desplegado aún. Ejecuta scripts/patch_monitoreo.py"}
 
 
 @app.get("/health")

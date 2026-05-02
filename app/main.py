@@ -117,6 +117,16 @@ _PENDING_DDLS = [
     "ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'redistribucion_ingresos'",
     "ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida'",
     "ALTER TYPE tipo_costo_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida'",
+    # migration 011 — PPA many-to-many refactor
+    # Drop old single-project FK and unused enum column from ppa_contratos
+    "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS proyecto_id",
+    "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS tipo_contrato",
+    # Create the join table (idempotent)
+    """CREATE TABLE IF NOT EXISTS ppa_contrato_proyectos (
+        contrato_id BIGINT NOT NULL REFERENCES ppa_contratos(id) ON DELETE CASCADE,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        PRIMARY KEY (contrato_id, proyecto_id)
+    )""",
 ]
 
 

@@ -42,6 +42,7 @@ class AsicSolicitud(Base):
     porcentaje_fncer: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     porcentaje_despacho: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     estado_solicitud: Mapped[str] = mapped_column(SAEnum(EstadoSolicitudAsicEnum, name="estado_solicitud_asic_enum"), nullable=False, default="en_proceso")
+    nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
     observaciones: Mapped[str | None] = mapped_column(Text, nullable=True)
     link_archivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -69,3 +70,12 @@ class AsicCambioContrato(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     solicitud: Mapped["AsicSolicitud | None"] = relationship("AsicSolicitud", back_populates="cambios")
+
+
+class GesconDiccionario(Base):
+    __tablename__ = "gescon_diccionario_contratos"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    codigo_contrato: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

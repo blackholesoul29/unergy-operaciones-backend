@@ -22,7 +22,7 @@ from app.models.liquidaciones import (
 )
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso, RecCertificado
-from app.models.asic import AsicSolicitud, AsicCambioContrato
+from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
 from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
@@ -40,7 +40,7 @@ __all__ = [
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
     "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",
-    "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato",
+    "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Documento", "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
     "GestionRegistro",

@@ -11,6 +11,8 @@ class TipoFronteraEnum(str, enum.Enum):
     generacion = "generacion"
     consumo = "consumo"
     generacion_consumo = "generacion_consumo"
+    consumo_auxiliar = "consumo_auxiliar"
+    consumo_propio = "consumo_propio"
 
 
 class EstadoFronteraEnum(str, enum.Enum):
@@ -29,7 +31,7 @@ class Frontera(Base):
     __tablename__ = "fronteras"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
     frontera_gemela_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
     agrupada_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
     embebida_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
@@ -63,6 +65,20 @@ class Frontera(Base):
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Registro ASIC
+    registrada_por: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    nivel_tension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transferencia_maxima_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    representante_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fecha_inicio_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    operador_red: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    operador_red_zona: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    predio_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    nombre_predio: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    representante_ddv: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Agentes
     nit_rf: Mapped[str | None] = mapped_column(String(20), nullable=True)
     nit_cgm: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -84,12 +100,47 @@ class Frontera(Base):
     codigo_sic_submercado_consumo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     codigo_sic_submercado_usuario: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # Medidor principal
+    nro_serie_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    marca_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    modelo_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    clase_medidor: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    num_elementos_med_ppal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fecha_cambio_med_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
+    entidad_calibradora_med_ppal: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fecha_calibracion_med_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_actualizacion_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Medidor respaldo
+    nro_serie_med_resp: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    marca_med_resp: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    modelo_med_resp: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    num_elementos_med_resp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fecha_cambio_med_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
+    entidad_calibradora_med_resp: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fecha_calibracion_med_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_actualizacion_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     # Agrupación/embebido
     es_agrupadora: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     factor_psf: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    agrupada_bajo: Mapped[str | None] = mapped_column(String(50), nullable=True)
     es_principal_embebido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    embebida_bajo: Mapped[str | None] = mapped_column(String(50), nullable=True)
     factor_acordado: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_ajuste: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    factor_perdidas_frontera_principal: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+
+    # Clasificación industrial
+    codigo_ciiu: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    clasificacion_industrial_general: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    clasificacion_industrial_especifica: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tipo_tecnologia: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Códigos SIC adicionales
+    codigo_sic_frontera_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    potencia_maxima_declarada: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    codigo_sic_frontera_usuario: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -22,6 +22,7 @@ class AsicSolicitudOut(BaseModel):
     porcentaje_fncer: float | None = None
     porcentaje_despacho: float | None = None
     estado_solicitud: str
+    nombre_interno: str | None = None
     observaciones: str | None = None
     link_archivo: str | None = None
     created_at: datetime
@@ -48,6 +49,53 @@ class AsicSolicitudCreate(BaseModel):
     porcentaje_fncer: float | None = None
     porcentaje_despacho: float | None = None
     estado_solicitud: str = "en_proceso"
+    nombre_interno: str | None = None
     observaciones: str | None = None
     link_archivo: str | None = None
     proyecto_id: int | None = None
+
+
+class AsicCambioCreate(BaseModel):
+    solicitud_id: int | None = None
+    codigo_sic_contrato: str | None = None
+    contrato_interno: str | None = None
+    proyecto_original_id: int | None = None
+    codigo_frt_original: str | None = None
+    energia_mensual_mwh_original: float | None = None
+    proyecto_nuevo_id: int | None = None
+    codigo_frt_nuevo: str | None = None
+    energia_mensual_mwh_nuevo: float | None = None
+    accion: str | None = None
+    nombre_archivo: str | None = None
+
+
+class AsicCambioOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    solicitud_id: int | None = None
+    codigo_sic_contrato: str | None = None
+    contrato_interno: str | None = None
+    proyecto_original_id: int | None = None
+    codigo_frt_original: str | None = None
+    energia_mensual_mwh_original: float | None = None
+    proyecto_nuevo_id: int | None = None
+    codigo_frt_nuevo: str | None = None
+    energia_mensual_mwh_nuevo: float | None = None
+    accion: str | None = None
+    nombre_archivo: str | None = None
+    created_at: datetime
+
+
+class GesconDiccionarioCreate(BaseModel):
+    codigo_contrato: str
+    nombre: str | None = None
+
+
+class GesconDiccionarioOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    codigo_contrato: str
+    nombre: str | None = None
+    created_at: datetime

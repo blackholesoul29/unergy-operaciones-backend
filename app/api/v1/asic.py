@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import AsicSolicitud
-from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate
+from app.models.asic import AsicCambioContrato, GesconDiccionario
+from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
 
@@ -64,3 +65,40 @@ def create_solicitud(
     db.commit()
     db.refresh(s)
     return _to_out(db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == s.id).first())
+
+
+@router.post("/cambios", response_model=AsicCambioOut, status_code=201)
+def create_cambio(
+    data: AsicCambioCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    obj = AsicCambioContrato(**data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@router.get("/gescon/diccionario", response_model=list[GesconDiccionarioOut])
+def list_diccionario(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    return db.query(GesconDiccionario).order_by(GesconDiccionario.codigo_contrato).all()
+
+
+@router.post("/gescon/diccionario", response_model=GesconDiccionarioOut, status_code=201)
+def upsert_diccionario(
+    data: GesconDiccionarioCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    existing = db.query(GesconDiccionario).filter_by(codigo_contrato=data.codigo_contrato).first()
+    if existing:
+        existing.nombre = data.nombre
+        db.commit()
+        db.refresh(existing)
+        return existing
+    obj = GesconDiccionario(**data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj

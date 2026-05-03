@@ -177,6 +177,7 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_asic_codigo_sic ON asic_solicitudes (codigo_sic_contrato)",
     "CREATE INDEX IF NOT EXISTS ix_asic_proyecto ON asic_solicitudes (proyecto_id)",
+    "CREATE INDEX IF NOT EXISTS ix_asic_estado_sic_fecha ON asic_solicitudes (estado_solicitud, codigo_sic_contrato, fecha_solicitud DESC NULLS LAST)",
     """CREATE TABLE IF NOT EXISTS asic_cambios_contratos (
         id BIGSERIAL PRIMARY KEY,
         solicitud_id BIGINT REFERENCES asic_solicitudes(id) ON DELETE SET NULL,

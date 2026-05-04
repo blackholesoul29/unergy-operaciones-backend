@@ -34,6 +34,7 @@ TIPO_LINEA_MAP = [
     (r"ajuste.*administr",                     "otro_costo"),
     (r"arriendo",                              "arriendo"),
     (r"mantenimiento",                         "mantenimiento"),
+    (r"iva.*internet|internet.*iva",           "iva_internet"),  # Bug 2: before generic internet rule
     (r"internet",                              "servicio_internet"),
     (r"poliza.*cumplimiento|p.liza.*cumpl",    "poliza_cumplimiento"),
     (r"poliza|incendio|lucro cesante",         "seguro"),
@@ -50,6 +51,21 @@ TIPO_LINEA_MAP = [
     (r"valor.*pagar|valor.*ganancia|utilidad", "valor_a_pagar"),
     (r"intereses",                             "intereses"),
 ]
+
+# Bug 4: doc types válidos y mapa de normalización a title-case
+_DOC_CONTABLE_MAP = {
+    "informacion": "Información",
+    "mandato":     "Mandato",
+    "costos":      "Costos",
+    "factura":     "Factura",
+    "buenaventura": "Buenaventura",
+}
+TIPOS_VALIDOS_DOC = set(_DOC_CONTABLE_MAP.keys())
+
+
+def normalizar_doc_contable(s: str) -> str:
+    """Normaliza el valor de Documento contable: trim + title-case canónico."""
+    return _DOC_CONTABLE_MAP.get(normalizar(s), s.strip())
 
 
 def normalizar(s: str) -> str:
@@ -156,7 +172,7 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
         rows.append({
             "proyecto":        str(proy).strip(),
             "inversionista":   str(valor(xl_row, 1) or "").strip(),
-            "doc_contable":    str(valor(xl_row, 2) or "").strip(),
+            "doc_contable":    normalizar_doc_contable(str(valor(xl_row, 2) or "")),
             "concepto":        str(valor(xl_row, 5) or "").strip(),
             "total":           parse_valor(valor(xl_row, 6)),
             "ref_factura":     str(valor(xl_row, 7) or "").strip(),
@@ -238,6 +254,18 @@ def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
 
 # ── Carga principal ───────────────────────────────────────────────────────────
 def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: str, dry_run: bool):
+    # Bug 4: validar tipos de Documento contable desconocidos
+    tipos_desconocidos: dict[str, list[int]] = {}
+    for i, f in enumerate(filas, start=2):
+        nd = normalizar(f["doc_contable"])
+        if nd and nd not in TIPOS_VALIDOS_DOC:
+            tipos_desconocidos.setdefault(f["doc_contable"], []).append(i)
+    if tipos_desconocidos:
+        print("\n⚠  TIPOS NO RECONOCIDOS en 'Documento contable':")
+        for tipo, filas_idx in tipos_desconocidos.items():
+            print(f"   '{tipo}' → filas: {filas_idx[:10]}{'…' if len(filas_idx) > 10 else ''}")
+        print("   Estas filas serán ignoradas. Revisar el archivo o agregar al mapa.\n")
+
     me = api.get("/api/v1/auth/me")
     usuario_id = me["id"]
 
@@ -331,12 +359,13 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     if f["cons_cos_txt"].isdigit():
                         cons_cos = int(f["cons_cos_txt"])
 
+            # Bug 1/3: "Buenaventura" contiene Representación/CGM → es Factura, no Mandato
             filas_ing = [f for f in filas_inv
-                         if f["doc_contable"].lower() in ("mandato", "buenaventura")]
+                         if f["doc_contable"].lower() == "mandato"]
             filas_cos = [f for f in filas_inv
-                         if f["doc_contable"].lower() in ("costos",)]
+                         if f["doc_contable"].lower() == "costos"]
             filas_fac = [f for f in filas_inv
-                         if f["doc_contable"].lower() == "factura"]
+                         if f["doc_contable"].lower() in ("factura", "buenaventura")]
 
             # ── Mandato de ingresos ──
             lineas_ing = [f for f in filas_ing

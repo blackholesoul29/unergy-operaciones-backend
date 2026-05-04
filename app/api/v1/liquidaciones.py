@@ -596,8 +596,11 @@ def vista_por_proyecto(
         if liq.proyecto_id not in liq_por_proyecto:
             continue
         liq_mandatos = mandatos_map.get(liq.id, [])
-        mandatos_ingresos = [m for m in liq_mandatos if m.tipo == "ingresos"]
-        mandatos_costos = [m for m in liq_mandatos if m.tipo == "costos"]
+        # Bug 2: separar mandatos del Total (inversionista_id = None) de los individuales
+        mandatos_ingresos = [m for m in liq_mandatos if m.tipo == "ingresos" and m.inversionista_id is not None]
+        mandatos_costos   = [m for m in liq_mandatos if m.tipo == "costos"   and m.inversionista_id is not None]
+        mandatos_total_ing = [m for m in liq_mandatos if m.tipo == "ingresos" and m.inversionista_id is None]
+        mandatos_total_cos = [m for m in liq_mandatos if m.tipo == "costos"   and m.inversionista_id is None]
 
         total_ingresos = sum(float(m.total_ingresos_cop or 0) for m in mandatos_ingresos)
         total_costos = sum(float(m.total_costos_cop or 0) for m in mandatos_costos)
@@ -635,6 +638,9 @@ def vista_por_proyecto(
             },
             "costos_proyecto": [_serializar_costo(c) for c in costos_map.get(liq.id, [])],
             "facturas_servicio": [_serializar_factura(f) for f in facturas_map.get(liq.id, [])],
+            # Bug 2: mandatos del Total (100% proyecto) separados de los inversionistas
+            "mandatos_total_ingresos": [_serializar_mandato(m) for m in mandatos_total_ing],
+            "mandatos_total_costos":   [_serializar_mandato(m) for m in mandatos_total_cos],
             "inversionistas": inversionistas_rows,
         })
 

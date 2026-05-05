@@ -2466,8 +2466,8 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("cbtn").addEventListener("click",function(){
     if(userRole==="cliente"){if(confirm("¿Cerrar sesión?")){ clearSession(); location.reload(); }} else { openSetup(true); }
   });
-  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";});
-  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";renderCharts();});
+  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";document.getElementById("inf-panel").style.display="none";});
+  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";document.getElementById("inf-panel").style.display="none";renderCharts();});
   var _tg=document.getElementById("tab-gen");
   if(_tg)_tg.addEventListener("click",function(){
     curTab="gen";
@@ -2476,6 +2476,7 @@ document.addEventListener("DOMContentLoaded",function(){
     document.getElementById("app").style.display="none";
     document.getElementById("gen-panel").style.display="block";
     document.getElementById("port-panel").style.display="none";
+    document.getElementById("inf-panel").style.display="none";
     loadGenProjects();
   });
   var _tp = document.getElementById("tab-port");
@@ -2486,6 +2487,7 @@ document.addEventListener("DOMContentLoaded",function(){
     document.getElementById("app").style.display = "none";
     document.getElementById("gen-panel").style.display = "none";
     document.getElementById("port-panel").style.display = "block";
+    document.getElementById("inf-panel").style.display = "none";
     if (!genProjects.length) loadGenProjects();
     loadPortfolios();
   });

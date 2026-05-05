@@ -253,7 +253,26 @@ def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
 
 
 # ── Carga principal ───────────────────────────────────────────────────────────
-def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: str, dry_run: bool):
+def _tiene_mandatos(api: API, liq_id: int, proyecto_id: int) -> bool:
+    try:
+        resp = api.get(
+            "/api/v1/liquidaciones/vistas/por-proyecto",
+            params={"proyecto_id": proyecto_id},
+        )
+        for proy in resp:
+            for liq in proy.get("liquidaciones", []):
+                if liq["liquidacion_id"] == liq_id:
+                    for inv in liq.get("inversionistas", []):
+                        if inv.get("mandatos_ingresos") or inv.get("mandatos_costos"):
+                            return True
+                    if liq.get("mandatos_total_ingresos") or liq.get("mandatos_total_costos"):
+                        return True
+        return False
+    except Exception:
+        return False
+
+
+def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: str, dry_run: bool, limpiar: bool = False):
     # Bug 4: validar tipos de Documento contable desconocidos
     tipos_desconocidos: dict[str, list[int]] = {}
     for i, f in enumerate(filas, start=2):
@@ -325,6 +344,29 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     print(f"  ✗ No se pudo crear ni encontrar liquidación (status={e.response.status_code})")
                     continue
                 print(f"  ~ Liquidación existente id={liq_id}")
+
+                if not limpiar and _tiene_mandatos(api, liq_id, pid):
+                    print(
+                        f"  ⚠  Liquidación {liq_id} ya tiene mandatos cargados.\n"
+                        f"     Usa --limpiar para reimportar sin duplicados. Saltando proyecto."
+                    )
+                    stats["ok"] += 1
+                    continue
+
+                if limpiar:
+                    if not dry_run:
+                        try:
+                            r = requests.delete(
+                                f"{api.base}/api/v1/liquidaciones/{liq_id}/limpiar",
+                                headers=api._h(),
+                            )
+                            r.raise_for_status()
+                            print(f"  ~ Liquidación {liq_id} limpiada (mandatos/costos/facturas borrados)")
+                        except Exception as exc:
+                            print(f"  ✗ Error limpiando liquidación {liq_id}: {exc}")
+                            continue
+                    else:
+                        print(f"  [DRY RUN] Se limpiaría liquidación {liq_id}")
             else:
                 raise
 
@@ -349,6 +391,12 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
             es_total = inv_nombre.upper() == "TOTAL"
             inv_db = None if es_total else match_inversionista(inversionistas_db, inv_nombre)
             inv_id = inv_db["id"] if inv_db else None
+
+            if not es_total and inv_db is None and inv_nombre.strip():
+                print(
+                    f"  ⚠  Inversionista sin match en DB: '{inv_nombre}' "
+                    f"(proyecto '{nombre_proy}'). Filas cargadas sin inversionista_id."
+                )
 
             # Consecutivos del row Información de este inversionista
             cons_ing = cons_cos = None
@@ -498,6 +546,12 @@ def main():
     p.add_argument("--usuario",  required=True)
     p.add_argument("--password", required=True)
     p.add_argument("--dry-run",  action="store_true")
+    p.add_argument(
+        "--limpiar",
+        action="store_true",
+        help="Borra mandatos/costos/facturas existentes antes de reimportar. "
+             "Usar para corregir cargas duplicadas.",
+    )
     args = p.parse_args()
 
     y, m = args.periodo.split("-")
@@ -515,7 +569,7 @@ def main():
     api.login(args.usuario, args.password)
     print("Autenticado\n")
 
-    cargar(api, filas, er_map, periodo_date, dry_run=args.dry_run)
+    cargar(api, filas, er_map, periodo_date, dry_run=args.dry_run, limpiar=args.limpiar)
 
 
 if __name__ == "__main__":

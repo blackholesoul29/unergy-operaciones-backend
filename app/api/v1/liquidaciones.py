@@ -366,6 +366,38 @@ def delete_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_cur
     db.commit()
 
 
+@router.delete("/{id}/limpiar", status_code=204)
+def limpiar_liquidacion(
+    id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
+    if not liq:
+        raise HTTPException(404, "Liquidación no encontrada")
+
+    mandatos = (
+        db.query(LiquidacionMandato)
+        .filter(LiquidacionMandato.liquidacion_id == id)
+        .all()
+    )
+    for m in mandatos:
+        db.query(LiquidacionMandatoLinea).filter(
+            LiquidacionMandatoLinea.mandato_id == m.id
+        ).delete(synchronize_session=False)
+        db.delete(m)
+
+    db.query(LiquidacionCosto).filter(
+        LiquidacionCosto.liquidacion_id == id
+    ).delete(synchronize_session=False)
+
+    db.query(LiquidacionFactura).filter(
+        LiquidacionFactura.liquidacion_id == id
+    ).delete(synchronize_session=False)
+
+    db.commit()
+
+
 # ── Costos ─────────────────────────────────────────────────────────────────────
 
 @router.post("/{id}/costos", status_code=201)

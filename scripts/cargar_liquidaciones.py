@@ -193,6 +193,10 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
         if not proy:
             continue
 
+        # Excluir proyectos "trading" (actividades de bolsa propias de Unergy)
+        if "trading" in _norm(str(proy)):
+            continue
+
         doc_raw = str(_celda_val(xl_row, 2) or "").strip()
         doc_tipo = _doc(doc_raw)
         if not doc_tipo:
@@ -348,9 +352,14 @@ def cargar(
     stats = {
         "ok": 0, "sin_match": [], "liq_nueva": 0, "liq_existente": 0,
         "mandatos": 0, "lineas": 0, "costos": 0, "facturas": 0,
+        "duplicados": 0,
     }
 
     OMITIR = {"porcentaje de participacion", "valor a pagar"}
+
+    # Rastrear proyecto_ids ya procesados para evitar cargar el mismo proyecto dos veces
+    # (ocurre cuando el Excel tiene "GD NAOS 1", "GD NAOS 2", etc. todos → mismo proyecto DB)
+    proy_ids_procesados: set[int] = set()
 
     for nombre_proy, inv_grupos in grupos.items():
         proy_db = match_proyecto(proyectos_db, nombre_proy)
@@ -360,6 +369,13 @@ def cargar(
             continue
 
         pid = proy_db["id"]
+
+        # Evitar duplicados: si ya procesamos este proyecto en esta carga, omitir
+        if pid in proy_ids_procesados:
+            print(f"  ⤷ '{nombre_proy}' → duplicado de proyecto id={pid}, omitido")
+            stats["duplicados"] += 1
+            continue
+        proy_ids_procesados.add(pid)
         er_url = er_map.get(_norm(nombre_proy))
         print(f"→ {nombre_proy}  (id={pid})")
 
@@ -580,6 +596,7 @@ def cargar(
     print(f"Líneas creadas:             {stats['lineas']}")
     print(f"Costos (nivel proyecto):    {stats['costos']}")
     print(f"Facturas de servicio:       {stats['facturas']}")
+    print(f"Duplicados omitidos:        {stats['duplicados']}")
     if stats["sin_match"]:
         print(f"\nProyectos sin match en DB ({len(stats['sin_match'])}):")
         for n in stats["sin_match"]:

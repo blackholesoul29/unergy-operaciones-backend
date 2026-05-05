@@ -103,6 +103,7 @@ class LineaCreate(BaseModel):
     porcentaje: float | None = None
     base_calculo_cop: float | None = None
     referencia_factura: str | None = None
+    soporte_url: str | None = None
     orden: int = 0
 
 
@@ -113,6 +114,7 @@ class LineaUpdate(BaseModel):
     porcentaje: float | None = None
     base_calculo_cop: float | None = None
     referencia_factura: str | None = None
+    soporte_url: str | None = None
     orden: int | None = None
 
 
@@ -181,6 +183,7 @@ def _serializar_linea(l: LiquidacionMandatoLinea) -> dict:
         "porcentaje": float(l.porcentaje) if l.porcentaje is not None else None,
         "base_calculo_cop": float(l.base_calculo_cop) if l.base_calculo_cop is not None else None,
         "referencia_factura": l.referencia_factura,
+        "soporte_url": l.soporte_url,
         "orden": l.orden,
     }
 
@@ -662,6 +665,7 @@ def vista_por_proyecto(
             "comprobante_contable_ref": liq.comprobante_contable_ref,
             "consecutivo_inicial_ingresos": liq.consecutivo_inicial_ingresos,
             "consecutivo_inicial_costos": liq.consecutivo_inicial_costos,
+            "estado_resultados_url": liq.estado_resultados_url,
             "resumen": {
                 "total_ingresos_cop": total_ingresos,
                 "total_costos_cop": total_costos,

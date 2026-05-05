@@ -535,6 +535,7 @@ def cargar(
                         "concepto":           f["concepto"],
                         "valor_cop":          f["total"],
                         "referencia_factura": ref,
+                        "soporte_url":        f.get("ref_factura_url") or f.get("cons_ing_url") or None,
                         "orden":              orden,
                     })
                     stats["lineas"] += 1

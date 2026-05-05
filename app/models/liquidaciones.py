@@ -211,6 +211,7 @@ class LiquidacionMandatoLinea(Base):
     porcentaje: Mapped[float | None] = mapped_column(Numeric(7, 4), nullable=True)
     base_calculo_cop: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     referencia_factura: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    soporte_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

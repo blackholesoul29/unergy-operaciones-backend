@@ -2170,7 +2170,11 @@ function renderGenChart(r,subProj,range,resolution){
   }
   if(chartCard)chartCard.style.display="block";
   document.getElementById("gen-empty").style.display="none";
-  // Agregar según resolución
+  // dayMap siempre disponible (para KPIs y coloreado de fallas)
+  var dayMap={};
+  data.forEach(function(d){if(!dayMap[d.date])dayMap[d.date]=0;dayMap[d.date]+=d.kwh;});
+
+  // Labels/series según resolución
   var labels,kwhSeries;
   if(resolution==="hourly"){
     labels=data.map(function(d){return d.time||d.date;});
@@ -2181,12 +2185,10 @@ function renderGenChart(r,subProj,range,resolution){
     labels=Object.keys(mMap).sort();
     kwhSeries=labels.map(function(m){return Math.round(mMap[m]*100)/100;});
   } else {
-    var dayMap={};
-    data.forEach(function(d){if(!dayMap[d.date])dayMap[d.date]=0;dayMap[d.date]+=d.kwh;});
     labels=Object.keys(dayMap).sort();
     kwhSeries=labels.map(function(d){return Math.round(dayMap[d]*100)/100;});
   }
-  var days=labels; // alias para compatibilidad con código existente
+  var days=labels;
   var kwhPerDay=kwhSeries;
   var sim=r.simulation;
   var p90daily=(resolution==="daily"&&sim)?sim.p90_daily:null;
@@ -2199,14 +2201,14 @@ function renderGenChart(r,subProj,range,resolution){
     else{projMatch=true;}
     if(!projMatch)return;
     var fd2=String(f.date||"").trim();var iso="";
-
     var m1=fd2.match(/^(\d{4})-(\d{2})-(\d{2})/);var m2=fd2.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
     if(m1)iso=fd2.slice(0,10);else if(m2)iso=m2[3]+"-"+m2[2]+"-"+m2[1].padStart(2,"0");
     if(iso&&iso>=range.from&&iso<=range.to){if(!faultDays[iso])faultDays[iso]=[];faultDays[iso].push(f);}
   });
 
-  var barColors=days.map(function(d){return faultDays[d]?'rgba(255,87,87,0.75)':'rgba(145,91,216,0.75)';});
-  var barBorders=days.map(function(d){return faultDays[d]?'#FF5757':'#915BD8';});
+  // Para horario el label es timestamp; extraer fecha para lookup de fallas
+  var barColors=days.map(function(d){var dk=d.slice(0,10);return faultDays[dk]?'rgba(255,87,87,0.75)':'rgba(145,91,216,0.75)';});
+  var barBorders=days.map(function(d){var dk=d.slice(0,10);return faultDays[dk]?'#FF5757':'#915BD8';});
   var totalKwh=kwhPerDay.reduce(function(a,b){return a+b;},0);
   var yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
   var ymd=yesterday.getFullYear()+"-"+String(yesterday.getMonth()+1).padStart(2,"0")+"-"+String(yesterday.getDate()).padStart(2,"0");
@@ -2241,9 +2243,9 @@ function renderGenChart(r,subProj,range,resolution){
         tooltip:{
           backgroundColor:"#1E1529",borderColor:"#4A3560",borderWidth:1,padding:12,titleColor:"#FDFAF7",bodyColor:"#A89EC0",
           callbacks:{
-            title:function(items){var d=items[0].label;var fs=faultDays[d];if(fs&&fs.length){return d+" · ⚡ "+fs.length+" falla"+(fs.length>1?"s":"")+" activa"+(fs.length>1?"s":"");}return d;},
+            title:function(items){var d=items[0].label;var dk=d.slice(0,10);var fs=faultDays[dk];if(fs&&fs.length){return d+" · ⚡ "+fs.length+" falla"+(fs.length>1?"s":"")+" activa"+(fs.length>1?"s":"");}return d;},
             label:function(item){if(item.dataset.type==="line")return "  P90 esperado: "+Math.round(item.raw).toLocaleString("es-CO")+" kWh";return "  Generación real: "+Math.round(item.raw).toLocaleString("es-CO")+" kWh";},
-            afterBody:function(items){var d=items[0].label;var fs=faultDays[d];if(!fs||!fs.length)return [];var lines=[""];fs.forEach(function(f){var fdd=fd(f.code);var s=ST[f.st]||ST.activa;lines.push("  "+s.ico+" ["+f.code+"] "+(fdd?fdd.label:f.faultLabel||f.code));lines.push("     Estado: "+s.lbl+(f.prio?" · Prioridad: "+f.prio:""));});return lines;}
+            afterBody:function(items){var d=items[0].label;var dk=d.slice(0,10);var fs=faultDays[dk];if(!fs||!fs.length)return [];var lines=[""];fs.forEach(function(f){var fdd=fd(f.code);var s=ST[f.st]||ST.activa;lines.push("  "+s.ico+" ["+f.code+"] "+(fdd?fdd.label:f.faultLabel||f.code));lines.push("     Estado: "+s.lbl+(f.prio?" · Prioridad: "+f.prio:""));});return lines;}
           }
         }
       },

@@ -471,6 +471,10 @@ def delete_mandato(id: int, mandato_id: int, db: Session = Depends(get_db), _=De
     ).first()
     if not mandato:
         raise HTTPException(404, "Mandato no encontrado")
+    # Delete child lineas first to avoid FK constraint violation
+    db.query(LiquidacionMandatoLinea).filter(
+        LiquidacionMandatoLinea.mandato_id == mandato_id
+    ).delete(synchronize_session=False)
     db.delete(mandato)
     db.commit()
 

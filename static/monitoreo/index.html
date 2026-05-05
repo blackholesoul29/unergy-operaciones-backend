@@ -456,14 +456,20 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
     <select class="fi fsel" id="gen-proj" style="min-width:200px"><option value="">Selecciona proyecto…</option></select>
-    <select class="fi fsel" id="gen-period" style="width:160px">
-      <option value="month">Este mes</option>
+    <select class="fi fsel" id="gen-period" style="width:140px">
+      <option value="today">Hoy</option>
       <option value="yesterday">Ayer</option>
-      <option value="week">Última semana</option>
+      <option value="mes_actual" selected>Mes actual</option>
+      <option value="mes_pasado">Mes pasado</option>
       <option value="custom">Personalizado</option>
     </select>
     <input type="date" class="fi fdate" id="gen-from" style="display:none"/>
     <input type="date" class="fi fdate" id="gen-to" style="display:none"/>
+    <select class="fi fsel" id="gen-res" style="width:118px">
+      <option value="daily" selected>Diaria</option>
+      <option value="hourly">Horaria</option>
+      <option value="monthly">Mensual</option>
+    </select>
     <button class="btn btn-pu" id="gen-load" style="padding:7px 18px;font-size:13px">Consultar ↻</button>
   </div>
   <div class="chart-card" id="gen-chart-card" style="margin-bottom:16px;display:none">
@@ -489,20 +495,38 @@ body.client-mode #tab-inf{display:none!important}
   <div id="gen-compare-section" style="display:none;margin-top:20px">
     <div class="chart-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px">
-        <div>
-          <div class="chart-title">Comparación entre Proyectos</div>
-          <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación diaria kWh · mismo período</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <!-- LEFT: título + selector de proyectos -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div>
+            <div class="chart-title">Comparación entre Proyectos</div>
+            <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación kWh · mismo período</div>
+          </div>
           <div style="position:relative" id="gen-cmp-dd-wrap">
             <button id="gen-cmp-trigger" style="display:flex;align-items:center;gap:6px;padding:6px 14px;font-size:12px;font-family:'Sora',sans-serif;font-weight:600;border-radius:8px;border:1.5px solid var(--br);background:var(--s1);color:var(--cr);cursor:pointer;transition:all .2s">
               <span>Proyectos</span><span id="gen-cmp-count" style="background:var(--pu);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;display:none">0</span><span style="font-size:10px;color:var(--mu)">▾</span>
             </button>
-            <div id="gen-cmp-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:200;min-width:240px;max-width:320px;max-height:320px;overflow-y:auto;background:var(--s2);border:1px solid var(--br);border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
+            <div id="gen-cmp-dropdown" style="display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:200;min-width:240px;max-width:320px;max-height:320px;overflow-y:auto;background:var(--s2);border:1px solid var(--br);border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
               <div style="font-size:10px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding:0 2px">Selecciona proyectos</div>
               <div id="gen-compare-sel" style="display:flex;flex-direction:column;gap:4px"></div>
             </div>
           </div>
+        </div>
+        <!-- RIGHT: período + resolución + botón -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="fi fsel" id="cmp-period" style="width:130px;font-size:12px">
+            <option value="today">Hoy</option>
+            <option value="yesterday">Ayer</option>
+            <option value="mes_actual" selected>Mes actual</option>
+            <option value="mes_pasado">Mes pasado</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <input type="date" class="fi fdate" id="cmp-from" style="display:none;font-size:12px"/>
+          <input type="date" class="fi fdate" id="cmp-to" style="display:none;font-size:12px"/>
+          <select class="fi fsel" id="cmp-res" style="width:110px;font-size:12px">
+            <option value="daily" selected>Diaria</option>
+            <option value="hourly">Horaria</option>
+            <option value="monthly">Mensual</option>
+          </select>
           <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
         </div>
       </div>
@@ -1937,7 +1961,8 @@ function loadGenCompare() {
   var selected = Object.keys(genCompareSelected).filter(function(sp){ return genCompareSelected[sp]; });
   if (!selected.length) { toast("⚠ Selecciona al menos un proyecto para comparar"); return; }
 
-  var range = getGenDateRange();
+  var range = getCmpDateRange();
+  var res   = (document.getElementById("cmp-res")||{}).value || "daily";
   var btn   = document.getElementById("gen-compare-load");
   if (btn) { btn.textContent = "⏳ Cargando…"; btn.disabled = true; }
 
@@ -1951,20 +1976,21 @@ function loadGenCompare() {
         if (r && r.ok && r.data && r.data.length) results[sp] = r.data;
         if (done === total) {
           if (btn) { btn.textContent = "Comparar ↻"; btn.disabled = false; }
-          renderGenCompareChart(results);
+          renderGenCompareChart(results, res);
         }
       }).catch(function() {
         done++;
         if (done === total) {
           if (btn) { btn.textContent = "Comparar ↻"; btn.disabled = false; }
-          renderGenCompareChart(results);
+          renderGenCompareChart(results, res);
         }
       });
     }, idx * 200);
   });
 }
 
-function renderGenCompareChart(results) {
+function renderGenCompareChart(results, resolution) {
+  resolution = resolution || "daily";
   var keys    = Object.keys(results);
   var wrap    = document.getElementById("gen-compare-chart-wrap");
   var emptyEl = document.getElementById("gen-compare-empty");
@@ -1978,15 +2004,23 @@ function renderGenCompareChart(results) {
   if (wrap)    wrap.style.display    = "block";
   if (emptyEl) emptyEl.style.display = "none";
 
-  var daySet = {};
-  keys.forEach(function(sp){ results[sp].forEach(function(d){ daySet[d.date] = true; }); });
-  var allDays = Object.keys(daySet).sort();
+  // Función clave según resolución
+  var getKey = function(d) {
+    if (resolution === "hourly")  return d.time || d.date;
+    if (resolution === "monthly") return d.date.slice(0, 7);
+    return d.date;
+  };
+
+  var keySet = {};
+  keys.forEach(function(sp){ results[sp].forEach(function(d){ keySet[getKey(d)] = true; }); });
+  var allDays = Object.keys(keySet).sort();
 
   var dayMaps = {};
   keys.forEach(function(sp) {
     dayMaps[sp] = {};
     results[sp].forEach(function(d) {
-      dayMaps[sp][d.date] = (dayMaps[sp][d.date] || 0) + d.kwh;
+      var k = getKey(d);
+      dayMaps[sp][k] = (dayMaps[sp][k] || 0) + d.kwh;
     });
   });
 
@@ -2087,20 +2121,23 @@ function loadGenProjects(){
     if(infM&&!infM.value){var now2=new Date();infM.value=now2.getFullYear()+"-"+String(now2.getMonth()+1).padStart(2,"0");}
   }).catch(function(e){console.error("loadGenProjects error:",e);});
 }
-function getGenDateRange(){
-  var period=document.getElementById("gen-period").value;
+function _buildDateRange(period,fromId,toId){
   var now=new Date();
   var pad=function(n){return String(n).padStart(2,"0");};
   var fmt=function(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
+  if(period==="today"){return{from:fmt(now),to:fmt(now)};}
   if(period==="yesterday"){var y=new Date(now);y.setDate(y.getDate()-1);return{from:fmt(y),to:fmt(y)};}
-  if(period==="week"){var w=new Date(now);w.setDate(w.getDate()-7);return{from:fmt(w),to:fmt(now)};}
-  if(period==="custom"){return{from:document.getElementById("gen-from").value||fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:document.getElementById("gen-to").value||fmt(now)};}
+  if(period==="mes_pasado"){var mp=new Date(now.getFullYear(),now.getMonth()-1,1);var mpE=new Date(now.getFullYear(),now.getMonth(),0);return{from:fmt(mp),to:fmt(mpE)};}
+  if(period==="custom"){var fi=document.getElementById(fromId);var ti=document.getElementById(toId);return{from:(fi&&fi.value)||fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:(ti&&ti.value)||fmt(now)};}
   return{from:fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:fmt(now)};
 }
+function getGenDateRange(){return _buildDateRange(document.getElementById("gen-period").value,"gen-from","gen-to");}
+function getCmpDateRange(){return _buildDateRange(document.getElementById("cmp-period").value,"cmp-from","cmp-to");}
 function loadGeneracion(){
   var proj=document.getElementById("gen-proj").value;
   if(!proj){toast("⚠ Selecciona un proyecto");return;}
   var range=getGenDateRange();
+  var res=(document.getElementById("gen-res")||{}).value||"daily";
   document.getElementById("gen-empty").style.display="none";
   document.getElementById("gen-faults-box").style.display="none";
   var btn=document.getElementById("gen-load");if(btn){btn.textContent="⏳ Cargando…";btn.disabled=true;}
@@ -2109,14 +2146,15 @@ function loadGeneracion(){
     if(btn){btn.textContent="Consultar ↻";btn.disabled=false;}
     if(!r||!r.ok){toast("⚠ Error: "+(r&&r.error?r.error:"sin respuesta"));return;}
     genData=r;
-    renderGenChart(r,proj,range);
+    renderGenChart(r,proj,range,res);
   })
   .catch(function(e){
     if(btn){btn.textContent="Consultar ↻";btn.disabled=false;}
     toast("⚠ Error al cargar generación");
   });
 }
-function renderGenChart(r,subProj,range){
+function renderGenChart(r,subProj,range,resolution){
+  resolution=resolution||"daily";
   var data=r.data||[];
   var chartCard=document.getElementById("gen-chart-card");
   if(!data.length){
@@ -2132,12 +2170,26 @@ function renderGenChart(r,subProj,range){
   }
   if(chartCard)chartCard.style.display="block";
   document.getElementById("gen-empty").style.display="none";
-  var dayMap={};
-  data.forEach(function(d){if(!dayMap[d.date])dayMap[d.date]=0;dayMap[d.date]+=d.kwh;});
-  var days=Object.keys(dayMap).sort();
-  var kwhPerDay=days.map(function(d){return Math.round(dayMap[d]*100)/100;});
+  // Agregar según resolución
+  var labels,kwhSeries;
+  if(resolution==="hourly"){
+    labels=data.map(function(d){return d.time||d.date;});
+    kwhSeries=data.map(function(d){return Math.round(d.kwh*100)/100;});
+  } else if(resolution==="monthly"){
+    var mMap={};
+    data.forEach(function(d){var m=d.date.slice(0,7);mMap[m]=(mMap[m]||0)+d.kwh;});
+    labels=Object.keys(mMap).sort();
+    kwhSeries=labels.map(function(m){return Math.round(mMap[m]*100)/100;});
+  } else {
+    var dayMap={};
+    data.forEach(function(d){if(!dayMap[d.date])dayMap[d.date]=0;dayMap[d.date]+=d.kwh;});
+    labels=Object.keys(dayMap).sort();
+    kwhSeries=labels.map(function(d){return Math.round(dayMap[d]*100)/100;});
+  }
+  var days=labels; // alias para compatibilidad con código existente
+  var kwhPerDay=kwhSeries;
   var sim=r.simulation;
-  var p90daily=sim?sim.p90_daily:null;
+  var p90daily=(resolution==="daily"&&sim)?sim.p90_daily:null;
   var p90Line=days.map(function(){return p90daily;});
   var faultDays={};
   faults.forEach(function(f){
@@ -2478,6 +2530,11 @@ document.addEventListener("DOMContentLoaded",function(){
     var custom=this.value==="custom";
     var gf=document.getElementById("gen-from");if(gf)gf.style.display=custom?"":"none";
     var gt=document.getElementById("gen-to");if(gt)gt.style.display=custom?"":"none";
+  });
+  var _cp=document.getElementById("cmp-period");if(_cp)_cp.addEventListener("change",function(){
+    var custom=this.value==="custom";
+    var cf=document.getElementById("cmp-from");if(cf)cf.style.display=custom?"":"none";
+    var ct=document.getElementById("cmp-to");if(ct)ct.style.display=custom?"":"none";
   });
   ["all","activa","revision","programada","terminada"].forEach(function(k){document.getElementById("pill-"+k).addEventListener("click",function(){filterSt=k;renderPills();renderBoard();});});
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});

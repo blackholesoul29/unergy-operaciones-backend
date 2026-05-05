@@ -249,9 +249,15 @@ _PENDING_DDLS = [
 def _run_column_migrations() -> None:
     for stmt in _PENDING_DDLS:
         try:
-            with engine.connect() as conn:
-                conn.execute(text(stmt))
-                conn.commit()
+            if "ADD VALUE" in stmt.upper():
+                # ALTER TYPE … ADD VALUE cannot run inside a transaction block in PostgreSQL
+                with engine.connect() as conn:
+                    conn.execute(text("COMMIT"))
+                    conn.execute(text(stmt))
+            else:
+                with engine.connect() as conn:
+                    conn.execute(text(stmt))
+                    conn.commit()
         except Exception as e:
             print(f"[startup ddl skipped] {e}")
 

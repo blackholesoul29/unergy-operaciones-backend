@@ -29,6 +29,10 @@ import re
 import sys
 import unicodedata
 
+# Windows: forzar UTF-8 en la salida estándar
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from openpyxl import load_workbook
 import requests
 
@@ -88,15 +92,16 @@ def concepto_a_tipo_factura(concepto: str) -> str:
 
 
 def concepto_a_tipo_costo(concepto: str) -> str:
+    """Mapea concepto → TipoCostoEnum (valores usados en liquidacion_costos)."""
     n = _norm(concepto)
     if "arriendo" in n:                    return "arriendo"
     if "mantenimiento" in n:               return "mantenimiento"
-    if "internet" in n:                    return "servicio_internet"
-    if "poliza" in n:                      return "poliza_cumplimiento"
-    if "servicios p" in n:                 return "servicios_publicos_consumo"
+    if "internet" in n:                    return "internet"
+    if "poliza" in n:                      return "polizas"
+    if "servicios p" in n:                 return "servicios_publicos"
     if "cambio" in n and "equipo" in n:    return "cambio_equipos_medida"
-    if "comercializaci" in n:              return "seguro"
-    return "otro_costo"
+    if "comercializaci" in n:              return "comercializacion_xm"
+    return "otro"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +202,8 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
             "proyecto":        str(proy).strip(),
             "inversionista":   str(_celda_val(xl_row, 1) or "").strip(),
             "doc_contable":    doc_tipo,
+            "contato1":        str(_celda_val(xl_row, 3) or "").strip(),
+            "contato2":        str(_celda_val(xl_row, 4) or "").strip(),
             "concepto":        str(_celda_val(xl_row, 5) or "").strip(),
             "total":           _valor(_celda_val(xl_row, 6)),
             "ref_factura":     str(_celda_val(xl_row, 7) or "").strip(),
@@ -436,6 +443,10 @@ def cargar(
             filas_costos  = [f for f in filas_inv if f["doc_contable"] == "Costos"]
             filas_factura = [f for f in filas_inv if f["doc_contable"] == "Factura"]
 
+            # numero_mandato = Contato 1 (primer valor no vacío entre las filas del grupo)
+            contato1 = next((f["contato1"] for f in filas_inv if f.get("contato1")), "")
+            contato2 = next((f["contato2"] for f in filas_inv if f.get("contato2")), "")
+
             # ── Mandato de ingresos ──────────────────────────────────────────
             lineas_ing = [
                 f for f in filas_mandato
@@ -446,7 +457,8 @@ def cargar(
                 m_resp = api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos", {
                     "tipo":                "ingresos",
                     "inversionista_id":    inv_id,
-                    "beneficiario_nombre": inv_nombre if not es_total else None,
+                    "numero_mandato":      contato1 or None,
+                    "beneficiario_nombre": contato2 or (inv_nombre if not es_total else None),
                     "consecutivo":         cons_ing,
                     "pa_aplica":           inv_db.get("es_patrimonio_autonomo", False) if inv_db else False,
                 })
@@ -493,7 +505,8 @@ def cargar(
                 mc_resp = api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos", {
                     "tipo":                "costos",
                     "inversionista_id":    inv_id,
-                    "beneficiario_nombre": inv_nombre if not es_total else None,
+                    "numero_mandato":      contato1 or None,
+                    "beneficiario_nombre": contato2 or (inv_nombre if not es_total else None),
                     "consecutivo":         cons_cos,
                     "pa_aplica":           inv_db.get("es_patrimonio_autonomo", False) if inv_db else False,
                 })

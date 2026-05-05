@@ -29,9 +29,10 @@ import re
 import sys
 import unicodedata
 
-# Windows: forzar UTF-8 en la salida estándar
+# Windows: forzar UTF-8 en la salida estándar y deshabilitar buffering
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(line_buffering=True)  # flush en cada línea (visible en background)
 
 from openpyxl import load_workbook
 import requests

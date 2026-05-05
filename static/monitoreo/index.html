@@ -485,20 +485,30 @@ body.client-mode #tab-inf{display:none!important}
     <div id="gen-faults-list"></div>
   </div>
 
-  <!-- ── NUEVO: Comparación multi-proyecto ── -->
+  <!-- ── Comparación multi-proyecto ── -->
   <div id="gen-compare-section" style="display:none;margin-top:20px">
     <div class="chart-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <div>
           <div class="chart-title">Comparación entre Proyectos</div>
-          <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación diaria kWh · mismo período · selecciona proyectos</div>
+          <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación diaria kWh · mismo período</div>
         </div>
-        <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="position:relative" id="gen-cmp-dd-wrap">
+            <button id="gen-cmp-trigger" style="display:flex;align-items:center;gap:6px;padding:6px 14px;font-size:12px;font-family:'Sora',sans-serif;font-weight:600;border-radius:8px;border:1.5px solid var(--br);background:var(--s1);color:var(--cr);cursor:pointer;transition:all .2s">
+              <span>Proyectos</span><span id="gen-cmp-count" style="background:var(--pu);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;display:none">0</span><span style="font-size:10px;color:var(--mu)">▾</span>
+            </button>
+            <div id="gen-cmp-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:200;min-width:240px;max-width:320px;max-height:320px;overflow-y:auto;background:var(--s2);border:1px solid var(--br);border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
+              <div style="font-size:10px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding:0 2px">Selecciona proyectos</div>
+              <div id="gen-compare-sel" style="display:flex;flex-direction:column;gap:4px"></div>
+            </div>
+          </div>
+          <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
+        </div>
       </div>
-      <div id="gen-compare-sel" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px"></div>
       <div id="gen-compare-chart-wrap" style="position:relative;height:260px;display:none"><canvas id="genCompareC"></canvas></div>
       <div id="gen-compare-empty" style="text-align:center;padding:30px;color:var(--fa);font-size:12px">
-        Selecciona proyectos arriba y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
+        Selecciona proyectos y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
       </div>
       <div id="gen-compare-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
     </div>
@@ -1873,7 +1883,6 @@ function renderGenCompareSelector() {
   if (!sel || !genProjects.length) return;
   if (section) section.style.display = "block";
 
-  // Filtrar por proyectos del cliente si aplica
   var visProjs = (userRole === "cliente" && clientProjects.length > 0)
     ? genProjects.filter(function(p) {
         return clientProjects.some(function(cp) {
@@ -1891,18 +1900,23 @@ function renderGenCompareSelector() {
       genCompareColors[p.sub_project] = portColorPalette[i % portColorPalette.length];
   });
 
+  // Render pills como filas con checkbox dentro del dropdown
   sel.innerHTML = visProjs.map(function(p) {
     var sp  = p.sub_project;
     var col = genCompareColors[sp];
-    var on  = genCompareSelected[sp];
+    var on  = !!genCompareSelected[sp];
     return '<button class="gen-cmp-pill" data-sp="' + esc(sp) + '" style="' +
-      'display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;' +
-      'border:1.5px solid ' + (on ? col : 'var(--br)') + ';' +
-      'background:' + (on ? col + '22' : 'var(--s1)') + ';' +
-      'color:' + (on ? col : 'var(--mu)') + ';' +
-      'font-size:11px;font-weight:700;font-family:\'Sora\',sans-serif;transition:all .2s">' +
-      '<div style="width:7px;height:7px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
-      esc(p.nombre_clientes || p.nombre_display) +
+      'display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border-radius:7px;cursor:pointer;text-align:left;' +
+      'border:1.5px solid ' + (on ? col : 'transparent') + ';' +
+      'background:' + (on ? col + '18' : 'transparent') + ';' +
+      'color:' + (on ? col : 'var(--cr)') + ';' +
+      'font-size:12px;font-weight:' + (on ? '700' : '400') + ';font-family:\'Sora\',sans-serif;transition:all .15s">' +
+      '<div style="width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1.5px solid ' + (on ? col : 'var(--mu)') + ';' +
+        'background:' + (on ? col : 'transparent') + ';display:flex;align-items:center;justify-content:center">' +
+        (on ? '<svg width="9" height="7" viewBox="0 0 9 7" fill="none"><polyline points="1,3.5 3.5,6 8,1" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
+      '</div>' +
+      '<div style="width:8px;height:8px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(p.nombre_clientes || p.nombre_display) + '</span>' +
       '</button>';
   }).join("");
 
@@ -1912,6 +1926,11 @@ function renderGenCompareSelector() {
       renderGenCompareSelector();
     });
   });
+
+  // Actualizar contador en el trigger
+  var nSel = Object.keys(genCompareSelected).filter(function(sp){ return genCompareSelected[sp]; }).length;
+  var countEl = document.getElementById("gen-cmp-count");
+  if (countEl) { countEl.textContent = nSel; countEl.style.display = nSel ? "inline" : "none"; }
 }
 
 function loadGenCompare() {
@@ -2440,8 +2459,21 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   var _pl = document.getElementById("port-load"); if (_pl) _pl.addEventListener("click", loadPortfolio);
   var _gl=document.getElementById("gen-load");if(_gl)_gl.addEventListener("click",loadGeneracion);
-  // ── NUEVO: listener comparación ──
   var _gcl=document.getElementById("gen-compare-load");if(_gcl)_gcl.addEventListener("click",loadGenCompare);
+  // ── Dropdown de selección de proyectos para comparación ──
+  var _cmpTrigger = document.getElementById("gen-cmp-trigger");
+  var _cmpDd      = document.getElementById("gen-cmp-dropdown");
+  if (_cmpTrigger && _cmpDd) {
+    _cmpTrigger.addEventListener("click", function(e) {
+      e.stopPropagation();
+      var open = _cmpDd.style.display !== "none";
+      _cmpDd.style.display = open ? "none" : "block";
+    });
+    document.addEventListener("click", function(e) {
+      var wrap = document.getElementById("gen-cmp-dd-wrap");
+      if (wrap && !wrap.contains(e.target)) _cmpDd.style.display = "none";
+    });
+  }
   var _gp=document.getElementById("gen-period");if(_gp)_gp.addEventListener("change",function(){
     var custom=this.value==="custom";
     var gf=document.getElementById("gen-from");if(gf)gf.style.display=custom?"":"none";

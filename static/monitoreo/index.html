@@ -456,14 +456,20 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
     <select class="fi fsel" id="gen-proj" style="min-width:200px"><option value="">Selecciona proyecto…</option></select>
-    <select class="fi fsel" id="gen-period" style="width:160px">
-      <option value="month">Este mes</option>
+    <select class="fi fsel" id="gen-period" style="width:140px">
+      <option value="today">Hoy</option>
       <option value="yesterday">Ayer</option>
-      <option value="week">Última semana</option>
+      <option value="mes_actual" selected>Mes actual</option>
+      <option value="mes_pasado">Mes pasado</option>
       <option value="custom">Personalizado</option>
     </select>
     <input type="date" class="fi fdate" id="gen-from" style="display:none"/>
     <input type="date" class="fi fdate" id="gen-to" style="display:none"/>
+    <select class="fi fsel" id="gen-res" style="width:118px">
+      <option value="daily" selected>Diaria</option>
+      <option value="hourly">Horaria</option>
+      <option value="monthly">Mensual</option>
+    </select>
     <button class="btn btn-pu" id="gen-load" style="padding:7px 18px;font-size:13px">Consultar ↻</button>
   </div>
   <div class="chart-card" id="gen-chart-card" style="margin-bottom:16px;display:none">
@@ -485,20 +491,48 @@ body.client-mode #tab-inf{display:none!important}
     <div id="gen-faults-list"></div>
   </div>
 
-  <!-- ── NUEVO: Comparación multi-proyecto ── -->
+  <!-- ── Comparación multi-proyecto ── -->
   <div id="gen-compare-section" style="display:none;margin-top:20px">
     <div class="chart-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px">
-        <div>
-          <div class="chart-title">Comparación entre Proyectos</div>
-          <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación diaria kWh · mismo período · selecciona proyectos</div>
+        <!-- LEFT: título + selector de proyectos -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div>
+            <div class="chart-title">Comparación entre Proyectos</div>
+            <div style="font-size:11px;color:var(--fa);margin-top:2px">Generación kWh · mismo período</div>
+          </div>
+          <div style="position:relative" id="gen-cmp-dd-wrap">
+            <button id="gen-cmp-trigger" style="display:flex;align-items:center;gap:6px;padding:6px 14px;font-size:12px;font-family:'Sora',sans-serif;font-weight:600;border-radius:8px;border:1.5px solid var(--br);background:var(--s1);color:var(--cr);cursor:pointer;transition:all .2s">
+              <span>Proyectos</span><span id="gen-cmp-count" style="background:var(--pu);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;display:none">0</span><span style="font-size:10px;color:var(--mu)">▾</span>
+            </button>
+            <div id="gen-cmp-dropdown" style="display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:200;min-width:240px;max-width:320px;max-height:320px;overflow-y:auto;background:var(--s2);border:1px solid var(--br);border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
+              <div style="font-size:10px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding:0 2px">Selecciona proyectos</div>
+              <div id="gen-compare-sel" style="display:flex;flex-direction:column;gap:4px"></div>
+            </div>
+          </div>
         </div>
-        <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
+        <!-- RIGHT: período + resolución + botón -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="fi fsel" id="cmp-period" style="width:130px;font-size:12px">
+            <option value="today">Hoy</option>
+            <option value="yesterday">Ayer</option>
+            <option value="mes_actual" selected>Mes actual</option>
+            <option value="mes_pasado">Mes pasado</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <input type="date" class="fi fdate" id="cmp-from" style="display:none;font-size:12px"/>
+          <input type="date" class="fi fdate" id="cmp-to" style="display:none;font-size:12px"/>
+          <select class="fi fsel" id="cmp-res" style="width:110px;font-size:12px">
+            <option value="daily" selected>Diaria</option>
+            <option value="hourly">Horaria</option>
+            <option value="monthly">Mensual</option>
+          </select>
+          <button class="btn btn-pu" id="gen-compare-load" style="padding:6px 16px;font-size:12px">Comparar ↻</button>
+        </div>
       </div>
-      <div id="gen-compare-sel" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px"></div>
       <div id="gen-compare-chart-wrap" style="position:relative;height:260px;display:none"><canvas id="genCompareC"></canvas></div>
       <div id="gen-compare-empty" style="text-align:center;padding:30px;color:var(--fa);font-size:12px">
-        Selecciona proyectos arriba y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
+        Selecciona proyectos y haz clic en <b style="color:var(--pu)">Comparar ↻</b>
       </div>
       <div id="gen-compare-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
     </div>
@@ -1264,7 +1298,7 @@ function toast(msg,dur){var t=document.getElementById("toast");t.textContent=msg
 function openLb(url){document.getElementById("lb-img").src=url;document.getElementById("lb").className="open";}
 function hideLoader(){document.getElementById("loader").style.display="none";}
 /* ══ API ══ */
-function apiGet(p,timeout){ return _apiFetch('GET', '/api/v1/monitoreo/_legacy?action='+(p.action||''), p); }
+function apiGet(p,timeout){var qs=Object.keys(p).filter(function(k){return k!=='action'&&p[k]!=null;}).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(p[k]);}).join('&');var url='/api/v1/monitoreo/_legacy?action='+(p.action||'')+(qs?'&'+qs:'');return _apiFetch('GET',url);}
 function apiPost(body){ return _apiFetch('POST', '/api/v1/monitoreo/_legacy', body); }
 /* ══ CARGAR FALLAS ══ */
 function _loadFaults_legacy(){
@@ -1873,7 +1907,6 @@ function renderGenCompareSelector() {
   if (!sel || !genProjects.length) return;
   if (section) section.style.display = "block";
 
-  // Filtrar por proyectos del cliente si aplica
   var visProjs = (userRole === "cliente" && clientProjects.length > 0)
     ? genProjects.filter(function(p) {
         return clientProjects.some(function(cp) {
@@ -1891,18 +1924,23 @@ function renderGenCompareSelector() {
       genCompareColors[p.sub_project] = portColorPalette[i % portColorPalette.length];
   });
 
+  // Render pills como filas con checkbox dentro del dropdown
   sel.innerHTML = visProjs.map(function(p) {
     var sp  = p.sub_project;
     var col = genCompareColors[sp];
-    var on  = genCompareSelected[sp];
+    var on  = !!genCompareSelected[sp];
     return '<button class="gen-cmp-pill" data-sp="' + esc(sp) + '" style="' +
-      'display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;cursor:pointer;' +
-      'border:1.5px solid ' + (on ? col : 'var(--br)') + ';' +
-      'background:' + (on ? col + '22' : 'var(--s1)') + ';' +
-      'color:' + (on ? col : 'var(--mu)') + ';' +
-      'font-size:11px;font-weight:700;font-family:\'Sora\',sans-serif;transition:all .2s">' +
-      '<div style="width:7px;height:7px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
-      esc(p.nombre_clientes || p.nombre_display) +
+      'display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border-radius:7px;cursor:pointer;text-align:left;' +
+      'border:1.5px solid ' + (on ? col : 'transparent') + ';' +
+      'background:' + (on ? col + '18' : 'transparent') + ';' +
+      'color:' + (on ? col : 'var(--cr)') + ';' +
+      'font-size:12px;font-weight:' + (on ? '700' : '400') + ';font-family:\'Sora\',sans-serif;transition:all .15s">' +
+      '<div style="width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1.5px solid ' + (on ? col : 'var(--mu)') + ';' +
+        'background:' + (on ? col : 'transparent') + ';display:flex;align-items:center;justify-content:center">' +
+        (on ? '<svg width="9" height="7" viewBox="0 0 9 7" fill="none"><polyline points="1,3.5 3.5,6 8,1" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
+      '</div>' +
+      '<div style="width:8px;height:8px;border-radius:50%;background:' + col + ';flex-shrink:0"></div>' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(p.nombre_clientes || p.nombre_display) + '</span>' +
       '</button>';
   }).join("");
 
@@ -1912,13 +1950,19 @@ function renderGenCompareSelector() {
       renderGenCompareSelector();
     });
   });
+
+  // Actualizar contador en el trigger
+  var nSel = Object.keys(genCompareSelected).filter(function(sp){ return genCompareSelected[sp]; }).length;
+  var countEl = document.getElementById("gen-cmp-count");
+  if (countEl) { countEl.textContent = nSel; countEl.style.display = nSel ? "inline" : "none"; }
 }
 
 function loadGenCompare() {
   var selected = Object.keys(genCompareSelected).filter(function(sp){ return genCompareSelected[sp]; });
   if (!selected.length) { toast("⚠ Selecciona al menos un proyecto para comparar"); return; }
 
-  var range = getGenDateRange();
+  var range = getCmpDateRange();
+  var res   = (document.getElementById("cmp-res")||{}).value || "daily";
   var btn   = document.getElementById("gen-compare-load");
   if (btn) { btn.textContent = "⏳ Cargando…"; btn.disabled = true; }
 
@@ -1932,20 +1976,21 @@ function loadGenCompare() {
         if (r && r.ok && r.data && r.data.length) results[sp] = r.data;
         if (done === total) {
           if (btn) { btn.textContent = "Comparar ↻"; btn.disabled = false; }
-          renderGenCompareChart(results);
+          renderGenCompareChart(results, res);
         }
       }).catch(function() {
         done++;
         if (done === total) {
           if (btn) { btn.textContent = "Comparar ↻"; btn.disabled = false; }
-          renderGenCompareChart(results);
+          renderGenCompareChart(results, res);
         }
       });
     }, idx * 200);
   });
 }
 
-function renderGenCompareChart(results) {
+function renderGenCompareChart(results, resolution) {
+  resolution = resolution || "daily";
   var keys    = Object.keys(results);
   var wrap    = document.getElementById("gen-compare-chart-wrap");
   var emptyEl = document.getElementById("gen-compare-empty");
@@ -1959,15 +2004,23 @@ function renderGenCompareChart(results) {
   if (wrap)    wrap.style.display    = "block";
   if (emptyEl) emptyEl.style.display = "none";
 
-  var daySet = {};
-  keys.forEach(function(sp){ results[sp].forEach(function(d){ daySet[d.date] = true; }); });
-  var allDays = Object.keys(daySet).sort();
+  // Función clave según resolución
+  var getKey = function(d) {
+    if (resolution === "hourly")  return (d.time || d.date).slice(0, 13);
+    if (resolution === "monthly") return d.date.slice(0, 7);
+    return d.date;
+  };
+
+  var keySet = {};
+  keys.forEach(function(sp){ results[sp].forEach(function(d){ keySet[getKey(d)] = true; }); });
+  var allDays = Object.keys(keySet).sort();
 
   var dayMaps = {};
   keys.forEach(function(sp) {
     dayMaps[sp] = {};
     results[sp].forEach(function(d) {
-      dayMaps[sp][d.date] = (dayMaps[sp][d.date] || 0) + d.kwh;
+      var k = getKey(d);
+      dayMaps[sp][k] = (dayMaps[sp][k] || 0) + d.kwh;
     });
   });
 
@@ -1990,7 +2043,7 @@ function renderGenCompareChart(results) {
 
   genCompareChart = new Chart(cv.getContext("2d"), {
     type: "line",
-    data: { labels: allDays, datasets: datasets },
+    data: { labels: allDays.map(function(k){ return resolution==="hourly" ? k+":00" : k; }), datasets: datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode:"index", intersect:false },
@@ -2068,20 +2121,23 @@ function loadGenProjects(){
     if(infM&&!infM.value){var now2=new Date();infM.value=now2.getFullYear()+"-"+String(now2.getMonth()+1).padStart(2,"0");}
   }).catch(function(e){console.error("loadGenProjects error:",e);});
 }
-function getGenDateRange(){
-  var period=document.getElementById("gen-period").value;
+function _buildDateRange(period,fromId,toId){
   var now=new Date();
   var pad=function(n){return String(n).padStart(2,"0");};
   var fmt=function(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
+  if(period==="today"){return{from:fmt(now),to:fmt(now)};}
   if(period==="yesterday"){var y=new Date(now);y.setDate(y.getDate()-1);return{from:fmt(y),to:fmt(y)};}
-  if(period==="week"){var w=new Date(now);w.setDate(w.getDate()-7);return{from:fmt(w),to:fmt(now)};}
-  if(period==="custom"){return{from:document.getElementById("gen-from").value||fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:document.getElementById("gen-to").value||fmt(now)};}
+  if(period==="mes_pasado"){var mp=new Date(now.getFullYear(),now.getMonth()-1,1);var mpE=new Date(now.getFullYear(),now.getMonth(),0);return{from:fmt(mp),to:fmt(mpE)};}
+  if(period==="custom"){var fi=document.getElementById(fromId);var ti=document.getElementById(toId);return{from:(fi&&fi.value)||fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:(ti&&ti.value)||fmt(now)};}
   return{from:fmt(new Date(now.getFullYear(),now.getMonth(),1)),to:fmt(now)};
 }
+function getGenDateRange(){return _buildDateRange(document.getElementById("gen-period").value,"gen-from","gen-to");}
+function getCmpDateRange(){return _buildDateRange(document.getElementById("cmp-period").value,"cmp-from","cmp-to");}
 function loadGeneracion(){
   var proj=document.getElementById("gen-proj").value;
   if(!proj){toast("⚠ Selecciona un proyecto");return;}
   var range=getGenDateRange();
+  var res=(document.getElementById("gen-res")||{}).value||"daily";
   document.getElementById("gen-empty").style.display="none";
   document.getElementById("gen-faults-box").style.display="none";
   var btn=document.getElementById("gen-load");if(btn){btn.textContent="⏳ Cargando…";btn.disabled=true;}
@@ -2090,14 +2146,15 @@ function loadGeneracion(){
     if(btn){btn.textContent="Consultar ↻";btn.disabled=false;}
     if(!r||!r.ok){toast("⚠ Error: "+(r&&r.error?r.error:"sin respuesta"));return;}
     genData=r;
-    renderGenChart(r,proj,range);
+    renderGenChart(r,proj,range,res);
   })
   .catch(function(e){
     if(btn){btn.textContent="Consultar ↻";btn.disabled=false;}
     toast("⚠ Error al cargar generación");
   });
 }
-function renderGenChart(r,subProj,range){
+function renderGenChart(r,subProj,range,resolution){
+  resolution=resolution||"daily";
   var data=r.data||[];
   var chartCard=document.getElementById("gen-chart-card");
   if(!data.length){
@@ -2113,12 +2170,30 @@ function renderGenChart(r,subProj,range){
   }
   if(chartCard)chartCard.style.display="block";
   document.getElementById("gen-empty").style.display="none";
+  // dayMap siempre disponible (para KPIs y coloreado de fallas)
   var dayMap={};
   data.forEach(function(d){if(!dayMap[d.date])dayMap[d.date]=0;dayMap[d.date]+=d.kwh;});
-  var days=Object.keys(dayMap).sort();
-  var kwhPerDay=days.map(function(d){return Math.round(dayMap[d]*100)/100;});
+
+  // Labels/series según resolución
+  var labels,kwhSeries;
+  if(resolution==="hourly"){
+    var hMap={};
+    data.forEach(function(d){var h=(d.time||d.date).slice(0,13);hMap[h]=(hMap[h]||0)+d.kwh;});
+    labels=Object.keys(hMap).sort().map(function(h){return h+":00";});
+    kwhSeries=Object.keys(hMap).sort().map(function(h){return Math.round(hMap[h]*100)/100;});
+  } else if(resolution==="monthly"){
+    var mMap={};
+    data.forEach(function(d){var m=d.date.slice(0,7);mMap[m]=(mMap[m]||0)+d.kwh;});
+    labels=Object.keys(mMap).sort();
+    kwhSeries=labels.map(function(m){return Math.round(mMap[m]*100)/100;});
+  } else {
+    labels=Object.keys(dayMap).sort();
+    kwhSeries=labels.map(function(d){return Math.round(dayMap[d]*100)/100;});
+  }
+  var days=labels;
+  var kwhPerDay=kwhSeries;
   var sim=r.simulation;
-  var p90daily=sim?sim.p90_daily:null;
+  var p90daily=(resolution==="daily"&&sim)?sim.p90_daily:null;
   var p90Line=days.map(function(){return p90daily;});
   var faultDays={};
   faults.forEach(function(f){
@@ -2128,14 +2203,14 @@ function renderGenChart(r,subProj,range){
     else{projMatch=true;}
     if(!projMatch)return;
     var fd2=String(f.date||"").trim();var iso="";
-
     var m1=fd2.match(/^(\d{4})-(\d{2})-(\d{2})/);var m2=fd2.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
     if(m1)iso=fd2.slice(0,10);else if(m2)iso=m2[3]+"-"+m2[2]+"-"+m2[1].padStart(2,"0");
     if(iso&&iso>=range.from&&iso<=range.to){if(!faultDays[iso])faultDays[iso]=[];faultDays[iso].push(f);}
   });
 
-  var barColors=days.map(function(d){return faultDays[d]?'rgba(255,87,87,0.75)':'rgba(145,91,216,0.75)';});
-  var barBorders=days.map(function(d){return faultDays[d]?'#FF5757':'#915BD8';});
+  // Para horario el label es timestamp; extraer fecha para lookup de fallas
+  var barColors=days.map(function(d){var dk=d.slice(0,10);return faultDays[dk]?'rgba(255,87,87,0.75)':'rgba(145,91,216,0.75)';});
+  var barBorders=days.map(function(d){var dk=d.slice(0,10);return faultDays[dk]?'#FF5757':'#915BD8';});
   var totalKwh=kwhPerDay.reduce(function(a,b){return a+b;},0);
   var yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
   var ymd=yesterday.getFullYear()+"-"+String(yesterday.getMonth()+1).padStart(2,"0")+"-"+String(yesterday.getDate()).padStart(2,"0");
@@ -2170,9 +2245,9 @@ function renderGenChart(r,subProj,range){
         tooltip:{
           backgroundColor:"#1E1529",borderColor:"#4A3560",borderWidth:1,padding:12,titleColor:"#FDFAF7",bodyColor:"#A89EC0",
           callbacks:{
-            title:function(items){var d=items[0].label;var fs=faultDays[d];if(fs&&fs.length){return d+" · ⚡ "+fs.length+" falla"+(fs.length>1?"s":"")+" activa"+(fs.length>1?"s":"");}return d;},
+            title:function(items){var d=items[0].label;var dk=d.slice(0,10);var fs=faultDays[dk];if(fs&&fs.length){return d+" · ⚡ "+fs.length+" falla"+(fs.length>1?"s":"")+" activa"+(fs.length>1?"s":"");}return d;},
             label:function(item){if(item.dataset.type==="line")return "  P90 esperado: "+Math.round(item.raw).toLocaleString("es-CO")+" kWh";return "  Generación real: "+Math.round(item.raw).toLocaleString("es-CO")+" kWh";},
-            afterBody:function(items){var d=items[0].label;var fs=faultDays[d];if(!fs||!fs.length)return [];var lines=[""];fs.forEach(function(f){var fdd=fd(f.code);var s=ST[f.st]||ST.activa;lines.push("  "+s.ico+" ["+f.code+"] "+(fdd?fdd.label:f.faultLabel||f.code));lines.push("     Estado: "+s.lbl+(f.prio?" · Prioridad: "+f.prio:""));});return lines;}
+            afterBody:function(items){var d=items[0].label;var dk=d.slice(0,10);var fs=faultDays[dk];if(!fs||!fs.length)return [];var lines=[""];fs.forEach(function(f){var fdd=fd(f.code);var s=ST[f.st]||ST.activa;lines.push("  "+s.ico+" ["+f.code+"] "+(fdd?fdd.label:f.faultLabel||f.code));lines.push("     Estado: "+s.lbl+(f.prio?" · Prioridad: "+f.prio:""));});return lines;}
           }
         }
       },
@@ -2393,8 +2468,8 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("cbtn").addEventListener("click",function(){
     if(userRole==="cliente"){if(confirm("¿Cerrar sesión?")){ clearSession(); location.reload(); }} else { openSetup(true); }
   });
-  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";});
-  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";renderCharts();});
+  document.getElementById("tab-board").addEventListener("click",function(){curTab="board";this.className="tab on";document.getElementById("tab-charts").className="tab";document.getElementById("board-panel").style.display="block";document.getElementById("frow").style.display="flex";document.getElementById("charts").style.display="none";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";document.getElementById("inf-panel").style.display="none";});
+  document.getElementById("tab-charts").addEventListener("click",function(){curTab="charts";this.className="tab on";document.getElementById("tab-board").className="tab";document.getElementById("board-panel").style.display="none";document.getElementById("frow").style.display="none";document.getElementById("charts").style.display="grid";document.getElementById("app").style.display="block";document.getElementById("gen-panel").style.display="none";document.getElementById("port-panel").style.display="none";document.getElementById("inf-panel").style.display="none";renderCharts();});
   var _tg=document.getElementById("tab-gen");
   if(_tg)_tg.addEventListener("click",function(){
     curTab="gen";
@@ -2403,6 +2478,7 @@ document.addEventListener("DOMContentLoaded",function(){
     document.getElementById("app").style.display="none";
     document.getElementById("gen-panel").style.display="block";
     document.getElementById("port-panel").style.display="none";
+    document.getElementById("inf-panel").style.display="none";
     loadGenProjects();
   });
   var _tp = document.getElementById("tab-port");
@@ -2413,6 +2489,7 @@ document.addEventListener("DOMContentLoaded",function(){
     document.getElementById("app").style.display = "none";
     document.getElementById("gen-panel").style.display = "none";
     document.getElementById("port-panel").style.display = "block";
+    document.getElementById("inf-panel").style.display = "none";
     if (!genProjects.length) loadGenProjects();
     loadPortfolios();
   });
@@ -2440,12 +2517,30 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   var _pl = document.getElementById("port-load"); if (_pl) _pl.addEventListener("click", loadPortfolio);
   var _gl=document.getElementById("gen-load");if(_gl)_gl.addEventListener("click",loadGeneracion);
-  // ── NUEVO: listener comparación ──
   var _gcl=document.getElementById("gen-compare-load");if(_gcl)_gcl.addEventListener("click",loadGenCompare);
+  // ── Dropdown de selección de proyectos para comparación ──
+  var _cmpTrigger = document.getElementById("gen-cmp-trigger");
+  var _cmpDd      = document.getElementById("gen-cmp-dropdown");
+  if (_cmpTrigger && _cmpDd) {
+    _cmpTrigger.addEventListener("click", function(e) {
+      e.stopPropagation();
+      var open = _cmpDd.style.display !== "none";
+      _cmpDd.style.display = open ? "none" : "block";
+    });
+    document.addEventListener("click", function(e) {
+      var wrap = document.getElementById("gen-cmp-dd-wrap");
+      if (wrap && !wrap.contains(e.target)) _cmpDd.style.display = "none";
+    });
+  }
   var _gp=document.getElementById("gen-period");if(_gp)_gp.addEventListener("change",function(){
     var custom=this.value==="custom";
     var gf=document.getElementById("gen-from");if(gf)gf.style.display=custom?"":"none";
     var gt=document.getElementById("gen-to");if(gt)gt.style.display=custom?"":"none";
+  });
+  var _cp=document.getElementById("cmp-period");if(_cp)_cp.addEventListener("change",function(){
+    var custom=this.value==="custom";
+    var cf=document.getElementById("cmp-from");if(cf)cf.style.display=custom?"":"none";
+    var ct=document.getElementById("cmp-to");if(ct)ct.style.display=custom?"":"none";
   });
   ["all","activa","revision","programada","terminada"].forEach(function(k){document.getElementById("pill-"+k).addEventListener("click",function(){filterSt=k;renderPills();renderBoard();});});
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});

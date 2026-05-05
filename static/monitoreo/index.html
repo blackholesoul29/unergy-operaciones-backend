@@ -2006,7 +2006,7 @@ function renderGenCompareChart(results, resolution) {
 
   // Función clave según resolución
   var getKey = function(d) {
-    if (resolution === "hourly")  return d.time || d.date;
+    if (resolution === "hourly")  return (d.time || d.date).slice(0, 13);
     if (resolution === "monthly") return d.date.slice(0, 7);
     return d.date;
   };
@@ -2043,7 +2043,7 @@ function renderGenCompareChart(results, resolution) {
 
   genCompareChart = new Chart(cv.getContext("2d"), {
     type: "line",
-    data: { labels: allDays, datasets: datasets },
+    data: { labels: allDays.map(function(k){ return resolution==="hourly" ? k+":00" : k; }), datasets: datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode:"index", intersect:false },
@@ -2177,8 +2177,10 @@ function renderGenChart(r,subProj,range,resolution){
   // Labels/series según resolución
   var labels,kwhSeries;
   if(resolution==="hourly"){
-    labels=data.map(function(d){return d.time||d.date;});
-    kwhSeries=data.map(function(d){return Math.round(d.kwh*100)/100;});
+    var hMap={};
+    data.forEach(function(d){var h=(d.time||d.date).slice(0,13);hMap[h]=(hMap[h]||0)+d.kwh;});
+    labels=Object.keys(hMap).sort().map(function(h){return h+":00";});
+    kwhSeries=Object.keys(hMap).sort().map(function(h){return Math.round(hMap[h]*100)/100;});
   } else if(resolution==="monthly"){
     var mMap={};
     data.forEach(function(d){var m=d.date.slice(0,7);mMap[m]=(mMap[m]||0)+d.kwh;});

@@ -2402,8 +2402,13 @@ function getPortDateRange() {
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
   if (!portName) { toast("⚠ Selecciona un cliente"); return; }
-  var projNames = portPortfolios[portName];
-  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos para este cliente"); return; }
+  var projNames = portPortfolios[portName] || [];
+  /* Fallback: si portPortfolios no tiene este cliente, buscar en PROJS_DETALLE */
+  if (!projNames.length && PROJS_DETALLE.length) {
+    var byCliente = PROJS_DETALLE.filter(function(p){ return p.cliente_nombre === portName; });
+    if (byCliente.length) projNames = byCliente.map(function(p){ return p.nombre; });
+  }
+  if (!projNames.length) { toast("⚠ Sin proyectos para este cliente"); return; }
   var allSysProjs = genProjects.length > 0 ? genProjects : [];
   var projsToLoad = [];
   projNames.forEach(function(nc){

@@ -709,36 +709,57 @@ def _action_get_projects(db: Session) -> dict:
 
 def _action_get_portfolios(db: Session) -> dict:
     """Clientes (inversionistas) con proyectos en operación, agrupados por cliente."""
-    from sqlalchemy import or_
-    from app.models.proyectos import ProyectoInversionista
+    try:
+        from sqlalchemy import or_
+        from app.models.proyectos import ProyectoInversionista
 
-    proyectos = (
-        db.query(Proyecto)
-        .filter(or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion"))  # noqa: E712
-        .options(
-            selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
-            selectinload(Proyecto.cliente),
+        # Consultar directo desde la tabla de inversionistas
+        rows = (
+            db.query(ProyectoInversionista)
+            .join(ProyectoInversionista.proyecto)
+            .filter(
+                or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion")  # noqa: E712
+            )
+            .options(
+                selectinload(ProyectoInversionista.cliente),
+                selectinload(ProyectoInversionista.proyecto),
+            )
+            .all()
         )
-        .all()
-    )
-    portfolios: dict = {}
-    for p in proyectos:
-        proj_name = p.nombre_clientes or p.nombre_comercial
-        # Obtener clientes desde inversionistas (fuente primaria) o cliente_id
-        cliente_nombres: list[str] = []
-        if p.inversionistas:
-            cliente_nombres = [
-                inv.cliente.razon_social_nombre
-                for inv in p.inversionistas
-                if inv.cliente
-            ]
-        if not cliente_nombres and p.cliente:
-            cliente_nombres = [p.cliente.razon_social_nombre]
-        for nombre in cliente_nombres:
-            portfolios.setdefault(nombre, [])
-            if proj_name not in portfolios[nombre]:
-                portfolios[nombre].append(proj_name)
-    return {"ok": True, "portfolios": portfolios}
+        portfolios: dict = {}
+        for inv in rows:
+            if not inv.cliente or not inv.proyecto:
+                continue
+            p = inv.proyecto
+            proj_name = p.nombre_clientes or p.nombre_comercial
+            cliente_nombre = inv.cliente.razon_social_nombre
+            portfolios.setdefault(cliente_nombre, [])
+            if proj_name not in portfolios[cliente_nombre]:
+                portfolios[cliente_nombre].append(proj_name)
+
+        # Fallback: proyectos con cliente_id directo no cubiertos por inversionistas
+        if not portfolios:
+            proyectos = (
+                db.query(Proyecto)
+                .filter(
+                    or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion")  # noqa: E712
+                )
+                .options(selectinload(Proyecto.cliente))
+                .all()
+            )
+            for p in proyectos:
+                if p.cliente:
+                    nombre = p.cliente.razon_social_nombre
+                    proj_name = p.nombre_clientes or p.nombre_comercial
+                    portfolios.setdefault(nombre, [])
+                    if proj_name not in portfolios[nombre]:
+                        portfolios[nombre].append(proj_name)
+
+        return {"ok": True, "portfolios": portfolios}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(exc), "portfolios": {}}
 
 
 def _action_get_all_contratos(db: Session) -> dict:

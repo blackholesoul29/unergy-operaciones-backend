@@ -377,18 +377,34 @@ def get_catalogo(db: Session = Depends(get_db), _=Depends(get_current_user)):
 # ── GET /monitoreo/proyectos ──────────────────────────────────────────────────
 @router.get("/proyectos")
 def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Devuelve la lista de proyectos para poblar los selectores de fallas-unergy."""
+    """Devuelve proyectos en operación con su cliente, para poblar selectores."""
+    from sqlalchemy import or_ as _or2
+    from app.models.clientes import Cliente as ClienteM
+
     proyectos = (
         db.query(Proyecto)
-        .filter(Proyecto.estado == "en_operacion")
+        .filter(_or2(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion"))  # noqa: E712
+        .options(selectinload(Proyecto.cliente))
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
+    clientes = db.query(ClienteM).order_by(ClienteM.razon_social_nombre).all()
     return {
         "proyectos": [p.nombre_comercial for p in proyectos],
         "proyectos_detalle": [
-            {"id": p.id, "nombre": p.nombre_comercial, "alias": p.alias_monitoreo or ""}
+            {
+                "id": p.id,
+                "nombre": p.nombre_comercial,
+                "alias": p.alias_monitoreo or "",
+                "sub_project": p.sub_project or p.alias_monitoreo or "",
+                "cliente_id": p.cliente_id,
+                "cliente_nombre": p.cliente.razon_social_nombre if p.cliente else "",
+            }
             for p in proyectos
+        ],
+        "clientes": [
+            {"id": c.id, "nombre": c.razon_social_nombre}
+            for c in clientes
         ],
     }
 

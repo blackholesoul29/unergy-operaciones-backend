@@ -786,10 +786,12 @@ function loadProyectosFromDB() {
 }
 
 function populateClienteSelects() {
-  /* Clientes reales desde la BD (fuente primaria) */
-  var merged = _allClientes.map(function(c){ return c.nombre; });
-  /* Complementar con clientes de portPortfolios no incluidos en BD */
-  Object.keys(portPortfolios).forEach(function(n){ if(merged.indexOf(n) < 0) merged.push(n); });
+  /* Fuente primaria: portPortfolios (clientes con proyectos en operación) */
+  var merged = Object.keys(portPortfolios);
+  /* Complementar con clientes de PROJS_DETALLE que tengan cliente_nombre */
+  PROJS_DETALLE.forEach(function(p){ if(p.cliente_nombre && merged.indexOf(p.cliente_nombre) < 0) merged.push(p.cliente_nombre); });
+  /* Si aún no hay datos de operación, mostrar todos los de BD como fallback */
+  if (!merged.length) merged = _allClientes.map(function(c){ return c.nombre; });
   merged.sort();
   /* #port-sel (tab Clientes) */
   var portSel = document.getElementById('port-sel');

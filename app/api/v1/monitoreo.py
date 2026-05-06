@@ -399,10 +399,16 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
     ]
     clientes = db.query(ClienteM).order_by(ClienteM.razon_social_nombre).all()
 
-    def _get_cliente_nombre(p: Proyecto) -> str:
-        if p.inversionistas:
-            return p.inversionistas[0].cliente.razon_social_nombre if p.inversionistas[0].cliente else ""
-        return p.cliente.razon_social_nombre if p.cliente else ""
+    def _get_cliente_nombres(p: Proyecto) -> list[str]:
+        names: list[str] = []
+        for inv in (p.inversionistas or []):
+            if inv.cliente and inv.cliente.razon_social_nombre:
+                n = inv.cliente.razon_social_nombre
+                if n not in names:
+                    names.append(n)
+        if not names and p.cliente and p.cliente.razon_social_nombre:
+            names.append(p.cliente.razon_social_nombre)
+        return names
 
     return {
         "proyectos": [p.nombre_comercial for p in op_proyectos],
@@ -412,7 +418,8 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
                 "nombre": p.nombre_comercial,
                 "alias": p.alias_monitoreo or "",
                 "sub_project": p.sub_project or p.alias_monitoreo or "",
-                "cliente_nombre": _get_cliente_nombre(p),
+                "cliente_nombre": _get_cliente_nombres(p)[0] if _get_cliente_nombres(p) else "",
+                "cliente_nombres": _get_cliente_nombres(p),  # todos los clientes del proyecto
             }
             for p in all_proyectos  # todos, para cubrir cualquier proyecto con fallas
         ],

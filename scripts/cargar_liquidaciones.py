@@ -269,6 +269,8 @@ class API:
 
     def post(self, path: str, body: dict):
         r = _retry(requests.post, f"{self.base}{path}", json=body, headers=self._h())
+        if not r.ok:
+            print(f"  ✗ POST {path} → {r.status_code}: {r.text[:400]}")
         r.raise_for_status()
         return r.json()
 

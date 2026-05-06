@@ -226,7 +226,7 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Cliente HTTP
 # ─────────────────────────────────────────────────────────────────────────────
-_RETRY_ON = {502, 503, 504}
+_RETRY_ON = {500, 502, 503, 504}  # incluye 500 para crashes transitorios de Railway
 _MAX_RETRIES = 4
 _RETRY_WAIT = 8  # segundos entre reintentos
 

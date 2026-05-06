@@ -226,7 +226,7 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Cliente HTTP
 # ─────────────────────────────────────────────────────────────────────────────
-_RETRY_ON = {500, 502, 503, 504}  # crashes transitorios de Railway
+_RETRY_ON = {502, 503, 504}  # crashes transitorios de Railway (NO 500: ver _post_linea)
 _MAX_RETRIES = 5
 _RETRY_WAIT = 20  # espera base en segundos (Railway tarda ~15s en recuperarse)
 _CALL_PAUSE = 0.2  # pausa mínima entre llamadas para no saturar el worker
@@ -273,6 +273,26 @@ class API:
             print(f"  ✗ POST {path} → {r.status_code}: {r.text[:400]}")
         r.raise_for_status()
         return r.json()
+
+    def post_linea(self, path: str, body: dict) -> bool:
+        """POST de línea tolerante a 500 post-commit.
+
+        Railway a veces comete el INSERT y luego falla al serializar la respuesta
+        (500 Internal Server Error), pero el dato YA quedó escrito en la DB.
+        En ese caso logueamos un aviso y continuamos — NO reintentamos para no
+        crear duplicados.  Devuelve True si la línea se creó (201 o 500-commit),
+        False si hubo un error real (4xx).
+        """
+        r = _retry(requests.post, f"{self.base}{path}", json=body, headers=self._h())
+        if r.status_code in (200, 201):
+            return True
+        if r.status_code == 500:
+            # El INSERT probablemente se committeó; continuamos sin duplicar
+            print(f"    ⚠  500 post-commit en línea (dato guardado, continuando)")
+            return True
+        print(f"  ✗ POST {path} → {r.status_code}: {r.text[:200]}")
+        r.raise_for_status()
+        return False
 
     def patch(self, path: str, body: dict):
         r = _retry(requests.patch, f"{self.base}{path}", json=body, headers=self._h())
@@ -521,14 +541,14 @@ def cargar(
                         partes.append(ci)
                     ref = " | ".join(p for p in partes if p) or None
 
-                    api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas", {
+                    if api.post_linea(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas", {
                         "tipo_linea":         _tipo_linea(f["concepto"]),
                         "concepto":           f["concepto"],
                         "valor_cop":          f["total"],
                         "referencia_factura": ref,
                         "orden":              orden,
-                    })
-                    stats["lineas"] += 1
+                    }):
+                        stats["lineas"] += 1
 
                 if neto_pagar is not None:
                     api.patch(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}",
@@ -569,7 +589,7 @@ def cargar(
                         partes.append(ci)
                     ref = " | ".join(p for p in partes if p) or None
 
-                    api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mcid}/lineas", {
+                    api.post_linea(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mcid}/lineas", {
                         "tipo_linea":         _tipo_linea(f["concepto"]),
                         "concepto":           f["concepto"],
                         "valor_cop":          f["total"],

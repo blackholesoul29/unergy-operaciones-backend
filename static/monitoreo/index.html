@@ -403,7 +403,7 @@ body.client-mode #tab-inf{display:none!important}
 <div id="topbar">
   <div class="logo"><div class="logo-icon">☀️</div><div><div class="logo-brand">Unergy <span style="color:var(--mu);font-weight:600;font-size:12px">· Fallas</span></div><div class="sync-row"><span class="sdot" id="sdot"></span><span id="stxt">Cargando…</span></div></div></div>
   <div class="tabs"><button class="tab on" id="tab-board">⊞ Tablero</button><button class="tab" id="tab-charts">📊 Gráficos</button>
-    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🗂 Portafolio</button><button class="tab" id="tab-inf">📄 Informe</button></div>
+    <button class="tab" id="tab-gen">☀️ Generación</button><button class="tab" id="tab-port">🏢 Clientes</button><button class="tab" id="tab-inf">📄 Informe</button></div>
   <div class="acts">
     <button class="cbadge hmob" id="cbtn"><span style="width:7px;height:7px;border-radius:50%;background:var(--gr);display:block"></span><span id="clbl">…</span></button>
     <span class="client-badge" id="client-badge-lbl" style="display:none">👁 Cliente</span>
@@ -426,6 +426,7 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <div id="frow">
     <input class="fi" id="fsearch" placeholder="🔍  Buscar ID, proyecto, código…"/>
+    <select class="fi fsel" id="fclient"><option value="">Todos los clientes</option></select>
     <select class="fi fsel" id="fproject"><option value="">Todos los proyectos</option></select>
     <select class="fi fsel" id="fcat"><option value="">Todas las categorías</option></select>
     <select class="fi fimp" id="fimp"><option value="">Todos los impactos</option><option value="1">📡 Medición</option><option value="2">⚡ Generación</option><option value="3">🌩️ Evento Adverso</option><option value="4">🔧 Desgaste</option><option value="5">🏗️ Civil</option><option value="6">🦺 HSE</option><option value="7">🔋 BESS</option><option value="8">📋 Administrativo</option><option value="9">🔌 Sin Suministro</option></select>
@@ -543,16 +544,16 @@ body.client-mode #tab-inf{display:none!important}
     <div>Selecciona un proyecto y haz clic en <b style="color:var(--pu)">Consultar</b></div>
   </div>
 </div>
-<!-- ══ PORTFOLIO PANEL ══ -->
+<!-- ══ CLIENTES PANEL ══ -->
 <div id="port-panel" style="display:none;max-width:1380px;margin:0 auto;padding:0 16px 90px">
   <!-- Header & filters -->
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
     <div>
-      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Portafolio <span style="color:var(--pu)" id="port-name-title"></span></div>
-      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona portafolio y período</div>
+      <div style="font-size:22px;font-weight:800;color:var(--cr);letter-spacing:-.3px">Clientes <span style="color:var(--pu)" id="port-name-title"></span></div>
+      <div style="font-size:12px;color:var(--fa);margin-top:3px" id="port-period-lbl">Selecciona cliente y período</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona portafolio…</option></select>
+      <select class="fi" id="port-sel" style="min-width:200px;font-size:13px"><option value="">Selecciona cliente…</option></select>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button class="port-period-btn on" data-p="week" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Semana</button>
         <button class="port-period-btn" data-p="yesterday" style="padding:7px 13px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Ayer</button>
@@ -564,7 +565,7 @@ body.client-mode #tab-inf{display:none!important}
       <button class="btn btn-pu" id="port-load" style="padding:7px 18px;font-size:13px">Consultar ↻</button>
     </div>
   </div>
-  <!-- KPIs portafolio -->
+  <!-- KPIs cliente -->
   <div id="port-kpis" style="display:none;gap:12px;margin-bottom:20px">
     <div class="kpi kgr">
       <div class="kpi-ico">⚡</div>
@@ -582,15 +583,15 @@ body.client-mode #tab-inf{display:none!important}
       <div class="kpi-ico">📈</div>
       <div class="kpi-val" id="pkv-avg" style="font-size:26px">—</div>
       <div class="kpi-lbl">Promedio Diario</div>
-      <div class="kpi-sub">kWh/día portafolio total</div>
+      <div class="kpi-sub">kWh/día total del cliente</div>
     </div>
   </div>
   <!-- Toggle chart view -->
   <div id="port-chart-section" style="display:none">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
       <div>
-        <div class="chart-title" id="port-chart-title">Generación por día — Portafolio</div>
-        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del portafolio</div>
+        <div class="chart-title" id="port-chart-title">Generación por día — Cliente</div>
+        <div style="font-size:11px;color:var(--fa);margin-top:2px" id="port-chart-sub">kWh acumulado del cliente</div>
       </div>
       <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
         <button id="port-view-stacked" class="port-view-btn on" style="padding:6px 13px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer">Apilado</button>
@@ -616,14 +617,14 @@ body.client-mode #tab-inf{display:none!important}
   </div>
   <!-- Empty state -->
   <div id="port-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
-    <div style="font-size:40px;margin-bottom:14px">🗂</div>
-    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un portafolio</div>
-    <div>Elige el portafolio y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
+    <div style="font-size:40px;margin-bottom:14px">🏢</div>
+    <div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Selecciona un cliente</div>
+    <div>Elige el cliente y el período, luego haz clic en <b style="color:var(--pu)">Consultar</b></div>
   </div>
   <!-- Loading state -->
   <div id="port-loading" style="display:none;text-align:center;padding:60px 20px">
     <div class="spin" style="margin:0 auto 16px"></div>
-    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del portafolio…</div>
+    <div style="font-size:13px;color:var(--mu)" id="port-loading-msg">Consultando generación del cliente…</div>
     <div style="font-size:11px;color:var(--fa);margin-top:6px" id="port-loading-sub"></div>
   </div>
 </div>
@@ -653,7 +654,7 @@ body.client-mode #tab-inf{display:none!important}
         <div id="inf-oper-toggles" style="display:flex;gap:8px;flex-wrap:wrap">
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-mode-btn" data-m="proyecto" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Por Proyecto</button>
-            <button class="inf-mode-btn" data-m="portafolio" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Portafolio</button>
+            <button class="inf-mode-btn" data-m="cliente" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--mu);cursor:pointer;transition:all .18s">Por Cliente</button>
           </div>
           <div style="display:flex;gap:0;background:#1a1025;border:1px solid var(--br);border-radius:8px;overflow:hidden">
             <button class="inf-period-btn" data-p="mes" style="padding:7px 12px;font-size:11px;font-weight:700;border:none;background:var(--pu);color:var(--cr);cursor:pointer;transition:all .18s">Mensual</button>
@@ -665,7 +666,7 @@ body.client-mode #tab-inf{display:none!important}
     <!-- Operacional controls -->
     <div id="inf-oper-controls" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
       <select class="fi fsel" id="inf-proj" style="min-width:190px;font-size:13px"><option value="">Selecciona proyecto…</option></select>
-      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona portafolio…</option></select>
+      <select class="fi fsel" id="inf-port" style="min-width:190px;font-size:13px;display:none"><option value="">Selecciona cliente…</option></select>
       <input type="month" class="fi" id="inf-month" style="width:150px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-from" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
       <input type="date" class="fi fdate" id="inf-to" style="display:none;width:145px;font-size:13px;color-scheme:dark"/>
@@ -762,9 +763,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function loadProyectosFromDB() {
   _apiFetch('GET', '/api/v1/monitoreo/proyectos').then(function(res) {
-    if (!res || !Array.isArray(res.proyectos) || !res.proyectos.length) return;
-    PROJS = res.proyectos;
+    if (!res) return;
+    if (Array.isArray(res.proyectos) && res.proyectos.length) PROJS = res.proyectos;
+    if (Array.isArray(res.proyectos_detalle) && res.proyectos_detalle.length) PROJS_DETALLE = res.proyectos_detalle;
+    if (Array.isArray(res.clientes) && res.clientes.length) _allClientes = res.clientes;
     renderSelects();
+    populateClienteSelects();
     var detalle = res.proyectos_detalle || res.proyectos.map(function(n) { return {nombre: n}; });
     ['gen-proj', 'inf-proj', 'fmo-proj'].forEach(function(sid) {
       var el = document.getElementById(sid);
@@ -775,10 +779,45 @@ function loadProyectosFromDB() {
       el.innerHTML = html;
       if (cur) el.value = cur;
     });
-    toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
+    if (PROJS.length) toast('✓ ' + PROJS.length + ' proyectos cargados desde la base de datos', 3000);
   }).catch(function(e) {
     console.warn('[Bridge] proyectos no disponibles desde BD:', e);
   });
+}
+
+function populateClienteSelects() {
+  /* Clientes reales desde la BD (fuente primaria) */
+  var merged = _allClientes.map(function(c){ return c.nombre; });
+  /* Complementar con clientes de portPortfolios no incluidos en BD */
+  Object.keys(portPortfolios).forEach(function(n){ if(merged.indexOf(n) < 0) merged.push(n); });
+  merged.sort();
+  /* #port-sel (tab Clientes) */
+  var portSel = document.getElementById('port-sel');
+  if (portSel) {
+    var saved = portSel.value;
+    var h = '<option value="">Selecciona cliente…</option>';
+    merged.forEach(function(n){ h += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
+    portSel.innerHTML = h;
+    if (saved) portSel.value = saved;
+  }
+  /* #inf-port (tab Informe → Por Cliente) */
+  var infPort = document.getElementById('inf-port');
+  if (infPort) {
+    var saved2 = infPort.value;
+    var h2 = '<option value="">Selecciona cliente…</option>';
+    merged.forEach(function(n){ h2 += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
+    infPort.innerHTML = h2;
+    if (saved2) infPort.value = saved2;
+  }
+  /* #fclient (filtro tablero fallas) */
+  var fclientEl = document.getElementById('fclient');
+  if (fclientEl) {
+    var saved3 = fclientEl.value;
+    var h3 = '<option value="">Todos los clientes</option>';
+    merged.forEach(function(n){ h3 += '<option value="'+esc(n)+'">'+esc(n)+'</option>'; });
+    fclientEl.innerHTML = h3;
+    if (saved3) fclientEl.value = saved3;
+  }
 }
 
 /* ── mapeos de estado ── */
@@ -1009,6 +1048,8 @@ var ALL_F=[];
 function rebuildF(){ALL_F=[];CATS.forEach(function(c){c.faults.forEach(function(f){ALL_F.push({code:f.c,label:f.l,catId:c.id,catLbl:c.lbl,catCol:c.col,catIco:c.ico});});});}
 rebuildF();
 var PROJS=[]; /* poblado desde /api/v1/monitoreo/proyectos (PostgreSQL) */
+var PROJS_DETALLE=[]; /* [{id,nombre,cliente_id,cliente_nombre}] */
+var _allClientes=[]; /* [{id,nombre}] todos los clientes de la BD */
 var RESOLS=[
   "Diagnóstico en sitio – sin intervención requerida","Diagnóstico remoto – monitoreo y seguimiento continuo",
   "Reinicio remoto de inversor","Reinicio remoto de datalogger / módem","Reinicio remoto del sistema de monitoreo / SCADA",
@@ -1411,15 +1452,28 @@ function renderPills(){
 }
 function getFiltered(){
   var q=(document.getElementById("fsearch").value||"").toLowerCase();
+  var fcliEl=document.getElementById("fclient");
+  var fcli=fcliEl?fcliEl.value||"":" ";fcli=fcli.trim();
   var fp=document.getElementById("fproject").value||"";
   var fc=document.getElementById("fcat").value||"";
   var fim=document.getElementById("fimp")?document.getElementById("fimp").value||"":" ";
   var dfrom=document.getElementById("fdate-from")?document.getElementById("fdate-from").value||"":" ";
   var dto=document.getElementById("fdate-to")?document.getElementById("fdate-to").value||"":" ";
   fim=fim.trim();dfrom=dfrom.trim();dto=dto.trim();
+  /* mapa proyecto → cliente desde PROJS_DETALLE */
+  var projClientMap={};
+  PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre)projClientMap[p.nombre]=p.cliente_nombre;});
+  /* complementar con portPortfolios */
+  Object.keys(portPortfolios).forEach(function(clientName){
+    (portPortfolios[clientName]||[]).forEach(function(p){
+      var pn=p.nombre_comercial||p.nombre;
+      if(pn&&!projClientMap[pn])projClientMap[pn]=clientName;
+    });
+  });
   return faults.filter(function(f){
     if(userRole==="cliente"&&clientProjects.length>0&&clientProjects.indexOf(f.proj)<0)return false;
     if(filterSt!=="all"&&f.st!==filterSt)return false;
+    if(fcli){var mapped=projClientMap[f.proj];if(!mapped||mapped!==fcli)return false;}
     if(fp&&f.proj!==fp)return false;
     if(fc){var di=fd(f.code);if(!di||di.catId!==fc)return false;}
     if(fim){var m2=String(f.code||"").match(/^(\d+)/);if(!m2||m2[1]!==fim)return false;}
@@ -1487,8 +1541,16 @@ function renderBoard(){
 }
 function renderSelects(){
   var visProjs=(userRole==="cliente"&&clientProjects.length>0)?clientProjects:PROJS;
+  /* Filtrar proyectos por cliente seleccionado */
+  var fcliEl=document.getElementById("fclient");
+  var activeCliente=fcliEl?fcliEl.value:"";
+  var filteredProjs=visProjs;
+  if(activeCliente&&PROJS_DETALLE.length){
+    var clienteProjNames=PROJS_DETALLE.filter(function(p){return p.cliente_nombre===activeCliente;}).map(function(p){return p.nombre;});
+    filteredProjs=visProjs.filter(function(p){return clienteProjNames.indexOf(p)>=0;});
+  }
   var o='<option value="">Todos los proyectos</option>';
-  visProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
+  filteredProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
   ["fproject","chart-proj"].forEach(function(id){var e=document.getElementById(id);if(e){var v=e.value;e.innerHTML=o;e.value=v;}});
 }
 /* ══ KPIs ══ */
@@ -2305,7 +2367,7 @@ function renderGenChart(r,subProj,range,resolution){
     html+='</div>';list.innerHTML=html;
   } else if(box){box.style.display="none";}
 }
-/* ══ PORTAFOLIO ══ */
+/* ══ CLIENTES ══ */
 var portChart = null;
 var portData = {};
 var portProjects = [];
@@ -2320,15 +2382,11 @@ var portColorPalette = [
 ];
 function loadPortfolios() {
   apiGet({action:"getPortfolios"}, 10000).then(function(r){
-    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); return; }
+    if (!r || !r.ok) { console.warn("getPortfolios error:", r&&r.error); populateClienteSelects(); return; }
     portPortfolios = r.portfolios || {};
-    var sel = document.getElementById("port-sel");if (!sel) return;
-    sel.innerHTML = '<option value="">Selecciona portafolio…</option>';
-    Object.keys(portPortfolios).forEach(function(name){sel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';});
-    // ── Poblar también el selector de informe ──
-    var infPort=document.getElementById("inf-port");
-    if(infPort){infPort.innerHTML='<option value="">Selecciona portafolio…</option>';Object.keys(portPortfolios).forEach(function(name){infPort.innerHTML+='<option value="'+esc(name)+'">'+esc(name)+'</option>';});}
-  }).catch(function(e){ console.error("loadPortfolios:", e); });
+    /* Poblar selectores con clientes reales desde BD, complementando con portPortfolios */
+    populateClienteSelects();
+  }).catch(function(e){ console.error("loadPortfolios:", e); populateClienteSelects(); });
 }
 function getPortDateRange() {
   var now = new Date();
@@ -2341,9 +2399,9 @@ function getPortDateRange() {
 }
 function loadPortfolio() {
   var portName = document.getElementById("port-sel").value;
-  if (!portName) { toast("⚠ Selecciona un portafolio"); return; }
+  if (!portName) { toast("⚠ Selecciona un cliente"); return; }
   var projNames = portPortfolios[portName];
-  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos en este portafolio"); return; }
+  if (!projNames || !projNames.length) { toast("⚠ Sin proyectos para este cliente"); return; }
   var allSysProjs = genProjects.length > 0 ? genProjects : [];
   var projsToLoad = [];
   projNames.forEach(function(nc){
@@ -2357,7 +2415,7 @@ function loadPortfolio() {
       projsToLoad.push(found);
     }
   });
-  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este portafolio"); return; }
+  if (!projsToLoad.length) { toast("⚠ No tienes acceso a proyectos de este cliente"); return; }
   portCurrentPortfolio = portName;
   var range = getPortDateRange();
   document.getElementById("port-empty").style.display = "none";
@@ -2388,7 +2446,7 @@ function renderPortfolio(range) {
   var keys = Object.keys(portData);
   if (!keys.length) {
     document.getElementById("port-empty").style.display = "block";
-    document.getElementById("port-empty").innerHTML = '<div style="font-size:40px;margin-bottom:14px">📭</div><div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Sin datos en el período</div><div>No se encontró generación para los proyectos de este portafolio en el rango seleccionado.</div>';
+    document.getElementById("port-empty").innerHTML = '<div style="font-size:40px;margin-bottom:14px">📭</div><div style="font-size:15px;font-weight:700;color:var(--mu);margin-bottom:8px">Sin datos en el período</div><div>No se encontró generación para los proyectos de este cliente en el rango seleccionado.</div>';
     return;
   }
   var titleEl = document.getElementById("port-name-title"); if (titleEl) titleEl.textContent = portCurrentPortfolio;
@@ -2544,6 +2602,7 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   ["all","activa","revision","programada","terminada"].forEach(function(k){document.getElementById("pill-"+k).addEventListener("click",function(){filterSt=k;renderPills();renderBoard();});});
   document.getElementById("fsearch").addEventListener("input",function(){renderBoard();});
+  var _fcli=document.getElementById("fclient");if(_fcli)_fcli.addEventListener("change",function(){renderSelects();renderBoard();});
   document.getElementById("fproject").addEventListener("change",function(){renderBoard();});
   document.getElementById("fcat").addEventListener("change",function(){renderBoard();});
   document.getElementById("chart-proj").addEventListener("change",function(){if(curTab==="charts")renderBar();});
@@ -2874,7 +2933,7 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
     +'</div>';
 }
 
-/* ── Página consolidada de portafolio ── */
+/* ── Página consolidada de cliente ── */
 function buildConsolidatedPage(portName,projsData,range,totalPages){
   var resp=cData.name||cData.email||"Operaciones UNERGY";
   var totalPort=0,overP90=0,totalEv=0;
@@ -2927,20 +2986,20 @@ function buildConsolidatedPage(portName,projsData,range,totalPages){
     +'<div class="rpt-header">'
     +'<div style="display:flex;align-items:center;gap:13px">'
     +'<svg width="38" height="31" viewBox="0 0 44 36" fill="none"><circle cx="22" cy="4" r="3" fill="white"/><path d="M8 10 L8 24 Q8 34 22 34 Q36 34 36 24 L36 10" stroke="white" stroke-width="5" fill="none" stroke-linecap="round"/></svg>'
-    +'<div><div style="color:#fff;font-size:14px;font-weight:800;letter-spacing:.8px">INFORME OPERACIONAL MENSUAL · PORTAFOLIO</div>'
+    +'<div><div style="color:#fff;font-size:14px;font-weight:800;letter-spacing:.8px">INFORME OPERACIONAL MENSUAL · CLIENTE</div>'
     +'<div style="color:#6B5F80;font-size:10px;letter-spacing:.6px;margin-top:2px">Unergy Energía Digital S.A.S ESP | Operación &amp; Mantenimiento</div></div></div>'
-    +'<div class="rpt-meta-grid">'+rmeta("PORTAFOLIO",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
+    +'<div class="rpt-meta-grid">'+rmeta("CLIENTE",portName)+rmeta("PERÍODO",range.headerPeriod)+rmeta("PROYECTOS",projsData.length+" proyectos")+rmeta("ELABORADO POR",resp)+'</div>'
     +'</div>'
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 1. Resumen Consolidado – '+esc(range.headerPeriod)+'</div>'
     +'<div class="rpt-kpi-row">'
-    +rkpi("⚡","Generación Total Portafolio",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
+    +rkpi("⚡","Generación Total Cliente",Math.round(totalPort).toLocaleString("es-CO")+" kWh",null)
     +rkpi("🏭","Proyectos sobre P90",overP90+" / "+projsData.length,overP90===projsData.length?"#4ADE80":"#F6FF72")
     +rkpi("⚠️","Total Eventos del Período",totalEv+" evento(s)",totalEv>0?"#F97316":"#4ADE80")
     +'</div>'
     +'<table class="rpt-table" style="margin-top:12px"><thead><tr>'
     +'<th># PROYECTO</th><th>GENERACIÓN (kWh)</th><th>PROM. DIARIO</th><th>DESV. P90</th><th>DISPONIB.</th><th>EVENTOS</th><th>ESTADO</th>'
     +'</tr></thead><tbody>'+rows+'</tbody>'
-    +'<tfoot><tr class="rpt-total-row"><td>TOTAL PORTAFOLIO</td>'
+    +'<tfoot><tr class="rpt-total-row"><td>TOTAL CLIENTE</td>'
     +'<td style="text-align:right;font-family:monospace" colspan="6">'+Math.round(totalPort).toLocaleString("es-CO")+' kWh</td></tr></tfoot>'
     +'</table></div>'
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 2. Generación por Proyecto — Ranking</div>'
@@ -3016,7 +3075,7 @@ function generateInforme(){
 
   }else{
     var pname=(document.getElementById("inf-port")||{}).value||"";
-    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un portafolio");return;}
+    if(!pname){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un cliente");return;}
     var portList=portPortfolios[pname]||[];
     if(!portList.length){toast("⚠ Portafolio vacío");return;}
     var cfgs=[];
@@ -3027,7 +3086,7 @@ function generateInforme(){
       });
       if(c)cfgs.push(c);
     });
-    if(!cfgs.length){toast("⚠ Proyectos del portafolio no encontrados");return;}
+    if(!cfgs.length){toast("⚠ Proyectos del cliente no encontrados");return;}
     var results=[],done=0;
     document.getElementById("inf-loading-msg").textContent="Consultando "+cfgs.length+" proyectos…";
     cfgs.forEach(function(c,i){
@@ -3071,8 +3130,8 @@ document.querySelectorAll(".inf-mode-btn").forEach(function(btn){
     this.style.background="var(--pu)";this.style.color="var(--cr)";
     var ps=document.getElementById("inf-proj"),pp=document.getElementById("inf-port");
     if(ps)ps.style.display=infMode==="proyecto"?"":"none";
-    if(pp)pp.style.display=infMode==="portafolio"?"":"none";
-    if(infMode==="portafolio"&&!Object.keys(portPortfolios).length)loadPortfolios();
+    if(pp)pp.style.display=infMode==="cliente"?"":"none";
+    if(infMode==="cliente"){populateClienteSelects();if(!Object.keys(portPortfolios).length)loadPortfolios();}
   });
 });
 document.querySelectorAll(".inf-period-btn").forEach(function(btn){

@@ -177,13 +177,13 @@ def _serializar_costo(c: LiquidacionCosto) -> dict:
 def _serializar_linea(l: LiquidacionMandatoLinea) -> dict:
     return {
         "id": l.id,
-        "tipo_linea": l.tipo_linea,
+        "tipo_linea": str(l.tipo_linea) if l.tipo_linea is not None else None,
         "concepto": l.concepto,
         "valor_cop": float(l.valor_cop),
         "porcentaje": float(l.porcentaje) if l.porcentaje is not None else None,
         "base_calculo_cop": float(l.base_calculo_cop) if l.base_calculo_cop is not None else None,
         "referencia_factura": l.referencia_factura,
-        "soporte_url": l.soporte_url,
+        "soporte_url": getattr(l, "soporte_url", None),
         "orden": l.orden,
     }
 

@@ -377,18 +377,28 @@ def get_catalogo(db: Session = Depends(get_db), _=Depends(get_current_user)):
 # ── GET /monitoreo/proyectos ──────────────────────────────────────────────────
 @router.get("/proyectos")
 def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Devuelve proyectos en operación con su cliente, para poblar selectores."""
+    """Devuelve proyectos en operación con su cliente (inversionista), para poblar selectores."""
     from sqlalchemy import or_ as _or2
     from app.models.clientes import Cliente as ClienteM
+    from app.models.proyectos import ProyectoInversionista
 
     proyectos = (
         db.query(Proyecto)
         .filter(_or2(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion"))  # noqa: E712
-        .options(selectinload(Proyecto.cliente))
+        .options(
+            selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
+            selectinload(Proyecto.cliente),
+        )
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
     clientes = db.query(ClienteM).order_by(ClienteM.razon_social_nombre).all()
+
+    def _get_cliente_nombre(p: Proyecto) -> str:
+        if p.inversionistas:
+            return p.inversionistas[0].cliente.razon_social_nombre if p.inversionistas[0].cliente else ""
+        return p.cliente.razon_social_nombre if p.cliente else ""
+
     return {
         "proyectos": [p.nombre_comercial for p in proyectos],
         "proyectos_detalle": [
@@ -397,8 +407,7 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
                 "nombre": p.nombre_comercial,
                 "alias": p.alias_monitoreo or "",
                 "sub_project": p.sub_project or p.alias_monitoreo or "",
-                "cliente_id": p.cliente_id,
-                "cliente_nombre": p.cliente.razon_social_nombre if p.cliente else "",
+                "cliente_nombre": _get_cliente_nombre(p),
             }
             for p in proyectos
         ],
@@ -699,16 +708,36 @@ def _action_get_projects(db: Session) -> dict:
 
 
 def _action_get_portfolios(db: Session) -> dict:
-    portafolios = db.query(Portafolio).filter(Portafolio.activo == True).all()
+    """Clientes (inversionistas) con proyectos en operación, agrupados por cliente."""
+    from sqlalchemy import or_
+    from app.models.proyectos import ProyectoInversionista
+
+    proyectos = (
+        db.query(Proyecto)
+        .filter(or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion"))  # noqa: E712
+        .options(
+            selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
+            selectinload(Proyecto.cliente),
+        )
+        .all()
+    )
     portfolios: dict = {}
-    for pf in portafolios:
-        names = [
-            p.nombre_clientes or p.nombre_comercial
-            for p in pf.proyectos
-            if p.sub_project or p.alias_monitoreo
-        ]
-        if names:
-            portfolios[pf.nombre] = names
+    for p in proyectos:
+        proj_name = p.nombre_clientes or p.nombre_comercial
+        # Obtener clientes desde inversionistas (fuente primaria) o cliente_id
+        cliente_nombres: list[str] = []
+        if p.inversionistas:
+            cliente_nombres = [
+                inv.cliente.razon_social_nombre
+                for inv in p.inversionistas
+                if inv.cliente
+            ]
+        if not cliente_nombres and p.cliente:
+            cliente_nombres = [p.cliente.razon_social_nombre]
+        for nombre in cliente_nombres:
+            portfolios.setdefault(nombre, [])
+            if proj_name not in portfolios[nombre]:
+                portfolios[nombre].append(proj_name)
     return {"ok": True, "portfolios": portfolios}
 
 

@@ -226,6 +226,24 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Cliente HTTP
 # ─────────────────────────────────────────────────────────────────────────────
+_RETRY_ON = {502, 503, 504}
+_MAX_RETRIES = 4
+_RETRY_WAIT = 8  # segundos entre reintentos
+
+
+def _retry(fn, *args, **kwargs):
+    """Reintenta una llamada HTTP en caso de 502/503/504 (Railway reiniciando)."""
+    import time
+    for attempt in range(_MAX_RETRIES):
+        r = fn(*args, **kwargs)
+        if r.status_code not in _RETRY_ON:
+            return r
+        wait = _RETRY_WAIT * (attempt + 1)
+        print(f"  ⚡ {r.status_code} transitorio — reintentando en {wait}s... ({attempt+1}/{_MAX_RETRIES})")
+        time.sleep(wait)
+    return r  # devuelve el último aunque siga fallando
+
+
 class API:
     def __init__(self, base: str):
         self.base = base.rstrip("/")
@@ -243,22 +261,22 @@ class API:
         return {"Authorization": f"Bearer {self.token}"}
 
     def get(self, path: str, **kw):
-        r = requests.get(f"{self.base}{path}", headers=self._h(), **kw)
+        r = _retry(requests.get, f"{self.base}{path}", headers=self._h(), **kw)
         r.raise_for_status()
         return r.json()
 
     def post(self, path: str, body: dict):
-        r = requests.post(f"{self.base}{path}", json=body, headers=self._h())
+        r = _retry(requests.post, f"{self.base}{path}", json=body, headers=self._h())
         r.raise_for_status()
         return r.json()
 
     def patch(self, path: str, body: dict):
-        r = requests.patch(f"{self.base}{path}", json=body, headers=self._h())
+        r = _retry(requests.patch, f"{self.base}{path}", json=body, headers=self._h())
         r.raise_for_status()
         return r.json()
 
     def delete(self, path: str):
-        r = requests.delete(f"{self.base}{path}", headers=self._h())
+        r = _retry(requests.delete, f"{self.base}{path}", headers=self._h())
         if r.status_code not in (200, 204, 404):
             r.raise_for_status()
 

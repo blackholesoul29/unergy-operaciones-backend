@@ -226,20 +226,22 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Cliente HTTP
 # ─────────────────────────────────────────────────────────────────────────────
-_RETRY_ON = {500, 502, 503, 504}  # incluye 500 para crashes transitorios de Railway
-_MAX_RETRIES = 4
-_RETRY_WAIT = 8  # segundos entre reintentos
+_RETRY_ON = {500, 502, 503, 504}  # crashes transitorios de Railway
+_MAX_RETRIES = 5
+_RETRY_WAIT = 20  # espera base en segundos (Railway tarda ~15s en recuperarse)
+_CALL_PAUSE = 0.2  # pausa mínima entre llamadas para no saturar el worker
 
 
 def _retry(fn, *args, **kwargs):
-    """Reintenta una llamada HTTP en caso de 502/503/504 (Railway reiniciando)."""
+    """Reintenta una llamada HTTP si Railway devuelve un error transitorio."""
     import time
+    time.sleep(_CALL_PAUSE)  # throttle básico entre llamadas
     for attempt in range(_MAX_RETRIES):
         r = fn(*args, **kwargs)
         if r.status_code not in _RETRY_ON:
             return r
         wait = _RETRY_WAIT * (attempt + 1)
-        print(f"  ⚡ {r.status_code} transitorio — reintentando en {wait}s... ({attempt+1}/{_MAX_RETRIES})")
+        print(f"  ⚡ {r.status_code} — reintentando en {wait}s... ({attempt+1}/{_MAX_RETRIES})")
         time.sleep(wait)
     return r  # devuelve el último aunque siga fallando
 

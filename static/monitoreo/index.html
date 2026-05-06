@@ -1477,10 +1477,10 @@ function getFiltered(){
   /* mapa proyecto → cliente desde PROJS_DETALLE */
   var projClientMap={};
   PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre)projClientMap[p.nombre]=p.cliente_nombre;});
-  /* complementar con portPortfolios */
+  /* complementar con portPortfolios (valores son strings de nombre_comercial) */
   Object.keys(portPortfolios).forEach(function(clientName){
     (portPortfolios[clientName]||[]).forEach(function(p){
-      var pn=p.nombre_comercial||p.nombre;
+      var pn=typeof p==='string'?p:(p.nombre_comercial||p.nombre||'');
       if(pn&&!projClientMap[pn])projClientMap[pn]=clientName;
     });
   });
@@ -1554,18 +1554,37 @@ function renderBoard(){
   renderKPIs();
 }
 function renderSelects(){
-  var visProjs=(userRole==="cliente"&&clientProjects.length>0)?clientProjects:PROJS;
-  /* Filtrar proyectos por cliente seleccionado */
   var fcliEl=document.getElementById("fclient");
   var activeCliente=fcliEl?fcliEl.value:"";
-  var filteredProjs=visProjs;
-  if(activeCliente&&PROJS_DETALLE.length){
-    var clienteProjNames=PROJS_DETALLE.filter(function(p){return p.cliente_nombre===activeCliente;}).map(function(p){return p.nombre;});
-    filteredProjs=visProjs.filter(function(p){return clienteProjNames.indexOf(p)>=0;});
-  }
+
+  /* Construir mapa proyecto→cliente desde todas las fuentes disponibles */
+  var pcm={};
+  PROJS_DETALLE.forEach(function(p){if(p.cliente_nombre)pcm[p.nombre]=p.cliente_nombre;});
+  Object.keys(portPortfolios).forEach(function(cn){
+    (portPortfolios[cn]||[]).forEach(function(p){
+      var pn=typeof p==='string'?p:(p.nombre_comercial||p.nombre||'');
+      if(pn&&!pcm[pn])pcm[pn]=cn;
+    });
+  });
+
+  /* #fproject: todos los proyectos con fallas (no solo srv_operacion) */
+  var faultProjSet={};
+  faults.forEach(function(f){if(f.proj)faultProjSet[f.proj]=true;});
+  var allFaultProjs=Object.keys(faultProjSet).sort();
+  var filteredFaultProjs=activeCliente
+    ?allFaultProjs.filter(function(p){return pcm[p]===activeCliente;})
+    :allFaultProjs;
   var o='<option value="">Todos los proyectos</option>';
-  filteredProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
-  ["fproject","chart-proj"].forEach(function(id){var e=document.getElementById(id);if(e){var v=e.value;e.innerHTML=o;e.value=v;}});
+  filteredFaultProjs.forEach(function(p){o+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
+  var fpe=document.getElementById("fproject");
+  if(fpe){var v=fpe.value;fpe.innerHTML=o;fpe.value=v;}
+
+  /* #chart-proj: solo proyectos en operación (para gráficas de generación) */
+  var visProjs=(userRole==="cliente"&&clientProjects.length>0)?clientProjects:PROJS;
+  var co='<option value="">Selecciona proyecto…</option>';
+  visProjs.forEach(function(p){co+='<option value="'+esc(p)+'">'+esc(p)+'</option>';});
+  var cpe=document.getElementById("chart-proj");
+  if(cpe){var cv=cpe.value;cpe.innerHTML=co;cpe.value=cv;}
 }
 /* ══ KPIs ══ */
 function renderKPIs(){

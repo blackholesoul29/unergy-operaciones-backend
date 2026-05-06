@@ -382,9 +382,9 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
     from app.models.clientes import Cliente as ClienteM
     from app.models.proyectos import ProyectoInversionista
 
-    proyectos = (
+    # Todos los proyectos (para mapeo cliente↔proyecto en fallas)
+    all_proyectos = (
         db.query(Proyecto)
-        .filter(_or2(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion"))  # noqa: E712
         .options(
             selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
             selectinload(Proyecto.cliente),
@@ -392,6 +392,11 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
+    # Solo proyectos en operación para los selectores de generación
+    op_proyectos = [
+        p for p in all_proyectos
+        if p.srv_operacion or p.estado == "en_operacion"
+    ]
     clientes = db.query(ClienteM).order_by(ClienteM.razon_social_nombre).all()
 
     def _get_cliente_nombre(p: Proyecto) -> str:
@@ -400,7 +405,7 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
         return p.cliente.razon_social_nombre if p.cliente else ""
 
     return {
-        "proyectos": [p.nombre_comercial for p in proyectos],
+        "proyectos": [p.nombre_comercial for p in op_proyectos],
         "proyectos_detalle": [
             {
                 "id": p.id,
@@ -409,7 +414,7 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
                 "sub_project": p.sub_project or p.alias_monitoreo or "",
                 "cliente_nombre": _get_cliente_nombre(p),
             }
-            for p in proyectos
+            for p in all_proyectos  # todos, para cubrir cualquier proyecto con fallas
         ],
         "clientes": [
             {"id": c.id, "nombre": c.razon_social_nombre}
@@ -731,7 +736,7 @@ def _action_get_portfolios(db: Session) -> dict:
             if not inv.cliente or not inv.proyecto:
                 continue
             p = inv.proyecto
-            proj_name = p.nombre_clientes or p.nombre_comercial
+            proj_name = p.nombre_comercial  # usar nombre_comercial para coincidir con f.proj en el frontend
             cliente_nombre = inv.cliente.razon_social_nombre
             portfolios.setdefault(cliente_nombre, [])
             if proj_name not in portfolios[cliente_nombre]:
@@ -750,7 +755,7 @@ def _action_get_portfolios(db: Session) -> dict:
             for p in proyectos:
                 if p.cliente:
                     nombre = p.cliente.razon_social_nombre
-                    proj_name = p.nombre_clientes or p.nombre_comercial
+                    proj_name = p.nombre_comercial
                     portfolios.setdefault(nombre, [])
                     if proj_name not in portfolios[nombre]:
                         portfolios[nombre].append(proj_name)

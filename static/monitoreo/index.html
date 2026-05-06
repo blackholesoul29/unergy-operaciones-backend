@@ -840,35 +840,47 @@ function _loadCatIds() {
   }).catch(function(e){console.warn('[Bridge] catIds:',e);});
 }
 
-/* OVERRIDE loadFaults — usa /api/v1/fallas (evita el 500 de /monitoreo/fallas) */
+/* OVERRIDE loadFaults — carga todas las páginas de /api/v1/fallas */
+function _mapFault(f){
+  return {
+    id:f.codigo_interno||String(f.id), _db_id:f.id,
+    proj:(f.proyecto||{}).nombre_comercial||"",
+    code:(f.tipo||{}).codigo||"otro_general",
+    faultLabel:(f.tipo||{}).etiqueta||"",
+    st:_ST_MAP[(f.estado||{}).codigo]||"activa",
+    date:f.fecha_identificacion||"",
+    time:f.hora_identificacion||"",
+    occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
+    res:(f.resolucion||{}).etiqueta||"",
+    desc:f.descripcion||"",
+    flw:(f.seguimientos||[]).map(function(s){
+      return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
+    }).join("\n"),
+    driveUrl:"",driveUrls:[],
+    endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
+    centinela:"",notify:false,
+    prio:(f.prioridad||{}).codigo||"media"
+  };
+}
+function _applyFaults(items){
+  faults=items.map(_mapFault);
+  faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
+  setSync("ok","Sincronizado ✓");hideLoader();renderAll();
+  toast("✓ "+faults.length+" fallas cargadas");
+}
 function loadFaults() {
   setSync("spin","Sincronizando…");
-  _apiFetch('GET','/api/v1/fallas?size=500&page=1').then(function(res) {
+  _apiFetch('GET','/api/v1/fallas?size=1000&page=1').then(function(res) {
     var items=(res&&res.items)||[];
-    faults=items.map(function(f) {
-      return {
-        id:f.codigo_interno||String(f.id), _db_id:f.id,
-        proj:(f.proyecto||{}).nombre_comercial||"",
-        code:(f.tipo||{}).codigo||"otro_general",
-        faultLabel:(f.tipo||{}).etiqueta||"",
-        st:_ST_MAP[(f.estado||{}).codigo]||"activa",
-        date:f.fecha_identificacion||"",
-        time:f.hora_identificacion||"",
-        occ:(f.fecha_ocurrencia||"").replace("T"," ").slice(0,16),
-        res:(f.resolucion||{}).etiqueta||"",
-        desc:f.descripcion||"",
-        flw:(f.seguimientos||[]).map(function(s){
-          return (s.created_at||"").slice(0,16).replace("T"," ")+" - "+((s.usuario||{}).nombre||"?")+": "+(s.nota||"");
-        }).join("\n"),
-        driveUrl:"",driveUrls:[],
-        endDT:(f.fecha_resolucion||"").replace("T"," ").slice(0,16),
-        centinela:"",notify:false,
-        prio:(f.prioridad||{}).codigo||"media"
-      };
-    });
-    faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
-    setSync("ok","Sincronizado ✓");hideLoader();renderAll();
-    toast("✓ "+faults.length+" fallas cargadas");
+    var pages=(res&&res.pages)||1;
+    if(pages<=1){_applyFaults(items);return;}
+    /* Cargar páginas restantes en paralelo */
+    var reqs=[];
+    for(var pg=2;pg<=pages;pg++){reqs.push(_apiFetch('GET','/api/v1/fallas?size=1000&page='+pg));}
+    Promise.all(reqs).then(function(results){
+      results.forEach(function(r){if(r&&r.items)items=items.concat(r.items);});
+      _applyFaults(items);
+    }).catch(function(){_applyFaults(items);});
   }).catch(function(e){
     setSync("err","Sin conexión");hideLoader();renderAll();
     toast("⚠ Error al cargar: "+e.message);

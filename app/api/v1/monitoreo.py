@@ -643,13 +643,23 @@ _COL_TZ = timezone(timedelta(hours=-5))
 
 # ── Unergy API helpers ────────────────────────────────────────────────────────
 
+_token_cache: dict = {"token": "", "expires_at": 0.0}
+
 async def _unergy_token() -> str:
+    import time as _time
+    now = _time.monotonic()
+    if _token_cache["token"] and now < _token_cache["expires_at"]:
+        return _token_cache["token"]
     auth_url = f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(auth_url, json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD})
         r.raise_for_status()
         data = r.json()
-        return data.get("token") or data.get("access") or data.get("key") or ""
+        tok = data.get("token") or data.get("access") or data.get("key") or ""
+        if tok:
+            _token_cache["token"] = tok
+            _token_cache["expires_at"] = now + 300  # reuse for 5 minutes
+        return tok
 
 
 async def _fetch_unergy_raw(token: str, sub_project: str, from_iso: str, to_iso: str, verified_only: bool) -> list:

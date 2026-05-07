@@ -457,7 +457,10 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
 
     def _get_cliente_nombres(p: Proyecto) -> list[str]:
         names: list[str] = []
-        for inv in (p.inversionistas or []):
+        invs = p.inversionistas
+        if not isinstance(invs, list):
+            invs = [invs] if invs is not None else []
+        for inv in invs:
             if inv.cliente and inv.cliente.razon_social_nombre:
                 n = inv.cliente.razon_social_nombre
                 if n not in names:

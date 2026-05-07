@@ -1795,16 +1795,8 @@ function makeSdr(wid,ph,flat,grouped,onSel,allowAdd,onAdd){
 function openNewFault(){
   if(userRole==="cliente")return;
   photos=[];
-  if(PROJS.length===0){
-    toast("Cargando proyectos…",2000);
-    _apiFetch('GET','/api/v1/monitoreo/proyectos').then(function(res){
-      if(res&&Array.isArray(res.proyectos)&&res.proyectos.length) PROJS=res.proyectos;
-      if(res&&Array.isArray(res.proyectos_detalle)&&res.proyectos_detalle.length) PROJS_DETALLE=res.proyectos_detalle;
-      if(res&&Array.isArray(res.clientes)&&res.clientes.length) _allClientes=res.clientes;
-      renderSelects();showForm(null);
-    }).catch(function(){showForm(null);});
-    return;
-  }
+  /* Si PROJS vacío, recargar en segundo plano para la próxima vez */
+  if(PROJS.length===0) loadProyectosFromDB();
   showForm(null);
 }
 function openEditFault(id){var f=faults.find(function(x){return x.id===id;});if(!f)return;photos=(f.photos||[]).slice();showForm(f);}
@@ -1858,7 +1850,12 @@ function showForm(f){
     '</div>';
   openModal((isEdit?"✏️ Editar":"✚ Nueva")+" Falla",html);
   renderPhotoGrid();
-  var projList=PROJS.length>0?PROJS:PROJS_DETALLE.map(function(p){return p.nombre;});
+  /* Construir lista de proyectos desde todas las fuentes disponibles */
+  var _pset={};
+  PROJS.forEach(function(p){if(p)_pset[p]=true;});
+  PROJS_DETALLE.forEach(function(p){if(p&&p.nombre)_pset[p.nombre]=true;});
+  faults.forEach(function(f){if(f&&f.proj)_pset[f.proj]=true;});
+  var projList=Object.keys(_pset).sort();
   sdrProj=makeSdr("w-proj","Escribe o elige proyecto…",projList.map(function(p){return{val:p,lbl:p};}),null,null,true,function(q){
     var n=prompt("Nuevo proyecto:",q||"");if(!n||!n.trim())return;n=n.trim();
     if(PROJS.indexOf(n)<0){PROJS.push(n);PROJS.sort();renderSelects();}

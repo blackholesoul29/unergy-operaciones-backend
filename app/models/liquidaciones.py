@@ -23,6 +23,7 @@ class TipoVentaLiqEnum(str, enum.Enum):
     bolsa = "bolsa"
     ppa = "ppa"
     interno = "interno"
+    autoconsumo = "autoconsumo"
 
 
 class TipoCostoEnum(str, enum.Enum):

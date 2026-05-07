@@ -770,12 +770,16 @@ function loadProyectosFromDB() {
     renderSelects();
     populateClienteSelects();
     var detalle = res.proyectos_detalle || res.proyectos.map(function(n) { return {nombre: n}; });
-    ['gen-proj', 'inf-proj', 'fmo-proj'].forEach(function(sid) {
+    ['gen-proj', 'inf-proj'].forEach(function(sid) {
       var el = document.getElementById(sid);
       if (!el) return;
       var cur = el.value;
       var html = '<option value="">Selecciona proyecto…</option>';
-      detalle.forEach(function(p) { html += '<option value="' + esc(p.nombre) + '">' + esc(p.nombre) + '</option>'; });
+      detalle.forEach(function(p) {
+        var val = p.sub_project || p.nombre;
+        var lbl = p.nombre;
+        html += '<option value="' + esc(val) + '">' + esc(lbl) + '</option>';
+      });
       el.innerHTML = html;
       if (cur) el.value = cur;
     });

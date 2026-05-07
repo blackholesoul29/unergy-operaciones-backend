@@ -473,8 +473,9 @@ def get_generacion_monitoreo(
 # ── POST /monitoreo/auth/verify-email ────────────────────────────────────────
 @router.post("/auth/verify-email")
 def verify_email_monitoreo(payload: dict, db: Session = Depends(get_db)):
-    """Valida que un email @unergy tenga usuario en la plataforma.
+    """Valida que un email @unergy tenga usuario en la plataforma y devuelve un JWT.
     Usado por fallas-unergy cuando no viene token de la plataforma."""
+    from app.core.security import create_access_token
     email = (payload.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "Email requerido")
@@ -483,11 +484,18 @@ def verify_email_monitoreo(payload: dict, db: Session = Depends(get_db)):
     if not user:
         return {"ok": False, "msg": "Correo no registrado en la plataforma"}
 
+    token = create_access_token({
+        "sub": str(user.id),
+        "rol": user.rol.value,
+        "nombre": user.nombre,
+        "email": user.email,
+    })
     return {
         "ok": True,
         "nombre": user.nombre,
         "email": user.email,
         "rol": user.rol.value,
+        "token": token,
     }
 
 

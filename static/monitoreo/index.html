@@ -1131,12 +1131,15 @@ function loadSession(){
     userRole=sess.role||"monitor";
     clientProjects=sess.projects||[];
     cData={name:sess.name||"",email:sess.email||""};
+    // Restaurar token si existe
+    if(sess.token) _API_TOKEN=sess.token;
     return true;
   }catch(e){localStorage.removeItem("unergy_session");return false;}
 }
-function saveSession(role,email,name,projects){
+function saveSession(role,email,name,projects,token){
   var expires=role==="cliente"?(Date.now()+24*60*60*1000):null;
-  var sess={role:role,email:email,name:name||"",projects:projects||[],expires:expires};
+  var tok=token||(_API_TOKEN)||null;
+  var sess={role:role,email:email,name:name||"",projects:projects||[],expires:expires,token:tok};
   try{localStorage.setItem("unergy_session",JSON.stringify(sess));}catch(e){}
   userRole=role;clientProjects=projects||[];
   cData={name:name||"",email:email};
@@ -1189,6 +1192,7 @@ function loginEmailGo(){
     showLoginStep("loading");
     _apiFetch('POST','/api/v1/monitoreo/auth/verify-email',{email:email}).then(function(r){
       if(r&&r.ok){
+        if(r.token) _API_TOKEN=r.token;
         saveSession('monitor',email,r.nombre||email,[]);
         document.getElementById("login-ov").className="";
         applyRole();loadFaults();
@@ -2697,7 +2701,15 @@ document.addEventListener("DOMContentLoaded",function(){
   if(loadSession()){
     applyRole();
     document.getElementById("login-ov").className="";
-    loadFaults();
+    /* Si no hay token (sesión antigua o expirada), pedir uno nuevo antes de cargar */
+    if(!_API_TOKEN && userRole==="monitor" && cData.email){
+      _apiFetch('POST','/api/v1/monitoreo/auth/verify-email',{email:cData.email}).then(function(r){
+        if(r&&r.ok&&r.token){_API_TOKEN=r.token;saveSession('monitor',cData.email,cData.name,[],r.token);}
+        _loadCatIds();loadProyectosFromDB();loadFaults();
+      }).catch(function(){_loadCatIds();loadProyectosFromDB();loadFaults();});
+    } else {
+      _loadCatIds();loadProyectosFromDB();loadFaults();
+    }
   } else {
     document.getElementById("loader").style.display="none";
     showLoginStep("email");

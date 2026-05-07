@@ -1792,7 +1792,21 @@ function makeSdr(wid,ph,flat,grouped,onSel,allowAdd,onAdd){
   };
 }
 /* ══ FORMULARIO ══ */
-function openNewFault(){if(userRole==="cliente")return;photos=[];showForm(null);}
+function openNewFault(){
+  if(userRole==="cliente")return;
+  photos=[];
+  if(PROJS.length===0){
+    toast("Cargando proyectos…",2000);
+    _apiFetch('GET','/api/v1/monitoreo/proyectos').then(function(res){
+      if(res&&Array.isArray(res.proyectos)&&res.proyectos.length) PROJS=res.proyectos;
+      if(res&&Array.isArray(res.proyectos_detalle)&&res.proyectos_detalle.length) PROJS_DETALLE=res.proyectos_detalle;
+      if(res&&Array.isArray(res.clientes)&&res.clientes.length) _allClientes=res.clientes;
+      renderSelects();showForm(null);
+    }).catch(function(){showForm(null);});
+    return;
+  }
+  showForm(null);
+}
 function openEditFault(id){var f=faults.find(function(x){return x.id===id;});if(!f)return;photos=(f.photos||[]).slice();showForm(f);}
 function showForm(f){
   var isEdit=!!f,nowDT=nowColombia();
@@ -1844,7 +1858,8 @@ function showForm(f){
     '</div>';
   openModal((isEdit?"✏️ Editar":"✚ Nueva")+" Falla",html);
   renderPhotoGrid();
-  sdrProj=makeSdr("w-proj","Escribe o elige proyecto…",PROJS.map(function(p){return{val:p,lbl:p};}),null,null,true,function(q){
+  var projList=PROJS.length>0?PROJS:PROJS_DETALLE.map(function(p){return p.nombre;});
+  sdrProj=makeSdr("w-proj","Escribe o elige proyecto…",projList.map(function(p){return{val:p,lbl:p};}),null,null,true,function(q){
     var n=prompt("Nuevo proyecto:",q||"");if(!n||!n.trim())return;n=n.trim();
     if(PROJS.indexOf(n)<0){PROJS.push(n);PROJS.sort();renderSelects();}
     if(sdrProj)sdrProj.setValue(n,n);toast("✓ Proyecto listo");

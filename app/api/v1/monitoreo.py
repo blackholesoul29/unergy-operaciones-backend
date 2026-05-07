@@ -13,7 +13,7 @@ import calendar
 import json
 import random
 import string
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, time as time_type, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -230,7 +230,17 @@ def save_falla_monitoreo(
                 continue
         return None
 
+    def _parse_time_val(s: str) -> time_type | None:
+        if not s or not s.strip():
+            return None
+        try:
+            parts = s.strip().split(":")
+            return time_type(int(parts[0]), int(parts[1]))
+        except Exception:
+            return None
+
     fecha_id = _parse_date(payload.get("identDate", "")) or date.today()
+    hora_id = _parse_time_val(payload.get("identTime", ""))
     fecha_ocurrencia = _parse_datetime(payload.get("occTime", ""))
     fecha_resolucion = _parse_datetime(payload.get("endTime", ""))
 
@@ -262,6 +272,7 @@ def save_falla_monitoreo(
             registrado_por_id=current_user.id,
             descripcion=payload.get("desc") or payload.get("faultLabel") or "Sin descripción",
             fecha_identificacion=fecha_id,
+            hora_identificacion=hora_id,
             fecha_ocurrencia=fecha_ocurrencia,
             fecha_resolucion=fecha_resolucion,
             fotos_urls=fotos_json,
@@ -296,6 +307,8 @@ def save_falla_monitoreo(
         falla.resolucion_id = resolucion.id if resolucion else None
         falla.descripcion = payload.get("desc") or payload.get("faultLabel") or falla.descripcion
         falla.fecha_identificacion = fecha_id
+        if hora_id is not None:
+            falla.hora_identificacion = hora_id
         falla.fecha_ocurrencia = fecha_ocurrencia
         falla.fecha_resolucion = fecha_resolucion
         falla.fotos_urls = fotos_json
@@ -345,6 +358,49 @@ def delete_falla_monitoreo(
     db.delete(falla)
     db.commit()
     return {"ok": True}
+
+
+# ── PATCH /monitoreo/mantenimientos/{id} ─────────────────────────────────────
+@router.patch("/mantenimientos/{mant_id}")
+def patch_mantenimiento(
+    mant_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    m = db.query(Mantenimiento).filter(Mantenimiento.id == mant_id).first()
+    if not m:
+        raise HTTPException(404, f"Mantenimiento {mant_id} no encontrado")
+
+    if payload.get("fecha"):
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                m.fecha = datetime.strptime(payload["fecha"].strip(), fmt).date()
+                break
+            except ValueError:
+                continue
+    if payload.get("tipo"):
+        m.tipo = payload["tipo"]
+    if payload.get("descripcion"):
+        m.descripcion = payload["descripcion"]
+    if payload.get("estado"):
+        m.estado = payload["estado"]
+    if "observaciones" in payload:
+        m.observaciones = payload["observaciones"] or None
+
+    db.commit()
+    db.refresh(m)
+    return {
+        "ok": True,
+        "mantenimiento": {
+            "id": m.id,
+            "tipo": m.tipo or "",
+            "descripcion": m.descripcion or "",
+            "fecha": m.fecha.isoformat() if m.fecha else "",
+            "estado": m.estado or "",
+            "observaciones": m.observaciones or "",
+        },
+    }
 
 
 # ── GET /monitoreo/catalogo ───────────────────────────────────────────────────

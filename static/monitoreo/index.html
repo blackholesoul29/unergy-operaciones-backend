@@ -929,7 +929,7 @@ function serverSave(f, cb) {
     statusLbl:ST[f.st]?ST[f.st].lbl:f.st, status:f.st,
     identDate:fmtD(f.date), identTime:padT(f.time),
     occTime:toTS(f.occ), resType:cleanRes,
-    desc:f.desc||"", followUp:f.flw||"",
+    desc:f.desc||"", followUp:(f._followUp!==undefined?f._followUp:f.flw)||"",
     driveUrl:f.driveUrl||"", driveUrls:f.driveUrls||[],
     endTime:toTS(f.endDT),
     centinela:f.centinela||"", prioridad:f.prio||"media",
@@ -1833,7 +1833,8 @@ function showForm(f){
       '<div class="help">Se completa automáticamente si se deja vacío.</div>'+
     '</div>'+
     '<div class="field"><label>Descripción <span class="req">*</span> <span style="color:var(--pu);font-size:10px;font-weight:600">· Se precarga del catálogo al elegir el evento</span></label><textarea class="fi" id="fdesc" rows="5" style="resize:vertical;line-height:1.65" placeholder="Al elegir el evento se carga la descripción del catálogo. Puedes editarla y agregar detalles…">'+esc(f&&f.desc||"")+'</textarea></div>'+
-    '<div class="field"><label>Seguimiento</label><textarea class="fi" id="fflw" rows="3" style="resize:vertical;line-height:1.65" placeholder="Acciones ejecutadas, avances, próximos pasos…">'+esc(f&&f.flw||"")+'</textarea></div>'+
+    (isEdit&&f&&f.flw?'<div class="field"><label style="color:var(--fa);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Historial de seguimiento</label><div style="background:#1a1025;border:1px solid var(--br);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--mu);white-space:pre-wrap;max-height:120px;overflow-y:auto;line-height:1.6">'+esc(f.flw)+'</div></div>':'')+
+    '<div class="field"><label>'+(isEdit?'Agregar nota de seguimiento':'Seguimiento')+'</label><textarea class="fi" id="fflw" rows="3" style="resize:vertical;line-height:1.65" placeholder="'+(isEdit?'Nueva nota (dejar vacío si no hay cambios)':'Acciones ejecutadas, avances, próximos pasos…')+'"></textarea></div>'+
     '<div class="field"><label>Centinela</label>'+centInfo+'</div>'+
     '<div class="field" style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:10px;cursor:pointer;text-transform:none;font-size:13px;color:var(--cr);font-weight:600;letter-spacing:0">'+
     '<input type="checkbox" id="fnotify" checked style="width:16px;height:16px;accent-color:var(--pu);cursor:pointer"/> '+
@@ -1930,7 +1931,7 @@ function submitForm(existingId,existingCreat,existingDrive){
   var dateStr=dtVal.slice(0,10).replace(/-/g,"");
   var fault={id:faultId,proj:proj,code:code,faultLabel:fdd.label||code,st:st,
     date:dtVal.slice(0,10),time:dtVal.slice(11,16),occ:occ,endDT:endDT,res:res,
-    desc:desc,flw:flw,prio:prio,centinela:getCLbl(),photos:photos.slice(),
+    desc:desc,flw:exF?(exF.flw||""):flw,_followUp:flw,prio:prio,centinela:getCLbl(),photos:photos.slice(),
     driveUrl:existingDrive||"",creat:existingCreat||nowColombia(),notify:notify,
     _db_id:exF?exF._db_id:undefined};
   var photosCopy=photos.slice();
@@ -3268,6 +3269,7 @@ function fmoErrHtml(msg,detail){
 var infType="operacional";       // "operacional" | "fmo"
 var fmoContratos=[];             // loaded from Contratos sheet
 var fmoChartInstances=[];
+var _fmoMants=[];
 
 /* ── Cargar proyectos FMO desde hoja Contratos ── */
 var FMO_FALLBACK=[
@@ -3427,6 +3429,8 @@ function generateFMOInforme(){
       document.getElementById("inf-content").innerHTML=html;
       document.getElementById("inf-content").style.display="block";
       document.getElementById("fmo-print").style.display="inline-flex";
+      _fmoMants=mant;
+      bindMantEditHandlers();
       setTimeout(function(){renderRptCharts();},200);
     }catch(e2){
       console.error("[FMO] buildFMOPage error:",e2);
@@ -3468,6 +3472,49 @@ function generateFMOInforme(){
   step1();
 }
 
+
+/* ── FMO: bind click handlers on mantenimiento rows ── */
+function bindMantEditHandlers(){
+  document.querySelectorAll('#inf-content tr[data-mant-id]').forEach(function(tr){
+    tr.addEventListener('click',function(){
+      var mid=parseInt(this.dataset.mantId||this.getAttribute('data-mant-id'));
+      var m=_fmoMants.find(function(x){return x.id===mid;});
+      if(m)openMantEdit(m);
+    });
+  });
+}
+function openMantEdit(m){
+  var TIPOS=[["preventivo","Preventivo"],["correctivo","Correctivo"],["predictivo","Predictivo"]];
+  var ESTADOS=[["programado","Programado"],["en_ejecucion","En ejecución"],["completado","Completado"],["cancelado","Cancelado"]];
+  var tipoOpts=TIPOS.map(function(t){return '<option value="'+t[0]+'"'+(m.tipo===t[0]?' selected':'')+'>'+t[1]+'</option>';}).join('');
+  var estOpts=ESTADOS.map(function(e){return '<option value="'+e[0]+'"'+(m.estado===e[0]?' selected':'')+'>'+e[1]+'</option>';}).join('');
+  var html='<div class="field"><label>Fecha</label><input type="date" class="fi" id="me-fecha" value="'+esc(m.fecha||'')+'"/></div>'+
+    '<div class="field"><label>Tipo</label><select class="fi" id="me-tipo">'+tipoOpts+'</select></div>'+
+    '<div class="field"><label>Descripción</label><textarea class="fi" id="me-desc" rows="3" style="resize:vertical">'+esc(m.descripcion||'')+'</textarea></div>'+
+    '<div class="field"><label>Estado</label><select class="fi" id="me-estado">'+estOpts+'</select></div>'+
+    '<div class="field"><label>Observaciones</label><textarea class="fi" id="me-obs" rows="2" style="resize:vertical">'+esc(m.observaciones||'')+'</textarea></div>'+
+    '<div class="mactions"><button class="btn btn-gh" id="me-cancel">Cancelar</button><button class="btn btn-pu" id="me-save">✔ Guardar</button></div>';
+  openModal('✏️ Editar Mantenimiento',html);
+  document.getElementById('me-cancel').addEventListener('click',closeModal);
+  document.getElementById('me-save').addEventListener('click',function(){
+    var payload={
+      fecha:document.getElementById('me-fecha').value,
+      tipo:document.getElementById('me-tipo').value,
+      descripcion:document.getElementById('me-desc').value,
+      estado:document.getElementById('me-estado').value,
+      observaciones:document.getElementById('me-obs').value
+    };
+    _apiFetch('PATCH','/api/v1/monitoreo/mantenimientos/'+m.id,payload).then(function(r){
+      if(r&&r.ok){
+        Object.assign(m,r.mantenimiento);
+        closeModal();
+        toast('✓ Mantenimiento actualizado');
+      } else {
+        toast('⚠ Error al guardar');
+      }
+    }).catch(function(e){toast('⚠ '+e.message);});
+  });
+}
 
 /* ── FMO: construir página ── */
 function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
@@ -3555,21 +3602,23 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var obsId2="fmo-obs-"+(_obsIdx++);
   if(mant&&mant.length){
     mantHtml='<table class="fmo-mant-table"><thead><tr>'
-      +'<th style="width:95px">FECHA</th><th style="width:110px">TIPO</th><th>DESCRIPCIÓN</th><th style="width:100px">ESTADO</th>'
+      +'<th style="width:95px">FECHA</th><th style="width:110px">TIPO</th><th>DESCRIPCIÓN</th><th style="width:100px">ESTADO</th><th style="width:40px"></th>'
       +'</tr></thead><tbody>';
     mant.forEach(function(m){
-      var stCol=m.estado==="Ejecutado"?"#2D8A4E":m.estado==="Pospuesto"?"#CC0000":"#B8860B";
-      mantHtml+='<tr>'
+      var stCol=m.estado==="completado"?"#2D8A4E":m.estado==="cancelado"?"#CC0000":"#B8860B";
+      var stLbl={"programado":"Programado","en_ejecucion":"En ejecución","completado":"Completado","cancelado":"Cancelado"}[m.estado]||m.estado;
+      mantHtml+='<tr data-mant-id="'+m.id+'" style="cursor:pointer" title="Clic para editar">'
         +'<td style="font-size:10px;color:#6B35C0;font-weight:700">'+esc(m.fecha||"—")+'</td>'
         +'<td>'+esc(m.tipo||"—")+'</td>'
         +'<td>'+esc(m.descripcion||"—")+'</td>'
-        +'<td style="color:'+stCol+';font-weight:700;text-align:center">'+esc(m.estado||"—")+'</td>'
+        +'<td style="color:'+stCol+';font-weight:700;text-align:center">'+stLbl+'</td>'
+        +'<td style="text-align:center;color:#915BD8;font-size:12px">✏️</td>'
         +'</tr>';
     });
     mantHtml+='</tbody></table>';
   }else{
     mantHtml='<div style="font-size:11px;color:#A89EC0;padding:12px;background:#F9F7FD;border-radius:8px;text-align:center">'
-      +'Sin registros de mantenimiento en el período. Ingresa actividades en la hoja <b>Mantenimientos</b> del Sheets.</div>';
+      +'Sin registros de mantenimiento en el período.</div>';
   }
 
   // SLA table

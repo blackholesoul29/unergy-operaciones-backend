@@ -936,10 +936,15 @@ function serverSave(f, cb) {
       setSync("ok","Guardado ✓");renderAll();if(cb)cb(true);
     }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
   } else {
-    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,{
-      tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc
-    }).then(function(){setSync("ok","Guardado ✓");if(cb)cb(true);})
-      .catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
+    var patchData={tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc};
+    if(f.date) patchData.fecha_identificacion=f.date;
+    if(f.occ) patchData.fecha_ocurrencia=f.occ.replace(" ","T")+":00";
+    if(f.endDT) patchData.fecha_resolucion=f.endDT.replace(" ","T")+":00";
+    if(f.centinela) patchData.centinela=f.centinela;
+    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,patchData).then(function(r){
+      if(r){var mapped=_mapFault(r);var idx=faults.findIndex(function(x){return x._db_id===f._db_id||x.id===f.id;});if(idx>=0)faults[idx]=mapped;else faults.unshift(mapped);renderAll();}
+      setSync("ok","Guardado ✓");if(cb)cb(true);
+    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
   }
 }
 /* ════════════════════════════════════════════════════════════════ */

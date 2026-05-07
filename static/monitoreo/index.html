@@ -1914,7 +1914,8 @@ function submitForm(existingId,existingCreat,existingDrive){
   var fault={id:faultId,proj:proj,code:code,faultLabel:fdd.label||code,st:st,
     date:dtVal.slice(0,10),time:dtVal.slice(11,16),occ:occ,endDT:endDT,res:res,
     desc:desc,flw:flw,prio:prio,centinela:getCLbl(),photos:photos.slice(),
-    driveUrl:existingDrive||"",creat:existingCreat||nowColombia(),notify:notify};
+    driveUrl:existingDrive||"",creat:existingCreat||nowColombia(),notify:notify,
+    _db_id:exF?exF._db_id:undefined};
   var photosCopy=photos.slice();
   var idx=faults.findIndex(function(x){return x.id===faultId;});
   if(idx>=0)faults[idx]=fault;else faults.unshift(fault);

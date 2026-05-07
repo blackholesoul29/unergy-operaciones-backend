@@ -1084,3 +1084,116 @@ async def legacy_bridge_post(
         return {"ok": True}
 
     raise HTTPException(400, f"Acción POST no reconocida: {action}")
+
+
+# ── POST /monitoreo/admin/sync-proyectos (temporal) ───────────────────────────
+@router.post("/admin/sync-proyectos")
+def sync_proyectos(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Llena campos faltantes de proyectos desde proyectos_solares_completo.json
+    y aplica el mapeo de Operadores de Red. Solo admin."""
+    if current_user.rol.value not in ("admin", "operaciones"):
+        raise HTTPException(403, "Sin permisos")
+
+    import json as _json
+    import re as _re
+    from pathlib import Path as _Path
+    from app.models.proyectos import ProyectoInfoTecnica
+
+    OR_MAP = {
+        "Perija": "Afinia", "El son": "Afinia", "Molino": "Air-e",
+        "La Puya": "Afinia", "Villanueva": "Air-e", "Reserva": "ESSA",
+        "Cañahuate": "Afinia", "La Paz Leyenda": "Afinia", "La Paz Verso": "Afinia",
+        "San Pedro": "Afinia", "La Paz Vallenata": "Afinia", "Gandalf": "Afinia",
+        "Uruaco": "Air-e", "Baraya": "Afinia", "La Paz Esmeralda": "Afinia",
+        "El merengue": "Afinia", "El Olimpo": "ESSA", "Ibirico": "Afinia",
+        "La Mesa": "ESSA", "San Diego Sur": "Afinia", "La Cacica 2": "Afinia",
+        "La Molina": "Afinia", "La Cumbia": "Afinia",
+        "Valencia 1": "Afinia", "Valencia 2": "Afinia",
+    }
+    NOMBRE_MAP = {
+        "MGS 0004 Valle de Gandalf": "Gandalf",
+        "MGS 0005 Cañahuate": "Cañahuate",
+        "MGS 0006 Perijá": "Perija",
+        "MGS 0007 La Paz Vallenata": "La Paz Vallenata",
+        "MGS 0008 La Paz Verso": "La Paz Verso",
+        "MGS 0009 El Molino": "Molino",
+        "MGS 0010 - Villanueva": "Villanueva",
+        "MGS 0011 El Roble": "El Roble",
+        "MGS 0013 La Mesa": "La Mesa",
+        "MGS 0014 - El Olimpo": "El Olimpo",
+        "MGS 0016 - Puya": "La Puya",
+        "MGS 0017- Esmeralda": "Esmeralda",
+        "MGS 0018 La Paz Leyenda": "La Paz Leyenda",
+        "MGS 0019 El Merengue": "merengue",
+        "Complejo Industrial Cedillanos": "Cedillanos",
+        "GRANJA SOLAR SAN AGUSTIN": "San Agustin",
+    }
+
+    def _find(kw):
+        r = db.query(Proyecto).filter(Proyecto.nombre_comercial == kw).first()
+        if r: return r
+        r = db.query(Proyecto).filter(Proyecto.nombre_comercial.ilike(f"%{kw}%")).first()
+        if r: return r
+        r = db.query(Proyecto).filter(Proyecto.alias_monitoreo.ilike(f"%{kw}%")).first()
+        return r
+
+    def _clean_dpto(s):
+        return _re.sub(r"\s+[Dd]epartment$", "", (s or "").strip()).strip()
+
+    def _upsert_it(pid, n):
+        it = db.query(ProyectoInfoTecnica).filter(ProyectoInfoTecnica.proyecto_id == pid).first()
+        if it:
+            if not it.cantidad_total_paneles:
+                it.cantidad_total_paneles = n
+        else:
+            db.add(ProyectoInfoTecnica(proyecto_id=pid, cantidad_total_paneles=n))
+
+    json_path = _Path(__file__).parent.parent.parent.parent / "data" / "proyectos_solares_completo.json"
+    data = _json.loads(json_path.read_text(encoding="utf-8"))
+
+    updated, skipped = [], []
+
+    for row in data:
+        nombre = row.get("nombre_topico", "").strip()
+        kw = NOMBRE_MAP.get(nombre) or _re.sub(r"^MGS\s*\d+\s*[-\s]*", "", nombre).strip() or nombre
+        proj = _find(kw)
+        if not proj:
+            skipped.append(nombre)
+            continue
+        changed = False
+        dpto = _clean_dpto(row.get("departamento") or "")
+        if dpto and not proj.departamento:
+            proj.departamento = dpto; changed = True
+        ciudad = (row.get("ciudad") or "").strip()
+        if ciudad and not proj.municipio:
+            proj.municipio = ciudad; changed = True
+        kwp = row.get("potencia_instalada_dc_kwp")
+        if kwp is not None and not proj.potencia_instalada_kwp:
+            proj.potencia_instalada_kwp = kwp; changed = True
+        paneles = row.get("numero_de_paneles")
+        if paneles is not None and not proj.cantidad_total_paneles:
+            proj.cantidad_total_paneles = paneles
+            _upsert_it(proj.id, paneles); changed = True
+        if changed:
+            updated.append(proj.nombre_comercial)
+
+    or_updated, or_skipped = [], []
+    for kw, operador in OR_MAP.items():
+        proj = _find(kw)
+        if not proj:
+            or_skipped.append(kw); continue
+        if not proj.operador_red or proj.operador_red.strip() != operador:
+            proj.operador_red = operador
+            or_updated.append(proj.nombre_comercial)
+
+    db.commit()
+    return {
+        "ok": True,
+        "json_actualizados": updated,
+        "json_saltados": skipped,
+        "or_actualizados": or_updated,
+        "or_saltados": or_skipped,
+    }

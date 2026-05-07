@@ -72,6 +72,14 @@ def add_columns():
     except Exception as e:
         print(f"  WARN enum tipo_costo_enum skipped: {e}")
 
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("COMMIT"))
+            conn.execute(text("ALTER TYPE tipo_venta_liq_enum ADD VALUE IF NOT EXISTS 'autoconsumo'"))
+            conn.execute(text("COMMIT"))
+    except Exception as e:
+        print(f"  WARN enum tipo_venta_liq_enum skipped: {e}")
+
     print("Columns migrated.")
 
 

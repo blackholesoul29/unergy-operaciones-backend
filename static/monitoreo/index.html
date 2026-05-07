@@ -912,40 +912,45 @@ function serverDel(id) {
     }).catch(function(e){setSync("err","Error");toast("⚠ No se pudo eliminar: "+e.message);});
 }
 
-/* OVERRIDE serverSave — usa POST/PATCH /api/v1/fallas */
+/* serverSave — usa /api/v1/monitoreo/fallas/save (mapeo completo en servidor) */
 function serverSave(f, cb) {
   setSync("spin","Guardando…");
-  var stCod=_ST_REV[f.st]||"abierta";
-  var eId=_catIds.estados[stCod];
-  var tId=_catIds.tipos[f.code];
-  var pId=_catIds.prioridades[f.prio||"media"];
-  var prId=_catIds.proyectos[f.proj];
-  if(!eId||!tId||!pId||!prId){
-    toast("⚠ Proyecto/tipo/estado/prioridad no encontrados en BD");
-    setSync("err","Error");if(cb)cb(false);return;
-  }
-  if(!f._db_id) {
-    _apiFetch('POST','/api/v1/fallas',{
-      proyecto_id:prId,tipo_id:tId,estado_id:eId,prioridad_id:pId,
-      descripcion:f.desc||"Sin descripción",
-      fecha_identificacion:f.date||new Date().toISOString().slice(0,10)
-    }).then(function(r){
-      f._db_id=r.id;f.id=r.codigo_interno;
-      var idx=faults.findIndex(function(x){return x.id===f.id;});
-      if(idx>=0)faults[idx]=f;else faults.unshift(f);
-      setSync("ok","Guardado ✓");renderAll();if(cb)cb(true);
-    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
-  } else {
-    var patchData={tipo_id:tId,estado_id:eId,prioridad_id:pId,descripcion:f.desc};
-    if(f.date) patchData.fecha_identificacion=f.date;
-    if(f.occ) patchData.fecha_ocurrencia=f.occ.replace(" ","T")+":00";
-    if(f.endDT) patchData.fecha_resolucion=f.endDT.replace(" ","T")+":00";
-    if(f.centinela) patchData.centinela=f.centinela;
-    _apiFetch('PATCH','/api/v1/fallas/'+f._db_id,patchData).then(function(r){
-      if(r){var mapped=_mapFault(r);var idx=faults.findIndex(function(x){return x._db_id===f._db_id||x.id===f.id;});if(idx>=0)faults[idx]=mapped;else faults.unshift(mapped);renderAll();}
-      setSync("ok","Guardado ✓");if(cb)cb(true);
-    }).catch(function(e){setSync("err","Error");toast("⚠ "+e.message);if(cb)cb(false);});
-  }
+  var fdd=fd(f.code)||{};
+  var cleanRes=(f.res&&f.res.trim()&&f.res.length>3&&!/^\d/.test(f.res)&&
+    !f.res.includes("/")&&!f.res.includes("GMT"))?f.res:"";
+  /* IDs reales del servidor tienen prefijo FAL-; F-XXXXX son temporales (nuevas) */
+  var realId=(f.id&&/^FAL-/.test(f.id))?f.id:"";
+  /* toSheets espera T separador; occ/endDT vienen con espacio desde _mapFault */
+  var toTS=function(v){return v?toSheets(String(v).replace(" ","T")):"";};
+  var payload={
+    id:realId, project:f.proj, faultCode:f.code,
+    faultLabel:fdd.label||f.faultLabel||f.code,
+    categoryId:fdd.catId||"1",
+    statusLbl:ST[f.st]?ST[f.st].lbl:f.st, status:f.st,
+    identDate:fmtD(f.date), identTime:padT(f.time),
+    occTime:toTS(f.occ), resType:cleanRes,
+    desc:f.desc||"", followUp:f.flw||"",
+    driveUrl:f.driveUrl||"", driveUrls:f.driveUrls||[],
+    endTime:toTS(f.endDT),
+    centinela:f.centinela||"", prioridad:f.prio||"media",
+    notify:f.notify===true
+  };
+  _apiFetch('POST','/api/v1/monitoreo/fallas/save',payload).then(function(r){
+    setSync(r&&r.ok?"ok":"err",r&&r.ok?"Guardado ✓":"Error al guardar");
+    if(r&&r.fault){
+      var srv=r.fault;
+      var oldId=f.id;
+      var idx=faults.findIndex(function(x){return x.id===oldId||x.id===srv.id;});
+      if(idx>=0)faults[idx]=srv; else faults.unshift(srv);
+      f.id=srv.id;
+      renderAll();
+    }
+    if(cb)cb(r&&r.ok);
+  }).catch(function(e){
+    setSync("err","Error de red");
+    toast("⚠ No se pudo guardar: "+e.message);
+    if(cb)cb(false);
+  });
 }
 /* ════════════════════════════════════════════════════════════════ */
 

@@ -862,6 +862,7 @@ function _mapFault(f){
     prio:(f.prioridad||{}).codigo||"media"
   };
 }
+var _faultsLoading=false; /* evita llamadas concurrentes */
 function _applyFaults(items){
   faults=items.map(_mapFault);
   faults.forEach(function(f){var n=parseInt((f.id||"").replace(/\D/g,""));if(!isNaN(n)&&n>=idN)idN=n+1;});
@@ -869,19 +870,29 @@ function _applyFaults(items){
   toast("✓ "+faults.length+" fallas cargadas");
 }
 function loadFaults() {
+  if(_faultsLoading){return;} /* ignorar si ya hay una carga en curso */
+  _faultsLoading=true;
   setSync("spin","Sincronizando…");
   _apiFetch('GET','/api/v1/fallas?size=1000&page=1').then(function(res) {
     var items=(res&&res.items)||[];
     var pages=(res&&res.pages)||1;
-    if(pages<=1){_applyFaults(items);return;}
+    if(pages<=1){_faultsLoading=false;_applyFaults(items);return;}
     /* Cargar páginas restantes en paralelo */
     var reqs=[];
     for(var pg=2;pg<=pages;pg++){reqs.push(_apiFetch('GET','/api/v1/fallas?size=1000&page='+pg));}
     Promise.all(reqs).then(function(results){
       results.forEach(function(r){if(r&&r.items)items=items.concat(r.items);});
+      _faultsLoading=false;
       _applyFaults(items);
-    }).catch(function(){_applyFaults(items);});
+    }).catch(function(e){
+      /* NO sobreescribir faults con datos parciales — conservar lo que hay */
+      _faultsLoading=false;
+      setSync("err","Error parcial");
+      toast("⚠ No se pudieron cargar todas las páginas. Reintentando…");
+      setTimeout(loadFaults,8000);
+    });
   }).catch(function(e){
+    _faultsLoading=false;
     setSync("err","Sin conexión");hideLoader();renderAll();
     toast("⚠ Error al cargar: "+e.message);
   });

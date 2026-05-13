@@ -84,6 +84,26 @@ def create_contrato(
     return _get_contrato_or_404(contrato.id, db)
 
 
+@router.get("/partes")
+def get_partes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    compradores = (
+        db.query(PPAContrato.comprador_nombre, PPAContrato.comprador_nit)
+        .filter(PPAContrato.comprador_nombre.isnot(None))
+        .distinct()
+        .all()
+    )
+    vendedores = (
+        db.query(PPAContrato.vendedor_nombre, PPAContrato.vendedor_nit)
+        .filter(PPAContrato.vendedor_nombre.isnot(None))
+        .distinct()
+        .all()
+    )
+    return {
+        "compradores": [{"nombre": r.comprador_nombre, "nit": r.comprador_nit} for r in compradores],
+        "vendedores": [{"nombre": r.vendedor_nombre, "nit": r.vendedor_nit} for r in vendedores],
+    }
+
+
 @router.get("/{id}", response_model=PPAContratoOut)
 def get_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_contrato_or_404(id, db)

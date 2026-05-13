@@ -308,11 +308,24 @@ body.client-mode #tab-inf{display:none!important}
 .rpt-status-row{font-size:11px;color:#6B5F80;margin-top:5px}
 .rpt-footer{background:#F7F4FD;border-top:1px solid #EDE8F5;padding:10px 28px;font-size:10px;color:#A89EC0;display:flex;justify-content:space-between}
 .rpt-page-sep{height:0;margin:0;padding:0}
+/* ── Modo edición de informe ── */
+#rpt-toolbar{padding:10px 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rpt-del-section{display:inline-flex!important;align-items:center;gap:4px;float:right;background:transparent;border:1px solid #FF575760;color:#FF5757;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-family:'Sora',sans-serif;font-weight:700;user-select:none;margin-bottom:6px;transition:all .15s}
+.rpt-del-section:hover{background:#FF575720;border-color:#FF5757}
+.rpt-del-row{text-align:center;cursor:pointer;color:#FF5757;font-weight:800;font-size:13px;padding:0 8px!important;width:28px;user-select:none;vertical-align:middle!important}
+.rpt-del-row:hover{background:#FF575720}
+.rpt-del-th{width:28px}
+#inf-content[contenteditable="true"]{cursor:text;outline:none}
+#inf-content[contenteditable="true"] td:not(.rpt-del-row):hover,
+#inf-content[contenteditable="true"] .rpt-kpi-val:hover,
+#inf-content[contenteditable="true"] .rpt-meta-val:hover,
+#inf-content[contenteditable="true"] .fmo-section-title:hover,
+#inf-content[contenteditable="true"] .rpt-section-title:hover{outline:1.5px dashed #915BD880;border-radius:3px;cursor:text}
 /* ── Print ── */
 @media print{
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
-  .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading{display:none!important}
+  .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
   body{background:#fff!important;margin:0;padding:0}
   #inf-panel{padding:0!important;max-width:100%!important}
   #inf-content{display:block!important}
@@ -343,6 +356,8 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-edit-hint{display:none!important}
   /* Observaciones editables - mostrar como texto normal */
   .rpt-obs-editable{outline:none!important;border:none!important;background:#F0FFF4!important}
+  /* Ocultar controles de edición */
+  #rpt-toolbar,.rpt-del-row,.rpt-del-th,.rpt-del-section{display:none!important}
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -680,6 +695,13 @@ body.client-mode #tab-inf{display:none!important}
       <button class="btn btn-pu" id="fmo-gen" style="padding:7px 18px;font-size:13px" onclick="generateFMOInforme()" >Generar FMO ↻</button>
       <button class="btn btn-ye" id="fmo-print" style="padding:7px 14px;font-size:13px;display:none" onclick="window.print()">🖨 Imprimir / PDF</button>
     </div>
+  </div>
+  <!-- Toolbar edición de informe -->
+  <div id="rpt-toolbar" style="display:none">
+    <span style="font-size:11px;color:var(--mu);font-weight:700">Antes de imprimir:</span>
+    <button id="rpt-edit-btn" class="btn btn-gh btn-sm" onclick="toggleRptEdit()" style="gap:5px">✏️ Editar informe</button>
+    <button id="rpt-restore-btn" class="btn btn-gh btn-sm" onclick="restoreRptSections()" style="display:none;color:var(--bl);border-color:var(--bl)40">↩ Mostrar todo</button>
+    <span id="rpt-edit-hint" style="font-size:10px;color:var(--fa);display:none">Clic en cualquier texto para editar · <span style="color:var(--re)">✕</span> para eliminar fila o sección</span>
   </div>
   <!-- Empty state -->
   <div id="inf-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
@@ -2784,9 +2806,22 @@ function getInfRange(){
 /* ── Fallas del período para un proyecto ── */
 function getFaultsForRange(subProj,range){
   var cfg=genProjects.find(function(p){return p.sub_project===subProj;});
+  // Fuente alternativa: PROJS_DETALLE (BD) — tiene sub_project y nombre_comercial
+  var pd=PROJS_DETALLE.find(function(p){
+    return (p.sub_project||"")=== subProj||(p.alias||"")===subProj;
+  });
+  // Fuente FMO: nombre_clientes del contrato
+  var fmoC=fmoContratos.find(function(c){return c.sub_project===subProj;});
   return faults.filter(function(f){
-    if(!cfg)return false;
-    var match=f.proj===cfg.nombre_bitacora||f.proj===cfg.nombre_display||f.proj===cfg.nombre_clientes||f.proj===cfg.sub_project;
+    var match=false;
+    if(cfg){
+      match=f.proj===cfg.nombre_bitacora||f.proj===cfg.nombre_display
+           ||f.proj===cfg.nombre_clientes||f.proj===cfg.sub_project;
+    }
+    // Si no coincidió con genProjects, probar nombre_comercial de BD
+    if(!match&&pd) match=f.proj===pd.nombre;
+    // Último recurso: nombre_clientes del contrato FMO
+    if(!match&&fmoC) match=f.proj===(fmoC.nombre_clientes||"")||f.proj===(fmoC.nombre_display||"");
     if(!match)return false;
     var ds=String(f.date||"").trim(),iso="";
     var m1=ds.match(/^(\d{4})-(\d{2})-(\d{2})/),m2=ds.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
@@ -3162,6 +3197,7 @@ function generateInforme(){
   document.getElementById("inf-content").style.display="none";
   document.getElementById("inf-loading").style.display="block";
   document.getElementById("inf-print").style.display="none";
+  _hideRptToolbar();
   document.getElementById("inf-loading-msg").textContent="Consultando datos de generación…";
   document.getElementById("inf-loading-sub").textContent="";
   infChartInstances.forEach(function(c){try{c.destroy();}catch(e){}});
@@ -3180,6 +3216,7 @@ function generateInforme(){
       document.getElementById("inf-content").innerHTML=buildProjectPage(cfg,r,mf,range,1,1);
       document.getElementById("inf-content").style.display="block";
       document.getElementById("inf-print").style.display="inline-flex";
+      _showRptToolbar();
       setTimeout(renderRptCharts,150);
     }).catch(function(){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Error al consultar generación");});
 
@@ -3229,6 +3266,7 @@ function finishPortReport(pname,results,range){
   document.getElementById("inf-content").innerHTML=pages.join('<div class="rpt-page-sep"></div>');
   document.getElementById("inf-content").style.display="block";
   document.getElementById("inf-print").style.display="inline-flex";
+  _showRptToolbar();
   setTimeout(renderRptCharts,180);
 }
 
@@ -3412,6 +3450,7 @@ function generateFMOInforme(){
   document.getElementById("inf-content").style.display="none";
   document.getElementById("inf-loading").style.display="block";
   document.getElementById("fmo-print").style.display="none";
+  _hideRptToolbar();
   document.getElementById("inf-loading-msg").textContent="Consultando generación…";
   document.getElementById("inf-loading-sub").textContent=sp;
   fmoChartInstances.forEach(function(c){try{c.destroy();}catch(e){}});
@@ -3420,8 +3459,17 @@ function generateFMOInforme(){
   function done(genR, fmoR){
     document.getElementById("inf-loading").style.display="none";
     var data=(genR&&genR.data)||[];
-    var cfg = genProjects.find(function(p){return p.sub_project===sp;})
-              ||{nombre_clientes:sp,nombre_display:sp,sub_project:sp,municipio:"—"};
+    var _gcfg = genProjects.find(function(p){return p.sub_project===sp;});
+    var _fmoC = fmoContratos.find(function(c){return c.sub_project===sp;});
+    var _pd   = PROJS_DETALLE.find(function(p){return (p.sub_project||"")===sp||(p.alias||"")===sp;});
+    // Nombre más descriptivo disponible
+    var _nom = (_gcfg&&(_gcfg.nombre_comercial||_gcfg.nombre_clientes||_gcfg.nombre_display))
+               ||(_fmoC&&(_fmoC.nombre_clientes||_fmoC.nombre_display))
+               ||(_pd&&_pd.nombre)||sp;
+    var cfg = _gcfg || {
+      nombre_clientes:_nom, nombre_display:_nom, sub_project:sp,
+      municipio:(_fmoC&&_fmoC.municipio)||(_pd&&_pd.municipio)||"—"
+    };
     var contrato  = fmoR&&fmoR.contrato  || null;
     var inverters = fmoR&&fmoR.inverters || [];
     var invErr    = fmoR&&fmoR.inverters_error || null;
@@ -3433,6 +3481,7 @@ function generateFMOInforme(){
       document.getElementById("inf-content").innerHTML=html;
       document.getElementById("inf-content").style.display="block";
       document.getElementById("fmo-print").style.display="inline-flex";
+      _showRptToolbar();
       _fmoMants=mant;
       bindMantEditHandlers();
       setTimeout(function(){renderRptCharts();},200);
@@ -3444,7 +3493,7 @@ function generateFMOInforme(){
     }
   }
 
-  // Step 1: load genProjects if needed, then generación, then fmoData
+  // Step 1: load genProjects if needed
   function step1(){
     if(!genProjects.length){
       apiGet({action:"getProjects"},10000)
@@ -3454,15 +3503,68 @@ function generateFMOInforme(){
     } else { step2(); }
   }
 
+  // Step 2: intentar primero GeneracionDiaria (BD verificada), luego Unergy API
   function step2(){
+    var cfg2   = genProjects.find(function(p){ return p.sub_project===sp; });
+    var fmoC   = fmoContratos.find(function(c){ return c.sub_project===sp; });
+    var pdDet  = PROJS_DETALLE.find(function(p){return (p.sub_project||"")===sp||(p.alias||"")===sp;});
+    // Candidatos de nombre para buscar en BD (de más preciso a menos)
+    var nameCandidates=[];
+    if(cfg2&&cfg2.nombre_comercial) nameCandidates.push(cfg2.nombre_comercial);
+    if(cfg2&&cfg2.nombre_clientes&&nameCandidates.indexOf(cfg2.nombre_clientes)<0) nameCandidates.push(cfg2.nombre_clientes);
+    if(pdDet&&pdDet.nombre&&nameCandidates.indexOf(pdDet.nombre)<0) nameCandidates.push(pdDet.nombre);
+    if(fmoC&&fmoC.nombre_clientes&&nameCandidates.indexOf(fmoC.nombre_clientes)<0) nameCandidates.push(fmoC.nombre_clientes);
+    if(nameCandidates.indexOf(sp)<0) nameCandidates.push(sp);
+    var pNombre=nameCandidates[0]; // mejor candidato
+    document.getElementById("inf-loading-msg").textContent="Consultando BD (datos verificados)…";
+    document.getElementById("inf-loading-sub").textContent=pNombre;
+
+    // Intentar con todos los candidatos de nombre hasta encontrar datos
+    function tryBD(candidates,idx){
+      if(idx>=candidates.length){console.log("[FMO] BD sin datos para ningún nombre → Unergy API");step2unergy();return;}
+      var name=candidates[idx];
+      _apiFetch('GET','/api/v1/monitoreo/generacion'
+        +'?proyecto_nombre='+encodeURIComponent(name)
+        +'&fecha_inicio='+range.from
+        +'&fecha_fin='+range.to)
+      .then(function(dbR){
+        var datos=(dbR&&dbR.ok&&dbR.datos)||[];
+        if(datos.length){
+          console.log("[FMO] BD hit con nombre='"+name+"': "+datos.length+" días");
+          processDBData(datos);
+        }else{
+          console.log("[FMO] BD sin datos para '"+name+"', probando siguiente…");
+          tryBD(candidates,idx+1);
+        }
+      }).catch(function(){tryBD(candidates,idx+1);});
+    }
+
+    function processDBData(datos){
+      // Convertir datos diarios BD → formato que espera buildFMOPage
+      var dbData=datos.map(function(d){
+        return{date:d.fecha,time:"12:00",kwh:parseFloat(d.kwh_real)||0};
+      });
+      // Construir simulation desde kwh_p90 diario
+      var p90Total=datos.reduce(function(s,d){return s+(parseFloat(d.kwh_p90)||0);},0);
+      var simDB=p90Total>0?{p90_monthly:p90Total,p50_monthly:null,p90_daily:p90Total/datos.length}:null;
+      var genR={ok:true,data:dbData,simulation:simDB,_source:"bd"};
+      console.log("[FMO] BD: "+dbData.length+" días, total="+dbData.reduce(function(s,d){return s+d.kwh;},0).toFixed(0)+" kWh, P90="+(p90Total||"n/a"));
+      step3fmo(genR);
+    }
+
+    // Iniciar búsqueda en BD con todos los candidatos
+    tryBD(nameCandidates, 0);
+  }
+
+  // Fallback: Unergy API (deltas acumulados)
+  function step2unergy(){
+    document.getElementById("inf-loading-msg").textContent="Consultando API Unergy…";
+    document.getElementById("inf-loading-sub").textContent=sp;
     apiGet({action:"getGeneration",sub_project:sp,date_from:range.from,date_to:range.to},30000)
     .then(function(genR){
-      console.log("[FMO] genR ok="+(!!(genR&&genR.ok))+" records="+((genR&&genR.data)||[]).length);
-      document.getElementById("inf-loading-msg").textContent="Consultando inversores…";
-      document.getElementById("inf-loading-sub").textContent="";
-      apiGet({action:"getFMOData",sub_project:sp,date_from:range.from,date_to:range.to},35000)
-        .then(function(fmoR){done(genR,fmoR);})
-        .catch(function(e){console.warn("[FMO] getFMOData skip:",e&&e.message);done(genR,{});});
+      console.log("[FMO] Unergy ok="+(!!( genR&&genR.ok))+" records="+((genR&&genR.data)||[]).length);
+      if(genR&&genR.data)genR._source="unergy";
+      step3fmo(genR);
     })
     .catch(function(e){
       console.error("[FMO] getGeneration error:",e&&e.message);
@@ -3471,6 +3573,15 @@ function generateFMOInforme(){
         fmoErrHtml("Error al cargar generación",esc(e&&e.message||"timeout"));
       document.getElementById("inf-content").style.display="block";
     });
+  }
+
+  // Step 3: obtener datos FMO (inversores, mantenimiento, contrato)
+  function step3fmo(genR){
+    document.getElementById("inf-loading-msg").textContent="Consultando inversores y contrato…";
+    document.getElementById("inf-loading-sub").textContent="";
+    apiGet({action:"getFMOData",sub_project:sp,date_from:range.from,date_to:range.to},35000)
+      .then(function(fmoR){done(genR,fmoR);})
+      .catch(function(e){console.warn("[FMO] getFMOData skip:",e&&e.message);done(genR,{});});
   }
 
   step1();
@@ -3523,6 +3634,7 @@ function openMantEdit(m){
 /* ── FMO: construir página ── */
 function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var data=genRes.data||[],sim=genRes.simulation;
+  var isDaily=genRes._source==="bd"; // datos diarios verificados BD (no horarios)
   var dm={};data.forEach(function(d){if(!dm[d.date])dm[d.date]=0;dm[d.date]+=d.kwh;});
   var days=Object.keys(dm).sort(),kpd=days.map(function(d){return Math.round(dm[d]*100)/100;});
   var total=kpd.reduce(function(a,b){return a+b;},0);
@@ -3532,12 +3644,28 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var pctStr=pct!==null?(pct>=0?"+":"")+pct.toFixed(1)+"% vs P90":"—";
   var pctCol=pct===null?"#A89EC0":pct>=0?"#4ADE80":"#FF5757";
 
-  // Disponibilidad
-  var avail=calcAvailability(data,range);
+  // Fuente de datos (badge para mostrar en informe)
+  var srcBadge=isDaily
+    ?'<span style="display:inline-flex;align-items:center;gap:4px;background:#D1FAE5;border:1px solid #6EE7B7;border-radius:6px;padding:2px 8px;font-size:9px;font-weight:800;color:#065F46;letter-spacing:.5px">✅ BD VERIFICADA</span>'
+    :'<span style="display:inline-flex;align-items:center;gap:4px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:6px;padding:2px 8px;font-size:9px;font-weight:800;color:#92400E;letter-spacing:.5px">⚠️ API UNERGY (estimado)</span>';
+
+  // Disponibilidad — si datos son diarios BD, usar aprox. días con generación
+  var avail;
+  if(isDaily){
+    // Aproximación: un día sin generación (kwh=0) equivale a 11h HUNA
+    var hLuz=11*range.totalDays;
+    var dCero=days.filter(function(d,i){return kpd[i]<0.001;}).length;
+    var hCero=dCero*11;
+    var hDisp=hLuz-hCero;
+    var aPct=hLuz>0?Math.round((hDisp/hLuz)*1000)/10:null;
+    avail={pct:aPct,disponibles:hDisp,total:hLuz,cero:hCero,_approx:true};
+  }else{
+    avail=calcAvailability(data,range);
+  }
   var DISP_GAR=parseFloat((contrato&&contrato.disponibilidad_garantizada_pct)||"97")||97;
   var dispPct=avail.pct!==null?avail.pct:null;
   var cumpleDisp=dispPct!==null&&dispPct>=DISP_GAR;
-  var dispStr=dispPct!==null?dispPct.toFixed(1)+"%":"No calculado";
+  var dispStr=dispPct!==null?dispPct.toFixed(1)+"%" + (avail._approx?" (aprox.)":""):"No calculado";
   var dispCol=dispPct===null?"#A89EC0":cumpleDisp?"#4ADE80":"#FF5757";
 
   // Multa disponibilidad
@@ -3684,6 +3812,11 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +'<div class="rpt-meta-grid" style="margin-top:6px">'
     +rmeta("ELABORADO POR",resp)+rmeta("DISPONIB. GARANTIZADA",DISP_GAR+"%")+rmeta("DISPONIB. REAL",dispStr)+rmeta("ENTREGA",range.monthName+" "+range.year+" · Primeros 5 días")
     +'</div>'
+    +'<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    +'<span style="font-size:9px;color:#6B5F80;font-weight:700;letter-spacing:.5px">DATOS DE GENERACIÓN:</span>'
+    +srcBadge
+    +(isDaily?'<span style="font-size:9px;color:#6B5F80">Disponibilidad calculada por días (aprox. para datos diarios)</span>':'<span style="font-size:9px;color:#6B5F80">Disponibilidad calculada por franja horaria 06:00–17:00</span>')
+    +'</div>'
     +'</div>'
     // S1 Resumen Ejecutivo
     +'<div class="rpt-section"><div class="fmo-section-title">▌ 1. RESUMEN EJECUTIVO — '+range.headerPeriod+'</div>'
@@ -3754,8 +3887,10 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +'</div>'
     +'<div style="background:#F7F4FD;border-radius:9px;padding:11px 14px;margin-bottom:12px;font-size:11px;color:#555;line-height:1.7">'
     +'<b>Metodología:</b> ASYS = (HPER - HUNA) / HPER × 100 | HPER = horas franjas solar 06:00–17:00 · '
-    +'HUNA = horas con generación ≈ 0 en franja solar. Nota: Cálculo a nivel de planta. La fórmula contractual '
-    +'(Anexo 1) requiere datos por inversor (IO).'
+    +'HUNA = horas con generación ≈ 0 en franja solar. Nota: Cálculo a nivel de planta. La fórmula contractual (Anexo 1) requiere datos por inversor (IO).'
+    +(isDaily?'<br><b>Nota fuente de datos:</b> Los datos de generación provienen de la BD verificada (registros diarios). '
+      +'La disponibilidad se aproxima como: días sin generación = 11 h HUNA/día. '
+      +'Para mayor precisión se requieren lecturas horarias de la API de monitoreo.':'')
     +'</div>'
     +invTableHtml
     +multaHtml
@@ -3815,6 +3950,100 @@ function rkpiRow(ico,lbl,val,col){
     +'<span>'+ico+' '+lbl+'</span>'
     +'<span style="font-weight:700;color:'+(col||"#333")+'">'+(typeof val==="number"?val.toString():val)+'</span>'
     +'</div>';
+}
+
+/* ══ EDICIÓN DE INFORME ANTES DE IMPRIMIR ══ */
+var _rptEditMode=false;
+
+function _showRptToolbar(){
+  var tb=document.getElementById("rpt-toolbar");
+  if(tb)tb.style.display="flex";
+}
+function _hideRptToolbar(){
+  if(_rptEditMode)toggleRptEdit();
+  var tb=document.getElementById("rpt-toolbar");
+  if(tb)tb.style.display="none";
+  var rb=document.getElementById("rpt-restore-btn");
+  if(rb)rb.style.display="none";
+}
+
+function toggleRptEdit(){
+  _rptEditMode=!_rptEditMode;
+  var c=document.getElementById("inf-content");
+  var btn=document.getElementById("rpt-edit-btn");
+  var hint=document.getElementById("rpt-edit-hint");
+  if(!c||!btn)return;
+
+  if(_rptEditMode){
+    // Activar modo edición
+    c.contentEditable="true";
+
+    // Botones ✕ en filas de tabla (tbody)
+    c.querySelectorAll("tbody tr").forEach(function(row){
+      if(row.querySelector(".rpt-del-row"))return;
+      var td=document.createElement("td");
+      td.className="rpt-del-row";
+      td.contentEditable="false";
+      td.textContent="✕";
+      td.title="Eliminar fila";
+      td.addEventListener("mousedown",function(e){
+        e.preventDefault();e.stopPropagation();row.remove();
+      });
+      row.appendChild(td);
+    });
+    // Celda vacía en thead para alinear columna ✕
+    c.querySelectorAll("thead tr").forEach(function(row){
+      if(row.querySelector(".rpt-del-th"))return;
+      var th=document.createElement("th");
+      th.className="rpt-del-th";
+      th.contentEditable="false";
+      row.appendChild(th);
+    });
+
+    // Botones "✕ Ocultar sección" en cada sección
+    c.querySelectorAll(".rpt-section,.fmo-section-title").forEach(function(el){
+      // Para fmo-section-title, subir al padre
+      var section=el.classList.contains("fmo-section-title")?el.parentElement:el;
+      if(!section||section.querySelector(".rpt-del-section"))return;
+      var dv=document.createElement("div");
+      dv.className="rpt-del-section";
+      dv.contentEditable="false";
+      dv.textContent="✕ Ocultar sección";
+      dv.title="Ocultar esta sección del informe";
+      dv.addEventListener("mousedown",function(e){
+        e.preventDefault();e.stopPropagation();
+        section.style.display="none";
+        var rb=document.getElementById("rpt-restore-btn");
+        if(rb)rb.style.display="inline-flex";
+      });
+      section.insertBefore(dv,section.firstChild);
+    });
+
+    // UI
+    btn.style.background="var(--re)";btn.style.color="var(--cr)";btn.style.border="none";
+    btn.textContent="🔒 Confirmar";
+    if(hint)hint.style.display="block";
+  }else{
+    // Desactivar modo edición
+    c.contentEditable="false";
+    c.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
+    btn.style.background="";btn.style.color="";btn.style.border="";
+    btn.textContent="✏️ Editar informe";
+    if(hint)hint.style.display="none";
+  }
+}
+
+function restoreRptSections(){
+  var c=document.getElementById("inf-content");
+  if(!c)return;
+  c.querySelectorAll(".rpt-section,.rpt-page>div").forEach(function(s){s.style.display="";});
+  // También restaurar secciones FMO ocultas
+  c.querySelectorAll("[style*='display: none']").forEach(function(s){
+    if(s.id==="inf-content")return;
+    s.style.display="";
+  });
+  var rb=document.getElementById("rpt-restore-btn");
+  if(rb)rb.style.display="none";
 }
 
 // FMO listeners

@@ -3810,12 +3810,7 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +rmeta("PROYECTO",pname)+rmeta("PERÍODO",range.headerPeriod)+rmeta("MUNICIPIO",muni)+rmeta("CONTRATISTA",contratista)
     +'</div>'
     +'<div class="rpt-meta-grid" style="margin-top:6px">'
-    +rmeta("ELABORADO POR",resp)+rmeta("DISPONIB. GARANTIZADA",DISP_GAR+"%")+rmeta("DISPONIB. REAL",dispStr)+rmeta("ENTREGA",range.monthName+" "+range.year+" · Primeros 5 días")
-    +'</div>'
-    +'<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-    +'<span style="font-size:9px;color:#6B5F80;font-weight:700;letter-spacing:.5px">DATOS DE GENERACIÓN:</span>'
-    +srcBadge
-    +(isDaily?'<span style="font-size:9px;color:#6B5F80">Disponibilidad calculada por días (aprox. para datos diarios)</span>':'<span style="font-size:9px;color:#6B5F80">Disponibilidad calculada por franja horaria 06:00–17:00</span>')
+    +rmeta("ELABORADO POR",resp)+rmeta("DISPONIB. GARANTIZADA",DISP_GAR+"%")+rmeta("DISPONIB. REAL",dispStr)+rmeta("ENTREGA",range.monthName+" "+range.year)
     +'</div>'
     +'</div>'
     // S1 Resumen Ejecutivo
@@ -3936,11 +3931,11 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +'<div style="border-top:1px solid #EDE8F5;margin-top:8px;padding-top:8px">'
     +'<div class="rpt-status-row">Resp: '+esc(resp)+'</div>'
     +'<div class="rpt-status-row">Contratista: '+esc(contratista)+'</div>'
-    +'<div class="rpt-status-row">Prox. entrega: primeros 5 días de '+nextMes(range.month)+' '+range.year+'</div>'
+    +'<div class="rpt-status-row">Prox. entrega: '+nextMes(range.month)+' '+range.year+'</div>'
     +'</div></div></div></div>'
     +'<div class="rpt-footer">'
     +'<span>UNERGY ENERGÍA DIGITAL S.A.S ESP · Informe FMO · Confidencial</span>'
-    +'<span>'+esc(range.headerPeriod)+' · Entrega: 5 primeros días del mes siguiente</span>'
+    +'<span>'+esc(range.headerPeriod)+'</span>'
     +'</div>'
     +'</div>';
 }
@@ -3975,15 +3970,23 @@ function toggleRptEdit(){
   if(!c||!btn)return;
 
   if(_rptEditMode){
-    // Activar modo edición
-    c.contentEditable="true";
+    // Hacer editables sección por sección (más fiable que el contenedor entero)
+    var editTargets=c.querySelectorAll(
+      ".rpt-section,.rpt-kpi,.rpt-meta-item,.rpt-header .rpt-meta-val,"+
+      ".rpt-obs-text,.rpt-obs-editable,.fmo-ok-box,.fmo-multa-box"
+    );
+    editTargets.forEach(function(el){
+      el.setAttribute("contenteditable","true");
+      el.style.outline="none";
+      el.style.cursor="text";
+    });
 
-    // Botones ✕ en filas de tabla (tbody)
+    // Botones ✕ en cada fila de tabla
     c.querySelectorAll("tbody tr").forEach(function(row){
       if(row.querySelector(".rpt-del-row"))return;
       var td=document.createElement("td");
       td.className="rpt-del-row";
-      td.contentEditable="false";
+      td.setAttribute("contenteditable","false");
       td.textContent="✕";
       td.title="Eliminar fila";
       td.addEventListener("mousedown",function(e){
@@ -3991,23 +3994,21 @@ function toggleRptEdit(){
       });
       row.appendChild(td);
     });
-    // Celda vacía en thead para alinear columna ✕
+    // Th vacío en thead para alinear
     c.querySelectorAll("thead tr").forEach(function(row){
       if(row.querySelector(".rpt-del-th"))return;
       var th=document.createElement("th");
       th.className="rpt-del-th";
-      th.contentEditable="false";
+      th.setAttribute("contenteditable","false");
       row.appendChild(th);
     });
 
     // Botones "✕ Ocultar sección" en cada sección
-    c.querySelectorAll(".rpt-section,.fmo-section-title").forEach(function(el){
-      // Para fmo-section-title, subir al padre
-      var section=el.classList.contains("fmo-section-title")?el.parentElement:el;
-      if(!section||section.querySelector(".rpt-del-section"))return;
+    c.querySelectorAll(".rpt-section").forEach(function(section){
+      if(section.querySelector(".rpt-del-section"))return;
       var dv=document.createElement("div");
       dv.className="rpt-del-section";
-      dv.contentEditable="false";
+      dv.setAttribute("contenteditable","false");
       dv.textContent="✕ Ocultar sección";
       dv.title="Ocultar esta sección del informe";
       dv.addEventListener("mousedown",function(e){
@@ -4024,8 +4025,16 @@ function toggleRptEdit(){
     btn.textContent="🔒 Confirmar";
     if(hint)hint.style.display="block";
   }else{
-    // Desactivar modo edición
-    c.contentEditable="false";
+    // Desactivar: quitar contenteditable de los elementos que pusimos
+    c.querySelectorAll("[contenteditable]").forEach(function(el){
+      el.removeAttribute("contenteditable");
+      el.style.cursor="";
+      el.style.outline="";
+    });
+    // Restaurar los que venían editables originalmente
+    c.querySelectorAll(".rpt-obs-editable").forEach(function(el){
+      el.setAttribute("contenteditable","true");
+    });
     c.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
     btn.style.background="";btn.style.color="";btn.style.border="";
     btn.textContent="✏️ Editar informe";

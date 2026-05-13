@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from app.models.usuarios import RolEnum
@@ -16,7 +16,7 @@ class UsuarioOut(BaseModel):
 
 
 class UsuarioCreate(BaseModel):
-    email: EmailStr
+    email: str
     nombre: str
     rol: RolEnum = RolEnum.admin
     password: str

@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
 """
-Carga datos de autoconsumo 2026 (Excel Panel Seguimiento Contable) al sistema
-de liquidaciones vía API REST.
+Carga liquidaciones de autoconsumo desde el Excel de panel de seguimiento.
+
+Lee las hojas Enero / Febrero / Marzo / Abril y sus hojas "<Mes> Data"
+(que contienen los nombres completos de los proyectos).
+Solo procesa filas donde columna D (Documento contable) == "Mandato".
+tipo_venta = "autoconsumo", inversionista_id = null (siempre Total).
 
 Columnas del Excel (0-based):
-  A=0  Proyecto
-  B=1  CLIENTE
-  C=2  Inversionista
-  D=3  Documento contable   ← solo "Mandato"
-  E=4  Ciudad
+  A=0  Proyecto (nombre corto)
+  D=3  Documento contable  ← filtrar solo "Mandato"
   F=5  Concepto
   G=6  Total
-  H=7  Factura (NroFactura)
-  I=8  Link Carpeta General
-  J=9  Codigo
+  H=7  Factura / NroFactura  → numero_mandato + referencia_factura
+  J=9  Codigo (consecutivo)
+
+Hoja "<Mes> Data" (0-based):
+  A=0  Proyecto (nombre completo UPPERCASE)
+  B=1  Concepto
+  C=2  Total
+  D=3  Código factura (UESP…)
 
 Uso:
-  python scripts/cargar_autoconsumo_csv.py \
-      --xlsx data/2026_Autoconsumo_Panel_Seguimiento_Contable.xlsx \
-      --hojas Enero Febrero Marzo Abril \
-      --usuario jessica@unergy.io \
-      --password Unergy2025! \
-      --limpiar
+  python scripts/cargar_autoconsumo_csv.py \\
+      --xlsx "ruta/2026_Autoconsumo_Panel_Seguimiento Contable.xlsx" \\
+      --hojas Enero Febrero Marzo Abril \\
+      --anio 2026 \\
+      --api-url https://backend-production-63d8.up.railway.app \\
+      --usuario admin@unergy.co \\
+      --password TU_PASSWORD \\
+      [--limpiar]   # borra mandatos/costos/facturas antes de reimportar
+      [--dry-run]
 """
 import argparse
 import io
@@ -29,7 +38,7 @@ import re
 import sys
 import unicodedata
 
-# Forzar stdout UTF-8 en Windows (evita UnicodeEncodeError con caracteres especiales)
+# Forzar stdout UTF-8 en Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from openpyxl import load_workbook
@@ -43,6 +52,7 @@ MESES_MAP = {
 }
 
 # ── Mapa concepto → tipo_linea ────────────────────────────────────────────────
+# Nota: "iva_internet" NO existe en TipoLineaMandatoEnum; se mapea a "iva".
 TIPO_LINEA_MAP = [
     (r"ingreso bruto|^ingreso$",              "ingreso_bruto"),
     (r"despacho",                             "despacho"),
@@ -55,7 +65,6 @@ TIPO_LINEA_MAP = [
     (r"ajuste.*administr",                    "otro_costo"),
     (r"arriendo",                             "arriendo"),
     (r"mantenimiento",                        "mantenimiento"),
-    (r"iva.*internet|internet.*iva",          "iva_internet"),
     (r"internet",                             "servicio_internet"),
     (r"poliza.*cumplimiento|p.liza.*cumpl",   "poliza_cumplimiento"),
     (r"poliza|incendio|lucro cesante",        "seguro"),
@@ -91,9 +100,10 @@ def parse_valor(v) -> float | None:
     if v is None:
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        f = float(v)
+        return None if f != f else f  # NaN guard
     s = re.sub(r"[$,\s]", "", str(v).strip())
-    if not s or s in ("-", "#N/A", "#n/a", "N/A", ""):
+    if not s or s in ("-", "#N/A", "#n/a", "N/A") or s.startswith("#"):
         return None
     try:
         return float(s)
@@ -106,29 +116,57 @@ def valor_celda(row, idx: int):
     return c.value if c is not None else None
 
 
+def _celda_link(row, idx: int) -> str | None:
+    """Lee el hyperlink.target de la celda si existe, si no None."""
+    c = row[idx] if idx < len(row) else None
+    if c is None:
+        return None
+    try:
+        return c.hyperlink.target if c.hyperlink else None
+    except Exception:
+        return None
+
+
 def hoja_a_periodo(hoja: str, anio: int = 2026) -> str:
     """'Enero' → '2026-01-01'"""
     tok = normalizar(hoja.split()[0])
     mes = MESES_MAP.get(tok)
     if not mes:
-        raise ValueError(f"No se pudo derivar mes de hoja '{hoja}'. "
-                         f"Disponibles: {list(MESES_MAP.keys())}")
+        raise ValueError(
+            f"No se pudo derivar mes de hoja '{hoja}'. Disponibles: {list(MESES_MAP.keys())}"
+        )
     return f"{anio}-{mes}-01"
 
 
 # ── Lectura del Excel ─────────────────────────────────────────────────────────
-def leer_hoja(xlsx_path: str, hoja: str) -> list[dict]:
+def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
     """
-    Lee filas donde Documento contable (col D) = 'Mandato'.
-    Ignora filas con concepto 'Total' (filas de suma del Excel).
+    Devuelve (filas_mandato, fac_a_nombre_completo).
+
+    filas_mandato          : filas de la hoja principal con D=="Mandato"
+    fac_a_nombre_completo  : {código_factura → nombre_completo} desde "<hoja> Data"
     """
     wb = load_workbook(xlsx_path, data_only=True)
+
+    # Hoja "<Mes> Data": col A=nombre completo, col D=código factura (UESP…)
+    fac_map: dict[str, str] = {}
+    data_name = f"{hoja} Data"
+    if data_name in wb.sheetnames:
+        sh_data = wb[data_name]
+        for row in sh_data.iter_rows(min_row=2, max_row=sh_data.max_row):
+            nombre_full = valor_celda(row, 0)
+            fac_code    = valor_celda(row, 3)
+            if nombre_full and fac_code:
+                key = str(fac_code).strip()
+                if key and key not in fac_map:
+                    fac_map[key] = str(nombre_full).strip().replace("\n", " ")
+
+    # Hoja principal: filtrar solo filas Mandato
     if hoja not in wb.sheetnames:
-        raise ValueError(
-            f"Hoja '{hoja}' no encontrada. Disponibles: {wb.sheetnames}"
-        )
+        raise ValueError(f"Hoja '{hoja}' no encontrada. Disponibles: {wb.sheetnames}")
     sh = wb[hoja]
-    filas = []
+
+    filas: list[dict] = []
     for xl_row in sh.iter_rows(min_row=2, max_row=sh.max_row):
         proy = valor_celda(xl_row, 0)
         if not proy:
@@ -137,19 +175,28 @@ def leer_hoja(xlsx_path: str, hoja: str) -> list[dict]:
         if doc != "mandato":
             continue
         concepto = str(valor_celda(xl_row, 5) or "").strip()
-        # Omitir filas de suma internas del Excel
+        # Omitir filas de suma interna del Excel
         if normalizar(concepto) == "total":
             continue
+
+        codigo_raw = valor_celda(xl_row, 9) if len(xl_row) > 9 else None
+        codigo: int | None = None
+        if isinstance(codigo_raw, float) and codigo_raw == codigo_raw:
+            codigo = int(codigo_raw)
+        elif isinstance(codigo_raw, int):
+            codigo = codigo_raw
+
         filas.append({
             "proyecto":    str(proy).strip(),
             "concepto":    concepto,
             "total":       parse_valor(valor_celda(xl_row, 6)),
             "nro_factura": str(valor_celda(xl_row, 7) or "").strip(),
-            "codigo":      str(valor_celda(xl_row, 9) or "").strip()
-                           if len(xl_row) > 9 else "",
+            "soporte_url": _celda_link(xl_row, 7),
+            "codigo":      codigo,
         })
+
     wb.close()
-    return filas
+    return filas, fac_map
 
 
 # ── API client ────────────────────────────────────────────────────────────────
@@ -194,46 +241,62 @@ class API:
 
 # ── Override manual para nombres ambiguos ─────────────────────────────────────
 # Clave: nombre normalizado del Excel → nombre_comercial exacto en DB
-NOMBRE_OVERRIDES: dict[str, str] = {
-    normalizar("Sociedad Medica Rionegro S.A. Somer S.A."): "Somer Torre 1",
-}
+NOMBRE_OVERRIDES: dict[str, str] = {}
 
 
 # ── Match de proyecto ─────────────────────────────────────────────────────────
-def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
-    norm = normalizar(nombre)
+def match_proyecto(proyectos_db: list, nombre_corto: str, nombre_completo: str = "") -> dict | None:
+    """
+    Intenta hacer match usando primero el nombre completo (del Data sheet)
+    y luego el nombre corto (del main sheet).
+    """
+    candidatos = [n for n in (nombre_completo, nombre_corto) if n]
 
-    # 0. Override manual (para colisiones conocidas)
-    if norm in NOMBRE_OVERRIDES:
-        target = normalizar(NOMBRE_OVERRIDES[norm])
+    for nombre in candidatos:
+        norm = normalizar(nombre)
+        if norm in NOMBRE_OVERRIDES:
+            target = normalizar(NOMBRE_OVERRIDES[norm])
+            for p in proyectos_db:
+                if normalizar(p["nombre_comercial"]) == target:
+                    return p
+
+    # 1. Exacto
+    for nombre in candidatos:
+        norm = normalizar(nombre)
         for p in proyectos_db:
-            if normalizar(p["nombre_comercial"]) == target:
+            if normalizar(p["nombre_comercial"]) == norm:
                 return p
-
-    # 1. Exact
-    for p in proyectos_db:
-        if normalizar(p["nombre_comercial"]) == norm:
-            return p
 
     # 2. Substring
-    for p in proyectos_db:
-        n = normalizar(p["nombre_comercial"])
-        if n in norm or norm in n:
-            return p
-
-    # 3. Token — primero tokens que matchean UN SOLO proyecto (más específicos)
-    tokens = sorted([t for t in norm.split() if len(t) >= 4], key=len, reverse=True)
-    for parte in tokens:
-        matches = [p for p in proyectos_db
-                   if parte in normalizar(p["nombre_comercial"])]
-        if len(matches) == 1:
-            return matches[0]
-
-    # 4. Fallback: primer match de cualquier token
-    for parte in tokens:
+    for nombre in candidatos:
+        norm = normalizar(nombre)
         for p in proyectos_db:
-            if parte in normalizar(p["nombre_comercial"]):
+            n = normalizar(p["nombre_comercial"])
+            if n in norm or norm in n:
                 return p
+
+    # 3. Token único (más específico primero)
+    for nombre in candidatos:
+        tokens = sorted(
+            [t for t in normalizar(nombre).split() if len(t) >= 4],
+            key=len, reverse=True
+        )
+        for parte in tokens:
+            matches = [p for p in proyectos_db
+                       if parte in normalizar(p["nombre_comercial"])]
+            if len(matches) == 1:
+                return matches[0]
+
+    # 4. Primer token que da cualquier match
+    for nombre in candidatos:
+        tokens = sorted(
+            [t for t in normalizar(nombre).split() if len(t) >= 4],
+            key=len, reverse=True
+        )
+        for parte in tokens:
+            for p in proyectos_db:
+                if parte in normalizar(p["nombre_comercial"]):
+                    return p
 
     return None
 
@@ -242,9 +305,9 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
 def limpiar_liquidacion(api: API, liq_id: int):
     try:
         api.delete(f"/api/v1/liquidaciones/{liq_id}/limpiar")
-        print(f"  ~ Liquidación {liq_id} limpiada (mandatos/costos/facturas borrados)")
+        print(f"     ~ Liquidación {liq_id} limpiada (mandatos/costos/facturas borrados)")
     except Exception as exc:
-        print(f"  ✗ Error limpiando liquidación {liq_id}: {exc}")
+        print(f"     ✗ Error limpiando liquidación {liq_id}: {exc}")
         raise
 
 
@@ -252,6 +315,7 @@ def limpiar_liquidacion(api: API, liq_id: int):
 def cargar_hoja(
     api: API,
     filas: list[dict],
+    fac_map: dict[str, str],
     periodo_date: str,
     proyectos_db: list,
     usuario_id: int,
@@ -259,33 +323,36 @@ def cargar_hoja(
     limpiar: bool,
     stats: dict,
 ):
-    # Agrupar filas por proyecto
+    # Agrupar filas por nombre corto de proyecto
     grupos: dict[str, list] = {}
     for f in filas:
         grupos.setdefault(f["proyecto"], []).append(f)
 
     for nombre_proy, filas_proy in grupos.items():
+        # Nombre completo desde Data sheet vía código de factura
+        fac_code = next((f["nro_factura"] for f in filas_proy if f["nro_factura"]), "")
+        nombre_completo = fac_map.get(fac_code, "")
 
-        # ── Filtro: omitir si Ingreso Bruto es 0, None o #N/A ──────────────
+        # Omitir si Ingreso Bruto es 0, None o error (#N/A)
         ingreso_bruto = None
         for f in filas_proy:
             if re.search(r"ingreso bruto|^ingreso$", normalizar(f["concepto"])):
                 ingreso_bruto = f["total"]
                 break
         if ingreso_bruto is None or ingreso_bruto == 0:
-            print(f"  ⏭  Omitido (ingreso bruto cero/null/#N/A): '{nombre_proy}'")
+            print(f"  ⏭  Omitido (ingreso bruto {ingreso_bruto!r}): '{nombre_proy}'")
             stats["omitidos"].append(nombre_proy)
             continue
 
-        # ── Match con DB ────────────────────────────────────────────────────
-        proy_db = match_proyecto(proyectos_db, nombre_proy)
+        # Match con DB usando nombre completo y corto
+        proy_db = match_proyecto(proyectos_db, nombre_proy, nombre_completo)
         if not proy_db:
             stats["sin_match"].append(nombre_proy)
-            print(f"  ⚠  Sin match en DB: '{nombre_proy}'")
+            print(f"  ⚠  Sin match en DB: '{nombre_proy}' / '{nombre_completo}'")
             continue
 
         pid = proy_db["id"]
-        print(f"\n  -> {nombre_proy}  (DB: '{proy_db['nombre_comercial']}' id={pid})")
+        print(f"\n  -> '{nombre_proy}'  (DB: '{proy_db['nombre_comercial']}' id={pid})")
 
         if dry_run:
             stats["ok"] += 1
@@ -304,7 +371,8 @@ def cargar_hoja(
             print(f"     ✓ Liquidación creada id={liq_id}")
             stats["liq"] += 1
         except requests.HTTPError as e:
-            if e.response.status_code in (409, 422, 500):
+            status = e.response.status_code if e.response is not None else 0
+            if status in (409, 422, 500):
                 resp = api.get("/api/v1/liquidaciones",
                                params={"proyecto_id": pid, "size": 50})
                 y, m = periodo_date[:7].split("-")
@@ -314,10 +382,19 @@ def cargar_hoja(
                     None,
                 )
                 if not liq_id:
-                    print(f"     ✗ No se pudo crear ni encontrar liquidación "
-                          f"(status={e.response.status_code})")
+                    print(f"     ✗ No se pudo crear ni encontrar liquidación (status={status})")
                     continue
                 print(f"     ~ Liquidación existente id={liq_id}")
+
+                # Si ya tiene mandatos y no se pidió limpiar → saltar
+                liq_detail = api.get(f"/api/v1/liquidaciones/{liq_id}")
+                if liq_detail.get("mandatos") and not limpiar:
+                    print(
+                        f"     ⚠  Ya tiene mandatos cargados. "
+                        f"Usar --limpiar para reimportar. Saltando."
+                    )
+                    stats["ok"] += 1
+                    continue
             else:
                 raise
 
@@ -325,12 +402,16 @@ def cargar_hoja(
         if limpiar:
             limpiar_liquidacion(api, liq_id)
 
+        # ── Consecutivo: primer valor no nulo de col J ──────────────────────
+        consecutivo = next((f["codigo"] for f in filas_proy if f["codigo"] is not None), None)
+
         # ── Crear mandato de ingresos (nivel Total, sin inversionista) ──────
         m_resp = api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos", {
             "tipo":               "ingresos",
             "inversionista_id":   None,
             "beneficiario_nombre": None,
-            "consecutivo":        None,
+            "numero_mandato":     fac_code or None,  # columna H = UESP…
+            "consecutivo":        consecutivo,        # columna J
             "pa_aplica":          False,
         })
         if m_resp is None:
@@ -338,7 +419,7 @@ def cargar_hoja(
             continue
         mid = m_resp["id"]
         stats["mandatos"] += 1
-        print(f"     ✓ Mandato id={mid}")
+        print(f"     ✓ Mandato id={mid} (consecutivo={consecutivo})")
 
         # ── Cargar líneas ───────────────────────────────────────────────────
         neto_pagar = None
@@ -354,17 +435,17 @@ def cargar_hoja(
                 neto_pagar = f["total"]
                 continue
 
-            tipo_l = concepto_a_tipo_linea(f["concepto"])
             result = api.post(
                 f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas",
                 {
-                    "tipo_linea":         tipo_l,
+                    "tipo_linea":         concepto_a_tipo_linea(f["concepto"]),
                     "concepto":           f["concepto"],
                     "valor_cop":          f["total"],
                     "referencia_factura": f["nro_factura"] or None,
+                    "soporte_url":        f.get("soporte_url"),
                     "orden":              orden,
                 },
-                tolerante=True,   # tolerante a 500 de Railway post-commit
+                tolerante=True,  # tolerante a 500 de Railway post-commit
             )
             if result is not None:
                 stats["lineas"] += 1
@@ -384,7 +465,7 @@ def cargar_hoja(
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="Carga autoconsumo 2026 desde Excel al sistema de liquidaciones"
+        description="Carga autoconsumo desde Excel al sistema de liquidaciones"
     )
     parser.add_argument("--xlsx",     required=True,  help="Ruta al Excel")
     parser.add_argument("--hojas",    nargs="+",       default=["Enero"],
@@ -399,13 +480,11 @@ def main():
                         help="Borra mandatos/costos/facturas antes de reimportar")
     args = parser.parse_args()
 
-    # Autenticación
     print(f"Autenticando en {args.api_url} ...")
     api = API(args.api_url)
     api.login(args.usuario, args.password)
     print("Autenticado ✓\n")
 
-    # Cargar proyectos de DB una sola vez
     proyectos_db = api.get("/api/v1/proyectos", params={"size": 500})["items"]
     print(f"{len(proyectos_db)} proyectos en DB")
 
@@ -423,18 +502,17 @@ def main():
         print(f"Hoja: {hoja}  →  período {periodo_date}")
         print(sep)
 
-        filas = leer_hoja(args.xlsx, hoja)
-        print(f"  {len(filas)} filas Mandato leídas")
+        filas, fac_map = leer_hoja(args.xlsx, hoja)
+        print(f"  {len(filas)} filas Mandato leídas, {len(fac_map)} nombres en '{hoja} Data'")
 
         if args.dry_run:
             print("  [DRY RUN — no se escribirá nada en la API]")
 
         cargar_hoja(
-            api, filas, periodo_date, proyectos_db,
+            api, filas, fac_map, periodo_date, proyectos_db,
             usuario_id, args.dry_run, args.limpiar, stats,
         )
 
-    # ── Resumen final ─────────────────────────────────────────────────────────
     print("\n" + "=" * 55)
     print("RESUMEN FINAL")
     print("=" * 55)

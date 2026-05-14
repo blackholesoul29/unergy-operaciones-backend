@@ -2805,27 +2805,39 @@ function getInfRange(){
 
 /* ── Fallas del período para un proyecto ── */
 function getFaultsForRange(subProj,range){
+  // Recopilar todos los nombres posibles para este proyecto en un set
+  var names={};
+  function addName(n){if(n&&n.trim())names[n.trim()]=true;}
+
+  addName(subProj); // el valor del selector como fallback directo
+
+  // Desde genProjects (API Unergy)
   var cfg=genProjects.find(function(p){return p.sub_project===subProj;});
-  // Fuente alternativa: PROJS_DETALLE (BD) — tiene sub_project y nombre_comercial
+  if(cfg){
+    [cfg.nombre_comercial,cfg.nombre_bitacora,cfg.nombre_display,
+     cfg.nombre_clientes,cfg.sub_project].forEach(addName);
+  }
+
+  // Desde PROJS_DETALLE (BD) — buscar por sub_project, alias O nombre_comercial
   var pd=PROJS_DETALLE.find(function(p){
-    return (p.sub_project||"")=== subProj||(p.alias||"")===subProj;
+    return (p.sub_project||"")===subProj
+        ||(p.alias||"")===subProj
+        ||(p.nombre||"")===subProj;
   });
-  // Fuente FMO: nombre_clientes del contrato
+  if(pd) addName(pd.nombre);
+
+  // Desde fmoContratos
   var fmoC=fmoContratos.find(function(c){return c.sub_project===subProj;});
+  if(fmoC){addName(fmoC.nombre_clientes);addName(fmoC.nombre_display);}
+
+  console.log("[getFaultsForRange] subProj="+subProj+" names="+Object.keys(names).join("|")+" faults="+faults.length);
+
   return faults.filter(function(f){
-    var match=false;
-    if(cfg){
-      match=f.proj===cfg.nombre_bitacora||f.proj===cfg.nombre_display
-           ||f.proj===cfg.nombre_clientes||f.proj===cfg.sub_project;
-    }
-    // Si no coincidió con genProjects, probar nombre_comercial de BD
-    if(!match&&pd) match=f.proj===pd.nombre;
-    // Último recurso: nombre_clientes del contrato FMO
-    if(!match&&fmoC) match=f.proj===(fmoC.nombre_clientes||"")||f.proj===(fmoC.nombre_display||"");
-    if(!match)return false;
+    if(!names[f.proj])return false;
     var ds=String(f.date||"").trim(),iso="";
     var m1=ds.match(/^(\d{4})-(\d{2})-(\d{2})/),m2=ds.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
     if(m1)iso=ds.slice(0,10);else if(m2)iso=m2[3]+"-"+m2[2]+"-"+m2[1].padStart(2,"0");
+    if(!iso)return false;
     return iso>=range.from&&iso<=range.to;
   });
 }

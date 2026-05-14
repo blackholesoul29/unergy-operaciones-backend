@@ -8,6 +8,13 @@ class ProyectoBasico(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ClienteBasico(BaseModel):
+    id: int
+    razon_social_nombre: str
+    nit_cedula: str | None = None
+    model_config = {"from_attributes": True}
+
+
 class PPATarifaIn(BaseModel):
     año: int
     mes: int
@@ -36,6 +43,8 @@ class PPACompromisoOut(PPACompromisoIn):
 
 class PPAContratoCreate(BaseModel):
     proyecto_ids: list[int] = []
+    comprador_id: int | None = None
+    vendedor_id: int | None = None
     numero_codigo_contrato: str | None = None
     nombre_interno: str | None = None
     comprador_nombre: str | None = None
@@ -64,6 +73,8 @@ class PPAContratoCreate(BaseModel):
 
 class PPAContratoUpdate(BaseModel):
     proyecto_ids: list[int] | None = None
+    comprador_id: int | None = None
+    vendedor_id: int | None = None
     numero_codigo_contrato: str | None = None
     nombre_interno: str | None = None
     comprador_nombre: str | None = None
@@ -93,6 +104,10 @@ class PPAContratoUpdate(BaseModel):
 class PPAContratoOut(BaseModel):
     id: int
     proyectos: list[ProyectoBasico] = []
+    comprador_id: int | None = None
+    vendedor_id: int | None = None
+    comprador: ClienteBasico | None = None
+    vendedor: ClienteBasico | None = None
     numero_codigo_contrato: str | None
     nombre_interno: str | None
     comprador_nombre: str | None

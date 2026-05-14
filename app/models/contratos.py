@@ -68,6 +68,8 @@ class PPAContrato(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     numero_codigo_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    comprador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
+    vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
     comprador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     comprador_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     vendedor_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -95,6 +97,8 @@ class PPAContrato(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", secondary=ppa_contrato_proyectos_table)
+    comprador: Mapped["Cliente | None"] = relationship("Cliente", foreign_keys=[comprador_id])
+    vendedor: Mapped["Cliente | None"] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")
     compromisos_energia: Mapped[list["PPACompromisoEnergia"]] = relationship("PPACompromisoEnergia", back_populates="contrato", cascade="all, delete-orphan")
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto
+from app.models.clientes import Cliente
 from app.models.contratos import ppa_contrato_proyectos_table
 from app.schemas.ppa import (
     PPAContratoCreate, PPAContratoUpdate, PPAContratoOut,
@@ -16,9 +17,25 @@ router = APIRouter(prefix="/ppa", tags=["PPA"])
 def _load_options():
     return [
         selectinload(PPAContrato.proyectos),
+        selectinload(PPAContrato.comprador),
+        selectinload(PPAContrato.vendedor),
         selectinload(PPAContrato.tarifas),
         selectinload(PPAContrato.compromisos_energia),
     ]
+
+
+def _sync_partes_from_clientes(contrato: PPAContrato, db: Session):
+    """Si hay comprador_id/vendedor_id, sincroniza nombre y NIT desde el cliente."""
+    if contrato.comprador_id:
+        c = db.query(Cliente).filter(Cliente.id == contrato.comprador_id).first()
+        if c:
+            contrato.comprador_nombre = c.razon_social_nombre
+            contrato.comprador_nit = c.nit_cedula
+    if contrato.vendedor_id:
+        v = db.query(Cliente).filter(Cliente.id == contrato.vendedor_id).first()
+        if v:
+            contrato.vendedor_nombre = v.razon_social_nombre
+            contrato.vendedor_nit = v.nit_cedula
 
 
 def _get_contrato_or_404(id: int, db: Session) -> PPAContrato:
@@ -80,6 +97,7 @@ def create_contrato(
     db.add(contrato)
     db.flush()
     _set_proyectos(contrato, data.proyecto_ids, db)
+    _sync_partes_from_clientes(contrato, db)
     db.commit()
     return _get_contrato_or_404(contrato.id, db)
 
@@ -122,6 +140,7 @@ def update_contrato(
         setattr(contrato, k, v)
     if data.proyecto_ids is not None:
         _set_proyectos(contrato, data.proyecto_ids, db)
+    _sync_partes_from_clientes(contrato, db)
     db.commit()
     return _get_contrato_or_404(id, db)
 

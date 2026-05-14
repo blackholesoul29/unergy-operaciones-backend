@@ -1,5 +1,7 @@
+from __future__ import annotations
 import enum
 from datetime import datetime, date
+from typing import Optional
 from sqlalchemy import (BigInteger, Integer as sa_Integer, String, Numeric, Boolean, Date,
                         DateTime, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, Table, Column)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -97,8 +99,8 @@ class PPAContrato(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", secondary=ppa_contrato_proyectos_table)
-    comprador: Mapped["Cliente | None"] = relationship("Cliente", foreign_keys=[comprador_id])
-    vendedor: Mapped["Cliente | None"] = relationship("Cliente", foreign_keys=[vendedor_id])
+    comprador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[comprador_id])
+    vendedor: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")
     compromisos_energia: Mapped[list["PPACompromisoEnergia"]] = relationship("PPACompromisoEnergia", back_populates="contrato", cascade="all, delete-orphan")
 

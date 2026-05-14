@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -14,3 +14,4 @@ api_router.include_router(ppa.router)
 api_router.include_router(asic.router)
 api_router.include_router(fronteras.router)
 api_router.include_router(alertas.router)
+api_router.include_router(contratos_servicio.router)

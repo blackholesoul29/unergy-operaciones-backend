@@ -14,6 +14,7 @@ class ServicioAplicaEnum(str, enum.Enum):
     representacion = "representacion"
     cgm = "cgm"
     promotor = "promotor"
+    rec = "rec"
 
 
 class EstadoContratoEnum(str, enum.Enum):
@@ -43,13 +44,25 @@ class ContratoServicio(Base):
     __tablename__ = "contratos_servicio"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
     numero_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     servicio_aplica: Mapped[str] = mapped_column(SAEnum(ServicioAplicaEnum, name="servicio_aplica_enum"), nullable=False)
     contratante_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contratante_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     prestador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prestador_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    contratante_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
+    prestador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
+    tiene_cgm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    tiene_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    cgm_codigo_sic: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    cgm_porcentaje_fncer: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    cgm_tipo_asignacion: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    promotor_tarifa: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    promotor_condiciones: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rec_cantidad: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    rec_precio_unitario: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    rec_vintage: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin: Mapped[date | None] = mapped_column(Date, nullable=True)
     tarifa_base: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
@@ -62,6 +75,8 @@ class ContratoServicio(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contratos_servicio")
     documentos: Mapped[list] = relationship("Documento", primaryjoin="and_(Documento.entity_type=='contrato_servicio', foreign(Documento.entity_id)==ContratoServicio.id)", viewonly=True)
+    contratante: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[contratante_id])
+    prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
 
 
 class PPAContrato(Base):

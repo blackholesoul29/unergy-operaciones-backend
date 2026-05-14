@@ -322,41 +322,55 @@ body.client-mode #tab-inf{display:none!important}
 #inf-content[contenteditable="true"] .fmo-section-title:hover,
 #inf-content[contenteditable="true"] .rpt-section-title:hover{outline:1.5px dashed #915BD880;border-radius:3px;cursor:text}
 /* ── Print ── */
+@page{size:A4 portrait;margin:8mm 10mm}
 @media print{
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
   .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
-  body{background:#fff!important;margin:0;padding:0}
-  #inf-panel{padding:0!important;max-width:100%!important}
-  #inf-content{display:block!important}
-  .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
-    page-break-after:always;break-after:page;border:none!important}
+  html,body{background:#fff!important;margin:0;padding:0;font-size:11px}
+  #app,#inf-panel{padding:0!important;max-width:100%!important;margin:0!important}
+  #inf-content{display:block!important;margin:0!important;padding:0!important}
+  /* Cada rpt-page = 1 página impresa */
+  .rpt-page{box-shadow:none!important;border-radius:0!important;margin:0!important;
+    page-break-after:always;break-after:page;border:none!important;
+    padding-bottom:4mm!important}
   .rpt-page:last-child{page-break-after:auto;break-after:auto}
   .rpt-page-sep{page-break-after:always;break-after:page;display:block;height:0}
-  /* Header */
-  .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important}
+  /* Evitar cortes dentro de secciones pequeñas */
+  .rpt-section{break-inside:avoid;padding:10px 22px!important}
+  .rpt-kpi-row{break-inside:avoid}
+  .fmo-kpi-grid{break-inside:avoid}
+  /* Header compacto */
+  .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important;padding:12px 22px!important}
   .rpt-meta-item{background:#221533!important}
   .rpt-meta-lbl{color:#A89EC0!important}
-  .rpt-meta-val{color:#fff!important}
-  /* Tabla encabezado - amarillo → dorado legible */
+  .rpt-meta-val{color:#fff!important;font-size:12px!important}
+  /* Tabla */
   .rpt-table th{background:#1A0F2E!important;color:#E8C840!important}
   .rpt-total-row td{background:#EDE8F5!important}
   .rpt-table tbody tr:nth-child(even) td{background:#F9F7FD!important}
+  .rpt-table{font-size:10px!important}
   /* KPI y secciones */
-  .rpt-kpi{background:#F7F4FD!important;border:1px solid #C8B8E8!important}
+  .rpt-kpi{background:#F7F4FD!important;border:1px solid #C8B8E8!important;padding:10px 12px!important}
+  .rpt-kpi-val{font-size:17px!important}
   .rpt-obs-text{background:#F0FFF4!important;border-left:3px solid #2E8B57!important}
   .rpt-status-box{background:#F7F4FD!important}
-  .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important}
   .rpt-footer{background:#F7F4FD!important}
   .rpt-section-title{border-left:3px solid #5B2DAA!important;color:#1A0F2E!important}
-  /* Colores de texto - amarillo→dorado, verde mantener, rojo mantener */
+  /* Gráficas: altura reducida para que quepan en página */
+  .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important;padding:8px 10px!important}
+  .rpt-chart-card>div[style*="height"]{height:130px!important;position:relative}
+  /* FMO gráficas */
+  [id^="fmoc1_"],[id^="fmoc2_"],[id^="rptc1_"],[id^="rptc2_"]{max-height:130px!important}
+  /* Colores */
   [style*="color:#F6FF72"],[style*="color: #F6FF72"]{color:#B8860B!important}
   [style*="color:#4ADE80"]{color:#2D8A4E!important}
-  /* Ocultar hint de edición */
+  .fmo-section-title{background:#F0EBF8!important;border-left:4px solid #1A0F2E!important}
+  .fmo-ok-box{background:#E8F5E9!important}
+  .fmo-multa-box{background:#FFEBEE!important}
+  /* Edición */
   .rpt-edit-hint{display:none!important}
-  /* Observaciones editables - mostrar como texto normal */
   .rpt-obs-editable{outline:none!important;border:none!important;background:#F0FFF4!important}
-  /* Ocultar controles de edición */
   #rpt-toolbar,.rpt-del-row,.rpt-del-th,.rpt-del-section{display:none!important}
 }
 </style>
@@ -3170,27 +3184,107 @@ function buildConsolidatedPage(portName,projsData,range,totalPages){
     +'</div>';
 }
 
+/* ── Plugin inline: valores encima de cada barra ── */
+var _barValuePlugin={
+  id:"barValues",
+  afterDatasetsDraw:function(chart){
+    var ctx=chart.ctx;
+    chart.data.datasets.forEach(function(ds,i){
+      var meta=chart.getDatasetMeta(i);
+      if(meta.type!=="bar")return;
+      meta.data.forEach(function(bar,j){
+        var val=ds.data[j];
+        if(val==null||val===0)return;
+        var str=val>=1000?(Math.round(val/100)/10).toFixed(1)+"k":Math.round(val)+"";
+        ctx.save();
+        ctx.fillStyle="#1A0F2E";
+        ctx.font="bold 9px 'Sora',sans-serif";
+        ctx.textAlign="center";
+        ctx.textBaseline="bottom";
+        ctx.fillText(str,bar.x,bar.y-3);
+        ctx.restore();
+      });
+    });
+  }
+};
+
 /* ── Renderizar gráficas del informe ── */
 function renderRptCharts(){
   Object.keys(rptChartQueue).forEach(function(id){
     var q=rptChartQueue[id],cv=document.getElementById(id);
     if(!cv)return;
     var ctx=cv.getContext("2d"),c=null,d=q.d;
+
     if(q.type==="daily"){
+      // Eje X: solo número de día (1,2,3…) en vez de fecha completa
+      var xLabels=d.labels.map(function(lbl){
+        var m=lbl.match(/-(\d{2})(?:T|$)/)||lbl.match(/-(\d{1,2})$/);
+        return m?String(parseInt(m[1])):lbl;
+      });
       var atypSet={};(d.atypDates||[]).forEach(function(dt){atypSet[dt]=true;});
       var barColors=d.labels.map(function(lbl){return atypSet[lbl]?"rgba(220,50,50,.8)":"rgba(107,53,192,.8)";});
       var barBorders=d.labels.map(function(lbl){return atypSet[lbl]?"#DC3232":"#6B35C0";});
       var dsets=[{type:"bar",label:"Real",data:d.kwh,backgroundColor:barColors,borderColor:barBorders,borderWidth:1,borderRadius:2,order:2}];
       if(d.p90d)dsets.push({type:"line",label:"P90",data:d.labels.map(function(){return d.p90d;}),borderColor:"#CC8800",borderWidth:1.5,pointRadius:0,fill:false,tension:0,borderDash:[5,3],order:1});
-      c=new Chart(ctx,{data:{labels:d.labels,datasets:dsets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:"#1E1529",borderColor:"#4A3560",borderWidth:1,callbacks:{label:function(i){return" "+(i.dataset.type==="line"?"P90":"Real")+": "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}}}},scales:{x:{ticks:{color:"#555",font:{size:8},maxRotation:45,maxTicksLimit:12},grid:{display:false},border:{color:"#ccc"}},y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/100)/10+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}}}});
+      c=new Chart(ctx,{
+        data:{labels:xLabels,datasets:dsets},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            tooltip:{backgroundColor:"#1E1529",borderColor:"#4A3560",borderWidth:1,
+              callbacks:{
+                title:function(items){return d.labels[items[0].dataIndex]||"";},
+                label:function(i){return" "+(i.dataset.type==="line"?"P90":"Real")+": "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}
+              }
+            }
+          },
+          scales:{
+            x:{ticks:{color:"#555",font:{size:8},maxRotation:0,autoSkip:false},grid:{display:false},border:{color:"#ccc"}},
+            y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/100)/10+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}
+          }
+        }
+      });
     }else if(q.type==="comp"){
-      var labs=["Real"],vals=[d.real],cols=["rgba(107,53,192,.8)"],bcols=["#6B35C0"];
-      if(d.p50!=null){labs.push("P50");vals.push(d.p50);cols.push("rgba(70,130,200,.7)");bcols.push("#4682C8");}
-      if(d.p90!=null){labs.push("P90");vals.push(d.p90);cols.push("rgba(200,150,0,.7)");bcols.push("#C89600");}
-      if(d.p99!=null){labs.push("P99");vals.push(d.p99);cols.push("rgba(50,150,80,.7)");bcols.push("#329650");}
-      c=new Chart(ctx,{type:"bar",data:{labels:labs,datasets:[{data:vals,backgroundColor:cols,borderColor:bcols,borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}}}},scales:{x:{ticks:{color:"#555",font:{size:11}},grid:{display:false},border:{color:"#ccc"}},y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/1000)+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}}}});
+      var labs=["Real"],vals=[d.real],cols=["rgba(107,53,192,.85)"],bcols=["#6B35C0"];
+      if(d.p50!=null){labs.push("P50");vals.push(d.p50);cols.push("rgba(70,130,200,.75)");bcols.push("#4682C8");}
+      if(d.p90!=null){labs.push("P90");vals.push(d.p90);cols.push("rgba(200,150,0,.75)");bcols.push("#C89600");}
+      if(d.p99!=null){labs.push("P99");vals.push(d.p99);cols.push("rgba(50,150,80,.75)");bcols.push("#329650");}
+      c=new Chart(ctx,{
+        type:"bar",
+        plugins:[_barValuePlugin],
+        data:{labels:labs,datasets:[{data:vals,backgroundColor:cols,borderColor:bcols,borderWidth:1.5,borderRadius:4}]},
+        options:{responsive:true,maintainAspectRatio:false,
+          layout:{padding:{top:18}},
+          plugins:{
+            legend:{display:false},
+            tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}}}
+          },
+          scales:{
+            x:{ticks:{color:"#444",font:{size:11,weight:"bold"}},grid:{display:false},border:{color:"#ccc"}},
+            y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/1000)+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}
+          }
+        }
+      });
     }else if(q.type==="port"){
-      c=new Chart(ctx,{type:"bar",data:{labels:d.labels,datasets:[{label:"Real (kWh)",data:d.vals,backgroundColor:"rgba(107,53,192,.8)",borderColor:"#6B35C0",borderWidth:1.5,borderRadius:3},{label:"P90 (kWh)",data:d.p90s,backgroundColor:"rgba(200,150,0,.4)",borderColor:"#C89600",borderWidth:1.5,borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:"#444",font:{size:10}}},tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+i.dataset.label+": "+Math.round(i.raw||0).toLocaleString("es-CO")+" kWh";}}}},scales:{x:{ticks:{color:"#555",font:{size:9},maxRotation:45},grid:{display:false},border:{color:"#ccc"}},y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/1000)+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}}}});
+      c=new Chart(ctx,{
+        type:"bar",
+        plugins:[_barValuePlugin],
+        data:{labels:d.labels,datasets:[
+          {label:"Real (kWh)",data:d.vals,backgroundColor:"rgba(107,53,192,.8)",borderColor:"#6B35C0",borderWidth:1.5,borderRadius:3},
+          {label:"P90 (kWh)",data:d.p90s,backgroundColor:"rgba(200,150,0,.4)",borderColor:"#C89600",borderWidth:1.5,borderRadius:3}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          layout:{padding:{top:18}},
+          plugins:{
+            legend:{display:true,labels:{color:"#444",font:{size:10}}},
+            tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+i.dataset.label+": "+Math.round(i.raw||0).toLocaleString("es-CO")+" kWh";}}}
+          },
+          scales:{
+            x:{ticks:{color:"#555",font:{size:9},maxRotation:45},grid:{display:false},border:{color:"#ccc"}},
+            y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/1000)+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}
+          }
+        }
+      });
     }
     if(c)infChartInstances.push(c);
   });

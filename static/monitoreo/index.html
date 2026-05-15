@@ -4503,8 +4503,10 @@ function _updateSavedBannerDate(isoDate){
 
 // ── Lógica de informes guardados (backend) ──────────────────────────────────
 
-// URL base del backend: vacío si ya estamos en Railway, absoluto si venimos desde Vercel/iframe
-var _BACKEND_API = (window.location.hostname.indexOf('railway.app') >= 0) ? '' : 'https://backend-production-63d8.up.railway.app';
+// URL base absoluta de Railway: necesaria porque el iframe corre bajo el origen
+// de Vercel y Vercel no tiene proxy para /api/v1/informes/.
+// CORS en Railway ya permite *.vercel.app así que la petición cross-origin pasa.
+var _BACKEND_API = 'https://backend-production-63d8.up.railway.app';
 
 var _rptBackendId=null;  // ID del informe en la BD si ya fue guardado
 

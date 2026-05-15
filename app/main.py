@@ -524,9 +524,11 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# El iframe de monitoreo se sirve desde Railway, por eso su origen no viene
-# del Vercel frontend; las peticiones API son same-origin. Solo necesitamos
-# permitir el Vercel frontend para las demás rutas.
+# El monitoreo se carga en un iframe desde Vercel. El origen del iframe es el
+# dominio de Vercel (variable o desconocido). Usamos allow_origin_regex para
+# cubrir cualquier subdominio de vercel.app sin necesidad de hardcodear el
+# dominio exacto. Se agrega también FRONTEND_URL por si se configura un
+# dominio custom en el futuro.
 _ALLOWED_ORIGINS = [
     settings.FRONTEND_URL,
     "http://localhost:5173",
@@ -536,6 +538,7 @@ _ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

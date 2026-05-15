@@ -713,6 +713,7 @@ body.client-mode #tab-inf{display:none!important}
   <div id="rpt-toolbar" style="display:none">
     <span style="font-size:11px;color:var(--mu);font-weight:700">Antes de imprimir:</span>
     <button id="rpt-edit-btn" class="btn btn-gh btn-sm" onclick="toggleRptEdit()" style="gap:5px">✏️ Editar informe</button>
+    <button id="rpt-save-btn" class="btn btn-gh btn-sm" onclick="saveRptEdit()" style="display:none;color:#2D8A4E;border-color:#4ADE8060;gap:5px">💾 Guardar cambios</button>
     <button id="rpt-restore-btn" class="btn btn-gh btn-sm" onclick="restoreRptSections()" style="display:none;color:var(--bl);border-color:var(--bl)40">↩ Mostrar todo</button>
     <span id="rpt-edit-hint" style="font-size:10px;color:var(--fa);display:none">Clic en cualquier texto para editar · <span style="color:var(--re)">✕</span> para eliminar fila o sección</span>
   </div>
@@ -3311,6 +3312,7 @@ function generateInforme(){
   if(infMode==="proyecto"){
     var sp=(document.getElementById("inf-proj")||{}).value||"";
     if(!sp){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un proyecto");return;}
+    _rptCurrentKey=_rptKey("op",sp,range.from,range.to);
     // Buscar cfg: primero por sub_project exacto, luego por nombre/alias via PROJS_DETALLE
     var cfg=genProjects.find(function(p){return p.sub_project===sp;});
     if(!cfg){
@@ -3335,7 +3337,9 @@ function generateInforme(){
       document.getElementById("inf-content").style.display="block";
       document.getElementById("inf-print").style.display="inline-flex";
       _showRptToolbar();
-      setTimeout(renderRptCharts,150);
+      var _sbtn=document.getElementById("rpt-save-btn");
+      if(_sbtn)_sbtn.style.display="none";
+      setTimeout(function(){renderRptCharts();_checkRptSaved();},150);
     }).catch(function(){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Error al consultar generación");});
 
   }else{
@@ -3371,6 +3375,7 @@ function generateInforme(){
 }
 
 function finishPortReport(pname,results,range){
+  _rptCurrentKey=_rptKey("port",pname,range.from,range.to);
   document.getElementById("inf-loading").style.display="none";
   // ── Ordenar de mayor a menor generación ──
   results.sort(function(a,b){
@@ -3385,7 +3390,9 @@ function finishPortReport(pname,results,range){
   document.getElementById("inf-content").style.display="block";
   document.getElementById("inf-print").style.display="inline-flex";
   _showRptToolbar();
-  setTimeout(renderRptCharts,180);
+  var _sbtn2=document.getElementById("rpt-save-btn");
+  if(_sbtn2)_sbtn2.style.display="none";
+  setTimeout(function(){renderRptCharts();_checkRptSaved();},180);
 }
 
 /* ── Listeners del panel informe ── */
@@ -3563,6 +3570,7 @@ function generateFMOInforme(){
     year:_y,month:_m,monthName:MESES_LARG[_m-1],lastDay:_last,
     headerPeriod:MESES_LARG[_m-1]+" "+_y,isCustom:false,totalDays:_last};
 
+  _rptCurrentKey=_rptKey("fmo",sp,ym);
   // Reset UI
   document.getElementById("inf-empty").style.display="none";
   document.getElementById("inf-content").style.display="none";
@@ -3600,9 +3608,11 @@ function generateFMOInforme(){
       document.getElementById("inf-content").style.display="block";
       document.getElementById("fmo-print").style.display="inline-flex";
       _showRptToolbar();
+      var _sbtn3=document.getElementById("rpt-save-btn");
+      if(_sbtn3)_sbtn3.style.display="none";
       _fmoMants=mant;
       bindMantEditHandlers();
-      setTimeout(function(){renderRptCharts();},200);
+      setTimeout(function(){renderRptCharts();_checkRptSaved();},200);
     }catch(e2){
       console.error("[FMO] buildFMOPage error:",e2);
       document.getElementById("inf-content").innerHTML=
@@ -4067,6 +4077,103 @@ function rkpiRow(ico,lbl,val,col){
 
 /* ══ EDICIÓN DE INFORME ANTES DE IMPRIMIR ══ */
 var _rptEditMode=false;
+var _rptCurrentKey=null; // clave localStorage del informe activo
+
+// ── Persistencia de ediciones ──
+function _rptKey(type,id,from,to){
+  // type: "op"|"fmo"|"port"   id: sub_project o portfolio name
+  return "rpt_edit_"+type+"_"+encodeURIComponent(id)+"_"+from+(to?"_"+to:"");
+}
+
+function saveRptEdit(){
+  if(!_rptCurrentKey){toast("⚠ Genera un informe primero");return;}
+  var c=document.getElementById("inf-content");
+  if(!c||!c.innerHTML.trim())return;
+  try{
+    // Clonar sin botones de edición para guardar HTML limpio
+    var clone=c.cloneNode(true);
+    clone.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
+    clone.querySelectorAll("[contenteditable]").forEach(function(el){
+      el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";
+    });
+    var payload=JSON.stringify({html:clone.innerHTML,charts:rptChartQueue,savedAt:new Date().toISOString()});
+    localStorage.setItem(_rptCurrentKey,payload);
+    toast("💾 Edición guardada");
+    _updateSavedBannerDate(new Date().toISOString());
+  }catch(e){console.error("[rpt-save]",e);toast("⚠ Error al guardar");}
+}
+
+function clearRptEdit(){
+  if(!_rptCurrentKey)return;
+  localStorage.removeItem(_rptCurrentKey);
+  var bn=document.getElementById("rpt-saved-banner");
+  if(bn)bn.remove();
+  toast("🗑 Edición descartada");
+}
+
+function restoreRptSavedEdit(){
+  if(!_rptCurrentKey)return;
+  var raw=localStorage.getItem(_rptCurrentKey);
+  if(!raw){toast("⚠ No hay edición guardada");return;}
+  try{
+    var saved=JSON.parse(raw);
+    if(!saved||!saved.html){toast("⚠ Edición inválida");return;}
+    var c=document.getElementById("inf-content");
+    if(!c)return;
+    // Destruir charts existentes
+    infChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+    fmoChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+    infChartInstances=[];fmoChartInstances=[];
+    c.innerHTML=saved.html;
+    if(saved.charts&&Object.keys(saved.charts).length){
+      rptChartQueue=saved.charts;
+      setTimeout(renderRptCharts,150);
+    }
+    var bn=document.getElementById("rpt-saved-banner");
+    if(bn)bn.remove();
+    var sb=document.getElementById("rpt-save-btn");
+    if(sb)sb.style.display="inline-flex";
+    toast("✅ Edición restaurada");
+  }catch(e){console.error("[rpt-restore]",e);toast("⚠ Error al restaurar");}
+}
+
+function _checkRptSaved(){
+  if(!_rptCurrentKey)return;
+  var raw=localStorage.getItem(_rptCurrentKey);
+  if(!raw)return;
+  try{
+    var saved=JSON.parse(raw);
+    if(!saved||!saved.savedAt)return;
+    _showSavedBanner(saved.savedAt);
+  }catch(e){}
+}
+
+function _showSavedBanner(isoDate){
+  var tb=document.getElementById("rpt-toolbar");
+  if(!tb)return;
+  var old=document.getElementById("rpt-saved-banner");
+  if(old)old.remove();
+  var d=new Date(isoDate);
+  var ds=d.toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"})
+         +" "+d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});
+  var bn=document.createElement("div");
+  bn.id="rpt-saved-banner";
+  bn.style.cssText="display:flex;align-items:center;gap:8px;background:#F0FFF4;border:1px solid #4ADE8040;border-radius:8px;padding:5px 12px;flex:1;flex-wrap:wrap";
+  bn.innerHTML='<span style="font-size:11px;font-weight:700;color:#2D8A4E">📝 Versión editada — '+ds+'</span>'
+    +'<button class="btn btn-sm" onclick="restoreRptSavedEdit()" style="background:#4ADE8020;border:1px solid #4ADE8060;color:#2D8A4E;font-size:10px;padding:3px 10px;font-family:inherit">↩ Restaurar mi edición</button>'
+    +'<button class="btn btn-sm" onclick="clearRptEdit()" style="background:transparent;border:1px solid #FF575740;color:#FF5757;font-size:10px;padding:3px 10px;font-family:inherit">✕ Descartar</button>';
+  tb.appendChild(bn);
+}
+
+function _updateSavedBannerDate(isoDate){
+  var bn=document.getElementById("rpt-saved-banner");
+  if(!bn){_showSavedBanner(isoDate);return;}
+  var d=new Date(isoDate);
+  var ds=d.toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"})
+         +" "+d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});
+  var sp=bn.querySelector("span");
+  if(sp)sp.textContent="📝 Versión editada — "+ds;
+}
 
 function _showRptToolbar(){
   var tb=document.getElementById("rpt-toolbar");
@@ -4142,6 +4249,8 @@ function toggleRptEdit(){
     btn.style.background="var(--re)";btn.style.color="var(--cr)";btn.style.border="none";
     btn.textContent="🔒 Confirmar";
     if(hint)hint.style.display="block";
+    var sb=document.getElementById("rpt-save-btn");
+    if(sb)sb.style.display="none"; // ocultar mientras se edita; confirmar guarda solo
   }else{
     // Desactivar: quitar contenteditable de los elementos que pusimos
     c.querySelectorAll("[contenteditable]").forEach(function(el){
@@ -4157,6 +4266,10 @@ function toggleRptEdit(){
     btn.style.background="";btn.style.color="";btn.style.border="";
     btn.textContent="✏️ Editar informe";
     if(hint)hint.style.display="none";
+    // Auto-guardar al confirmar edición
+    saveRptEdit();
+    var sb=document.getElementById("rpt-save-btn");
+    if(sb)sb.style.display="inline-flex";
   }
 }
 

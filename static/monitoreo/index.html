@@ -337,7 +337,8 @@ body.client-mode #tab-inf{display:none!important}
     page-break-after:always;break-after:page;border:none!important;
     width:100%!important;overflow:visible!important}
   .rpt-page:last-child{page-break-after:auto!important;break-after:auto!important}
-  .rpt-page-sep{page-break-after:always;break-after:page;display:block!important;height:0!important;margin:0!important;padding:0!important;background:#fff!important}
+  /* Ocultar en impresión: .rpt-page ya lleva page-break-after, el sep crearía páginas en blanco */
+  .rpt-page-sep{display:none!important}
   /* Header */
   .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important;overflow:visible!important}
   .rpt-meta-item{background:#221533!important}
@@ -363,7 +364,8 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-kpi-row{display:grid!important;grid-template-columns:repeat(3,1fr)!important;max-width:100%!important}
   .rpt-meta-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;max-width:100%!important}
   .fmo-kpi-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;max-width:100%!important}
-  /* Gráficas: altura controlada */
+  /* Gráficas: limitar altura del contenedor Y del canvas para evitar espacio vacío */
+  .rpt-chart-card>div{height:auto!important;max-height:165px!important}
   .rpt-chart-card canvas{max-height:155px!important;max-width:100%!important}
   /* Colores de texto - amarillo→dorado */
   [style*="color:#F6FF72"],[style*="color: #F6FF72"]{color:#B8860B!important}

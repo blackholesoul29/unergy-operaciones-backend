@@ -322,15 +322,18 @@ body.client-mode #tab-inf{display:none!important}
 #inf-content[contenteditable="true"] .fmo-section-title:hover,
 #inf-content[contenteditable="true"] .rpt-section-title:hover{outline:1.5px dashed #915BD880;border-radius:3px;cursor:text}
 /* ── Print ── */
+@page{size:A4 portrait;margin:12mm 14mm}
 @media print{
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
   .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
+  html{zoom:.76}
   body{background:#fff!important;margin:0;padding:0}
   #inf-panel{padding:0!important;max-width:100%!important}
-  #inf-content{display:block!important}
+  #inf-content{display:block!important;width:100%}
   .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
-    page-break-after:always;break-after:page;border:none!important}
+    page-break-after:always;break-after:page;border:none!important;
+    overflow:hidden;width:100%}
   .rpt-page:last-child{page-break-after:auto;break-after:auto}
   .rpt-page-sep{page-break-after:always;break-after:page;display:block;height:0}
   /* Header */
@@ -358,6 +361,16 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-obs-editable{outline:none!important;border:none!important;background:#F0FFF4!important}
   /* Ocultar controles de edición */
   #rpt-toolbar,.rpt-del-row,.rpt-del-th,.rpt-del-section{display:none!important}
+  /* Gráficas: altura reducida para caber en la hoja */
+  .rpt-chart-card canvas{max-height:140px!important}
+  /* Evitar cortes en tablas y KPIs */
+  .rpt-table tr{break-inside:avoid;page-break-inside:avoid}
+  .rpt-kpi-row{break-inside:avoid;page-break-inside:avoid}
+  .fmo-section-title{break-inside:avoid;page-break-inside:avoid}
+  /* Secciones sin espaciado extra */
+  .rpt-section{padding:10px 22px!important}
+  .rpt-header{padding:12px 22px!important}
+  .rpt-footer{padding:7px 22px!important}
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

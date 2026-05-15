@@ -332,12 +332,11 @@ body.client-mode #tab-inf{display:none!important}
   body{background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important;width:100%!important}
   #inf-panel{background:#fff!important;padding:0!important;max-width:100%!important;width:100%!important;overflow:visible!important}
   #inf-content{display:block!important;background:#fff!important;width:100%!important;overflow:visible!important}
-  /* CLAVE: flex-column + min-height igual a área útil A4 (277mm físicos / zoom .72 = 385mm CSS)
-     El footer queda siempre al borde inferior gracias a margin-top:auto */
+  /* flex-column para que el espaciador JS pueda empujar el footer al borde inferior */
   .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
     page-break-after:always;break-after:page;border:none!important;
     width:100%!important;overflow:visible!important;
-    display:flex!important;flex-direction:column!important;min-height:385mm!important}
+    display:flex!important;flex-direction:column!important}
   .rpt-page:last-child{page-break-after:auto!important;break-after:auto!important}
   /* Ocultar en impresión: .rpt-page ya lleva page-break-after, el sep crearía páginas en blanco */
   .rpt-page-sep{display:none!important}
@@ -360,7 +359,7 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-obs-text{background:#F0FFF4!important;border-left:3px solid #2E8B57!important;overflow:visible!important}
   .rpt-status-box{background:#F7F4FD!important;overflow:visible!important}
   .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important;overflow:visible!important;max-width:100%!important}
-  .rpt-footer{background:#F7F4FD!important;overflow:visible!important;margin-top:auto!important}
+  .rpt-footer{background:#F7F4FD!important;overflow:visible!important}
   .rpt-section-title{border-left:3px solid #5B2DAA!important;color:#1A0F2E!important}
   /* Grids: asegurar que caben en el ancho */
   .rpt-kpi-row{display:grid!important;grid-template-columns:repeat(3,1fr)!important;max-width:100%!important}
@@ -3684,6 +3683,37 @@ document.querySelectorAll(".inf-period-btn").forEach(function(btn){
 });
 var _ig=document.getElementById("inf-gen");if(_ig)_ig.addEventListener("click",function(){if(userRole==="cliente")return;generateInforme();});
 var _ip=document.getElementById("inf-print");if(_ip)_ip.addEventListener("click",function(){window.print();});
+
+/* ── Footer al borde de página: espaciador dinámico en beforeprint ──
+   Lógica: en beforeprint Chrome ya aplicó @media print + zoom.
+   scrollHeight de .rpt-page devuelve px físicos (zoom incluido).
+   A4 contenido = 277mm = 1047px físicos.
+   El espaciador (en CSS px sin zoom) llena el hueco hasta el pie. */
+var _rptSpacers=[];
+function _addRptFooterSpacers(){
+  var PAGE_PX=Math.round(277/25.4*96); // 1047px — área útil A4 a 96dpi
+  var ZOOM=0.72;                        // coincide con html{zoom} en @media print
+  document.querySelectorAll('.rpt-page').forEach(function(page){
+    // ignorar páginas ocultas (display:none → scrollHeight=0)
+    if(!page.scrollHeight)return;
+    var footer=page.querySelector('.rpt-footer');
+    if(!footer)return;
+    var gap=PAGE_PX-page.scrollHeight; // px físicos disponibles por encima del footer
+    if(gap>0){
+      var sp=document.createElement('div');
+      sp.style.cssText='flex-shrink:0;flex-grow:0;height:'+Math.round(gap/ZOOM)+'px;display:block';
+      page.insertBefore(sp,footer);
+      _rptSpacers.push(sp);
+    }
+  });
+}
+function _clearRptFooterSpacers(){
+  _rptSpacers.forEach(function(s){if(s.parentNode)s.parentNode.removeChild(s);});
+  _rptSpacers=[];
+}
+window.addEventListener('beforeprint',_addRptFooterSpacers);
+window.addEventListener('afterprint',_clearRptFooterSpacers);
+
 /* ══════════════════════════════════════════════════
    INFORME FMO — Contrato O&M
 ══════════════════════════════════════════════════ */

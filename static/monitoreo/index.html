@@ -362,10 +362,18 @@ body.client-mode #tab-inf{display:none!important}
   #rpt-toolbar,.rpt-del-row,.rpt-del-th,.rpt-del-section{display:none!important}
   /* Gráficas: altura reducida para caber en la hoja */
   .rpt-chart-card canvas{max-height:140px!important}
-  /* Evitar cortes en tablas y KPIs */
-  .rpt-table tr{break-inside:avoid;page-break-inside:avoid}
-  .rpt-kpi-row{break-inside:avoid;page-break-inside:avoid}
-  .fmo-section-title{break-inside:avoid;page-break-inside:avoid}
+  /* Evitar cortes en bloques internos */
+  .rpt-header{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-footer{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-kpi-row{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-kpi{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-chart-card{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-status-box{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-obs-text{break-inside:avoid!important;page-break-inside:avoid!important}
+  .rpt-table tr{break-inside:avoid!important;page-break-inside:avoid!important}
+  /* Evitar que un título de sección quede solo al pie de página */
+  .rpt-section-title{break-after:avoid!important;page-break-after:avoid!important}
+  .fmo-section-title{break-after:avoid!important;page-break-after:avoid!important}
   /* Secciones sin espaciado extra */
   .rpt-section{padding:10px 22px!important}
   .rpt-header{padding:12px 22px!important}

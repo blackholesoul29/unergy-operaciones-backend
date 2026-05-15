@@ -322,47 +322,57 @@ body.client-mode #tab-inf{display:none!important}
 #inf-content[contenteditable="true"] .fmo-section-title:hover,
 #inf-content[contenteditable="true"] .rpt-section-title:hover{outline:1.5px dashed #915BD880;border-radius:3px;cursor:text}
 /* ── Print ── */
-@page{size:A4 portrait;margin:12mm 14mm}
+@page{size:A4 portrait;margin:10mm 10mm}
 @media print{
-  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}
   #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
   .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
-  html{zoom:.76;background:#fff!important;min-height:0!important;height:auto!important}
-  body{background:#fff!important;margin:0;padding:0}
-  #inf-panel{background:#fff!important;padding:0!important;max-width:100%!important}
-  #inf-content{display:block!important;background:#fff!important;width:100%}
+  /* Escalar para que 1100px de contenido quepa en A4 sin cortes */
+  html{zoom:.72;background:#fff!important;min-height:0!important;height:auto!important}
+  body{background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important;width:100%!important}
+  #inf-panel{background:#fff!important;padding:0!important;max-width:100%!important;width:100%!important;overflow:visible!important}
+  #inf-content{display:block!important;background:#fff!important;width:100%!important;overflow:visible!important}
+  /* CLAVE: overflow:visible para que no se corte ningún elemento */
   .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
-    page-break-after:always;break-after:page;border:none!important;width:100%!important;overflow:hidden!important}
+    page-break-after:always;break-after:page;border:none!important;
+    width:100%!important;overflow:visible!important}
   .rpt-page:last-child{page-break-after:auto!important;break-after:auto!important}
   .rpt-page-sep{page-break-after:always;break-after:page;display:block!important;height:0!important;margin:0!important;padding:0!important;background:#fff!important}
   /* Header */
-  .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important}
+  .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important;overflow:visible!important}
   .rpt-meta-item{background:#221533!important}
   .rpt-meta-lbl{color:#A89EC0!important}
   .rpt-meta-val{color:#fff!important}
-  /* Tabla encabezado - amarillo → dorado legible */
+  /* Tablas: ancho 100%, sin desbordamiento horizontal */
+  .rpt-table{width:100%!important;max-width:100%!important;table-layout:fixed!important}
+  .rpt-table th,.rpt-table td{word-break:break-word!important;overflow-wrap:break-word!important;white-space:normal!important}
   .rpt-table th{background:#1A0F2E!important;color:#E8C840!important}
   .rpt-total-row td{background:#EDE8F5!important}
   .rpt-table tbody tr:nth-child(even) td{background:#F9F7FD!important}
+  /* Tablas FMO */
+  .fmo-inv-table,.fmo-mant-table{width:100%!important;max-width:100%!important;table-layout:fixed!important}
+  .fmo-inv-table th,.fmo-inv-table td,.fmo-mant-table th,.fmo-mant-table td{word-break:break-word!important;overflow-wrap:break-word!important}
   /* KPI y secciones */
-  .rpt-kpi{background:#F7F4FD!important;border:1px solid #C8B8E8!important}
-  .rpt-obs-text{background:#F0FFF4!important;border-left:3px solid #2E8B57!important}
-  .rpt-status-box{background:#F7F4FD!important}
-  .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important}
-  .rpt-footer{background:#F7F4FD!important}
+  .rpt-kpi{background:#F7F4FD!important;border:1px solid #C8B8E8!important;overflow:visible!important}
+  .rpt-obs-text{background:#F0FFF4!important;border-left:3px solid #2E8B57!important;overflow:visible!important}
+  .rpt-status-box{background:#F7F4FD!important;overflow:visible!important}
+  .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important;overflow:visible!important;max-width:100%!important}
+  .rpt-footer{background:#F7F4FD!important;overflow:visible!important}
   .rpt-section-title{border-left:3px solid #5B2DAA!important;color:#1A0F2E!important}
-  /* Colores de texto - amarillo→dorado, verde mantener, rojo mantener */
+  /* Grids: asegurar que caben en el ancho */
+  .rpt-kpi-row{display:grid!important;grid-template-columns:repeat(3,1fr)!important;max-width:100%!important}
+  .rpt-meta-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;max-width:100%!important}
+  .fmo-kpi-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;max-width:100%!important}
+  /* Gráficas: altura controlada */
+  .rpt-chart-card canvas{max-height:155px!important;max-width:100%!important}
+  /* Colores de texto - amarillo→dorado */
   [style*="color:#F6FF72"],[style*="color: #F6FF72"]{color:#B8860B!important}
   [style*="color:#4ADE80"]{color:#2D8A4E!important}
-  /* Ocultar hint de edición */
+  /* Ocultar elementos UI */
   .rpt-edit-hint{display:none!important}
-  /* Observaciones editables - mostrar como texto normal */
   .rpt-obs-editable{outline:none!important;border:none!important;background:#F0FFF4!important}
-  /* Ocultar controles de edición */
   #rpt-toolbar,.rpt-del-row,.rpt-del-th,.rpt-del-section{display:none!important}
-  /* Gráficas: altura reducida para caber en la hoja */
-  .rpt-chart-card canvas{max-height:140px!important}
-  /* Evitar cortes en bloques internos */
+  /* Evitar cortes DENTRO de bloques */
   .rpt-header{break-inside:avoid!important;page-break-inside:avoid!important}
   .rpt-footer{break-inside:avoid!important;page-break-inside:avoid!important}
   .rpt-kpi-row{break-inside:avoid!important;page-break-inside:avoid!important}
@@ -371,13 +381,15 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-status-box{break-inside:avoid!important;page-break-inside:avoid!important}
   .rpt-obs-text{break-inside:avoid!important;page-break-inside:avoid!important}
   .rpt-table tr{break-inside:avoid!important;page-break-inside:avoid!important}
-  /* Evitar que un título de sección quede solo al pie de página */
+  .fmo-section-title{break-inside:avoid!important;page-break-inside:avoid!important}
+  .fmo-ok-box,.fmo-multa-box{break-inside:avoid!important;page-break-inside:avoid!important}
+  /* Títulos nunca quedan solos al pie de página */
   .rpt-section-title{break-after:avoid!important;page-break-after:avoid!important}
   .fmo-section-title{break-after:avoid!important;page-break-after:avoid!important}
-  /* Secciones sin espaciado extra */
-  .rpt-section{padding:10px 22px!important}
-  .rpt-header{padding:12px 22px!important}
-  .rpt-footer{padding:7px 22px!important}
+  /* Reducir padding interno para más espacio */
+  .rpt-section{padding:8px 18px!important}
+  .rpt-header{padding:10px 18px!important}
+  .rpt-footer{padding:6px 18px!important}
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

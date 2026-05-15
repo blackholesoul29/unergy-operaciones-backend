@@ -4503,6 +4503,9 @@ function _updateSavedBannerDate(isoDate){
 
 // ── Lógica de informes guardados (backend) ──────────────────────────────────
 
+// URL base del backend: vacío si ya estamos en Railway, absoluto si venimos desde Vercel/iframe
+var _BACKEND_API = (window.location.hostname.indexOf('railway.app') >= 0) ? '' : 'https://backend-production-63d8.up.railway.app';
+
 var _rptBackendId=null;  // ID del informe en la BD si ya fue guardado
 
 function _getCurrentUserName(){
@@ -4546,7 +4549,7 @@ function saveRptEdit(){
     charts_data:JSON.stringify(rptChartQueue)
   };
 
-  _apiFetch("POST","/api/v1/informes/",payload)
+  _apiFetch("POST",_BACKEND_API+"/api/v1/informes/",payload)
   .then(function(r){
     _rptBackendId=r.id;
     toast("💾 Informe guardado");
@@ -4587,13 +4590,13 @@ function _saveAndThen(cb){
     html_content:clone.innerHTML,
     charts_data:JSON.stringify(rptChartQueue)
   };
-  _apiFetch("POST","/api/v1/informes/",payload)
+  _apiFetch("POST",_BACKEND_API+"/api/v1/informes/",payload)
   .then(function(r){_rptBackendId=r.id;cb(r.id);})
   .catch(function(e){toast("⚠ Error al guardar: "+e.message);});
 }
 
 function _doChangeEstado(id,estado){
-  _apiFetch("PATCH","/api/v1/informes/"+id+"/estado",{estado:estado})
+  _apiFetch("PATCH",_BACKEND_API+"/api/v1/informes/"+id+"/estado",{estado:estado})
   .then(function(r){
     toast(estado==="revisado"?"👁 Marcado como revisado":estado==="aprobado"?"✅ Aprobado — enviando correo…":"Estado actualizado");
     _updateEstadoBadge(r.estado);
@@ -4605,7 +4608,7 @@ function _doChangeEstado(id,estado){
 }
 
 function _doSendEmail(id){
-  _apiFetch("POST","/api/v1/informes/"+id+"/enviar",{})
+  _apiFetch("POST",_BACKEND_API+"/api/v1/informes/"+id+"/enviar",{})
   .then(function(r){toast("📧 Correo enviado a "+r.enviado_a);})
   .catch(function(e){
     var msg=e.message||"";
@@ -4657,7 +4660,7 @@ function loadSavedReports(){
   if(!_API_TOKEN)return;
   var filterEl=document.getElementById("saved-filter-estado");
   var estadoFilter=filterEl?filterEl.value:"";
-  var url="/api/v1/informes/?limit=50"+(estadoFilter?"&estado="+estadoFilter:"");
+  var url=_BACKEND_API+"/api/v1/informes/?limit=50"+(estadoFilter?"&estado="+estadoFilter:"");
   _apiFetch("GET",url)
   .then(function(list){
     _renderSavedReports(list);
@@ -4696,7 +4699,7 @@ function _renderSavedReports(list){
 
 function openSavedReport(id){
   if(!_API_TOKEN){toast("⚠ Se requiere sesión de plataforma");return;}
-  _apiFetch("GET","/api/v1/informes/"+id)
+  _apiFetch("GET",_BACKEND_API+"/api/v1/informes/"+id)
   .then(function(inf){
     // Destruir charts existentes
     infChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});

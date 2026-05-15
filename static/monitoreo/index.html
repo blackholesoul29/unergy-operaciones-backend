@@ -327,15 +327,14 @@ body.client-mode #tab-inf{display:none!important}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
   .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
-  html{zoom:.76}
+  html{zoom:.76;background:#fff!important;min-height:0!important;height:auto!important}
   body{background:#fff!important;margin:0;padding:0}
-  #inf-panel{padding:0!important;max-width:100%!important}
-  #inf-content{display:block!important;width:100%}
+  #inf-panel{background:#fff!important;padding:0!important;max-width:100%!important}
+  #inf-content{display:block!important;background:#fff!important;width:100%}
   .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
-    page-break-after:always;break-after:page;border:none!important;
-    overflow:hidden;width:100%}
-  .rpt-page:last-child{page-break-after:auto;break-after:auto}
-  .rpt-page-sep{page-break-after:always;break-after:page;display:block;height:0}
+    page-break-after:always;break-after:page;border:none!important;width:100%!important;overflow:hidden!important}
+  .rpt-page:last-child{page-break-after:auto!important;break-after:auto!important}
+  .rpt-page-sep{page-break-after:always;break-after:page;display:block!important;height:0!important;margin:0!important;padding:0!important;background:#fff!important}
   /* Header */
   .rpt-header{background:#1A0F2E!important;-webkit-print-color-adjust:exact!important}
   .rpt-meta-item{background:#221533!important}
@@ -2753,7 +2752,7 @@ document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("mclose").addEventListener("click",closeModal);
   try{var _t=localStorage.getItem("unergy_theme");if(_t==="light")applyTheme(true);}catch(e){}
   var _btnT=document.getElementById("btn-theme");if(_btnT)_btnT.addEventListener("click",function(){applyTheme(!isLight);});
-  var _btnE=document.getElementById("btn-export");if(_btnE)_btnE.addEventListener("click",exportCSV);
+  var _btnE=document.getElementById("btn-export");if(_btnE)_btnE.addEventListener("click",function(){if(curTab==="inf")exportInformeExcel();else exportCSV();});
   function renderBoardAndKPIs(){renderBoard();}
   var _fi=document.getElementById("fimp");if(_fi)_fi.addEventListener("change",renderBoardAndKPIs);
   var _fd1=document.getElementById("fdate-from");if(_fd1)_fd1.addEventListener("change",renderBoardAndKPIs);
@@ -2790,6 +2789,7 @@ var infMode="proyecto";
 var infPeriodMode="mes";
 var infChartInstances=[];
 var rptChartQueue={};
+var _lastInformeData=null;
 var MESES_LARG=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 /* ── Rango ── */
@@ -3334,6 +3334,7 @@ function generateInforme(){
       if(!r||!r.ok){toast("⚠ Error al cargar generación");document.getElementById("inf-empty").style.display="block";return;}
       var mf=getFaultsForRange(sp,range);
       document.getElementById("inf-content").innerHTML=buildProjectPage(cfg,r,mf,range,1,1);
+      _lastInformeData={type:"proyecto",range:range,cfg:cfg,genRes:r,mf:mf};
       document.getElementById("inf-content").style.display="block";
       document.getElementById("inf-print").style.display="inline-flex";
       _showRptToolbar();
@@ -3387,12 +3388,249 @@ function finishPortReport(pname,results,range){
   var pages=[buildConsolidatedPage(pname,results,range,totalPages)];
   results.forEach(function(pd,i){pages.push(buildProjectPage(pd.cfg,pd.genRes,pd.mf,range,i+2,totalPages));});
   document.getElementById("inf-content").innerHTML=pages.join('<div class="rpt-page-sep"></div>');
+  _lastInformeData={type:"cliente",range:range,portName:pname,results:results};
   document.getElementById("inf-content").style.display="block";
   document.getElementById("inf-print").style.display="inline-flex";
   _showRptToolbar();
   var _sbtn2=document.getElementById("rpt-save-btn");
   if(_sbtn2)_sbtn2.style.display="none";
   setTimeout(function(){renderRptCharts();_checkRptSaved();},180);
+}
+
+/* ── Exportar informe operacional como Excel ── */
+function exportInformeExcel(){
+  if(typeof XLSX==="undefined"){toast("⚠ Cargando librería Excel, intenta en 2 segundos");return;}
+  if(!_lastInformeData){toast("⚠ Genera primero el informe antes de exportar");return;}
+  var d=_lastInformeData;
+  var wb=XLSX.utils.book_new();
+
+  /* Configuración de página APA / impresión */
+  var PAGE={paperSize:9,orientation:"portrait",fitToPage:true,fitToWidth:1,fitToHeight:0,scale:85};
+  var MARGINS={left:0.5,right:0.5,top:0.75,bottom:0.75,header:0.3,footer:0.3};
+  var PAGE_L=Object.assign({},PAGE,{orientation:"landscape"});
+
+  function setPrint(ws,land){
+    ws["!pageSetup"]=land?PAGE_L:PAGE;
+    ws["!margins"]=MARGINS;
+    ws["!printOptions"]={gridLines:false,headings:false};
+  }
+
+  /* Estilos de celda (aplicados si la build de XLSX los soporta) */
+  var S_HDR={font:{name:"Calibri",bold:true,sz:10,color:{rgb:"E8C840"}},
+             fill:{fgColor:{rgb:"1A0F2E"},patternType:"solid"},
+             alignment:{horizontal:"center",vertical:"center",wrapText:true},
+             border:{bottom:{style:"medium",color:{rgb:"915BD8"}}}};
+  var S_TITLE={font:{name:"Calibri",bold:true,sz:14,color:{rgb:"1A0F2E"}},
+               alignment:{horizontal:"left",vertical:"center"}};
+  var S_META_L={font:{name:"Calibri",bold:true,sz:10,color:{rgb:"6B5F80"}},
+                fill:{fgColor:{rgb:"F0EBF8"},patternType:"solid"},
+                alignment:{vertical:"center"}};
+  var S_META_V={font:{name:"Calibri",sz:10,color:{rgb:"1A0F2E"}},
+                fill:{fgColor:{rgb:"F7F4FD"},patternType:"solid"},
+                alignment:{vertical:"center",wrapText:true}};
+  var S_KPI_L={font:{name:"Calibri",bold:true,sz:9,color:{rgb:"1A0F2E"}},
+               fill:{fgColor:{rgb:"F7F4FD"},patternType:"solid"},
+               alignment:{vertical:"center",wrapText:true}};
+  var S_KPI_V={font:{name:"Calibri",bold:true,sz:11,color:{rgb:"915BD8"}},
+               fill:{fgColor:{rgb:"F7F4FD"},patternType:"solid"},
+               alignment:{horizontal:"center",vertical:"center"}};
+  function sRow(even){
+    return{font:{name:"Calibri",sz:9,color:{rgb:"1A0F2E"}},
+           fill:{fgColor:{rgb:even?"F9F7FD":"FFFFFF"},patternType:"solid"},
+           alignment:{vertical:"top",wrapText:true}};
+  }
+  function sTot(){
+    return{font:{name:"Calibri",bold:true,sz:10,color:{rgb:"1A0F2E"}},
+           fill:{fgColor:{rgb:"EDE8F5"},patternType:"solid"},
+           alignment:{vertical:"center"}};
+  }
+  function applyStyle(ws,ref,s){var c=ws[ref];if(c)c.s=s;}
+  function fN(n){return typeof n==="number"?Math.round(n).toLocaleString("es-CO"):"—";}
+  function pct(a,b){return b>0?((a-b)/b*100):null;}
+  function pctStr(v){return v!==null?(v>=0?"+":"")+v.toFixed(1)+"%":"—";}
+
+  if(d.type==="proyecto"){
+    /* ═══ Informe por proyecto ═══════════════════════════════════════ */
+    var cfg=d.cfg, genRes=d.genRes, mf=d.mf, rng=d.range;
+    var data=genRes.data||[], sim=genRes.simulation||{};
+    var total=data.reduce(function(s,r){return s+r.kwh;},0);
+    var nd=data.length||1;
+    var avg=total/nd;
+    var p90m=sim.p90_monthly||null, p90d=sim.p90_daily||null;
+    var dp90=pct(total,p90m);
+    var avail=calcAvailability(data,rng);
+    var pname=cfg.nombre_clientes||cfg.nombre_display||cfg.sub_project||"—";
+    var autor=cData.name||cData.email||"Unergy";
+
+    /* ── Hoja 1: Resumen ─────────────────────────────────────────── */
+    var aoa=[
+      ["INFORME OPERACIONAL MENSUAL","","","",""],
+      ["Unergy Energía Digital S.A.S ESP — Operación & Mantenimiento","","","",""],
+      ["","","","",""],
+      ["PROYECTO",pname,"","PERÍODO",rng.headerPeriod],
+      ["MUNICIPIO",cfg.municipio||"—","","ELABORADO POR",autor],
+      ["CAPACIDAD",(cfg.capacidad_kw||"—")+" kWp","","FECHA EMISIÓN",new Date().toLocaleDateString("es-CO")],
+      ["","","","",""],
+      ["RESUMEN DE GENERACIÓN","","","",""],
+      ["Indicador","Valor","","Indicador","Valor"],
+      ["Generación total del período",fN(total)+" kWh","","Promedio diario",fN(avg)+" kWh"],
+      ["P90 mensual estimado",p90m?fN(p90m)+" kWh":"No disponible","","Desviación vs P90",pctStr(dp90)],
+      ["Disponibilidad del período",avail.pct!==null?avail.pct.toFixed(1)+"%":"—","","Eventos registrados",mf.length+" evento(s)"],
+      ["","","","",""],
+      ["OBSERVACIONES","","","",""],
+      [genRes.obs||("Generación del período: "+fN(total)+" kWh en "+nd+" días de operación. "+(dp90!==null&&dp90>=0?"Resultado por encima del P90 estimado.":"Resultado por debajo del P90 estimado. Se recomienda revisión.")),"","","",""]
+    ];
+    var ws1=XLSX.utils.aoa_to_sheet(aoa);
+    ws1["!merges"]=[
+      {s:{r:0,c:0},e:{r:0,c:4}},{s:{r:1,c:0},e:{r:1,c:4}},
+      {s:{r:7,c:0},e:{r:7,c:4}},{s:{r:13,c:0},e:{r:13,c:4}},
+      {s:{r:14,c:0},e:{r:14,c:4}}
+    ];
+    ws1["!cols"]=[{wch:28},{wch:22},{wch:3},{wch:22},{wch:20}];
+    ws1["!rows"]=[{hpt:22},{hpt:14},{hpt:6},{hpt:16},{hpt:16},{hpt:16},{hpt:6},{hpt:16},{hpt:14},{hpt:16},{hpt:16},{hpt:16},{hpt:6},{hpt:14},{hpt:40}];
+    applyStyle(ws1,"A1",S_TITLE);
+    ["A4","C4","A5","C5","A6","C6"].forEach(function(r){applyStyle(ws1,r,S_META_L);});
+    ["B4","E4","B5","E5","B6","E6"].forEach(function(r){applyStyle(ws1,r,S_META_V);});
+    ["A9","B9","D9","E9"].forEach(function(r){applyStyle(ws1,r,S_HDR);});
+    for(var ri=9;ri<12;ri++){
+      ["A","B","D","E"].forEach(function(c){
+        var ref=c+(ri+1);
+        applyStyle(ws1,ref,ri%2===0?S_KPI_L:S_KPI_V);
+      });
+    }
+    setPrint(ws1,false);
+    XLSX.utils.book_append_sheet(wb,ws1,"Resumen");
+
+    /* ── Hoja 2: Generación Diaria ───────────────────────────────── */
+    var gHdr=["Fecha","kWh Real","P90 Diario (kWh)","Dif. P90 (kWh)","Dif. P90 (%)","Estado"];
+    var gRows=data.map(function(row){
+      var diff=p90d!==null?row.kwh-p90d:null;
+      var dp=pct(row.kwh,p90d);
+      return[row.date,row.kwh,p90d||null,diff,dp!==null?dp:null,
+             dp===null?"—":dp>=0?"Normal":"Por debajo P90"];
+    });
+    if(!gRows.length)gRows=[["Sin datos en el período","","","","",""]];
+    var ws2=XLSX.utils.aoa_to_sheet([gHdr].concat(gRows));
+    var r2=XLSX.utils.decode_range(ws2["!ref"]);
+    for(var C=r2.s.c;C<=r2.e.c;C++){
+      var ch2=ws2[XLSX.utils.encode_cell({r:0,c:C})];
+      if(ch2)ch2.s=S_HDR;
+    }
+    gRows.forEach(function(row,ri){
+      for(var C=0;C<gHdr.length;C++){
+        var cx=ws2[XLSX.utils.encode_cell({r:ri+1,c:C})];
+        if(cx)cx.s=sRow(ri%2===1);
+      }
+    });
+    ws2["!cols"]=[{wch:13},{wch:13},{wch:14},{wch:14},{wch:13},{wch:18}];
+    ws2["!freeze"]={xSplit:0,ySplit:1,topLeftCell:"A2"};
+    ws2["!autofilter"]={ref:ws2["!ref"]};
+    setPrint(ws2,false);
+    XLSX.utils.book_append_sheet(wb,ws2,"Generación Diaria");
+
+    /* ── Hoja 3: Fallas del Período ──────────────────────────────── */
+    var fHdr=["Tipo de Falla","Estado","Prioridad","Días Abierta","Fecha","Descripción","Seguimiento"];
+    var fRows=mf.map(function(f){
+      var fdd=fd(f.code);
+      return[fdd?fdd.label:(f.code||"—"),ST[f.st]?ST[f.st].lbl:"—",
+             f.prio||"—",getDaysOpen(f)||0,fmtD(f.date)||"—",f.desc||"—",f.flw||"—"];
+    });
+    if(!fRows.length)fRows=[["Sin eventos registrados en el período","","","","","",""]];
+    var ws3=XLSX.utils.aoa_to_sheet([fHdr].concat(fRows));
+    var r3=XLSX.utils.decode_range(ws3["!ref"]);
+    for(var C=r3.s.c;C<=r3.e.c;C++){
+      var ch3=ws3[XLSX.utils.encode_cell({r:0,c:C})];
+      if(ch3)ch3.s=S_HDR;
+    }
+    fRows.forEach(function(row,ri){
+      for(var C=0;C<fHdr.length;C++){
+        var cx=ws3[XLSX.utils.encode_cell({r:ri+1,c:C})];
+        if(cx)cx.s=sRow(ri%2===1);
+      }
+    });
+    ws3["!cols"]=[{wch:24},{wch:13},{wch:12},{wch:13},{wch:13},{wch:42},{wch:42}];
+    ws3["!freeze"]={xSplit:0,ySplit:1,topLeftCell:"A2"};
+    setPrint(ws3,true);
+    XLSX.utils.book_append_sheet(wb,ws3,"Fallas del Período");
+
+  }else{
+    /* ═══ Informe por cliente (portafolio) ═══════════════════════ */
+    var portName=d.portName, results=d.results, rng=d.range;
+    var autor=cData.name||cData.email||"Unergy";
+    var totalPort=results.reduce(function(s,pd){
+      return s+(pd.genRes.data||[]).reduce(function(s2,dd){return s2+dd.kwh;},0);
+    },0);
+
+    /* ── Hoja 1: Consolidado ─────────────────────────────────────── */
+    var cHdr=["#","Proyecto","Generación (kWh)","Prom. Diario (kWh)","Desv. P90","Disponib. (%)","Eventos","Estado"];
+    var cRows=results.map(function(pd,i){
+      var data=pd.genRes.data||[], sim=pd.genRes.simulation||{};
+      var tot=data.reduce(function(s,dd){return s+dd.kwh;},0);
+      var nd=data.length||1;
+      var p90=sim.p90_monthly||null;
+      var dp=pct(tot,p90);
+      var av=calcAvailability(data,rng);
+      return[i+1,pd.cfg.nombre_clientes||pd.cfg.nombre_display||pd.cfg.sub_project||"—",
+             Math.round(tot),Math.round(tot/nd),pctStr(dp),
+             av.pct!==null?av.pct.toFixed(1)+"%":"—",pd.mf.length,
+             dp===null?"—":dp>=0?"Normal":"Atención"];
+    });
+    var aoaC=[
+      ["INFORME CONSOLIDADO — "+portName,"","","","","","",""],
+      ["Período: "+rng.headerPeriod+" · Elaborado por: "+autor+" · "+new Date().toLocaleDateString("es-CO"),"","","","","","",""],
+      ["","","","","","","",""],
+      cHdr
+    ].concat(cRows).concat([[
+      "","TOTAL PORTAFOLIO",Math.round(totalPort),"","","","",""
+    ]]);
+    var wsC=XLSX.utils.aoa_to_sheet(aoaC);
+    wsC["!merges"]=[{s:{r:0,c:0},e:{r:0,c:7}},{s:{r:1,c:0},e:{r:1,c:7}}];
+    var totalRow=aoaC.length-1;
+    for(var C=0;C<cHdr.length;C++){
+      var ch=wsC[XLSX.utils.encode_cell({r:3,c:C})];if(ch)ch.s=S_HDR;
+      var ct=wsC[XLSX.utils.encode_cell({r:totalRow,c:C})];if(ct)ct.s=sTot();
+    }
+    cRows.forEach(function(row,ri){
+      for(var C=0;C<cHdr.length;C++){
+        var cx=wsC[XLSX.utils.encode_cell({r:4+ri,c:C})];if(cx)cx.s=sRow(ri%2===1);
+      }
+    });
+    applyStyle(wsC,"A1",S_TITLE);
+    wsC["!cols"]=[{wch:4},{wch:30},{wch:16},{wch:16},{wch:13},{wch:13},{wch:10},{wch:12}];
+    wsC["!freeze"]={xSplit:0,ySplit:4,topLeftCell:"A5"};
+    wsC["!autofilter"]={ref:"A4:H"+aoaC.length};
+    setPrint(wsC,true);
+    XLSX.utils.book_append_sheet(wb,wsC,"Consolidado");
+
+    /* ── Hoja por proyecto ─────────────────────────────────────── */
+    results.forEach(function(pd){
+      var pn=(pd.cfg.nombre_clientes||pd.cfg.nombre_display||pd.cfg.sub_project||"").slice(0,28);
+      var data=pd.genRes.data||[], sim=pd.genRes.simulation||{};
+      var p90d=sim.p90_daily||null;
+      var gHdr=["Fecha","kWh Real","P90 Diario (kWh)","Dif. P90 (kWh)","Dif. P90 (%)","Estado"];
+      var gRows=data.map(function(row){
+        var diff=p90d!==null?row.kwh-p90d:null;
+        var dp=pct(row.kwh,p90d);
+        return[row.date,row.kwh,p90d||null,diff,dp!==null?dp:null,
+               dp===null?"—":dp>=0?"Normal":"Por debajo P90"];
+      });
+      if(!gRows.length)gRows=[["Sin datos en el período","","","","",""]];
+      var wsPr=XLSX.utils.aoa_to_sheet([gHdr].concat(gRows));
+      var rp=XLSX.utils.decode_range(wsPr["!ref"]);
+      for(var C=rp.s.c;C<=rp.e.c;C++){var ch=wsPr[XLSX.utils.encode_cell({r:0,c:C})];if(ch)ch.s=S_HDR;}
+      gRows.forEach(function(row,ri){
+        for(var C=0;C<gHdr.length;C++){var cx=wsPr[XLSX.utils.encode_cell({r:ri+1,c:C})];if(cx)cx.s=sRow(ri%2===1);}
+      });
+      wsPr["!cols"]=[{wch:13},{wch:13},{wch:14},{wch:14},{wch:13},{wch:18}];
+      wsPr["!freeze"]={xSplit:0,ySplit:1,topLeftCell:"A2"};
+      setPrint(wsPr,false);
+      XLSX.utils.book_append_sheet(wb,wsPr,pn||"Proyecto");
+    });
+  }
+
+  var fname="Informe_Operacional_Unergy_"+d.range.from+"_"+d.range.to+".xlsx";
+  XLSX.writeFile(wb,fname);
+  toast("✓ Excel generado: "+fname);
 }
 
 /* ── Listeners del panel informe ── */

@@ -332,10 +332,12 @@ body.client-mode #tab-inf{display:none!important}
   body{background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important;width:100%!important}
   #inf-panel{background:#fff!important;padding:0!important;max-width:100%!important;width:100%!important;overflow:visible!important}
   #inf-content{display:block!important;background:#fff!important;width:100%!important;overflow:visible!important}
-  /* CLAVE: overflow:visible para que no se corte ningún elemento */
+  /* CLAVE: flex-column + min-height igual a área útil A4 (277mm físicos / zoom .72 = 385mm CSS)
+     El footer queda siempre al borde inferior gracias a margin-top:auto */
   .rpt-page{box-shadow:none!important;border-radius:0!important;margin-bottom:0!important;
     page-break-after:always;break-after:page;border:none!important;
-    width:100%!important;overflow:visible!important}
+    width:100%!important;overflow:visible!important;
+    display:flex!important;flex-direction:column!important;min-height:385mm!important}
   .rpt-page:last-child{page-break-after:auto!important;break-after:auto!important}
   /* Ocultar en impresión: .rpt-page ya lleva page-break-after, el sep crearía páginas en blanco */
   .rpt-page-sep{display:none!important}
@@ -358,7 +360,7 @@ body.client-mode #tab-inf{display:none!important}
   .rpt-obs-text{background:#F0FFF4!important;border-left:3px solid #2E8B57!important;overflow:visible!important}
   .rpt-status-box{background:#F7F4FD!important;overflow:visible!important}
   .rpt-chart-card{background:#F9F7FD!important;border:1px solid #DDD!important;overflow:visible!important;max-width:100%!important}
-  .rpt-footer{background:#F7F4FD!important;overflow:visible!important}
+  .rpt-footer{background:#F7F4FD!important;overflow:visible!important;margin-top:auto!important}
   .rpt-section-title{border-left:3px solid #5B2DAA!important;color:#1A0F2E!important}
   /* Grids: asegurar que caben en el ancho */
   .rpt-kpi-row{display:grid!important;grid-template-columns:repeat(3,1fr)!important;max-width:100%!important}

@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.api.v1.auth import get_current_user
 from app.models.informes import InformeGuardado
 from app.models.usuarios import Usuario
 

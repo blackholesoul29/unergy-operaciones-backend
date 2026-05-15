@@ -308,6 +308,14 @@ body.client-mode #tab-inf{display:none!important}
 .rpt-status-row{font-size:11px;color:#6B5F80;margin-top:5px}
 .rpt-footer{background:#F7F4FD;border-top:1px solid #EDE8F5;padding:10px 28px;font-size:10px;color:#A89EC0;display:flex;justify-content:space-between}
 .rpt-page-sep{height:0;margin:0;padding:0}
+/* ── Informes guardados ── */
+.saved-rpt-card{background:var(--cd);border:1px solid var(--br);border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;transition:border-color .2s}
+.saved-rpt-card:hover{border-color:var(--pu)40}
+.saved-rpt-estado{font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:.5px;white-space:nowrap}
+.estado-borrador{background:#F6FF7220;color:#B8A800;border:1px solid #F6FF7240}
+.estado-revisado{background:#2563EB20;color:#2563EB;border:1px solid #2563EB40}
+.estado-aprobado{background:#4ADE8020;color:#2D8A4E;border:1px solid #4ADE8040}
+.saved-rpt-meta{font-size:11px;color:var(--fa);margin-top:2px}
 /* ── Modo edición de informe ── */
 #rpt-toolbar{padding:10px 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .rpt-del-section{display:inline-flex!important;align-items:center;gap:4px;float:right;background:transparent;border:1px solid #FF575760;color:#FF5757;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-family:'Sora',sans-serif;font-weight:700;user-select:none;margin-bottom:6px;transition:all .15s}
@@ -735,9 +743,26 @@ body.client-mode #tab-inf{display:none!important}
   <div id="rpt-toolbar" style="display:none">
     <span style="font-size:11px;color:var(--mu);font-weight:700">Antes de imprimir:</span>
     <button id="rpt-edit-btn" class="btn btn-gh btn-sm" onclick="toggleRptEdit()" style="gap:5px">✏️ Editar informe</button>
-    <button id="rpt-save-btn" class="btn btn-gh btn-sm" onclick="saveRptEdit()" style="display:none;color:#2D8A4E;border-color:#4ADE8060;gap:5px">💾 Guardar cambios</button>
+    <button id="rpt-save-btn" class="btn btn-gh btn-sm" onclick="saveRptEdit()" style="display:none;color:#2D8A4E;border-color:#4ADE8060;gap:5px">💾 Guardar</button>
+    <button id="rpt-revisar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('revisado')" style="display:none;color:#2563EB;border-color:#2563EB40;gap:5px">👁 Marcar revisado</button>
+    <button id="rpt-aprobar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('aprobado')" style="display:none;color:#915BD8;border-color:#915BD840;gap:5px">✅ Aprobar y enviar</button>
     <button id="rpt-restore-btn" class="btn btn-gh btn-sm" onclick="restoreRptSections()" style="display:none;color:var(--bl);border-color:var(--bl)40">↩ Mostrar todo</button>
+    <span id="rpt-estado-badge" style="display:none;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px"></span>
     <span id="rpt-edit-hint" style="font-size:10px;color:var(--fa);display:none">Clic en cualquier texto para editar · <span style="color:var(--re)">✕</span> para eliminar fila o sección</span>
+  </div>
+  <!-- Informes guardados -->
+  <div id="saved-reports-section" style="margin-top:18px;display:none">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:800;color:var(--mu);letter-spacing:.3px">📁 Informes guardados</div>
+      <button class="btn btn-gh btn-sm" onclick="loadSavedReports()" style="font-size:11px;padding:3px 10px">↻ Actualizar</button>
+      <select id="saved-filter-estado" class="fi fsel" style="font-size:11px;padding:3px 8px;height:auto" onchange="loadSavedReports()">
+        <option value="">Todos los estados</option>
+        <option value="borrador">Borrador</option>
+        <option value="revisado">Revisado</option>
+        <option value="aprobado">Aprobado</option>
+      </select>
+    </div>
+    <div id="saved-reports-list" style="display:flex;flex-direction:column;gap:8px"></div>
   </div>
   <!-- Empty state -->
   <div id="inf-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
@@ -3124,6 +3149,10 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
     +(pgLbl?'<span style="font-weight:700;color:#6B35C0">'+pgLbl+'</span>':'')+
     '<span>Documento confidencial – '+esc(range.headerPeriod)+'</span>'
     +'</span></div>'
+    +'<div id="rpt-audit-footer" style="background:#F0EBF8;border-top:1px solid #EDE8F5;padding:7px 28px;font-size:10px;color:#6B5F80;display:flex;gap:20px;flex-wrap:wrap">'
+    +'<span id="rpt-audit-editor">✏️ Elaborado por: —</span>'
+    +'<span id="rpt-audit-aprobador" style="display:none">✅ Aprobado por: —</span>'
+    +'</div>'
     +'</div>';
 }
 
@@ -3336,6 +3365,8 @@ function generateInforme(){
     var sp=(document.getElementById("inf-proj")||{}).value||"";
     if(!sp){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un proyecto");return;}
     _rptCurrentKey=_rptKey("op",sp,range.from,range.to);
+    _rptCurrentSp=sp;_rptCurrentFrom=range.from;_rptCurrentTo=range.to;
+    _rptCurrentDisplay=range.headerPeriod||"";_rptCurrentNombre="";_rptBackendId=null;
     // Buscar cfg: primero por sub_project exacto, luego por nombre/alias via PROJS_DETALLE
     var cfg=genProjects.find(function(p){return p.sub_project===sp;});
     if(!cfg){
@@ -3361,9 +3392,13 @@ function generateInforme(){
       document.getElementById("inf-content").style.display="block";
       document.getElementById("inf-print").style.display="inline-flex";
       _showRptToolbar();
+      _rptCurrentNombre=cfg.nombre_clientes||cfg.nombre_display||cfg.nombre_bitacora||sp;
       var _sbtn=document.getElementById("rpt-save-btn");
-      if(_sbtn)_sbtn.style.display="none";
-      setTimeout(function(){renderRptCharts();_checkRptSaved();},150);
+      if(_sbtn)_sbtn.style.display="inline-flex";
+      var _rbtn=document.getElementById("rpt-revisar-btn");if(_rbtn)_rbtn.style.display="inline-flex";
+      var _abtn=document.getElementById("rpt-aprobar-btn");if(_abtn)_abtn.style.display="none";
+      var _ebadge=document.getElementById("rpt-estado-badge");if(_ebadge)_ebadge.style.display="none";
+      setTimeout(function(){renderRptCharts();_checkRptSaved();loadSavedReports();},150);
     }).catch(function(){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Error al consultar generación");});
 
   }else{
@@ -3415,9 +3450,14 @@ function finishPortReport(pname,results,range){
   document.getElementById("inf-content").style.display="block";
   document.getElementById("inf-print").style.display="inline-flex";
   _showRptToolbar();
+  _rptCurrentSp=pname;_rptCurrentFrom=range.from;_rptCurrentTo=range.to;
+  _rptCurrentDisplay=range.headerPeriod||"";_rptCurrentNombre=pname;_rptBackendId=null;
   var _sbtn2=document.getElementById("rpt-save-btn");
-  if(_sbtn2)_sbtn2.style.display="none";
-  setTimeout(function(){renderRptCharts();_checkRptSaved();},180);
+  if(_sbtn2)_sbtn2.style.display="inline-flex";
+  var _rb2=document.getElementById("rpt-revisar-btn");if(_rb2)_rb2.style.display="inline-flex";
+  var _ab2=document.getElementById("rpt-aprobar-btn");if(_ab2)_ab2.style.display="none";
+  var _eb2=document.getElementById("rpt-estado-badge");if(_eb2)_eb2.style.display="none";
+  setTimeout(function(){renderRptCharts();_checkRptSaved();loadSavedReports();},180);
 }
 
 /* ── Exportar informe operacional como Excel ── */
@@ -3863,6 +3903,8 @@ function generateFMOInforme(){
     headerPeriod:MESES_LARG[_m-1]+" "+_y,isCustom:false,totalDays:_last};
 
   _rptCurrentKey=_rptKey("fmo",sp,ym);
+  _rptCurrentSp=sp;_rptCurrentFrom=ym+"-01";_rptCurrentTo=ym+"-31";
+  _rptCurrentDisplay="";_rptCurrentNombre="";_rptBackendId=null;
   // Reset UI
   document.getElementById("inf-empty").style.display="none";
   document.getElementById("inf-content").style.display="none";
@@ -3900,11 +3942,16 @@ function generateFMOInforme(){
       document.getElementById("inf-content").style.display="block";
       document.getElementById("fmo-print").style.display="inline-flex";
       _showRptToolbar();
+      _rptCurrentDisplay=range.monthName+" "+range.year;
+      _rptCurrentNombre=cfg.nombre_clientes||cfg.nombre_display||sp;
       var _sbtn3=document.getElementById("rpt-save-btn");
-      if(_sbtn3)_sbtn3.style.display="none";
+      if(_sbtn3)_sbtn3.style.display="inline-flex";
+      var _rb3=document.getElementById("rpt-revisar-btn");if(_rb3)_rb3.style.display="inline-flex";
+      var _ab3=document.getElementById("rpt-aprobar-btn");if(_ab3)_ab3.style.display="none";
+      var _eb3=document.getElementById("rpt-estado-badge");if(_eb3)_eb3.style.display="none";
       _fmoMants=mant;
       bindMantEditHandlers();
-      setTimeout(function(){renderRptCharts();_checkRptSaved();},200);
+      setTimeout(function(){renderRptCharts();_checkRptSaved();loadSavedReports();},200);
     }catch(e2){
       console.error("[FMO] buildFMOPage error:",e2);
       document.getElementById("inf-content").innerHTML=
@@ -4369,30 +4416,17 @@ function rkpiRow(ico,lbl,val,col){
 
 /* ══ EDICIÓN DE INFORME ANTES DE IMPRIMIR ══ */
 var _rptEditMode=false;
-var _rptCurrentKey=null; // clave localStorage del informe activo
+var _rptCurrentKey=null;     // clave localStorage/BD del informe activo
+var _rptCurrentSp=null;      // sub_project activo
+var _rptCurrentFrom=null;    // periodo_desde activo
+var _rptCurrentTo=null;      // periodo_hasta activo
+var _rptCurrentDisplay=null; // periodo_display activo
+var _rptCurrentNombre=null;  // proyecto_nombre activo
 
 // ── Persistencia de ediciones ──
 function _rptKey(type,id,from,to){
   // type: "op"|"fmo"|"port"   id: sub_project o portfolio name
   return "rpt_edit_"+type+"_"+encodeURIComponent(id)+"_"+from+(to?"_"+to:"");
-}
-
-function saveRptEdit(){
-  if(!_rptCurrentKey){toast("⚠ Genera un informe primero");return;}
-  var c=document.getElementById("inf-content");
-  if(!c||!c.innerHTML.trim())return;
-  try{
-    // Clonar sin botones de edición para guardar HTML limpio
-    var clone=c.cloneNode(true);
-    clone.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
-    clone.querySelectorAll("[contenteditable]").forEach(function(el){
-      el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";
-    });
-    var payload=JSON.stringify({html:clone.innerHTML,charts:rptChartQueue,savedAt:new Date().toISOString()});
-    localStorage.setItem(_rptCurrentKey,payload);
-    toast("💾 Edición guardada");
-    _updateSavedBannerDate(new Date().toISOString());
-  }catch(e){console.error("[rpt-save]",e);toast("⚠ Error al guardar");}
 }
 
 function clearRptEdit(){
@@ -4465,6 +4499,242 @@ function _updateSavedBannerDate(isoDate){
          +" "+d.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});
   var sp=bn.querySelector("span");
   if(sp)sp.textContent="📝 Versión editada — "+ds;
+}
+
+// ── Lógica de informes guardados (backend) ──────────────────────────────────
+
+var _rptBackendId=null;  // ID del informe en la BD si ya fue guardado
+
+function _getCurrentUserName(){
+  return (_PLATFORM_USER&&_PLATFORM_USER.nombre)||cData.name||"";
+}
+
+function saveRptEdit(){
+  // Primero guardar en backend si hay token; si no, localStorage como fallback
+  if(!_rptCurrentKey){toast("⚠ Genera un informe primero");return;}
+  var c=document.getElementById("inf-content");
+  if(!c||!c.innerHTML.trim())return;
+
+  // Clonar sin botones de edición
+  var clone=c.cloneNode(true);
+  clone.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
+  clone.querySelectorAll("[contenteditable]").forEach(function(el){
+    el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";
+  });
+  var htmlClean=clone.innerHTML;
+
+  // Guardar localStorage siempre (fallback offline)
+  try{
+    localStorage.setItem(_rptCurrentKey,JSON.stringify({html:htmlClean,charts:rptChartQueue,savedAt:new Date().toISOString()}));
+  }catch(e){}
+
+  // Guardar en backend si hay token
+  if(!_API_TOKEN){toast("💾 Guardado localmente (sin sesión de plataforma)");_updateSavedBannerDate(new Date().toISOString());return;}
+
+  var parts=_rptCurrentKey.replace("rpt_edit_","").split("_");
+  var tipo=parts[0];
+  // Reconstruir sub_project desde _rptCurrentKey (formato: rpt_edit_TYPE_SP_FROM_TO)
+  // Necesitamos los datos del informe actual
+  var payload={
+    tipo:tipo,
+    sub_project:decodeURIComponent(_rptCurrentSp||""),
+    periodo_desde:_rptCurrentFrom||"",
+    periodo_hasta:_rptCurrentTo||"",
+    periodo_display:_rptCurrentDisplay||"",
+    proyecto_nombre:_rptCurrentNombre||"",
+    html_content:htmlClean,
+    charts_data:JSON.stringify(rptChartQueue)
+  };
+
+  _apiFetch("POST","/api/v1/informes/",payload)
+  .then(function(r){
+    _rptBackendId=r.id;
+    toast("💾 Informe guardado");
+    _updateSavedBannerDate(r.editado_en||new Date().toISOString());
+    _updateEstadoBadge(r.estado);
+    _updateWorkflowBtns(r.estado);
+  })
+  .catch(function(e){
+    toast("⚠ Error al guardar en servidor: "+e.message);
+  });
+}
+
+function changeReportEstado(nuevoEstado){
+  if(!_rptBackendId){
+    // Intentar guardar primero y luego cambiar estado
+    toast("Guardando informe primero…");
+    // Llamada encadenada: save → then change estado
+    _saveAndThen(function(id){_doChangeEstado(id,nuevoEstado);});
+    return;
+  }
+  _doChangeEstado(_rptBackendId,nuevoEstado);
+}
+
+function _saveAndThen(cb){
+  if(!_rptCurrentKey||!_API_TOKEN){toast("⚠ Guarda el informe primero");return;}
+  var c=document.getElementById("inf-content");
+  if(!c)return;
+  var clone=c.cloneNode(true);
+  clone.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
+  clone.querySelectorAll("[contenteditable]").forEach(function(el){el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";});
+  var payload={
+    tipo:(_rptCurrentKey.replace("rpt_edit_","").split("_")[0]),
+    sub_project:decodeURIComponent(_rptCurrentSp||""),
+    periodo_desde:_rptCurrentFrom||"",
+    periodo_hasta:_rptCurrentTo||"",
+    periodo_display:_rptCurrentDisplay||"",
+    proyecto_nombre:_rptCurrentNombre||"",
+    html_content:clone.innerHTML,
+    charts_data:JSON.stringify(rptChartQueue)
+  };
+  _apiFetch("POST","/api/v1/informes/",payload)
+  .then(function(r){_rptBackendId=r.id;cb(r.id);})
+  .catch(function(e){toast("⚠ Error al guardar: "+e.message);});
+}
+
+function _doChangeEstado(id,estado){
+  _apiFetch("PATCH","/api/v1/informes/"+id+"/estado",{estado:estado})
+  .then(function(r){
+    toast(estado==="revisado"?"👁 Marcado como revisado":estado==="aprobado"?"✅ Aprobado — enviando correo…":"Estado actualizado");
+    _updateEstadoBadge(r.estado);
+    _updateWorkflowBtns(r.estado,r.editado_por_nombre,r.aprobado_por_nombre);
+    if(estado==="aprobado") _doSendEmail(id);
+    loadSavedReports();
+  })
+  .catch(function(e){toast("⚠ Error: "+e.message);});
+}
+
+function _doSendEmail(id){
+  _apiFetch("POST","/api/v1/informes/"+id+"/enviar",{})
+  .then(function(r){toast("📧 Correo enviado a "+r.enviado_a);})
+  .catch(function(e){
+    var msg=e.message||"";
+    if(msg.indexOf("503")>=0||msg.indexOf("SMTP")>=0){
+      toast("⚠ SMTP no configurado — el informe está aprobado pero no se envió el correo");
+    }else if(msg.indexOf("correo_operacional")>=0){
+      toast("⚠ El cliente no tiene correo operacional configurado");
+    }else{
+      toast("⚠ Error al enviar correo: "+msg);
+    }
+  });
+}
+
+function _updateEstadoBadge(estado){
+  var b=document.getElementById("rpt-estado-badge");
+  if(!b)return;
+  var map={borrador:{t:"Borrador",cl:"estado-borrador"},revisado:{t:"Revisado",cl:"estado-revisado"},aprobado:{t:"✅ Aprobado",cl:"estado-aprobado"}};
+  var m=map[estado]||{t:estado,cl:""};
+  b.textContent=m.t;b.className="saved-rpt-estado "+m.cl;b.style.display="inline-flex";
+}
+
+function _updateWorkflowBtns(estado,editorNombre,aprobadorNombre){
+  var sb=document.getElementById("rpt-save-btn");
+  var rb=document.getElementById("rpt-revisar-btn");
+  var ab=document.getElementById("rpt-aprobar-btn");
+  if(estado==="borrador"){
+    if(sb)sb.style.display="inline-flex";
+    if(rb)rb.style.display="inline-flex";
+    if(ab)ab.style.display="none";
+  }else if(estado==="revisado"){
+    if(sb)sb.style.display="inline-flex";
+    if(rb)rb.style.display="none";
+    if(ab)ab.style.display="inline-flex";
+  }else if(estado==="aprobado"){
+    if(sb)sb.style.display="none";
+    if(rb)rb.style.display="none";
+    if(ab)ab.style.display="none";
+  }
+  // Actualizar footer de auditoría
+  var ae=document.getElementById("rpt-audit-editor");
+  var aa=document.getElementById("rpt-audit-aprobador");
+  var uname=editorNombre||_getCurrentUserName();
+  if(ae&&uname)ae.textContent="✏️ Elaborado por: "+uname;
+  if(aa&&aprobadorNombre){aa.textContent="✅ Aprobado por: "+aprobadorNombre;aa.style.display="inline";}
+}
+
+// Cargar lista de informes guardados en la subsección
+function loadSavedReports(){
+  if(!_API_TOKEN)return;
+  var filterEl=document.getElementById("saved-filter-estado");
+  var estadoFilter=filterEl?filterEl.value:"";
+  var url="/api/v1/informes/?limit=50"+(estadoFilter?"&estado="+estadoFilter:"");
+  _apiFetch("GET",url)
+  .then(function(list){
+    _renderSavedReports(list);
+    var sec=document.getElementById("saved-reports-section");
+    if(sec)sec.style.display=list.length?"block":"none";
+  })
+  .catch(function(){});
+}
+
+function _renderSavedReports(list){
+  var container=document.getElementById("saved-reports-list");
+  if(!container)return;
+  if(!list||!list.length){
+    container.innerHTML='<div style="color:var(--fa);font-size:12px;padding:12px 0">No hay informes guardados aún.</div>';
+    return;
+  }
+  var estadoMap={borrador:{t:"Borrador",cl:"estado-borrador"},revisado:{t:"Revisado",cl:"estado-revisado"},aprobado:{t:"✅ Aprobado",cl:"estado-aprobado"}};
+  container.innerHTML=list.map(function(inf){
+    var em=estadoMap[inf.estado]||{t:inf.estado,cl:""};
+    var fecha=inf.editado_en?new Date(inf.editado_en).toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
+    var editor=inf.editado_por_nombre?(" · ✏️ "+inf.editado_por_nombre):"";
+    var aprobador=inf.aprobado_por_nombre?(" · ✅ "+inf.aprobado_por_nombre):"";
+    var correoEnv=inf.correo_enviado?' <span style="color:#2D8A4E;font-size:10px">📧 enviado</span>':"";
+    return '<div class="saved-rpt-card">'
+      +'<span class="saved-rpt-estado '+em.cl+'">'+em.t+'</span>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:12px;font-weight:700;color:var(--te);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+      +(inf.proyecto_nombre||inf.sub_project)+' · '+(inf.periodo_display||inf.periodo_desde)+correoEnv
+      +'</div>'
+      +'<div class="saved-rpt-meta">'+fecha+editor+aprobador+'</div>'
+      +'</div>'
+      +'<button class="btn btn-gh btn-sm" onclick="openSavedReport('+inf.id+')" style="font-size:11px;padding:3px 12px;white-space:nowrap">Abrir →</button>'
+      +'</div>';
+  }).join("");
+}
+
+function openSavedReport(id){
+  if(!_API_TOKEN){toast("⚠ Se requiere sesión de plataforma");return;}
+  _apiFetch("GET","/api/v1/informes/"+id)
+  .then(function(inf){
+    // Destruir charts existentes
+    infChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+    fmoChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+    infChartInstances=[];fmoChartInstances=[];
+    // Inyectar HTML
+    var c=document.getElementById("inf-content");
+    c.innerHTML=inf.html_content;
+    c.style.display="block";
+    // Restaurar charts
+    if(inf.charts_data){
+      try{rptChartQueue=JSON.parse(inf.charts_data);setTimeout(renderRptCharts,150);}catch(e){}
+    }
+    // Actualizar estado en toolbar
+    _rptBackendId=inf.id;
+    _rptCurrentKey=_rptKey(inf.tipo,inf.sub_project,inf.periodo_desde,inf.periodo_hasta);
+    _rptCurrentSp=inf.sub_project;
+    _rptCurrentFrom=inf.periodo_desde;
+    _rptCurrentTo=inf.periodo_hasta;
+    _rptCurrentDisplay=inf.periodo_display||"";
+    _rptCurrentNombre=inf.proyecto_nombre||"";
+    // Mostrar toolbar con estado
+    document.getElementById("inf-empty").style.display="none";
+    document.getElementById("inf-loading").style.display="none";
+    var pp=document.getElementById("inf-print");
+    if(pp)pp.style.display="inline-flex";
+    var fp=document.getElementById("fmo-print");
+    if(fp)fp.style.display="none";
+    _showRptToolbar();
+    var sb=document.getElementById("rpt-save-btn");
+    if(sb)sb.style.display="none";
+    _updateEstadoBadge(inf.estado);
+    _updateWorkflowBtns(inf.estado,inf.editado_por_nombre,inf.aprobado_por_nombre);
+    toast("📄 Informe cargado: "+(inf.proyecto_nombre||inf.sub_project));
+    // Scroll al informe
+    c.scrollIntoView({behavior:"smooth"});
+  })
+  .catch(function(e){toast("⚠ Error al cargar informe: "+e.message);});
 }
 
 function _showRptToolbar(){
@@ -4560,8 +4830,6 @@ function toggleRptEdit(){
     if(hint)hint.style.display="none";
     // Auto-guardar al confirmar edición
     saveRptEdit();
-    var sb=document.getElementById("rpt-save-btn");
-    if(sb)sb.style.display="inline-flex";
   }
 }
 
@@ -4597,6 +4865,7 @@ if(_ti)_ti.addEventListener("click",function(){
   if(!genProjects.length)loadGenProjects();
   if(!Object.keys(portPortfolios).length)loadPortfolios();
   if(infType==="fmo")loadContratos();
+  loadSavedReports();
 });
 
 // Mes por defecto

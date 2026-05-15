@@ -46,6 +46,7 @@ class Cliente(Base):
     correo_liquidacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    correo_operacional: Mapped[str | None] = mapped_column(String(255), nullable=True)
     telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -263,6 +263,35 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_precio_unitario NUMERIC(12,4)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_vintage VARCHAR(20)",
     "ALTER TYPE servicio_aplica_enum ADD VALUE IF NOT EXISTS 'rec'",
+    # migration 015 — correo_operacional en clientes
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_operacional VARCHAR(255)",
+    # migration 016 — informes_guardados: flujo editorial de informes operacionales
+    """CREATE TABLE IF NOT EXISTS informes_guardados (
+        id BIGSERIAL PRIMARY KEY,
+        tipo VARCHAR(20) NOT NULL,
+        sub_project VARCHAR(200) NOT NULL,
+        periodo_desde VARCHAR(10) NOT NULL,
+        periodo_hasta VARCHAR(10) NOT NULL,
+        periodo_display VARCHAR(100),
+        proyecto_nombre VARCHAR(300),
+        html_content TEXT NOT NULL,
+        charts_data TEXT,
+        estado VARCHAR(20) NOT NULL DEFAULT 'borrador',
+        creado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+        editado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+        aprobado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+        creado_por_nombre VARCHAR(255),
+        editado_por_nombre VARCHAR(255),
+        aprobado_por_nombre VARCHAR(255),
+        creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        editado_en TIMESTAMPTZ,
+        aprobado_en TIMESTAMPTZ,
+        correo_enviado BOOLEAN NOT NULL DEFAULT FALSE,
+        correo_enviado_en TIMESTAMPTZ
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_informes_tipo_sp_periodo ON informes_guardados (tipo, sub_project, periodo_desde, periodo_hasta)",
+    "CREATE INDEX IF NOT EXISTS ix_informes_sub_project ON informes_guardados (sub_project)",
+    "CREATE INDEX IF NOT EXISTS ix_informes_estado ON informes_guardados (estado)",
 ]
 
 

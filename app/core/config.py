@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     SOLENIUM_USER: str = "laura.hurtado"
     SOLENIUM_PASS: str = "1000899435"
 
+    # SMTP — envío de informes aprobados
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "operaciones@unergy.io"
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:

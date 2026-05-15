@@ -3202,10 +3202,10 @@ function renderRptCharts(){
     var ctx=cv.getContext("2d"),c=null,d=q.d;
 
     if(q.type==="daily"){
-      // Eje X: solo número de día (1,2,3…) en vez de fecha completa
+      // Eje X: solo número de día (1,2,3…) en vez de fecha completa (2026-04-07)
       var xLabels=d.labels.map(function(lbl){
-        var m=lbl.match(/-(\d{2})(?:T|$)/)||lbl.match(/-(\d{1,2})$/);
-        return m?String(parseInt(m[1])):lbl;
+        var m=lbl.match(/(\d{4})-\d{2}-(\d{2})/);
+        return m?String(parseInt(m[2])):lbl;
       });
       var atypSet={};(d.atypDates||[]).forEach(function(dt){atypSet[dt]=true;});
       var barColors=d.labels.map(function(lbl){return atypSet[lbl]?"rgba(220,50,50,.8)":"rgba(107,53,192,.8)";});
@@ -3298,9 +3298,22 @@ function generateInforme(){
   if(infMode==="proyecto"){
     var sp=(document.getElementById("inf-proj")||{}).value||"";
     if(!sp){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Selecciona un proyecto");return;}
+    // Buscar cfg: primero por sub_project exacto, luego por nombre/alias via PROJS_DETALLE
     var cfg=genProjects.find(function(p){return p.sub_project===sp;});
-    if(!cfg){toast("⚠ Proyecto no encontrado");return;}
-    apiGet({action:"getGeneration",sub_project:sp,date_from:range.from,date_to:range.to},30000)
+    if(!cfg){
+      var _pd2=PROJS_DETALLE.find(function(p){return (p.sub_project||"")===sp||(p.alias||"")===sp||(p.nombre||"")===sp;});
+      if(_pd2){
+        cfg=genProjects.find(function(p){
+          return (p.sub_project||"")===(_pd2.alias||"")
+              ||(p.nombre_comercial||"")===(_pd2.nombre||"")
+              ||(p.nombre_display||"")===(_pd2.nombre||"");
+        });
+        if(!cfg) cfg={sub_project:_pd2.alias||sp,nombre_clientes:_pd2.nombre,nombre_display:_pd2.nombre,nombre_bitacora:_pd2.nombre,municipio:"—"};
+      }
+    }
+    if(!cfg){document.getElementById("inf-loading").style.display="none";document.getElementById("inf-empty").style.display="block";toast("⚠ Proyecto no encontrado");return;}
+    var _apiSp=cfg.sub_project||sp; // sub_project para la API Unergy
+    apiGet({action:"getGeneration",sub_project:_apiSp,date_from:range.from,date_to:range.to},30000)
     .then(function(r){
       document.getElementById("inf-loading").style.display="none";
       if(!r||!r.ok){toast("⚠ Error al cargar generación");document.getElementById("inf-empty").style.display="block";return;}

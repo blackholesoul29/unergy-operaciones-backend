@@ -24,7 +24,7 @@ from app.api.v1.auth import get_current_user
 from app.models.informes import InformeGuardado
 from app.models.usuarios import Usuario
 
-router = APIRouter(prefix="/api/v1/informes", tags=["informes"])
+router = APIRouter(prefix="/informes", tags=["informes"])
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────

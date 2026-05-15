@@ -1,14 +1,33 @@
 """
 Servicio de email para envío de informes aprobados.
-Usa únicamente smtplib de la stdlib — sin dependencias externas.
-El informe se envía como HTML en el cuerpo del correo.
+Usa Playwright (Chromium headless) para generar el PDF y smtplib para enviarlo.
 """
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 from app.core.config import settings
+
+
+def _build_pdf(html: str) -> bytes:
+    """Genera PDF desde HTML usando Playwright (Chromium headless)."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        page = browser.new_page()
+        page.set_content(html, wait_until="networkidle")
+        pdf_bytes = page.pdf(
+            format="A4",
+            margin={"top": "12mm", "bottom": "12mm", "left": "14mm", "right": "14mm"},
+            print_background=True,
+        )
+        browser.close()
+        return pdf_bytes
 
 
 def send_informe_email(
@@ -20,8 +39,7 @@ def send_informe_email(
     html_content: str,
 ) -> None:
     """
-    Envía el informe aprobado por correo.
-    El informe completo va en el cuerpo del email como HTML.
+    Genera el PDF del informe con Playwright y lo envía como adjunto por correo.
     Lanza RuntimeError si SMTP no está configurado o falla el envío.
     """
     if not settings.SMTP_HOST:
@@ -30,52 +48,65 @@ def send_informe_email(
             "SMTP_PASSWORD y SMTP_FROM en las variables de entorno."
         )
 
-    subject = f"Informe Operacional — {proyecto_nombre} — {periodo_display}"
-
-    # Cabecera de presentación + informe completo embebido
-    intro = f"""
-    <div style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:800px;margin:0 auto 0">
-      <div style="background:#1A0F2E;padding:20px 28px;border-radius:10px 10px 0 0;display:flex;align-items:center;gap:16px">
-        <div>
-          <div style="color:#F6FF72;font-size:18px;font-weight:800;letter-spacing:1px">UNERGY</div>
-          <div style="color:#6B5F80;font-size:10px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Informe Operacional</div>
-        </div>
-        <div style="margin-left:auto;background:#4ADE8020;border:1px solid #4ADE8060;border-radius:8px;padding:6px 14px">
-          <div style="font-size:10px;color:#2D8A4E;font-weight:700">✅ APROBADO POR</div>
-          <div style="font-size:13px;color:#1A0F2E;font-weight:800">{aprobado_por}</div>
-        </div>
-      </div>
-      <div style="background:#F0EBF8;padding:12px 28px;border:1px solid #EDE8F5;border-top:none;font-size:12px;color:#6B5F80">
-        Estimado cliente, a continuación encontrará el <strong>Informe Operacional de {proyecto_nombre}</strong>
-        correspondiente al período <strong>{periodo_display}</strong>.
-        Para imprimir o guardar como PDF, use <em>Archivo → Imprimir → Guardar como PDF</em> en su navegador.
-      </div>
-    </div>
-    """
-
-    full_html = f"""<!DOCTYPE html>
+    # HTML completo para el PDF (incluir estilos base)
+    html_for_pdf = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Informe {proyecto_nombre} — {periodo_display}</title>
+<style>
+  @page {{ size: A4 portrait; margin: 12mm 14mm; }}
+  * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
+  body {{ margin: 0; padding: 0; background: #fff; font-family: Arial, sans-serif; }}
+</style>
 </head>
-<body style="margin:0;padding:16px;background:#f4f0fc;font-family:'Segoe UI',Arial,sans-serif">
-{intro}
-<div style="max-width:800px;margin:0 auto">
-{html_content}
-</div>
-<div style="max-width:800px;margin:8px auto;text-align:center;font-size:10px;color:#A89EC0;padding:12px">
-  UNERGY ENERGÍA DIGITAL S.A.S ESP · operaciones@unergy.io · www.unergy.co
-</div>
+<body>{html_content}</body>
+</html>"""
+
+    pdf_bytes = _build_pdf(html_for_pdf)
+
+    subject = f"Informe Operacional — {proyecto_nombre} — {periodo_display}"
+
+    body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:620px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Informe Operacional</div>
+  </div>
+  <div style="background:#F7F4FD;padding:24px 28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <p style="margin:0 0 16px">Estimado cliente,</p>
+    <p style="margin:0 0 16px">
+      Adjunto encontrará el <strong>Informe Operacional de {proyecto_nombre}</strong>
+      correspondiente al período <strong>{periodo_display}</strong>.
+    </p>
+    <div style="background:#fff;border:1px solid #EDE8F5;border-radius:8px;padding:14px 18px;margin:20px 0">
+      <div style="font-size:11px;font-weight:700;color:#A89EC0;letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px">APROBADO POR</div>
+      <div style="font-size:14px;font-weight:700;color:#1A0F2E">✅ {aprobado_por}</div>
+    </div>
+    <p style="color:#6B5F80;font-size:12px;margin:16px 0 0">
+      Cualquier consulta, escríbenos a
+      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
 </body>
 </html>"""
 
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_FROM
     msg["To"] = to_email
-    msg.attach(MIMEText(full_html, "html", "utf-8"))
+    msg.attach(MIMEText(body_html, "html", "utf-8"))
+
+    # PDF adjunto
+    attachment = MIMEBase("application", "pdf")
+    attachment.set_payload(pdf_bytes)
+    encoders.encode_base64(attachment)
+    safe_name = (
+        f"Informe_{proyecto_nombre.replace(' ', '_')}_"
+        f"{periodo_display.replace(' ', '_')}.pdf"
+    )
+    attachment.add_header("Content-Disposition", f"attachment; filename=\"{safe_name}\"")
+    msg.attach(attachment)
 
     context = ssl.create_default_context()
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:

@@ -748,14 +748,30 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
 
     simulation = None
     from sqlalchemy import or_
+    import json as _json
+
+    def _parse_kwh_list(val):
+        """Normaliza JSONB o string JSON a list[float|None]. Maneja datos históricos."""
+        if val is None:
+            return None
+        if isinstance(val, list):
+            return val
+        if isinstance(val, str):
+            try:
+                result = _json.loads(val)
+                return result if isinstance(result, list) else None
+            except Exception:
+                return None
+        return None
+
     proyecto = db.query(Proyecto).filter(
         or_(Proyecto.sub_project == sub_project, Proyecto.alias_monitoreo == sub_project)
     ).first()
     if proyecto and (proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh):
         try:
             month = d_from_date.month
-            p90_list = proyecto.p90_mensual_kwh if proyecto.p90_mensual_kwh else [None] * 12
-            p50_list = proyecto.p50_mensual_kwh if proyecto.p50_mensual_kwh else [None] * 12
+            p90_list = _parse_kwh_list(proyecto.p90_mensual_kwh) or [None] * 12
+            p50_list = _parse_kwh_list(proyecto.p50_mensual_kwh) or [None] * 12
             p90m = p90_list[month - 1] if len(p90_list) >= month else None
             p50m = p50_list[month - 1] if len(p50_list) >= month else None
             days_in_month = calendar.monthrange(d_from_date.year, month)[1]

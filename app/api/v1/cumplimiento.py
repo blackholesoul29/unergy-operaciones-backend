@@ -85,9 +85,10 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     ultimo_dia = None
     try:
         last_ts = records_sorted[-1].get("time_stamp", "")
+        # La API devuelve timestamps con offset Colombia (-05:00) o Z.
+        # fromisoformat los parsea correctamente — el .day es ya hora Colombia.
         last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-        col_dt = last_dt.replace(tzinfo=None) - timedelta(hours=5)  # UTC → Colombia
-        ultimo_dia = col_dt.day
+        ultimo_dia = last_dt.day
     except Exception:
         pass
 
@@ -240,7 +241,8 @@ def get_cumplimiento(
         def _fetch_one(p: dict) -> dict:
             gen = _fetch_month(token, p["sub_project"], year, month)
             gen_planta = gen["mwh"]
-            gen_contrato = round(gen_planta * p["pct_despacho"] / 100, 3) if gen_planta is not None else None
+            # porcentaje_despacho en ASIC es fracción 0-1 (1.0 = 100%)
+            gen_contrato = round(gen_planta * p["pct_despacho"], 3) if gen_planta is not None else None
             return {
                 "nombre": p["nombre"],
                 "sub_project": p["sub_project"],

@@ -240,6 +240,14 @@ def save_falla_monitoreo(
 
     # ── fotos: solo almacenar URLs, no subir nada ─────────────────────────
     fotos_urls_payload = payload.get("driveUrls") or []
+    # Defensivo: el frontend podría enviar driveUrls como JSON-string (doble-encoding)
+    if isinstance(fotos_urls_payload, str):
+        try:
+            fotos_urls_payload = json.loads(fotos_urls_payload)
+            if not isinstance(fotos_urls_payload, list):
+                fotos_urls_payload = []
+        except Exception:
+            fotos_urls_payload = []
     drive_url = payload.get("driveUrl", "").strip()
     if drive_url and drive_url not in fotos_urls_payload:
         fotos_urls_payload = [drive_url] + fotos_urls_payload

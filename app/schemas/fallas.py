@@ -143,6 +143,21 @@ class FallaOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+    @field_validator("fotos_lista", mode="before")
+    @classmethod
+    def coerce_fotos_lista(cls, v):
+        """Acepta list o JSON-string; nunca falla con 500."""
+        import json as _json
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else []
+            except Exception:
+                return []
+        return []
+
     @field_validator("seguimientos", mode="before")
     @classmethod
     def none_to_list(cls, v):

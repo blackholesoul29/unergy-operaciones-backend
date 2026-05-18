@@ -125,7 +125,24 @@ class Falla(Base):
 
     @property
     def fotos_lista(self) -> list[str]:
-        return self.fotos_urls or []
+        # Con JSONB el ORM ya devuelve list o str según cómo fue almacenado.
+        # Manejamos ambos casos + doble-codificación de datos históricos.
+        if not self.fotos_urls:
+            return []
+        if isinstance(self.fotos_urls, list):
+            return self.fotos_urls
+        # Caso legado: string JSON (antes de la migración a JSONB)
+        try:
+            result = json.loads(self.fotos_urls)
+            if isinstance(result, list):
+                return result
+            # Doble-codificación histórica → decodificar una vez más
+            if isinstance(result, str):
+                inner = json.loads(result)
+                return inner if isinstance(inner, list) else []
+            return []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
 
 class FallaSeguimiento(Base):

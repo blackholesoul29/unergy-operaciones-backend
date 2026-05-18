@@ -1,7 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, CheckConstraint)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -64,9 +65,9 @@ class Proyecto(Base):
     __tablename__ = "proyectos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True)
-    portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True)
-    proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
+    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True, index=True)
+    portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
+    proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
 
     nombre_comercial: Mapped[str] = mapped_column(String(255), nullable=False)
     nombre_bitacora: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -106,8 +107,8 @@ class Proyecto(Base):
     # Monitoreo
     alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P50/P90 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
-    p90_mensual_kwh: Mapped[str | None] = mapped_column(Text, nullable=True)
-    p50_mensual_kwh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    p90_mensual_kwh = mapped_column(JSONB, nullable=True)
+    p50_mensual_kwh = mapped_column(JSONB, nullable=True)
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Liquidación
@@ -149,7 +150,7 @@ class ProyectoInfoTecnica(Base):
     __tablename__ = "proyecto_info_tecnica"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), unique=True, nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), unique=True, index=True, nullable=False)
     cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tiene_almacenamiento: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     capacidad_almacenamiento_kwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
@@ -165,7 +166,7 @@ class ProyectoGrupoPanel(Base):
     __tablename__ = "proyecto_grupos_panel"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
     modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     potencia_pico_wp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
@@ -180,7 +181,7 @@ class ProyectoInversor(Base):
     __tablename__ = "proyecto_inversores"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
     modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     potencia_nominal_kw: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
@@ -196,7 +197,7 @@ class ProyectoContacto(Base):
     __tablename__ = "proyecto_contactos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     tipo: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -209,10 +210,13 @@ class ProyectoContacto(Base):
 
 class ProyectoInversionista(Base):
     __tablename__ = "proyecto_inversionistas"
+    __table_args__ = (
+        CheckConstraint("porcentaje_participacion >= 0 AND porcentaje_participacion <= 100", name="ck_inversionista_pct_rango"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     contrato_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     porcentaje_participacion: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     es_patrimonio_autonomo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -67,7 +67,7 @@ class ClienteServicio(Base):
     __tablename__ = "cliente_servicios"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoServicioClienteEnum, name="tipo_servicio_cliente_enum"), nullable=False)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -80,7 +80,7 @@ class ClienteDocumentoComercial(Base):
     __tablename__ = "cliente_documentos_comerciales"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoDocumentoClienteEnum, name="tipo_documento_cliente_enum"), nullable=False)
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     numero: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -91,7 +91,7 @@ class ClienteDocumentoComercial(Base):
     )
     archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     archivo_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True)
+    servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True, index=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

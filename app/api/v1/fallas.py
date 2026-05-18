@@ -1,4 +1,3 @@
-import json
 from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -179,13 +178,12 @@ def create_falla(
     current_user: Usuario = Depends(get_current_user),
 ):
     dump = data.model_dump()
-    # fotos_urls viene como list[str] del schema pero el modelo almacena JSON string
     fotos = dump.pop("fotos_urls", None)
     falla = Falla(
         **dump,
         codigo_interno=_gen_codigo(db),
         registrado_por_id=current_user.id,
-        fotos_urls=json.dumps(fotos) if fotos else None,
+        fotos_urls=fotos if fotos else None,
     )
     db.add(falla)
     db.commit()
@@ -208,9 +206,6 @@ def update_falla(
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     dump = data.model_dump(exclude_none=True)
-    # fotos_urls viene como list[str] del schema, convertir a JSON string
-    if "fotos_urls" in dump:
-        dump["fotos_urls"] = json.dumps(dump["fotos_urls"]) if dump["fotos_urls"] else None
     for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()

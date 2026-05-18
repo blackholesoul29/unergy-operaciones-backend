@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, date
 from typing import List
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, CheckConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -104,8 +104,8 @@ class Liquidacion(Base):
     __table_args__ = (UniqueConstraint("proyecto_id", "periodo", name="uq_liquidacion_proyecto_periodo"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    generado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    generado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False, index=True)
     periodo: Mapped[date] = mapped_column(Date, nullable=False)  # primer día del mes
     tipo_venta: Mapped[str] = mapped_column(SAEnum(TipoVentaLiqEnum, name="tipo_venta_liq_enum"), nullable=False)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoLiquidacionEnum, name="estado_liquidacion_enum"), nullable=False, default="iniciada")
@@ -138,7 +138,7 @@ class LiquidacionCosto(Base):
     __tablename__ = "liquidacion_costos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
+    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
     tipo_costo: Mapped[str] = mapped_column(SAEnum(TipoCostoEnum, name="tipo_costo_enum"), nullable=False)
     descripcion: Mapped[str] = mapped_column(String(500), nullable=False)
     proveedor: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -146,6 +146,7 @@ class LiquidacionCosto(Base):
     soporte_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     valor_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="costos")
 
@@ -154,8 +155,8 @@ class LiquidacionXMDato(Base):
     __tablename__ = "liquidacion_xm_datos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
-    frontera_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
+    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
+    frontera_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
     tipo_venta: Mapped[str] = mapped_column(SAEnum(TipoVentaLiqEnum, name="tipo_venta_xm_enum", create_constraint=False), nullable=False)
     energia_kwh: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
     tarifa_aplicada_kwh: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False)
@@ -172,8 +173,8 @@ class LiquidacionMandato(Base):
     __tablename__ = "liquidacion_mandatos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
-    inversionista_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyecto_inversionistas.id"), nullable=True)
+    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
+    inversionista_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyecto_inversionistas.id"), nullable=True, index=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoMandatoEnum, name="tipo_mandato_enum"), nullable=False)
     numero_mandato: Mapped[str | None] = mapped_column(String(50), nullable=True)
     consecutivo: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -205,7 +206,7 @@ class LiquidacionMandatoLinea(Base):
     __tablename__ = "liquidacion_mandato_lineas"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    mandato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidacion_mandatos.id"), nullable=False)
+    mandato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidacion_mandatos.id"), nullable=False, index=True)
     tipo_linea: Mapped[str] = mapped_column(SAEnum(TipoLineaMandatoEnum, name="tipo_linea_mandato_enum"), nullable=False)
     concepto: Mapped[str] = mapped_column(String(500), nullable=False)
     valor_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
@@ -215,6 +216,7 @@ class LiquidacionMandatoLinea(Base):
     soporte_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     mandato: Mapped["LiquidacionMandato"] = relationship("LiquidacionMandato", back_populates="lineas")
 
@@ -223,7 +225,7 @@ class LiquidacionFactura(Base):
     __tablename__ = "liquidacion_facturas"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False)
+    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
     tipo_servicio: Mapped[str] = mapped_column(SAEnum(TipoFacturaServicioEnum, name="tipo_factura_servicio_enum"), nullable=False)
     numero_factura: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nro_soporte: Mapped[str | None] = mapped_column(String(100), nullable=True)

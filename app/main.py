@@ -15,7 +15,7 @@ _PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS codigo_legado VARCHAR(30)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_fallas_codigo_legado_unique ON fallas (codigo_legado) WHERE codigo_legado IS NOT NULL",
     # migration 003 — monitoreo fields
-    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls TEXT",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls JSONB",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
@@ -44,8 +44,8 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
     # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh TEXT",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh TEXT",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh JSONB",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh JSONB",
     # migration 005 — código TSF (frontera CREG) por proyecto
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_tsf VARCHAR(100)",
     # migration 006 — múltiples correos por cliente (T14)
@@ -59,7 +59,7 @@ _PENDING_DDLS = [
         tipo VARCHAR(50) NOT NULL,
         titulo VARCHAR(500) NOT NULL,
         descripcion TEXT,
-        archivos_json TEXT,
+        archivos_json JSONB,
         created_by VARCHAR(255),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -231,8 +231,6 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_resp VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_resp DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_resp DATE",
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS agrupada_bajo VARCHAR(50)",
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS embebida_bajo VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS factor_perdidas_frontera_principal NUMERIC(10,6)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS codigo_ciiu VARCHAR(20)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS clasificacion_industrial_general VARCHAR(255)",
@@ -275,7 +273,7 @@ _PENDING_DDLS = [
         periodo_display VARCHAR(100),
         proyecto_nombre VARCHAR(300),
         html_content TEXT NOT NULL,
-        charts_data TEXT,
+        charts_data JSONB,
         estado VARCHAR(20) NOT NULL DEFAULT 'borrador',
         creado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
         editado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,

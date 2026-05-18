@@ -25,7 +25,7 @@ class AsicSolicitud(Base):
     __tablename__ = "asic_solicitudes"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
+    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     requerimiento_asic: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tipo_solicitud: Mapped[str] = mapped_column(SAEnum(TipoSolicitudAsicEnum, name="tipo_solicitud_asic_enum"), nullable=False)
     prioridad_limitacion: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -56,13 +56,13 @@ class AsicCambioContrato(Base):
     __tablename__ = "asic_cambios_contratos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    solicitud_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("asic_solicitudes.id"), nullable=True)
+    solicitud_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("asic_solicitudes.id"), nullable=True, index=True)
     codigo_sic_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True)
     contrato_interno: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    proyecto_original_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
+    proyecto_original_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     codigo_frt_original: Mapped[str | None] = mapped_column(String(20), nullable=True)
     energia_mensual_mwh_original: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
-    proyecto_nuevo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
+    proyecto_nuevo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     codigo_frt_nuevo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     energia_mensual_mwh_nuevo: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
     accion: Mapped[str | None] = mapped_column(String(100), nullable=True)

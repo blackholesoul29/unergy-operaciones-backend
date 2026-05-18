@@ -97,9 +97,7 @@ class FronteraBase(BaseModel):
     # Agrupación/embebido
     es_agrupadora: Optional[bool] = False
     factor_psf: Optional[float] = None
-    agrupada_bajo: Optional[str] = None
     es_principal_embebido: Optional[bool] = False
-    embebida_bajo: Optional[str] = None
     factor_acordado: Optional[float] = None
     factor_ajuste: Optional[float] = None
     factor_perdidas_frontera_principal: Optional[float] = None

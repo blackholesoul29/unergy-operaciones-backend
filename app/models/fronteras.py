@@ -1,7 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text,
+                        Index, CheckConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -31,10 +32,10 @@ class Frontera(Base):
     __tablename__ = "fronteras"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
-    frontera_gemela_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
-    agrupada_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
-    embebida_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True)
+    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
+    frontera_gemela_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
+    agrupada_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
+    embebida_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
 
     codigo_frontera: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     nombre_frontera: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -124,9 +125,7 @@ class Frontera(Base):
     # Agrupación/embebido
     es_agrupadora: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     factor_psf: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
-    agrupada_bajo: Mapped[str | None] = mapped_column(String(50), nullable=True)
     es_principal_embebido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    embebida_bajo: Mapped[str | None] = mapped_column(String(50), nullable=True)
     factor_acordado: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_ajuste: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_perdidas_frontera_principal: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
@@ -153,9 +152,12 @@ class Frontera(Base):
 
 class FronteraLectura(Base):
     __tablename__ = "fronteras_lecturas"
+    __table_args__ = (
+        Index("ix_frontera_lectura_frontera_fecha", "frontera_id", "fecha_hora"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=False)
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=False, index=True)
     fuente: Mapped[str] = mapped_column(SAEnum(FuenteLecturaEnum, name="fuente_lectura_enum"), nullable=False)
     fecha_hora: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)

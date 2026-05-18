@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from decimal import Decimal
 from sqlalchemy import (BigInteger, String, Numeric, Date, DateTime,
-                        ForeignKey, Text, UniqueConstraint)
+                        ForeignKey, Text, UniqueConstraint, Index)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -10,6 +10,7 @@ from app.models.base import Base
 class GeneracionDiaria(Base):
     __tablename__ = "generacion_diaria"
     __table_args__ = (
+        Index("ix_generacion_diaria_fecha", "fecha"),
         UniqueConstraint("proyecto_id", "fecha", name="uq_generacion_proyecto_fecha"),
     )
 

@@ -3,7 +3,8 @@ import enum
 from datetime import datetime, date
 from typing import Optional
 from sqlalchemy import (BigInteger, Integer as sa_Integer, String, Numeric, Boolean, Date,
-                        DateTime, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, Table, Column)
+                        DateTime, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, Table,
+                        Column, CheckConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -44,15 +45,15 @@ class ContratoServicio(Base):
     __tablename__ = "contratos_servicio"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True)
+    proyecto_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     numero_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     servicio_aplica: Mapped[str] = mapped_column(SAEnum(ServicioAplicaEnum, name="servicio_aplica_enum"), nullable=False)
     contratante_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contratante_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     prestador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prestador_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    contratante_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
-    prestador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
+    contratante_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
+    prestador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     tiene_cgm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     tiene_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     cgm_codigo_sic: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -85,8 +86,8 @@ class PPAContrato(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     numero_codigo_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    comprador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
-    vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True)
+    comprador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
+    vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     comprador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     comprador_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     vendedor_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -124,21 +125,24 @@ class PPATarifa(Base):
     __tablename__ = "ppa_tarifas"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    contrato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("ppa_contratos.id", ondelete="CASCADE"), nullable=False)
+    contrato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("ppa_contratos.id", ondelete="CASCADE"), nullable=False, index=True)
     año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
     mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
     tarifa: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
 
     contrato: Mapped["PPAContrato"] = relationship("PPAContrato", back_populates="tarifas")
 
-    __table_args__ = (UniqueConstraint("contrato_id", "año", "mes", name="uq_ppa_tarifa_contrato_periodo"),)
+    __table_args__ = (
+        CheckConstraint("mes >= 1 AND mes <= 12", name="ck_ppa_tarifa_mes_rango"),
+        UniqueConstraint("contrato_id", "año", "mes", name="uq_ppa_tarifa_contrato_periodo"),
+    )
 
 
 class PPACompromisoEnergia(Base):
     __tablename__ = "ppa_compromisos_energia"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    contrato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("ppa_contratos.id", ondelete="CASCADE"), nullable=False)
+    contrato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("ppa_contratos.id", ondelete="CASCADE"), nullable=False, index=True)
     año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
     mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
     energia_minima: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
@@ -147,20 +151,30 @@ class PPACompromisoEnergia(Base):
 
     contrato: Mapped["PPAContrato"] = relationship("PPAContrato", back_populates="compromisos_energia")
 
-    __table_args__ = (UniqueConstraint("contrato_id", "año", "mes", name="uq_ppa_compromiso_contrato_periodo"),)
+    __table_args__ = (
+        CheckConstraint("mes >= 1 AND mes <= 12", name="ck_ppa_compromiso_mes_rango"),
+        UniqueConstraint("contrato_id", "año", "mes", name="uq_ppa_compromiso_contrato_periodo"),
+    )
+
+
+class EstadoArriendoEnum(str, enum.Enum):
+    vigente = "vigente"
+    vencido = "vencido"
+    terminado = "terminado"
+    en_renovacion = "en_renovacion"
 
 
 class ContratoArriendo(Base):
     __tablename__ = "contratos_arriendo"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     propietario_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     hectareas: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     verificado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
-    estado: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    estado: Mapped[str | None] = mapped_column(SAEnum(EstadoArriendoEnum, name="estado_arriendo_enum"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

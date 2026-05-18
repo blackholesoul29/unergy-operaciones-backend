@@ -10,7 +10,6 @@ Convención de estados:
   terminada      ←→  cerrada / sin_solucion (ambos → terminada al salir)
 """
 import calendar
-import json
 import random
 import string
 from datetime import datetime, date, time as time_type, timedelta, timezone
@@ -78,12 +77,7 @@ def _falla_to_fault(f: Falla) -> dict:
             lineas.append(f"{ts} - {quien}: {nota}")
         seguimiento_txt = "\n".join(lineas)
 
-    fotos_lista: list[str] = []
-    if f.fotos_urls:
-        try:
-            fotos_lista = json.loads(f.fotos_urls)
-        except (json.JSONDecodeError, TypeError):
-            fotos_lista = []
+    fotos_lista: list[str] = f.fotos_urls or []
 
     return {
         "id": f.codigo_interno,
@@ -249,7 +243,7 @@ def save_falla_monitoreo(
     drive_url = payload.get("driveUrl", "").strip()
     if drive_url and drive_url not in fotos_urls_payload:
         fotos_urls_payload = [drive_url] + fotos_urls_payload
-    fotos_json = json.dumps(fotos_urls_payload) if fotos_urls_payload else None
+    fotos_json = fotos_urls_payload if fotos_urls_payload else None
 
     centinela = (payload.get("centinela") or "").strip() or current_user.nombre
     followup_nuevo = (payload.get("followUp") or "").strip()
@@ -749,8 +743,8 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
     if proyecto and (proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh):
         try:
             month = d_from_date.month
-            p90_list = json.loads(proyecto.p90_mensual_kwh) if proyecto.p90_mensual_kwh else [None] * 12
-            p50_list = json.loads(proyecto.p50_mensual_kwh) if proyecto.p50_mensual_kwh else [None] * 12
+            p90_list = proyecto.p90_mensual_kwh if proyecto.p90_mensual_kwh else [None] * 12
+            p50_list = proyecto.p50_mensual_kwh if proyecto.p50_mensual_kwh else [None] * 12
             p90m = p90_list[month - 1] if len(p90_list) >= month else None
             p50m = p50_list[month - 1] if len(p50_list) >= month else None
             days_in_month = calendar.monthrange(d_from_date.year, month)[1]

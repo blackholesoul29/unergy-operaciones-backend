@@ -9,8 +9,9 @@ los compromisos de energía (min/max MWh) del contrato PPA.
 
 import calendar
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -100,6 +101,75 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     }
 
 
+def _fetch_recent_avg(token: str, sub_project: str, n_days: int = 15) -> dict:
+    """
+    Promedio diario de generación en los últimos n_days días con datos reales.
+    Consulta los 60 días previos a hoy para encontrar días con producción > 0.
+    Usa para proyectar meses futuros donde no hay datos reales.
+    """
+    now_col = datetime.now(timezone.utc) - timedelta(hours=5)
+    start_col = now_col - timedelta(days=60)
+    tz_offset = timedelta(hours=5)
+    start_utc = start_col + tz_offset
+    end_utc = now_col + tz_offset
+
+    try:
+        with httpx.Client(timeout=90, follow_redirects=True) as client:
+            resp = client.get(
+                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
+                params={
+                    "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "sub_project": sub_project,
+                    "limit": "10000",
+                },
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "PostmanRuntime/7.50.0",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            records = data if isinstance(data, list) else data.get("results", [])
+    except Exception as exc:
+        logger.warning("API error recent_avg sub_project=%s: %s", sub_project, exc)
+        return {"avg_daily_mwh": None, "n_days_used": 0, "last_data_date": None}
+
+    if not records:
+        return {"avg_daily_mwh": None, "n_days_used": 0, "last_data_date": None}
+
+    by_day: dict = defaultdict(list)
+    for r in records:
+        ts_str = r.get("time_stamp", "")
+        gen_val = r.get("generacion")
+        if not ts_str or gen_val is None:
+            continue
+        try:
+            dt_aware = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            dt_col = dt_aware.astimezone(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
+            by_day[dt_col.date()].append(float(gen_val))
+        except Exception:
+            continue
+
+    daily_gen = []
+    for day, vals in by_day.items():
+        delta_mwh = (max(vals) - min(vals)) / 1000
+        if delta_mwh > 0:
+            daily_gen.append((day, delta_mwh))
+
+    if not daily_gen:
+        return {"avg_daily_mwh": None, "n_days_used": 0, "last_data_date": None}
+
+    daily_gen.sort(key=lambda x: x[0])
+    recent = daily_gen[-n_days:]
+    avg = round(sum(v for _, v in recent) / len(recent), 3)
+    return {
+        "avg_daily_mwh": avg,
+        "n_days_used": len(recent),
+        "last_data_date": recent[-1][0].isoformat(),
+    }
+
+
 # ── GESCON ────────────────────────────────────────────────────────────────────
 
 def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -> list:
@@ -176,6 +246,7 @@ def get_resumen(
     """
     today = date.today()
     es_mes_actual = year == today.year and month == today.month
+    es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
     total_dias = calendar.monthrange(year, month)[1]
     dia_actual = today.day if es_mes_actual else total_dias
 
@@ -220,6 +291,11 @@ def get_resumen(
         sp_list = list(sp_set)
 
         def _fetch_sp(sp: str) -> tuple:
+            if es_mes_futuro:
+                recent = _fetch_recent_avg(token, sp)
+                avg = recent["avg_daily_mwh"]
+                mwh = round(avg * total_dias, 3) if avg is not None else None
+                return sp, {"mwh": mwh, "n_records": recent["n_days_used"], "ultimo_dia": None}
             return sp, _fetch_month(token, sp, year, month)
 
         max_workers = min(len(sp_list), 10)
@@ -269,7 +345,7 @@ def get_resumen(
         min_mwh: Optional[float] = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
         max_mwh: Optional[float] = float(compromiso.energia_maxima) if compromiso and compromiso.energia_maxima is not None else None
 
-        val_b = gen_proy_c if es_mes_actual else gen_total_c
+        val_b = gen_proy_c if (es_mes_actual or es_mes_futuro) else gen_total_c
 
         if min_mwh is not None and max_mwh is not None:
             has_any_compromisos = True
@@ -311,7 +387,7 @@ def get_resumen(
     # ── 6. Totales agregados ──────────────────────────────────────────────────
     total_gen = round(total_gen, 3)
     total_proy = round(total_proy, 3)
-    val_total = total_proy if es_mes_actual else total_gen
+    val_total = total_proy if (es_mes_actual or es_mes_futuro) else total_gen
 
     if has_any_compromisos and total_max > 0:
         if val_total < total_min:
@@ -336,6 +412,8 @@ def get_resumen(
             "dia_actual": dia_actual,
             "dias_mes": total_dias,
             "es_mes_actual": es_mes_actual,
+            "es_mes_futuro": es_mes_futuro,
+            "tipo_datos": "proyeccion_historica" if es_mes_futuro else ("proyeccion_lineal" if es_mes_actual else "real"),
             "dia_min_datos": min(dias_min_list) if dias_min_list else None,
             "dia_max_datos": max(dias_min_list) if dias_min_list else None,
         },
@@ -392,6 +470,7 @@ def get_cumplimiento(
     # ── 3. Período ────────────────────────────────────────────
     today = date.today()
     es_mes_actual = year == today.year and month == today.month
+    es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
     total_dias = calendar.monthrange(year, month)[1]
     dia_actual = today.day if es_mes_actual else total_dias
 
@@ -429,8 +508,17 @@ def get_cumplimiento(
             raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
 
         def _fetch_one(p: dict) -> dict:
-            gen = _fetch_month(token, p["sub_project"], year, month)
-            gen_planta = gen["mwh"]
+            if es_mes_futuro:
+                recent = _fetch_recent_avg(token, p["sub_project"])
+                avg = recent["avg_daily_mwh"]
+                gen_planta = round(avg * total_dias, 3) if avg is not None else None
+                n_registros = recent["n_days_used"]
+                ultimo_dia = None
+            else:
+                gen = _fetch_month(token, p["sub_project"], year, month)
+                gen_planta = gen["mwh"]
+                n_registros = gen["n_records"]
+                ultimo_dia = gen["ultimo_dia"]
             # porcentaje_despacho en ASIC es fracción 0-1 (1.0 = 100%)
             gen_contrato = round(gen_planta * p["pct_despacho"], 3) if gen_planta is not None else None
             return {
@@ -439,8 +527,8 @@ def get_cumplimiento(
                 "pct_despacho": p["pct_despacho"],
                 "gen_planta_mwh": gen_planta,
                 "gen_contrato_mwh": gen_contrato,
-                "n_registros": gen["n_records"],
-                "ultimo_dia": gen["ultimo_dia"],
+                "n_registros": n_registros,
+                "ultimo_dia": ultimo_dia,
                 "sin_datos": gen_planta is None,
                 "sin_api_id": False,
             }
@@ -485,7 +573,7 @@ def get_cumplimiento(
     min_mwh: Optional[float] = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
     max_mwh: Optional[float] = float(compromiso.energia_maxima) if compromiso and compromiso.energia_maxima is not None else None
 
-    val_balance = gen_proyectada if es_mes_actual else gen_total
+    val_balance = gen_proyectada if (es_mes_actual or es_mes_futuro) else gen_total
 
     if min_mwh is not None and max_mwh is not None:
         if val_balance < min_mwh:
@@ -516,6 +604,8 @@ def get_cumplimiento(
             "dia_actual": dia_actual,
             "dias_mes": total_dias,
             "es_mes_actual": es_mes_actual,
+            "es_mes_futuro": es_mes_futuro,
+            "tipo_datos": "proyeccion_historica" if es_mes_futuro else ("proyeccion_lineal" if es_mes_actual else "real"),
             "dia_min_datos": dia_min_datos,
             "dia_max_datos": dia_max_datos,
         },

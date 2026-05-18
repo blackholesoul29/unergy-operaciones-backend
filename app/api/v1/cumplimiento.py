@@ -430,6 +430,182 @@ def get_resumen(
     }
 
 
+@router.get("/ppa/resumen-anual")
+def get_resumen_anual(
+    year: int = Query(..., ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Annual commitment totals per contract (DB only, no Unergy API)."""
+    contratos = (
+        db.query(PPAContrato)
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+    compromisos = (
+        db.query(PPACompromisoEnergia)
+        .filter(PPACompromisoEnergia.año == year)
+        .all()
+    )
+    comp_by_c: dict = defaultdict(list)
+    for c in compromisos:
+        comp_by_c[c.contrato_id].append(c)
+
+    result = []
+    for c in contratos:
+        rows = comp_by_c.get(c.id, [])
+        total_min = sum(float(r.energia_minima) for r in rows if r.energia_minima is not None)
+        total_max = sum(float(r.energia_maxima) for r in rows if r.energia_maxima is not None)
+        result.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            "total_min_mwh": round(total_min, 1) if rows else None,
+            "total_max_mwh": round(total_max, 1) if rows else None,
+            "meses_con_compromisos": len(rows),
+        })
+    return result
+
+
+@router.get("/ppa/{contrato_id}/anual")
+def get_anual(
+    contrato_id: int,
+    year: int = Query(..., ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Annual chart data for a contract: 12 months of generation vs commitments."""
+    today = date.today()
+
+    contrato = db.query(PPAContrato).filter(PPAContrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(404, "Contrato PPA no encontrado")
+
+    comp_map = {
+        r.mes: r
+        for r in db.query(PPACompromisoEnergia).filter(
+            PPACompromisoEnergia.contrato_id == contrato_id,
+            PPACompromisoEnergia.año == year,
+        ).all()
+    }
+
+    gescon_per_month: dict = {}
+    for m in range(1, 13):
+        gescon_per_month[m] = (
+            _resolve_gescon(db, contrato.numero_codigo_contrato, year, m)
+            if contrato.numero_codigo_contrato else []
+        )
+
+    need_month: set = set()
+    need_avg: set = set()
+    for m in range(1, 13):
+        is_future = (year > today.year) or (year == today.year and m > today.month)
+        for asic in gescon_per_month[m]:
+            if asic.proyecto and asic.proyecto.sub_project:
+                if is_future:
+                    need_avg.add(asic.proyecto.sub_project)
+                else:
+                    need_month.add((m, asic.proyecto.sub_project))
+
+    month_cache: dict = {}
+    avg_cache: dict = {}
+
+    if need_month or need_avg:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in get_anual: %s", exc)
+            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+
+        if need_month:
+            def _ft(task):
+                m, sp = task
+                return task, _fetch_month(token, sp, year, m)
+            with ThreadPoolExecutor(max_workers=min(len(need_month), 12)) as pool:
+                for task, res in pool.map(_ft, list(need_month)):
+                    month_cache[task] = res
+
+        if need_avg:
+            def _fa(sp):
+                return sp, _fetch_recent_avg(token, sp)
+            with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
+                for sp, res in pool.map(_fa, list(need_avg)):
+                    avg_cache[sp] = res.get("avg_daily_mwh")
+
+    meses = []
+    for m in range(1, 13):
+        total_dias = calendar.monthrange(year, m)[1]
+        is_current = (year == today.year and m == today.month)
+        is_future = (year > today.year) or (year == today.year and m > today.month)
+        dia_actual = today.day if is_current else total_dias
+
+        comp = comp_map.get(m)
+        min_mwh: Optional[float] = float(comp.energia_minima) if comp and comp.energia_minima is not None else None
+        max_mwh: Optional[float] = float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None
+
+        gen_total = 0.0
+        for asic in gescon_per_month[m]:
+            if not (asic.proyecto and asic.proyecto.sub_project):
+                continue
+            sp = asic.proyecto.sub_project
+            pct = float(asic.porcentaje_despacho or 0)
+            if is_future:
+                avg = avg_cache.get(sp)
+                gp = round(avg * total_dias, 3) if avg is not None else None
+            else:
+                gd = month_cache.get((m, sp), {"mwh": None})
+                gp = gd.get("mwh")
+            if gp is not None:
+                gen_total += gp * pct
+
+        gen_total = round(gen_total, 3)
+        if is_current and dia_actual > 0 and gen_total > 0:
+            gen_proy: Optional[float] = round(gen_total * total_dias / dia_actual, 3)
+        elif is_future:
+            gen_proy = gen_total
+        else:
+            gen_proy = None
+
+        val = gen_proy if (is_current or is_future) else gen_total
+        if min_mwh is not None and max_mwh is not None:
+            if val < min_mwh:
+                estado, compras, excedentes = "deficit", round(max(0., min_mwh - val), 3), 0.
+            elif val > max_mwh:
+                estado, compras, excedentes = "excedente", 0., round(max(0., val - max_mwh), 3)
+            else:
+                estado, compras, excedentes = "ok", 0., 0.
+        else:
+            estado, compras, excedentes = "sin_compromisos", None, None
+
+        tipo = "proyeccion_historica" if is_future else ("proyeccion_lineal" if is_current else "real")
+        meses.append({
+            "month": m,
+            "gen_mwh": gen_total,
+            "gen_proyectada_mwh": gen_proy,
+            "min_mwh": min_mwh,
+            "max_mwh": max_mwh,
+            "estado": estado,
+            "tipo_datos": tipo,
+            "compras_bolsa_mwh": compras,
+            "excedentes_bolsa_mwh": excedentes,
+            "n_plantas": len(gescon_per_month[m]),
+        })
+
+    return {
+        "contrato": {
+            "id": contrato.id,
+            "nombre_interno": contrato.nombre_interno,
+            "numero_codigo_contrato": contrato.numero_codigo_contrato,
+            "comprador_nombre": contrato.comprador_nombre,
+        },
+        "year": year,
+        "meses": meses,
+    }
+
+
 @router.get("/ppa/{contrato_id}")
 def get_cumplimiento(
     contrato_id: int,

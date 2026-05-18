@@ -740,29 +740,46 @@ body.client-mode #tab-inf{display:none!important}
     </div>
   </div>
   <!-- Toolbar edición de informe -->
-  <div id="rpt-toolbar" style="display:none">
-    <span style="font-size:11px;color:var(--mu);font-weight:700">Antes de imprimir:</span>
-    <button id="rpt-edit-btn" class="btn btn-gh btn-sm" onclick="toggleRptEdit()" style="gap:5px">✏️ Editar informe</button>
-    <button id="rpt-save-btn" class="btn btn-gh btn-sm" onclick="saveRptEdit()" style="display:none;color:#2D8A4E;border-color:#4ADE8060;gap:5px">💾 Guardar</button>
-    <button id="rpt-revisar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('revisado')" style="display:none;color:#2563EB;border-color:#2563EB40;gap:5px">👁 Marcar revisado</button>
-    <button id="rpt-aprobar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('aprobado')" style="display:none;color:#915BD8;border-color:#915BD840;gap:5px">✅ Aprobar y enviar</button>
-    <button id="rpt-restore-btn" class="btn btn-gh btn-sm" onclick="restoreRptSections()" style="display:none;color:var(--bl);border-color:var(--bl)40">↩ Mostrar todo</button>
-    <span id="rpt-estado-badge" style="display:none;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px"></span>
-    <span id="rpt-edit-hint" style="font-size:10px;color:var(--fa);display:none">Clic en cualquier texto para editar · <span style="color:var(--re)">✕</span> para eliminar fila o sección</span>
+  <div id="rpt-toolbar" style="display:none;background:var(--s1);border:1px solid var(--br);border-radius:12px;padding:12px 16px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <!-- Izquierda: acciones de edición -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <button id="rpt-edit-btn" class="btn btn-gh btn-sm" onclick="toggleRptEdit()" style="gap:5px">✏️ Editar informe</button>
+        <button id="rpt-discard-btn" class="btn btn-gh btn-sm" onclick="discardRptEdit()" style="display:none;color:#FF5757;border-color:#FF575740;gap:5px">↩ Descartar cambios</button>
+        <button id="rpt-save-btn" class="btn btn-gh btn-sm" onclick="saveRptEdit()" style="display:none;color:#2D8A4E;border-color:#4ADE8060;gap:5px">💾 Guardar versión</button>
+        <button id="rpt-restore-btn" class="btn btn-gh btn-sm" onclick="restoreRptSections()" style="display:none;color:var(--bl);border-color:var(--bl)40;gap:5px">↩ Mostrar todo</button>
+      </div>
+      <!-- Derecha: flujo de aprobación + estado -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span id="rpt-estado-badge" style="display:none"></span>
+        <button id="rpt-revisar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('revisado')" style="display:none;color:#2563EB;border-color:#2563EB40;gap:5px">👁 Marcar revisado</button>
+        <button id="rpt-aprobar-btn" class="btn btn-gh btn-sm" onclick="changeReportEstado('aprobado')" style="display:none;color:#915BD8;border-color:#915BD840;gap:5px">✅ Aprobar y enviar</button>
+      </div>
+    </div>
+    <!-- Hint de edición — solo visible al editar -->
+    <div id="rpt-edit-hint" style="display:none;margin-top:10px;padding:7px 11px;background:#915BD810;border:1px solid #915BD830;border-radius:7px;font-size:10px;color:var(--fa);line-height:1.5">
+      ✏️ Haz clic en cualquier texto para editarlo directamente &nbsp;·&nbsp; <span style="color:var(--re)">✕</span> elimina fila o sección &nbsp;·&nbsp; Al hacer clic en <b style="color:var(--cr)">🔒 Confirmar</b> se guarda automáticamente
+    </div>
   </div>
   <!-- Informes guardados -->
-  <div id="saved-reports-section" style="margin-top:18px;display:none">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:800;color:var(--mu);letter-spacing:.3px">📁 Informes guardados</div>
-      <button class="btn btn-gh btn-sm" onclick="loadSavedReports()" style="font-size:11px;padding:3px 10px">↻ Actualizar</button>
-      <select id="saved-filter-estado" class="fi fsel" style="font-size:11px;padding:3px 8px;height:auto" onchange="loadSavedReports()">
-        <option value="">Todos los estados</option>
-        <option value="borrador">Borrador</option>
-        <option value="revisado">Revisado</option>
-        <option value="aprobado">Aprobado</option>
-      </select>
+  <div id="saved-reports-section" style="margin-top:20px;display:none">
+    <div style="background:var(--s1);border:1px solid var(--br);border-radius:12px;overflow:hidden">
+      <!-- Header del panel -->
+      <div style="padding:11px 16px;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div style="font-size:12px;font-weight:800;color:var(--mu);letter-spacing:.4px;text-transform:uppercase">📁 Informes guardados</div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <select id="saved-filter-estado" class="fi fsel" style="font-size:11px;padding:3px 9px;height:auto;border-radius:7px" onchange="loadSavedReports()">
+            <option value="">Todos</option>
+            <option value="borrador">Borrador</option>
+            <option value="revisado">Revisado</option>
+            <option value="aprobado">Aprobado</option>
+          </select>
+          <button class="btn btn-gh btn-sm" onclick="loadSavedReports()" style="font-size:11px;padding:3px 10px" title="Actualizar lista">↻</button>
+        </div>
+      </div>
+      <!-- Lista -->
+      <div id="saved-reports-list" style="padding:10px 12px;display:flex;flex-direction:column;gap:7px"></div>
     </div>
-    <div id="saved-reports-list" style="display:flex;flex-direction:column;gap:8px"></div>
   </div>
   <!-- Empty state -->
   <div id="inf-empty" style="text-align:center;padding:60px 20px;color:var(--fa);font-size:13px">
@@ -823,6 +840,7 @@ function _apiFetch(method, path, body) {
       throw new Error('401');
     }
     if (!r.ok) throw new Error('API ' + r.status);
+    if (r.status === 204) return null; // DELETE sin body
     return r.json();
   });
 }
@@ -4416,6 +4434,8 @@ function rkpiRow(ico,lbl,val,col){
 
 /* ══ EDICIÓN DE INFORME ANTES DE IMPRIMIR ══ */
 var _rptEditMode=false;
+var _rptPreEditHtml=null;    // snapshot del HTML justo antes de entrar en modo edición
+var _rptPreEditCharts=null;  // snapshot de los charts antes de editar
 var _rptCurrentKey=null;     // clave localStorage/BD del informe activo
 var _rptCurrentSp=null;      // sub_project activo
 var _rptCurrentFrom=null;    // periodo_desde activo
@@ -4676,27 +4696,55 @@ function _renderSavedReports(list){
   var container=document.getElementById("saved-reports-list");
   if(!container)return;
   if(!list||!list.length){
-    container.innerHTML='<div style="color:var(--fa);font-size:12px;padding:12px 0">No hay informes guardados aún.</div>';
+    container.innerHTML='<div style="color:var(--fa);font-size:12px;padding:10px 4px">No hay informes guardados aún.</div>';
     return;
   }
-  var estadoMap={borrador:{t:"Borrador",cl:"estado-borrador"},revisado:{t:"Revisado",cl:"estado-revisado"},aprobado:{t:"✅ Aprobado",cl:"estado-aprobado"}};
+  var estadoMap={
+    borrador:{t:"Borrador",cl:"estado-borrador"},
+    revisado:{t:"Revisado",cl:"estado-revisado"},
+    aprobado:{t:"✅ Aprobado",cl:"estado-aprobado"}
+  };
   container.innerHTML=list.map(function(inf){
     var em=estadoMap[inf.estado]||{t:inf.estado,cl:""};
     var fecha=inf.editado_en?new Date(inf.editado_en).toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
     var editor=inf.editado_por_nombre?(" · ✏️ "+inf.editado_por_nombre):"";
     var aprobador=inf.aprobado_por_nombre?(" · ✅ "+inf.aprobado_por_nombre):"";
     var correoEnv=inf.correo_enviado?' <span style="color:#2D8A4E;font-size:10px">📧 enviado</span>':"";
+    var nombre=esc(inf.proyecto_nombre||inf.sub_project);
+    var periodo=esc(inf.periodo_display||inf.periodo_desde);
+    // Botón eliminar solo para no aprobados
+    var delBtn=inf.estado!=="aprobado"
+      ?'<button class="btn btn-sm" onclick="deleteInforme('+inf.id+',\''+nombre+' · '+periodo+'\')" title="Eliminar informe" '
+        +'style="color:#FF5757;border:1px solid #FF575730;background:transparent;padding:4px 9px;font-size:12px;border-radius:7px;line-height:1;flex-shrink:0" '
+        +'onmouseover="this.style.background=\'#FF575718\'" onmouseout="this.style.background=\'transparent\'">🗑</button>'
+      :'';
     return '<div class="saved-rpt-card">'
       +'<span class="saved-rpt-estado '+em.cl+'">'+em.t+'</span>'
       +'<div style="flex:1;min-width:0">'
-      +'<div style="font-size:12px;font-weight:700;color:var(--te);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-      +(inf.proyecto_nombre||inf.sub_project)+' · '+(inf.periodo_display||inf.periodo_desde)+correoEnv
-      +'</div>'
+      +'<div style="font-size:12px;font-weight:700;color:var(--te);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nombre+' · '+periodo+correoEnv+'</div>'
       +'<div class="saved-rpt-meta">'+fecha+editor+aprobador+'</div>'
       +'</div>'
-      +'<button class="btn btn-gh btn-sm" onclick="openSavedReport('+inf.id+')" style="font-size:11px;padding:3px 12px;white-space:nowrap">Abrir →</button>'
+      +'<div style="display:flex;gap:5px;align-items:center;flex-shrink:0">'
+      +'<button class="btn btn-gh btn-sm" onclick="openSavedReport('+inf.id+')" style="font-size:11px;padding:4px 13px;white-space:nowrap">Abrir →</button>'
+      +delBtn
+      +'</div>'
       +'</div>';
   }).join("");
+}
+
+function deleteInforme(id, nombre){
+  if(!confirm('¿Eliminar el informe "'+nombre+'"?\nEsta acción no se puede deshacer.'))return;
+  _apiFetch("DELETE",_BACKEND_API+"/api/v1/informes/"+id)
+  .then(function(){
+    toast("🗑 Informe eliminado");
+    if(_rptBackendId===id){_rptBackendId=null;}
+    loadSavedReports();
+  })
+  .catch(function(e){
+    var msg=e.message||"";
+    if(msg.indexOf("400")>=0){toast("⚠ No se puede eliminar un informe aprobado");}
+    else{toast("⚠ Error al eliminar: "+msg);}
+  });
 }
 
 function openSavedReport(id){
@@ -4759,9 +4807,13 @@ function toggleRptEdit(){
   var c=document.getElementById("inf-content");
   var btn=document.getElementById("rpt-edit-btn");
   var hint=document.getElementById("rpt-edit-hint");
+  var discardBtn=document.getElementById("rpt-discard-btn");
   if(!c||!btn)return;
 
   if(_rptEditMode){
+    // Guardar snapshot para poder descartar cambios
+    _rptPreEditHtml=c.innerHTML;
+    _rptPreEditCharts=JSON.parse(JSON.stringify(rptChartQueue||{}));
     // Hacer editables sección por sección (más fiable que el contenedor entero)
     var editTargets=c.querySelectorAll(
       ".rpt-section,.rpt-kpi,.rpt-meta-item,.rpt-header .rpt-meta-val,"+
@@ -4816,26 +4868,51 @@ function toggleRptEdit(){
     btn.style.background="var(--re)";btn.style.color="var(--cr)";btn.style.border="none";
     btn.textContent="🔒 Confirmar";
     if(hint)hint.style.display="block";
+    if(discardBtn)discardBtn.style.display="inline-flex";
     var sb=document.getElementById("rpt-save-btn");
-    if(sb)sb.style.display="none"; // ocultar mientras se edita; confirmar guarda solo
+    if(sb)sb.style.display="none"; // ocultar mientras edita; confirmar guarda solo
   }else{
-    // Desactivar: quitar contenteditable de los elementos que pusimos
-    c.querySelectorAll("[contenteditable]").forEach(function(el){
-      el.removeAttribute("contenteditable");
-      el.style.cursor="";
-      el.style.outline="";
-    });
-    // Restaurar los que venían editables originalmente
-    c.querySelectorAll(".rpt-obs-editable").forEach(function(el){
-      el.setAttribute("contenteditable","true");
-    });
-    c.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
-    btn.style.background="";btn.style.color="";btn.style.border="";
-    btn.textContent="✏️ Editar informe";
-    if(hint)hint.style.display="none";
+    _exitRptEditMode(c,btn,hint,discardBtn);
     // Auto-guardar al confirmar edición
     saveRptEdit();
   }
+}
+
+function _exitRptEditMode(c,btn,hint,discardBtn){
+  c=c||document.getElementById("inf-content");
+  btn=btn||document.getElementById("rpt-edit-btn");
+  hint=hint||document.getElementById("rpt-edit-hint");
+  discardBtn=discardBtn||document.getElementById("rpt-discard-btn");
+  // Desactivar contenteditable
+  c.querySelectorAll("[contenteditable]").forEach(function(el){
+    el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";
+  });
+  c.querySelectorAll(".rpt-obs-editable").forEach(function(el){
+    el.setAttribute("contenteditable","true");
+  });
+  c.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
+  // Restaurar botón
+  if(btn){btn.style.background="";btn.style.color="";btn.style.border="";btn.textContent="✏️ Editar informe";}
+  if(hint)hint.style.display="none";
+  if(discardBtn)discardBtn.style.display="none";
+  _rptEditMode=false;
+}
+
+function discardRptEdit(){
+  if(!_rptPreEditHtml){toast("⚠ No hay versión anterior guardada");return;}
+  var c=document.getElementById("inf-content");
+  if(!c)return;
+  // Restaurar contenido pre-edición
+  infChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+  fmoChartInstances.forEach(function(ch){try{ch.destroy();}catch(e){}});
+  infChartInstances=[];fmoChartInstances=[];
+  c.innerHTML=_rptPreEditHtml;
+  rptChartQueue=_rptPreEditCharts||{};
+  setTimeout(renderRptCharts,150);
+  // Limpiar snapshot
+  _rptPreEditHtml=null;_rptPreEditCharts=null;
+  _exitRptEditMode(c);
+  toast("↩ Cambios descartados — versión anterior restaurada");
 }
 
 function restoreRptSections(){

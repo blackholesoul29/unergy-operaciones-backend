@@ -217,6 +217,21 @@ def change_estado(
     return inf
 
 
+@router.delete("/{informe_id}", status_code=204, summary="Eliminar informe guardado")
+def delete_informe(
+    informe_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    if inf.estado == "aprobado":
+        raise HTTPException(400, "No se puede eliminar un informe aprobado")
+    db.delete(inf)
+    db.commit()
+
+
 @router.post("/{informe_id}/enviar", summary="Enviar informe aprobado por email")
 def enviar_informe(
     informe_id: int,

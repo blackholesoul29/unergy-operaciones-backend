@@ -546,6 +546,8 @@ def get_anual(
     meses = []
     for m in range(1, 13):
         total_dias = calendar.monthrange(year, m)[1]
+        first_day_m = date(year, m, 1)
+        last_day_m = date(year, m, total_dias)
         is_current = (year == today.year and m == today.month)
         is_future = (year > today.year) or (year == today.year and m > today.month)
         dia_actual = today.day if is_current else total_dias
@@ -561,6 +563,13 @@ def get_anual(
             nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
             sp = proyecto.sub_project if proyecto else None
             pct = float(asic.porcentaje_despacho or 0)
+
+            # Days this plant was in the contract during the month (handles mid-month entries/exits)
+            eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
+            eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
+            dias_activos = max(0, (eff_end - eff_start).days + 1)
+            proration = dias_activos / total_dias
+
             if sp:
                 if is_future:
                     avg = avg_cache.get(sp)
@@ -570,13 +579,17 @@ def get_anual(
                     gp = gd.get("mwh")
             else:
                 gp = None
-            gen_contrato = round(gp * pct, 3) if gp is not None else None
+
+            # Apply percentage and partial-month proration
+            gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
             if gen_contrato is not None:
                 gen_total += gen_contrato
             plantas_mes.append({
                 "nombre": nombre,
                 "sub_project": sp,
                 "pct_despacho": pct,
+                "dias_en_contrato": dias_activos,
+                "dias_mes": total_dias,
                 "gen_planta_mwh": gp,
                 "gen_contrato_mwh": gen_contrato,
             })

@@ -52,13 +52,14 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     end_utc = datetime(year, month, last_day, 23, 59, 59) + tz_offset
 
     try:
-        with httpx.Client(timeout=90) as client:
+        with httpx.Client(timeout=90, follow_redirects=True) as client:
             resp = client.get(
-                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation",
+                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
                 params={
                     "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "sub_project": sub_project,
+                    "limit": "10000",
                 },
                 headers={
                     "Authorization": f"Bearer {token}",

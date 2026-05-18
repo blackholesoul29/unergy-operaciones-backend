@@ -516,7 +516,7 @@ def get_simulador(
             if asic.proyecto_id:
                 proyecto_a_contrato[asic.proyecto_id] = {
                     "contrato_id": c.id,
-                    "pct_despacho": float(asic.porcentaje_despacho or 1.0),
+                    "pct_despacho": float(asic.porcentaje_despacho or 0),
                 }
                 assigned_ids.add(c.id)
 

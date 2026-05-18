@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    SECRET_KEY: str = ""
     JWT_EXPIRE_MINUTES: int = 480
 
     STORAGE_BACKEND: str = "local"
@@ -24,15 +24,15 @@ class Settings(BaseSettings):
 
     # Unergy API credentials (used by _legacy bridge)
     UNERGY_API_URL: str = "https://api.unergy.io"
-    UNERGY_ACCOUNT_ID: str = "XFtY7e"
-    UNERGY_LOGIN: str = "admin_laurah"
-    UNERGY_PASSWORD: str = "9fR_JmtQ>dEjj]g"
+    UNERGY_ACCOUNT_ID: str = ""
+    UNERGY_LOGIN: str = ""
+    UNERGY_PASSWORD: str = ""
 
     # Solenium API (FMO inverter data) — OAuth2 username/password
     SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api/token/"
     SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
-    SOLENIUM_USER: str = "laura.hurtado"
-    SOLENIUM_PASS: str = "1000899435"
+    SOLENIUM_USER: str = ""
+    SOLENIUM_PASS: str = ""
 
     # SMTP — envío de informes aprobados
     SMTP_HOST: str = ""

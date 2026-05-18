@@ -526,12 +526,15 @@ def get_generacion_monitoreo(
 # ── POST /monitoreo/auth/verify-email ────────────────────────────────────────
 @router.post("/auth/verify-email")
 def verify_email_monitoreo(payload: dict, db: Session = Depends(get_db)):
-    """Valida que un email @unergy tenga usuario en la plataforma y devuelve un JWT.
-    Usado por fallas-unergy cuando no viene token de la plataforma."""
+    """Valida que un email @unergy.io tenga usuario en la plataforma y devuelve un JWT.
+    Restringido a dominio corporativo. Usado por fallas-unergy cuando no viene token."""
     from app.core.security import create_access_token
     email = (payload.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "Email requerido")
+
+    if not email.endswith("@unergy.io"):
+        raise HTTPException(403, "Solo correos @unergy.io pueden usar este método")
 
     user = db.query(Usuario).filter(Usuario.email == email, Usuario.activo == True).first()
     if not user:
@@ -586,7 +589,7 @@ def send_code(payload: dict, db: Session = Depends(get_db)):
 
 
 # ── POST /monitoreo/auth/verify-code ─────────────────────────────────────────
-@router.post("/monitoreo/auth/verify-code")
+@router.post("/auth/verify-code")
 def verify_code(payload: dict, db: Session = Depends(get_db)):
     """Verifica el código de 6 dígitos y devuelve los proyectos del cliente."""
     email = (payload.get("email") or "").strip().lower()

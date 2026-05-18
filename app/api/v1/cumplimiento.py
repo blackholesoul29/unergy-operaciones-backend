@@ -581,6 +581,14 @@ def get_anual(
             estado, compras, excedentes = "sin_compromisos", None, None
 
         tipo = "proyeccion_historica" if is_future else ("proyeccion_lineal" if is_current else "real")
+        plantas_mes = [
+            {
+                "nombre": asic.proyecto.nombre_comercial if asic.proyecto else f"Proyecto {asic.proyecto_id}",
+                "sub_project": asic.proyecto.sub_project if asic.proyecto else None,
+                "pct_despacho": float(asic.porcentaje_despacho or 0),
+            }
+            for asic in gescon_per_month[m]
+        ]
         meses.append({
             "month": m,
             "gen_mwh": gen_total,
@@ -591,7 +599,8 @@ def get_anual(
             "tipo_datos": tipo,
             "compras_bolsa_mwh": compras,
             "excedentes_bolsa_mwh": excedentes,
-            "n_plantas": len(gescon_per_month[m]),
+            "plantas": plantas_mes,
+            "n_plantas": len(plantas_mes),
         })
 
     return {

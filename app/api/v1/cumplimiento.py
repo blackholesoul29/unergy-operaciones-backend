@@ -16,6 +16,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.auth import get_current_user
@@ -188,6 +189,13 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
             AsicSolicitud.contrato_interno == contrato_interno,
             AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
             AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+            # Snapshot temporal: solo registros publicados hasta el fin del mes consultado.
+            # Esto garantiza que DISTINCT ON refleje el estado del contrato en ese período,
+            # no el estado actual (que puede incluir terminaciones o modificaciones futuras).
+            or_(
+                AsicSolicitud.fecha_solicitud <= last_day,
+                AsicSolicitud.fecha_solicitud.is_(None),
+            ),
         )
         .order_by(AsicSolicitud.fecha_solicitud.desc().nullslast())
         .all()

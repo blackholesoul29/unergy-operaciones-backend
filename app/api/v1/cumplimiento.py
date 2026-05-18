@@ -546,20 +546,32 @@ def get_anual(
         min_mwh: Optional[float] = float(comp.energia_minima) if comp and comp.energia_minima is not None else None
         max_mwh: Optional[float] = float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None
 
+        plantas_mes = []
         gen_total = 0.0
         for asic in gescon_per_month[m]:
-            if not (asic.proyecto and asic.proyecto.sub_project):
-                continue
-            sp = asic.proyecto.sub_project
+            proyecto = asic.proyecto
+            nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
+            sp = proyecto.sub_project if proyecto else None
             pct = float(asic.porcentaje_despacho or 0)
-            if is_future:
-                avg = avg_cache.get(sp)
-                gp = round(avg * total_dias, 3) if avg is not None else None
+            if sp:
+                if is_future:
+                    avg = avg_cache.get(sp)
+                    gp: Optional[float] = round(avg * total_dias, 3) if avg is not None else None
+                else:
+                    gd = month_cache.get((m, sp), {"mwh": None})
+                    gp = gd.get("mwh")
             else:
-                gd = month_cache.get((m, sp), {"mwh": None})
-                gp = gd.get("mwh")
-            if gp is not None:
-                gen_total += gp * pct
+                gp = None
+            gen_contrato = round(gp * pct, 3) if gp is not None else None
+            if gen_contrato is not None:
+                gen_total += gen_contrato
+            plantas_mes.append({
+                "nombre": nombre,
+                "sub_project": sp,
+                "pct_despacho": pct,
+                "gen_planta_mwh": gp,
+                "gen_contrato_mwh": gen_contrato,
+            })
 
         gen_total = round(gen_total, 3)
         if is_current and dia_actual > 0 and gen_total > 0:
@@ -581,14 +593,6 @@ def get_anual(
             estado, compras, excedentes = "sin_compromisos", None, None
 
         tipo = "proyeccion_historica" if is_future else ("proyeccion_lineal" if is_current else "real")
-        plantas_mes = [
-            {
-                "nombre": asic.proyecto.nombre_comercial if asic.proyecto else f"Proyecto {asic.proyecto_id}",
-                "sub_project": asic.proyecto.sub_project if asic.proyecto else None,
-                "pct_despacho": float(asic.porcentaje_despacho or 0),
-            }
-            for asic in gescon_per_month[m]
-        ]
         meses.append({
             "month": m,
             "gen_mwh": gen_total,

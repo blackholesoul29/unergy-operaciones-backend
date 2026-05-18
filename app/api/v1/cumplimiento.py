@@ -163,6 +163,195 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
     ]
 
 
+@router.get("/ppa/resumen")
+def get_resumen(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Resumen de cumplimiento de todos los contratos PPA para un período.
+    Deduplica sub_projects y hace una sola llamada a la API por planta.
+    """
+    today = date.today()
+    es_mes_actual = year == today.year and month == today.month
+    total_dias = calendar.monthrange(year, month)[1]
+    dia_actual = today.day if es_mes_actual else total_dias
+
+    # ── 1. Contratos y compromisos ────────────────────────────────────────────
+    contratos = (
+        db.query(PPAContrato)
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+    compromisos_map = {
+        c.contrato_id: c
+        for c in db.query(PPACompromisoEnergia).filter(
+            PPACompromisoEnergia.año == year,
+            PPACompromisoEnergia.mes == month,
+        ).all()
+    }
+
+    # ── 2. GESCON por contrato ────────────────────────────────────────────────
+    contrato_assignments: dict[int, list] = {}
+    for c in contratos:
+        if c.numero_codigo_contrato:
+            contrato_assignments[c.id] = _resolve_gescon(db, c.numero_codigo_contrato, year, month)
+        else:
+            contrato_assignments[c.id] = []
+
+    # ── 3. Sub-projects únicos ────────────────────────────────────────────────
+    sp_set: set[str] = set()
+    for assignments in contrato_assignments.values():
+        for asic in assignments:
+            if asic.proyecto and asic.proyecto.sub_project:
+                sp_set.add(asic.proyecto.sub_project)
+
+    # ── 4. Generación en paralelo (un solo fetch por planta) ──────────────────
+    gen_cache: dict[str, dict] = {}
+    if sp_set:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in resumen: %s", exc)
+            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+
+        sp_list = list(sp_set)
+
+        def _fetch_sp(sp: str) -> tuple:
+            return sp, _fetch_month(token, sp, year, month)
+
+        max_workers = min(len(sp_list), 10)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for sp, result in pool.map(_fetch_sp, sp_list):
+                gen_cache[sp] = result
+
+    # ── 5. Cálculo por contrato ────────────────────────────────────────────────
+    contratos_result = []
+    total_min = 0.0
+    total_max = 0.0
+    total_gen = 0.0
+    total_proy = 0.0
+    has_any_compromisos = False
+
+    for c in contratos:
+        assignments = contrato_assignments[c.id]
+        compromiso = compromisos_map.get(c.id)
+
+        gen_total_c = 0.0
+        plantas_sin_datos: list[str] = []
+        dias_datos: list[int] = []
+
+        for asic in assignments:
+            proyecto = asic.proyecto
+            nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
+            pct = float(asic.porcentaje_despacho or 0)
+            if proyecto and proyecto.sub_project:
+                gd = gen_cache.get(proyecto.sub_project, {"mwh": None, "ultimo_dia": None})
+                gp = gd["mwh"]
+                if gp is not None:
+                    gen_total_c += gp * pct
+                    if gd.get("ultimo_dia") is not None:
+                        dias_datos.append(gd["ultimo_dia"])
+                else:
+                    plantas_sin_datos.append(nombre)
+            else:
+                plantas_sin_datos.append(nombre)
+
+        gen_total_c = round(gen_total_c, 3)
+        gen_proy_c = (
+            round(gen_total_c * total_dias / dia_actual, 3)
+            if es_mes_actual and dia_actual > 0 and gen_total_c > 0
+            else gen_total_c
+        )
+
+        min_mwh: Optional[float] = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
+        max_mwh: Optional[float] = float(compromiso.energia_maxima) if compromiso and compromiso.energia_maxima is not None else None
+
+        val_b = gen_proy_c if es_mes_actual else gen_total_c
+
+        if min_mwh is not None and max_mwh is not None:
+            has_any_compromisos = True
+            if val_b < min_mwh:
+                estado_c = "deficit"
+            elif val_b > max_mwh:
+                estado_c = "excedente"
+            else:
+                estado_c = "ok"
+            compras_c = round(max(0.0, min_mwh - val_b), 3)
+            excedentes_c = round(max(0.0, val_b - max_mwh), 3)
+            total_min += min_mwh
+            total_max += max_mwh
+        else:
+            estado_c = "sin_compromisos"
+            compras_c = None
+            excedentes_c = None
+
+        total_gen += gen_total_c
+        total_proy += gen_proy_c
+
+        contratos_result.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "energia_minima_mwh": min_mwh,
+            "energia_maxima_mwh": max_mwh,
+            "gen_total_mwh": gen_total_c,
+            "gen_proyectada_mwh": gen_proy_c,
+            "estado": estado_c,
+            "compras_bolsa_mwh": compras_c,
+            "excedentes_bolsa_mwh": excedentes_c,
+            "n_plantas_activas": len(assignments),
+            "plantas_sin_datos": plantas_sin_datos,
+            "dia_min_datos": min(dias_datos) if dias_datos else None,
+        })
+
+    # ── 6. Totales agregados ──────────────────────────────────────────────────
+    total_gen = round(total_gen, 3)
+    total_proy = round(total_proy, 3)
+    val_total = total_proy if es_mes_actual else total_gen
+
+    if has_any_compromisos and total_max > 0:
+        if val_total < total_min:
+            total_estado = "deficit"
+        elif val_total > total_max:
+            total_estado = "excedente"
+        else:
+            total_estado = "ok"
+        total_compras = round(max(0.0, total_min - val_total), 3)
+        total_excedentes = round(max(0.0, val_total - total_max), 3)
+    else:
+        total_estado = "sin_compromisos"
+        total_compras = None
+        total_excedentes = None
+
+    dias_min_list = [c["dia_min_datos"] for c in contratos_result if c["dia_min_datos"] is not None]
+
+    return {
+        "periodo": {
+            "year": year,
+            "month": month,
+            "dia_actual": dia_actual,
+            "dias_mes": total_dias,
+            "es_mes_actual": es_mes_actual,
+            "dia_min_datos": min(dias_min_list) if dias_min_list else None,
+            "dia_max_datos": max(dias_min_list) if dias_min_list else None,
+        },
+        "totales": {
+            "energia_minima_mwh": round(total_min, 3) if has_any_compromisos else None,
+            "energia_maxima_mwh": round(total_max, 3) if has_any_compromisos else None,
+            "gen_total_mwh": total_gen,
+            "gen_proyectada_mwh": total_proy,
+            "estado": total_estado,
+            "compras_bolsa_mwh": total_compras,
+            "excedentes_bolsa_mwh": total_excedentes,
+        },
+        "contratos": contratos_result,
+    }
+
+
 @router.get("/ppa/{contrato_id}")
 def get_cumplimiento(
     contrato_id: int,

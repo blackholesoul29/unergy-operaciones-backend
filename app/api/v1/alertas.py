@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.database import get_db
+from app.api.v1.auth import get_current_user
 from app.models.proyectos import Proyecto
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
@@ -40,7 +41,7 @@ _LATEST_SIC_SQL = text("""
 
 
 @router.get("/contratos-ppa")
-def alertas_contratos_ppa(db: Session = Depends(get_db)):
+def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
     hoy = date.today()
 
     # ── 1. Latest published solicitud per SIC (single query, DISTINCT ON) ───

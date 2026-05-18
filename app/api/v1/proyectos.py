@@ -49,6 +49,7 @@ def list_proyectos(
     tipo_proyecto: str | None = None,
     portafolio_id: int | None = None,
     db: Session = Depends(get_db),
+    _=Depends(get_current_user),
 ):
     query = db.query(Proyecto).options(
         selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
@@ -80,7 +81,7 @@ def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db), _=Depen
 
 
 @router.get("/{id}", response_model=ProyectoOut)
-def get_proyecto(id: int, db: Session = Depends(get_db)):
+def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
 
 

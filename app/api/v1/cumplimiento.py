@@ -478,6 +478,103 @@ def get_resumen_anual(
     return result
 
 
+@router.get("/simulador")
+def get_simulador(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Plants with avg generation + GESCON assignments for the simulator."""
+    from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
+
+    total_dias = calendar.monthrange(year, month)[1]
+
+    plantas_db = (
+        db.query(Proyecto)
+        .filter(
+            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
+            Proyecto.estado == EstadoProyectoEnum.en_operacion,
+            Proyecto.sub_project.isnot(None),
+        )
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+
+    contratos_db = (
+        db.query(PPAContrato)
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+
+    proyecto_a_contrato: dict[int, dict] = {}
+    assigned_ids: set[int] = set()
+    for c in contratos_db:
+        if not c.numero_codigo_contrato:
+            continue
+        for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
+            if asic.proyecto_id:
+                proyecto_a_contrato[asic.proyecto_id] = {
+                    "contrato_id": c.id,
+                    "pct_despacho": float(asic.porcentaje_despacho or 1.0),
+                }
+                assigned_ids.add(c.id)
+
+    comp_map = {
+        r.contrato_id: r
+        for r in db.query(PPACompromisoEnergia).filter(
+            PPACompromisoEnergia.año == year,
+            PPACompromisoEnergia.mes == month,
+        ).all()
+    }
+
+    sp_list = [p.sub_project for p in plantas_db if p.sub_project]
+    avg_cache: dict[str, float | None] = {}
+    if sp_list:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in simulador: %s", exc)
+            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+
+        def _fa(sp: str):
+            res = _fetch_recent_avg(token, sp)
+            return sp, res.get("avg_daily_mwh")
+
+        with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+            for sp, avg in pool.map(_fa, sp_list):
+                avg_cache[sp] = avg
+
+    plantas_out = []
+    for p in plantas_db:
+        asn = proyecto_a_contrato.get(p.id)
+        plantas_out.append({
+            "id": p.id,
+            "nombre": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "tipo_proyecto": p.tipo_proyecto,
+            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "avg_daily_mwh": avg_cache.get(p.sub_project),
+            "contrato_id": asn["contrato_id"] if asn else None,
+            "pct_despacho": asn["pct_despacho"] if asn else 1.0,
+        })
+
+    contratos_out = []
+    for c in contratos_db:
+        comp = comp_map.get(c.id)
+        if comp is None and c.id not in assigned_ids:
+            continue
+        contratos_out.append({
+            "id": c.id,
+            "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
+            "comprador_nombre": c.comprador_nombre,
+            "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
+            "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
+        })
+
+    return {"year": year, "month": month, "dias_mes": total_dias, "plantas": plantas_out, "contratos": contratos_out}
+
+
 @router.get("/ppa/{contrato_id}/anual")
 def get_anual(
     contrato_id: int,

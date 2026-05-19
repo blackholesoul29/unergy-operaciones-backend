@@ -3003,9 +3003,21 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
   var total=kpd.reduce(function(a,b){return a+b;},0);
   var avg=days.length?total/days.length:0;
   var p90m=sim?sim.p90_monthly:null,p50m=sim?sim.p50_monthly:null,p90d=sim?sim.p90_daily:null;
-  // Usar P99 almacenado; si no existe, aproximar como 92.5% del P90 (mejor que 90%)
+  // Usar P99 almacenado; si no existe, aproximar como 92.5% del P90
   var p99m=sim&&sim.p99_monthly!=null?sim.p99_monthly:(p90m?Math.round(p90m*0.925):null);
-  var pct=p90m>0?((total-p90m)/p90m*100):null;
+
+  // Prorratear simulación al número de días con datos para comparación justa
+  // (ej: mes incompleto de 19 días no se compara contra P90 del mes completo de 31 días)
+  var totalDaysInPeriod=range.totalDays||range.lastDay||30;
+  var daysWithData=days.length||1;
+  var simFactor=(p90m&&totalDaysInPeriod>0)?(daysWithData/totalDaysInPeriod):1;
+  var simFull=Math.abs(simFactor-1)<0.05; // true si el mes está ≥95% completo
+  var p90mComp=p90m?Math.round(p90m*simFactor):null;
+  var p50mComp=p50m?Math.round(p50m*simFactor):null;
+  var p99mComp=p99m?Math.round(p99m*simFactor):null;
+  var simNote=(!simFull&&p90m)?(" · al día "+daysWithData+" de "+totalDaysInPeriod):"";
+
+  var pct=p90mComp>0?((total-p90mComp)/p90mComp*100):null;
   var pctStr=pct!==null?(pct>=0?"+":"")+pct.toFixed(1)+"% vs P90":"—";
   var pctCol=pct===null?"#A89EC0":pct>=0?"#4ADE80":"#FF5757";
   var pctPrint=pct===null?"#888":pct>=0?"#2D8A4E":"#CC0000";
@@ -3030,7 +3042,8 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
   var uid=cfg.sub_project.replace(/[^a-z0-9]/gi,"_")+"_"+Date.now();
   var cid1="rptc1_"+uid,cid2="rptc2_"+uid;
   rptChartQueue[cid1]={type:"daily",d:{labels:days,kwh:kpd,p90d:p90d,avg:Math.round(avg),atypDates:atypical.map(function(a){return a.date;})}};
-  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50m,p90:p90m,p99:p99m}};
+  // Usar valores prorrateados en el comparativo para comparar el mismo período
+  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50mComp,p90:p90mComp,p99:p99mComp,simNote:simNote}};
 
   // Tabla semanal con flechas de tendencia
   var tableHtml="";
@@ -3132,11 +3145,11 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
     +rkpi("📆","Días con datos",days.length+" / "+range.totalDays+" días",null)
     +rkpi("🗓","Días atípicos",atypical.length+" día"+(atypical.length!==1?"s":""),atypical.length===0?"#4ADE80":atypical.length<=2?"#F97316":"#FF5757")
     +'</div>'
-    // Fila simulaciones P50/P90/P99
+    // Fila simulaciones P50/P90/P99 (valores mensuales completos de BD)
     +(p50m||p90m||p99m?'<div class="rpt-kpi-row" style="margin-top:10px">'
-      +rkpi("📊","Ref. P50 (50% prob.)",p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disponible","#4682C8")
-      +rkpi("📈","Ref. P90 (90% prob.)",p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disponible","#C89600")
-      +rkpi("🎯","Ref. P99 (99% prob.)",p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disponible","#329650")
+      +rkpi("📊","P50 mes completo"+simNote,p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disp.","#4682C8")
+      +rkpi("📈","P90 mes completo"+simNote,p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disp.","#C89600")
+      +rkpi("🎯","P99 mes completo"+simNote,p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disp.","#329650")
       +'</div>':'')
     +tableHtml+atypHtml+'</div>'
     // S2
@@ -3348,6 +3361,7 @@ function renderRptCharts(){
       if(d.p50!=null){labs.push("P50");vals.push(d.p50);cols.push("rgba(70,130,200,.75)");bcols.push("#4682C8");}
       if(d.p90!=null){labs.push("P90");vals.push(d.p90);cols.push("rgba(200,150,0,.75)");bcols.push("#C89600");}
       if(d.p99!=null){labs.push("P99");vals.push(d.p99);cols.push("rgba(50,150,80,.75)");bcols.push("#329650");}
+      var compNote=d.simNote||"";
       c=new Chart(ctx,{
         type:"bar",
         plugins:[_barValuePlugin,_whiteBgPlugin],
@@ -3356,7 +3370,7 @@ function renderRptCharts(){
           layout:{padding:{top:20}},
           plugins:{
             legend:{display:false},
-            tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}}}
+            tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+Math.round(i.raw).toLocaleString("es-CO")+" kWh"+(i.dataIndex>0&&compNote?" (prorr.)":"");}}}
           },
           scales:{
             x:{ticks:{color:"#333",font:{size:11,weight:"bold"}},grid:{display:false},border:{color:"#ccc"}},
@@ -4154,7 +4168,18 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var avg=days.length?total/days.length:0;
   var p90m=sim?sim.p90_monthly:null,p50m=sim?sim.p50_monthly:null,p90d=sim?sim.p90_daily:null;
   var p99m=sim&&sim.p99_monthly!=null?sim.p99_monthly:(p90m?Math.round(p90m*0.925):null);
-  var pct=p90m>0?((total-p90m)/p90m*100):null;
+
+  // Prorratear simulación al número de días con datos
+  var totalDaysInPeriod=range.totalDays||range.lastDay||30;
+  var daysWithData=days.length||1;
+  var simFactor=(p90m&&totalDaysInPeriod>0)?(daysWithData/totalDaysInPeriod):1;
+  var simFull=Math.abs(simFactor-1)<0.05;
+  var p90mComp=p90m?Math.round(p90m*simFactor):null;
+  var p50mComp=p50m?Math.round(p50m*simFactor):null;
+  var p99mComp=p99m?Math.round(p99m*simFactor):null;
+  var simNote=(!simFull&&p90m)?(" · al día "+daysWithData+" de "+totalDaysInPeriod):"";
+
+  var pct=p90mComp>0?((total-p90mComp)/p90mComp*100):null;
   var pctStr=pct!==null?(pct>=0?"+":"")+pct.toFixed(1)+"% vs P90":"—";
   var pctCol=pct===null?"#A89EC0":pct>=0?"#4ADE80":"#FF5757";
 
@@ -4297,7 +4322,7 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var uid=cfg.sub_project.replace(/[^a-z0-9]/gi,"_")+"_fmo_"+Date.now();
   var cid1="fmoc1_"+uid,cid2="fmoc2_"+uid;
   rptChartQueue[cid1]={type:"daily",d:{labels:days,kwh:kpd,p90d:p90d,avg:Math.round(avg),atypDates:atypical.map(function(a){return a.date;})}};
-  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50m,p90:p90m,p99:p99m}};
+  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50mComp,p90:p90mComp,p99:p99mComp,simNote:simNote}};
 
   // Auto obs FMO
   var obsFMO="El proyecto "+esc(cfg.nombre_clientes||cfg.nombre_display)+" registró una generación total de "
@@ -4341,11 +4366,11 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +rkpi("⚡","Eventos operativos",mf.length,mf.length===0?"#4ADE80":"#F97316")
     +rkpi("⚠️","Fuera de SLA",fuera_sla,fuera_sla===0?"#4ADE80":"#FF5757")
     +'</div>'
-    // Fila simulaciones P50/P90/P99
+    // Fila simulaciones P50/P90/P99 (valores mensuales completos de BD)
     +(p50m||p90m||p99m?'<div class="rpt-kpi-row" style="margin-top:10px">'
-      +rkpi("📊","Ref. P50 (50% prob.)",p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disponible","#4682C8")
-      +rkpi("📈","Ref. P90 (90% prob.)",p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disponible","#C89600")
-      +rkpi("🎯","Ref. P99 (99% prob.)",p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disponible","#329650")
+      +rkpi("📊","P50 mes completo"+simNote,p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disp.","#4682C8")
+      +rkpi("📈","P90 mes completo"+simNote,p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disp.","#C89600")
+      +rkpi("🎯","P99 mes completo"+simNote,p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disp.","#329650")
       +'</div>':'')
     +multaHtml
     +'</div>'

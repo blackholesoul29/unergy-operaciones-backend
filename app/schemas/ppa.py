@@ -69,6 +69,8 @@ class PPAContratoCreate(BaseModel):
     gescon_fecha_fin: date | None = None
     gescon_precio: float | None = None
     gescon_cantidades_kwh: float | None = None
+    tipo_contrato: str | None = "venta"
+    carpeta_link: str | None = None
 
 
 class PPAContratoUpdate(BaseModel):
@@ -99,6 +101,8 @@ class PPAContratoUpdate(BaseModel):
     gescon_fecha_fin: date | None = None
     gescon_precio: float | None = None
     gescon_cantidades_kwh: float | None = None
+    tipo_contrato: str | None = None
+    carpeta_link: str | None = None
 
 
 class PPAContratoOut(BaseModel):
@@ -132,6 +136,8 @@ class PPAContratoOut(BaseModel):
     gescon_fecha_fin: date | None
     gescon_precio: float | None
     gescon_cantidades_kwh: float | None
+    tipo_contrato: str | None = None
+    carpeta_link: str | None = None
     tarifas: list[PPATarifaOut] = []
     compromisos_energia: list[PPACompromisoOut] = []
     created_at: datetime

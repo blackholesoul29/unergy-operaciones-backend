@@ -559,9 +559,22 @@ def get_simulador(
         .all()
     )
 
+    contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
+
+    from sqlalchemy.orm import selectinload
+    compra_proyecto_ids: set[int] = set()
+    compra_nombre_map: dict[int, str] = {}
+    for cc in contratos_compra:
+        cc_loaded = db.query(PPAContrato).options(selectinload(PPAContrato.proyectos)).filter(PPAContrato.id == cc.id).first()
+        if cc_loaded:
+            for proy in cc_loaded.proyectos:
+                compra_proyecto_ids.add(proy.id)
+                compra_nombre_map[proy.id] = cc.nombre_interno or cc.numero_codigo_contrato or f"Compra {cc.id}"
+
     proyecto_a_contrato: dict[int, dict] = {}
     assigned_ids: set[int] = set()
-    for c in contratos_db:
+    for c in contratos_venta:
         if not c.numero_codigo_contrato:
             continue
         for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
@@ -609,10 +622,12 @@ def get_simulador(
             "avg_daily_mwh": avg_cache.get(p.sub_project),
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
+            "comprado_por_unergy": p.id in compra_proyecto_ids,
+            "contrato_compra_nombre": compra_nombre_map.get(p.id),
         })
 
     contratos_out = []
-    for c in contratos_db:
+    for c in contratos_venta:
         comp = comp_map.get(c.id)
         if comp is None and c.id not in assigned_ids:
             continue

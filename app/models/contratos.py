@@ -111,6 +111,8 @@ class PPAContrato(Base):
     gescon_precio: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     gescon_cantidades_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
+    carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

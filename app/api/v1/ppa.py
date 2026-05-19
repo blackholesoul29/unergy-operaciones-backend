@@ -57,11 +57,14 @@ def _set_proyectos(contrato: PPAContrato, proyecto_ids: list[int], db: Session):
 def list_contratos(
     proyecto_id: int | None = Query(None),
     q: str | None = Query(None),
+    tipo_contrato: str | None = Query(None),
     limit: int = Query(500, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     query = db.query(PPAContrato).filter(PPAContrato.deleted_at.is_(None)).options(*_load_options())
+    if tipo_contrato is not None:
+        query = query.filter(PPAContrato.tipo_contrato == tipo_contrato)
     if proyecto_id is not None:
         query = query.join(
             ppa_contrato_proyectos_table,

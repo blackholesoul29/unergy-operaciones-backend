@@ -1,8 +1,11 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto
+
+logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
 from app.models.contratos import ppa_contrato_proyectos_table
 from app.schemas.ppa import (
@@ -143,8 +146,19 @@ def update_contrato(
     if data.proyecto_ids is not None:
         _set_proyectos(contrato, data.proyecto_ids, db)
     _sync_partes_from_clientes(contrato, db)
-    db.commit()
-    return _get_contrato_or_404(id, db)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.exception("Error al guardar contrato PPA %s", id)
+        raise HTTPException(500, detail=f"Error al guardar: {e}")
+    try:
+        return _get_contrato_or_404(id, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error al serializar contrato PPA %s después de update", id)
+        raise HTTPException(500, detail=f"Error al cargar contrato actualizado: {e}")
 
 
 @router.delete("/{id}", status_code=204)

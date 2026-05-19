@@ -53,19 +53,33 @@ def _get_pk(obj: Any) -> int | None:
 
 
 def _serialize(v: Any) -> Any:
+    if v is None:
+        return None
     if isinstance(v, datetime):
         return v.isoformat()
+    from datetime import date as _date
+    if isinstance(v, _date):
+        return v.isoformat()
+    from decimal import Decimal
+    if isinstance(v, Decimal):
+        return float(v)
     if isinstance(v, (list, dict)):
+        return v
+    if isinstance(v, (str, int, float, bool)):
         return v
     if hasattr(v, "value"):
         return v.value
-    return v
+    return str(v)
 
 
 def _diff_attrs(obj: Any) -> dict[str, dict[str, Any]] | None:
     insp = inspect(obj)
+    mapper = inspect(type(obj))
+    column_keys = {c.key for c in mapper.column_attrs}
     changes = {}
     for attr in insp.attrs:
+        if attr.key not in column_keys:
+            continue
         hist = attr.history
         if hist.has_changes():
             old = hist.deleted[0] if hist.deleted else None

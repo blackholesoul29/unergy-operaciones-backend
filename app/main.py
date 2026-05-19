@@ -639,6 +639,39 @@ def _run_create_tables() -> None:
 _mgs_scheduler = None
 
 
+def _scheduled_bolsa_ingest():
+    """Daily ingest of bolsa prices from EVO energy-api."""
+    import json as _json
+    if not settings.EVO_API_URL:
+        return
+    try:
+        headers = {}
+        if settings.EVO_API_TOKEN:
+            headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+        import httpx
+        with httpx.Client(timeout=httpx.Timeout(10.0, read=30.0)) as client:
+            resp = client.get(
+                f"{settings.EVO_API_URL.rstrip('/')}/dailyspot/latest",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        fecha = data.get("date")
+        if not fecha:
+            print("[bolsa_ingest] No date in response")
+            return
+        if data.get("stale_days", 0) > 2:
+            print(f"[bolsa_ingest] Skipping stale data: {fecha} ({data.get('stale_days')}d old)")
+            return
+
+        from app.api.v1.evo_proxy import _persist_dailyspot
+        _persist_dailyspot(data)
+        print(f"[bolsa_ingest] Persisted bolsa prices for {fecha}")
+    except Exception as e:
+        print(f"[bolsa_ingest] Failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _mgs_scheduler
@@ -666,6 +699,17 @@ async def lifespan(app: FastAPI):
                 id="mgs_poll",
                 name="MGS alarm poll",
             )
+            # Bolsa price ingest: daily at 11:00 AM Colombia (after XM publishes)
+            if settings.EVO_API_URL:
+                from apscheduler.triggers.cron import CronTrigger
+                _mgs_scheduler.add_job(
+                    _scheduled_bolsa_ingest,
+                    CronTrigger(hour=11, minute=0, timezone=settings.TIMEZONE),
+                    id="bolsa_ingest",
+                    name="Daily bolsa price ingest",
+                )
+                print("[bolsa_ingest] Scheduled daily at 11:00 AM Colombia")
+
             _mgs_scheduler.start()
             poll_once()
             print(f"[MGS] Scheduler started — polling every {settings.MGS_POLL_INTERVAL_MINUTES} min")

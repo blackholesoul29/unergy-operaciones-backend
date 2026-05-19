@@ -16,17 +16,43 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cumplimiento", tags=["Cumplimiento"])
+
+
+def _get_bolsa_avg(db: Session, year: int, month: int) -> dict:
+    """Get average bolsa price for a month from precios_bolsa_diario."""
+    row = db.execute(text("""
+        SELECT
+            AVG(precio_promedio) as precio_promedio,
+            MIN(precio_min) as precio_min,
+            MAX(precio_max) as precio_max,
+            AVG(precio_escasez) as precio_escasez,
+            COUNT(*) as dias_con_datos
+        FROM precios_bolsa_diario
+        WHERE EXTRACT(YEAR FROM fecha) = :year
+          AND EXTRACT(MONTH FROM fecha) = :month
+          AND precio_promedio IS NOT NULL
+    """), {"year": year, "month": month}).fetchone()
+    if not row or not row.precio_promedio:
+        return {"precio_promedio": None, "precio_min": None, "precio_max": None,
+                "precio_escasez": None, "dias_con_datos": 0}
+    return {
+        "precio_promedio": round(float(row.precio_promedio), 2),
+        "precio_min": round(float(row.precio_min), 2) if row.precio_min else None,
+        "precio_max": round(float(row.precio_max), 2) if row.precio_max else None,
+        "precio_escasez": round(float(row.precio_escasez), 2) if row.precio_escasez else None,
+        "dias_con_datos": int(row.dias_con_datos),
+    }
 
 
 # ── Unergy API ────────────────────────────────────────────────────────────────
@@ -413,6 +439,31 @@ def get_resumen(
 
     dias_min_list = [c["dia_min_datos"] for c in contratos_result if c["dia_min_datos"] is not None]
 
+    # ── Valoración COP con precios de bolsa ──────────────────
+    bolsa = _get_bolsa_avg(db, year, month)
+    precio_bolsa = bolsa["precio_promedio"]
+
+    valoracion_total = None
+    if precio_bolsa is not None and (total_compras or total_excedentes):
+        valoracion_total = {
+            "precio_bolsa_avg_cop_kwh": precio_bolsa,
+            "dias_con_precios": bolsa["dias_con_datos"],
+            "compras_bolsa_cop": round(total_compras * 1000 * precio_bolsa, 0) if total_compras else 0,
+            "excedentes_bolsa_cop": round(total_excedentes * 1000 * precio_bolsa, 0) if total_excedentes else 0,
+        }
+
+    # Add COP to each contract row
+    if precio_bolsa is not None:
+        for c in contratos_result:
+            if c["compras_bolsa_mwh"] is not None and c["compras_bolsa_mwh"] > 0:
+                c["compras_bolsa_cop"] = round(c["compras_bolsa_mwh"] * 1000 * precio_bolsa, 0)
+            else:
+                c["compras_bolsa_cop"] = None
+            if c["excedentes_bolsa_mwh"] is not None and c["excedentes_bolsa_mwh"] > 0:
+                c["excedentes_bolsa_cop"] = round(c["excedentes_bolsa_mwh"] * 1000 * precio_bolsa, 0)
+            else:
+                c["excedentes_bolsa_cop"] = None
+
     return {
         "periodo": {
             "year": year,
@@ -434,6 +485,7 @@ def get_resumen(
             "compras_bolsa_mwh": total_compras,
             "excedentes_bolsa_mwh": total_excedentes,
         },
+        "valoracion_bolsa": valoracion_total,
         "contratos": contratos_result,
     }
 
@@ -896,6 +948,30 @@ def get_cumplimiento(
         estado = "sin_compromisos"
         compras = excedentes = margen = None
 
+    # ── 8. Valoración COP con precios de bolsa ───────────────
+    bolsa = _get_bolsa_avg(db, year, month)
+    tarifa_ppa = float(tarifa_row.tarifa) if tarifa_row and tarifa_row.tarifa else None
+    precio_bolsa = bolsa["precio_promedio"]
+
+    valoracion = None
+    if precio_bolsa is not None and (compras or excedentes):
+        compras_cop = round(compras * 1000 * precio_bolsa, 0) if compras else 0
+        excedentes_cop = round(excedentes * 1000 * precio_bolsa, 0) if excedentes else 0
+        delta_vs_ppa = None
+        if tarifa_ppa and compras:
+            delta_vs_ppa = round(compras * 1000 * (precio_bolsa - tarifa_ppa), 0)
+        valoracion = {
+            "precio_bolsa_avg_cop_kwh": precio_bolsa,
+            "precio_bolsa_min_cop_kwh": bolsa["precio_min"],
+            "precio_bolsa_max_cop_kwh": bolsa["precio_max"],
+            "precio_escasez_cop_kwh": bolsa["precio_escasez"],
+            "dias_con_precios": bolsa["dias_con_datos"],
+            "tarifa_ppa_cop_kwh": tarifa_ppa,
+            "compras_bolsa_cop": compras_cop,
+            "excedentes_bolsa_cop": excedentes_cop,
+            "sobrecosto_vs_ppa_cop": delta_vs_ppa,
+        }
+
     return {
         "contrato": {
             "id": contrato.id,
@@ -923,7 +999,7 @@ def get_cumplimiento(
         "generacion": {
             "gen_total_mwh": gen_total,
             "gen_proyectada_mwh": gen_proyectada,
-            "tarifa_cop_kwh": float(tarifa_row.tarifa) if tarifa_row and tarifa_row.tarifa else None,
+            "tarifa_cop_kwh": tarifa_ppa,
             "plantas": plantas_data,
             "plantas_sin_datos": plantas_sin_datos,
             "sin_api_id": sin_api_id,
@@ -935,4 +1011,159 @@ def get_cumplimiento(
             "excedentes_bolsa_mwh": excedentes,
             "margen_mwh": margen,
         },
+        "valoracion_bolsa": valoracion,
+    }
+
+
+# ── Descubrimientos ─────────────────────────────────────────────────────────
+
+@router.get("/descubrimientos")
+def get_descubrimientos(
+    year: int = Query(..., ge=2020, le=2050),
+    month_from: int = Query(1, ge=1, le=12),
+    month_to: int = Query(12, ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Exposición financiera por descubrimientos de energía en bolsa.
+    Cruza deltas MWh (cumplimiento) × precio promedio bolsa del mes.
+    Solo usa datos de DB — no llama la API de Unergy.
+    """
+    contratos = (
+        db.query(PPAContrato)
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+
+    meses_data = []
+    gran_total_compras_cop = 0.0
+    gran_total_excedentes_cop = 0.0
+    gran_total_compras_mwh = 0.0
+    gran_total_excedentes_mwh = 0.0
+
+    for m in range(month_from, month_to + 1):
+        bolsa = _get_bolsa_avg(db, year, m)
+        precio = bolsa["precio_promedio"]
+
+        compromisos = {
+            c.contrato_id: c
+            for c in db.query(PPACompromisoEnergia).filter(
+                PPACompromisoEnergia.año == year,
+                PPACompromisoEnergia.mes == m,
+            ).all()
+        }
+
+        tarifas = {
+            t.contrato_id: float(t.tarifa)
+            for t in db.query(PPATarifa).filter(
+                PPATarifa.contrato_id.in_([c.id for c in contratos]),
+                PPATarifa.año == year,
+                PPATarifa.mes == m,
+            ).all()
+            if t.tarifa is not None
+        }
+
+        # Get real generation from generacion_diaria (monthly sum)
+        gen_rows = db.execute(text("""
+            SELECT p.id as proyecto_id, SUM(g.kwh_real) / 1000.0 as mwh
+            FROM generacion_diaria g
+            JOIN proyectos p ON g.proyecto_id = p.id
+            WHERE EXTRACT(YEAR FROM g.fecha) = :year
+              AND EXTRACT(MONTH FROM g.fecha) = :month
+              AND g.kwh_real IS NOT NULL
+            GROUP BY p.id
+        """), {"year": year, "month": m}).fetchall()
+        gen_by_proyecto = {int(r.proyecto_id): float(r.mwh) for r in gen_rows}
+
+        mes_compras_cop = 0.0
+        mes_excedentes_cop = 0.0
+        mes_compras_mwh = 0.0
+        mes_excedentes_mwh = 0.0
+        contratos_mes = []
+
+        for c in contratos:
+            comp = compromisos.get(c.id)
+            if not comp:
+                continue
+            min_mwh = float(comp.energia_minima) if comp.energia_minima is not None else None
+            max_mwh = float(comp.energia_maxima) if comp.energia_maxima is not None else None
+            if min_mwh is None or max_mwh is None:
+                continue
+
+            # Sum generation from GESCON-assigned plants
+            if c.numero_codigo_contrato:
+                assignments = _resolve_gescon(db, c.numero_codigo_contrato, year, m)
+            else:
+                assignments = []
+
+            gen_assigned = 0.0
+            for asic in assignments:
+                if asic.proyecto_id and asic.proyecto_id in gen_by_proyecto:
+                    pct = float(asic.porcentaje_despacho or 0)
+                    gen_assigned += gen_by_proyecto[asic.proyecto_id] * pct
+
+            gen_assigned = round(gen_assigned, 3)
+            compras_mwh = round(max(0.0, min_mwh - gen_assigned), 3)
+            excedentes_mwh = round(max(0.0, gen_assigned - max_mwh), 3)
+
+            tarifa_ppa = tarifas.get(c.id)
+            compras_cop = 0.0
+            excedentes_cop = 0.0
+            sobrecosto = None
+
+            if precio is not None:
+                compras_cop = round(compras_mwh * 1000 * precio, 0)
+                excedentes_cop = round(excedentes_mwh * 1000 * precio, 0)
+                if tarifa_ppa and compras_mwh > 0:
+                    sobrecosto = round(compras_mwh * 1000 * (precio - tarifa_ppa), 0)
+
+            if compras_mwh > 0 or excedentes_mwh > 0:
+                mes_compras_cop += compras_cop
+                mes_excedentes_cop += excedentes_cop
+                mes_compras_mwh += compras_mwh
+                mes_excedentes_mwh += excedentes_mwh
+                contratos_mes.append({
+                    "contrato_id": c.id,
+                    "nombre": c.nombre_interno or c.numero_codigo_contrato,
+                    "comprador": c.comprador_nombre,
+                    "min_mwh": min_mwh,
+                    "max_mwh": max_mwh,
+                    "gen_asignada_mwh": gen_assigned,
+                    "compras_mwh": compras_mwh,
+                    "excedentes_mwh": excedentes_mwh,
+                    "compras_cop": compras_cop,
+                    "excedentes_cop": excedentes_cop,
+                    "sobrecosto_vs_ppa_cop": sobrecosto,
+                    "tarifa_ppa_kwh": tarifa_ppa,
+                })
+
+        gran_total_compras_cop += mes_compras_cop
+        gran_total_excedentes_cop += mes_excedentes_cop
+        gran_total_compras_mwh += mes_compras_mwh
+        gran_total_excedentes_mwh += mes_excedentes_mwh
+
+        meses_data.append({
+            "month": m,
+            "precio_bolsa_avg": precio,
+            "dias_con_precios": bolsa["dias_con_datos"],
+            "compras_mwh": round(mes_compras_mwh, 3),
+            "excedentes_mwh": round(mes_excedentes_mwh, 3),
+            "compras_cop": round(mes_compras_cop, 0),
+            "excedentes_cop": round(mes_excedentes_cop, 0),
+            "contratos": contratos_mes,
+        })
+
+    return {
+        "year": year,
+        "month_from": month_from,
+        "month_to": month_to,
+        "totales": {
+            "compras_bolsa_mwh": round(gran_total_compras_mwh, 3),
+            "excedentes_bolsa_mwh": round(gran_total_excedentes_mwh, 3),
+            "compras_bolsa_cop": round(gran_total_compras_cop, 0),
+            "excedentes_bolsa_cop": round(gran_total_excedentes_cop, 0),
+            "exposicion_neta_cop": round(gran_total_compras_cop - gran_total_excedentes_cop, 0),
+        },
+        "meses": meses_data,
     }

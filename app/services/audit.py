@@ -133,7 +133,7 @@ def _flush_audit(session: Session) -> None:
             text(
                 "INSERT INTO audit_log "
                 "(tabla, registro_id, accion, usuario_id, usuario_nombre, cambios) "
-                "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, :cambios::jsonb)"
+                "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, CAST(:cambios AS jsonb))"
             ),
             entry,
         )

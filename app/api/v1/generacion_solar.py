@@ -265,6 +265,85 @@ def sync_generation(_=Depends(get_current_user)):
     return {"status": "sync_started"}
 
 
+@router.get("/data-completeness")
+def data_completeness(
+    year: int = Query(None, ge=2020, le=2050),
+    month: int = Query(None, ge=1, le=12),
+    _=Depends(get_current_user),
+):
+    """Show which projects have/lack generation data for a given month."""
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+    days_in_month = (date(year + (month // 12), (month % 12) + 1, 1) - date(year, month, 1)).days if month < 12 else 31
+
+    db = SessionLocal()
+    try:
+        return _data_completeness_query(db, year, month, today, days_in_month)
+    finally:
+        db.close()
+
+
+def _data_completeness_query(db, year, month, today, days_in_month):
+    projects = db.execute(text("""
+        SELECT p.id, p.nombre_comercial, p.potencia_instalada_kwp,
+               p.project_id_solenium, p.estado
+        FROM proyectos p
+        WHERE p.estado = 'en_operacion'
+        ORDER BY p.nombre_comercial
+    """)).fetchall()
+
+    gen_data = db.execute(text("""
+        SELECT proyecto_id,
+               COUNT(*) as days_with_data,
+               SUM(kwh_real) as total_kwh,
+               MAX(fecha) as last_date,
+               MAX(fuente) as fuente
+        FROM generacion_diaria
+        WHERE EXTRACT(YEAR FROM fecha) = :year
+          AND EXTRACT(MONTH FROM fecha) = :month
+          AND kwh_real IS NOT NULL
+        GROUP BY proyecto_id
+    """), {"year": year, "month": month}).fetchall()
+    gen_map = {int(r.proyecto_id): r for r in gen_data}
+
+    elapsed_days = min(today.day, days_in_month) if year == today.year and month == today.month else days_in_month
+
+    result = []
+    with_data = 0
+    without_data = 0
+    for p in projects:
+        gen = gen_map.get(p.id)
+        has_data = gen is not None and gen.days_with_data > 0
+        if has_data:
+            with_data += 1
+        else:
+            without_data += 1
+        result.append({
+            "proyecto_id": p.id,
+            "nombre": p.nombre_comercial,
+            "capacidad_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "has_solenium_id": p.project_id_solenium is not None,
+            "days_with_data": gen.days_with_data if gen else 0,
+            "days_expected": elapsed_days,
+            "completeness_pct": round(gen.days_with_data / elapsed_days * 100, 0) if gen and elapsed_days > 0 else 0,
+            "total_kwh": round(float(gen.total_kwh), 1) if gen and gen.total_kwh else 0,
+            "last_date": gen.last_date.isoformat() if gen and gen.last_date else None,
+            "fuente": gen.fuente if gen else None,
+        })
+
+    return {
+        "year": year,
+        "month": month,
+        "days_elapsed": elapsed_days,
+        "projects_total": len(result),
+        "with_data": with_data,
+        "without_data": without_data,
+        "completeness_pct": round(with_data / len(result) * 100, 0) if result else 0,
+        "projects": result,
+    }
+
+
 @router.get("/availability")
 def fleet_availability(_=Depends(get_current_user)):
     """Fleet availability breakdown from Solenium."""

@@ -80,6 +80,43 @@ def mgs_alarms_history(
     }
 
 
+@router.patch("/alarms/{alarm_id}/resolve")
+def mgs_resolve_alarm(
+    alarm_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    result = db.execute(
+        text("""
+            UPDATE alarmas_monitoreo
+            SET resolved_at = NOW()
+            WHERE id = :id AND resolved_at IS NULL
+            RETURNING id, proyecto_nombre, alarm_type
+        """),
+        {"id": alarm_id},
+    ).mappings().first()
+    db.commit()
+    if not result:
+        return {"error": "Alarma no encontrada o ya resuelta"}
+    return {"status": "resolved", "alarm": dict(result)}
+
+
+@router.patch("/alarms/resolve-all")
+def mgs_resolve_all(
+    severity: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    q = "UPDATE alarmas_monitoreo SET resolved_at = NOW() WHERE resolved_at IS NULL"
+    params: dict = {}
+    if severity:
+        q += " AND severity = :severity"
+        params["severity"] = severity
+    result = db.execute(text(q), params)
+    db.commit()
+    return {"status": "resolved", "count": result.rowcount}
+
+
 @router.post("/poll")
 def mgs_force_poll(_=Depends(get_current_user)):
     scheduler.poll_once()

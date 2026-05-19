@@ -781,12 +781,15 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
             month = d_from_date.month
             p90_list = _parse_kwh_list(proyecto.p90_mensual_kwh) or [None] * 12
             p50_list = _parse_kwh_list(proyecto.p50_mensual_kwh) or [None] * 12
+            p99_list = _parse_kwh_list(getattr(proyecto, "p99_mensual_kwh", None)) or [None] * 12
             p90m = p90_list[month - 1] if len(p90_list) >= month else None
             p50m = p50_list[month - 1] if len(p50_list) >= month else None
+            p99m = p99_list[month - 1] if len(p99_list) >= month else None
             days_in_month = calendar.monthrange(d_from_date.year, month)[1]
             simulation = {
                 "p90_monthly": p90m,
                 "p50_monthly": p50m,
+                "p99_monthly": p99m,
                 "p90_daily": round(p90m / days_in_month, 1) if p90m else None,
             }
         except Exception:

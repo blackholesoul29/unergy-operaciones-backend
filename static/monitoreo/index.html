@@ -3000,7 +3000,8 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
   var total=kpd.reduce(function(a,b){return a+b;},0);
   var avg=days.length?total/days.length:0;
   var p90m=sim?sim.p90_monthly:null,p50m=sim?sim.p50_monthly:null,p90d=sim?sim.p90_daily:null;
-  var p99m=p90m?Math.round(p90m*0.9):null;
+  // Usar P99 almacenado; si no existe, aproximar como 92.5% del P90 (mejor que 90%)
+  var p99m=sim&&sim.p99_monthly!=null?sim.p99_monthly:(p90m?Math.round(p90m*0.925):null);
   var pct=p90m>0?((total-p90m)/p90m*100):null;
   var pctStr=pct!==null?(pct>=0?"+":"")+pct.toFixed(1)+"% vs P90":"—";
   var pctCol=pct===null?"#A89EC0":pct>=0?"#4ADE80":"#FF5757";
@@ -4129,6 +4130,7 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var total=kpd.reduce(function(a,b){return a+b;},0);
   var avg=days.length?total/days.length:0;
   var p90m=sim?sim.p90_monthly:null,p50m=sim?sim.p50_monthly:null,p90d=sim?sim.p90_daily:null;
+  var p99m=sim&&sim.p99_monthly!=null?sim.p99_monthly:(p90m?Math.round(p90m*0.925):null);
   var pct=p90m>0?((total-p90m)/p90m*100):null;
   var pctStr=pct!==null?(pct>=0?"+":"")+pct.toFixed(1)+"% vs P90":"—";
   var pctCol=pct===null?"#A89EC0":pct>=0?"#4ADE80":"#FF5757";
@@ -4272,7 +4274,7 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
   var uid=cfg.sub_project.replace(/[^a-z0-9]/gi,"_")+"_fmo_"+Date.now();
   var cid1="fmoc1_"+uid,cid2="fmoc2_"+uid;
   rptChartQueue[cid1]={type:"daily",d:{labels:days,kwh:kpd,p90d:p90d,avg:Math.round(avg),atypDates:atypical.map(function(a){return a.date;})}};
-  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50m,p90:p90m,p99:p90m?Math.round(p90m*0.9):null}};
+  rptChartQueue[cid2]={type:"comp",d:{real:Math.round(total),p50:p50m,p90:p90m,p99:p99m}};
 
   // Auto obs FMO
   var obsFMO="El proyecto "+esc(cfg.nombre_clientes||cfg.nombre_display)+" registró una generación total de "

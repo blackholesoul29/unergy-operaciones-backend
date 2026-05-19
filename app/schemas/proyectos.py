@@ -187,6 +187,7 @@ class ProyectoCreate(BaseModel):
     generar_liquidacion: Optional[bool] = None
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
+    p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
     srv_operacion: Optional[bool] = None
     srv_representacion: Optional[bool] = None
@@ -234,6 +235,7 @@ class ProyectoOut(BaseModel):
     generar_liquidacion: bool
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
+    p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
     srv_operacion: bool
     srv_representacion: bool
@@ -261,7 +263,7 @@ class ProyectoOut(BaseModel):
             return list(v) if hasattr(v, "__iter__") else [v]
         return v
 
-    @field_validator("p90_mensual_kwh", "p50_mensual_kwh", mode="before")
+    @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod
     def coerce_json_list(cls, v):
         """Acepta list o JSON-string (datos históricos pre-JSONB)."""

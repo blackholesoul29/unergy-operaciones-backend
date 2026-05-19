@@ -106,9 +106,10 @@ class Proyecto(Base):
 
     # Monitoreo
     alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # P50/P90 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
+    # P50/P90/P99 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
     p90_mensual_kwh = mapped_column(JSONB, nullable=True)
     p50_mensual_kwh = mapped_column(JSONB, nullable=True)
+    p99_mensual_kwh = mapped_column(JSONB, nullable=True)
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Liquidación

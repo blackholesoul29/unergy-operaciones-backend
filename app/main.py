@@ -46,6 +46,7 @@ _PENDING_DDLS = [
     # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh JSONB",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh JSONB",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p99_mensual_kwh JSONB",
     # migration 005 — código TSF (frontera CREG) por proyecto
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_tsf VARCHAR(100)",
     # migration 006 — múltiples correos por cliente (T14)

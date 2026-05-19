@@ -215,3 +215,49 @@ def evo_clima_history(
 @router.get("/health")
 def evo_health(_=Depends(get_current_user)):
     return _evo_get("/health")
+
+
+@router.post("/clima/bulk-load")
+def evo_clima_bulk_load(payload: dict, _=Depends(get_current_user)):
+    """Admin endpoint: bulk load climate indices and price history."""
+    db = SessionLocal()
+    counts = {"oni": 0, "precip": 0, "prices": 0}
+    try:
+        for row in payload.get("oni", []):
+            db.execute(text("""
+                INSERT INTO clima_oni_monthly (year, month, oni_value, soi_value, pdo_value, mjo_amplitude, enso_phase)
+                VALUES (:year, :month, :oni, :soi, :pdo, :mjo, :phase)
+                ON CONFLICT (year, month) DO UPDATE SET
+                    oni_value=EXCLUDED.oni_value, soi_value=EXCLUDED.soi_value,
+                    pdo_value=EXCLUDED.pdo_value, mjo_amplitude=EXCLUDED.mjo_amplitude,
+                    enso_phase=EXCLUDED.enso_phase
+            """), row)
+            counts["oni"] += 1
+
+        for row in payload.get("precip", []):
+            db.execute(text("""
+                INSERT INTO clima_precip_monthly (year, month, region, precip_mm, anomaly_pct, climatology_mm)
+                VALUES (:year, :month, :region, :precip_mm, :anomaly_pct, :climatology_mm)
+                ON CONFLICT (year, month, region) DO UPDATE SET
+                    precip_mm=EXCLUDED.precip_mm, anomaly_pct=EXCLUDED.anomaly_pct,
+                    climatology_mm=EXCLUDED.climatology_mm
+            """), row)
+            counts["precip"] += 1
+
+        for row in payload.get("prices", []):
+            db.execute(text("""
+                INSERT INTO clima_price_monthly (year, month, price_cop_kwh, enso_phase, precip_andina_mm)
+                VALUES (:year, :month, :price_cop_kwh, :enso_phase, :precip_andina_mm)
+                ON CONFLICT (year, month) DO UPDATE SET
+                    price_cop_kwh=EXCLUDED.price_cop_kwh, enso_phase=EXCLUDED.enso_phase,
+                    precip_andina_mm=EXCLUDED.precip_andina_mm
+            """), row)
+            counts["prices"] += 1
+
+        db.commit()
+        return {"status": "ok", "loaded": counts}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Bulk load failed: {e}")
+    finally:
+        db.close()

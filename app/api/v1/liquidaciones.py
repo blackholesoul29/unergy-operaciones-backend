@@ -2,7 +2,7 @@ from datetime import date
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
@@ -17,7 +17,7 @@ def _require_liquidaciones_write(current: Usuario = Depends(get_current_user)):
     return current
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionMandato,
-    LiquidacionMandatoLinea, LiquidacionFactura,
+    LiquidacionMandatoLinea, LiquidacionFactura, LiquidacionXMDato,
     TipoCostoEnum, TipoMandatoEnum, TipoLineaMandatoEnum,
     TipoFacturaServicioEnum, EstadoLiquidacionEnum,
     EstadoMandatoEnum, EstadoFacturaEnum,
@@ -145,6 +145,26 @@ class FacturaUpdate(BaseModel):
     estado: str | None = None
 
 
+class XMDatoCreate(BaseModel):
+    frontera_id: int | None = None
+    tipo_venta: str
+    energia_kwh: float
+    tarifa_aplicada_kwh: float
+    valor_bruto_cop: float
+    referencia_factura_xm: str | None = None
+    fecha_factura_xm: date | None = None
+
+
+class XMDatoUpdate(BaseModel):
+    frontera_id: int | None = None
+    tipo_venta: str | None = None
+    energia_kwh: float | None = None
+    tarifa_aplicada_kwh: float | None = None
+    valor_bruto_cop: float | None = None
+    referencia_factura_xm: str | None = None
+    fecha_factura_xm: date | None = None
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _get_liq_or_404(id: int, db: Session) -> Liquidacion:
@@ -240,6 +260,20 @@ def _serializar_factura(f: LiquidacionFactura) -> dict:
         "fecha_emision": f.fecha_emision.isoformat() if f.fecha_emision else None,
         "fecha_vencimiento": f.fecha_vencimiento.isoformat() if f.fecha_vencimiento else None,
         "estado": f.estado,
+    }
+
+
+def _serializar_xm_dato(x: LiquidacionXMDato) -> dict:
+    return {
+        "id": x.id,
+        "frontera_id": x.frontera_id,
+        "tipo_venta": x.tipo_venta,
+        "energia_kwh": float(x.energia_kwh),
+        "tarifa_aplicada_kwh": float(x.tarifa_aplicada_kwh),
+        "valor_bruto_cop": float(x.valor_bruto_cop),
+        "referencia_factura_xm": x.referencia_factura_xm,
+        "fecha_factura_xm": x.fecha_factura_xm.isoformat() if x.fecha_factura_xm else None,
+        "created_at": x.created_at.isoformat(),
     }
 
 
@@ -344,10 +378,13 @@ def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_l
         .all()
     )
 
+    xm_datos = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == id).all()
+
     data = _serializar_liquidacion_base(liq)
     data["costos"] = [_serializar_costo(c) for c in costos]
     data["facturas"] = [_serializar_factura(f) for f in facturas]
     data["mandatos"] = [_serializar_mandato(m) for m in mandatos]
+    data["xm_datos"] = [_serializar_xm_dato(x) for x in xm_datos]
     return data
 
 
@@ -783,4 +820,131 @@ def catalogos(_=Depends(get_current_user)):
         "estado_liquidacion": [e.value for e in EstadoLiquidacionEnum],
         "estado_mandato": [e.value for e in EstadoMandatoEnum],
         "estado_factura": [e.value for e in EstadoFacturaEnum],
+    }
+
+
+# ── XM Data (Datos de Mercado XM) ───────────────────────────────────────────
+
+@router.post("/{id}/xm-datos", status_code=201)
+def add_xm_dato(id: int, body: XMDatoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
+    _get_liq_or_404(id, db)
+    dato = LiquidacionXMDato(
+        liquidacion_id=id,
+        frontera_id=body.frontera_id,
+        tipo_venta=body.tipo_venta,
+        energia_kwh=body.energia_kwh,
+        tarifa_aplicada_kwh=body.tarifa_aplicada_kwh,
+        valor_bruto_cop=body.valor_bruto_cop,
+        referencia_factura_xm=body.referencia_factura_xm,
+        fecha_factura_xm=body.fecha_factura_xm,
+    )
+    db.add(dato)
+    db.commit()
+    db.refresh(dato)
+    return _serializar_xm_dato(dato)
+
+
+@router.patch("/{id}/xm-datos/{dato_id}")
+def update_xm_dato(id: int, dato_id: int, body: XMDatoUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
+    dato = db.query(LiquidacionXMDato).filter(
+        LiquidacionXMDato.id == dato_id,
+        LiquidacionXMDato.liquidacion_id == id,
+    ).first()
+    if not dato:
+        raise HTTPException(404, "Dato XM no encontrado")
+    for field, val in body.model_dump(exclude_unset=True).items():
+        setattr(dato, field, val)
+    db.commit()
+    db.refresh(dato)
+    return _serializar_xm_dato(dato)
+
+
+@router.delete("/{id}/xm-datos/{dato_id}", status_code=204)
+def delete_xm_dato(id: int, dato_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
+    dato = db.query(LiquidacionXMDato).filter(
+        LiquidacionXMDato.id == dato_id,
+        LiquidacionXMDato.liquidacion_id == id,
+    ).first()
+    if not dato:
+        raise HTTPException(404, "Dato XM no encontrado")
+    db.delete(dato)
+    db.commit()
+
+
+@router.post("/{id}/xm-datos/auto-populate")
+def auto_populate_xm_datos(
+    id: int,
+    db: Session = Depends(get_db),
+    _=Depends(_require_liquidaciones_write),
+):
+    """
+    Auto-populate XM data from generacion_diaria + precios_bolsa for this liquidación's
+    proyecto and periodo. Bridges cumplimiento → liquidaciones.
+    """
+    liq = _get_liq_or_404(id, db)
+    year = liq.periodo.year
+    month = liq.periodo.month
+
+    existing = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == id).count()
+    if existing > 0:
+        raise HTTPException(
+            409,
+            f"La liquidación ya tiene {existing} datos XM. Elimínelos primero si desea re-poblar.",
+        )
+
+    gen_row = db.execute(text("""
+        SELECT SUM(kwh_real) as total_kwh
+        FROM generacion_diaria
+        WHERE proyecto_id = :pid
+          AND EXTRACT(YEAR FROM fecha) = :year
+          AND EXTRACT(MONTH FROM fecha) = :month
+          AND kwh_real IS NOT NULL
+    """), {"pid": liq.proyecto_id, "year": year, "month": month}).first()
+
+    total_kwh = float(gen_row.total_kwh or 0) if gen_row else 0.0
+    if total_kwh <= 0:
+        return {"msg": "Sin generación registrada para este período", "xm_datos": []}
+
+    precio_row = db.execute(text("""
+        SELECT AVG(precio_promedio_kwh) as tarifa_avg
+        FROM precios_bolsa_diario
+        WHERE EXTRACT(YEAR FROM fecha) = :year
+          AND EXTRACT(MONTH FROM fecha) = :month
+          AND precio_promedio_kwh IS NOT NULL
+    """), {"year": year, "month": month}).first()
+
+    tarifa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else 0.0
+
+    frontera_row = db.execute(text("""
+        SELECT f.id
+        FROM fronteras f
+        WHERE f.proyecto_id = :pid
+          AND f.estado = 'activa'
+        LIMIT 1
+    """), {"pid": liq.proyecto_id}).first()
+    frontera_id = frontera_row.id if frontera_row else None
+
+    tipo_venta = liq.tipo_venta or "bolsa"
+    valor_bruto = round(total_kwh * tarifa, 2)
+
+    dato = LiquidacionXMDato(
+        liquidacion_id=id,
+        frontera_id=frontera_id,
+        tipo_venta=tipo_venta,
+        energia_kwh=round(total_kwh, 3),
+        tarifa_aplicada_kwh=round(tarifa, 6),
+        valor_bruto_cop=valor_bruto,
+    )
+    db.add(dato)
+    db.commit()
+    db.refresh(dato)
+
+    if liq.ingresos_energia_cop is None:
+        liq.ingresos_energia_cop = valor_bruto
+        liq.estado = "xm_procesado"
+        db.commit()
+
+    return {
+        "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} = ${valor_bruto:,.0f} COP",
+        "xm_datos": [_serializar_xm_dato(dato)],
     }

@@ -174,6 +174,24 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     except Exception:
         pass
 
+    # Generation data freshness (last Solenium sync)
+    gen_last_date = None
+    gen_projects_with_data = 0
+    try:
+        row = db.execute(text(
+            "SELECT MAX(fecha) FROM generacion_diaria WHERE fuente = 'solenium'"
+        )).first()
+        if row and row[0]:
+            gen_last_date = row[0].isoformat()
+        count_row = db.execute(text(
+            "SELECT COUNT(DISTINCT proyecto_id) FROM generacion_diaria "
+            "WHERE fuente = 'solenium' AND fecha >= CURRENT_DATE - INTERVAL '7 days'"
+        )).first()
+        if count_row:
+            gen_projects_with_data = count_row[0]
+    except Exception:
+        pass
+
     return {
         "proyectos_total": proyectos_total,
         "proyectos_operacion": proyectos_operacion,
@@ -194,4 +212,6 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "garantias_vigentes": garantias_vigentes,
         "garantias_por_vencer": garantias_por_vencer,
         "garantias_valor_total_cop": garantias_valor_total,
+        "gen_solenium_last_date": gen_last_date,
+        "gen_solenium_projects": gen_projects_with_data,
     }

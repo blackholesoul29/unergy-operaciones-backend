@@ -643,6 +643,101 @@ def _run_create_tables() -> None:
 _mgs_scheduler = None
 
 
+def _scheduled_generation_sync():
+    """Sync daily generation from Solenium into generacion_diaria."""
+    from datetime import date, timedelta
+    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS:
+        return
+    try:
+        from app.services.mgs.solenium_client import SoleniumClient
+        client = SoleniumClient()
+        if not client.enabled:
+            return
+
+        db = None
+        try:
+            from app.core.database import SessionLocal
+            db = SessionLocal()
+            rows = db.execute(text(
+                "SELECT id, project_id_solenium FROM proyectos "
+                "WHERE project_id_solenium IS NOT NULL AND estado = 'en_operacion'"
+            )).fetchall()
+        finally:
+            if db:
+                db.close()
+
+        if not rows:
+            print("[gen_sync] No projects with Solenium IDs in operation")
+            return
+
+        end = date.today()
+        start = end - timedelta(days=7)
+        total_upserted = 0
+
+        for proyecto_id, sol_id in rows:
+            try:
+                sol_id_int = int(sol_id)
+            except (ValueError, TypeError):
+                continue
+
+            data = client.get_energy(
+                sol_id_int,
+                granularity="day",
+                date_from=start.isoformat(),
+                date_to=end.isoformat(),
+            )
+            if not data:
+                continue
+
+            raw = data.get("results") or data.get("data") or data if isinstance(data, dict) else data
+            day_rows = []
+            if isinstance(raw, dict):
+                for k, v in raw.items():
+                    kwh = None
+                    if isinstance(v, (int, float)):
+                        kwh = v
+                    elif isinstance(v, dict) and "value" in v:
+                        kwh = v["value"]
+                    if kwh is not None and kwh > 0:
+                        day_rows.append((k, round(kwh, 3)))
+            elif isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, dict):
+                        d = item.get("date") or item.get("day")
+                        kwh = item.get("kwh") or item.get("value") or item.get("energy")
+                        if d and kwh and float(kwh) > 0:
+                            day_rows.append((str(d), round(float(kwh), 3)))
+
+            if not day_rows:
+                continue
+
+            db = None
+            try:
+                db = SessionLocal()
+                for fecha_str, kwh in day_rows:
+                    db.execute(text("""
+                        INSERT INTO generacion_diaria (proyecto_id, fecha, kwh_real, fuente)
+                        VALUES (:pid, :fecha, :kwh, 'solenium')
+                        ON CONFLICT (proyecto_id, fecha) DO UPDATE
+                        SET kwh_real = EXCLUDED.kwh_real, fuente = 'solenium',
+                            updated_at = NOW()
+                        WHERE generacion_diaria.fuente = 'solenium'
+                    """), {"pid": proyecto_id, "fecha": fecha_str, "kwh": kwh})
+                db.commit()
+                total_upserted += len(day_rows)
+            except Exception as e:
+                if db:
+                    db.rollback()
+                print(f"[gen_sync] DB error for project {proyecto_id}: {e}")
+            finally:
+                if db:
+                    db.close()
+
+        print(f"[gen_sync] Synced {total_upserted} day-rows from {len(rows)} Solenium projects")
+    except Exception as e:
+        print(f"[gen_sync] Failed: {e}")
+
+
 def _scheduled_bolsa_ingest():
     """Daily ingest of bolsa prices from EVO energy-api."""
     import json as _json
@@ -703,9 +798,26 @@ async def lifespan(app: FastAPI):
                 id="mgs_poll",
                 name="MGS alarm poll",
             )
+            from apscheduler.triggers.cron import CronTrigger
+
+            # Solenium → generacion_diaria sync: 7am and 7pm Colombia
+            if settings.SOLENIUM_USER:
+                _mgs_scheduler.add_job(
+                    _scheduled_generation_sync,
+                    CronTrigger(hour=7, minute=0, timezone=settings.TIMEZONE),
+                    id="gen_sync_am",
+                    name="Solenium generation sync (AM)",
+                )
+                _mgs_scheduler.add_job(
+                    _scheduled_generation_sync,
+                    CronTrigger(hour=19, minute=0, timezone=settings.TIMEZONE),
+                    id="gen_sync_pm",
+                    name="Solenium generation sync (PM)",
+                )
+                print("[gen_sync] Scheduled at 7:00 AM and 7:00 PM Colombia")
+
             # Bolsa price ingest: daily at 11:00 AM Colombia (after XM publishes)
             if settings.EVO_API_URL:
-                from apscheduler.triggers.cron import CronTrigger
                 _mgs_scheduler.add_job(
                     _scheduled_bolsa_ingest,
                     CronTrigger(hour=11, minute=0, timezone=settings.TIMEZONE),

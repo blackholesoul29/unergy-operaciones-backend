@@ -29,6 +29,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.grupos_panel),
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.contactos),
+            selectinload(Proyecto.servicio_representacion),
         )
         .filter(Proyecto.id == id)
         .first()
@@ -40,6 +41,16 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
 
 # ── Proyectos ─────────────────────────────────────────────────────────────────
 
+SERVICIO_FILTER_MAP = {
+    "operacion": Proyecto.srv_operacion,
+    "representacion": Proyecto.srv_representacion,
+    "cgm": Proyecto.srv_cgm,
+    "ppa": Proyecto.srv_ppa,
+    "promotor": Proyecto.srv_promotor,
+    "rec": Proyecto.srv_rec,
+}
+
+
 @router.get("", response_model=PaginatedResponse[ProyectoOut])
 def list_proyectos(
     page: int = Query(1, ge=1),
@@ -48,6 +59,7 @@ def list_proyectos(
     estado: str | None = None,
     tipo_proyecto: str | None = None,
     portafolio_id: int | None = None,
+    servicio: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -57,6 +69,7 @@ def list_proyectos(
         selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.contactos),
+        selectinload(Proyecto.servicio_representacion),
     )
     if q:
         query = query.filter(Proyecto.nombre_comercial.ilike(f"%{q}%"))
@@ -66,6 +79,8 @@ def list_proyectos(
         query = query.filter(Proyecto.tipo_proyecto == tipo_proyecto)
     if portafolio_id:
         query = query.filter(Proyecto.portafolio_id == portafolio_id)
+    if servicio and servicio in SERVICIO_FILTER_MAP:
+        query = query.filter(SERVICIO_FILTER_MAP[servicio] == True)
     total = query.count()
     items = query.order_by(Proyecto.nombre_comercial).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}

@@ -137,6 +137,22 @@ class ProyectoContactoOut(ProyectoContactoCreate):
     model_config = {"from_attributes": True}
 
 
+# ── Servicio Representación ───────────────────────────────────────────────────
+
+class ServicioRepresentacionOut(BaseModel):
+    id: int
+    proyecto_id: int
+    nit_rf: Optional[str] = None
+    nombre_rf: Optional[str] = None
+    fecha_inicio_representacion: Optional[date] = None
+    modalidad_venta: Optional[str] = None
+    nombre_comercializador: Optional[str] = None
+    codigo_despacho_xm: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
@@ -225,6 +241,7 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    servicio_representacion: Optional[ServicioRepresentacionOut] = None
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []

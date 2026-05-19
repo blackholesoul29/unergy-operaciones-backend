@@ -45,6 +45,7 @@ class AsicSolicitud(Base):
     nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
     observaciones: Mapped[str | None] = mapped_column(Text, nullable=True)
     link_archivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    reemplaza_anterior: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

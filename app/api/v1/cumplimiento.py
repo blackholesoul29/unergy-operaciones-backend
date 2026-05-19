@@ -202,8 +202,13 @@ def _fetch_recent_avg(token: str, sub_project: str, n_days: int = 15) -> dict:
 def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -> list:
     """
     Devuelve los registros ASIC activos para el contrato en el mes dado.
-    Aplica la regla GESCON: DISTINCT ON codigo_sic_contrato por fecha_solicitud
-    más reciente, excluyendo terminaciones y desistimientos.
+
+    Procesa cronológicamente (antiguo → reciente) por cada codigo_sic_contrato:
+    - Si un registro introduce una planta nueva y reemplaza_anterior=True,
+      reemplaza todas las plantas previas en ese SIC (comportamiento normal).
+    - Si reemplaza_anterior=False, la nueva planta coexiste con las existentes.
+    - Terminaciones eliminan la planta indicada.
+    - Modificaciones a una planta ya activa solo actualizan sus datos.
     """
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
@@ -215,33 +220,42 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
             AsicSolicitud.contrato_interno == contrato_interno,
             AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
             AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
-            # Snapshot temporal: solo registros publicados hasta el fin del mes consultado.
-            # Esto garantiza que DISTINCT ON refleje el estado del contrato en ese período,
-            # no el estado actual (que puede incluir terminaciones o modificaciones futuras).
             or_(
                 AsicSolicitud.fecha_solicitud <= last_day,
                 AsicSolicitud.fecha_solicitud.is_(None),
             ),
         )
-        .order_by(AsicSolicitud.fecha_solicitud.desc().nullslast())
+        .order_by(AsicSolicitud.fecha_solicitud.asc().nullsfirst())
         .all()
     )
 
-    # DISTINCT ON: solo la fila más reciente por codigo_sic_contrato.
-    # Cuando una modificación reemplaza una planta por otra en el mismo SIC,
-    # la más reciente es la que vale (comportamiento real de GESCON).
-    seen: set = set()
-    latest = []
+    by_sic: dict[str, list] = defaultdict(list)
     for r in records:
-        key = r.codigo_sic_contrato or f"_id_{r.id}"
-        if key not in seen:
-            seen.add(key)
-            latest.append(r)
+        by_sic[r.codigo_sic_contrato or f"_id_{r.id}"].append(r)
+
+    result = []
+    for sic_records in by_sic.values():
+        active: dict[int | str, AsicSolicitud] = {}
+        for r in sic_records:
+            pid = r.proyecto_id
+            if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
+                if pid is not None:
+                    active.pop(pid, None)
+                continue
+            if pid is None:
+                active[f"_nopid_{r.id}"] = r
+                continue
+            if pid in active:
+                active[pid] = r
+            else:
+                if r.reemplaza_anterior:
+                    active.clear()
+                active[pid] = r
+        result.extend(active.values())
 
     return [
-        r for r in latest
-        if r.tipo_solicitud != TipoSolicitudAsicEnum.terminacion
-        and (r.fecha_fin is None or r.fecha_fin >= first_day)
+        r for r in result
+        if (r.fecha_fin is None or r.fecha_fin >= first_day)
         and (r.fecha_inicio is None or r.fecha_inicio <= last_day)
     ]
 

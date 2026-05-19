@@ -63,24 +63,6 @@ def get_catalogos(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return {"estados": estados, "prioridades": prioridades, "tipos": tipos, "resoluciones": resoluciones}
 
 
-@router.get("/debug/error")
-def debug_falla_error(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    import traceback
-    try:
-        falla = db.query(Falla).options(selectinload(Falla.seguimientos)).first()
-        if not falla:
-            return {"error": "no fallas en DB"}
-        segs = falla.seguimientos
-        seg_info = {
-            "type": type(segs).__name__,
-            "is_list": isinstance(segs, list),
-            "len": len(segs) if isinstance(segs, list) else "n/a",
-        }
-        result = FallaOut.model_validate(falla)
-        return {"ok": True, "codigo": result.codigo_interno, "seg_info": seg_info}
-    except Exception as e:
-        return {"error": str(e), "type": type(e).__name__, "trace": traceback.format_exc()}
-
 
 @router.get("/stats/resumen")
 def stats_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)):

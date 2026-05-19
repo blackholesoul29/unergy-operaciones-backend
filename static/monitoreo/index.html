@@ -1302,35 +1302,21 @@ function loginEmailGo(){
   var err=document.getElementById("li-email-err");
   if(!email||email.indexOf("@")<0){err.textContent="⚠ Ingresa un correo válido";return;}
   err.textContent="";pendingEmail=email;
-  if(isMonitorEmail(email)){
-    /* usuarios @unergy: verificar contra la plataforma */
-    showLoginStep("loading");
-    _apiFetch('POST','/api/v1/monitoreo/auth/verify-email',{email:email}).then(function(r){
-      if(r&&r.ok){
-        if(r.token) _API_TOKEN=r.token;
-        saveSession('monitor',email,r.nombre||email,[]);
-        document.getElementById("login-ov").className="";
-        applyRole();loadFaults();
-      } else {
-        showLoginStep("email");
-        err.textContent="⚠ Correo no registrado en la plataforma.";
-      }
-    }).catch(function(){showLoginStep("email");err.textContent="⚠ Sin conexión con el servidor.";});
-  } else {
-    /* clientes externos: enviar código */
-    showLoginStep("loading");
-    _apiFetch('POST','/api/v1/monitoreo/auth/send-code',{email:email}).then(function(r){
-      if(r&&r.ok){
-        var em=document.getElementById("ls-code-em");if(em)em.textContent=email;
-        var ci=document.getElementById("li-code");if(ci)ci.value="";
-        var ce=document.getElementById("li-code-err");if(ce)ce.textContent="";
-        showLoginStep("code");
-        setTimeout(function(){var el=document.getElementById("li-code");if(el)el.focus();},80);
-      } else {
-        showLoginStep("email");err.textContent="⚠ Correo no registrado.";
-      }
-    }).catch(function(){showLoginStep("email");err.textContent="⚠ Sin conexión con el servidor.";});
-  }
+  /* Todos los usuarios (internos @unergy y externos) pasan por OTP.
+     Para @unergy el OTP llega al correo y verify-email emite JWT de operaciones.
+     Para externos verify-code emite JWT de cliente. */
+  showLoginStep("loading");
+  _apiFetch('POST','/api/v1/monitoreo/auth/send-code',{email:email}).then(function(r){
+    if(r&&r.ok){
+      var em=document.getElementById("ls-code-em");if(em)em.textContent=email;
+      var ci=document.getElementById("li-code");if(ci)ci.value="";
+      var ce=document.getElementById("li-code-err");if(ce)ce.textContent="";
+      showLoginStep("code");
+      setTimeout(function(){var el=document.getElementById("li-code");if(el)el.focus();},80);
+    } else {
+      showLoginStep("email");err.textContent="⚠ Correo no registrado.";
+    }
+  }).catch(function(){showLoginStep("email");err.textContent="⚠ Sin conexión con el servidor.";})
 }
 function loginNameGo(){
   var name=(document.getElementById("li-name").value||"").trim();
@@ -1346,21 +1332,40 @@ function loginCodeGo(){
   var err=document.getElementById("li-code-err");
   if(code.length!==6||!/^\d{6}$/.test(code)){err.textContent="⚠ Ingresa el código de 6 dígitos";return;}
   err.textContent="";showLoginStep("loading");
-  _apiFetch('POST','/api/v1/monitoreo/auth/verify-code',{email:pendingEmail,code:code}).then(function(r){
-    if(r&&r.ok){
-      saveSession('cliente',pendingEmail,"",r.projects||[]);
-      document.getElementById("login-ov").className="";
-      applyRole();
-      if(!r.projects||r.projects.length===0){
-        toast("⚠ Tu cuenta no tiene proyectos asignados.",6000);
-        hideLoader();renderAll();
+  if(isMonitorEmail(pendingEmail)){
+    /* @unergy.io → verify-email devuelve JWT de operaciones */
+    _apiFetch('POST','/api/v1/monitoreo/auth/verify-email',{email:pendingEmail,codigo:code}).then(function(r){
+      if(r&&r.ok){
+        if(r.token)_API_TOKEN=r.token;
+        saveSession('monitor',pendingEmail,r.nombre||pendingEmail,[]);
+        document.getElementById("login-ov").className="";
+        applyRole();loadFaults();
+        toast("✓ Bienvenido, "+(r.nombre||pendingEmail),3000);
       } else {
-        toast("✓ Acceso concedido",3000);loadFaults();
+        showLoginStep("code");err.textContent="⚠ Código incorrecto o expirado";
       }
-    } else {
-      showLoginStep("code");err.textContent="⚠ Código incorrecto o expirado";
-    }
-  }).catch(function(){showLoginStep("code");err.textContent="⚠ Sin conexión.";});
+    }).catch(function(e){
+      showLoginStep("code");
+      err.textContent=e.message==="401"?"⚠ Código incorrecto o expirado":"⚠ Sin conexión.";
+    });
+  } else {
+    /* clientes externos → verify-code devuelve JWT de cliente */
+    _apiFetch('POST','/api/v1/monitoreo/auth/verify-code',{email:pendingEmail,code:code}).then(function(r){
+      if(r&&r.ok){
+        saveSession('cliente',pendingEmail,"",r.projects||[]);
+        document.getElementById("login-ov").className="";
+        applyRole();
+        if(!r.projects||r.projects.length===0){
+          toast("⚠ Tu cuenta no tiene proyectos asignados.",6000);
+          hideLoader();renderAll();
+        } else {
+          toast("✓ Acceso concedido",3000);loadFaults();
+        }
+      } else {
+        showLoginStep("code");err.textContent="⚠ Código incorrecto o expirado";
+      }
+    }).catch(function(){showLoginStep("code");err.textContent="⚠ Sin conexión.";});
+  }
 }
 /* ══ HELPERS FECHA ══ */
 function padT(t){if(!t)return "";var p=String(t).trim().split(":");if(p.length<2)return "";return p[0].padStart(2,"0")+":"+p[1].padStart(2,"0");}
@@ -4597,15 +4602,30 @@ function saveRptEdit(){
 
   var payloadSize=JSON.stringify(payload).length;
   console.log("[saveRptEdit] payload size:",Math.round(payloadSize/1024)+"KB","url:",_BACKEND_API+"/api/v1/informes/");
-  _apiFetch("POST",_BACKEND_API+"/api/v1/informes/",payload)
-  .then(function(r){
-    _rptBackendId=r.id;
-    toast("💾 Informe guardado");
-    _updateSavedBannerDate(r.editado_en||new Date().toISOString());
-    _updateEstadoBadge(r.estado);
-    _updateWorkflowBtns(r.estado);
-  })
-  .catch(function(e){
+  fetch(_BACKEND_API+"/api/v1/informes/",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+(_API_TOKEN||"")},
+    body:JSON.stringify(payload)
+  }).then(function(r){
+    if(r.status===409){
+      return r.json().then(function(d){
+        toast("🔒 "+((d&&d.detail)||"El informe está en revisión. Reviértelo a borrador primero."),7000);
+      });
+    }
+    if(r.status===400){
+      return r.json().then(function(d){
+        toast("⚠ "+(d&&d.detail||"No se puede editar el informe"),6000);
+      });
+    }
+    if(!r.ok)throw new Error("API "+r.status);
+    return r.json().then(function(d){
+      _rptBackendId=d.id;
+      toast("💾 Informe guardado");
+      _updateSavedBannerDate(d.editado_en||new Date().toISOString());
+      _updateEstadoBadge(d.estado);
+      _updateWorkflowBtns(d.estado);
+    });
+  }).catch(function(e){
     console.error("[saveRptEdit] error:",e);
     toast("⚠ Error al guardar: "+e.message+" — revisa la consola del navegador");
   });

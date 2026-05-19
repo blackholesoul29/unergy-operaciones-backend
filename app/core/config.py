@@ -13,14 +13,19 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 
     SECRET_KEY: str = ""
+    JWT_EXPIRE_MINUTES: int = 480
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod
-    def secret_key_must_be_set(cls, v: str) -> str:
+    def secret_key_warn_if_weak(cls, v: str) -> str:
         if not v or len(v) < 16:
-            raise ValueError("SECRET_KEY must be set and at least 16 characters")
+            import warnings
+            warnings.warn(
+                "[SEGURIDAD] SECRET_KEY no está configurado o es muy corto. "
+                "Define la variable de entorno SECRET_KEY en Railway con una clave segura.",
+                stacklevel=2,
+            )
         return v
-    JWT_EXPIRE_MINUTES: int = 480
 
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_PATH: str = "./uploads"

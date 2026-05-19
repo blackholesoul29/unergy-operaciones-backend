@@ -30,6 +30,56 @@ def _build_pdf(html: str) -> bytes:
         return pdf_bytes
 
 
+def send_otp_email(*, to_email: str, codigo: str) -> None:
+    """
+    Envía el código OTP de 6 dígitos al correo indicado.
+    Si SMTP no está configurado, imprime el código en los logs del servidor
+    (útil para desarrollo/staging).
+    """
+    if not settings.SMTP_HOST:
+        print(f"[OTP] Código para {to_email}: {codigo}  (SMTP no configurado — solo en logs)")
+        return
+
+    subject = "Tu código de acceso — Monitoreo Unergy"
+    body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:480px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Código de acceso</div>
+  </div>
+  <div style="background:#F7F4FD;padding:28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <p style="margin:0 0 20px">Usa el siguiente código para ingresar al módulo de monitoreo:</p>
+    <div style="background:#fff;border:2px solid #915BD8;border-radius:10px;padding:20px;text-align:center;margin:0 0 20px">
+      <div style="font-size:38px;font-weight:900;letter-spacing:10px;color:#1A0F2E;font-family:monospace">{codigo}</div>
+      <div style="font-size:12px;color:#A89EC0;margin-top:8px">Válido por 10 minutos</div>
+    </div>
+    <p style="color:#6B5F80;font-size:12px;margin:0">
+      Si no solicitaste este código, ignora este correo.<br>
+      Contacto: <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_html, "html", "utf-8"))
+
+    context = ssl.create_default_context()
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.SMTP_FROM, [to_email], msg.as_string())
+    except Exception as exc:
+        print(f"[OTP] Error enviando email a {to_email}: {exc} — código: {codigo}")
+        raise RuntimeError(f"No se pudo enviar el código: {exc}") from exc
+
+
 def send_informe_email(
     *,
     to_email: str,

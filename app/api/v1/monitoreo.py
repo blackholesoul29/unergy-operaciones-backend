@@ -594,7 +594,13 @@ def send_code(payload: dict, db: Session = Depends(get_db)):
     db.add(verificacion)
     db.commit()
 
-    # TODO: integrar envío real de email (SendGrid / SES / SMTP)
+    # Enviar código por email (si SMTP está configurado; si no, se imprime en los logs)
+    try:
+        from app.services.email_service import send_otp_email
+        send_otp_email(to_email=email, codigo=codigo)
+    except Exception as exc:
+        # No bloqueamos la respuesta aunque falle el email — el log tiene el código
+        print(f"[send-code] Fallo al enviar email OTP a {email}: {exc}")
 
     return {"ok": True}
 

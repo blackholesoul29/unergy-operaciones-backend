@@ -115,9 +115,16 @@ def upsert_informe(
     now = datetime.now(timezone.utc)
 
     if existing:
-        # Actualizar — solo borrador o revisado son editables
+        # Solo "borrador" se puede sobrescribir.
+        # "revisado" y "aprobado" están bloqueados para no perder avances del flujo editorial.
         if existing.estado == "aprobado":
             raise HTTPException(400, "No se puede editar un informe ya aprobado")
+        if existing.estado == "revisado":
+            raise HTTPException(
+                409,
+                "Este informe ya está en estado 'revisado'. "
+                "Reviértelo a borrador antes de guardar una nueva versión.",
+            )
         existing.html_content = payload.html_content
         existing.charts_data = payload.charts_data
         if payload.proyecto_nombre:

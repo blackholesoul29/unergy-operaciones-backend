@@ -174,6 +174,28 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     except Exception:
         pass
 
+    # Liquidaciones: projects pending settlement this month
+    liquidaciones_pendientes = 0
+    try:
+        liq_done = (
+            db.query(Liquidacion.proyecto_id)
+            .filter(
+                Liquidacion.periodo == today.replace(day=1),
+                Liquidacion.deleted_at.is_(None),
+            )
+            .subquery()
+        )
+        liquidaciones_pendientes = (
+            db.query(func.count(Proyecto.id))
+            .filter(
+                Proyecto.estado == "en_operacion",
+                ~Proyecto.id.in_(db.query(liq_done.c.proyecto_id)),
+            )
+            .scalar() or 0
+        )
+    except Exception:
+        pass
+
     # Generation data freshness (last Solenium sync)
     gen_last_date = None
     gen_projects_with_data = 0
@@ -214,4 +236,5 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "garantias_valor_total_cop": garantias_valor_total,
         "gen_solenium_last_date": gen_last_date,
         "gen_solenium_projects": gen_projects_with_data,
+        "liquidaciones_pendientes": liquidaciones_pendientes,
     }

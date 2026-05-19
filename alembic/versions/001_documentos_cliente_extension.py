@@ -18,10 +18,24 @@ def upgrade() -> None:
     # Usar IF NOT EXISTS en todo para que sea seguro correr incluso si init_db.py
     # ya creó las tablas con el modelo actualizado.
 
-    # 1. Nuevos valores del enum (IF NOT EXISTS es nativo en PostgreSQL 9.6+)
-    op.execute("ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'rut'")
-    op.execute("ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'certificado_bancario'")
-    op.execute("ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'camara_comercio'")
+    # 1. Nuevos valores del enum — only if the type exists (fresh deploys
+    #    create the table with the full enum via SQLAlchemy models, so the
+    #    standalone type may not exist).
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'rut';
+        EXCEPTION WHEN undefined_object THEN NULL; END $$
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'certificado_bancario';
+        EXCEPTION WHEN undefined_object THEN NULL; END $$
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TYPE tipodocumentoclienteenum ADD VALUE IF NOT EXISTS 'camara_comercio';
+        EXCEPTION WHEN undefined_object THEN NULL; END $$
+    """)
 
     # 2. Columna archivo_nombre
     op.execute("""

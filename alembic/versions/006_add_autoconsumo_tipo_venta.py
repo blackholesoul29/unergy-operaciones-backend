@@ -13,8 +13,11 @@ depends_on = None
 
 
 def upgrade():
-    # ALTER TYPE cannot run inside a transaction in PostgreSQL
-    op.execute("ALTER TYPE tipo_venta_liq_enum ADD VALUE IF NOT EXISTS 'autoconsumo'")
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TYPE tipo_venta_liq_enum ADD VALUE IF NOT EXISTS 'autoconsumo';
+        EXCEPTION WHEN undefined_object THEN NULL; END $$
+    """)
 
 
 def downgrade():

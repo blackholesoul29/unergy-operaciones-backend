@@ -15,14 +15,20 @@ depends_on = None
 
 def upgrade() -> None:
     # --- Nuevos valores en tipo_linea_mandato_enum ---
-    op.execute("ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'despacho'")
-    op.execute("ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'ventas_en_bolsa'")
-    op.execute("ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'compras_en_bolsa'")
-    op.execute("ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'redistribucion_ingresos'")
-    op.execute("ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida'")
+    for val in ('despacho', 'ventas_en_bolsa', 'compras_en_bolsa',
+                'redistribucion_ingresos', 'cambio_equipos_medida'):
+        op.execute(f"""
+            DO $$ BEGIN
+                ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS '{val}';
+            EXCEPTION WHEN undefined_object THEN NULL; END $$
+        """)
 
     # --- Nuevo valor en tipo_costo_enum ---
-    op.execute("ALTER TYPE tipo_costo_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida'")
+    op.execute("""
+        DO $$ BEGIN
+            ALTER TYPE tipo_costo_enum ADD VALUE IF NOT EXISTS 'cambio_equipos_medida';
+        EXCEPTION WHEN undefined_object THEN NULL; END $$
+    """)
 
     # --- liquidacion_mandatos: FK a inversionista ---
     op.add_column('liquidacion_mandatos',

@@ -227,12 +227,13 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
         .all()
     )
 
-    # DISTINCT ON: solo la fila más reciente por (codigo_sic_contrato, proyecto_id).
-    # Dos plantas distintas pueden compartir el mismo SIC en un contrato.
+    # DISTINCT ON: solo la fila más reciente por codigo_sic_contrato.
+    # Cuando una modificación reemplaza una planta por otra en el mismo SIC,
+    # la más reciente es la que vale (comportamiento real de GESCON).
     seen: set = set()
     latest = []
     for r in records:
-        key = (r.codigo_sic_contrato or f"_id_{r.id}", r.proyecto_id)
+        key = r.codigo_sic_contrato or f"_id_{r.id}"
         if key not in seen:
             seen.add(key)
             latest.append(r)

@@ -648,6 +648,114 @@ def get_simulador(
     return {"year": year, "month": month, "dias_mes": total_dias, "plantas": plantas_out, "contratos": contratos_out}
 
 
+@router.get("/plantas-contratos")
+def get_plantas_contratos(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Overview of all plants grouped by contract: venta, compra, and bolsa."""
+    from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
+    from sqlalchemy.orm import selectinload
+
+    total_dias = calendar.monthrange(year, month)[1]
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
+
+    plantas_db = (
+        db.query(Proyecto)
+        .filter(
+            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
+            Proyecto.estado == EstadoProyectoEnum.en_operacion,
+            Proyecto.sub_project.isnot(None),
+        )
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    plantas_map = {p.id: p for p in plantas_db}
+
+    contratos_db = (
+        db.query(PPAContrato)
+        .filter(PPAContrato.deleted_at.is_(None))
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+
+    contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
+
+    # --- VENTA: use GESCON to resolve plant assignments ---
+    venta_out = []
+    assigned_plant_ids: set[int] = set()
+    for c in contratos_venta:
+        plantas_list = []
+        if c.numero_codigo_contrato:
+            for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
+                if asic.proyecto_id and asic.proyecto_id in plantas_map:
+                    p = plantas_map[asic.proyecto_id]
+                    assigned_plant_ids.add(p.id)
+                    plantas_list.append({
+                        "id": p.id,
+                        "nombre": p.nombre_comercial,
+                        "codigo_sic": asic.codigo_sic_contrato,
+                        "fecha_inicio": asic.fecha_inicio.isoformat() if asic.fecha_inicio else None,
+                        "fecha_fin": asic.fecha_fin.isoformat() if asic.fecha_fin else None,
+                        "pct_despacho": float(asic.porcentaje_despacho or 0),
+                    })
+        venta_out.append({
+            "id": c.id,
+            "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
+            "comprador_nombre": c.comprador_nombre,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            "plantas": plantas_list,
+        })
+
+    # --- COMPRA: use M2M proyecto relationship, filter by contract dates ---
+    compra_out = []
+    for cc in contratos_compra:
+        if cc.fecha_fin and cc.fecha_fin < first_day:
+            continue
+        if cc.fecha_inicio and cc.fecha_inicio > last_day:
+            continue
+        cc_loaded = db.query(PPAContrato).options(selectinload(PPAContrato.proyectos)).filter(PPAContrato.id == cc.id).first()
+        plantas_list = []
+        if cc_loaded:
+            for p in cc_loaded.proyectos:
+                plantas_list.append({
+                    "id": p.id,
+                    "nombre": p.nombre_comercial,
+                    "fecha_inicio": cc.fecha_inicio.isoformat() if cc.fecha_inicio else None,
+                    "fecha_fin": cc.fecha_fin.isoformat() if cc.fecha_fin else None,
+                })
+        compra_out.append({
+            "id": cc.id,
+            "nombre": cc.nombre_interno or cc.numero_codigo_contrato or f"Compra {cc.id}",
+            "vendedor_nombre": cc.vendedor_nombre,
+            "fecha_inicio": cc.fecha_inicio.isoformat() if cc.fecha_inicio else None,
+            "fecha_fin": cc.fecha_fin.isoformat() if cc.fecha_fin else None,
+            "plantas": plantas_list,
+        })
+
+    # --- BOLSA: plants that exist but have no GESCON assignment this month ---
+    bolsa_plantas = []
+    for p in plantas_db:
+        if p.id not in assigned_plant_ids:
+            bolsa_plantas.append({
+                "id": p.id,
+                "nombre": p.nombre_comercial,
+            })
+
+    return {
+        "year": year,
+        "month": month,
+        "venta": venta_out,
+        "compra": compra_out,
+        "bolsa": bolsa_plantas,
+    }
+
+
 @router.get("/ppa/{contrato_id}/anual")
 def get_anual(
     contrato_id: int,

@@ -14,7 +14,12 @@ from app.core.config import settings
 
 def _build_pdf(html: str) -> bytes:
     """Genera PDF desde HTML usando Playwright (Chromium headless)."""
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(
+            "playwright no está instalado. Instálalo con: pip install playwright && playwright install chromium"
+        )
     with sync_playwright() as p:
         browser = p.chromium.launch(
             args=["--no-sandbox", "--disable-setuid-sandbox"]

@@ -393,7 +393,7 @@ def get_comparacion(
             if fechaFin:
                 q = q.filter(GeneracionDiaria.fecha <= fechaFin)
             daily = [
-                {"fecha": str(r.fecha), "kwh": float(r.kwh_generados or 0)}
+                {"fecha": str(r.fecha), "kwh": float(r.kwh_real or 0)}
                 for r in q.order_by(GeneracionDiaria.fecha).all()
             ]
             result["internos"].append({

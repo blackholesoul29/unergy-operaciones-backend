@@ -212,6 +212,67 @@ def evo_clima_history(
         db.close()
 
 
+@router.get("/clima/oni")
+def evo_clima_oni(
+    years: int = Query(10, ge=1, le=80),
+    _=Depends(get_current_user),
+):
+    """Historical ONI index with ENSO phases."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT year, month, oni_value, soi_value, pdo_value, mjo_amplitude, enso_phase
+            FROM clima_oni_monthly
+            ORDER BY year DESC, month DESC
+            LIMIT :limit
+        """), {"limit": years * 12}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
+@router.get("/clima/prices")
+def evo_clima_prices(
+    years: int = Query(26, ge=1, le=30),
+    _=Depends(get_current_user),
+):
+    """Historical energy prices with ENSO phase."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT p.year, p.month, p.price_cop_kwh, p.enso_phase,
+                   o.oni_value
+            FROM clima_price_monthly p
+            LEFT JOIN clima_oni_monthly o ON p.year = o.year AND p.month = o.month
+            ORDER BY p.year DESC, p.month DESC
+            LIMIT :limit
+        """), {"limit": years * 12}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
+@router.get("/clima/precip")
+def evo_clima_precip(
+    region: str = Query("Andina"),
+    years: int = Query(10, ge=1, le=40),
+    _=Depends(get_current_user),
+):
+    """Historical precipitation for a region."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT year, month, precip_mm, anomaly_pct, climatology_mm
+            FROM clima_precip_monthly
+            WHERE region = :region
+            ORDER BY year DESC, month DESC
+            LIMIT :limit
+        """), {"region": region, "limit": years * 12}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
 @router.get("/health")
 def evo_health(_=Depends(get_current_user)):
     return _evo_get("/health")

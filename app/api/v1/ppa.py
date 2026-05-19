@@ -132,7 +132,7 @@ def get_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
     return _get_contrato_or_404(id, db)
 
 
-@router.patch("/{id}", response_model=PPAContratoOut)
+@router.patch("/{id}")
 def update_contrato(
     id: int,
     data: PPAContratoUpdate,
@@ -153,12 +153,13 @@ def update_contrato(
         logger.exception("Error al guardar contrato PPA %s", id)
         raise HTTPException(500, detail=f"Error al guardar: {e}")
     try:
-        return _get_contrato_or_404(id, db)
+        updated = _get_contrato_or_404(id, db)
+        return PPAContratoOut.model_validate(updated, from_attributes=True).model_dump(mode="json")
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Error al serializar contrato PPA %s después de update", id)
-        raise HTTPException(500, detail=f"Error al cargar contrato actualizado: {e}")
+        raise HTTPException(500, detail=f"Error al serializar respuesta: {e}")
 
 
 @router.delete("/{id}", status_code=204)

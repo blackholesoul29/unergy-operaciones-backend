@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from app.core.database import get_db
@@ -61,10 +62,11 @@ def list_usuarios(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    total = db.query(func.count(Usuario.id)).scalar()
     users = db.query(Usuario).order_by(Usuario.nombre).limit(size).all()
     return {
         "items": [{"id": u.id, "nombre": u.nombre, "email": u.email, "rol": u.rol.value, "activo": u.activo} for u in users],
-        "total": len(users),
+        "total": total,
     }
 
 

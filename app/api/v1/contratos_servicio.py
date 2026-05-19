@@ -40,6 +40,7 @@ def _sync_partes(contrato: ContratoServicio, db: Session):
 def list_contratos(
     tipo: str | None = Query(None),
     proyecto_id: int | None = Query(None),
+    limit: int = Query(500, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -48,7 +49,7 @@ def list_contratos(
         q = q.filter(ContratoServicio.servicio_aplica == tipo)
     if proyecto_id:
         q = q.filter(ContratoServicio.proyecto_id == proyecto_id)
-    return q.order_by(ContratoServicio.fecha_inicio.desc().nullslast(), ContratoServicio.id.desc()).all()
+    return q.order_by(ContratoServicio.fecha_inicio.desc().nullslast(), ContratoServicio.id.desc()).limit(limit).all()
 
 
 @router.post("", response_model=ContratoServicioOut, status_code=201)

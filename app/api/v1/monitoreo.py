@@ -10,6 +10,7 @@ Convención de estados:
   terminada      ←→  cerrada / sin_solucion (ambos → terminada al salir)
 """
 import calendar
+import json
 import random
 import string
 from datetime import datetime, date, time as time_type, timedelta, timezone

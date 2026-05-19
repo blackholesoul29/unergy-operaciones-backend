@@ -1,21 +1,31 @@
 from datetime import date, datetime
-from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from typing import Literal, Optional
+from pydantic import BaseModel, ConfigDict, field_validator
+
+TIPOS_GARANTIA = ("cuenta_custodia", "poliza", "carta_credito", "fiducia", "otro")
+ESTADOS_GARANTIA = ("vigente", "vencida", "en_renovacion", "liberada", "en_proceso")
 
 
 class GarantiaBase(BaseModel):
     proyecto_id: Optional[int] = None
     contrato_ppa_id: Optional[int] = None
     codigo_frontera: Optional[str] = None
-    tipo: str
+    tipo: Literal["cuenta_custodia", "poliza", "carta_credito", "fiducia", "otro"]
     entidad: Optional[str] = None
     numero_referencia: Optional[str] = None
     valor_cop: float
     porcentaje_cobertura: Optional[float] = None
     fecha_constitucion: Optional[date] = None
     fecha_vencimiento: Optional[date] = None
-    estado: str = "vigente"
+    estado: Literal["vigente", "vencida", "en_renovacion", "liberada", "en_proceso"] = "vigente"
     observaciones: Optional[str] = None
+
+    @field_validator("valor_cop")
+    @classmethod
+    def valor_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError("valor_cop must be >= 0")
+        return v
 
 
 class GarantiaCreate(GarantiaBase):
@@ -26,14 +36,14 @@ class GarantiaUpdate(BaseModel):
     proyecto_id: Optional[int] = None
     contrato_ppa_id: Optional[int] = None
     codigo_frontera: Optional[str] = None
-    tipo: Optional[str] = None
+    tipo: Optional[Literal["cuenta_custodia", "poliza", "carta_credito", "fiducia", "otro"]] = None
     entidad: Optional[str] = None
     numero_referencia: Optional[str] = None
     valor_cop: Optional[float] = None
     porcentaje_cobertura: Optional[float] = None
     fecha_constitucion: Optional[date] = None
     fecha_vencimiento: Optional[date] = None
-    estado: Optional[str] = None
+    estado: Optional[Literal["vigente", "vencida", "en_renovacion", "liberada", "en_proceso"]] = None
     observaciones: Optional[str] = None
 
 
@@ -47,7 +57,7 @@ class GarantiaOut(GarantiaBase):
 
 
 class MovimientoBase(BaseModel):
-    tipo: str
+    tipo: Literal["deposito", "cobro_xm", "devolucion", "ajuste", "interes", "renovacion"]
     monto_cop: float
     fecha: date
     concepto: Optional[str] = None

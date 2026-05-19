@@ -56,8 +56,8 @@ class Garantia(TimestampMixin, Base):
     )
     observaciones: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    proyecto = relationship("Proyecto", backref="garantias", lazy="joined")
-    contrato_ppa = relationship("PPAContrato", backref="garantias", lazy="joined")
+    proyecto = relationship("Proyecto", backref="garantias", lazy="select")
+    contrato_ppa = relationship("PPAContrato", backref="garantias", lazy="select")
     movimientos = relationship("GarantiaMovimiento", back_populates="garantia", cascade="all, delete-orphan", order_by="GarantiaMovimiento.fecha.desc()")
 
 

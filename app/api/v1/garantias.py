@@ -37,7 +37,7 @@ def _garantia_to_out(g: Garantia) -> dict:
         "created_at": g.created_at.isoformat() if g.created_at else None,
         "updated_at": g.updated_at.isoformat() if g.updated_at else None,
         "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else None,
-        "contrato_nombre": g.contrato_ppa.nombre_interno or g.contrato_ppa.numero_codigo_contrato if g.contrato_ppa else None,
+        "contrato_nombre": (g.contrato_ppa.nombre_interno or g.contrato_ppa.numero_codigo_contrato) if g.contrato_ppa else None,
     }
     return d
 
@@ -126,15 +126,23 @@ def list_garantias(
 ):
     q = db.query(Garantia)
     if estado:
-        q = q.filter(Garantia.estado == estado)
+        try:
+            q = q.filter(Garantia.estado == EstadoGarantiaEnum(estado))
+        except ValueError:
+            raise HTTPException(400, f"Estado inválido: {estado}")
     if tipo:
-        q = q.filter(Garantia.tipo == tipo)
+        from app.models.garantias import TipoGarantiaEnum
+        try:
+            q = q.filter(Garantia.tipo == TipoGarantiaEnum(tipo))
+        except ValueError:
+            raise HTTPException(400, f"Tipo inválido: {tipo}")
     if proyecto_id:
         q = q.filter(Garantia.proyecto_id == proyecto_id)
     if expiring_days:
         cutoff = date.today() + timedelta(days=expiring_days)
+        if not estado:
+            q = q.filter(Garantia.estado == EstadoGarantiaEnum.vigente)
         q = q.filter(
-            Garantia.estado == EstadoGarantiaEnum.vigente,
             Garantia.fecha_vencimiento.isnot(None),
             Garantia.fecha_vencimiento <= cutoff,
         )
@@ -268,7 +276,7 @@ def create_movimiento(
     )
     prev_saldo = float(last_mov.saldo_posterior_cop) if last_mov and last_mov.saldo_posterior_cop is not None else float(g.valor_cop or 0)
 
-    if data.tipo in ("deposito", "devolucion", "interes"):
+    if data.tipo in ("deposito", "devolucion", "interes", "renovacion"):
         new_saldo = prev_saldo + abs(data.monto_cop)
     else:
         new_saldo = prev_saldo - abs(data.monto_cop)

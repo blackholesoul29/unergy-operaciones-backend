@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, _require_admin
 from app.core.config import settings
 from app.core.database import SessionLocal
 
@@ -279,7 +279,7 @@ def evo_health(_=Depends(get_current_user)):
 
 
 @router.post("/clima/bulk-load")
-def evo_clima_bulk_load(payload: dict, _=Depends(get_current_user)):
+def evo_clima_bulk_load(payload: dict, _=Depends(_require_admin)):
     """Admin endpoint: bulk load climate indices and price history."""
     db = SessionLocal()
     counts = {"oni": 0, "precip": 0, "prices": 0}

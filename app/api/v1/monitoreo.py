@@ -460,19 +460,20 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
             names.append(p.cliente.razon_social_nombre)
         return names
 
+    def _proyecto_detalle(p):
+        nombres = _get_cliente_nombres(p)
+        return {
+            "id": p.id,
+            "nombre": p.nombre_comercial,
+            "alias": p.alias_monitoreo or "",
+            "sub_project": p.sub_project or p.alias_monitoreo or "",
+            "cliente_nombre": nombres[0] if nombres else "",
+            "cliente_nombres": nombres,
+        }
+
     return {
         "proyectos": [p.nombre_comercial for p in op_proyectos],
-        "proyectos_detalle": [
-            {
-                "id": p.id,
-                "nombre": p.nombre_comercial,
-                "alias": p.alias_monitoreo or "",
-                "sub_project": p.sub_project or p.alias_monitoreo or "",
-                "cliente_nombre": _get_cliente_nombres(p)[0] if _get_cliente_nombres(p) else "",
-                "cliente_nombres": _get_cliente_nombres(p),  # todos los clientes del proyecto
-            }
-            for p in all_proyectos  # todos, para cubrir cualquier proyecto con fallas
-        ],
+        "proyectos_detalle": [_proyecto_detalle(p) for p in all_proyectos],
         "clientes": [
             {"id": c.id, "nombre": c.razon_social_nombre}
             for c in clientes
@@ -523,15 +524,30 @@ def get_generacion_monitoreo(
 # ── POST /monitoreo/auth/verify-email ────────────────────────────────────────
 @router.post("/auth/verify-email")
 def verify_email_monitoreo(payload: dict, db: Session = Depends(get_db)):
-    """Valida que un email @unergy.io tenga usuario en la plataforma y devuelve un JWT.
-    Restringido a dominio corporativo. Usado por fallas-unergy cuando no viene token."""
+    """Valida email @unergy.io + código OTP antes de emitir JWT.
+    Requiere haber llamado a /auth/send-code primero."""
     from app.core.security import create_access_token
     email = (payload.get("email") or "").strip().lower()
+    codigo = (payload.get("codigo") or "").strip()
     if not email:
         raise HTTPException(400, "Email requerido")
+    if not codigo:
+        raise HTTPException(400, "Código de verificación requerido")
 
     if not email.endswith("@unergy.io"):
         raise HTTPException(403, "Solo correos @unergy.io pueden usar este método")
+
+    verif = db.query(MonitoreoVerificacion).filter(
+        MonitoreoVerificacion.email == email,
+        MonitoreoVerificacion.codigo == codigo,
+        MonitoreoVerificacion.usado == False,
+        MonitoreoVerificacion.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if not verif:
+        raise HTTPException(401, "Código inválido o expirado")
+
+    verif.usado = True
+    db.commit()
 
     user = db.query(Usuario).filter(Usuario.email == email, Usuario.activo == True).first()
     if not user:
@@ -579,8 +595,6 @@ def send_code(payload: dict, db: Session = Depends(get_db)):
     db.commit()
 
     # TODO: integrar envío real de email (SendGrid / SES / SMTP)
-    # Por ahora, el código se puede ver en los logs de desarrollo
-    print(f"[MONITOREO] Código para {email}: {codigo}")
 
     return {"ok": True}
 

@@ -8,6 +8,13 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.models import Usuario
+
+
+def _require_liquidaciones_write(current: Usuario = Depends(get_current_user)):
+    if current.rol.value not in ("admin", "liquidaciones"):
+        raise HTTPException(403, "Se requiere rol admin o liquidaciones")
+    return current
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionMandato,
     LiquidacionMandatoLinea, LiquidacionFactura,
@@ -298,7 +305,7 @@ def list_liquidaciones(
 def create_liquidacion(
     body: LiquidacionCreate,
     db: Session = Depends(get_db),
-    usuario=Depends(get_current_user),
+    usuario=Depends(_require_liquidaciones_write),
 ):
     liq = Liquidacion(
         proyecto_id=body.proyecto_id,
@@ -319,7 +326,7 @@ def create_liquidacion(
 
 
 @router.get("/{id}")
-def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     liq = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto)).filter(Liquidacion.id == id).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
@@ -349,7 +356,7 @@ def update_liquidacion(
     id: int,
     body: LiquidacionUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    _=Depends(_require_liquidaciones_write),
 ):
     liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
     if not liq:
@@ -361,7 +368,7 @@ def update_liquidacion(
 
 
 @router.delete("/{id}", status_code=204)
-def delete_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def delete_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
@@ -373,7 +380,7 @@ def delete_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_cur
 def limpiar_liquidacion(
     id: int,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    _=Depends(_require_liquidaciones_write),
 ):
     liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
     if not liq:
@@ -404,7 +411,7 @@ def limpiar_liquidacion(
 # ── Costos ─────────────────────────────────────────────────────────────────────
 
 @router.post("/{id}/costos", status_code=201)
-def add_costo(id: int, body: CostoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def add_costo(id: int, body: CostoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
         raise HTTPException(404, "Liquidación no encontrada")
     costo = LiquidacionCosto(liquidacion_id=id, **body.model_dump())
@@ -415,7 +422,7 @@ def add_costo(id: int, body: CostoCreate, db: Session = Depends(get_db), _=Depen
 
 
 @router.patch("/{id}/costos/{costo_id}")
-def update_costo(id: int, costo_id: int, body: CostoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def update_costo(id: int, costo_id: int, body: CostoUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     costo = db.query(LiquidacionCosto).filter(
         LiquidacionCosto.id == costo_id, LiquidacionCosto.liquidacion_id == id
     ).first()
@@ -428,7 +435,7 @@ def update_costo(id: int, costo_id: int, body: CostoUpdate, db: Session = Depend
 
 
 @router.delete("/{id}/costos/{costo_id}", status_code=204)
-def delete_costo(id: int, costo_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def delete_costo(id: int, costo_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     costo = db.query(LiquidacionCosto).filter(
         LiquidacionCosto.id == costo_id, LiquidacionCosto.liquidacion_id == id
     ).first()
@@ -441,7 +448,7 @@ def delete_costo(id: int, costo_id: int, db: Session = Depends(get_db), _=Depend
 # ── Mandatos ───────────────────────────────────────────────────────────────────
 
 @router.post("/{id}/mandatos", status_code=201)
-def add_mandato(id: int, body: MandatoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def add_mandato(id: int, body: MandatoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
         raise HTTPException(404, "Liquidación no encontrada")
     mandato = LiquidacionMandato(liquidacion_id=id, **body.model_dump())
@@ -452,7 +459,7 @@ def add_mandato(id: int, body: MandatoCreate, db: Session = Depends(get_db), _=D
 
 
 @router.patch("/{id}/mandatos/{mandato_id}")
-def update_mandato(id: int, mandato_id: int, body: MandatoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def update_mandato(id: int, mandato_id: int, body: MandatoUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     mandato = db.query(LiquidacionMandato).filter(
         LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
     ).first()
@@ -465,7 +472,7 @@ def update_mandato(id: int, mandato_id: int, body: MandatoUpdate, db: Session = 
 
 
 @router.delete("/{id}/mandatos/{mandato_id}", status_code=204)
-def delete_mandato(id: int, mandato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def delete_mandato(id: int, mandato_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     mandato = db.query(LiquidacionMandato).filter(
         LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
     ).first()
@@ -482,7 +489,7 @@ def delete_mandato(id: int, mandato_id: int, db: Session = Depends(get_db), _=De
 # ── Líneas de mandato ──────────────────────────────────────────────────────────
 
 @router.post("/{id}/mandatos/{mandato_id}/lineas", status_code=201)
-def add_linea(id: int, mandato_id: int, body: LineaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def add_linea(id: int, mandato_id: int, body: LineaCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     mandato = db.query(LiquidacionMandato).filter(
         LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
     ).first()
@@ -496,7 +503,7 @@ def add_linea(id: int, mandato_id: int, body: LineaCreate, db: Session = Depends
 
 
 @router.patch("/{id}/mandatos/{mandato_id}/lineas/{linea_id}")
-def update_linea(id: int, mandato_id: int, linea_id: int, body: LineaUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def update_linea(id: int, mandato_id: int, linea_id: int, body: LineaUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     linea = db.query(LiquidacionMandatoLinea).filter(
         LiquidacionMandatoLinea.id == linea_id,
         LiquidacionMandatoLinea.mandato_id == mandato_id,
@@ -510,7 +517,7 @@ def update_linea(id: int, mandato_id: int, linea_id: int, body: LineaUpdate, db:
 
 
 @router.delete("/{id}/mandatos/{mandato_id}/lineas/{linea_id}", status_code=204)
-def delete_linea(id: int, mandato_id: int, linea_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def delete_linea(id: int, mandato_id: int, linea_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     linea = db.query(LiquidacionMandatoLinea).filter(
         LiquidacionMandatoLinea.id == linea_id,
         LiquidacionMandatoLinea.mandato_id == mandato_id,
@@ -524,7 +531,7 @@ def delete_linea(id: int, mandato_id: int, linea_id: int, db: Session = Depends(
 # ── Facturas de servicio ───────────────────────────────────────────────────────
 
 @router.post("/{id}/facturas", status_code=201)
-def add_factura(id: int, body: FacturaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def add_factura(id: int, body: FacturaCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
         raise HTTPException(404, "Liquidación no encontrada")
     factura = LiquidacionFactura(liquidacion_id=id, **body.model_dump())
@@ -535,7 +542,7 @@ def add_factura(id: int, body: FacturaCreate, db: Session = Depends(get_db), _=D
 
 
 @router.patch("/{id}/facturas/{factura_id}")
-def update_factura(id: int, factura_id: int, body: FacturaUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def update_factura(id: int, factura_id: int, body: FacturaUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     factura = db.query(LiquidacionFactura).filter(
         LiquidacionFactura.id == factura_id, LiquidacionFactura.liquidacion_id == id
     ).first()
@@ -548,7 +555,7 @@ def update_factura(id: int, factura_id: int, body: FacturaUpdate, db: Session = 
 
 
 @router.delete("/{id}/facturas/{factura_id}", status_code=204)
-def delete_factura(id: int, factura_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def delete_factura(id: int, factura_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
     factura = db.query(LiquidacionFactura).filter(
         LiquidacionFactura.id == factura_id, LiquidacionFactura.liquidacion_id == id
     ).first()

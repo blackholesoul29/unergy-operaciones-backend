@@ -44,8 +44,8 @@ def _get_or_404(id: int, db: Session) -> Falla:
 
 def _gen_codigo(db: Session) -> str:
     year = datetime.now(timezone.utc).year
-    count = db.query(func.count(Falla.id)).scalar() or 0
-    return f"FAL-{year}-{count + 1:05d}"
+    max_id = db.query(func.max(Falla.id)).scalar() or 0
+    return f"FAL-{year}-{max_id + 1:05d}"
 
 
 @router.get("/catalogos", response_model=FallaCatalogos)

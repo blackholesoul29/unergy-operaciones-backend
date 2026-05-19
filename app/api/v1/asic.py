@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import AsicSolicitud
 from app.models.asic import AsicCambioContrato, GesconDiccionario
-from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
+from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
 
@@ -38,17 +38,15 @@ def list_solicitudes(
 @router.patch("/{id}", response_model=AsicSolicitudOut)
 def patch_solicitud(
     id: int,
-    data: dict,
+    data: AsicSolicitudUpdate,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first()
     if not s:
-        from fastapi import HTTPException
         raise HTTPException(404, "No encontrado")
-    for k, v in data.items():
-        if hasattr(s, k):
-            setattr(s, k, v)
+    for k, v in data.model_dump(exclude_none=True).items():
+        setattr(s, k, v)
     db.commit()
     db.refresh(s)
     return _to_out(db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first())

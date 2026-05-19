@@ -563,9 +563,15 @@ def get_simulador(
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     from sqlalchemy.orm import selectinload
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
     compra_proyecto_ids: set[int] = set()
     compra_nombre_map: dict[int, str] = {}
     for cc in contratos_compra:
+        if cc.fecha_fin and cc.fecha_fin < first_day:
+            continue
+        if cc.fecha_inicio and cc.fecha_inicio > last_day:
+            continue
         cc_loaded = db.query(PPAContrato).options(selectinload(PPAContrato.proyectos)).filter(PPAContrato.id == cc.id).first()
         if cc_loaded:
             for proy in cc_loaded.proyectos:

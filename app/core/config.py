@@ -34,6 +34,23 @@ class Settings(BaseSettings):
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
 
+    # Quoia CGM API (fronteras / medidores)
+    QUOIA_API_TOKEN: str = ""
+    QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"
+
+    # MGS Alarms polling
+    MGS_ENABLED: bool = True
+    MGS_POLL_INTERVAL_MINUTES: int = 15
+    TIMEZONE: str = "America/Bogota"
+
+    # EVO Energy API (DailySpot + Clima via Tailscale)
+    EVO_API_URL: str = ""
+    EVO_API_TOKEN: str = ""
+
+    # External databases (read-only correlation)
+    ORIGINA_DATABASE_URL: str = ""
+    REQUESTSDB_DATABASE_URL: str = ""
+
     # SMTP — envío de informes aprobados
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

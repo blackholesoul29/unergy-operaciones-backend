@@ -1,0 +1,125 @@
+"""Sync HTTP client for Solenium API (inverters / availability)."""
+from __future__ import annotations
+
+import logging
+import time
+
+import httpx
+
+from app.core.config import settings
+
+logger = logging.getLogger("mgs.solenium")
+
+RETRY_MAX = 2
+TIMEOUT = 30.0
+TOKEN_MARGIN_SECONDS = 60
+
+
+class SoleniumClient:
+    def __init__(self):
+        self._auth_url = settings.SOLENIUM_AUTH_URL.rstrip("/")
+        self._data_url = settings.SOLENIUM_DATA_URL.rstrip("/")
+        self._username = settings.SOLENIUM_USER
+        self._password = settings.SOLENIUM_PASS
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._token_time: float = 0
+        self._http = httpx.Client(timeout=TIMEOUT)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._username and self._password)
+
+    def _authenticate(self):
+        url = f"{self._auth_url}/token/"
+        try:
+            resp = self._http.post(url, json={
+                "username": self._username,
+                "password": self._password,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            self._access_token = data["access"]
+            self._refresh_token = data["refresh"]
+            self._token_time = time.time()
+        except (httpx.HTTPError, KeyError) as exc:
+            logger.error("solenium auth failed: %s", exc)
+            self._access_token = None
+            self._refresh_token = None
+
+    def _try_refresh(self) -> bool:
+        if not self._refresh_token:
+            return False
+        url = f"{self._auth_url}/token/refresh/"
+        try:
+            resp = self._http.post(url, json={"refresh": self._refresh_token})
+            resp.raise_for_status()
+            self._access_token = resp.json()["access"]
+            self._token_time = time.time()
+            return True
+        except httpx.HTTPError:
+            return False
+
+    def _ensure_token(self):
+        if not self._access_token:
+            self._authenticate()
+            return
+        age = time.time() - self._token_time
+        if age > (5 * 60 - TOKEN_MARGIN_SECONDS):
+            if not self._try_refresh():
+                self._authenticate()
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._access_token}"}
+
+    def _get(self, url: str, params: dict | None = None) -> dict | list | None:
+        for attempt in range(1, RETRY_MAX + 1):
+            self._ensure_token()
+            if not self._access_token:
+                return None
+            try:
+                resp = self._http.get(url, headers=self._headers(), params=params)
+                if resp.status_code == 401 and attempt == 1:
+                    self._access_token = None
+                    continue
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                logger.warning("solenium request failed url=%s attempt=%d: %s", url, attempt, exc)
+                if attempt == RETRY_MAX:
+                    return None
+        return None
+
+    def get_availability(self) -> dict[int, dict]:
+        url = f"{self._data_url}/project_availability/"
+        data = self._get(url)
+        if not data:
+            return {}
+        result: dict[int, dict] = {}
+        for cat in data.get("results", {}).get("categories", []):
+            cat_id = cat.get("id", "unknown")
+            for item in cat.get("items", []):
+                pid = item.get("project")
+                if pid is not None:
+                    result[pid] = {
+                        "name": (item.get("name") or "").strip(),
+                        "availability": item.get("availability"),
+                        "category": cat_id,
+                    }
+        return result
+
+    def get_inverters(self, project_id: int) -> list[dict]:
+        url = f"{self._data_url}/project/{project_id}/inverter/"
+        data = self._get(url)
+        if not data:
+            return []
+        return data.get("results", [])
+
+    def get_measurements(self, project_id: int, variable: str = "cp1", time_scale: int = 0) -> dict | None:
+        url = f"{self._data_url}/project/{project_id}/measurement/"
+        data = self._get(url, params={"variable": variable, "time_scale": time_scale})
+        if not data:
+            return None
+        return data.get("results") or data

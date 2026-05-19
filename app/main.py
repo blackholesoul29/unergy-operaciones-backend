@@ -263,6 +263,24 @@ _PENDING_DDLS = [
     "ALTER TYPE servicio_aplica_enum ADD VALUE IF NOT EXISTS 'rec'",
     # migration 015 — correo_operacional en clientes
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_operacional VARCHAR(255)",
+    # MGS alarms table
+    """CREATE TABLE IF NOT EXISTS alarmas_monitoreo (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_nombre VARCHAR(255) NOT NULL,
+        severity VARCHAR(20) NOT NULL,
+        alarm_type VARCHAR(50) NOT NULL,
+        details TEXT NOT NULL,
+        source_data JSONB,
+        resolved_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_created ON alarmas_monitoreo (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_severity ON alarmas_monitoreo (severity) WHERE resolved_at IS NULL",
+    # Cross-database correlation columns
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS requestsdb_supply_id BIGINT",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_node_name VARCHAR(255)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     # migration 016 — informes_guardados: flujo editorial de informes operacionales
     """CREATE TABLE IF NOT EXISTS informes_guardados (
         id BIGSERIAL PRIMARY KEY,
@@ -503,14 +521,44 @@ def _run_create_tables() -> None:
         print(f"[startup] create_all skipped: {e}")
 
 
+_mgs_scheduler = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _mgs_scheduler
     _run_create_tables()
     _run_column_migrations()
     _run_catalog_seed()
     _run_tipo_migration()
     _run_srv_operacion_sync()
+
+    if settings.MGS_ENABLED:
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            from apscheduler.triggers.interval import IntervalTrigger
+            from app.services.mgs.scheduler import poll_once
+
+            _mgs_scheduler = BackgroundScheduler(
+                timezone=settings.TIMEZONE,
+            )
+            _mgs_scheduler.add_job(
+                poll_once,
+                IntervalTrigger(minutes=settings.MGS_POLL_INTERVAL_MINUTES),
+                id="mgs_poll",
+                name="MGS alarm poll",
+            )
+            _mgs_scheduler.start()
+            poll_once()
+            print(f"[MGS] Scheduler started — polling every {settings.MGS_POLL_INTERVAL_MINUTES} min")
+        except Exception as e:
+            print(f"[MGS] Scheduler failed to start: {e}")
+
     yield
+
+    if _mgs_scheduler:
+        _mgs_scheduler.shutdown(wait=False)
+        print("[MGS] Scheduler stopped")
 
 
 app = FastAPI(

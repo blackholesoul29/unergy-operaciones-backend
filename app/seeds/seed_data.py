@@ -15,7 +15,7 @@ USUARIOS = [
     {"email": "laurah@unergy.io",   "nombre": "Laura Vanessa Hurtado",    "rol": "admin"},
     {"email": "jessica@unergy.io",  "nombre": "Jessica",                  "rol": "admin"},
     {"email": "nicolas@unergy.io",  "nombre": "Nicolás Villegas",         "rol": "operaciones"},
-    {"email": "eduardo@unergy.io",  "nombre": "Eduardo",                  "rol": "operaciones"},
+    {"email": "eduardo@unergy.io",  "nombre": "Eduardo",                  "rol": "admin"},
     {"email": "victor@unergy.io",   "nombre": "Víctor",                   "rol": "admin"},
     {"email": "camilo@unergy.io",   "nombre": "Camilo",                   "rol": "operaciones"},
     {"email": "danielg@unergy.io",  "nombre": "Daniel G.",                "rol": "operaciones"},

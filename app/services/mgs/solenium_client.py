@@ -123,3 +123,52 @@ class SoleniumClient:
         if not data:
             return None
         return data.get("results") or data
+
+    def get_projects(self) -> list[dict]:
+        url = f"{self._data_url}/project/"
+        all_projects = []
+        while url:
+            data = self._get(url)
+            if not data:
+                break
+            results = data.get("results", data) if isinstance(data, dict) else data
+            if isinstance(results, list):
+                all_projects.extend(results)
+            url = data.get("next") if isinstance(data, dict) else None
+        return all_projects
+
+    def get_project_detail(self, project_id: int) -> dict | None:
+        url = f"{self._data_url}/project_detail/{project_id}/"
+        return self._get(url)
+
+    def get_project_summary(self) -> list[dict]:
+        url = f"{self._data_url}/project_summary/"
+        data = self._get(url)
+        if not data:
+            return []
+        return data.get("items", []) if isinstance(data, dict) else data
+
+    def get_generation(self, project_id: int, start_date: str, end_date: str) -> dict | None:
+        url = f"{self._data_url}/project/{project_id}/generation/"
+        return self._get(url, params={"start_date": start_date, "end_date": end_date})
+
+    def get_energy(self, project_id: int, granularity: str = "day",
+                   date_from: str = "", date_to: str = "") -> dict | None:
+        url = f"{self._data_url}/project/{project_id}/energy/"
+        params: dict = {"granularity": granularity}
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
+        return self._get(url, params=params)
+
+    def get_power(self, project_id: int) -> dict | None:
+        url = f"{self._data_url}/project/{project_id}/power/"
+        return self._get(url)
+
+    def get_project_inverters(self, project_id: int) -> list[dict]:
+        url = f"{self._data_url}/project/{project_id}/inverter/"
+        data = self._get(url)
+        if not data:
+            return []
+        return data.get("results", data) if isinstance(data, dict) else data

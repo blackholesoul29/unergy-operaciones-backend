@@ -1,4 +1,5 @@
 """Dashboard KPI endpoint — single call for all dashboard metrics."""
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -11,6 +12,9 @@ from app.models import (
     Proyecto, Cliente, Falla, FallaCatEstado,
     Liquidacion, GeneracionDiaria, PPAContrato,
 )
+from app.services.mgs.solenium_client import SoleniumClient
+
+logger = logging.getLogger("dashboard")
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -62,6 +66,17 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     except Exception:
         pass
 
+    fleet_power_kw = None
+    fleet_online = None
+    try:
+        client = SoleniumClient()
+        if client.enabled:
+            summary = client.get_project_summary()
+            fleet_power_kw = round(sum(s.get("power_kw") or 0 for s in summary), 1)
+            fleet_online = sum(1 for s in summary if (s.get("power_kw") or 0) > 0)
+    except Exception:
+        logger.debug("Solenium fleet summary unavailable", exc_info=True)
+
     return {
         "proyectos_total": proyectos_total,
         "proyectos_operacion": proyectos_operacion,
@@ -72,4 +87,6 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "ppa_activos": ppa_activos,
         "precio_bolsa_cop_kwh": precio_bolsa,
         "alarmas_mgs": mgs_activas,
+        "fleet_power_kw": fleet_power_kw,
+        "fleet_online": fleet_online,
     }

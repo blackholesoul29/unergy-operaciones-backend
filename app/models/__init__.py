@@ -27,6 +27,7 @@ from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
 from app.models.gestion import GestionRegistro
+from app.models.garantias import Garantia, GarantiaMovimiento
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -44,4 +45,5 @@ __all__ = [
     "Documento", "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
     "GestionRegistro",
+    "Garantia", "GarantiaMovimiento",
 ]

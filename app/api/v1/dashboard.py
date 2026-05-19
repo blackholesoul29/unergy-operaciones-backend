@@ -1,5 +1,6 @@
 """Dashboard KPI endpoint — single call for all dashboard metrics."""
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
@@ -17,6 +18,9 @@ from app.models.garantias import EstadoGarantiaEnum
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("dashboard")
+
+_fleet_cache: dict = {"data": None, "ts": 0}
+_FLEET_TTL = 180  # 3 minutes
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -77,15 +81,21 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     fleet_power_kw = None
     fleet_online = None
     fleet_total = None
-    try:
-        client = SoleniumClient()
-        if client.enabled:
-            summary = client.get_project_summary()
-            fleet_power_kw = round(sum(s.get("power_kw") or 0 for s in summary), 1)
-            fleet_online = sum(1 for s in summary if (s.get("power_kw") or 0) > 0)
-            fleet_total = len(summary)
-    except Exception:
-        logger.debug("Solenium fleet summary unavailable", exc_info=True)
+    now = time.monotonic()
+    if _fleet_cache["data"] and (now - _fleet_cache["ts"]) < _FLEET_TTL:
+        fleet_power_kw, fleet_online, fleet_total = _fleet_cache["data"]
+    else:
+        try:
+            client = SoleniumClient()
+            if client.enabled:
+                summary = client.get_project_summary()
+                fleet_power_kw = round(sum(s.get("power_kw") or 0 for s in summary), 1)
+                fleet_online = sum(1 for s in summary if (s.get("power_kw") or 0) > 0)
+                fleet_total = len(summary)
+                _fleet_cache["data"] = (fleet_power_kw, fleet_online, fleet_total)
+                _fleet_cache["ts"] = now
+        except Exception:
+            logger.debug("Solenium fleet summary unavailable", exc_info=True)
 
     # Fallas by priority (for severity breakdown)
     fallas_por_prioridad = {}

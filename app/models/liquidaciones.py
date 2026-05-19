@@ -125,6 +125,7 @@ class Liquidacion(Base):
     observaciones_resultados: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="liquidaciones")
     generado_por: Mapped["Usuario"] = relationship("Usuario", back_populates="liquidaciones")

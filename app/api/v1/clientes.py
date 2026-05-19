@@ -39,7 +39,7 @@ def list_clientes(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    query = db.query(Cliente)
+    query = db.query(Cliente).filter(Cliente.deleted_at.is_(None))
     if q:
         query = query.filter(Cliente.razon_social_nombre.ilike(f"%{q}%"))
     total = query.count()

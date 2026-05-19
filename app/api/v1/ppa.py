@@ -58,7 +58,7 @@ def list_contratos(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    query = db.query(PPAContrato).options(*_load_options())
+    query = db.query(PPAContrato).filter(PPAContrato.deleted_at.is_(None)).options(*_load_options())
     if proyecto_id is not None:
         query = query.join(
             ppa_contrato_proyectos_table,

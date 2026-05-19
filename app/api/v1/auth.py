@@ -20,6 +20,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(Usuario).filter(Usuario.id == int(payload.get("sub"))).first()
     if not user or not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no encontrado")
+    from app.services.audit import set_audit_user
+    set_audit_user(user.id, user.nombre)
     return user
 
 

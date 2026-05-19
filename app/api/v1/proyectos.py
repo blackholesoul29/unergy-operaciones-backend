@@ -51,7 +51,7 @@ def list_proyectos(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    query = db.query(Proyecto).options(
+    query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).options(
         selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.grupos_panel),

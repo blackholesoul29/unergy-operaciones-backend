@@ -98,6 +98,7 @@ class Falla(Base):
     notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fallas")
     tipo: Mapped["FallaCatTipo"] = relationship("FallaCatTipo", back_populates="fallas")

@@ -118,7 +118,7 @@ def list_fallas(
     search = q or buscar
     estado_joined = False
 
-    query = db.query(Falla).options(*_FALLA_LOAD)
+    query = db.query(Falla).filter(Falla.deleted_at.is_(None)).options(*_FALLA_LOAD)
 
     if search:
         query = query.filter(Falla.descripcion.ilike(f"%{search}%") | Falla.codigo_interno.ilike(f"%{search}%"))

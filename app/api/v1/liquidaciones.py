@@ -281,7 +281,7 @@ def list_liquidaciones(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    q = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto))
+    q = db.query(Liquidacion).filter(Liquidacion.deleted_at.is_(None)).options(selectinload(Liquidacion.proyecto))
     if proyecto_id:
         q = q.filter(Liquidacion.proyecto_id == proyecto_id)
     if periodo_desde:

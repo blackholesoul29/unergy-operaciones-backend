@@ -808,6 +808,74 @@ def vista_por_inversionista(
     return list(clientes.values())
 
 
+# ── Resumen mensual ──────────────────────────────────────────────────────────
+
+@router.get("/resumen")
+def resumen_liquidaciones(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Summary of settlement status for a given month."""
+    periodo = date(year, month, 1)
+
+    liqs = (
+        db.query(Liquidacion)
+        .options(selectinload(Liquidacion.proyecto))
+        .filter(Liquidacion.periodo == periodo, Liquidacion.deleted_at.is_(None))
+        .all()
+    )
+
+    by_estado = {}
+    total_ingresos = 0.0
+    total_costos_op = 0.0
+    for liq in liqs:
+        estado = liq.estado or "iniciada"
+        by_estado[estado] = by_estado.get(estado, 0) + 1
+        if liq.ingresos_energia_cop:
+            total_ingresos += float(liq.ingresos_energia_cop)
+        if liq.costos_operativos_cop:
+            total_costos_op += float(liq.costos_operativos_cop)
+
+    proyectos_operacion = (
+        db.query(func.count(Proyecto.id))
+        .filter(Proyecto.estado == "en_operacion")
+        .scalar() or 0
+    )
+
+    xm_datos_count = 0
+    if liqs:
+        liq_ids = [l.id for l in liqs]
+        xm_datos_count = (
+            db.query(func.count(LiquidacionXMDato.id))
+            .filter(LiquidacionXMDato.liquidacion_id.in_(liq_ids))
+            .scalar() or 0
+        )
+
+    return {
+        "periodo": periodo.isoformat(),
+        "liquidaciones_total": len(liqs),
+        "proyectos_operacion": proyectos_operacion,
+        "proyectos_sin_liquidacion": proyectos_operacion - len(liqs),
+        "por_estado": by_estado,
+        "total_ingresos_energia_cop": round(total_ingresos, 0),
+        "total_costos_operativos_cop": round(total_costos_op, 0),
+        "xm_datos_registrados": xm_datos_count,
+        "liquidaciones": [
+            {
+                "id": l.id,
+                "proyecto_nombre": l.proyecto.nombre_comercial if l.proyecto else str(l.proyecto_id),
+                "estado": l.estado,
+                "tipo_venta": l.tipo_venta,
+                "ingresos_energia_cop": float(l.ingresos_energia_cop or 0),
+                "ingreso_neto_cop": float(l.ingreso_neto_cop or 0),
+            }
+            for l in liqs
+        ],
+    }
+
+
 # ── Catálogos de enums ─────────────────────────────────────────────────────────
 
 @router.get("/catalogos/tipos")

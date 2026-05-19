@@ -333,8 +333,11 @@ body.client-mode #tab-inf{display:none!important}
 @page{size:A4 portrait;margin:10mm 10mm}
 @media print{
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}
-  #topbar,#inf-panel>div:first-child,#fab,#toast,#loader,#login-ov,
-  .inf-mode-btn,.btn,#inf-gen,#inf-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
+  /* Ocultar todo lo que no sea el informe */
+  #topbar,#fab,#toast,#loader,#login-ov,#setup-ov,#overlay,
+  #app,#gen-panel,#port-panel,
+  #inf-controls-card,#fmo-deadline-bar,#saved-reports-section,
+  .inf-mode-btn,.btn,#inf-gen,#inf-print,#fmo-print,#inf-empty,#inf-loading,#rpt-toolbar{display:none!important}
   /* Escalar para que 1100px de contenido quepa en A4 sin cortes */
   html{zoom:.72;background:#fff!important;min-height:0!important;height:auto!important}
   body{background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important;width:100%!important}
@@ -696,7 +699,7 @@ body.client-mode #tab-inf{display:none!important}
     <div id="fmo-deadline-count" style="font-size:13px;font-weight:800"></div>
   </div>
   <!-- Controles -->
-  <div style="background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:18px 20px;margin-bottom:20px">
+  <div id="inf-controls-card" style="background:var(--s1);border:1px solid var(--br);border-radius:13px;padding:18px 20px;margin-bottom:20px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
       <div>
         <div style="font-size:17px;font-weight:800;color:var(--cr)" id="inf-panel-title">📄 Informe Operacional</div>
@@ -4549,13 +4552,22 @@ function _embedChartsAsImages(clone){
     var real=document.getElementById(cc.id);
     if(!real)return;
     try{
-      var dataUrl=real.toDataURL("image/jpeg",0.85);
-      // Si toDataURL devuelve un canvas en blanco (sin datos) lo saltamos
+      // Dibujar sobre canvas temporal con fondo blanco para evitar fondo negro en JPEG
+      var w=real.width||real.offsetWidth||400;
+      var h=real.height||real.offsetHeight||200;
+      var tmp=document.createElement("canvas");
+      tmp.width=w; tmp.height=h;
+      var ctx=tmp.getContext("2d");
+      ctx.fillStyle="#FFFFFF";
+      ctx.fillRect(0,0,w,h);
+      ctx.drawImage(real,0,0,w,h);
+      var dataUrl=tmp.toDataURL("image/jpeg",0.90);
+      // Si el canvas está vacío (sin datos) lo saltamos
       if(!dataUrl||dataUrl.length<1000)return;
       var img=document.createElement("img");
       img.src=dataUrl;
-      img.width=real.offsetWidth||real.width||400;
-      img.height=real.offsetHeight||real.height||200;
+      img.width=real.offsetWidth||w;
+      img.height=real.offsetHeight||h;
       img.style.cssText="max-width:100%;height:auto;display:block;"+(cc.style.cssText||"");
       img.className=cc.className||"";
       cc.parentNode.replaceChild(img,cc);

@@ -3132,12 +3132,18 @@ function buildProjectPage(cfg,genRes,mf,range,pageNum,totalPages){
     +rkpi("📆","Días con datos",days.length+" / "+range.totalDays+" días",null)
     +rkpi("🗓","Días atípicos",atypical.length+" día"+(atypical.length!==1?"s":""),atypical.length===0?"#4ADE80":atypical.length<=2?"#F97316":"#FF5757")
     +'</div>'
+    // Fila simulaciones P50/P90/P99
+    +(p50m||p90m||p99m?'<div class="rpt-kpi-row" style="margin-top:10px">'
+      +rkpi("📊","Ref. P50 (50% prob.)",p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disponible","#4682C8")
+      +rkpi("📈","Ref. P90 (90% prob.)",p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disponible","#C89600")
+      +rkpi("🎯","Ref. P99 (99% prob.)",p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disponible","#329650")
+      +'</div>':'')
     +tableHtml+atypHtml+'</div>'
     // S2
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 2. Análisis Gráfico de Generación</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
-    +'<div class="rpt-chart-card"><div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">Generación Diaria</div><div style="position:relative;height:185px"><canvas id="'+cid1+'"></canvas></div></div>'
-    +'<div class="rpt-chart-card"><div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">Comparativo vs Simulaciones</div><div style="position:relative;height:185px"><canvas id="'+cid2+'"></canvas></div></div>'
+    +'<div class="rpt-chart-card"><div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">Generación Diaria vs P90</div><div style="position:relative;height:185px"><canvas id="'+cid1+'"></canvas></div></div>'
+    +'<div class="rpt-chart-card"><div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">Comparativo: Real vs P50 / P90 / P99</div><div style="position:relative;height:185px"><canvas id="'+cid2+'"></canvas></div></div>'
     +'</div></div>'
     // S3
     +'<div class="rpt-section"><div class="rpt-section-title">▌ 3. Eventos Operativos y Acciones Correctivas</div>'
@@ -3277,13 +3283,26 @@ var _barValuePlugin={
         var str=val>=1000?(Math.round(val/100)/10).toFixed(1)+"k":Math.round(val)+"";
         ctx.save();
         ctx.fillStyle="#1A0F2E";
-        ctx.font="bold 9px 'Sora',sans-serif";
+        ctx.font="bold 10px 'Sora',sans-serif";
         ctx.textAlign="center";
         ctx.textBaseline="bottom";
         ctx.fillText(str,bar.x,bar.y-3);
         ctx.restore();
       });
     });
+  }
+};
+
+/* ── Plugin inline: fondo blanco en canvas (evita fondo negro al guardar como JPEG) ── */
+var _whiteBgPlugin={
+  id:"whiteBg",
+  beforeDraw:function(chart){
+    var ctx=chart.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation="destination-over";
+    ctx.fillStyle="#FFFFFF";
+    ctx.fillRect(0,0,chart.width,chart.height);
+    ctx.restore();
   }
 };
 
@@ -3306,6 +3325,7 @@ function renderRptCharts(){
       var dsets=[{type:"bar",label:"Real",data:d.kwh,backgroundColor:barColors,borderColor:barBorders,borderWidth:1,borderRadius:2,order:2}];
       if(d.p90d)dsets.push({type:"line",label:"P90",data:d.labels.map(function(){return d.p90d;}),borderColor:"#CC8800",borderWidth:1.5,pointRadius:0,fill:false,tension:0,borderDash:[5,3],order:1});
       c=new Chart(ctx,{
+        plugins:[_whiteBgPlugin],
         data:{labels:xLabels,datasets:dsets},
         options:{responsive:true,maintainAspectRatio:false,
           plugins:{
@@ -3330,16 +3350,16 @@ function renderRptCharts(){
       if(d.p99!=null){labs.push("P99");vals.push(d.p99);cols.push("rgba(50,150,80,.75)");bcols.push("#329650");}
       c=new Chart(ctx,{
         type:"bar",
-        plugins:[_barValuePlugin],
+        plugins:[_barValuePlugin,_whiteBgPlugin],
         data:{labels:labs,datasets:[{data:vals,backgroundColor:cols,borderColor:bcols,borderWidth:1.5,borderRadius:4}]},
         options:{responsive:true,maintainAspectRatio:false,
-          layout:{padding:{top:18}},
+          layout:{padding:{top:20}},
           plugins:{
             legend:{display:false},
             tooltip:{backgroundColor:"#1E1529",callbacks:{label:function(i){return" "+Math.round(i.raw).toLocaleString("es-CO")+" kWh";}}}
           },
           scales:{
-            x:{ticks:{color:"#444",font:{size:11,weight:"bold"}},grid:{display:false},border:{color:"#ccc"}},
+            x:{ticks:{color:"#333",font:{size:11,weight:"bold"}},grid:{display:false},border:{color:"#ccc"}},
             y:{ticks:{color:"#555",font:{size:9},callback:function(v){return v>=1000?Math.round(v/1000)+"k":v;}},grid:{color:"#eee"},border:{color:"transparent"}}
           }
         }
@@ -3347,7 +3367,7 @@ function renderRptCharts(){
     }else if(q.type==="port"){
       c=new Chart(ctx,{
         type:"bar",
-        plugins:[_barValuePlugin],
+        plugins:[_barValuePlugin,_whiteBgPlugin],
         data:{labels:d.labels,datasets:[
           {label:"Real (kWh)",data:d.vals,backgroundColor:"rgba(107,53,192,.8)",borderColor:"#6B35C0",borderWidth:1.5,borderRadius:3},
           {label:"P90 (kWh)",data:d.p90s,backgroundColor:"rgba(200,150,0,.4)",borderColor:"#C89600",borderWidth:1.5,borderRadius:3}
@@ -4321,6 +4341,12 @@ function buildFMOPage(cfg,genRes,mf,range,inverters,invErr,mant,contrato){
     +rkpi("⚡","Eventos operativos",mf.length,mf.length===0?"#4ADE80":"#F97316")
     +rkpi("⚠️","Fuera de SLA",fuera_sla,fuera_sla===0?"#4ADE80":"#FF5757")
     +'</div>'
+    // Fila simulaciones P50/P90/P99
+    +(p50m||p90m||p99m?'<div class="rpt-kpi-row" style="margin-top:10px">'
+      +rkpi("📊","Ref. P50 (50% prob.)",p50m?Math.round(p50m).toLocaleString("es-CO")+" kWh":"No disponible","#4682C8")
+      +rkpi("📈","Ref. P90 (90% prob.)",p90m?Math.round(p90m).toLocaleString("es-CO")+" kWh":"No disponible","#C89600")
+      +rkpi("🎯","Ref. P99 (99% prob.)",p99m?Math.round(p99m).toLocaleString("es-CO")+" kWh":"No disponible","#329650")
+      +'</div>':'')
     +multaHtml
     +'</div>'
     // S2 Generación
@@ -4548,21 +4574,30 @@ function _getCurrentUserName(){
    Esto garantiza que las gráficas queden embebidas como imágenes en el HTML guardado,
    sin depender de rptChartQueue al momento de cargar el informe. */
 function _embedChartsAsImages(clone){
+  /* Reemplaza cada <canvas id="x"> del clon con un <img> JPEG del canvas real del DOM.
+     Los charts ya renderizan con fondo blanco gracias a _whiteBgPlugin, por lo que
+     toDataURL('image/jpeg') captura fondo blanco sin artefactos oscuros.
+     Fallback: si el canvas real no existe o es muy pequeño, se dibuja fondo blanco
+     sobre canvas temporal antes de exportar. */
   clone.querySelectorAll("canvas[id]").forEach(function(cc){
     var real=document.getElementById(cc.id);
     if(!real)return;
     try{
-      // Dibujar sobre canvas temporal con fondo blanco para evitar fondo negro en JPEG
       var w=real.width||real.offsetWidth||400;
       var h=real.height||real.offsetHeight||200;
-      var tmp=document.createElement("canvas");
-      tmp.width=w; tmp.height=h;
-      var ctx=tmp.getContext("2d");
-      ctx.fillStyle="#FFFFFF";
-      ctx.fillRect(0,0,w,h);
-      ctx.drawImage(real,0,0,w,h);
-      var dataUrl=tmp.toDataURL("image/jpeg",0.90);
-      // Si el canvas está vacío (sin datos) lo saltamos
+      if(w<10||h<10)return; // canvas sin dimensiones válidas
+      // Intentar captura directa (canvas ya tiene fondo blanco por _whiteBgPlugin)
+      var dataUrl=real.toDataURL("image/jpeg",0.92);
+      // Fallback: si la imagen es muy pequeña (canvas vacío), usar canvas temporal con fondo blanco
+      if(!dataUrl||dataUrl.length<1000){
+        var tmp=document.createElement("canvas");
+        tmp.width=w; tmp.height=h;
+        var ctx2=tmp.getContext("2d");
+        ctx2.fillStyle="#FFFFFF";
+        ctx2.fillRect(0,0,w,h);
+        ctx2.drawImage(real,0,0,w,h);
+        dataUrl=tmp.toDataURL("image/jpeg",0.92);
+      }
       if(!dataUrl||dataUrl.length<1000)return;
       var img=document.createElement("img");
       img.src=dataUrl;

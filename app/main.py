@@ -147,7 +147,6 @@ _PENDING_DDLS = [
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS vendedor_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     # Drop stale columns from old schema
     "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS proyecto_id",
-    "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS tipo_contrato",
     # Create the join table (idempotent)
     """CREATE TABLE IF NOT EXISTS ppa_contrato_proyectos (
         contrato_id BIGINT NOT NULL REFERENCES ppa_contratos(id) ON DELETE CASCADE,
@@ -424,6 +423,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_ppa_deleted ON ppa_contratos (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_deleted ON fallas (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_deleted ON liquidaciones (deleted_at) WHERE deleted_at IS NOT NULL",
+    # migration — PPA tipo_contrato + carpeta_link for purchase contract support
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",
+    "UPDATE ppa_contratos SET tipo_contrato = 'venta' WHERE tipo_contrato IS NULL",
 ]
 
 

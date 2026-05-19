@@ -26,6 +26,7 @@ class AsicSolicitudOut(BaseModel):
     observaciones: str | None = None
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
+    es_duplicado: bool = False
     created_at: datetime
 
     # Nombre de la planta (resuelto en endpoint)
@@ -54,6 +55,7 @@ class AsicSolicitudCreate(BaseModel):
     observaciones: str | None = None
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
+    es_duplicado: bool = False
     proyecto_id: int | None = None
 
 
@@ -78,6 +80,7 @@ class AsicSolicitudUpdate(BaseModel):
     observaciones: str | None = None
     link_archivo: str | None = None
     reemplaza_anterior: bool | None = None
+    es_duplicado: bool | None = None
     proyecto_id: int | None = None
 
 

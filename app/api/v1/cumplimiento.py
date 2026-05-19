@@ -366,18 +366,26 @@ def get_resumen(
         compromiso = compromisos_map.get(c.id)
 
         gen_total_c = 0.0
+        bolsa_dup_c = 0.0
         plantas_sin_datos: list[str] = []
         dias_datos: list[int] = []
+        n_duplicados = 0
 
         for asic in assignments:
             proyecto = asic.proyecto
             nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
             pct = float(asic.porcentaje_despacho or 0)
+            is_dup = bool(asic.es_duplicado)
             if proyecto and proyecto.sub_project:
                 gd = gen_cache.get(proyecto.sub_project, {"mwh": None, "ultimo_dia": None})
                 gp = gd["mwh"]
                 if gp is not None:
-                    gen_total_c += gp * pct
+                    mwh_contrato = gp * pct
+                    if is_dup:
+                        bolsa_dup_c += mwh_contrato
+                        n_duplicados += 1
+                    else:
+                        gen_total_c += mwh_contrato
                     if gd.get("ultimo_dia") is not None:
                         dias_datos.append(gd["ultimo_dia"])
                 else:
@@ -386,6 +394,7 @@ def get_resumen(
                 plantas_sin_datos.append(nombre)
 
         gen_total_c = round(gen_total_c, 3)
+        bolsa_dup_c = round(bolsa_dup_c, 3)
         gen_proy_c = (
             round(gen_total_c * total_dias / dia_actual, 3)
             if es_mes_actual and dia_actual > 0 and gen_total_c > 0
@@ -429,7 +438,9 @@ def get_resumen(
             "estado": estado_c,
             "compras_bolsa_mwh": compras_c,
             "excedentes_bolsa_mwh": excedentes_c,
+            "exposicion_bolsa_duplicados_mwh": bolsa_dup_c if bolsa_dup_c > 0 else None,
             "n_plantas_activas": len(assignments),
+            "n_duplicados": n_duplicados,
             "plantas_sin_datos": plantas_sin_datos,
             "dia_min_datos": min(dias_datos) if dias_datos else None,
         })
@@ -604,6 +615,7 @@ def get_simulador(
                 proyecto_a_contrato[asic.proyecto_id] = {
                     "contrato_id": c.id,
                     "pct_despacho": float(asic.porcentaje_despacho or 0),
+                    "es_duplicado": bool(asic.es_duplicado),
                 }
                 assigned_ids.add(c.id)
 
@@ -644,6 +656,7 @@ def get_simulador(
             "avg_daily_mwh": avg_cache.get(p.sub_project),
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
+            "es_duplicado": asn["es_duplicado"] if asn else False,
             "comprado_por_unergy": p.id in compra_proyecto_ids,
             "contrato_compra_nombre": compra_nombre_map.get(p.id),
         })
@@ -718,6 +731,7 @@ def get_plantas_contratos(
                         "fecha_inicio": asic.fecha_inicio.isoformat() if asic.fecha_inicio else None,
                         "fecha_fin": asic.fecha_fin.isoformat() if asic.fecha_fin else None,
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
+                        "es_duplicado": bool(asic.es_duplicado),
                     })
         venta_out.append({
             "id": c.id,
@@ -852,13 +866,14 @@ def get_anual(
 
         plantas_mes = []
         gen_total = 0.0
+        bolsa_dup_total = 0.0
         for asic in gescon_per_month[m]:
             proyecto = asic.proyecto
             nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
             sp = proyecto.sub_project if proyecto else None
             pct = float(asic.porcentaje_despacho or 0)
+            is_dup = bool(asic.es_duplicado)
 
-            # Days this plant was in the contract during the month (handles mid-month entries/exits)
             eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
             eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
             dias_activos = max(0, (eff_end - eff_start).days + 1)
@@ -874,10 +889,12 @@ def get_anual(
             else:
                 gp = None
 
-            # Apply percentage and partial-month proration
             gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
             if gen_contrato is not None:
-                gen_total += gen_contrato
+                if is_dup:
+                    bolsa_dup_total += gen_contrato
+                else:
+                    gen_total += gen_contrato
             plantas_mes.append({
                 "nombre": nombre,
                 "sub_project": sp,
@@ -886,9 +903,11 @@ def get_anual(
                 "dias_mes": total_dias,
                 "gen_planta_mwh": gp,
                 "gen_contrato_mwh": gen_contrato,
+                "es_duplicado": is_dup,
             })
 
         gen_total = round(gen_total, 3)
+        bolsa_dup_total = round(bolsa_dup_total, 3)
         if is_current and dia_actual > 0 and gen_total > 0:
             gen_proy: Optional[float] = round(gen_total * total_dias / dia_actual, 3)
         elif is_future:
@@ -918,6 +937,7 @@ def get_anual(
             "tipo_datos": tipo,
             "compras_bolsa_mwh": compras,
             "excedentes_bolsa_mwh": excedentes,
+            "exposicion_bolsa_duplicados_mwh": bolsa_dup_total if bolsa_dup_total > 0 else None,
             "plantas": plantas_mes,
             "n_plantas": len(plantas_mes),
         })
@@ -994,15 +1014,17 @@ def get_cumplimiento(
         proyecto = asic.proyecto
         nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
         pct = float(asic.porcentaje_despacho or 0)
+        is_dup = bool(asic.es_duplicado)
         if proyecto and proyecto.sub_project:
             plants_with_id.append({
                 "nombre": nombre,
                 "sub_project": proyecto.sub_project,
                 "pct_despacho": pct,
+                "es_duplicado": is_dup,
             })
         else:
             sin_api_id.append(nombre)
-            plants_without_id.append({"nombre": nombre, "pct_despacho": pct})
+            plants_without_id.append({"nombre": nombre, "pct_despacho": pct, "es_duplicado": is_dup})
 
     if plants_with_id:
         try:
@@ -1029,6 +1051,7 @@ def get_cumplimiento(
                 "nombre": p["nombre"],
                 "sub_project": p["sub_project"],
                 "pct_despacho": p["pct_despacho"],
+                "es_duplicado": p["es_duplicado"],
                 "gen_planta_mwh": gen_planta,
                 "gen_contrato_mwh": gen_contrato,
                 "n_registros": n_registros,
@@ -1047,6 +1070,7 @@ def get_cumplimiento(
             "nombre": p["nombre"],
             "sub_project": None,
             "pct_despacho": p["pct_despacho"],
+            "es_duplicado": p["es_duplicado"],
             "gen_planta_mwh": None,
             "gen_contrato_mwh": None,
             "n_registros": 0,
@@ -1057,7 +1081,11 @@ def get_cumplimiento(
 
     # ── 6. Totales ────────────────────────────────────────────
     gen_total = round(
-        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None),
+        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None and not p["es_duplicado"]),
+        3,
+    )
+    bolsa_dup = round(
+        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None and p["es_duplicado"]),
         3,
     )
     plantas_sin_datos = [p["nombre"] for p in plantas_data if p["sin_datos"]]
@@ -1144,6 +1172,7 @@ def get_cumplimiento(
         "generacion": {
             "gen_total_mwh": gen_total,
             "gen_proyectada_mwh": gen_proyectada,
+            "exposicion_bolsa_duplicados_mwh": bolsa_dup if bolsa_dup > 0 else None,
             "tarifa_cop_kwh": tarifa_ppa,
             "plantas": plantas_data,
             "plantas_sin_datos": plantas_sin_datos,

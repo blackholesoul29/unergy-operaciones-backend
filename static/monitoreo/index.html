@@ -3358,7 +3358,6 @@ function renderRptCharts(){
     }
     if(c)infChartInstances.push(c);
   });
-  rptChartQueue={};
 }
 
 /* ── Generar informe ── */
@@ -4534,6 +4533,25 @@ function _getCurrentUserName(){
   return (_PLATFORM_USER&&_PLATFORM_USER.nombre)||cData.name||"";
 }
 
+/* Reemplaza cada <canvas id="x"> del clon con un <img> capturado del canvas real del DOM.
+   Esto garantiza que las gráficas queden embebidas como imágenes en el HTML guardado,
+   sin depender de rptChartQueue al momento de cargar el informe. */
+function _embedChartsAsImages(clone){
+  clone.querySelectorAll("canvas[id]").forEach(function(cc){
+    var real=document.getElementById(cc.id);
+    if(!real)return;
+    try{
+      var img=document.createElement("img");
+      img.src=real.toDataURL("image/png");
+      img.width=real.offsetWidth||real.width||400;
+      img.height=real.offsetHeight||real.height||200;
+      img.style.cssText=cc.style.cssText||"max-width:100%;display:block;";
+      img.className=cc.className||"";
+      cc.parentNode.replaceChild(img,cc);
+    }catch(e){}
+  });
+}
+
 function saveRptEdit(){
   // Primero guardar en backend si hay token; si no, localStorage como fallback
   if(!_rptCurrentKey){toast("⚠ Genera un informe primero");return;}
@@ -4546,6 +4564,8 @@ function saveRptEdit(){
   clone.querySelectorAll("[contenteditable]").forEach(function(el){
     el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";
   });
+  // Incrustar gráficas como imágenes para que persistan al cargar el informe guardado
+  _embedChartsAsImages(clone);
   var htmlClean=clone.innerHTML;
 
   // Guardar localStorage siempre (fallback offline)
@@ -4602,6 +4622,7 @@ function _saveAndThen(cb){
   var clone=c.cloneNode(true);
   clone.querySelectorAll(".rpt-del-row,.rpt-del-th,.rpt-del-section").forEach(function(el){el.remove();});
   clone.querySelectorAll("[contenteditable]").forEach(function(el){el.removeAttribute("contenteditable");el.style.cursor="";el.style.outline="";});
+  _embedChartsAsImages(clone);
   var payload={
     tipo:(_rptCurrentKey.replace("rpt_edit_","").split("_")[0]),
     sub_project:decodeURIComponent(_rptCurrentSp||""),
@@ -4759,9 +4780,16 @@ function openSavedReport(id){
     var c=document.getElementById("inf-content");
     c.innerHTML=inf.html_content;
     c.style.display="block";
-    // Restaurar charts
+    // Restaurar charts: si el HTML ya tiene <img> incrustadas (guardados nuevos) no hace falta nada.
+    // Para guardados legacy que tienen <canvas> + charts_data, re-renderizar.
     if(inf.charts_data){
-      try{rptChartQueue=JSON.parse(inf.charts_data);setTimeout(renderRptCharts,150);}catch(e){}
+      try{
+        var qd=JSON.parse(inf.charts_data);
+        if(qd&&Object.keys(qd).length>0){
+          rptChartQueue=qd;
+          setTimeout(renderRptCharts,150);
+        }
+      }catch(e){}
     }
     // Actualizar estado en toolbar
     _rptBackendId=inf.id;

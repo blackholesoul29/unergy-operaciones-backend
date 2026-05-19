@@ -1,9 +1,17 @@
 """EVO API proxy — forwards requests to EVO (DailySpot + Clima) via Tailscale."""
+import json
+import logging
+import threading
+
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
+
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
+from app.core.database import SessionLocal
 
+logger = logging.getLogger("evo_proxy")
 router = APIRouter(prefix="/evo", tags=["EVO Proxy"])
 
 _TIMEOUT = httpx.Timeout(10.0, read=30.0)
@@ -29,9 +37,111 @@ def _evo_get(path: str, params: dict | None = None) -> dict:
         raise HTTPException(exc.response.status_code, exc.response.text)
 
 
+def _persist_dailyspot(data: dict):
+    """Save DailySpot data to precios_bolsa tables (fire-and-forget)."""
+    try:
+        fecha = data.get("date")
+        if not fecha:
+            return
+        summary = data.get("summary", {})
+        prices = data.get("prices", {})
+        generation = data.get("generation", {})
+        marginals = data.get("marginal_plants", {})
+
+        db = SessionLocal()
+        try:
+            db.execute(text("""
+                INSERT INTO precios_bolsa_diario
+                    (fecha, precio_promedio, precio_min, precio_max, precio_escasez,
+                     demanda_gwh, hidro_pct, termica_pct, renovable_pct, menor_pct,
+                     hora_pico, spread, source_data)
+                VALUES (:fecha, :avg, :min, :max, :escasez,
+                        :demanda, :hidro, :termica, :renovable, :menor,
+                        :pico, :spread, :source)
+                ON CONFLICT (fecha) DO UPDATE SET
+                    precio_promedio = EXCLUDED.precio_promedio,
+                    precio_min = EXCLUDED.precio_min,
+                    precio_max = EXCLUDED.precio_max,
+                    source_data = EXCLUDED.source_data
+            """), {
+                "fecha": fecha,
+                "avg": summary.get("price_avg"),
+                "min": summary.get("price_min"),
+                "max": summary.get("price_max"),
+                "escasez": data.get("scarcity_price"),
+                "demanda": summary.get("total_gwh"),
+                "hidro": summary.get("hydro_pct"),
+                "termica": summary.get("thermal_pct"),
+                "renovable": summary.get("renewable_pct"),
+                "menor": summary.get("minor_pct"),
+                "pico": summary.get("peak_hour"),
+                "spread": summary.get("spread"),
+                "source": json.dumps({"fetched_at": data.get("fetched_at")}),
+            })
+
+            for hour_str, price in prices.items():
+                hour = int(hour_str)
+                gen = generation.get(hour_str, {})
+                db.execute(text("""
+                    INSERT INTO precios_bolsa_horario
+                        (fecha, hora, precio_cop_kwh, gen_hidro, gen_termica,
+                         gen_renovable, gen_menor, planta_marginal)
+                    VALUES (:fecha, :hora, :precio, :hidro, :termica,
+                            :renovable, :menor, :marginal)
+                    ON CONFLICT (fecha, hora) DO UPDATE SET
+                        precio_cop_kwh = EXCLUDED.precio_cop_kwh,
+                        gen_hidro = EXCLUDED.gen_hidro,
+                        gen_termica = EXCLUDED.gen_termica
+                """), {
+                    "fecha": fecha, "hora": hour, "precio": price,
+                    "hidro": gen.get("Hidraulica"),
+                    "termica": gen.get("Termica"),
+                    "renovable": gen.get("Renovables"),
+                    "menor": gen.get("Menores"),
+                    "marginal": marginals.get(hour_str),
+                })
+
+            db.commit()
+            logger.info("Persisted DailySpot for %s (%d hours)", fecha, len(prices))
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist DailySpot")
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("DailySpot persist error")
+
+
+def _persist_forecast(data: dict):
+    """Save clima forecast to clima_forecasts table."""
+    try:
+        if not data.get("models_available"):
+            return
+        db = SessionLocal()
+        try:
+            db.execute(text("""
+                INSERT INTO clima_forecasts (forecast_date, forecast_json, model_version)
+                VALUES (CURRENT_DATE, :data, :version)
+                ON CONFLICT DO NOTHING
+            """), {
+                "data": json.dumps(data, default=str),
+                "version": data.get("source", "unknown"),
+            })
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist forecast")
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Forecast persist error")
+
+
 @router.get("/dailyspot/latest")
 def evo_dailyspot_latest(_=Depends(get_current_user)):
-    return _evo_get("/dailyspot/latest")
+    data = _evo_get("/dailyspot/latest")
+    threading.Thread(target=_persist_dailyspot, args=(data,), daemon=True).start()
+    return data
 
 
 @router.get("/dailyspot/text")
@@ -39,15 +149,67 @@ def evo_dailyspot_text(_=Depends(get_current_user)):
     return _evo_get("/dailyspot/text")
 
 
+@router.get("/dailyspot/history")
+def evo_dailyspot_history(
+    days: int = Query(30, ge=1, le=365),
+    _=Depends(get_current_user),
+):
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT fecha, precio_promedio, precio_min, precio_max,
+                   precio_escasez, demanda_gwh, hidro_pct, spread, hora_pico
+            FROM precios_bolsa_diario
+            ORDER BY fecha DESC LIMIT :days
+        """), {"days": days}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
+@router.get("/dailyspot/hourly/{fecha}")
+def evo_dailyspot_hourly(fecha: str, _=Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT hora, precio_cop_kwh, gen_hidro, gen_termica,
+                   gen_renovable, gen_menor, planta_marginal
+            FROM precios_bolsa_horario
+            WHERE fecha = :fecha ORDER BY hora
+        """), {"fecha": fecha}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
 @router.get("/clima/forecast")
 def evo_clima_forecast(_=Depends(get_current_user)):
-    return _evo_get("/clima/forecast")
+    data = _evo_get("/clima/forecast")
+    threading.Thread(target=_persist_forecast, args=(data,), daemon=True).start()
+    return data
 
 
 @router.get("/clima/trading")
 def evo_clima_trading(tariff: float | None = None, _=Depends(get_current_user)):
     params = {"tariff": tariff} if tariff is not None else None
     return _evo_get("/clima/trading", params=params)
+
+
+@router.get("/clima/history")
+def evo_clima_history(
+    limit: int = Query(10, ge=1, le=100),
+    _=Depends(get_current_user),
+):
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id, forecast_date, model_version, created_at
+            FROM clima_forecasts
+            ORDER BY forecast_date DESC LIMIT :limit
+        """), {"limit": limit}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
 
 
 @router.get("/health")

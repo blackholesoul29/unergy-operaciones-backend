@@ -308,6 +308,85 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_informes_tipo_sp_periodo ON informes_guardados (tipo, sub_project, periodo_desde, periodo_hasta)",
     "CREATE INDEX IF NOT EXISTS ix_informes_sub_project ON informes_guardados (sub_project)",
     "CREATE INDEX IF NOT EXISTS ix_informes_estado ON informes_guardados (estado)",
+    # migration 017 — Climate indices + energy price history + forecasts
+    """CREATE TABLE IF NOT EXISTS clima_oni_monthly (
+        id BIGSERIAL PRIMARY KEY,
+        year INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        oni_value REAL NOT NULL,
+        soi_value REAL,
+        pdo_value REAL,
+        mjo_amplitude REAL,
+        enso_phase VARCHAR(20),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(year, month)
+    )""",
+    """CREATE TABLE IF NOT EXISTS clima_precip_monthly (
+        id BIGSERIAL PRIMARY KEY,
+        year INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        region VARCHAR(50) NOT NULL,
+        precip_mm REAL NOT NULL,
+        anomaly_pct REAL,
+        climatology_mm REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(year, month, region)
+    )""",
+    """CREATE TABLE IF NOT EXISTS clima_price_monthly (
+        id BIGSERIAL PRIMARY KEY,
+        year INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        price_cop_kwh REAL NOT NULL,
+        enso_phase VARCHAR(20),
+        precip_andina_mm REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(year, month)
+    )""",
+    """CREATE TABLE IF NOT EXISTS clima_forecasts (
+        id BIGSERIAL PRIMARY KEY,
+        forecast_date DATE NOT NULL,
+        forecast_json JSONB NOT NULL,
+        model_version VARCHAR(50) DEFAULT 'v1_statistical',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_clima_oni_ym ON clima_oni_monthly (year, month)",
+    "CREATE INDEX IF NOT EXISTS ix_clima_precip_ym ON clima_precip_monthly (year, month, region)",
+    "CREATE INDEX IF NOT EXISTS ix_clima_price_ym ON clima_price_monthly (year, month)",
+    "CREATE INDEX IF NOT EXISTS ix_clima_forecasts_date ON clima_forecasts (forecast_date DESC)",
+    # migration 018 — Precios de bolsa XM (hourly history + daily aggregates)
+    """CREATE TABLE IF NOT EXISTS precios_bolsa_diario (
+        id BIGSERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
+        precio_promedio REAL NOT NULL,
+        precio_min REAL,
+        precio_max REAL,
+        precio_escasez REAL,
+        demanda_gwh REAL,
+        hidro_pct REAL,
+        termica_pct REAL,
+        renovable_pct REAL,
+        menor_pct REAL,
+        hora_pico INTEGER,
+        spread REAL,
+        source_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(fecha)
+    )""",
+    """CREATE TABLE IF NOT EXISTS precios_bolsa_horario (
+        id BIGSERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
+        hora INTEGER NOT NULL CHECK (hora BETWEEN 1 AND 24),
+        precio_cop_kwh REAL NOT NULL,
+        gen_hidro REAL,
+        gen_termica REAL,
+        gen_renovable REAL,
+        gen_menor REAL,
+        planta_marginal VARCHAR(100),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(fecha, hora)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_precios_bolsa_diario_fecha ON precios_bolsa_diario (fecha DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_precios_bolsa_horario_fecha ON precios_bolsa_horario (fecha DESC, hora)",
 ]
 
 

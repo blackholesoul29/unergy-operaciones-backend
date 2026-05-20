@@ -936,11 +936,11 @@ def _scheduled_evo_forecast_ingest():
         print(f"[evo_forecast_ingest] Failed: {e}")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _mgs_scheduler
+def _deferred_init():
+    """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
     _t0 = _t.time()
+    global _mgs_scheduler
 
     for label, fn in [
         ("create_tables", _run_create_tables),
@@ -978,7 +978,6 @@ async def lifespan(app: FastAPI):
             )
             from apscheduler.triggers.cron import CronTrigger
 
-            # Solenium → generacion_diaria sync: 7am and 7pm Colombia
             if settings.SOLENIUM_USER:
                 _mgs_scheduler.add_job(
                     _scheduled_generation_sync,
@@ -992,9 +991,7 @@ async def lifespan(app: FastAPI):
                     id="gen_sync_pm",
                     name="Solenium generation sync (PM)",
                 )
-                print("[gen_sync] Scheduled at 7:00 AM and 7:00 PM Colombia")
 
-            # Bolsa price ingest: daily at 11:00 AM Colombia (after XM publishes)
             if settings.EVO_API_URL:
                 _mgs_scheduler.add_job(
                     _scheduled_bolsa_ingest,
@@ -1002,37 +999,41 @@ async def lifespan(app: FastAPI):
                     id="bolsa_ingest",
                     name="Daily bolsa price ingest",
                 )
-                print("[bolsa_ingest] Scheduled daily at 11:00 AM Colombia")
-
-                # EVO forecast ingest: daily at 6:00 AM Colombia
                 _mgs_scheduler.add_job(
                     _scheduled_evo_forecast_ingest,
                     CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
                     id="evo_forecast_ingest",
                     name="Daily EVO forecast ingest",
                 )
-                print("[evo_forecast] Scheduled daily at 6:00 AM Colombia")
 
-            # Correlation sync: daily at 2:00 AM Colombia
             _mgs_scheduler.add_job(
                 _scheduled_correlation_sync,
                 CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
                 id="correlation_sync",
                 name="Daily correlation sync",
             )
-            print("[correlation_sync] Scheduled daily at 2:00 AM Colombia")
 
             _mgs_scheduler.start()
             poll_once_async()
-            print(f"[MGS] Scheduler started — first poll in background, interval {settings.MGS_POLL_INTERVAL_MINUTES} min")
+            print(f"[startup] MGS scheduler started ({_t.time() - _t0:.1f}s)")
         except Exception as e:
-            print(f"[MGS] Scheduler failed to start: {e}")
+            print(f"[startup] MGS scheduler FAILED: {e}")
+
+    print(f"[startup] deferred init complete ({_t.time() - _t0:.1f}s)")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from threading import Thread
+    init_thread = Thread(target=_deferred_init, daemon=True)
+    init_thread.start()
+    print("[startup] server ready — DB init running in background")
 
     yield
 
     if _mgs_scheduler:
         _mgs_scheduler.shutdown(wait=False)
-        print("[MGS] Scheduler stopped")
+        print("[shutdown] MGS scheduler stopped")
 
 
 app = FastAPI(

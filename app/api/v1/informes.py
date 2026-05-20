@@ -188,7 +188,7 @@ def list_envios(
     return [dict(r._mapping) for r in rows]
 
 
-@router.get("", response_model=list[InformeOut], summary="Listar informes guardados")
+@router.get("/", response_model=list[InformeOut], summary="Listar informes guardados")
 def list_informes(
     tipo: Optional[str] = Query(None),
     sub_project: Optional[str] = Query(None),

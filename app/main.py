@@ -308,6 +308,7 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_informes_tipo_sp_periodo ON informes_guardados (tipo, sub_project, periodo_desde, periodo_hasta)",
     "CREATE INDEX IF NOT EXISTS ix_informes_sub_project ON informes_guardados (sub_project)",
     "CREATE INDEX IF NOT EXISTS ix_informes_estado ON informes_guardados (estado)",
+    "CREATE INDEX IF NOT EXISTS ix_informes_editado_en ON informes_guardados (editado_en DESC NULLS LAST)",
     # migration 017 — Climate indices + energy price history + forecasts
     """CREATE TABLE IF NOT EXISTS clima_oni_monthly (
         id BIGSERIAL PRIMARY KEY,

@@ -943,7 +943,7 @@ async def lifespan(app: FastAPI):
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
             from apscheduler.triggers.interval import IntervalTrigger
-            from app.services.mgs.scheduler import poll_once
+            from app.services.mgs.scheduler import poll_once, poll_once_async
 
             _mgs_scheduler = BackgroundScheduler(
                 timezone=settings.TIMEZONE,
@@ -1001,8 +1001,8 @@ async def lifespan(app: FastAPI):
             print("[correlation_sync] Scheduled daily at 2:00 AM Colombia")
 
             _mgs_scheduler.start()
-            poll_once()
-            print(f"[MGS] Scheduler started — polling every {settings.MGS_POLL_INTERVAL_MINUTES} min")
+            poll_once_async()
+            print(f"[MGS] Scheduler started — first poll in background, interval {settings.MGS_POLL_INTERVAL_MINUTES} min")
         except Exception as e:
             print(f"[MGS] Scheduler failed to start: {e}")
 

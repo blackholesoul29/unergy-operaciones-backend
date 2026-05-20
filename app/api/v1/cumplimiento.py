@@ -1674,3 +1674,82 @@ def facturar_cumplimiento(
     db.commit()
     db.refresh(row)
     return _build_cumplimiento_out(row)
+
+
+@router.get("/diagnostico")
+def diagnostico_enlaces(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Diagnostic: dump all contract→GESCON→project→sub_project mappings."""
+    from app.models.proyectos import Proyecto
+    today = date.today()
+    year, month = today.year, today.month
+
+    contratos = (
+        db.query(PPAContrato)
+        .filter(PPAContrato.deleted_at.is_(None))
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+
+    result = []
+    for c in contratos:
+        gescon_raw = []
+        resolved = []
+        if c.numero_codigo_contrato:
+            raw_records = (
+                db.query(AsicSolicitud)
+                .options(joinedload(AsicSolicitud.proyecto))
+                .filter(AsicSolicitud.contrato_interno == c.numero_codigo_contrato)
+                .order_by(AsicSolicitud.fecha_solicitud.asc().nullsfirst())
+                .all()
+            )
+            for r in raw_records:
+                gescon_raw.append({
+                    "id": r.id,
+                    "tipo": r.tipo_solicitud.value if r.tipo_solicitud else None,
+                    "estado": r.estado_solicitud.value if r.estado_solicitud else None,
+                    "codigo_sic": r.codigo_sic_contrato,
+                    "proyecto_id": r.proyecto_id,
+                    "planta": r.proyecto.nombre_comercial if r.proyecto else None,
+                    "sub_project": r.proyecto.sub_project if r.proyecto else None,
+                    "pct_despacho": float(r.porcentaje_despacho) if r.porcentaje_despacho else None,
+                    "es_duplicado": bool(r.es_duplicado),
+                    "reemplaza_anterior": bool(r.reemplaza_anterior),
+                    "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
+                    "fecha_fin": r.fecha_fin.isoformat() if r.fecha_fin else None,
+                })
+            resolved_asics = _resolve_gescon(db, c.numero_codigo_contrato, year, month)
+            for a in resolved_asics:
+                resolved.append({
+                    "asic_id": a.id,
+                    "planta": a.proyecto.nombre_comercial if a.proyecto else None,
+                    "sub_project": a.proyecto.sub_project if a.proyecto else None,
+                    "pct_despacho": float(a.porcentaje_despacho) if a.porcentaje_despacho else None,
+                    "es_duplicado": bool(a.es_duplicado),
+                })
+
+        result.append({
+            "contrato_id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador": c.comprador_nombre,
+            "tipo": c.tipo_contrato or "venta",
+            "gescon_raw": gescon_raw,
+            "gescon_resolved": resolved,
+            "n_plantas_activas": len(resolved),
+        })
+
+    all_projects = (
+        db.query(Proyecto)
+        .filter(Proyecto.sub_project.isnot(None))
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    projects_info = [
+        {"id": p.id, "nombre": p.nombre_comercial, "sub_project": p.sub_project, "estado": p.estado.value if p.estado else None}
+        for p in all_projects
+    ]
+
+    return {"contratos": result, "proyectos_con_sub_project": projects_info}

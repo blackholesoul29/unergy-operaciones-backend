@@ -58,11 +58,11 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
         Garantia.estado == EstadoGarantiaEnum.vencida
     ).scalar() or 0
 
-    # Oversold detection: projects where sum of PPA commitments > guarantee coverage
-    oversold = []
+    # Exceso de cobertura: projects where coverage exceeds 100%
+    exceso_cobertura = []
     for g in vigentes:
         if g.porcentaje_cobertura and g.porcentaje_cobertura > 100:
-            oversold.append({
+            exceso_cobertura.append({
                 "garantia_id": g.id,
                 "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else "—",
                 "porcentaje": float(g.porcentaje_cobertura),
@@ -100,7 +100,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
             }
             for g in sorted(expiring_soon, key=lambda x: x.fecha_vencimiento)
         ],
-        "oversold": oversold,
+        "exceso_cobertura": exceso_cobertura,
         "por_tipo": by_tipo,
         "movimientos_recientes": [
             {
@@ -150,6 +150,56 @@ def list_garantias(
     return {
         "items": [_garantia_to_out(g) for g in garantias],
         "total": len(garantias),
+    }
+
+
+@router.get("/vencimientos-proximos")
+def vencimientos_proximos(
+    dias: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Warranties expiring within the next N days (default 30). Groups by 30/60/90 day buckets."""
+    today = date.today()
+    cutoff = today + timedelta(days=dias)
+
+    garantias = (
+        db.query(Garantia)
+        .filter(
+            Garantia.estado == EstadoGarantiaEnum.vigente,
+            Garantia.fecha_vencimiento.isnot(None),
+            Garantia.fecha_vencimiento <= cutoff,
+            Garantia.fecha_vencimiento >= today,
+        )
+        .order_by(Garantia.fecha_vencimiento)
+        .all()
+    )
+
+    # Group by 30/60/90 day buckets
+    buckets = {"30_dias": [], "60_dias": [], "90_dias": []}
+    for g in garantias:
+        dias_restantes = (g.fecha_vencimiento - today).days
+        item = {
+            "id": g.id,
+            "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else None,
+            "contrato_nombre": (g.contrato_ppa.nombre_interno or g.contrato_ppa.numero_codigo_contrato) if g.contrato_ppa else None,
+            "tipo": g.tipo.value if g.tipo else None,
+            "entidad": g.entidad,
+            "valor_cop": float(g.valor_cop or 0),
+            "fecha_vencimiento": g.fecha_vencimiento.isoformat(),
+            "dias_restantes": dias_restantes,
+        }
+        if dias_restantes <= 30:
+            buckets["30_dias"].append(item)
+        elif dias_restantes <= 60:
+            buckets["60_dias"].append(item)
+        else:
+            buckets["90_dias"].append(item)
+
+    return {
+        "total": len(garantias),
+        "valor_total_cop": round(sum(float(g.valor_cop or 0) for g in garantias), 2),
+        "buckets": buckets,
     }
 
 

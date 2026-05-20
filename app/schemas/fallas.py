@@ -78,6 +78,11 @@ class FallaCreate(BaseModel):
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None
     notificacion: bool = False
+    alarma_monitoreo_id: Optional[int] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
 
 
 class FallaUpdate(BaseModel):
@@ -96,6 +101,10 @@ class FallaUpdate(BaseModel):
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None
     notificacion: Optional[bool] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -136,6 +145,11 @@ class FallaOut(BaseModel):
     fotos_lista: list[str] = []
     centinela: Optional[str] = None
     notificacion: bool = False
+    alarma_monitoreo_id: Optional[int] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
     dias_abierta: Optional[int] = None
     sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []
@@ -169,3 +183,19 @@ class FallaCatalogos(BaseModel):
     prioridades: list[FallaCatPrioridadOut]
     tipos: list[FallaCatTipoOut]
     resoluciones: list[FallaCatResolucionOut]
+
+
+class FallaSLADashboard(BaseModel):
+    fallas_en_riesgo_sla: int
+    fallas_sla_vencido: int
+    promedio_tiempo_resolucion_horas: Optional[float]
+    cumplimiento_sla_pct: Optional[float]
+
+
+class FallaImpacto(BaseModel):
+    falla_id: int
+    proyecto_nombre: str
+    potencia_instalada_kwp: Optional[float]
+    horas_fuera: float
+    kwh_perdidos_estimado: float
+    impacto_economico_cop: float

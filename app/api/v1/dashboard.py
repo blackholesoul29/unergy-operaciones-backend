@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.models import (
     Proyecto, Cliente, Falla, FallaCatEstado, FallaCatPrioridad,
     Liquidacion, GeneracionDiaria, PPAContrato, PPACompromisoEnergia,
-    Garantia,
+    Garantia, CumplimientoMensual,
 )
 from app.models.garantias import EstadoGarantiaEnum
 from app.services.mgs.solenium_client import SoleniumClient
@@ -214,6 +214,48 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     except Exception:
         pass
 
+    # ── PPA compliance snapshot (current month from cumplimiento_mensual) ────
+    cumplimiento_ppa = {
+        "contratos_con_deficit": 0,
+        "contratos_cumplidos": 0,
+        "exposicion_bolsa_cop": 0,
+        "cobertura_pct": None,
+    }
+    try:
+        cm_rows = (
+            db.query(CumplimientoMensual)
+            .filter(
+                CumplimientoMensual.anio == today.year,
+                CumplimientoMensual.mes == today.month,
+            )
+            .all()
+        )
+        if cm_rows:
+            total_gen = 0.0
+            total_compromiso = 0.0
+            total_exposicion = 0.0
+            for cm in cm_rows:
+                gen = float(cm.gen_total_mwh) if cm.gen_total_mwh is not None else 0
+                comp = float(cm.compromiso_mwh) if cm.compromiso_mwh is not None else None
+                compras_cop = float(cm.compras_bolsa_cop) if cm.compras_bolsa_cop is not None else 0
+
+                if comp is not None:
+                    total_compromiso += comp
+                    total_gen += gen
+                    if gen < comp:
+                        cumplimiento_ppa["contratos_con_deficit"] += 1
+                    else:
+                        cumplimiento_ppa["contratos_cumplidos"] += 1
+                    total_exposicion += compras_cop
+
+            cumplimiento_ppa["exposicion_bolsa_cop"] = round(total_exposicion, 0)
+            if total_compromiso > 0:
+                cumplimiento_ppa["cobertura_pct"] = round(
+                    (total_gen / total_compromiso) * 100, 1,
+                )
+    except Exception:
+        logger.debug("cumplimiento_ppa metrics failed", exc_info=True)
+
     return {
         "proyectos_total": proyectos_total,
         "proyectos_operacion": proyectos_operacion,
@@ -237,4 +279,5 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "gen_solenium_last_date": gen_last_date,
         "gen_solenium_projects": gen_projects_with_data,
         "liquidaciones_pendientes": liquidaciones_pendientes,
+        "cumplimiento_ppa": cumplimiento_ppa,
     }

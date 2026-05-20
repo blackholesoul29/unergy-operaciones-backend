@@ -1,6 +1,9 @@
+import uuid
 from datetime import date, datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlalchemy import func, extract
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -8,11 +11,13 @@ from app.models import (
     Falla, FallaSeguimiento,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
+from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
     FallaCreate, FallaUpdate, FallaOut,
     FallaSeguimientoCreate, FallaSeguimientoOut,
     FallaCatalogos, FallaCatEstadoOut, FallaCatPrioridadOut, FallaCatTipoOut, FallaCatResolucionOut,
+    FallaSLADashboard, FallaImpacto,
 )
 from app.schemas.common import PaginatedResponse
 
@@ -46,6 +51,102 @@ def _gen_codigo(db: Session) -> str:
     year = datetime.now(timezone.utc).year
     max_id = db.query(func.max(Falla.id)).scalar() or 0
     return f"FAL-{year}-{max_id + 1:05d}"
+
+
+FALLA_UPLOADS_DIR = Path("uploads/fallas")
+FALLA_ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+FALLA_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+# ── SLA defaults ─────────────────────────────────────────────────────────────
+# Default SLA hours by priority level (used when sla_limite_horas is not set)
+_DEFAULT_SLA_HOURS = {
+    1: 8,     # critica
+    2: 24,    # alta
+    3: 72,    # media
+    4: 168,   # baja (7 days)
+}
+
+# Average energy price COP/kWh for economic impact estimation
+_PRECIO_ENERGIA_COP_KWH = 800.0
+
+# Solar capacity factor for kWh loss estimation
+_SOLAR_CAPACITY_FACTOR = 0.18
+
+
+@router.get("/sla-dashboard", response_model=FallaSLADashboard)
+def sla_dashboard(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """SLA monitoring dashboard with risk, overdue, and compliance metrics."""
+    now = datetime.now(timezone.utc)
+
+    # Get all open fallas with their priority info
+    open_fallas = (
+        db.query(Falla, FallaCatPrioridad.nivel)
+        .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        .join(FallaCatPrioridad, Falla.prioridad_id == FallaCatPrioridad.id)
+        .filter(Falla.deleted_at.is_(None), ~FallaCatEstado.es_estado_final)
+        .all()
+    )
+
+    en_riesgo = 0
+    vencido = 0
+    for falla, nivel in open_fallas:
+        sla_hours = falla.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        sla_deadline = datetime(
+            falla.fecha_identificacion.year,
+            falla.fecha_identificacion.month,
+            falla.fecha_identificacion.day,
+            tzinfo=timezone.utc,
+        ) + timedelta(hours=sla_hours)
+
+        if now > sla_deadline:
+            vencido += 1
+        elif now > sla_deadline - timedelta(hours=sla_hours * 0.2):
+            # Within last 20% of SLA window = at risk
+            en_riesgo += 1
+
+    # Average resolution time for resolved fallas in last 90 days
+    resolved_fallas = (
+        db.query(Falla)
+        .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        .filter(
+            Falla.deleted_at.is_(None),
+            FallaCatEstado.es_estado_final == True,
+            Falla.fecha_resolucion.isnot(None),
+            Falla.updated_at >= now - timedelta(days=90),
+        )
+        .all()
+    )
+
+    total_hours = 0.0
+    count_resolved = 0
+    sla_met = 0
+    sla_evaluated = 0
+    for f in resolved_fallas:
+        if f.fecha_resolucion and f.fecha_identificacion:
+            start = datetime(
+                f.fecha_identificacion.year,
+                f.fecha_identificacion.month,
+                f.fecha_identificacion.day,
+                tzinfo=timezone.utc,
+            )
+            hours = (f.fecha_resolucion - start).total_seconds() / 3600
+            total_hours += hours
+            count_resolved += 1
+
+        if f.sla_cumplido is not None:
+            sla_evaluated += 1
+            if f.sla_cumplido:
+                sla_met += 1
+
+    promedio = round(total_hours / count_resolved, 1) if count_resolved else None
+    cumplimiento = round(sla_met / sla_evaluated * 100, 1) if sla_evaluated else None
+
+    return FallaSLADashboard(
+        fallas_en_riesgo_sla=en_riesgo,
+        fallas_sla_vencido=vencido,
+        promedio_tiempo_resolucion_horas=promedio,
+        cumplimiento_sla_pct=cumplimiento,
+    )
 
 
 @router.get("/catalogos", response_model=FallaCatalogos)
@@ -108,6 +209,7 @@ def list_fallas(
     prioridad_codigo: str | None = None,
     tipo_codigo: str | None = None,
     proyecto_id: int | None = None,
+    cliente_id: int | None = None,
     asignado_a_id: int | None = None,
     codigo_legado: str | None = None,
     solo_alerta: bool = False,
@@ -138,6 +240,14 @@ def list_fallas(
                       .filter(FallaCatTipo.codigo == tipo_codigo))
     if proyecto_id:
         query = query.filter(Falla.proyecto_id == proyecto_id)
+    if cliente_id:
+        # Filter fallas by projects belonging to a specific client
+        client_project_ids = (
+            db.query(Proyecto.id)
+            .filter(Proyecto.cliente_id == cliente_id, Proyecto.deleted_at.is_(None))
+            .subquery()
+        )
+        query = query.filter(Falla.proyecto_id.in_(client_project_ids))
     if asignado_a_id:
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
     if codigo_legado:
@@ -236,3 +346,101 @@ def add_seguimiento(
         .filter(FallaSeguimiento.id == seg.id)
         .first()
     )
+
+
+# ── Feature 4: Impact on generation ─────────────────────────────────────────
+@router.get("/{id}/impacto", response_model=FallaImpacto)
+def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """
+    Estimate generation loss and economic impact for a falla based on
+    project capacity and downtime duration.
+    """
+    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id).first()
+    if not falla:
+        raise HTTPException(404, "Falla no encontrada")
+
+    proyecto = falla.proyecto
+    potencia_kwp = float(proyecto.potencia_instalada_kwp or 0)
+
+    # Calculate downtime hours
+    start = datetime(
+        falla.fecha_identificacion.year,
+        falla.fecha_identificacion.month,
+        falla.fecha_identificacion.day,
+        tzinfo=timezone.utc,
+    )
+    if falla.hora_identificacion:
+        start = start.replace(
+            hour=falla.hora_identificacion.hour,
+            minute=falla.hora_identificacion.minute,
+        )
+
+    end = falla.fecha_resolucion or datetime.now(timezone.utc)
+    horas_fuera = max(0, (end - start).total_seconds() / 3600)
+
+    # Estimate kWh lost = capacity_kWp * capacity_factor * solar_hours_per_day * days
+    # More accurate: capacity * capacity_factor * actual_hours (capped at ~12 solar hrs/day)
+    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
+    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
+    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+
+    # Persist the estimate back to the falla if not already set
+    if falla.kwh_perdidos_estimado is None:
+        falla.kwh_perdidos_estimado = kwh_perdidos
+        falla.impacto_economico_cop = impacto_cop
+        db.commit()
+
+    return FallaImpacto(
+        falla_id=falla.id,
+        proyecto_nombre=proyecto.nombre_comercial,
+        potencia_instalada_kwp=potencia_kwp or None,
+        horas_fuera=round(horas_fuera, 1),
+        kwh_perdidos_estimado=kwh_perdidos,
+        impacto_economico_cop=impacto_cop,
+    )
+
+
+# ── Feature 6: File attachments for fallas ───────────────────────────────────
+@router.post("/{id}/attachments")
+async def upload_falla_attachment(
+    id: int,
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Upload a file attachment (photo, PDF) for a falla.
+    Stores under uploads/fallas/{id}/ and appends URL to fotos_urls JSONB.
+    """
+    falla = db.query(Falla).filter(Falla.id == id).first()
+    if not falla:
+        raise HTTPException(404, "Falla no encontrada")
+
+    if archivo.content_type not in FALLA_ALLOWED_MIME:
+        raise HTTPException(400, "Tipo de archivo no permitido. Use PDF, JPG, PNG o WebP.")
+
+    contenido = await archivo.read()
+    if len(contenido) > FALLA_MAX_FILE_SIZE:
+        raise HTTPException(400, "El archivo supera el limite de 20 MB")
+
+    ext = Path(archivo.filename).suffix.lower() if archivo.filename else ".jpg"
+    nombre_guardado = f"{uuid.uuid4().hex}{ext}"
+    carpeta = FALLA_UPLOADS_DIR / str(id)
+    carpeta.mkdir(parents=True, exist_ok=True)
+    ruta_nueva = carpeta / nombre_guardado
+    ruta_nueva.write_bytes(contenido)
+
+    url = f"/static/uploads/fallas/{id}/{nombre_guardado}"
+
+    # Append to existing fotos_urls JSONB
+    current_urls = falla.fotos_lista  # property that safely parses JSONB
+    current_urls.append(url)
+    falla.fotos_urls = current_urls
+    db.commit()
+
+    return {
+        "status": "ok",
+        "url": url,
+        "filename": archivo.filename or nombre_guardado,
+        "fotos_urls": current_urls,
+    }

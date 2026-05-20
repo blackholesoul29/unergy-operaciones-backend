@@ -62,6 +62,14 @@ def _persist_dailyspot(data: dict):
                     precio_promedio = EXCLUDED.precio_promedio,
                     precio_min = EXCLUDED.precio_min,
                     precio_max = EXCLUDED.precio_max,
+                    precio_escasez = EXCLUDED.precio_escasez,
+                    demanda_gwh = EXCLUDED.demanda_gwh,
+                    hidro_pct = EXCLUDED.hidro_pct,
+                    termica_pct = EXCLUDED.termica_pct,
+                    renovable_pct = EXCLUDED.renovable_pct,
+                    menor_pct = EXCLUDED.menor_pct,
+                    hora_pico = EXCLUDED.hora_pico,
+                    spread = EXCLUDED.spread,
                     source_data = EXCLUDED.source_data
             """), {
                 "fecha": fecha,
@@ -91,7 +99,10 @@ def _persist_dailyspot(data: dict):
                     ON CONFLICT (fecha, hora) DO UPDATE SET
                         precio_cop_kwh = EXCLUDED.precio_cop_kwh,
                         gen_hidro = EXCLUDED.gen_hidro,
-                        gen_termica = EXCLUDED.gen_termica
+                        gen_termica = EXCLUDED.gen_termica,
+                        gen_renovable = EXCLUDED.gen_renovable,
+                        gen_menor = EXCLUDED.gen_menor,
+                        planta_marginal = EXCLUDED.planta_marginal
                 """), {
                     "fecha": fecha, "hora": hour, "precio": price,
                     "hidro": gen.get("Hidraulica"),
@@ -207,6 +218,56 @@ def evo_clima_history(
             FROM clima_forecasts
             ORDER BY forecast_date DESC LIMIT :limit
         """), {"limit": limit}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
+@router.get("/clima/forecast/{forecast_id}")
+def evo_clima_forecast_detail(forecast_id: int, _=Depends(get_current_user)):
+    """Retrieve full forecast JSON by ID."""
+    db = SessionLocal()
+    try:
+        row = db.execute(text("""
+            SELECT id, forecast_date, forecast_json, model_version, created_at
+            FROM clima_forecasts
+            WHERE id = :fid
+        """), {"fid": forecast_id}).first()
+        if not row:
+            raise HTTPException(404, "Forecast not found")
+        return dict(row._mapping)
+    finally:
+        db.close()
+
+
+@router.get("/precios/historico")
+def evo_precios_historico(
+    desde: str = Query(None, description="Start date YYYY-MM-DD"),
+    hasta: str = Query(None, description="End date YYYY-MM-DD"),
+    limit: int = Query(365, ge=1, le=3650),
+    _=Depends(get_current_user),
+):
+    """Historical spot prices with optional date range filter."""
+    db = SessionLocal()
+    try:
+        params: dict = {"limit": limit}
+        where_clauses = []
+        if desde:
+            where_clauses.append("fecha >= :desde")
+            params["desde"] = desde
+        if hasta:
+            where_clauses.append("fecha <= :hasta")
+            params["hasta"] = hasta
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        rows = db.execute(text(f"""
+            SELECT fecha, precio_promedio, precio_min, precio_max,
+                   precio_escasez, demanda_gwh, hidro_pct, termica_pct,
+                   renovable_pct, menor_pct, hora_pico, spread
+            FROM precios_bolsa_diario
+            {where_sql}
+            ORDER BY fecha DESC LIMIT :limit
+        """), params).fetchall()
         return [dict(r._mapping) for r in rows]
     finally:
         db.close()

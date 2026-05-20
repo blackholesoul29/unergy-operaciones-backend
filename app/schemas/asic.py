@@ -27,6 +27,9 @@ class AsicSolicitudOut(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
+    fecha_envio_xm: date | None = None
+    fecha_respuesta_xm: date | None = None
+    numero_radicado: str | None = None
     created_at: datetime
 
     # Nombre de la planta (resuelto en endpoint)
@@ -58,6 +61,11 @@ class AsicSolicitudCreate(BaseModel):
     es_duplicado: bool = False
     proyecto_id: int | None = None
 
+    # XM tracking
+    fecha_envio_xm: date | None = None
+    fecha_respuesta_xm: date | None = None
+    numero_radicado: str | None = None
+
 
 class AsicSolicitudUpdate(BaseModel):
     requerimiento_asic: str | None = None
@@ -82,6 +90,11 @@ class AsicSolicitudUpdate(BaseModel):
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
     proyecto_id: int | None = None
+
+    # XM tracking
+    fecha_envio_xm: date | None = None
+    fecha_respuesta_xm: date | None = None
+    numero_radicado: str | None = None
 
 
 class AsicCambioCreate(BaseModel):

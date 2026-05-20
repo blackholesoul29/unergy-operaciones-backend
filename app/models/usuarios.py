@@ -25,6 +25,8 @@ class Usuario(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ultimo_acceso: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

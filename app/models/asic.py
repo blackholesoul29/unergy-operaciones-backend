@@ -47,6 +47,9 @@ class AsicSolicitud(Base):
     link_archivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reemplaza_anterior: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     es_duplicado: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    fecha_envio_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_respuesta_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
+    numero_radicado: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

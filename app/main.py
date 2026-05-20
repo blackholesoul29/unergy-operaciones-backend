@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy import text
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import engine, SessionLocal
 from app.api.v1.router import api_router
 
 # Idempotent DDL run at startup — safe to run on every boot
@@ -429,6 +429,102 @@ _PENDING_DDLS = [
     "UPDATE ppa_contratos SET tipo_contrato = 'venta' WHERE tipo_contrato IS NULL",
     # migration — ASIC coexistence flag for multi-plant SIC codes
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS reemplaza_anterior BOOLEAN NOT NULL DEFAULT TRUE",
+    # migration — cumplimiento_mensual: PPA compliance snapshots
+    "CREATE TYPE estado_cumplimiento_enum AS ENUM ('pendiente', 'cerrado', 'facturado')",
+    """CREATE TABLE IF NOT EXISTS cumplimiento_mensual (
+        id BIGSERIAL PRIMARY KEY,
+        contrato_ppa_id BIGINT NOT NULL REFERENCES ppa_contratos(id) ON DELETE CASCADE,
+        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
+        anio INTEGER NOT NULL,
+        mes INTEGER NOT NULL,
+        gen_total_mwh NUMERIC(14,3),
+        compromiso_mwh NUMERIC(14,3),
+        compras_bolsa_mwh NUMERIC(14,3),
+        excedentes_bolsa_mwh NUMERIC(14,3),
+        precio_bolsa_promedio NUMERIC(12,4),
+        compras_bolsa_cop NUMERIC(18,2),
+        excedentes_bolsa_cop NUMERIC(18,2),
+        estado estado_cumplimiento_enum NOT NULL DEFAULT 'pendiente',
+        tarifa_ppa_cop_mwh NUMERIC(12,4),
+        valoracion_contrato_cop NUMERIC(18,2),
+        liquidacion_id BIGINT REFERENCES liquidaciones(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(contrato_ppa_id, anio, mes)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_cumplimiento_contrato ON cumplimiento_mensual (contrato_ppa_id)",
+    "CREATE INDEX IF NOT EXISTS ix_cumplimiento_periodo ON cumplimiento_mensual (anio, mes)",
+    "CREATE INDEX IF NOT EXISTS ix_cumplimiento_estado ON cumplimiento_mensual (estado)",
+    # migration — Fallas: MGS alarm link + impact + documentation fields
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS alarma_monitoreo_id BIGINT",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS kwh_perdidos_estimado NUMERIC(14,3)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS impacto_economico_cop NUMERIC(16,2)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS causa_raiz TEXT",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS acciones_correctivas TEXT",
+    "CREATE INDEX IF NOT EXISTS ix_fallas_alarma_monitoreo ON fallas (alarma_monitoreo_id) WHERE alarma_monitoreo_id IS NOT NULL",
+    # migration — Password recovery fields on usuarios
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)",
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMPTZ",
+    # migration — Client contact & banking fields
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS departamento VARCHAR(100)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS banco VARCHAR(200)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tipo_cuenta VARCHAR(50)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS numero_cuenta VARCHAR(50)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS titular_cuenta VARCHAR(255)",
+    # migration — Notificaciones table
+    "CREATE TYPE tipo_notificacion_enum AS ENUM ('alerta', 'info', 'accion')",
+    """CREATE TABLE IF NOT EXISTS notificaciones (
+        id BIGSERIAL PRIMARY KEY,
+        usuario_id BIGINT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        tipo tipo_notificacion_enum NOT NULL,
+        titulo VARCHAR(500) NOT NULL,
+        mensaje TEXT NOT NULL,
+        leida BOOLEAN NOT NULL DEFAULT FALSE,
+        link VARCHAR(1000),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_notificaciones_usuario ON notificaciones (usuario_id)",
+    "CREATE INDEX IF NOT EXISTS ix_notificaciones_leida ON notificaciones (usuario_id, leida) WHERE leida = FALSE",
+    # migration — fronteras: quoia_meter_id + estado_operacional + soft delete
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_meter_id INTEGER",
+    "CREATE INDEX IF NOT EXISTS ix_fronteras_quoia_meter ON fronteras (quoia_meter_id) WHERE quoia_meter_id IS NOT NULL",
+    "CREATE TYPE estado_operacional_enum AS ENUM ('activo', 'inactivo', 'en_registro', 'descomisionado')",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS estado_operacional estado_operacional_enum DEFAULT 'activo'",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS ix_fronteras_soft_deleted ON fronteras (deleted_at) WHERE deleted_at IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_fronteras_estado_op ON fronteras (estado_operacional) WHERE estado_operacional IS NOT NULL",
+    # migration — ASIC: XM tracking fields
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_envio_xm DATE",
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_respuesta_xm DATE",
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS numero_radicado VARCHAR(100)",
+    "CREATE INDEX IF NOT EXISTS ix_asic_radicado ON asic_solicitudes (numero_radicado) WHERE numero_radicado IS NOT NULL",
+    # migration — email_envios: send logging
+    """CREATE TABLE IF NOT EXISTS email_envios (
+        id BIGSERIAL PRIMARY KEY,
+        destinatario VARCHAR(500) NOT NULL,
+        cc TEXT,
+        asunto VARCHAR(500) NOT NULL,
+        tipo VARCHAR(50) NOT NULL,
+        exitoso BOOLEAN NOT NULL DEFAULT TRUE,
+        error TEXT,
+        enviado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_email_envios_tipo ON email_envios (tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_email_envios_at ON email_envios (enviado_at DESC)",
+    # migration — correlation_sync_log: track sync runs
+    """CREATE TABLE IF NOT EXISTS correlation_sync_log (
+        id BIGSERIAL PRIMARY KEY,
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        projects_processed INTEGER NOT NULL DEFAULT 0,
+        correlations_updated INTEGER NOT NULL DEFAULT 0,
+        origina_found INTEGER NOT NULL DEFAULT 0,
+        requestsdb_found INTEGER NOT NULL DEFAULT 0,
+        error TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_correlation_sync_at ON correlation_sync_log (synced_at DESC)",
+    # migration — investment fund correlation on clientes
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origina_investment_id BIGINT",
+    "CREATE INDEX IF NOT EXISTS ix_clientes_origina_investment ON clientes (origina_investment_id) WHERE origina_investment_id IS NOT NULL",
 ]
 
 
@@ -773,6 +869,55 @@ def _scheduled_bolsa_ingest():
         print(f"[bolsa_ingest] Failed: {e}")
 
 
+def _scheduled_correlation_sync():
+    """Daily cross-database correlation sync."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.correlation import correlate_projects
+            result = correlate_projects(db)
+            print(f"[correlation_sync] OK — {result.get('correlations_updated', 0)} updated")
+        except Exception as e:
+            print(f"[correlation_sync] Failed: {e}")
+            # Log error
+            try:
+                db.execute(text(
+                    "INSERT INTO correlation_sync_log (synced_at, projects_processed, correlations_updated, error) "
+                    "VALUES (NOW(), 0, 0, :err)"
+                ), {"err": str(e)})
+                db.commit()
+            except Exception:
+                db.rollback()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[correlation_sync] Failed to get DB session: {e}")
+
+
+def _scheduled_evo_forecast_ingest():
+    """Daily ingest of climate forecast from EVO energy-api."""
+    if not settings.EVO_API_URL:
+        return
+    try:
+        headers = {}
+        if settings.EVO_API_TOKEN:
+            headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+        import httpx
+        with httpx.Client(timeout=httpx.Timeout(10.0, read=30.0)) as client:
+            resp = client.get(
+                f"{settings.EVO_API_URL.rstrip('/')}/clima/forecast",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        from app.api.v1.evo_proxy import _persist_forecast
+        _persist_forecast(data)
+        print(f"[evo_forecast_ingest] Persisted forecast")
+    except Exception as e:
+        print(f"[evo_forecast_ingest] Failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _mgs_scheduler
@@ -827,6 +972,24 @@ async def lifespan(app: FastAPI):
                     name="Daily bolsa price ingest",
                 )
                 print("[bolsa_ingest] Scheduled daily at 11:00 AM Colombia")
+
+                # EVO forecast ingest: daily at 6:00 AM Colombia
+                _mgs_scheduler.add_job(
+                    _scheduled_evo_forecast_ingest,
+                    CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
+                    id="evo_forecast_ingest",
+                    name="Daily EVO forecast ingest",
+                )
+                print("[evo_forecast] Scheduled daily at 6:00 AM Colombia")
+
+            # Correlation sync: daily at 2:00 AM Colombia
+            _mgs_scheduler.add_job(
+                _scheduled_correlation_sync,
+                CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
+                id="correlation_sync",
+                name="Daily correlation sync",
+            )
+            print("[correlation_sync] Scheduled daily at 2:00 AM Colombia")
 
             _mgs_scheduler.start()
             poll_once()

@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
@@ -130,9 +131,137 @@ def get_partes(db: Session = Depends(get_db), _=Depends(get_current_user)):
     }
 
 
+def _compute_visibility(contrato: PPAContrato, db: Session) -> dict:
+    """Compute estado_cumplimiento, dias_restantes, cobertura_actual_pct for a PPA contract."""
+    today = date.today()
+    result: dict = {}
+
+    # dias_restantes
+    if contrato.fecha_fin:
+        result["dias_restantes"] = (contrato.fecha_fin - today).days
+    else:
+        result["dias_restantes"] = None
+
+    # cobertura_actual_pct: current month gen / commitment as %
+    compromiso = (
+        db.query(PPACompromisoEnergia)
+        .filter(
+            PPACompromisoEnergia.contrato_id == contrato.id,
+            PPACompromisoEnergia.año == today.year,
+            PPACompromisoEnergia.mes == today.month,
+        )
+        .first()
+    )
+    min_mwh = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
+
+    # Try to get actual generation from cumplimiento_mensual
+    from app.models.cumplimiento import CumplimientoMensual
+    cumpl = (
+        db.query(CumplimientoMensual)
+        .filter(
+            CumplimientoMensual.contrato_ppa_id == contrato.id,
+            CumplimientoMensual.anio == today.year,
+            CumplimientoMensual.mes == today.month,
+        )
+        .first()
+    )
+    gen_mwh = float(cumpl.gen_total_mwh) if cumpl and cumpl.gen_total_mwh is not None else None
+
+    if min_mwh and min_mwh > 0 and gen_mwh is not None:
+        result["cobertura_actual_pct"] = round(gen_mwh / min_mwh * 100, 1)
+    else:
+        result["cobertura_actual_pct"] = None
+
+    # estado_cumplimiento
+    if result["cobertura_actual_pct"] is not None:
+        if result["cobertura_actual_pct"] >= 100:
+            result["estado_cumplimiento"] = "on_track"
+        elif result["cobertura_actual_pct"] >= 80:
+            result["estado_cumplimiento"] = "at_risk"
+        else:
+            result["estado_cumplimiento"] = "deficit"
+    elif contrato.fecha_fin and contrato.fecha_fin < today:
+        result["estado_cumplimiento"] = "deficit"
+    else:
+        result["estado_cumplimiento"] = None
+
+    return result
+
+
+@router.get("/resumen-global")
+def get_resumen_global(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Portfolio-level PPA summary with aggregated visibility metrics."""
+    today = date.today()
+    contratos = (
+        db.query(PPAContrato)
+        .filter(PPAContrato.deleted_at.is_(None))
+        .options(*_load_options())
+        .all()
+    )
+
+    total_contratos = len(contratos)
+    vigentes = [c for c in contratos if c.fecha_fin and c.fecha_fin >= today]
+    vencidos = [c for c in contratos if c.fecha_fin and c.fecha_fin < today]
+    sin_fecha = [c for c in contratos if not c.fecha_fin]
+
+    # Compute visibility per contract
+    on_track = 0
+    at_risk = 0
+    deficit = 0
+    sin_datos = 0
+    contratos_resumen = []
+    for c in contratos:
+        vis = _compute_visibility(c, db)
+        estado = vis.get("estado_cumplimiento")
+        if estado == "on_track":
+            on_track += 1
+        elif estado == "at_risk":
+            at_risk += 1
+        elif estado == "deficit":
+            deficit += 1
+        else:
+            sin_datos += 1
+
+        contratos_resumen.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "tipo_contrato": c.tipo_contrato,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            "estado_cumplimiento": vis.get("estado_cumplimiento"),
+            "dias_restantes": vis.get("dias_restantes"),
+            "cobertura_actual_pct": vis.get("cobertura_actual_pct"),
+        })
+
+    return {
+        "total_contratos": total_contratos,
+        "vigentes": len(vigentes),
+        "vencidos": len(vencidos),
+        "sin_fecha_fin": len(sin_fecha),
+        "cumplimiento": {
+            "on_track": on_track,
+            "at_risk": at_risk,
+            "deficit": deficit,
+            "sin_datos": sin_datos,
+        },
+        "contratos": contratos_resumen,
+    }
+
+
 @router.get("/{id}", response_model=PPAContratoOut)
 def get_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return _get_contrato_or_404(id, db)
+    c = _get_contrato_or_404(id, db)
+    out = PPAContratoOut.model_validate(c, from_attributes=True)
+    vis = _compute_visibility(c, db)
+    out.estado_cumplimiento = vis.get("estado_cumplimiento")
+    out.dias_restantes = vis.get("dias_restantes")
+    out.cobertura_actual_pct = vis.get("cobertura_actual_pct")
+    return out
 
 
 @router.patch("/{id}")

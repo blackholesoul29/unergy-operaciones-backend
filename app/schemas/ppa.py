@@ -140,6 +140,10 @@ class PPAContratoOut(BaseModel):
     carpeta_link: str | None = None
     tarifas: list[PPATarifaOut] = []
     compromisos_energia: list[PPACompromisoOut] = []
+    # Computed visibility fields (populated by endpoint, not ORM)
+    estado_cumplimiento: str | None = None  # on_track / at_risk / deficit
+    dias_restantes: int | None = None
+    cobertura_actual_pct: float | None = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

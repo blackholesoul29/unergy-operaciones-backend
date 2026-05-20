@@ -11,13 +11,15 @@ pasada — mucho más eficiente que la alternativa subquery+join.
 """
 from datetime import date
 from collections import defaultdict
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.proyectos import Proyecto
+from app.models.cumplimiento import CumplimientoMensual
+from app.models.contratos import PPAContrato
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
 
@@ -125,4 +127,83 @@ def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_u
         "fecha_consulta": str(hoy),
         "huerfanos": huerfanos,
         "duplicados": duplicados,
+    }
+
+
+@router.get("/cumplimiento-ppa")
+def alertas_cumplimiento_ppa(
+    anio: int | None = Query(None, ge=2020, le=2050),
+    mes: int | None = Query(None, ge=1, le=12),
+    umbral_pct: float = Query(90.0, ge=0, le=100, description="Threshold below which a deficit alert fires (default: 90%)"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Alertas de deficit de cumplimiento PPA.
+
+    Genera una alerta por cada contrato cuya generacion real sea menor al
+    umbral_pct% de su compromiso de energia. Default: 90%.
+
+    Si anio/mes no se proporcionan, usa el mes actual.
+    """
+    hoy = date.today()
+    year = anio or hoy.year
+    month = mes or hoy.month
+
+    rows = (
+        db.query(CumplimientoMensual)
+        .join(PPAContrato, CumplimientoMensual.contrato_ppa_id == PPAContrato.id)
+        .filter(
+            CumplimientoMensual.anio == year,
+            CumplimientoMensual.mes == month,
+        )
+        .all()
+    )
+
+    alertas = []
+    for r in rows:
+        gen = float(r.gen_total_mwh) if r.gen_total_mwh is not None else 0
+        comp = float(r.compromiso_mwh) if r.compromiso_mwh is not None else None
+        if comp is None or comp <= 0:
+            continue
+
+        cobertura = (gen / comp) * 100
+        if cobertura >= umbral_pct:
+            continue
+
+        deficit_mwh = round(comp - gen, 3)
+        # Estimate COP impact
+        precio = float(r.precio_bolsa_promedio) if r.precio_bolsa_promedio is not None else None
+        impacto_cop = round(deficit_mwh * 1000 * precio, 0) if precio is not None else None
+
+        contrato = r.contrato_ppa
+        alertas.append({
+            "tipo": "deficit_cumplimiento_ppa",
+            "severidad": "alta" if cobertura < 80 else "media",
+            "contrato_ppa_id": r.contrato_ppa_id,
+            "contrato_nombre": contrato.nombre_interno if contrato else None,
+            "comprador_nombre": contrato.comprador_nombre if contrato else None,
+            "anio": year,
+            "mes": month,
+            "gen_total_mwh": gen,
+            "compromiso_mwh": comp,
+            "cobertura_pct": round(cobertura, 1),
+            "deficit_mwh": deficit_mwh,
+            "impacto_estimado_cop": impacto_cop,
+            "precio_bolsa_promedio": precio,
+            "mensaje": (
+                f"{contrato.nombre_interno or 'Contrato'}: "
+                f"deficit de {deficit_mwh:.1f} MWh ({cobertura:.0f}% cobertura)"
+                + (f", impacto estimado ${impacto_cop:,.0f} COP" if impacto_cop else "")
+            ),
+        })
+
+    alertas.sort(key=lambda a: a.get("cobertura_pct", 100))
+
+    return {
+        "fecha_consulta": str(hoy),
+        "periodo": {"anio": year, "mes": month},
+        "umbral_pct": umbral_pct,
+        "total_alertas": len(alertas),
+        "alertas": alertas,
     }

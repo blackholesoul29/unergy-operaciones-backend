@@ -203,6 +203,220 @@ def fetch_requestsdb_status_history(supply_ids: list[int]) -> dict[int, list[dic
             return {}
 
 
+def fetch_origina_investments() -> list[dict]:
+    """Fetch investment funds from originabotdb with their portfolios and project counts.
+
+    Chain: investment_investment -> investment_portfolio_investments ->
+           investment_portfolio -> investment_portfolio_minifarm ->
+           investment_minifarm -> minifarm_project
+    """
+    with _origina_conn() as conn:
+        if conn is None:
+            return []
+        try:
+            cur = conn.execute("""
+                SELECT
+                    ii.id,
+                    ii.code,
+                    ii.name,
+                    ii.email,
+                    ii.phone,
+                    ii.status,
+                    ii.rut,
+                    ii.business_registry,
+                    COUNT(DISTINCT ip.id) AS portfolio_count,
+                    COUNT(DISTINCT im.id) AS minifarm_count,
+                    COALESCE(SUM(mp.project_installed_power), 0) AS total_kw
+                FROM investment_investment ii
+                LEFT JOIN investment_portfolio_investments ipi ON ipi.investment_id = ii.id
+                LEFT JOIN investment_portfolio ip ON ip.id = ipi.portfolio_id
+                LEFT JOIN investment_portfolio_minifarm ipm ON ipm.portfolio_id = ip.id
+                LEFT JOIN investment_minifarm im ON im.id = ipm.minifarm_id
+                LEFT JOIN minifarm_project mp ON mp.id = im.project_id
+                WHERE ii.status IN ('investment', 'portfolio', 'dd', 'open')
+                GROUP BY ii.id, ii.code, ii.name, ii.email, ii.phone,
+                         ii.status, ii.rut, ii.business_registry
+                ORDER BY ii.name
+            """)
+            cols = [d.name for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error("origina investments query failed: %s", e)
+            return []
+
+
+def fetch_origina_investment_detail(investment_id: int) -> dict | None:
+    """Fetch a single investment fund with its portfolios and minifarms."""
+    with _origina_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            # Fund info
+            cur = conn.execute("""
+                SELECT id, code, name, email, phone, status, rut, business_registry
+                FROM investment_investment
+                WHERE id = %s
+            """, (investment_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d.name for d in cur.description]
+            fund = dict(zip(cols, row))
+
+            # Portfolios with minifarms
+            cur2 = conn.execute("""
+                SELECT
+                    ip.id AS portfolio_id,
+                    ip.name AS portfolio_name,
+                    ip.expected,
+                    ip.financing,
+                    im.id AS minifarm_id,
+                    im.name AS minifarm_name,
+                    mp.id AS project_id,
+                    mp.name AS project_name,
+                    mp.stage,
+                    mp.project_installed_power AS kw
+                FROM investment_portfolio_investments ipi
+                JOIN investment_portfolio ip ON ip.id = ipi.portfolio_id
+                LEFT JOIN investment_portfolio_minifarm ipm ON ipm.portfolio_id = ip.id
+                LEFT JOIN investment_minifarm im ON im.id = ipm.minifarm_id
+                LEFT JOIN minifarm_project mp ON mp.id = im.project_id
+                WHERE ipi.investment_id = %s
+                ORDER BY ip.name, im.name
+            """, (investment_id,))
+            cols2 = [d.name for d in cur2.description]
+            port_rows = [dict(zip(cols2, r)) for r in cur2.fetchall()]
+
+            # Group by portfolio
+            portfolios: dict[int, dict] = {}
+            for pr in port_rows:
+                pid = pr["portfolio_id"]
+                if pid not in portfolios:
+                    portfolios[pid] = {
+                        "id": pid,
+                        "name": pr["portfolio_name"],
+                        "expected": pr["expected"],
+                        "financing": pr["financing"],
+                        "minifarms": [],
+                    }
+                if pr.get("minifarm_id"):
+                    portfolios[pid]["minifarms"].append({
+                        "id": pr["minifarm_id"],
+                        "name": pr["minifarm_name"],
+                        "project_id": pr["project_id"],
+                        "project_name": pr["project_name"],
+                        "stage": pr["stage"],
+                        "kw": float(pr["kw"]) if pr["kw"] else None,
+                    })
+
+            fund["portfolios"] = list(portfolios.values())
+            return fund
+        except Exception as e:
+            logger.error("origina investment detail query failed: %s", e)
+            return None
+
+
+def correlate_investments(db: Session) -> dict:
+    """Match investment funds from origina with clients in operations DB.
+
+    Matching strategy (in priority order):
+    1. NIT/RUT: cliente.nit_cedula == investment.rut or investment.business_registry
+    2. Email: cliente.correo_electronico == investment.email
+    3. Name: fuzzy substring match between cliente.razon_social_nombre and investment.name
+    """
+    investments = fetch_origina_investments()
+    if not investments:
+        return {"matched": 0, "investments": 0, "details": []}
+
+    rows = db.execute(text(
+        "SELECT id, razon_social_nombre, nit_cedula, correo_electronico, origina_investment_id "
+        "FROM clientes WHERE deleted_at IS NULL ORDER BY razon_social_nombre"
+    )).mappings().all()
+    clients = [dict(r) for r in rows]
+
+    # Build lookup indexes for clients
+    clients_by_nit: dict[str, dict] = {}
+    clients_by_email: dict[str, dict] = {}
+    clients_by_norm_name: dict[str, dict] = {}
+    for c in clients:
+        nit = (c.get("nit_cedula") or "").strip()
+        if nit:
+            clients_by_nit[nit] = c
+        email = (c.get("correo_electronico") or "").strip().lower()
+        if email:
+            clients_by_email[email] = c
+        name = (c.get("razon_social_nombre") or "").strip()
+        norm = _normalize(name)
+        if norm:
+            clients_by_norm_name[norm] = c
+
+    matched = 0
+    details: list[dict] = []
+
+    for inv in investments:
+        inv_id = inv["id"]
+        inv_rut = (inv.get("rut") or "").strip()
+        inv_biz_reg = (inv.get("business_registry") or "").strip()
+        inv_email = (inv.get("email") or "").strip().lower()
+        inv_name = (inv.get("name") or "").strip()
+        inv_norm = _normalize(inv_name)
+
+        match_client: dict | None = None
+        match_method: str | None = None
+
+        # 1. Match by NIT/RUT
+        if inv_rut and inv_rut in clients_by_nit:
+            match_client = clients_by_nit[inv_rut]
+            match_method = "nit_rut"
+        elif inv_biz_reg and inv_biz_reg in clients_by_nit:
+            match_client = clients_by_nit[inv_biz_reg]
+            match_method = "business_registry"
+
+        # 2. Match by email
+        if not match_client and inv_email and inv_email in clients_by_email:
+            match_client = clients_by_email[inv_email]
+            match_method = "email"
+
+        # 3. Fuzzy name match
+        if not match_client and inv_norm:
+            for cn, cc in clients_by_norm_name.items():
+                if inv_norm and (inv_norm in cn or cn in inv_norm):
+                    match_client = cc
+                    match_method = "name_fuzzy"
+                    break
+
+        detail = {
+            "investment_id": inv_id,
+            "investment_name": inv_name,
+            "investment_status": inv.get("status"),
+            "matched_client_id": None,
+            "matched_client_name": None,
+            "match_method": None,
+        }
+
+        if match_client:
+            detail["matched_client_id"] = match_client["id"]
+            detail["matched_client_name"] = match_client["razon_social_nombre"]
+            detail["match_method"] = match_method
+
+            # Only update if not already linked
+            if match_client.get("origina_investment_id") != inv_id:
+                db.execute(text(
+                    "UPDATE clientes SET origina_investment_id = :inv_id WHERE id = :cid"
+                ), {"inv_id": inv_id, "cid": match_client["id"]})
+                matched += 1
+
+        details.append(detail)
+
+    db.commit()
+
+    return {
+        "investments": len(investments),
+        "matched": matched,
+        "details": details,
+    }
+
+
 def correlate_projects(db: Session) -> dict:
     """Run cross-database correlation and update proyectos with matches."""
     rows = db.execute(text(
@@ -295,13 +509,41 @@ def correlate_projects(db: Session) -> dict:
 
     db.commit()
 
-    return {
+    # Run investment fund correlation after project correlation
+    try:
+        inv_result = correlate_investments(db)
+    except Exception as e:
+        logger.warning("Investment correlation failed: %s", e)
+        inv_result = {"matched": 0, "investments": 0, "details": []}
+
+    result = {
         "total_operations_projects": len(ops_projects),
         "origina_projects_found": len(origina_projects),
         "requestsdb_supplies_found": len(requestsdb_supplies),
         "correlations_updated": matched,
+        "investment_funds_found": inv_result.get("investments", 0),
+        "investment_correlations_updated": inv_result.get("matched", 0),
         "details": results,
     }
+
+    # Log sync result
+    try:
+        db.execute(text(
+            "INSERT INTO correlation_sync_log "
+            "(synced_at, projects_processed, correlations_updated, origina_found, requestsdb_found) "
+            "VALUES (NOW(), :pp, :cu, :of, :rf)"
+        ), {
+            "pp": len(ops_projects),
+            "cu": matched,
+            "of": len(origina_projects),
+            "rf": len(requestsdb_supplies),
+        })
+        db.commit()
+    except Exception as e:
+        logger.warning("Failed to log correlation sync: %s", e)
+        db.rollback()
+
+    return result
 
 
 def get_project_cross_view(db: Session, proyecto_id: int) -> dict:

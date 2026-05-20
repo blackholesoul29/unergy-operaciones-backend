@@ -23,6 +23,13 @@ class EstadoFronteraEnum(str, enum.Enum):
     en_falla = "en_falla"
 
 
+class EstadoOperacionalEnum(str, enum.Enum):
+    activo = "activo"
+    inactivo = "inactivo"
+    en_registro = "en_registro"
+    descomisionado = "descomisionado"
+
+
 class FuenteLecturaEnum(str, enum.Enum):
     medidor_principal = "medidor_principal"
     medidor_respaldo = "medidor_respaldo"
@@ -129,6 +136,18 @@ class Frontera(Base):
     factor_acordado: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_ajuste: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_perdidas_frontera_principal: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+
+    # Quoia meter link
+    quoia_meter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+    # Estado operacional (lifecycle)
+    estado_operacional: Mapped[str | None] = mapped_column(
+        SAEnum(EstadoOperacionalEnum, name="estado_operacional_enum"),
+        nullable=True, default="activo",
+    )
+
+    # Soft delete
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Clasificación industrial
     codigo_ciiu: Mapped[str | None] = mapped_column(String(20), nullable=True)

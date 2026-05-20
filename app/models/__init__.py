@@ -28,6 +28,8 @@ from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
 from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
+from app.models.cumplimiento import CumplimientoMensual
+from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -46,4 +48,6 @@ __all__ = [
     "GeneracionDiaria", "MonitoreoVerificacion",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
+    "CumplimientoMensual",
+    "Notificacion", "TipoNotificacionEnum",
 ]

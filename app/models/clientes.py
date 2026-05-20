@@ -50,6 +50,12 @@ class Cliente(Base):
     telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Banking info
+    banco: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tipo_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    numero_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    titular_cuenta: Mapped[str | None] = mapped_column(String(255), nullable=True)
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
@@ -57,6 +63,7 @@ class Cliente(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    origina_investment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     proyectos: Mapped[list] = relationship("Proyecto", back_populates="cliente", uselist=True)
     participaciones: Mapped[list] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)

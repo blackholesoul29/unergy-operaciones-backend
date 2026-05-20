@@ -160,6 +160,34 @@ def upsert_informe(
         return nuevo
 
 
+@router.get("/envios", summary="Email send history")
+def list_envios(
+    tipo: Optional[str] = Query(None, description="Filter by email type (otp, informe, alarma)"),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """List email send history from email_envios table."""
+    params: dict = {"limit": limit}
+    where_clauses = []
+    if tipo:
+        where_clauses.append("tipo = :tipo")
+        params["tipo"] = tipo
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    rows = db.execute(
+        text(f"""
+            SELECT id, destinatario, cc, asunto, tipo, exitoso, error, enviado_at
+            FROM email_envios
+            {where_sql}
+            ORDER BY enviado_at DESC
+            LIMIT :limit
+        """),
+        params,
+    ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
 @router.get("/", response_model=list[InformeOut], summary="Listar informes guardados")
 def list_informes(
     tipo: Optional[str] = Query(None),

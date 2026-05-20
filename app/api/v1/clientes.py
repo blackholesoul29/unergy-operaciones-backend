@@ -194,3 +194,140 @@ async def upload_archivo_documento(
     db.commit()
     db.refresh(doc)
     return doc
+
+
+# ── Fondos de inversión (origina) ────────────────────────────────────────────
+
+
+@router.get("/{id}/fondos")
+def get_client_fund(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Get the investment fund linked to this client (from originabotdb)."""
+    cliente = _get_cliente_or_404(id, db)
+    if not cliente.origina_investment_id:
+        return {"linked": False, "fund": None}
+
+    from app.services.correlation import fetch_origina_investment_detail
+    fund = fetch_origina_investment_detail(cliente.origina_investment_id)
+    if not fund:
+        return {
+            "linked": True,
+            "origina_investment_id": cliente.origina_investment_id,
+            "fund": None,
+            "error": "Fondo no encontrado en Origina (puede haber sido eliminado)",
+        }
+
+    return {"linked": True, "fund": fund}
+
+
+# ── Client linking: Proyectos, Fronteras, Contratos PPA ─────────────────────
+
+@router.get("/{id}/proyectos")
+def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """List all projects where this client is owner or investor."""
+    from app.models.proyectos import Proyecto, ProyectoInversionista
+    _get_cliente_or_404(id, db)
+
+    # Projects where client is owner
+    owned = db.query(Proyecto).filter(
+        Proyecto.cliente_id == id,
+        Proyecto.deleted_at.is_(None),
+    ).all()
+
+    # Projects where client is investor
+    invested_ids = (
+        db.query(ProyectoInversionista.proyecto_id)
+        .filter(ProyectoInversionista.cliente_id == id)
+        .all()
+    )
+    invested_project_ids = {r[0] for r in invested_ids} - {p.id for p in owned}
+    invested = (
+        db.query(Proyecto)
+        .filter(Proyecto.id.in_(invested_project_ids), Proyecto.deleted_at.is_(None))
+        .all()
+    ) if invested_project_ids else []
+
+    def _proj(p, rol):
+        return {
+            "id": p.id,
+            "nombre_comercial": p.nombre_comercial,
+            "estado": p.estado.value if hasattr(p.estado, "value") else p.estado,
+            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "departamento": p.departamento,
+            "municipio": p.municipio,
+            "rol": rol,
+        }
+
+    return [_proj(p, "propietario") for p in owned] + [_proj(p, "inversionista") for p in invested]
+
+
+@router.get("/{id}/fronteras")
+def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """List fronteras linked to this client via their projects."""
+    from app.models.proyectos import Proyecto, ProyectoInversionista
+    from app.models.fronteras import Frontera
+    _get_cliente_or_404(id, db)
+
+    # Gather all project IDs for this client (owned + invested)
+    owned_ids = (
+        db.query(Proyecto.id)
+        .filter(Proyecto.cliente_id == id, Proyecto.deleted_at.is_(None))
+        .all()
+    )
+    invested_ids = (
+        db.query(ProyectoInversionista.proyecto_id)
+        .filter(ProyectoInversionista.cliente_id == id)
+        .all()
+    )
+    all_project_ids = {r[0] for r in owned_ids} | {r[0] for r in invested_ids}
+    if not all_project_ids:
+        return []
+
+    fronteras = (
+        db.query(Frontera)
+        .filter(Frontera.proyecto_id.in_(all_project_ids))
+        .order_by(Frontera.codigo_frontera)
+        .all()
+    )
+    return [
+        {
+            "id": f.id,
+            "codigo_frontera": f.codigo_frontera,
+            "nombre_frontera": f.nombre_frontera,
+            "tipo_frontera": f.tipo_frontera.value if hasattr(f.tipo_frontera, "value") else f.tipo_frontera,
+            "estado": f.estado.value if hasattr(f.estado, "value") else f.estado,
+            "proyecto_id": f.proyecto_id,
+        }
+        for f in fronteras
+    ]
+
+
+@router.get("/{id}/contratos-ppa")
+def list_client_contratos_ppa(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """List PPA contracts where this client is buyer or seller."""
+    from app.models.contratos import PPAContrato
+    from sqlalchemy import or_
+    _get_cliente_or_404(id, db)
+
+    contratos = (
+        db.query(PPAContrato)
+        .filter(
+            PPAContrato.deleted_at.is_(None),
+            or_(PPAContrato.comprador_id == id, PPAContrato.vendedor_id == id),
+        )
+        .order_by(PPAContrato.fecha_inicio.desc().nullslast())
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "nombre_interno": c.nombre_interno,
+            "comprador_nombre": c.comprador_nombre,
+            "vendedor_nombre": c.vendedor_nombre,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            "tipo_contrato": c.tipo_contrato,
+            "rol": "comprador" if c.comprador_id == id else "vendedor",
+        }
+        for c in contratos
+    ]

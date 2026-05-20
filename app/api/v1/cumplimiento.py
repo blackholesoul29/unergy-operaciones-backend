@@ -24,6 +24,11 @@ from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
+from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
+from app.schemas.cumplimiento import (
+    CumplimientoMensualOut, CerrarPeriodoRequest, CerrarPeriodoResponse,
+    FacturarRequest,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cumplimiento", tags=["Cumplimiento"])
@@ -1341,3 +1346,316 @@ def get_descubrimientos(
         },
         "meses": meses_data,
     }
+
+
+# ── Cumplimiento Mensual — Persistencia ──────────────────────────────────────
+
+
+def _build_cumplimiento_out(row: CumplimientoMensual) -> dict:
+    """Serialize a CumplimientoMensual row to dict matching CumplimientoMensualOut."""
+    contrato = row.contrato_ppa
+    return {
+        "id": row.id,
+        "contrato_ppa_id": row.contrato_ppa_id,
+        "proyecto_id": row.proyecto_id,
+        "anio": row.anio,
+        "mes": row.mes,
+        "gen_total_mwh": float(row.gen_total_mwh) if row.gen_total_mwh is not None else None,
+        "compromiso_mwh": float(row.compromiso_mwh) if row.compromiso_mwh is not None else None,
+        "compras_bolsa_mwh": float(row.compras_bolsa_mwh) if row.compras_bolsa_mwh is not None else None,
+        "excedentes_bolsa_mwh": float(row.excedentes_bolsa_mwh) if row.excedentes_bolsa_mwh is not None else None,
+        "precio_bolsa_promedio": float(row.precio_bolsa_promedio) if row.precio_bolsa_promedio is not None else None,
+        "compras_bolsa_cop": float(row.compras_bolsa_cop) if row.compras_bolsa_cop is not None else None,
+        "excedentes_bolsa_cop": float(row.excedentes_bolsa_cop) if row.excedentes_bolsa_cop is not None else None,
+        "estado": row.estado,
+        "tarifa_ppa_cop_mwh": float(row.tarifa_ppa_cop_mwh) if row.tarifa_ppa_cop_mwh is not None else None,
+        "valoracion_contrato_cop": float(row.valoracion_contrato_cop) if row.valoracion_contrato_cop is not None else None,
+        "liquidacion_id": row.liquidacion_id,
+        "contrato_nombre": contrato.nombre_interno if contrato else None,
+        "comprador_nombre": contrato.comprador_nombre if contrato else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.post("/cerrar-periodo")
+def cerrar_periodo(
+    body: CerrarPeriodoRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Cierra un periodo (anio, mes) para todos los contratos PPA activos.
+
+    Calcula el cumplimiento usando la misma logica que /ppa/resumen
+    (generacion real desde Unergy API + compromisos de la DB),
+    y persiste un snapshot en cumplimiento_mensual.
+
+    Si ya existen registros para el periodo, los actualiza (upsert).
+    """
+    year, month = body.anio, body.mes
+    today = date.today()
+    es_mes_actual = year == today.year and month == today.month
+    es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
+    total_dias = calendar.monthrange(year, month)[1]
+    dia_actual = today.day if es_mes_actual else total_dias
+
+    # ── 1. Contratos y compromisos ────────────────────────────────────────────
+    contratos = (
+        db.query(PPAContrato)
+        .filter(PPAContrato.deleted_at.is_(None))
+        .order_by(PPAContrato.id)
+        .all()
+    )
+    if not contratos:
+        raise HTTPException(404, "No hay contratos PPA registrados")
+
+    compromisos_map = {
+        c.contrato_id: c
+        for c in db.query(PPACompromisoEnergia).filter(
+            PPACompromisoEnergia.año == year,
+            PPACompromisoEnergia.mes == month,
+        ).all()
+    }
+
+    tarifas_map = {
+        t.contrato_id: float(t.tarifa)
+        for t in db.query(PPATarifa).filter(
+            PPATarifa.año == year,
+            PPATarifa.mes == month,
+        ).all()
+        if t.tarifa is not None
+    }
+
+    # ── 2. GESCON assignments ─────────────────────────────────────────────────
+    contrato_assignments: dict[int, list] = {}
+    for c in contratos:
+        if c.numero_codigo_contrato:
+            contrato_assignments[c.id] = _resolve_gescon(db, c.numero_codigo_contrato, year, month)
+        else:
+            contrato_assignments[c.id] = []
+
+    # ── 3. Sub-projects unicos ────────────────────────────────────────────────
+    sp_set: set[str] = set()
+    for assignments in contrato_assignments.values():
+        for asic in assignments:
+            if asic.proyecto and asic.proyecto.sub_project:
+                sp_set.add(asic.proyecto.sub_project)
+
+    # ── 4. Generacion en paralelo ─────────────────────────────────────────────
+    gen_cache: dict[str, dict] = {}
+    if sp_set:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in cerrar_periodo: %s", exc)
+            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+
+        sp_list = list(sp_set)
+
+        def _fetch_sp(sp: str) -> tuple:
+            if es_mes_futuro:
+                recent = _fetch_recent_avg(token, sp)
+                avg = recent["avg_daily_mwh"]
+                mwh = round(avg * total_dias, 3) if avg is not None else None
+                return sp, {"mwh": mwh, "n_records": recent["n_days_used"], "ultimo_dia": None}
+            return sp, _fetch_month(token, sp, year, month)
+
+        max_workers = min(len(sp_list), 10)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for sp, result in pool.map(_fetch_sp, sp_list):
+                gen_cache[sp] = result
+
+    # ── 5. Precios de bolsa ───────────────────────────────────────────────────
+    bolsa = _get_bolsa_avg(db, year, month)
+    precio_bolsa = bolsa["precio_promedio"]
+
+    # ── 6. Calculo y persistencia por contrato ────────────────────────────────
+    registros: list[dict] = []
+    n_deficit = 0
+    n_cumplidos = 0
+
+    for c in contratos:
+        assignments = contrato_assignments[c.id]
+        compromiso = compromisos_map.get(c.id)
+
+        gen_total_c = 0.0
+        for asic in assignments:
+            proyecto = asic.proyecto
+            pct = float(asic.porcentaje_despacho or 0)
+            if proyecto and proyecto.sub_project:
+                gd = gen_cache.get(proyecto.sub_project, {"mwh": None})
+                gp = gd.get("mwh")
+                if gp is not None:
+                    gen_total_c += gp * pct
+
+        gen_total_c = round(gen_total_c, 3)
+
+        # Linear projection for current month
+        gen_val = gen_total_c
+        if es_mes_actual and dia_actual > 0 and gen_total_c > 0:
+            gen_val = round(gen_total_c * total_dias / dia_actual, 3)
+
+        min_mwh = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
+
+        compras_mwh = None
+        excedentes_mwh = None
+        compras_cop = None
+        excedentes_cop = None
+
+        if min_mwh is not None:
+            compras_mwh = round(max(0.0, min_mwh - gen_val), 3)
+            max_mwh_val = float(compromiso.energia_maxima) if compromiso and compromiso.energia_maxima is not None else min_mwh
+            excedentes_mwh = round(max(0.0, gen_val - max_mwh_val), 3)
+
+            if precio_bolsa is not None:
+                compras_cop = round(compras_mwh * 1000 * precio_bolsa, 2)
+                excedentes_cop = round(excedentes_mwh * 1000 * precio_bolsa, 2)
+
+            if compras_mwh > 0:
+                n_deficit += 1
+            else:
+                n_cumplidos += 1
+
+        tarifa_ppa = tarifas_map.get(c.id)
+
+        # Valoracion del contrato: generacion * tarifa PPA (COP/kWh -> COP)
+        valoracion_cop = None
+        if tarifa_ppa is not None and gen_val > 0:
+            valoracion_cop = round(gen_val * 1000 * tarifa_ppa, 2)
+
+        # Upsert
+        existing = (
+            db.query(CumplimientoMensual)
+            .filter(
+                CumplimientoMensual.contrato_ppa_id == c.id,
+                CumplimientoMensual.anio == year,
+                CumplimientoMensual.mes == month,
+            )
+            .first()
+        )
+
+        if existing:
+            # Don't overwrite facturado records
+            if existing.estado == EstadoCumplimientoEnum.facturado:
+                registros.append(_build_cumplimiento_out(existing))
+                continue
+            existing.gen_total_mwh = gen_total_c
+            existing.compromiso_mwh = min_mwh
+            existing.compras_bolsa_mwh = compras_mwh
+            existing.excedentes_bolsa_mwh = excedentes_mwh
+            existing.precio_bolsa_promedio = precio_bolsa
+            existing.compras_bolsa_cop = compras_cop
+            existing.excedentes_bolsa_cop = excedentes_cop
+            existing.tarifa_ppa_cop_mwh = tarifa_ppa
+            existing.valoracion_contrato_cop = valoracion_cop
+            existing.estado = EstadoCumplimientoEnum.cerrado
+            db.flush()
+            registros.append(_build_cumplimiento_out(existing))
+        else:
+            new_row = CumplimientoMensual(
+                contrato_ppa_id=c.id,
+                proyecto_id=None,
+                anio=year,
+                mes=month,
+                gen_total_mwh=gen_total_c,
+                compromiso_mwh=min_mwh,
+                compras_bolsa_mwh=compras_mwh,
+                excedentes_bolsa_mwh=excedentes_mwh,
+                precio_bolsa_promedio=precio_bolsa,
+                compras_bolsa_cop=compras_cop,
+                excedentes_bolsa_cop=excedentes_cop,
+                estado=EstadoCumplimientoEnum.cerrado,
+                tarifa_ppa_cop_mwh=tarifa_ppa,
+                valoracion_contrato_cop=valoracion_cop,
+            )
+            db.add(new_row)
+            db.flush()
+            registros.append(_build_cumplimiento_out(new_row))
+
+    db.commit()
+
+    return {
+        "anio": year,
+        "mes": month,
+        "contratos_procesados": len(contratos),
+        "contratos_con_deficit": n_deficit,
+        "contratos_cumplidos": n_cumplidos,
+        "registros": registros,
+    }
+
+
+@router.get("/historico")
+def historico_cumplimiento(
+    contrato_id: Optional[int] = Query(None),
+    proyecto_id: Optional[int] = Query(None),
+    anio: Optional[int] = Query(None, ge=2020, le=2050),
+    mes: Optional[int] = Query(None, ge=1, le=12),
+    estado: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Lista registros historicos de cumplimiento con filtros opcionales."""
+    q = (
+        db.query(CumplimientoMensual)
+        .join(PPAContrato, CumplimientoMensual.contrato_ppa_id == PPAContrato.id)
+    )
+
+    if contrato_id is not None:
+        q = q.filter(CumplimientoMensual.contrato_ppa_id == contrato_id)
+    if proyecto_id is not None:
+        q = q.filter(CumplimientoMensual.proyecto_id == proyecto_id)
+    if anio is not None:
+        q = q.filter(CumplimientoMensual.anio == anio)
+    if mes is not None:
+        q = q.filter(CumplimientoMensual.mes == mes)
+    if estado is not None:
+        q = q.filter(CumplimientoMensual.estado == estado)
+
+    rows = q.order_by(
+        CumplimientoMensual.anio.desc(),
+        CumplimientoMensual.mes.desc(),
+        CumplimientoMensual.contrato_ppa_id,
+    ).all()
+
+    return [_build_cumplimiento_out(r) for r in rows]
+
+
+@router.get("/historico/{record_id}")
+def historico_detalle(
+    record_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Detalle de un registro de cumplimiento."""
+    row = (
+        db.query(CumplimientoMensual)
+        .join(PPAContrato, CumplimientoMensual.contrato_ppa_id == PPAContrato.id)
+        .filter(CumplimientoMensual.id == record_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(404, "Registro de cumplimiento no encontrado")
+    return _build_cumplimiento_out(row)
+
+
+@router.post("/historico/{record_id}/facturar")
+def facturar_cumplimiento(
+    record_id: int,
+    body: FacturarRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Marca un registro de cumplimiento como facturado y lo vincula a una liquidacion."""
+    row = db.query(CumplimientoMensual).filter(CumplimientoMensual.id == record_id).first()
+    if not row:
+        raise HTTPException(404, "Registro de cumplimiento no encontrado")
+    if row.estado == EstadoCumplimientoEnum.facturado:
+        raise HTTPException(400, "El registro ya esta facturado")
+
+    row.estado = EstadoCumplimientoEnum.facturado
+    if body.liquidacion_id is not None:
+        row.liquidacion_id = body.liquidacion_id
+    db.commit()
+    db.refresh(row)
+    return _build_cumplimiento_out(row)

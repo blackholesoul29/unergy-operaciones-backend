@@ -1,8 +1,10 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from app.core.database import get_db
 from app.core.security import verify_password, create_access_token, decode_token
 from app.models.usuarios import Usuario
@@ -46,6 +48,62 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 @router.get("/me")
 def me(current: Usuario = Depends(get_current_user)):
     return UsuarioOut.model_validate(current).model_dump(mode="json")
+
+
+# ── Password recovery ───────────────────────────────────────────────────────
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Generate a time-limited reset token (1hr) and send via email."""
+    user = db.query(Usuario).filter(Usuario.email == data.email).first()
+    if not user:
+        # Return 200 even if user not found to prevent email enumeration
+        return {"msg": "Si el correo existe, recibirás instrucciones para restablecer tu contraseña."}
+
+    token = uuid.uuid4().hex
+    user.password_reset_token = token
+    user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    db.commit()
+
+    # Send reset email
+    try:
+        from app.services.email_service import send_reset_password_email
+        send_reset_password_email(to_email=user.email, token=token)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Error enviando email de reset: %s", exc)
+
+    return {"msg": "Si el correo existe, recibirás instrucciones para restablecer tu contraseña."}
+
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Validate reset token and update password."""
+    user = db.query(Usuario).filter(
+        Usuario.password_reset_token == data.token,
+    ).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Token inválido o expirado")
+    if not user.password_reset_expires or user.password_reset_expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Token inválido o expirado")
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres")
+
+    user.password_hash = hash_password(data.new_password)
+    user.password_reset_token = None
+    user.password_reset_expires = None
+    db.commit()
+    return {"msg": "Contraseña actualizada exitosamente"}
 
 
 # Separate router for user listing (not under /auth prefix)

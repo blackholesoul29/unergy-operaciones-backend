@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
-from threading import Lock
+from threading import Lock, Thread
 
 import pytz
 from sqlalchemy import text
@@ -23,57 +23,82 @@ _engine = AlarmEngine()
 _quoia = QuoiaClient()
 _solenium = SoleniumClient()
 _solenium_checker = SoleniumChecker(_solenium)
-_lock = Lock()
+_write_lock = Lock()
 
 _last_nodes: list[dict] = []
 _last_alarms: list[Alarm] = []
 _last_poll_time: datetime | None = None
 _last_inverter_obs: dict[str, str] = {}
+_poll_running = False
 
 
 def poll_once():
-    global _last_nodes, _last_alarms, _last_poll_time, _last_inverter_obs
+    global _last_nodes, _last_alarms, _last_poll_time, _last_inverter_obs, _poll_running
 
     if not _quoia.enabled:
         logger.warning("QUOIA_API_TOKEN not set — MGS polling disabled")
         return
 
-    with _lock:
+    if _poll_running:
+        logger.info("Poll already in progress — skipping")
+        return
+
+    _poll_running = True
+    try:
+        nodes = _quoia.get_all_nodes()
+        if not nodes:
+            logger.warning("Quoia returned empty node list")
+            return
+
+        alarms = _engine.evaluate(nodes)
+        poll_time = datetime.now(pytz.timezone(settings.TIMEZONE))
+
+        project_names = [p["name"] for p in _engine.get_summary(nodes).get("projects", [])]
         try:
-            nodes = _quoia.get_all_nodes()
-            if not nodes:
-                logger.warning("Quoia returned empty node list")
-                return
-
-            _last_nodes = nodes
-            _last_alarms = _engine.evaluate(nodes)
-            _last_poll_time = datetime.now(pytz.timezone(settings.TIMEZONE))
-
-            project_names = [p["name"] for p in _engine.get_summary(nodes).get("projects", [])]
-            _last_inverter_obs = _solenium_checker.get_inverter_observations(project_names)
-
-            for alarm in _last_alarms:
-                inv_note = _last_inverter_obs.get(alarm.node_name)
-                if inv_note and alarm.alarm_type.value != "RECUPERACION":
-                    alarm.details += f" | Inversores: {inv_note}"
-
-            _persist_alarms(_last_alarms)
-
-            logger.info(
-                "MGS poll complete: %d nodes, %d alarms, %d inverter observations",
-                len(nodes), len(_last_alarms), len(_last_inverter_obs),
-            )
-
+            inverter_obs = _solenium_checker.get_inverter_observations(project_names)
         except Exception:
-            logger.exception("MGS poll failed")
+            logger.exception("Solenium inverter check failed — continuing without")
+            inverter_obs = {}
+
+        for alarm in alarms:
+            inv_note = inverter_obs.get(alarm.node_name)
+            if inv_note and alarm.alarm_type.value != "RECUPERACION":
+                alarm.details += f" | Inversores: {inv_note}"
+
+        with _write_lock:
+            _last_nodes = nodes
+            _last_alarms = alarms
+            _last_poll_time = poll_time
+            _last_inverter_obs = inverter_obs
+
+        _persist_alarms(alarms)
+
+        logger.info(
+            "MGS poll complete: %d nodes, %d alarms, %d inverter observations",
+            len(nodes), len(alarms), len(inverter_obs),
+        )
+
+    except Exception:
+        logger.exception("MGS poll failed")
+    finally:
+        _poll_running = False
+
+
+def poll_once_async():
+    """Run poll_once in a background thread (non-blocking for API callers)."""
+    if _poll_running:
+        return False
+    t = Thread(target=poll_once, daemon=True)
+    t.start()
+    return True
 
 
 def _persist_alarms(alarms: list[Alarm]):
     if not alarms:
         return
+    alarm_ids: list[tuple[Alarm, int]] = []
     db = SessionLocal()
     try:
-        alarm_ids: list[tuple[Alarm, int]] = []
         for alarm in alarms:
             result = db.execute(text("""
                 INSERT INTO alarmas_monitoreo
@@ -92,17 +117,19 @@ def _persist_alarms(alarms: list[Alarm]):
             alarm_ids.append((alarm, alarm_db_id))
         db.commit()
 
-        # Feature 2: auto-create fallas for critical alarms
         _auto_create_fallas(db, alarm_ids)
-
-        # Feature 7: send email notifications for critical alarms
-        _send_alarm_notifications(db, alarm_ids)
 
     except Exception:
         db.rollback()
         logger.exception("Failed to persist alarms")
     finally:
         db.close()
+
+    if alarm_ids:
+        try:
+            _send_alarm_notifications_safe(alarm_ids)
+        except Exception:
+            logger.exception("Failed to send alarm notifications")
 
 
 # Mapping alarm types to falla catalog tipo codes
@@ -234,76 +261,86 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
             logger.exception("Failed to auto-create falla for alarm %d", alarm_db_id)
 
 
-def _send_alarm_notifications(db, alarm_ids: list[tuple[Alarm, int]]):
-    """Send email notifications for critical alarms to project contacts."""
+def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
+    """Send email notifications in a separate DB session so failures don't affect persistence."""
     from app.services.email_service import send_alarm_notification_email
 
     notifiable_severities = {Severity.CRITICAL, Severity.WARNING}
+    to_notify = [
+        (alarm, aid) for alarm, aid in alarm_ids
+        if alarm.severity in notifiable_severities and alarm.alarm_type != AlarmType.RECUPERACION
+    ]
+    if not to_notify:
+        return
 
-    for alarm, alarm_db_id in alarm_ids:
-        if alarm.severity not in notifiable_severities:
-            continue
-        if alarm.alarm_type == AlarmType.RECUPERACION:
-            continue
+    db = SessionLocal()
+    try:
+        for alarm, alarm_db_id in to_notify:
+            try:
+                emails = db.execute(text("""
+                    SELECT DISTINCT pc.email
+                    FROM proyecto_contactos pc
+                    JOIN proyectos p ON pc.proyecto_id = p.id
+                    WHERE p.deleted_at IS NULL
+                      AND pc.recibe_notificaciones = TRUE
+                      AND (p.nombre_comercial = :name
+                           OR p.alias_monitoreo ILIKE :pattern
+                           OR p.nombre_comercial ILIKE :pattern)
+                """), {
+                    "name": alarm.node_name,
+                    "pattern": f"%{alarm.node_name}%",
+                }).scalars().all()
 
-        try:
-            # Find project contacts that receive notifications
-            emails = db.execute(text("""
-                SELECT DISTINCT pc.email
-                FROM proyecto_contactos pc
-                JOIN proyectos p ON pc.proyecto_id = p.id
-                WHERE p.deleted_at IS NULL
-                  AND pc.recibe_notificaciones = TRUE
-                  AND (p.nombre_comercial = :name
-                       OR p.alias_monitoreo ILIKE :pattern
-                       OR p.nombre_comercial ILIKE :pattern)
-            """), {
-                "name": alarm.node_name,
-                "pattern": f"%{alarm.node_name}%",
-            }).scalars().all()
+                if not emails:
+                    continue
 
-            if not emails:
-                logger.debug("No notification contacts for '%s'", alarm.node_name)
-                continue
-
-            send_alarm_notification_email(
-                to_emails=list(emails),
-                proyecto_nombre=alarm.node_name,
-                alarm_type=alarm.alarm_type.value,
-                severity=alarm.severity.value,
-                details=alarm.details,
-            )
-        except Exception:
-            logger.exception("Failed to send alarm notification for '%s'", alarm.node_name)
+                send_alarm_notification_email(
+                    to_emails=list(emails),
+                    proyecto_nombre=alarm.node_name,
+                    alarm_type=alarm.alarm_type.value,
+                    severity=alarm.severity.value,
+                    details=alarm.details,
+                )
+            except Exception:
+                logger.exception("Failed to send alarm notification for '%s'", alarm.node_name)
+    finally:
+        db.close()
 
 
 def get_status() -> dict:
-    with _lock:
-        summary = _engine.get_summary(_last_nodes) if _last_nodes else {}
-        active = [
-            {
-                "severity": a.severity.value,
-                "alarm_type": a.alarm_type.value,
-                "node_name": a.node_name,
-                "details": a.details,
-                "timestamp": a.timestamp.isoformat(),
-            }
-            for a in _last_alarms
-        ]
-        return {
-            "last_poll": _last_poll_time.isoformat() if _last_poll_time else None,
-            "summary": summary,
-            "active_alarms": active,
-            "inverter_observations": _last_inverter_obs,
+    nodes = _last_nodes
+    alarms = _last_alarms
+    poll_time = _last_poll_time
+    inv_obs = _last_inverter_obs
+
+    summary = _engine.get_summary(nodes) if nodes else {}
+    active = [
+        {
+            "severity": a.severity.value,
+            "alarm_type": a.alarm_type.value,
+            "node_name": a.node_name,
+            "details": a.details,
+            "timestamp": a.timestamp.isoformat(),
         }
+        for a in alarms
+    ]
+    return {
+        "last_poll": poll_time.isoformat() if poll_time else None,
+        "poll_running": _poll_running,
+        "summary": summary,
+        "active_alarms": active,
+        "inverter_observations": inv_obs,
+    }
 
 
 def get_plants() -> list[dict]:
-    with _lock:
-        if not _last_nodes:
-            return []
-        summary = _engine.get_summary(_last_nodes)
-        plants = summary.get("projects", [])
-        for p in plants:
-            p["inverter_obs"] = _last_inverter_obs.get(p["name"])
-        return plants
+    nodes = _last_nodes
+    inv_obs = _last_inverter_obs
+
+    if not nodes:
+        return []
+    summary = _engine.get_summary(nodes)
+    plants = summary.get("projects", [])
+    for p in plants:
+        p["inverter_obs"] = inv_obs.get(p["name"])
+    return plants

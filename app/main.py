@@ -405,7 +405,7 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_proyectos_estado ON proyectos (estado)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_cliente ON proyectos (cliente_id) WHERE cliente_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_estado_proyecto ON fallas (estado_id, proyecto_id)",
-    "CREATE INDEX IF NOT EXISTS ix_fallas_fecha_reporte ON fallas (fecha_reporte DESC NULLS LAST)",
+    "CREATE INDEX IF NOT EXISTS ix_fallas_fecha_identificacion ON fallas (fecha_identificacion DESC NULLS LAST)",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_proyecto_periodo ON liquidaciones (proyecto_id, periodo)",
     "CREATE INDEX IF NOT EXISTS ix_ppa_comprador ON ppa_contratos (comprador_id) WHERE comprador_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fronteras_proyecto ON fronteras (proyecto_id) WHERE proyecto_id IS NOT NULL",
@@ -1063,6 +1063,10 @@ async def serve_monitoreo():
     if _monitoreo_index.exists():
         return FileResponse(str(_monitoreo_index), media_type="text/html")
     return {"error": "Monitoreo no desplegado aún. Ejecuta scripts/patch_monitoreo.py"}
+
+
+if _monitoreo_path.exists() and any(_monitoreo_path.iterdir()):
+    app.mount("/monitoreo/static", StaticFiles(directory=str(_monitoreo_path)), name="monitoreo_static")
 
 
 @app.get("/health")

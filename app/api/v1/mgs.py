@@ -119,5 +119,7 @@ def mgs_resolve_all(
 
 @router.post("/poll")
 def mgs_force_poll(_=Depends(get_current_user)):
-    scheduler.poll_once()
-    return {"status": "poll_complete"}
+    started = scheduler.poll_once_async()
+    if started:
+        return {"status": "poll_started"}
+    return {"status": "poll_already_running"}

@@ -196,6 +196,20 @@ class ProyectoCreate(BaseModel):
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
 
+    @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
+    @classmethod
+    def coerce_json_list(cls, v):
+        import json as _json
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else None
+            except Exception:
+                return None
+        return v
+
 
 class ProyectoUpdate(ProyectoCreate):
     nombre_comercial: Optional[str] = None

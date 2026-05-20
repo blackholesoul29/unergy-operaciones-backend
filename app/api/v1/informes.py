@@ -261,8 +261,6 @@ def delete_informe(
     inf = db.get(InformeGuardado, informe_id)
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
-    if inf.estado == "aprobado":
-        raise HTTPException(400, "No se puede eliminar un informe aprobado")
     db.delete(inf)
     db.commit()
 

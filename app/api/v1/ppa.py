@@ -2,6 +2,7 @@ import logging
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql import func
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto
@@ -43,7 +44,12 @@ def _sync_partes_from_clientes(contrato: PPAContrato, db: Session):
 
 
 def _get_contrato_or_404(id: int, db: Session) -> PPAContrato:
-    c = db.query(PPAContrato).options(*_load_options()).filter(PPAContrato.id == id).first()
+    c = (
+        db.query(PPAContrato)
+        .options(*_load_options())
+        .filter(PPAContrato.id == id, PPAContrato.deleted_at.is_(None))
+        .first()
+    )
     if not c:
         raise HTTPException(404, "Contrato PPA no encontrado")
     return c
@@ -297,7 +303,7 @@ def update_contrato(
 @router.delete("/{id}", status_code=204)
 def delete_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     contrato = _get_contrato_or_404(id, db)
-    db.delete(contrato)
+    contrato.deleted_at = func.now()
     db.commit()
 
 

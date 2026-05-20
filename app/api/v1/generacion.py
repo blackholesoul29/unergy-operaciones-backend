@@ -69,7 +69,7 @@ def update_generacion(
     row = db.query(GeneracionDiaria).filter(GeneracionDiaria.id == id).first()
     if not row:
         raise HTTPException(404, "Registro no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(row, k, v)
     db.commit()
     return db.query(GeneracionDiaria).options(selectinload(GeneracionDiaria.proyecto)).filter(GeneracionDiaria.id == id).first()

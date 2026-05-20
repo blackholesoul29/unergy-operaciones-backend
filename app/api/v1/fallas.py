@@ -297,7 +297,7 @@ def update_falla(
     falla = db.query(Falla).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
-    dump = data.model_dump(exclude_none=True)
+    dump = data.model_dump(exclude_unset=True)
     for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()

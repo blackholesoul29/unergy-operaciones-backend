@@ -50,10 +50,12 @@ class AsicSolicitud(Base):
     fecha_envio_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_respuesta_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     numero_radicado: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contrato_ppa_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ppa_contratos.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto | None"] = relationship("Proyecto", back_populates="asic_solicitudes")
+    contrato_ppa: Mapped["PPAContrato | None"] = relationship("PPAContrato", foreign_keys=[contrato_ppa_id])
     cambios: Mapped[list] = relationship("AsicCambioContrato", back_populates="solicitud")
 
 

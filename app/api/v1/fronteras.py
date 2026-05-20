@@ -8,7 +8,7 @@ from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
-    FronteraLecturaOut, FronteraResumen,
+    FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
 )
 from app.services.mgs.quoia_client import QuoiaClient
 
@@ -107,6 +107,10 @@ def fronteras_resumen(
 def list_fronteras(
     proyecto_id: int | None = Query(None),
     estado_operacional: str | None = Query(None, description="Filter by estado_operacional"),
+    tipo_frontera: str | None = Query(None, description="Filter by tipo_frontera"),
+    estado: str | None = Query(None, description="Filter by estado (activa, en_registro, cancelada, en_falla)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -119,7 +123,11 @@ def list_fronteras(
         q = q.filter(Frontera.proyecto_id == proyecto_id)
     if estado_operacional:
         q = q.filter(Frontera.estado_operacional == estado_operacional)
-    return [_to_out(f) for f in q.order_by(Frontera.codigo_frontera).all()]
+    if tipo_frontera:
+        q = q.filter(Frontera.tipo_frontera == tipo_frontera)
+    if estado:
+        q = q.filter(Frontera.estado == estado)
+    return [_to_out(f) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
@@ -181,7 +189,7 @@ def update_frontera(
     )
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in body.model_dump(exclude_unset=True).items():
         setattr(f, k, v)
     db.commit()
     db.refresh(f)
@@ -231,6 +239,45 @@ def get_lecturas(
     if hasta:
         q = q.filter(FronteraLectura.fecha_hora <= datetime.combine(hasta, datetime.max.time()))
     return q.order_by(FronteraLectura.fecha_hora.desc()).limit(limit).all()
+
+
+@router.post("/{frontera_id}/lecturas", response_model=FronteraLecturaOut, status_code=201)
+def create_lectura(
+    frontera_id: int,
+    body: FronteraLecturaCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Create a single meter reading for a frontera."""
+    f = db.query(Frontera).filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None)).first()
+    if not f:
+        raise HTTPException(404, "Frontera no encontrada")
+    obj = FronteraLectura(frontera_id=frontera_id, **body.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+@router.post("/{frontera_id}/lecturas/bulk", response_model=list[FronteraLecturaOut], status_code=201)
+def create_lecturas_bulk(
+    frontera_id: int,
+    body: list[FronteraLecturaCreate],
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Create multiple meter readings for a frontera in a single request."""
+    f = db.query(Frontera).filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None)).first()
+    if not f:
+        raise HTTPException(404, "Frontera no encontrada")
+    if not body:
+        raise HTTPException(422, "La lista de lecturas no puede estar vacía")
+    objects = [FronteraLectura(frontera_id=frontera_id, **item.model_dump()) for item in body]
+    db.add_all(objects)
+    db.commit()
+    for obj in objects:
+        db.refresh(obj)
+    return objects
 
 
 # ── Quoia endpoints ───────────────────────────────────────────────────────────

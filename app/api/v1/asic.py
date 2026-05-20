@@ -45,7 +45,7 @@ def patch_solicitud(
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first()
     if not s:
         raise HTTPException(404, "No encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
     db.commit()
     db.refresh(s)

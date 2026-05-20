@@ -23,6 +23,7 @@ from app.models.liquidaciones import (
     EstadoMandatoEnum, EstadoFacturaEnum,
 )
 from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_table
 from app.models.clientes import Cliente
 from app.schemas.common import PaginatedResponse
 
@@ -79,6 +80,8 @@ class MandatoCreate(BaseModel):
     consecutivo: int | None = None
     beneficiario_nombre: str | None = None
     beneficiario_nit: str | None = None
+    periodo_inicio: date | None = None
+    periodo_fin: date | None = None
     pa_aplica: bool = False
     categoria_contable: str | None = None
     observaciones: str | None = None
@@ -89,6 +92,8 @@ class MandatoUpdate(BaseModel):
     consecutivo: int | None = None
     beneficiario_nombre: str | None = None
     beneficiario_nit: str | None = None
+    periodo_inicio: date | None = None
+    periodo_fin: date | None = None
     estado: str | None = None
     fecha_generacion: date | None = None
     fecha_envio_revisoria: date | None = None
@@ -180,7 +185,7 @@ def _get_liq_or_404(id: int, db: Session) -> Liquidacion:
                 .selectinload(LiquidacionMandato.inversionista)
                 .selectinload(ProyectoInversionista.cliente),
         )
-        .filter(Liquidacion.id == id)
+        .filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None))
         .first()
     )
     if not liq:
@@ -361,7 +366,7 @@ def create_liquidacion(
 
 @router.get("/{id}")
 def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    liq = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto)).filter(Liquidacion.id == id).first()
+    liq = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto)).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
 
@@ -395,10 +400,10 @@ def update_liquidacion(
     db: Session = Depends(get_db),
     _=Depends(_require_liquidaciones_write),
 ):
-    liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(liq, field, value)
     db.commit()
     return {"msg": "Actualizada"}
@@ -406,10 +411,10 @@ def update_liquidacion(
 
 @router.delete("/{id}", status_code=204)
 def delete_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
-    db.delete(liq)
+    liq.deleted_at = func.now()
     db.commit()
 
 
@@ -419,7 +424,7 @@ def limpiar_liquidacion(
     db: Session = Depends(get_db),
     _=Depends(_require_liquidaciones_write),
 ):
-    liq = db.query(Liquidacion).filter(Liquidacion.id == id).first()
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
     if not liq:
         raise HTTPException(404, "Liquidación no encontrada")
 
@@ -442,6 +447,10 @@ def limpiar_liquidacion(
         LiquidacionFactura.liquidacion_id == id
     ).delete(synchronize_session=False)
 
+    db.query(LiquidacionXMDato).filter(
+        LiquidacionXMDato.liquidacion_id == id
+    ).delete(synchronize_session=False)
+
     db.commit()
 
 
@@ -449,7 +458,7 @@ def limpiar_liquidacion(
 
 @router.post("/{id}/costos", status_code=201)
 def add_costo(id: int, body: CostoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
+    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
         raise HTTPException(404, "Liquidación no encontrada")
     costo = LiquidacionCosto(liquidacion_id=id, **body.model_dump())
     db.add(costo)
@@ -465,7 +474,7 @@ def update_costo(id: int, costo_id: int, body: CostoUpdate, db: Session = Depend
     ).first()
     if not costo:
         raise HTTPException(404, "Costo no encontrado")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(costo, field, value)
     db.commit()
     return _serializar_costo(costo)
@@ -486,7 +495,7 @@ def delete_costo(id: int, costo_id: int, db: Session = Depends(get_db), _=Depend
 
 @router.post("/{id}/mandatos", status_code=201)
 def add_mandato(id: int, body: MandatoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
+    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
         raise HTTPException(404, "Liquidación no encontrada")
     mandato = LiquidacionMandato(liquidacion_id=id, **body.model_dump())
     db.add(mandato)
@@ -502,7 +511,7 @@ def update_mandato(id: int, mandato_id: int, body: MandatoUpdate, db: Session = 
     ).first()
     if not mandato:
         raise HTTPException(404, "Mandato no encontrado")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(mandato, field, value)
     db.commit()
     return {"msg": "Mandato actualizado"}
@@ -547,7 +556,7 @@ def update_linea(id: int, mandato_id: int, linea_id: int, body: LineaUpdate, db:
     ).first()
     if not linea:
         raise HTTPException(404, "Línea no encontrada")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(linea, field, value)
     db.commit()
     return _serializar_linea(linea)
@@ -569,7 +578,7 @@ def delete_linea(id: int, mandato_id: int, linea_id: int, db: Session = Depends(
 
 @router.post("/{id}/facturas", status_code=201)
 def add_factura(id: int, body: FacturaCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id).first():
+    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
         raise HTTPException(404, "Liquidación no encontrada")
     factura = LiquidacionFactura(liquidacion_id=id, **body.model_dump())
     db.add(factura)
@@ -585,7 +594,7 @@ def update_factura(id: int, factura_id: int, body: FacturaUpdate, db: Session = 
     ).first()
     if not factura:
         raise HTTPException(404, "Factura no encontrada")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(factura, field, value)
     db.commit()
     return _serializar_factura(factura)
@@ -643,7 +652,7 @@ def vista_por_proyecto(
     liq_q = (
         db.query(Liquidacion)
         .options(selectinload(Liquidacion.proyecto))
-        .filter(Liquidacion.proyecto_id.in_(proy_ids))
+        .filter(Liquidacion.proyecto_id.in_(proy_ids), Liquidacion.deleted_at.is_(None))
     )
     if periodo_desde:
         liq_q = liq_q.filter(Liquidacion.periodo >= periodo_desde)
@@ -770,7 +779,7 @@ def vista_por_inversionista(
 
     liq_por_proyecto: dict[int, list] = {pid: [] for pid in proy_ids}
     if proy_ids:
-        liq_q = db.query(Liquidacion).filter(Liquidacion.proyecto_id.in_(proy_ids))
+        liq_q = db.query(Liquidacion).filter(Liquidacion.proyecto_id.in_(proy_ids), Liquidacion.deleted_at.is_(None))
         if periodo_desde:
             liq_q = liq_q.filter(Liquidacion.periodo >= periodo_desde)
         if periodo_hasta:
@@ -973,15 +982,43 @@ def auto_populate_xm_datos(
     if total_kwh <= 0:
         return {"msg": "Sin generación registrada para este período", "xm_datos": []}
 
-    precio_row = db.execute(text("""
-        SELECT AVG(precio_promedio_kwh) as tarifa_avg
-        FROM precios_bolsa_diario
-        WHERE EXTRACT(YEAR FROM fecha) = :year
-          AND EXTRACT(MONTH FROM fecha) = :month
-          AND precio_promedio_kwh IS NOT NULL
-    """), {"year": year, "month": month}).first()
+    tarifa = 0.0
+    tarifa_source = "bolsa"
 
-    tarifa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else 0.0
+    # For PPA tipo_venta, look up the contracted tariff first
+    if liq.tipo_venta == "ppa":
+        ppa_tarifa_row = (
+            db.query(PPATarifa.tarifa)
+            .join(PPAContrato, PPATarifa.contrato_id == PPAContrato.id)
+            .join(
+                ppa_contrato_proyectos_table,
+                ppa_contrato_proyectos_table.c.contrato_id == PPAContrato.id,
+            )
+            .filter(
+                ppa_contrato_proyectos_table.c.proyecto_id == liq.proyecto_id,
+                PPATarifa.año == year,
+                PPATarifa.mes == month,
+                PPATarifa.tarifa.isnot(None),
+                PPAContrato.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if ppa_tarifa_row and ppa_tarifa_row.tarifa:
+            tarifa = float(ppa_tarifa_row.tarifa)
+            tarifa_source = "ppa"
+
+    # Fall back to bolsa price average if no PPA tariff found or tipo_venta is not PPA
+    if tarifa == 0.0:
+        precio_row = db.execute(text("""
+            SELECT AVG(precio_promedio_kwh) as tarifa_avg
+            FROM precios_bolsa_diario
+            WHERE EXTRACT(YEAR FROM fecha) = :year
+              AND EXTRACT(MONTH FROM fecha) = :month
+              AND precio_promedio_kwh IS NOT NULL
+        """), {"year": year, "month": month}).first()
+
+        tarifa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else 0.0
+        tarifa_source = "bolsa"
 
     frontera_row = db.execute(text("""
         SELECT f.id
@@ -1013,6 +1050,6 @@ def auto_populate_xm_datos(
         db.commit()
 
     return {
-        "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} = ${valor_bruto:,.0f} COP",
+        "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} ({tarifa_source}) = ${valor_bruto:,.0f} COP",
         "xm_datos": [_serializar_xm_dato(dato)],
     }

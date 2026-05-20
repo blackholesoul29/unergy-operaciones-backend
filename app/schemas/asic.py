@@ -35,6 +35,7 @@ class AsicSolicitudOut(BaseModel):
     # Nombre de la planta (resuelto en endpoint)
     proyecto_id: int | None = None
     planta_nombre: str | None = None
+    contrato_ppa_id: int | None = None
 
 
 class AsicSolicitudCreate(BaseModel):
@@ -60,6 +61,7 @@ class AsicSolicitudCreate(BaseModel):
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
     proyecto_id: int | None = None
+    contrato_ppa_id: int | None = None
 
     # XM tracking
     fecha_envio_xm: date | None = None
@@ -90,6 +92,7 @@ class AsicSolicitudUpdate(BaseModel):
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
     proyecto_id: int | None = None
+    contrato_ppa_id: int | None = None
 
     # XM tracking
     fecha_envio_xm: date | None = None

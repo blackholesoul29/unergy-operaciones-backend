@@ -111,7 +111,9 @@ class FronteraBase(BaseModel):
 
 
 class FronteraCreate(FronteraBase):
-    pass
+    frontera_gemela_id: Optional[int] = None
+    agrupada_bajo_id: Optional[int] = None
+    embebida_bajo_id: Optional[int] = None
 
 
 class FronteraUpdate(BaseModel):
@@ -216,6 +218,11 @@ class FronteraUpdate(BaseModel):
     factor_ajuste: Optional[float] = None
     factor_perdidas_frontera_principal: Optional[float] = None
 
+    # Self-referential FK
+    frontera_gemela_id: Optional[int] = None
+    agrupada_bajo_id: Optional[int] = None
+    embebida_bajo_id: Optional[int] = None
+
     # Clasificacion industrial
     codigo_ciiu: Optional[str] = None
     clasificacion_industrial_general: Optional[str] = None
@@ -226,10 +233,26 @@ class FronteraOut(FronteraBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    frontera_gemela_id: Optional[int] = None
+    agrupada_bajo_id: Optional[int] = None
+    embebida_bajo_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
     proyecto_nombre: Optional[str] = None
+
+
+class FronteraLecturaCreate(BaseModel):
+    fuente: str
+    fecha_hora: datetime
+    periodo_inicio: date
+    periodo_fin: date
+    energia_activa_import_kwh: Optional[float] = None
+    energia_activa_export_kwh: Optional[float] = None
+    energia_react_ind_import_kvarh: Optional[float] = None
+    energia_react_ind_export_kvarh: Optional[float] = None
+    energia_react_cap_import_kvarh: Optional[float] = None
+    energia_react_cap_export_kvarh: Optional[float] = None
 
 
 class FronteraLecturaOut(BaseModel):

@@ -105,7 +105,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(p, k, v)
     db.commit()
     return _get_proyecto_or_404(id, db)
@@ -173,7 +173,7 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     _get_proyecto_or_404(id, db)
     it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).first()
     if it:
-        for k, v in data.model_dump(exclude_none=True).items():
+        for k, v in data.model_dump(exclude_unset=True).items():
             setattr(it, k, v)
     else:
         it = ProyectoInfoTecnica(proyecto_id=id, **data.model_dump())
@@ -206,7 +206,7 @@ def update_grupo_panel(id: int, gp_id: int, data: ProyectoGrupoPanelUpdate, db: 
     gp = db.query(ProyectoGrupoPanel).filter_by(id=gp_id, proyecto_id=id).first()
     if not gp:
         raise HTTPException(404, "Grupo de paneles no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(gp, k, v)
     db.commit()
     db.refresh(gp)
@@ -245,7 +245,7 @@ def update_inversor(id: int, inv_id: int, data: ProyectoInversorUpdate, db: Sess
     inv = db.query(ProyectoInversor).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversor no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(inv, k, v)
     db.commit()
     db.refresh(inv)
@@ -284,7 +284,7 @@ def update_contacto(id: int, c_id: int, data: ProyectoContactoUpdate, db: Sessio
     c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
     if not c:
         raise HTTPException(404, "Contacto no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(c, k, v)
     db.commit()
     db.refresh(c)
@@ -335,7 +335,7 @@ def update_inversionista(id: int, inv_id: int, data: ProyectoInversionistaUpdate
     inv = db.query(ProyectoInversionista).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversionista no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(inv, k, v)
     db.commit()
     return db.query(ProyectoInversionista).options(

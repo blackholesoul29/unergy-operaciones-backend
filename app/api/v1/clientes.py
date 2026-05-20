@@ -63,7 +63,7 @@ def get_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current_us
 @router.patch("/{id}", response_model=ClienteOut)
 def update_cliente(id: int, data: ClienteUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     cliente = _get_cliente_or_404(id, db)
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(cliente, k, v)
     db.commit()
     return _get_cliente_or_404(id, db)
@@ -136,7 +136,7 @@ def update_documento(id: int, doc_id: int, data: ClienteDocumentoUpdate, db: Ses
     doc = db.query(ClienteDocumentoComercial).filter_by(id=doc_id, cliente_id=id).first()
     if not doc:
         raise HTTPException(404, "Documento no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(doc, k, v)
     db.commit()
     db.refresh(doc)

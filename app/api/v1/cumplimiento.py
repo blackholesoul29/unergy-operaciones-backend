@@ -1753,3 +1753,144 @@ def diagnostico_enlaces(
     ]
 
     return {"contratos": result, "proyectos_con_sub_project": projects_info}
+
+
+@router.post("/fix-enlaces")
+def fix_enlaces(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Auto-fix missing GESCON assignments for known contracts.
+    Creates AsicSolicitud records where they're missing.
+    """
+    if current_user.email != "juanjose@unergy.io":
+        raise HTTPException(403, "Solo el admin puede ejecutar esta acción")
+
+    from app.models.proyectos import Proyecto
+    import unicodedata
+
+    def norm(s):
+        s = unicodedata.normalize("NFD", str(s or ""))
+        return "".join(c for c in s if unicodedata.category(c) != "Mn").strip().lower()
+
+    projects = db.query(Proyecto).all()
+    proj_by_norm = {norm(p.nombre_comercial): p for p in projects}
+
+    FIXES = [
+        {
+            "contrato_interno": "MNRNEU-2024-006",
+            "nombre_interno": "NEU II - Ibirico",
+            "plantas": [
+                {"nombre_norm": "mgs 0021 ibirico", "pct": 1.0, "duplicado": False,
+                 "fecha_inicio": "2025-03-01", "fecha_fin": "2040-12-31"},
+            ],
+        },
+        {
+            "contrato_interno": "OC.UNER-063-2025",
+            "nombre_interno": "Nitro Energy",
+            "plantas": [
+                {"nombre_norm": "mgs 0040 cacica", "pct": 1.0, "duplicado": False,
+                 "fecha_inicio": "2026-01-01", "fecha_fin": "2040-12-31"},
+                {"nombre_norm": "mgs 0041 piloneras", "pct": 1.0, "duplicado": False,
+                 "fecha_inicio": "2026-01-01", "fecha_fin": "2040-12-31"},
+            ],
+        },
+    ]
+
+    actions = []
+
+    for fix in FIXES:
+        contrato_code = fix["contrato_interno"]
+        for planta_def in fix["plantas"]:
+            proj = proj_by_norm.get(planta_def["nombre_norm"])
+            if not proj:
+                actions.append({"action": "skip", "reason": f"Proyecto '{planta_def['nombre_norm']}' no encontrado en BD",
+                                "contrato": contrato_code})
+                continue
+
+            existing = (
+                db.query(AsicSolicitud)
+                .filter(
+                    AsicSolicitud.contrato_interno == contrato_code,
+                    AsicSolicitud.proyecto_id == proj.id,
+                    AsicSolicitud.tipo_solicitud == TipoSolicitudAsicEnum.registro,
+                    AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+                )
+                .first()
+            )
+
+            if existing:
+                actions.append({"action": "exists", "contrato": contrato_code,
+                                "planta": proj.nombre_comercial, "asic_id": existing.id})
+                continue
+
+            new_asic = AsicSolicitud(
+                proyecto_id=proj.id,
+                contrato_interno=contrato_code,
+                tipo_solicitud=TipoSolicitudAsicEnum.registro,
+                estado_solicitud=EstadoSolicitudAsicEnum.publicado,
+                fecha_inicio=date.fromisoformat(planta_def["fecha_inicio"]),
+                fecha_fin=date.fromisoformat(planta_def["fecha_fin"]),
+                porcentaje_despacho=planta_def["pct"],
+                es_duplicado=planta_def["duplicado"],
+                reemplaza_anterior=False,
+                tipo_mercado="No regulado",
+                nombre_interno=fix["nombre_interno"],
+            )
+            db.add(new_asic)
+            db.flush()
+            actions.append({"action": "created", "contrato": contrato_code,
+                            "planta": proj.nombre_comercial, "sub_project": proj.sub_project,
+                            "asic_id": new_asic.id})
+
+    # Fix Uruaco duplicate in KLIK
+    klik_uruaco = (
+        db.query(AsicSolicitud)
+        .options(joinedload(AsicSolicitud.proyecto))
+        .filter(
+            AsicSolicitud.contrato_interno == "OM-UNERGY-010-2025",
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+        )
+        .all()
+    )
+
+    uruaco_records = [r for r in klik_uruaco if r.proyecto and norm(r.proyecto.nombre_comercial).find("uruaco") >= 0]
+    if len(uruaco_records) > 1:
+        for dup in uruaco_records[1:]:
+            actions.append({"action": "delete_duplicate", "contrato": "OM-UNERGY-010-2025",
+                            "planta": dup.proyecto.nombre_comercial if dup.proyecto else None,
+                            "asic_id": dup.id})
+            db.delete(dup)
+    elif len(uruaco_records) == 1 and uruaco_records[0].es_duplicado:
+        uruaco_records[0].es_duplicado = False
+        actions.append({"action": "unflag_duplicate", "contrato": "OM-UNERGY-010-2025",
+                        "planta": uruaco_records[0].proyecto.nombre_comercial,
+                        "asic_id": uruaco_records[0].id})
+    elif not uruaco_records:
+        proj_uruaco = proj_by_norm.get("minigranja solar uruaco")
+        if proj_uruaco:
+            new_asic = AsicSolicitud(
+                proyecto_id=proj_uruaco.id,
+                contrato_interno="OM-UNERGY-010-2025",
+                tipo_solicitud=TipoSolicitudAsicEnum.registro,
+                estado_solicitud=EstadoSolicitudAsicEnum.publicado,
+                fecha_inicio=date(2026, 4, 1),
+                fecha_fin=date(2041, 3, 31),
+                porcentaje_despacho=1.0,
+                es_duplicado=False,
+                reemplaza_anterior=False,
+                tipo_mercado="No regulado",
+                nombre_interno="KLIK - Uruaco",
+            )
+            db.add(new_asic)
+            db.flush()
+            actions.append({"action": "created", "contrato": "OM-UNERGY-010-2025",
+                            "planta": proj_uruaco.nombre_comercial, "sub_project": proj_uruaco.sub_project,
+                            "asic_id": new_asic.id})
+        else:
+            actions.append({"action": "skip", "reason": "Uruaco no encontrado en BD",
+                            "contrato": "OM-UNERGY-010-2025"})
+
+    db.commit()
+    return {"status": "ok", "actions": actions}

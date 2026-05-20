@@ -336,22 +336,23 @@ def get_resumen(
             token = _unergy_token()
         except Exception as exc:
             logger.error("Auth Unergy failed in resumen: %s", exc)
-            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+            token = None
 
-        sp_list = list(sp_set)
+        if token:
+            sp_list = list(sp_set)
 
-        def _fetch_sp(sp: str) -> tuple:
-            if es_mes_futuro:
-                recent = _fetch_recent_avg(token, sp)
-                avg = recent["avg_daily_mwh"]
-                mwh = round(avg * total_dias, 3) if avg is not None else None
-                return sp, {"mwh": mwh, "n_records": recent["n_days_used"], "ultimo_dia": None}
-            return sp, _fetch_month(token, sp, year, month)
+            def _fetch_sp(sp: str) -> tuple:
+                if es_mes_futuro:
+                    recent = _fetch_recent_avg(token, sp)
+                    avg = recent["avg_daily_mwh"]
+                    mwh = round(avg * total_dias, 3) if avg is not None else None
+                    return sp, {"mwh": mwh, "n_records": recent["n_days_used"], "ultimo_dia": None}
+                return sp, _fetch_month(token, sp, year, month)
 
-        max_workers = min(len(sp_list), 10)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for sp, result in pool.map(_fetch_sp, sp_list):
-                gen_cache[sp] = result
+            max_workers = min(len(sp_list), 10)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for sp, result in pool.map(_fetch_sp, sp_list):
+                    gen_cache[sp] = result
 
     # ── 5. Cálculo por contrato ────────────────────────────────────────────────
     contratos_result = []
@@ -629,20 +630,23 @@ def get_simulador(
 
     sp_list = [p.sub_project for p in plantas_db if p.sub_project]
     avg_cache: dict[str, float | None] = {}
+    gen_warning: str | None = None
     if sp_list:
         try:
             token = _unergy_token()
         except Exception as exc:
             logger.error("Auth Unergy failed in simulador: %s", exc)
-            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+            gen_warning = "No se pudo autenticar con la API de generación. Datos de generación no disponibles."
+            token = None
 
-        def _fa(sp: str):
-            res = _fetch_recent_avg(token, sp)
-            return sp, res.get("avg_daily_mwh")
+        if token:
+            def _fa(sp: str):
+                res = _fetch_recent_avg(token, sp)
+                return sp, res.get("avg_daily_mwh")
 
-        with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
-            for sp, avg in pool.map(_fa, sp_list):
-                avg_cache[sp] = avg
+            with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+                for sp, avg in pool.map(_fa, sp_list):
+                    avg_cache[sp] = avg
 
     plantas_out = []
     for p in plantas_db:
@@ -674,7 +678,10 @@ def get_simulador(
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
         })
 
-    return {"year": year, "month": month, "dias_mes": total_dias, "plantas": plantas_out, "contratos": contratos_out}
+    result = {"year": year, "month": month, "dias_mes": total_dias, "plantas": plantas_out, "contratos": contratos_out}
+    if gen_warning:
+        result["warning"] = gen_warning
+    return result
 
 
 @router.get("/plantas-contratos")
@@ -834,9 +841,9 @@ def get_anual(
             token = _unergy_token()
         except Exception as exc:
             logger.error("Auth Unergy failed in get_anual: %s", exc)
-            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+            token = None
 
-        if need_month:
+        if token and need_month:
             def _ft(task):
                 m, sp = task
                 return task, _fetch_month(token, sp, year, m)
@@ -844,7 +851,7 @@ def get_anual(
                 for task, res in pool.map(_ft, list(need_month)):
                     month_cache[task] = res
 
-        if need_avg:
+        if token and need_avg:
             def _fa(sp):
                 return sp, _fetch_recent_avg(token, sp)
             with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
@@ -1031,39 +1038,47 @@ def get_cumplimiento(
             token = _unergy_token()
         except Exception as exc:
             logger.error("No se pudo autenticar con la API de Unergy: %s", exc)
-            raise HTTPException(503, "No se pudo autenticar con la API de Unergy")
+            token = None
 
-        def _fetch_one(p: dict) -> dict:
-            if es_mes_futuro:
-                recent = _fetch_recent_avg(token, p["sub_project"])
-                avg = recent["avg_daily_mwh"]
-                gen_planta = round(avg * total_dias, 3) if avg is not None else None
-                n_registros = recent["n_days_used"]
-                ultimo_dia = None
-            else:
-                gen = _fetch_month(token, p["sub_project"], year, month)
-                gen_planta = gen["mwh"]
-                n_registros = gen["n_records"]
-                ultimo_dia = gen["ultimo_dia"]
-            # porcentaje_despacho en ASIC es fracción 0-1 (1.0 = 100%)
-            gen_contrato = round(gen_planta * p["pct_despacho"], 3) if gen_planta is not None else None
-            return {
-                "nombre": p["nombre"],
-                "sub_project": p["sub_project"],
-                "pct_despacho": p["pct_despacho"],
-                "es_duplicado": p["es_duplicado"],
-                "gen_planta_mwh": gen_planta,
-                "gen_contrato_mwh": gen_contrato,
-                "n_registros": n_registros,
-                "ultimo_dia": ultimo_dia,
-                "sin_datos": gen_planta is None,
-                "sin_api_id": False,
-            }
+        if token:
+            def _fetch_one(p: dict) -> dict:
+                if es_mes_futuro:
+                    recent = _fetch_recent_avg(token, p["sub_project"])
+                    avg = recent["avg_daily_mwh"]
+                    gen_planta = round(avg * total_dias, 3) if avg is not None else None
+                    n_registros = recent["n_days_used"]
+                    ultimo_dia = None
+                else:
+                    gen = _fetch_month(token, p["sub_project"], year, month)
+                    gen_planta = gen["mwh"]
+                    n_registros = gen["n_records"]
+                    ultimo_dia = gen["ultimo_dia"]
+                gen_contrato = round(gen_planta * p["pct_despacho"], 3) if gen_planta is not None else None
+                return {
+                    "nombre": p["nombre"],
+                    "sub_project": p["sub_project"],
+                    "pct_despacho": p["pct_despacho"],
+                    "es_duplicado": p["es_duplicado"],
+                    "gen_planta_mwh": gen_planta,
+                    "gen_contrato_mwh": gen_contrato,
+                    "n_registros": n_registros,
+                    "ultimo_dia": ultimo_dia,
+                    "sin_datos": gen_planta is None,
+                    "sin_api_id": False,
+                }
 
-        max_workers = min(len(plants_with_id), 10)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(_fetch_one, plants_with_id))
-        plantas_data.extend(results)
+            max_workers = min(len(plants_with_id), 10)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(_fetch_one, plants_with_id))
+            plantas_data.extend(results)
+        else:
+            for p in plants_with_id:
+                plantas_data.append({
+                    "nombre": p["nombre"], "sub_project": p["sub_project"],
+                    "pct_despacho": p["pct_despacho"], "es_duplicado": p["es_duplicado"],
+                    "gen_planta_mwh": None, "gen_contrato_mwh": None,
+                    "n_registros": 0, "ultimo_dia": None, "sin_datos": True, "sin_api_id": False,
+                })
 
     for p in plants_without_id:
         plantas_data.append({

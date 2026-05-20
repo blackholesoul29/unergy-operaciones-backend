@@ -538,17 +538,26 @@ _PENDING_DDLS = [
 
 
 def _run_column_migrations() -> None:
-    for stmt in _PENDING_DDLS:
-        try:
-            if "ADD VALUE" in stmt.upper():
-                # ALTER TYPE … ADD VALUE cannot run inside a transaction block in PostgreSQL
-                with engine.connect() as conn:
-                    conn.execute(text("COMMIT"))
-                    conn.execute(text(stmt))
-            else:
-                with engine.connect() as conn:
+    add_value_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" in s.upper()]
+    regular_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" not in s.upper()]
+
+    # Batch regular DDLs in a single connection (much faster than 200+ connections)
+    if regular_stmts:
+        with engine.connect() as conn:
+            for stmt in regular_stmts:
+                try:
                     conn.execute(text(stmt))
                     conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    print(f"[startup ddl skipped] {e}")
+
+    # ALTER TYPE … ADD VALUE cannot run inside a transaction block in PostgreSQL
+    for stmt in add_value_stmts:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("COMMIT"))
+                conn.execute(text(stmt))
         except Exception as e:
             print(f"[startup ddl skipped] {e}")
 
@@ -930,14 +939,27 @@ def _scheduled_evo_forecast_ingest():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _mgs_scheduler
-    _run_create_tables()
-    _run_column_migrations()
-    _run_catalog_seed()
-    _run_tipo_migration()
-    _run_srv_operacion_sync()
+    import time as _t
+    _t0 = _t.time()
 
-    from app.services.audit import init_audit
-    init_audit()
+    for label, fn in [
+        ("create_tables", _run_create_tables),
+        ("column_migrations", _run_column_migrations),
+        ("catalog_seed", _run_catalog_seed),
+        ("tipo_migration", _run_tipo_migration),
+        ("srv_operacion_sync", _run_srv_operacion_sync),
+    ]:
+        try:
+            fn()
+            print(f"[startup] {label} OK ({_t.time() - _t0:.1f}s)")
+        except Exception as e:
+            print(f"[startup] {label} FAILED: {e}")
+
+    try:
+        from app.services.audit import init_audit
+        init_audit()
+    except Exception as e:
+        print(f"[startup] audit init FAILED: {e}")
 
     if settings.MGS_ENABLED:
         try:

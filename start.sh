@@ -1,7 +1,8 @@
 #!/bin/sh
-set -e
 echo "Running DB init + seed..."
-python init_db.py
+if ! python init_db.py; then
+    echo "WARNING: DB init failed — lifespan will retry DDL"
+fi
 echo "Running Alembic migrations..."
 if ! alembic upgrade head; then
     echo "WARNING: Alembic migration failed — check logs above"

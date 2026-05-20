@@ -19,6 +19,7 @@ USUARIOS = [
     {"email": "victor@unergy.io",   "nombre": "Víctor",                   "rol": "admin"},
     {"email": "camilo@unergy.io",   "nombre": "Camilo",                   "rol": "operaciones"},
     {"email": "danielg@unergy.io",  "nombre": "Daniel G.",                "rol": "operaciones"},
+    {"email": "hillary@unergy.io", "nombre": "Hillary",                  "rol": "admin"},
 ]
 
 CATEGORIAS_FALLA = [

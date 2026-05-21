@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models import AsicSolicitud
+from app.models import AsicSolicitud, PPAContrato
 from app.models.asic import AsicCambioContrato, GesconDiccionario
+from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
@@ -84,6 +85,35 @@ def delete_solicitud(
     )
     if n_cambios:
         razones.append(f"Tiene {n_cambios} cambio(s) de contrato asociados")
+
+    if s.contrato_ppa_id:
+        n_cumpl = (
+            db.query(CumplimientoMensual)
+            .filter(CumplimientoMensual.contrato_ppa_id == s.contrato_ppa_id)
+            .count()
+        )
+        if n_cumpl:
+            ppa = db.query(PPAContrato).filter(PPAContrato.id == s.contrato_ppa_id).first()
+            nombre_ppa = ppa.nombre_interno or ppa.numero_codigo_contrato or f"ID {ppa.id}" if ppa else f"ID {s.contrato_ppa_id}"
+            razones.append(f"Vinculado al contrato PPA \"{nombre_ppa}\" que tiene {n_cumpl} registro(s) de cumplimiento")
+    elif s.contrato_interno:
+        ppa = (
+            db.query(PPAContrato)
+            .filter(
+                PPAContrato.numero_codigo_contrato == s.contrato_interno,
+                PPAContrato.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if ppa:
+            n_cumpl = (
+                db.query(CumplimientoMensual)
+                .filter(CumplimientoMensual.contrato_ppa_id == ppa.id)
+                .count()
+            )
+            if n_cumpl:
+                nombre_ppa = ppa.nombre_interno or ppa.numero_codigo_contrato or f"ID {ppa.id}"
+                razones.append(f"Vinculado al contrato PPA \"{nombre_ppa}\" que tiene {n_cumpl} registro(s) de cumplimiento")
 
     if razones:
         raise HTTPException(409, f"No se puede eliminar: {'; '.join(razones)}.")

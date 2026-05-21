@@ -86,6 +86,7 @@ class Proyecto(Base):
     codigo_cnd: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_fin_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)

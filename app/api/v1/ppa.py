@@ -6,6 +6,7 @@ from sqlalchemy.sql import func
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto
+from app.models.cumplimiento import CumplimientoMensual
 
 logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
@@ -161,7 +162,6 @@ def _compute_visibility(contrato: PPAContrato, db: Session) -> dict:
     min_mwh = float(compromiso.energia_minima) if compromiso and compromiso.energia_minima is not None else None
 
     # Try to get actual generation from cumplimiento_mensual
-    from app.models.cumplimiento import CumplimientoMensual
     cumpl = (
         db.query(CumplimientoMensual)
         .filter(
@@ -303,6 +303,13 @@ def update_contrato(
 @router.delete("/{id}", status_code=204)
 def delete_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     contrato = _get_contrato_or_404(id, db)
+    tiene_liquidaciones = (
+        db.query(CumplimientoMensual)
+        .filter(CumplimientoMensual.contrato_ppa_id == contrato.id)
+        .first()
+    )
+    if tiene_liquidaciones:
+        raise HTTPException(409, "No se puede eliminar: el contrato tiene liquidaciones asociadas.")
     contrato.deleted_at = func.now()
     db.commit()
 

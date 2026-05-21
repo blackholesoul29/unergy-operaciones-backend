@@ -412,18 +412,20 @@ def get_resumen(
 
         val_b = gen_proy_c if (es_mes_actual or es_mes_futuro) else gen_total_c
 
-        if min_mwh is not None and max_mwh is not None:
+        if min_mwh is not None or max_mwh is not None:
             has_any_compromisos = True
-            if val_b < min_mwh:
+            effective_max = max_mwh if max_mwh is not None else float('inf')
+            effective_min = min_mwh if min_mwh is not None else 0.0
+            if val_b < effective_min:
                 estado_c = "deficit"
-            elif val_b > max_mwh:
+            elif val_b > effective_max:
                 estado_c = "excedente"
             else:
                 estado_c = "ok"
-            compras_c = round(max(0.0, min_mwh - val_b), 3)
-            excedentes_c = round(max(0.0, val_b - max_mwh), 3)
-            total_min += min_mwh
-            total_max += max_mwh
+            compras_c = round(max(0.0, effective_min - val_b), 3)
+            excedentes_c = round(max(0.0, val_b - effective_max), 3) if max_mwh is not None else 0.0
+            total_min += effective_min
+            total_max += max_mwh if max_mwh is not None else 0.0
         else:
             estado_c = "sin_compromisos"
             compras_c = None
@@ -456,15 +458,15 @@ def get_resumen(
     total_proy = round(total_proy, 3)
     val_total = total_proy if (es_mes_actual or es_mes_futuro) else total_gen
 
-    if has_any_compromisos and total_max > 0:
-        if val_total < total_min:
+    if has_any_compromisos and (total_min > 0 or total_max > 0):
+        if total_min > 0 and val_total < total_min:
             total_estado = "deficit"
-        elif val_total > total_max:
+        elif total_max > 0 and val_total > total_max:
             total_estado = "excedente"
         else:
             total_estado = "ok"
-        total_compras = round(max(0.0, total_min - val_total), 3)
-        total_excedentes = round(max(0.0, val_total - total_max), 3)
+        total_compras = round(max(0.0, total_min - val_total), 3) if total_min > 0 else 0.0
+        total_excedentes = round(max(0.0, val_total - total_max), 3) if total_max > 0 else 0.0
     else:
         total_estado = "sin_compromisos"
         total_compras = None
@@ -928,11 +930,13 @@ def get_anual(
             gen_proy = None
 
         val = gen_proy if (is_current or is_future) else gen_total
-        if min_mwh is not None and max_mwh is not None:
-            if val < min_mwh:
-                estado, compras, excedentes = "deficit", round(max(0., min_mwh - val), 3), 0.
-            elif val > max_mwh:
-                estado, compras, excedentes = "excedente", 0., round(max(0., val - max_mwh), 3)
+        if min_mwh is not None or max_mwh is not None:
+            effective_min = min_mwh if min_mwh is not None else 0.0
+            effective_max = max_mwh if max_mwh is not None else float('inf')
+            if val < effective_min:
+                estado, compras, excedentes = "deficit", round(max(0., effective_min - val), 3), 0.
+            elif val > effective_max:
+                estado, compras, excedentes = "excedente", 0., round(max(0., val - effective_max), 3)
             else:
                 estado, compras, excedentes = "ok", 0., 0.
         else:
@@ -1127,16 +1131,18 @@ def get_cumplimiento(
 
     val_balance = gen_proyectada if (es_mes_actual or es_mes_futuro) else gen_total
 
-    if min_mwh is not None and max_mwh is not None:
-        if val_balance < min_mwh:
+    if min_mwh is not None or max_mwh is not None:
+        effective_min = min_mwh if min_mwh is not None else 0.0
+        effective_max = max_mwh if max_mwh is not None else float('inf')
+        if val_balance < effective_min:
             estado = "deficit"
-        elif val_balance > max_mwh:
+        elif val_balance > effective_max:
             estado = "excedente"
         else:
             estado = "ok"
-        compras = round(max(0.0, min_mwh - val_balance), 3)
-        excedentes = round(max(0.0, val_balance - max_mwh), 3)
-        margen = round(max_mwh - val_balance, 3)
+        compras = round(max(0.0, effective_min - val_balance), 3)
+        excedentes = round(max(0.0, val_balance - effective_max), 3) if max_mwh is not None else 0.0
+        margen = round(effective_max - val_balance, 3) if max_mwh is not None else None
     else:
         estado = "sin_compromisos"
         compras = excedentes = margen = None

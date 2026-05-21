@@ -107,6 +107,8 @@ _PENDING_DDLS = [
     # migration 010 — liquidaciones module columns
     "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS estado_resultados_url VARCHAR(1000)",
     "ALTER TABLE liquidacion_mandatos ADD COLUMN IF NOT EXISTS inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL",
+    "ALTER TABLE liquidacion_mandatos ADD COLUMN IF NOT EXISTS periodo_inicio DATE",
+    "ALTER TABLE liquidacion_mandatos ADD COLUMN IF NOT EXISTS periodo_fin DATE",
     "ALTER TABLE liquidacion_costos ADD COLUMN IF NOT EXISTS soporte_url VARCHAR(1000)",
     "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS nro_soporte VARCHAR(100)",
     "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS soporte_url VARCHAR(1000)",

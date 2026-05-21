@@ -1,6 +1,9 @@
 from datetime import date, datetime, timedelta, timezone
+import io
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
@@ -324,3 +327,162 @@ def quoia_meter_curves(meter_id: int, _=Depends(get_current_user)):
             "eae": eae,
         })
     return {"meter_id": meter_id, "curves": summary}
+
+
+# ── Diagrama Fasorial ──────────────────────────────────────────────────────────
+
+class FasorialInput(BaseModel):
+    titulo: str
+    vp1: float
+    vp2: float
+    vp3: float
+    cp1: float
+    cp2: float
+    cp3: float
+
+
+@router.post("/fasorial/generar", tags=["Fronteras"])
+def generar_fasorial(
+    body: FasorialInput,
+    _=Depends(get_current_user),
+):
+    """Genera y retorna el diagrama fasorial trifásico como imagen JPEG."""
+    try:
+        import numpy as np
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        from matplotlib.lines import Line2D
+    except ImportError as exc:
+        raise HTTPException(500, f"matplotlib no disponible: {exc}")
+
+    vp = [body.vp1, body.vp2, body.vp3]
+    cp = [body.cp1, body.cp2, body.cp3]
+
+    ang_v    = [90, 330, 210]
+    ang_c    = list(ang_v)
+
+    colors_v = ["#E84040", "#2ECC71", "#3B82F6"]
+    colors_c = ["#FF8C8C", "#7EEFC1", "#93C5FD"]
+    labels_v = ["V₁ (R)", "V₂ (S)", "V₃ (T)"]
+    labels_c = ["I₁ (R)", "I₂ (S)", "I₃ (T)"]
+
+    v_max   = max(vp);  c_max = max(cp)
+    radius  = 1.0;      c_scale = 0.55
+    v_norm  = [v / v_max * radius for v in vp]
+    c_norm  = [c / c_max * c_scale for c in cp]
+
+    fig, ax = plt.subplots(figsize=(11, 11), dpi=150, facecolor="#0D1117")
+    ax.set_facecolor("#0D1117")
+    ax.set_aspect("equal")
+
+    for r in np.linspace(0.25, 1.15, 4):
+        ax.add_patch(plt.Circle((0, 0), r, color="#2C3E50", lw=0.6,
+                                linestyle="--", fill=False, zorder=1))
+
+    for deg in range(0, 360, 30):
+        rad = np.radians(deg)
+        ax.plot([0, 1.18 * np.cos(rad)], [0, 1.18 * np.sin(rad)],
+                color="#2C3E50", lw=0.5, zorder=1)
+        ax.text(1.22 * np.cos(rad), 1.22 * np.sin(rad), f"{deg}°",
+                ha="center", va="center", fontsize=6.5,
+                color="#5B7A99", fontfamily="monospace")
+
+    ax.axhline(0, color="#3D5166", lw=0.8, zorder=1)
+    ax.axvline(0, color="#3D5166", lw=0.8, zorder=1)
+
+    for i in range(3):
+        rad = np.radians(ang_v[i])
+        xv, yv = v_norm[i] * np.cos(rad), v_norm[i] * np.sin(rad)
+        ax.annotate("", xy=(xv, yv), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle="->", color=colors_v[i],
+                                   lw=2.8, mutation_scale=20))
+        off = 0.09
+        ax.text(xv + off * np.cos(rad), yv + off * np.sin(rad),
+                f"{labels_v[i]}\n{vp[i]:,.2f} V",
+                ha="center", va="center", fontsize=9,
+                color=colors_v[i], fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#151C26",
+                          edgecolor=colors_v[i], alpha=0.85, lw=1))
+
+    for i in range(3):
+        rad = np.radians(ang_c[i])
+        xi, yi = c_norm[i] * np.cos(rad), c_norm[i] * np.sin(rad)
+        ax.annotate("", xy=(xi, yi), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle="->", color=colors_c[i],
+                                   lw=1.8, mutation_scale=16,
+                                   linestyle="dashed"))
+        off2 = -0.12
+        ax.text(xi + off2 * np.cos(rad), yi + off2 * np.sin(rad),
+                f"{labels_c[i]}\n{cp[i]:.3f} A",
+                ha="center", va="center", fontsize=8,
+                color=colors_c[i],
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0D1117",
+                          edgecolor=colors_c[i], alpha=0.75, lw=0.8))
+
+    ax.plot(0, 0, "o", color="white", ms=5, zorder=10)
+
+    lim = 1.40
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.axis("off")
+
+    ax.add_patch(mpatches.FancyBboxPatch(
+        (-lim * 0.97, -lim * 0.97), lim * 1.94, lim * 1.94,
+        boxstyle="round,pad=0.02", linewidth=2,
+        edgecolor="#1E3A5F", facecolor="none", zorder=20))
+
+    fig.text(0.5, 0.965, body.titulo.upper(), ha="center", va="top",
+             fontsize=22, fontweight="bold", color="#FFFFFF",
+             fontfamily="DejaVu Sans", transform=fig.transFigure)
+    fig.text(0.5, 0.930, "Diagrama Fasorial — Sistema Trifásico",
+             ha="center", va="top", fontsize=11, color="#7EB4E2",
+             transform=fig.transFigure)
+    fig.add_artist(Line2D([0.08, 0.92], [0.918, 0.918],
+                   transform=fig.transFigure, color="#1E4D7B", lw=1.5))
+
+    anomalias = [labels_v[i] for i in range(3) if vp[i] < v_max * 0.10]
+    if anomalias:
+        msg = "⚠  " + ", ".join(anomalias) + " — Posible falla o pérdida de fase"
+        fig.text(0.5, 0.905, msg, ha="center", va="top", fontsize=9.5,
+                 color="#FFD700",
+                 bbox=dict(boxstyle="round,pad=0.35", facecolor="#2A1A00",
+                           edgecolor="#FFD700", alpha=0.9, lw=1.2),
+                 transform=fig.transFigure)
+
+    legend_items = []
+    for i in range(3):
+        legend_items.append(mpatches.Patch(color=colors_v[i],
+                             label=f"{labels_v[i]}: {vp[i]:,.2f} V"))
+    for i in range(3):
+        legend_items.append(mpatches.Patch(color=colors_c[i],
+                             label=f"{labels_c[i]}: {cp[i]:.3f} A"))
+
+    ax.legend(handles=legend_items, loc="lower left",
+              bbox_to_anchor=(0.01, 0.01), fontsize=8.5,
+              framealpha=0.7, facecolor="#111827",
+              edgecolor="#1E4D7B", labelcolor="white", ncol=2)
+
+    fig.text(0.5, 0.035,
+             "Ángulos: V₁=90° | V₂=330° | V₃=210°   •   Unergy",
+             ha="center", va="bottom", fontsize=7.5,
+             color="#4A6B8A", transform=fig.transFigure)
+
+    fig.text(0.5, 0.5, "UNERGY", ha="center", va="center",
+             fontsize=72, fontweight="bold", color="#FFFFFF",
+             alpha=0.045, rotation=30, transform=fig.transFigure,
+             fontfamily="DejaVu Sans", zorder=0)
+
+    plt.tight_layout(rect=[0, 0.05, 1, 0.89])
+
+    buf = io.BytesIO()
+    plt.savefig(buf, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), format="jpeg")
+    plt.close(fig)
+    buf.seek(0)
+
+    filename = body.titulo.replace(" ", "_").replace("/", "-") + "_Fasorial.jpg"
+    return StreamingResponse(
+        buf,
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -383,7 +383,11 @@ def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_l
         .all()
     )
 
-    xm_datos = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == id).all()
+    try:
+        xm_datos = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == id).all()
+    except Exception:
+        db.rollback()
+        xm_datos = []
 
     data = _serializar_liquidacion_base(liq)
     data["costos"] = [_serializar_costo(c) for c in costos]
@@ -447,9 +451,12 @@ def limpiar_liquidacion(
         LiquidacionFactura.liquidacion_id == id
     ).delete(synchronize_session=False)
 
-    db.query(LiquidacionXMDato).filter(
-        LiquidacionXMDato.liquidacion_id == id
-    ).delete(synchronize_session=False)
+    try:
+        db.query(LiquidacionXMDato).filter(
+            LiquidacionXMDato.liquidacion_id == id
+        ).delete(synchronize_session=False)
+    except Exception:
+        db.rollback()
 
     db.commit()
 
@@ -856,11 +863,14 @@ def resumen_liquidaciones(
     xm_datos_count = 0
     if liqs:
         liq_ids = [l.id for l in liqs]
-        xm_datos_count = (
-            db.query(func.count(LiquidacionXMDato.id))
-            .filter(LiquidacionXMDato.liquidacion_id.in_(liq_ids))
-            .scalar() or 0
-        )
+        try:
+            xm_datos_count = (
+                db.query(func.count(LiquidacionXMDato.id))
+                .filter(LiquidacionXMDato.liquidacion_id.in_(liq_ids))
+                .scalar() or 0
+            )
+        except Exception:
+            db.rollback()
 
     return {
         "periodo": periodo.isoformat(),

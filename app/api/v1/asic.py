@@ -65,6 +65,33 @@ def create_solicitud(
     return _to_out(db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == s.id).first())
 
 
+@router.delete("/{id}", status_code=204)
+def delete_solicitud(
+    id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    s = db.query(AsicSolicitud).filter(AsicSolicitud.id == id).first()
+    if not s:
+        raise HTTPException(404, "Registro GESCON no encontrado")
+
+    razones = []
+
+    n_cambios = (
+        db.query(AsicCambioContrato)
+        .filter(AsicCambioContrato.solicitud_id == id)
+        .count()
+    )
+    if n_cambios:
+        razones.append(f"Tiene {n_cambios} cambio(s) de contrato asociados")
+
+    if razones:
+        raise HTTPException(409, f"No se puede eliminar: {'; '.join(razones)}.")
+
+    db.delete(s)
+    db.commit()
+
+
 @router.post("/cambios", response_model=AsicCambioOut, status_code=201)
 def create_cambio(
     data: AsicCambioCreate,

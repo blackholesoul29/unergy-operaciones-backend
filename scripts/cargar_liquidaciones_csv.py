@@ -243,7 +243,13 @@ def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
         return None
     norm = normalizar(nombre)
     for inv in inversionistas_db:
-        cn = normalizar(inv.get("cliente_nombre") or "")
+        nombre_inv = (
+            inv.get("cliente_nombre") or
+            inv.get("razon_social_nombre") or
+            inv.get("nombre") or
+            inv.get("razon_social") or ""
+        )
+        cn = normalizar(nombre_inv)
         if cn and (cn in norm or norm in cn):
             return inv
         palabras = [w for w in norm.split() if len(w) > 4]

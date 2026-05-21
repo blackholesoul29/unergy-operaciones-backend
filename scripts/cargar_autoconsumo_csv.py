@@ -244,13 +244,7 @@ class API:
 
 def limpiar_liq(api, liq_id):
     print(f"    Limpiando liquidacion {liq_id}...")
-    detalle = api.get(f"/api/v1/liquidaciones/{liq_id}")
-    for m in detalle.get("mandatos", []):
-        api.delete(f"/api/v1/liquidaciones/{liq_id}/mandatos/{m['id']}")
-    for f in detalle.get("facturas", []):
-        api.delete(f"/api/v1/liquidaciones/{liq_id}/facturas/{f['id']}")
-    for c in detalle.get("costos", []):
-        api.delete(f"/api/v1/liquidaciones/{liq_id}/costos/{c['id']}")
+    api.delete(f"/api/v1/liquidaciones/{liq_id}/limpiar")
 
 
 # ── Carga de un mes ───────────────────────────────────────────────────────────

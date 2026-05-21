@@ -76,7 +76,7 @@ CLIENTES = [
 # ── 2. PROYECTOS ──────────────────────────────────────────────────────────────
 
 PROYECTOS = [
-    {"topic_slug": "mgs0012lareserva",   "nombre_comercial": "Minigranja Solar La Palma",           "potencia_instalada_kwp": 990,  "cantidad_total_paneles": 2196,  "produccion_especifica_kwh_kwp": 4.38, "cliente_nit": "900.528.346-1"},
+    {"topic_slug": "mgs0012lareserva",   "nombre_comercial": "MGS 0012 La Reserva",           "potencia_instalada_kwp": 990,  "cantidad_total_paneles": 2196,  "produccion_especifica_kwh_kwp": 4.38, "cliente_nit": "900.528.346-1"},
     {"topic_slug": "agustin_1",          "nombre_comercial": "GD Agustin 1",                        "potencia_instalada_kwp": 990,  "cantidad_total_paneles": None,  "produccion_especifica_kwh_kwp": None, "cliente_nit": "901.497.656-2"},
     {"topic_slug": "astrolumen",         "nombre_comercial": "GD Astrolumen La Garita",              "potencia_instalada_kwp": 990,  "cantidad_total_paneles": 10000, "produccion_especifica_kwh_kwp": None, "cliente_nit": "900.623.254-2"},
     {"topic_slug": "baraya",             "nombre_comercial": "Minigranja Solar Baraya",              "potencia_instalada_kwp": 996,  "cantidad_total_paneles": 2496,  "produccion_especifica_kwh_kwp": 4.97, "cliente_nit": "901.372.693-8"},

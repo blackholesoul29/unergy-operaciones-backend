@@ -584,12 +584,11 @@ def _run_column_migrations() -> None:
     add_value_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" in s.upper()]
     regular_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" not in s.upper()]
 
-    # ALTER TYPE … ADD VALUE must run first (outside a transaction block) so new
-    # enum values exist before any regular DDL that references them.
+    # ALTER TYPE … ADD VALUE must run outside a transaction block in PostgreSQL.
+    # Run first so new enum values exist before any regular DDL that references them.
     for stmt in add_value_stmts:
         try:
-            with engine.connect() as conn:
-                conn.execute(text("COMMIT"))
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 conn.execute(text(stmt))
         except Exception as e:
             print(f"[startup ddl skipped] {e}")

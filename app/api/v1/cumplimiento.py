@@ -658,9 +658,13 @@ def get_simulador(
 
     today = date.today()
     es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
+    es_mes_actual = (year == today.year and month == today.month)
+    dia_actual = today.day if es_mes_actual else total_dias
+    dias_restantes = (total_dias - dia_actual) if es_mes_actual else 0
 
     sp_list = [p.sub_project for p in plantas_db if p.sub_project]
     gen_cache: dict[str, float | None] = {}
+    avg_cache_sim: dict[str, float | None] = {}
     gen_warning: str | None = None
     if sp_list:
         try:
@@ -673,17 +677,29 @@ def get_simulador(
         if token:
             if es_mes_futuro:
                 def _fa(sp: str):
-                    res = _fetch_recent_avg(token, sp)
+                    res = _fetch_recent_avg(token, sp, n_days=30)
                     avg = res.get("avg_daily_mwh")
                     return sp, round(avg * total_dias, 3) if avg is not None else None
+
+                with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+                    for sp, mwh in pool.map(_fa, sp_list):
+                        gen_cache[sp] = mwh
+            elif es_mes_actual:
+                def _fm(sp: str):
+                    return sp, _fetch_month(token, sp, year, month), _fetch_recent_avg(token, sp, n_days=30)
+
+                with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+                    for sp, month_res, avg_res in pool.map(_fm, sp_list):
+                        gen_cache[sp] = month_res.get("mwh")
+                        avg_cache_sim[sp] = avg_res.get("avg_daily_mwh")
             else:
-                def _fa(sp: str):
+                def _fp(sp: str):
                     res = _fetch_month(token, sp, year, month)
                     return sp, res.get("mwh")
 
-            with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
-                for sp, mwh in pool.map(_fa, sp_list):
-                    gen_cache[sp] = mwh
+                with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+                    for sp, mwh in pool.map(_fp, sp_list):
+                        gen_cache[sp] = mwh
 
     plantas_by_id = {p.id: p for p in plantas_db}
     plantas_out = []
@@ -696,6 +712,11 @@ def get_simulador(
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
             "month_mwh": gen_cache.get(p.sub_project),
+            "month_mwh_proyectado": (
+                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
+                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
+                else gen_cache.get(p.sub_project)
+            ),
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
             "es_duplicado": False,
@@ -714,6 +735,11 @@ def get_simulador(
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
             "month_mwh": gen_cache.get(p.sub_project),
+            "month_mwh_proyectado": (
+                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
+                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
+                else gen_cache.get(p.sub_project)
+            ),
             "contrato_id": dup["contrato_id"],
             "pct_despacho": dup["pct_despacho"],
             "es_duplicado": True,
@@ -734,7 +760,12 @@ def get_simulador(
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
         })
 
-    result = {"year": year, "month": month, "dias_mes": total_dias, "es_mes_futuro": es_mes_futuro, "plantas": plantas_out, "contratos": contratos_out}
+    result = {
+        "year": year, "month": month, "dias_mes": total_dias,
+        "es_mes_futuro": es_mes_futuro, "es_mes_actual": es_mes_actual,
+        "dia_actual": dia_actual, "dias_restantes": dias_restantes,
+        "plantas": plantas_out, "contratos": contratos_out,
+    }
     if gen_warning:
         result["warning"] = gen_warning
     return result

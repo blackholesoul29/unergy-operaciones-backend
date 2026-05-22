@@ -876,10 +876,14 @@ def get_anual(
     need_month: set = set()
     need_avg: set = set()
     for m in range(1, 13):
+        is_current = (year == today.year and m == today.month)
         is_future = (year > today.year) or (year == today.year and m > today.month)
         for asic in gescon_per_month[m]:
             if asic.proyecto and asic.proyecto.sub_project:
                 if is_future:
+                    need_avg.add(asic.proyecto.sub_project)
+                elif is_current:
+                    need_month.add((m, asic.proyecto.sub_project))
                     need_avg.add(asic.proyecto.sub_project)
                 else:
                     need_month.add((m, asic.proyecto.sub_project))
@@ -904,7 +908,7 @@ def get_anual(
 
         if token and need_avg:
             def _fa(sp):
-                return sp, _fetch_recent_avg(token, sp)
+                return sp, _fetch_recent_avg(token, sp, n_days=30)
             with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
                 for sp, res in pool.map(_fa, list(need_avg)):
                     avg_cache[sp] = res.get("avg_daily_mwh")
@@ -966,14 +970,39 @@ def get_anual(
 
         gen_total = round(gen_total, 3)
         bolsa_dup_total = round(bolsa_dup_total, 3)
-        if is_current and dia_actual > 0 and gen_total > 0:
-            gen_proy: Optional[float] = round(gen_total * total_dias / dia_actual, 3)
+
+        # Projection based on 30-day rolling average
+        gen_cierre: Optional[float] = None
+        if is_current:
+            dias_restantes = total_dias - dia_actual
+            avg_30d_total = 0.0
+            avg_available = False
+            for asic in gescon_per_month[m]:
+                proyecto = asic.proyecto
+                sp = proyecto.sub_project if proyecto else None
+                if not sp:
+                    continue
+                pct = float(asic.porcentaje_despacho or 0)
+                is_dup = bool(asic.es_duplicado)
+                if is_dup:
+                    continue
+                eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
+                eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
+                dias_activos = max(0, (eff_end - eff_start).days + 1)
+                proration = dias_activos / total_dias
+                avg_daily = avg_cache.get(sp)
+                if avg_daily is not None:
+                    avg_30d_total += avg_daily * pct * proration
+                    avg_available = True
+            if avg_available and gen_total >= 0:
+                gen_cierre = round(gen_total + avg_30d_total * dias_restantes, 3)
+            gen_proy = gen_cierre
         elif is_future:
-            gen_proy = gen_total
+            gen_proy = gen_total if gen_total > 0 else None
         else:
             gen_proy = None
 
-        val = gen_proy if (is_current or is_future) else gen_total
+        val = gen_cierre if is_current and gen_cierre is not None else (gen_proy if is_future else gen_total)
         if min_mwh is not None or max_mwh is not None:
             effective_min = min_mwh if min_mwh is not None else 0.0
             effective_max = max_mwh if max_mwh is not None else float('inf')
@@ -986,15 +1015,18 @@ def get_anual(
         else:
             estado, compras, excedentes = "sin_compromisos", None, None
 
-        tipo = "proyeccion_historica" if is_future else ("proyeccion_lineal" if is_current else "real")
+        tipo = "proyeccion_historica" if is_future else ("mes_actual" if is_current else "real")
         meses.append({
             "month": m,
             "gen_mwh": gen_total,
             "gen_proyectada_mwh": gen_proy,
+            "gen_proyectada_cierre": gen_cierre,
             "min_mwh": min_mwh,
             "max_mwh": max_mwh,
             "estado": estado,
             "tipo_datos": tipo,
+            "dia_actual": dia_actual if is_current else None,
+            "dias_restantes": (total_dias - dia_actual) if is_current else None,
             "compras_bolsa_mwh": compras,
             "excedentes_bolsa_mwh": excedentes,
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_total if bolsa_dup_total > 0 else None,

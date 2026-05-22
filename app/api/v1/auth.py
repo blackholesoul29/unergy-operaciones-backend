@@ -1,8 +1,9 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import hashlib
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from app.core.database import get_db
@@ -12,10 +13,37 @@ from app.schemas.usuarios import TokenResponse, UsuarioOut, UsuarioCreate, Usuar
 from app.core.security import hash_password
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Usuario:
+def get_current_user(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Usuario:
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        row = db.execute(
+            text("SELECT usuario_id FROM api_keys WHERE key_hash = :h AND activo = TRUE"),
+            {"h": key_hash},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API Key inválida")
+        db.execute(
+            text("UPDATE api_keys SET ultimo_uso = :now WHERE key_hash = :h"),
+            {"h": key_hash, "now": datetime.now(timezone.utc)},
+        )
+        db.commit()
+        user = db.query(Usuario).filter(Usuario.id == row.usuario_id).first()
+        if not user or not user.activo:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no encontrado")
+        from app.services.audit import set_audit_user
+        set_audit_user(user.id, user.nombre)
+        return user
+
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token requerido")
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")

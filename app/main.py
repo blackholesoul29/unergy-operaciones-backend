@@ -577,6 +577,22 @@ _PENDING_DDLS = [
          AND target.estado_solicitud = 'publicado'
          AND target.tipo_solicitud IN ('registro', 'modificacion')
          AND (term.proyecto_id IS NULL OR target.proyecto_id = term.proyecto_id)""",
+    # migration — api_keys: API token management for external integrations
+    """CREATE TABLE IF NOT EXISTS api_keys (
+        id BIGSERIAL PRIMARY KEY,
+        usuario_id BIGINT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        nombre VARCHAR(255) NOT NULL,
+        key_hash VARCHAR(255) NOT NULL,
+        key_prefix VARCHAR(12) NOT NULL,
+        scopes JSONB NOT NULL DEFAULT '["read"]'::jsonb,
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        ultimo_uso TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_api_keys_usuario ON api_keys (usuario_id)",
+    "CREATE INDEX IF NOT EXISTS ix_api_keys_prefix ON api_keys (key_prefix)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys (key_hash)",
 ]
 
 

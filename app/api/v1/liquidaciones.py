@@ -1,3 +1,5 @@
+import logging
+import traceback
 from datetime import date
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,6 +7,8 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -389,12 +393,16 @@ def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_l
         db.rollback()
         xm_datos = []
 
-    data = _serializar_liquidacion_base(liq)
-    data["costos"] = [_serializar_costo(c) for c in costos]
-    data["facturas"] = [_serializar_factura(f) for f in facturas]
-    data["mandatos"] = [_serializar_mandato(m) for m in mandatos]
-    data["xm_datos"] = [_serializar_xm_dato(x) for x in xm_datos]
-    return data
+    try:
+        data = _serializar_liquidacion_base(liq)
+        data["costos"] = [_serializar_costo(c) for c in costos]
+        data["facturas"] = [_serializar_factura(f) for f in facturas]
+        data["mandatos"] = [_serializar_mandato(m) for m in mandatos]
+        data["xm_datos"] = [_serializar_xm_dato(x) for x in xm_datos]
+        return data
+    except Exception as exc:
+        logger.error("Error serializing liquidacion %s: %s\n%s", id, exc, traceback.format_exc())
+        raise HTTPException(500, f"Error interno: {exc}")
 
 
 @router.patch("/{id}")
@@ -744,16 +752,20 @@ def vista_por_proyecto(
             "inversionistas": inversionistas_rows,
         })
 
-    result = []
-    for proy in todos_proyectos:
+    try:
+      result = []
+      for proy in todos_proyectos:
         result.append({
             "proyecto_id": proy.id,
             "proyecto_nombre": proy.nombre_comercial,
-            "estado": proy.estado,
+            "estado": str(proy.estado) if proy.estado else None,
             "inversionistas_registrados": inv_registrados_map.get(proy.id, []),
             "liquidaciones": liq_por_proyecto.get(proy.id, []),
         })
-    return result
+      return result
+    except Exception as exc:
+      logger.error("Error in vista_por_proyecto: %s\n%s", exc, traceback.format_exc())
+      raise HTTPException(500, f"Error interno: {exc}")
 
 
 # ── Vista Por Inversionista ────────────────────────────────────────────────────

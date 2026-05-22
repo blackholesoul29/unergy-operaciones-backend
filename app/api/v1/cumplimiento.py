@@ -627,19 +627,26 @@ def get_simulador(
                 compra_proyecto_ids.add(proy.id)
                 compra_nombre_map[proy.id] = cc.nombre_interno or cc.numero_codigo_contrato or f"Compra {cc.id}"
 
-    proyecto_a_contrato: dict[int, dict] = {}
+    proyecto_primary: dict[int, dict] = {}
+    proyecto_dups: list[dict] = []
     assigned_ids: set[int] = set()
     for c in contratos_venta:
         if not c.numero_codigo_contrato:
             continue
         for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
-            if asic.proyecto_id:
-                proyecto_a_contrato[asic.proyecto_id] = {
-                    "contrato_id": c.id,
-                    "pct_despacho": float(asic.porcentaje_despacho or 0),
-                    "es_duplicado": bool(asic.es_duplicado),
-                }
-                assigned_ids.add(c.id)
+            if not asic.proyecto_id:
+                continue
+            entry = {
+                "contrato_id": c.id,
+                "pct_despacho": float(asic.porcentaje_despacho or 0),
+                "es_duplicado": bool(asic.es_duplicado),
+                "proyecto_id": asic.proyecto_id,
+            }
+            if asic.es_duplicado:
+                proyecto_dups.append(entry)
+            else:
+                proyecto_primary[asic.proyecto_id] = entry
+            assigned_ids.add(c.id)
 
     comp_map = {
         r.contrato_id: r
@@ -669,9 +676,10 @@ def get_simulador(
                 for sp, avg in pool.map(_fa, sp_list):
                     avg_cache[sp] = avg
 
+    plantas_by_id = {p.id: p for p in plantas_db}
     plantas_out = []
     for p in plantas_db:
-        asn = proyecto_a_contrato.get(p.id)
+        asn = proyecto_primary.get(p.id)
         plantas_out.append({
             "id": p.id,
             "nombre": p.nombre_comercial,
@@ -681,9 +689,27 @@ def get_simulador(
             "avg_daily_mwh": avg_cache.get(p.sub_project),
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
-            "es_duplicado": asn["es_duplicado"] if asn else False,
+            "es_duplicado": False,
             "comprado_por_unergy": p.id in compra_proyecto_ids,
             "contrato_compra_nombre": compra_nombre_map.get(p.id),
+        })
+
+    for dup in proyecto_dups:
+        p = plantas_by_id.get(dup["proyecto_id"])
+        if not p:
+            continue
+        plantas_out.append({
+            "id": f"{p.id}_dup_{dup['contrato_id']}",
+            "nombre": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "tipo_proyecto": p.tipo_proyecto,
+            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "avg_daily_mwh": avg_cache.get(p.sub_project),
+            "contrato_id": dup["contrato_id"],
+            "pct_despacho": dup["pct_despacho"],
+            "es_duplicado": True,
+            "comprado_por_unergy": False,
+            "contrato_compra_nombre": None,
         })
 
     contratos_out = []

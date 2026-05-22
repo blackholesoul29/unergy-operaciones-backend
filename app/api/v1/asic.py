@@ -3,11 +3,43 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import AsicSolicitud, PPAContrato
-from app.models.asic import AsicCambioContrato, GesconDiccionario
+from app.models.asic import (
+    AsicCambioContrato, GesconDiccionario,
+    TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum,
+)
 from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
+
+
+def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
+    """When a terminación is published, mark matching prior registros as 'terminado'."""
+    if (
+        solicitud.tipo_solicitud != TipoSolicitudAsicEnum.terminacion
+        or solicitud.estado_solicitud != EstadoSolicitudAsicEnum.publicado
+        or not solicitud.codigo_sic_contrato
+    ):
+        return 0
+    targets = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.id != solicitud.id,
+            AsicSolicitud.codigo_sic_contrato == solicitud.codigo_sic_contrato,
+            AsicSolicitud.contrato_interno == solicitud.contrato_interno,
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud.in_([
+                TipoSolicitudAsicEnum.registro,
+                TipoSolicitudAsicEnum.modificacion,
+            ]),
+        )
+        .all()
+    )
+    for t in targets:
+        if solicitud.proyecto_id is not None and t.proyecto_id != solicitud.proyecto_id:
+            continue
+        t.estado_solicitud = EstadoSolicitudAsicEnum.terminado
+    return len(targets)
 
 
 def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
@@ -48,6 +80,7 @@ def patch_solicitud(
         raise HTTPException(404, "No encontrado")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
+    _auto_terminate(db, s)
     db.commit()
     db.refresh(s)
     return _to_out(db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first())
@@ -61,6 +94,8 @@ def create_solicitud(
 ):
     s = AsicSolicitud(**data.model_dump())
     db.add(s)
+    db.flush()
+    _auto_terminate(db, s)
     db.commit()
     db.refresh(s)
     return _to_out(db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == s.id).first())

@@ -19,6 +19,7 @@ class EstadoSolicitudAsicEnum(str, enum.Enum):
     publicado = "publicado"
     rechazado = "rechazado"
     desistido = "desistido"
+    terminado = "terminado"
 
 
 class AsicSolicitud(Base):

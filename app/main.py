@@ -563,6 +563,20 @@ _PENDING_DDLS = [
     # migration — missing updated_at on liquidacion child tables
     "ALTER TABLE liquidacion_costos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE liquidacion_mandato_lineas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    # migration — ASIC 'terminado' estado
+    "ALTER TYPE estado_solicitud_asic_enum ADD VALUE IF NOT EXISTS 'terminado'",
+    # retroactive: mark registros terminated by existing terminación records
+    """UPDATE asic_solicitudes AS target
+       SET estado_solicitud = 'terminado'
+       FROM asic_solicitudes AS term
+       WHERE term.tipo_solicitud = 'terminacion'
+         AND term.estado_solicitud = 'publicado'
+         AND target.codigo_sic_contrato = term.codigo_sic_contrato
+         AND target.contrato_interno = term.contrato_interno
+         AND target.id != term.id
+         AND target.estado_solicitud = 'publicado'
+         AND target.tipo_solicitud IN ('registro', 'modificacion')
+         AND (term.proyecto_id IS NULL OR target.proyecto_id = term.proyecto_id)""",
 ]
 
 

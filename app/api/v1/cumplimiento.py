@@ -656,8 +656,11 @@ def get_simulador(
         ).all()
     }
 
+    today = date.today()
+    es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
+
     sp_list = [p.sub_project for p in plantas_db if p.sub_project]
-    avg_cache: dict[str, float | None] = {}
+    gen_cache: dict[str, float | None] = {}
     gen_warning: str | None = None
     if sp_list:
         try:
@@ -668,13 +671,19 @@ def get_simulador(
             token = None
 
         if token:
-            def _fa(sp: str):
-                res = _fetch_recent_avg(token, sp)
-                return sp, res.get("avg_daily_mwh")
+            if es_mes_futuro:
+                def _fa(sp: str):
+                    res = _fetch_recent_avg(token, sp)
+                    avg = res.get("avg_daily_mwh")
+                    return sp, round(avg * total_dias, 3) if avg is not None else None
+            else:
+                def _fa(sp: str):
+                    res = _fetch_month(token, sp, year, month)
+                    return sp, res.get("mwh")
 
             with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
-                for sp, avg in pool.map(_fa, sp_list):
-                    avg_cache[sp] = avg
+                for sp, mwh in pool.map(_fa, sp_list):
+                    gen_cache[sp] = mwh
 
     plantas_by_id = {p.id: p for p in plantas_db}
     plantas_out = []
@@ -686,7 +695,7 @@ def get_simulador(
             "sub_project": p.sub_project,
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "avg_daily_mwh": avg_cache.get(p.sub_project),
+            "month_mwh": gen_cache.get(p.sub_project),
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
             "es_duplicado": False,
@@ -704,7 +713,7 @@ def get_simulador(
             "sub_project": p.sub_project,
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "avg_daily_mwh": avg_cache.get(p.sub_project),
+            "month_mwh": gen_cache.get(p.sub_project),
             "contrato_id": dup["contrato_id"],
             "pct_despacho": dup["pct_despacho"],
             "es_duplicado": True,
@@ -725,7 +734,7 @@ def get_simulador(
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
         })
 
-    result = {"year": year, "month": month, "dias_mes": total_dias, "plantas": plantas_out, "contratos": contratos_out}
+    result = {"year": year, "month": month, "dias_mes": total_dias, "es_mes_futuro": es_mes_futuro, "plantas": plantas_out, "contratos": contratos_out}
     if gen_warning:
         result["warning"] = gen_warning
     return result

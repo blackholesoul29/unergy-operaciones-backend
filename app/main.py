@@ -584,7 +584,16 @@ def _run_column_migrations() -> None:
     add_value_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" in s.upper()]
     regular_stmts = [s for s in _PENDING_DDLS if "ADD VALUE" not in s.upper()]
 
-    # Batch regular DDLs in a single connection (much faster than 200+ connections)
+    # ALTER TYPE … ADD VALUE must run first (outside a transaction block) so new
+    # enum values exist before any regular DDL that references them.
+    for stmt in add_value_stmts:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("COMMIT"))
+                conn.execute(text(stmt))
+        except Exception as e:
+            print(f"[startup ddl skipped] {e}")
+
     if regular_stmts:
         with engine.connect() as conn:
             for stmt in regular_stmts:
@@ -594,15 +603,6 @@ def _run_column_migrations() -> None:
                 except Exception as e:
                     conn.rollback()
                     print(f"[startup ddl skipped] {e}")
-
-    # ALTER TYPE … ADD VALUE cannot run inside a transaction block in PostgreSQL
-    for stmt in add_value_stmts:
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("COMMIT"))
-                conn.execute(text(stmt))
-        except Exception as e:
-            print(f"[startup ddl skipped] {e}")
 
 
 _CAT_META = {

@@ -311,118 +311,6 @@ def _serializar_liquidacion_base(liq: Liquidacion) -> dict:
     }
 
 
-# ── Diagnostic ────────────────────────────────────────────────────────────────
-
-@router.get("/debug/check")
-def debug_check(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    results = {}
-    liq_id = None
-    try:
-        row = db.query(Liquidacion).filter(Liquidacion.deleted_at.is_(None)).first()
-        liq_id = row.id if row else None
-        results["liquidaciones"] = f"OK (sample id={liq_id})"
-    except Exception as e:
-        results["liquidaciones"] = f"FAIL: {e}"
-
-    if liq_id:
-        for label, model in [
-            ("costos", LiquidacionCosto),
-            ("facturas", LiquidacionFactura),
-            ("mandatos", LiquidacionMandato),
-        ]:
-            try:
-                items = db.query(model).filter(model.liquidacion_id == liq_id).all()
-                results[label] = f"OK ({len(items)} rows)"
-            except Exception as e:
-                db.rollback()
-                results[label] = f"FAIL: {e}"
-
-        try:
-            items = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == liq_id).all()
-            results["xm_datos"] = f"OK ({len(items)} rows)"
-        except Exception as e:
-            db.rollback()
-            results["xm_datos"] = f"FAIL: {e}"
-
-        try:
-            mandatos = (
-                db.query(LiquidacionMandato)
-                .options(selectinload(LiquidacionMandato.lineas))
-                .filter(LiquidacionMandato.liquidacion_id == liq_id)
-                .all()
-            )
-            total_lineas = sum(len(m.lineas) for m in mandatos)
-            results["mandato_lineas"] = f"OK ({total_lineas} lineas in {len(mandatos)} mandatos)"
-        except Exception as e:
-            db.rollback()
-            results["mandato_lineas"] = f"FAIL: {e}"
-
-        try:
-            mandatos = (
-                db.query(LiquidacionMandato)
-                .options(selectinload(LiquidacionMandato.inversionista).selectinload(ProyectoInversionista.cliente))
-                .filter(LiquidacionMandato.liquidacion_id == liq_id)
-                .all()
-            )
-            results["mandato_inversionista"] = f"OK ({len(mandatos)} mandatos with inversionista loaded)"
-        except Exception as e:
-            db.rollback()
-            results["mandato_inversionista"] = f"FAIL: {e}"
-
-        try:
-            costos = db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id == liq_id).all()
-            serialized = [_serializar_costo(c) for c in costos]
-            results["serialize_costos"] = f"OK ({len(serialized)} serialized)"
-        except Exception as e:
-            db.rollback()
-            results["serialize_costos"] = f"FAIL: {e}"
-
-        try:
-            facturas = db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id == liq_id).all()
-            serialized = [_serializar_factura(f) for f in facturas]
-            results["serialize_facturas"] = f"OK ({len(serialized)} serialized)"
-        except Exception as e:
-            db.rollback()
-            results["serialize_facturas"] = f"FAIL: {e}"
-
-        try:
-            mandatos = (
-                db.query(LiquidacionMandato)
-                .options(
-                    selectinload(LiquidacionMandato.lineas),
-                    selectinload(LiquidacionMandato.inversionista).selectinload(ProyectoInversionista.cliente),
-                )
-                .filter(LiquidacionMandato.liquidacion_id == liq_id)
-                .all()
-            )
-            serialized = [_serializar_mandato(m) for m in mandatos]
-            results["serialize_mandatos"] = f"OK ({len(serialized)} serialized)"
-        except Exception as e:
-            db.rollback()
-            results["serialize_mandatos"] = f"FAIL: {e}"
-
-    # Check DB schema
-    try:
-        cols = db.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'liquidacion_costos' ORDER BY ordinal_position"
-        )).fetchall()
-        results["schema_liquidacion_costos"] = [r[0] for r in cols]
-    except Exception as e:
-        results["schema_liquidacion_costos"] = f"FAIL: {e}"
-
-    try:
-        cols = db.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'liquidacion_mandato_lineas' ORDER BY ordinal_position"
-        )).fetchall()
-        results["schema_mandato_lineas"] = [r[0] for r in cols]
-    except Exception as e:
-        results["schema_mandato_lineas"] = f"FAIL: {e}"
-
-    return results
-
-
 # ── CRUD Liquidaciones ─────────────────────────────────────────────────────────
 
 @router.get("")
@@ -865,7 +753,7 @@ def vista_por_proyecto(
             result.append({
                 "proyecto_id": proy.id,
                 "proyecto_nombre": proy.nombre_comercial,
-                "estado": str(proy.estado) if proy.estado else None,
+                "estado": proy.estado.value if proy.estado else None,
                 "inversionistas_registrados": inv_registrados_map.get(proy.id, []),
                 "liquidaciones": liq_por_proyecto.get(proy.id, []),
             })

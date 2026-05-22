@@ -202,6 +202,31 @@ def _fetch_recent_avg(token: str, sub_project: str, n_days: int = 15) -> dict:
     }
 
 
+# ── Contratos vigentes ────────────────────────────────────────────────────────
+
+def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> list:
+    """
+    PPA contracts active during the given period, excluding soft-deleted.
+    month=None → any month in the year.
+    """
+    if month:
+        first_day = date(year, month, 1)
+        last_day = date(year, month, calendar.monthrange(year, month)[1])
+    else:
+        first_day = date(year, 1, 1)
+        last_day = date(year, 12, 31)
+    return (
+        db.query(PPAContrato)
+        .filter(
+            PPAContrato.deleted_at.is_(None),
+            or_(PPAContrato.fecha_inicio.is_(None), PPAContrato.fecha_inicio <= last_day),
+            or_(PPAContrato.fecha_fin.is_(None), PPAContrato.fecha_fin >= first_day),
+        )
+        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
+        .all()
+    )
+
+
 # ── GESCON ────────────────────────────────────────────────────────────────────
 
 def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -> list:
@@ -272,6 +297,7 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Lista todos los contratos PPA para el selector."""
     rows = (
         db.query(PPAContrato)
+        .filter(PPAContrato.deleted_at.is_(None))
         .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
         .all()
     )
@@ -306,11 +332,7 @@ def get_resumen(
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = (
-        db.query(PPAContrato)
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
-    )
+    contratos = _contratos_vigentes(db, year, month)
     compromisos_map = {
         c.contrato_id: c
         for c in db.query(PPACompromisoEnergia).filter(
@@ -532,11 +554,7 @@ def get_resumen_anual(
     _=Depends(get_current_user),
 ):
     """Annual commitment totals per contract (DB only, no Unergy API)."""
-    contratos = (
-        db.query(PPAContrato)
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
-    )
+    contratos = _contratos_vigentes(db, year)
     compromisos = (
         db.query(PPACompromisoEnergia)
         .filter(PPACompromisoEnergia.año == year)
@@ -588,11 +606,7 @@ def get_simulador(
         .all()
     )
 
-    contratos_db = (
-        db.query(PPAContrato)
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
-    )
+    contratos_db = _contratos_vigentes(db, year, month)
 
     contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
@@ -718,12 +732,7 @@ def get_plantas_contratos(
     )
     plantas_map = {p.id: p for p in plantas_db}
 
-    contratos_db = (
-        db.query(PPAContrato)
-        .filter(PPAContrato.deleted_at.is_(None))
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
-    )
+    contratos_db = _contratos_vigentes(db, year, month)
 
     contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
@@ -1230,11 +1239,7 @@ def get_descubrimientos(
     Cruza deltas MWh (cumplimiento) × precio promedio bolsa del mes.
     Solo usa datos de DB — no llama la API de Unergy.
     """
-    contratos = (
-        db.query(PPAContrato)
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
-    )
+    contratos = _contratos_vigentes(db, year)
 
     meses_data = []
     gran_total_compras_cop = 0.0
@@ -1422,12 +1427,7 @@ def cerrar_periodo(
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = (
-        db.query(PPAContrato)
-        .filter(PPAContrato.deleted_at.is_(None))
-        .order_by(PPAContrato.id)
-        .all()
-    )
+    contratos = _contratos_vigentes(db, year, month)
     if not contratos:
         raise HTTPException(404, "No hay contratos PPA registrados")
 

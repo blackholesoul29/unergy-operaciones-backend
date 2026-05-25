@@ -757,6 +757,7 @@ def vista_por_proyecto(
                 "proyecto_id": proy.id,
                 "proyecto_nombre": proy.nombre_comercial,
                 "estado": proy.estado.value if proy.estado else None,
+                "tipo_proyecto": proy.tipo_proyecto,
                 "inversionistas_registrados": inv_registrados_map.get(proy.id, []),
                 "liquidaciones": liq_por_proyecto.get(proy.id, []),
             })

@@ -9,9 +9,17 @@ class ClienteCreate(BaseModel):
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
     correo_electronico: Optional[str] = None
+    correo_liquidacion: Optional[str] = None
+    correo_monitoreo: Optional[str] = None
+    correo_soporte: Optional[str] = None
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
+    departamento: Optional[str] = None
+    banco: Optional[str] = None
+    tipo_cuenta: Optional[str] = None
+    numero_cuenta: Optional[str] = None
+    titular_cuenta: Optional[str] = None
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
@@ -66,25 +74,41 @@ class ClienteDocumentoOut(ClienteDocumentoCreate):
     model_config = {"from_attributes": True}
 
 
-class ClienteOut(BaseModel):
+class ClienteBase(BaseModel):
     id: int
     razon_social_nombre: str
-    nit_cedula: Optional[str]
-    tipo_persona: Optional[str]
-    representante_legal: Optional[str]
-    correo_electronico: Optional[str]
-    telefono_contacto: Optional[str]
-    direccion: Optional[str]
-    ciudad: Optional[str]
-    iva_pct: Optional[float]
-    retencion_pct: Optional[float]
-    reteica_pct: Optional[float]
-    rut_url: Optional[str]
-    created_at: datetime
-    updated_at: datetime
+    nit_cedula: Optional[str] = None
+    tipo_persona: Optional[str] = None
+    representante_legal: Optional[str] = None
+    correo_electronico: Optional[str] = None
+    correo_liquidacion: Optional[str] = None
+    correo_monitoreo: Optional[str] = None
+    correo_soporte: Optional[str] = None
+    telefono_contacto: Optional[str] = None
+    direccion: Optional[str] = None
+    ciudad: Optional[str] = None
+    departamento: Optional[str] = None
+    banco: Optional[str] = None
+    tipo_cuenta: Optional[str] = None
+    numero_cuenta: Optional[str] = None
+    titular_cuenta: Optional[str] = None
+    iva_pct: Optional[float] = None
+    retencion_pct: Optional[float] = None
+    reteica_pct: Optional[float] = None
+    rut_url: Optional[str] = None
+    origina_investment_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
+class ClienteListOut(ClienteBase):
+    pass
+
+
+class ClienteOut(ClienteBase):
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
-    model_config = {"from_attributes": True}
 
     @field_validator("servicios", "documentos_comerciales", mode="before")
     @classmethod

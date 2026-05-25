@@ -10,7 +10,8 @@ ENTITY_TYPES = (
     "servicio_representacion", "cgm", "ppa_contrato", "contrato_servicio",
     "contrato_arriendo", "frontera", "equipo", "promotor_seguimiento",
     "rec_proceso", "falla", "mantenimiento", "liquidacion",
-    "liquidacion_mandato", "liquidacion_factura",
+    "liquidacion_mandato", "liquidacion_mandato_linea",
+    "liquidacion_costo", "liquidacion_factura",
 )
 
 

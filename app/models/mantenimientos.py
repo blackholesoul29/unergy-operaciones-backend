@@ -23,8 +23,8 @@ class Mantenimiento(Base):
     __tablename__ = "mantenimientos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    registrado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    registrado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False, index=True)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoMantenimientoEnum, name="tipo_mantenimiento_enum"), nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)

@@ -48,8 +48,8 @@ class OperacionKPI(Base):
     __tablename__ = "operacion_kpis"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    servicio_operacion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("servicio_operacion.id"), nullable=True)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    servicio_operacion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("servicio_operacion.id"), nullable=True, index=True)
     periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     periodo_fin: Mapped[date] = mapped_column(Date, nullable=False)
     energia_generada_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
@@ -86,8 +86,8 @@ class RepresentacionGescon(Base):
     __tablename__ = "representacion_gescon"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    servicio_representacion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("servicio_representacion.id"), nullable=True)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    servicio_representacion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("servicio_representacion.id"), nullable=True, index=True)
     codigo_contrato_gescon: Mapped[str | None] = mapped_column(String(100), nullable=True)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin: Mapped[date | None] = mapped_column(Date, nullable=True)

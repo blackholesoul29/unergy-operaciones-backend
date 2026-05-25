@@ -19,7 +19,7 @@ class Equipo(Base):
     __tablename__ = "equipos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=False)
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=False, index=True)
     tipo_equipo: Mapped[str] = mapped_column(SAEnum(TipoEquipoEnum, name="tipo_equipo_enum"), nullable=False)
     marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
     modelo_referencia: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -47,7 +47,7 @@ class EquipoSello(Base):
     __tablename__ = "equipos_sellos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    equipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("equipos.id"), nullable=False)
+    equipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("equipos.id"), nullable=False, index=True)
     numero_sello: Mapped[str] = mapped_column(String(100), nullable=False)
     fecha_instalacion: Mapped[date] = mapped_column(Date, nullable=False)
     persona_instalo: Mapped[str | None] = mapped_column(String(255), nullable=True)

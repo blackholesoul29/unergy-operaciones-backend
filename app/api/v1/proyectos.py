@@ -29,6 +29,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.grupos_panel),
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.contactos),
+            selectinload(Proyecto.servicio_representacion),
         )
         .filter(Proyecto.id == id)
         .first()
@@ -40,6 +41,16 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
 
 # ── Proyectos ─────────────────────────────────────────────────────────────────
 
+SERVICIO_FILTER_MAP = {
+    "operacion": Proyecto.srv_operacion,
+    "representacion": Proyecto.srv_representacion,
+    "cgm": Proyecto.srv_cgm,
+    "ppa": Proyecto.srv_ppa,
+    "promotor": Proyecto.srv_promotor,
+    "rec": Proyecto.srv_rec,
+}
+
+
 @router.get("", response_model=PaginatedResponse[ProyectoOut])
 def list_proyectos(
     page: int = Query(1, ge=1),
@@ -47,16 +58,18 @@ def list_proyectos(
     q: str | None = None,
     estado: str | None = None,
     tipo_proyecto: str | None = None,
-    cliente_id: int | None = None,
     portafolio_id: int | None = None,
+    servicio: str | None = None,
     db: Session = Depends(get_db),
+    _=Depends(get_current_user),
 ):
-    query = db.query(Proyecto).options(
+    query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).options(
         selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.contactos),
+        selectinload(Proyecto.servicio_representacion),
     )
     if q:
         query = query.filter(Proyecto.nombre_comercial.ilike(f"%{q}%"))
@@ -64,10 +77,10 @@ def list_proyectos(
         query = query.filter(Proyecto.estado == estado)
     if tipo_proyecto:
         query = query.filter(Proyecto.tipo_proyecto == tipo_proyecto)
-    if cliente_id:
-        query = query.filter(Proyecto.cliente_id == cliente_id)
     if portafolio_id:
         query = query.filter(Proyecto.portafolio_id == portafolio_id)
+    if servicio and servicio in SERVICIO_FILTER_MAP:
+        query = query.filter(SERVICIO_FILTER_MAP[servicio] == True)
     total = query.count()
     items = query.order_by(Proyecto.nombre_comercial).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
@@ -83,7 +96,7 @@ def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db), _=Depen
 
 
 @router.get("/{id}", response_model=ProyectoOut)
-def get_proyecto(id: int, db: Session = Depends(get_db)):
+def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
 
 
@@ -92,7 +105,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(p, k, v)
     db.commit()
     return _get_proyecto_or_404(id, db)
@@ -160,7 +173,7 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     _get_proyecto_or_404(id, db)
     it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).first()
     if it:
-        for k, v in data.model_dump(exclude_none=True).items():
+        for k, v in data.model_dump(exclude_unset=True).items():
             setattr(it, k, v)
     else:
         it = ProyectoInfoTecnica(proyecto_id=id, **data.model_dump())
@@ -193,7 +206,7 @@ def update_grupo_panel(id: int, gp_id: int, data: ProyectoGrupoPanelUpdate, db: 
     gp = db.query(ProyectoGrupoPanel).filter_by(id=gp_id, proyecto_id=id).first()
     if not gp:
         raise HTTPException(404, "Grupo de paneles no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(gp, k, v)
     db.commit()
     db.refresh(gp)
@@ -232,7 +245,7 @@ def update_inversor(id: int, inv_id: int, data: ProyectoInversorUpdate, db: Sess
     inv = db.query(ProyectoInversor).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversor no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(inv, k, v)
     db.commit()
     db.refresh(inv)
@@ -271,7 +284,7 @@ def update_contacto(id: int, c_id: int, data: ProyectoContactoUpdate, db: Sessio
     c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
     if not c:
         raise HTTPException(404, "Contacto no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(c, k, v)
     db.commit()
     db.refresh(c)
@@ -322,7 +335,7 @@ def update_inversionista(id: int, inv_id: int, data: ProyectoInversionistaUpdate
     inv = db.query(ProyectoInversionista).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversionista no encontrado")
-    for k, v in data.model_dump(exclude_none=True).items():
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(inv, k, v)
     db.commit()
     return db.query(ProyectoInversionista).options(

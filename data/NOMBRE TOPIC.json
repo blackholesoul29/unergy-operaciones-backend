@@ -1,0 +1,1228 @@
+[
+    {
+        "Topic": "zofiva",
+        "Project": "Zona Franca V.A."
+    },
+    {
+        "Topic": "yurbaqua",
+        "Project": "PSF - Yurbaqua"
+    },
+    {
+        "Topic": "yuan_solar",
+        "Project": "GD Yuan Solar"
+    },
+    {
+        "Topic": "villanueva",
+        "Project": "MGS 0010 - Villanueva"
+    },
+    {
+        "Topic": "verso",
+        "Project": "MGS 0008 La Paz Verso"
+    },
+    {
+        "Topic": "vallenata",
+        "Project": "MGS 0007 La Paz Vallenata"
+    },
+    {
+        "Topic": "valenciaoriente",
+        "Project": "MGS 0026 Valencia Oriente 1"
+    },
+    {
+        "Topic": "valencia_oriente_2",
+        "Project": "MGS 0027 Valencia Oriente 2"
+    },
+    {
+        "Topic": "uruaco_gd",
+        "Project": "Minigranja Solar Uruaco"
+    },
+    {
+        "Topic": "tierraalta",
+        "Project": "Granja Solar Tierra Alta"
+    },
+    {
+        "Topic": "taurus_x",
+        "Project": "Taurus X"
+    },
+    {
+        "Topic": "taurus_viii",
+        "Project": "Taurus VIII"
+    },
+    {
+        "Topic": "taurus_ix",
+        "Project": "Taurus IX"
+    },
+    {
+        "Topic": "tamalacue",
+        "Project": "Minigranja Solar Tamalacué"
+    },
+    {
+        "Topic": "somer_torre_2",
+        "Project": "Clínica Somer"
+    },
+    {
+        "Topic": "somer_torre_1",
+        "Project": "Clínica Somer"
+    },
+    {
+        "Topic": "sirius",
+        "Project": "GD Sirius"
+    },
+    {
+        "Topic": "seridme",
+        "Project": "Seridme"
+    },
+    {
+        "Topic": "savannaplaza",
+        "Project": "Centro Comercial Savanna Plaza"
+    },
+    {
+        "Topic": "sansimon",
+        "Project": "Ladrillera Arcillas San Simón"
+    },
+    {
+        "Topic": "sanpedro",
+        "Project": "Minigranja Solar San Pedro"
+    },
+    {
+        "Topic": "sanjose",
+        "Project": "Centro de atención al desamparado San José"
+    },
+    {
+        "Topic": "sanesteban3",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanesteban2",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanesteban",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanagustin_elektra",
+        "Project": "GRANJA SOLAR SAN AGUSTIN"
+    },
+    {
+        "Topic": "san_pelayo",
+        "Project": "GD San Pelayo"
+    },
+    {
+        "Topic": "san_onofre",
+        "Project": "GD 1MVA SAN ONOFRE"
+    },
+    {
+        "Topic": "san_diego_sur",
+        "Project": "MGS 0024 - San Diego Sur"
+    },
+    {
+        "Topic": "salud_vegas",
+        "Project": "Salud Vegas - Torre Médica"
+    },
+    {
+        "Topic": "sabana_de_torres",
+        "Project": "Minigranja Solar Sabana de Torres"
+    },
+    {
+        "Topic": "reserva",
+        "Project": "MGS 0012 La Reserva"
+    },
+    {
+        "Topic": "puya",
+        "Project": "MGS 0016 - Puya"
+    },
+    {
+        "Topic": "polikem",
+        "Project": "Polikem"
+    },
+    {
+        "Topic": "polaris_2",
+        "Project": "GD Polaris 2"
+    },
+    {
+        "Topic": "polaris_1",
+        "Project": "GD Polaris 1"
+    },
+    {
+        "Topic": "poladelpub",
+        "Project": "Pola del Pub"
+    },
+    {
+        "Topic": "piloneras",
+        "Project": "MGS 0041 Piloneras"
+    },
+    {
+        "Topic": "perija",
+        "Project": "MGS 0006 Perijá"
+    },
+    {
+        "Topic": "pazderio",
+        "Project": "Triturados Paz de Río"
+    },
+    {
+        "Topic": "olimpo",
+        "Project": "MGS 0014 - El Olimpo"
+    },
+    {
+        "Topic": "obelisco",
+        "Project": "Centro Comercial Obelisco"
+    },
+    {
+        "Topic": "nuestroatlantico",
+        "Project": "Centro Comercial Nuestro Atlántico"
+    },
+    {
+        "Topic": "ngs",
+        "Project": "Nuevo Gimnasio School"
+    },
+    {
+        "Topic": "nestle_valledupar",
+        "Project": "Nestlé Cicolac Valledupar"
+    },
+    {
+        "Topic": "naos3",
+        "Project": "MGS Naos 3"
+    },
+    {
+        "Topic": "naos2",
+        "Project": "MGS Naos 2"
+    },
+    {
+        "Topic": "naos1",
+        "Project": "GD NAOS 1"
+    },
+    {
+        "Topic": "mdm",
+        "Project": "MDM Científica"
+    },
+    {
+        "Topic": "marimonda",
+        "Project": "GD Marimonda"
+    },
+    {
+        "Topic": "maderas",
+        "Project": "Central de Maderas"
+    },
+    {
+        "Topic": "loscoches",
+        "Project": "Los Coches"
+    },
+    {
+        "Topic": "leyenda",
+        "Project": "MGS 0018 La Paz Leyenda"
+    },
+    {
+        "Topic": "laurelescampestre_parques",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_fuentes_torre_3",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_fuentes_torre_2",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_aires_torre4",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_aires_123",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "lamesa",
+        "Project": "MGS 0013 La Mesa"
+    },
+    {
+        "Topic": "joropo",
+        "Project": "MGS 0023 Joropo"
+    },
+    {
+        "Topic": "jerico_merengue",
+        "Project": "MGS 0019 El Merengue"
+    },
+    {
+        "Topic": "jerico_el_son",
+        "Project": "Minigranja Solar El Son"
+    },
+    {
+        "Topic": "iml_etiquetas",
+        "Project": "IML"
+    },
+    {
+        "Topic": "iml_empaques",
+        "Project": "IML"
+    },
+    {
+        "Topic": "ibirico",
+        "Project": "MGS 0021 Ibirico"
+    },
+    {
+        "Topic": "ibes",
+        "Project": "Instituto Bolivariano Esdiseños"
+    },
+    {
+        "Topic": "gimsanangelo",
+        "Project": "Gimnasio San Angelo"
+    },
+    {
+        "Topic": "gimcampreibri_comedor",
+        "Project": "Gimnasio Campestre Reino Británico"
+    },
+    {
+        "Topic": "gimcampreibri_bloque4",
+        "Project": "Gimnasio Campestre Reino Británico"
+    },
+    {
+        "Topic": "gandalf",
+        "Project": "MGS 0004 Valle de Gandalf"
+    },
+    {
+        "Topic": "esmeralda",
+        "Project": "MGS 0017- Esmeralda"
+    },
+    {
+        "Topic": "elroble",
+        "Project": "MGS 0011 El Roble"
+    },
+    {
+        "Topic": "elmolino",
+        "Project": "MGS 0009 El Molino"
+    },
+    {
+        "Topic": "ecoimagenips",
+        "Project": "Ecoimagen IPS"
+    },
+    {
+        "Topic": "delta_2",
+        "Project": "GD delta 2"
+    },
+    {
+        "Topic": "delta_1",
+        "Project": "GD Delta 1"
+    },
+    {
+        "Topic": "cumbia",
+        "Project": "MGS 0022 - La Cumbia"
+    },
+    {
+        "Topic": "cross",
+        "Project": "Cross Business Center"
+    },
+    {
+        "Topic": "cristorey",
+        "Project": "Colegio Cristo Rey Bogotá"
+    },
+    {
+        "Topic": "copey_occidente",
+        "Project": "MGS 0025 - El Copey Occidente"
+    },
+    {
+        "Topic": "coopsana2",
+        "Project": "IPS Coopsana"
+    },
+    {
+        "Topic": "coopsana",
+        "Project": "IPS Coopsana"
+    },
+    {
+        "Topic": "colaboratec",
+        "Project": "Colaboratec (Piloto)"
+    },
+    {
+        "Topic": "cienaga",
+        "Project": "Sol&Cielo 9 - Ciénaga"
+    },
+    {
+        "Topic": "chiriguana_norte_4",
+        "Project": "MGS 0077 - Chiriguaná Norte 4"
+    },
+    {
+        "Topic": "chiriguana_norte_2",
+        "Project": "MGS 0075 - Chiriguaná Norte 2"
+    },
+    {
+        "Topic": "chima",
+        "Project": "MGS 0030 Chimá Oriente"
+    },
+    {
+        "Topic": "cedillanosexc",
+        "Project": "Cedillanos_excedentes"
+    },
+    {
+        "Topic": "cedillanos",
+        "Project": "Complejo Industrial Cedillanos"
+    },
+    {
+        "Topic": "cañahuate",
+        "Project": "MGS 0005 Cañahuate"
+    },
+    {
+        "Topic": "catedral",
+        "Project": "La Catedral"
+    },
+    {
+        "Topic": "cacica",
+        "Project": "MGS 0040 Cacica"
+    },
+    {
+        "Topic": "bongos",
+        "Project": "Sol Y Cielo 7 Los Bongos"
+    },
+    {
+        "Topic": "biosolar",
+        "Project": "GD Biosolar"
+    },
+    {
+        "Topic": "bayunca",
+        "Project": "Bayunca"
+    },
+    {
+        "Topic": "baraya",
+        "Project": "Minigranja Solar Baraya"
+    },
+    {
+        "Topic": "astrolumen",
+        "Project": "GD Astrolumen La Garita"
+    },
+    {
+        "Topic": "asprolesa",
+        "Project": "Asociación Asprolesa"
+    },
+    {
+        "Topic": "arboleda",
+        "Project": "Arboleda de Castilla"
+    },
+    {
+        "Topic": "amc",
+        "Project": "Almacenes AMC"
+    },
+    {
+        "Topic": "almagran",
+        "Project": "Torre Almagrán"
+    },
+    {
+        "Topic": "agustin_3",
+        "Project": "Agustín 3"
+    },
+    {
+        "Topic": "agustin_2",
+        "Project": "Agustín 2"
+    },
+    {
+        "Topic": "agustin_1",
+        "Project": "GD Agustin 1"
+    },
+    {
+        "Topic": "acanto",
+        "Project": "Unidad Residencial Acanto"
+    },
+    {
+        "Topic": "MGS Mapale",
+        "Project": "MGS Mapale"
+    },
+    {
+        "Topic": "106 sub projects"
+    },
+    {
+        "Topic": "Filter"
+    },
+    {
+        "Topic": " By income distribution method"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "Pague lo consumido"
+    },
+    {
+        "Topic": "Pague lo generado"
+    },
+    {
+        "Topic": " By measurement scheme type"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "Generation And Border"
+    },
+    {
+        "Topic": "Generation And Load"
+    },
+    {
+        "Topic": "Only Generation"
+    },
+    {
+        "Topic": " By measurement verification enabled"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "Yes"
+    },
+    {
+        "Topic": "No"
+    },
+    {
+        "Topic": " By measurement phases"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "Phases 1"
+    },
+    {
+        "Topic": "Phases 2"
+    },
+    {
+        "Topic": "Phases 3"
+    },
+    {
+        "Topic": " By blockchain report enabled"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "Yes"
+    },
+    {
+        "Topic": "No"
+    },
+    {
+        "Topic": " By project"
+    },
+    {
+        "Topic": "All"
+    },
+    {
+        "Topic": "MGS 0012 La Reserva"
+    },
+    {
+        "Topic": "Unidad Residencial Acanto"
+    },
+    {
+        "Topic": "GD Agustin 1"
+    },
+    {
+        "Topic": "Agustín 2"
+    },
+    {
+        "Topic": "Agustín 3"
+    },
+    {
+        "Topic": "Torre Almagrán"
+    },
+    {
+        "Topic": "Almacenes AMC"
+    },
+    {
+        "Topic": "Arboleda de Castilla"
+    },
+    {
+        "Topic": "Asociación Asprolesa"
+    },
+    {
+        "Topic": "GD Astrolumen La Garita"
+    },
+    {
+        "Topic": "Minigranja Solar Baraya"
+    },
+    {
+        "Topic": "Bayunca"
+    },
+    {
+        "Topic": "GD Biosolar"
+    },
+    {
+        "Topic": "Sol Y Cielo 7 Los Bongos"
+    },
+    {
+        "Topic": "MGS 0040 Cacica"
+    },
+    {
+        "Topic": "La Catedral"
+    },
+    {
+        "Topic": "MGS 0005 Cañahuate"
+    },
+    {
+        "Topic": "Complejo Industrial Cedillanos"
+    },
+    {
+        "Topic": "Cedillanos_excedentes"
+    },
+    {
+        "Topic": "MGS 0030 Chimá Oriente"
+    },
+    {
+        "Topic": "MGS 0075 - Chiriguaná Norte 2"
+    },
+    {
+        "Topic": "MGS 0077 - Chiriguaná Norte 4"
+    },
+    {
+        "Topic": "Sol&Cielo 9 - Ciénaga"
+    },
+    {
+        "Topic": "Colaboratec (Piloto)"
+    },
+    {
+        "Topic": "IPS Coopsana"
+    },
+    {
+        "Topic": "MGS 0025 - El Copey Occidente"
+    },
+    {
+        "Topic": "Colegio Cristo Rey Bogotá"
+    },
+    {
+        "Topic": "Cross Business Center"
+    },
+    {
+        "Topic": "MGS 0022 - La Cumbia"
+    },
+    {
+        "Topic": "GD Delta 1"
+    },
+    {
+        "Topic": "GD delta 2"
+    },
+    {
+        "Topic": "Ecoimagen IPS"
+    },
+    {
+        "Topic": "MGS 0009 El Molino"
+    },
+    {
+        "Topic": "MGS 0017- Esmeralda"
+    },
+    {
+        "Topic": "MGS 0004 Valle de Gandalf"
+    },
+    {
+        "Topic": "Gimnasio Campestre Reino Británico"
+    },
+    {
+        "Topic": "Gimnasio San Angelo"
+    },
+    {
+        "Topic": "Instituto Bolivariano Esdiseños"
+    },
+    {
+        "Topic": "MGS 0021 Ibirico"
+    },
+    {
+        "Topic": "IML"
+    },
+    {
+        "Topic": "Minigranja Solar El Son"
+    },
+    {
+        "Topic": "MGS 0019 El Merengue"
+    },
+    {
+        "Topic": "MGS 0023 Joropo"
+    },
+    {
+        "Topic": "MGS 0013 La Mesa"
+    },
+    {
+        "Topic": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "Los Coches"
+    },
+    {
+        "Topic": "Central de Maderas"
+    },
+    {
+        "Topic": "MGS Mapale"
+    },
+    {
+        "Topic": "GD Marimonda"
+    },
+    {
+        "Topic": "MDM Científica"
+    },
+    {
+        "Topic": "MGS 0011 El Roble"
+    },
+    {
+        "Topic": "MGS 0018 La Paz Leyenda"
+    },
+    {
+        "Topic": "GD NAOS 1"
+    },
+    {
+        "Topic": "MGS Naos 2"
+    },
+    {
+        "Topic": "MGS Naos 3"
+    },
+    {
+        "Topic": "Nestlé Cicolac Valledupar"
+    },
+    {
+        "Topic": "Nuevo Gimnasio School"
+    },
+    {
+        "Topic": "Centro Comercial Nuestro Atlántico"
+    },
+    {
+        "Topic": "Centro Comercial Obelisco"
+    },
+    {
+        "Topic": "MGS 0014 - El Olimpo"
+    },
+    {
+        "Topic": "Triturados Paz de Río"
+    },
+    {
+        "Topic": "MGS 0006 Perijá"
+    },
+    {
+        "Topic": "MGS 0041 Piloneras"
+    },
+    {
+        "Topic": "Pola del Pub"
+    },
+    {
+        "Topic": "GD Polaris 1"
+    },
+    {
+        "Topic": "GD Polaris 2"
+    },
+    {
+        "Topic": "Polikem"
+    },
+    {
+        "Topic": "MGS 0016 - Puya"
+    },
+    {
+        "Topic": "Minigranja Solar Sabana de Torres"
+    },
+    {
+        "Topic": "Salud Vegas - Torre Médica"
+    },
+    {
+        "Topic": "MGS 0024 - San Diego Sur"
+    },
+    {
+        "Topic": "GD 1MVA SAN ONOFRE"
+    },
+    {
+        "Topic": "GD San Pelayo"
+    },
+    {
+        "Topic": "GRANJA SOLAR SAN AGUSTIN"
+    },
+    {
+        "Topic": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "Centro de atención al desamparado San José"
+    },
+    {
+        "Topic": "Minigranja Solar San Pedro"
+    },
+    {
+        "Topic": "Ladrillera Arcillas San Simón"
+    },
+    {
+        "Topic": "Centro Comercial Savanna Plaza"
+    },
+    {
+        "Topic": "Seridme"
+    },
+    {
+        "Topic": "GD Sirius"
+    },
+    {
+        "Topic": "Clínica Somer"
+    },
+    {
+        "Topic": "Minigranja Solar Tamalacué"
+    },
+    {
+        "Topic": "Taurus IX"
+    },
+    {
+        "Topic": "Taurus VIII"
+    },
+    {
+        "Topic": "Taurus X"
+    },
+    {
+        "Topic": "Granja Solar Tierra Alta"
+    },
+    {
+        "Topic": "Minigranja Solar Uruaco"
+    },
+    {
+        "Topic": "MGS 0027 Valencia Oriente 2"
+    },
+    {
+        "Topic": "MGS 0026 Valencia Oriente 1"
+    },
+    {
+        "Topic": "MGS 0007 La Paz Vallenata"
+    },
+    {
+        "Topic": "MGS 0008 La Paz Verso"
+    },
+    {
+        "Topic": "MGS 0010 - Villanueva"
+    },
+    {
+        "Topic": "GD Yuan Solar"
+    },
+    {
+        "Topic": "PSF - Yurbaqua"
+    },
+    {
+        "Topic": "Zona Franca V.A."
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+        "Topic": "MGS Mapale",
+        "Project": "MGS Mapale"
+    },
+    {
+        "Topic": "acanto",
+        "Project": "Unidad Residencial Acanto"
+    },
+    {
+        "Topic": "agustin_1",
+        "Project": "GD Agustin 1"
+    },
+    {
+        "Topic": "agustin_2",
+        "Project": "Agustín 2"
+    },
+    {
+        "Topic": "agustin_3",
+        "Project": "Agustín 3"
+    },
+    {
+        "Topic": "almagran",
+        "Project": "Torre Almagrán"
+    },
+    {
+        "Topic": "amc",
+        "Project": "Almacenes AMC"
+    },
+    {
+        "Topic": "arboleda",
+        "Project": "Arboleda de Castilla"
+    },
+    {
+        "Topic": "asprolesa",
+        "Project": "Asociación Asprolesa"
+    },
+    {
+        "Topic": "astrolumen",
+        "Project": "GD Astrolumen La Garita"
+    },
+    {
+        "Topic": "baraya",
+        "Project": "Minigranja Solar Baraya"
+    },
+    {
+        "Topic": "bayunca",
+        "Project": "Bayunca"
+    },
+    {
+        "Topic": "biosolar",
+        "Project": "GD Biosolar"
+    },
+    {
+        "Topic": "bongos",
+        "Project": "Sol Y Cielo 7 Los Bongos"
+    },
+    {
+        "Topic": "cacica",
+        "Project": "MGS 0040 Cacica"
+    },
+    {
+        "Topic": "catedral",
+        "Project": "La Catedral"
+    },
+    {
+        "Topic": "cañahuate",
+        "Project": "MGS 0005 Cañahuate"
+    },
+    {
+        "Topic": "cedillanos",
+        "Project": "Complejo Industrial Cedillanos"
+    },
+    {
+        "Topic": "cedillanosexc",
+        "Project": "Cedillanos_excedentes"
+    },
+    {
+        "Topic": "chima",
+        "Project": "MGS 0030 Chimá Oriente"
+    },
+    {
+        "Topic": "chiriguana_norte_2",
+        "Project": "MGS 0075 - Chiriguaná Norte 2"
+    },
+    {
+        "Topic": "chiriguana_norte_4",
+        "Project": "MGS 0077 - Chiriguaná Norte 4"
+    },
+    {
+        "Topic": "cienaga",
+        "Project": "Sol&Cielo 9 - Ciénaga"
+    },
+    {
+        "Topic": "colaboratec",
+        "Project": "Colaboratec (Piloto)"
+    },
+    {
+        "Topic": "coopsana",
+        "Project": "IPS Coopsana"
+    },
+    {
+        "Topic": "coopsana2",
+        "Project": "IPS Coopsana"
+    },
+    {
+        "Topic": "copey_occidente",
+        "Project": "MGS 0025 - El Copey Occidente"
+    },
+    {
+        "Topic": "cristorey",
+        "Project": "Colegio Cristo Rey Bogotá"
+    },
+    {
+        "Topic": "cross",
+        "Project": "Cross Business Center"
+    },
+    {
+        "Topic": "cumbia",
+        "Project": "MGS 0022 - La Cumbia"
+    },
+    {
+        "Topic": "delta_1",
+        "Project": "GD Delta 1"
+    },
+    {
+        "Topic": "delta_2",
+        "Project": "GD delta 2"
+    },
+    {
+        "Topic": "ecoimagenips",
+        "Project": "Ecoimagen IPS"
+    },
+    {
+        "Topic": "elmolino",
+        "Project": "MGS 0009 El Molino"
+    },
+    {
+        "Topic": "elroble",
+        "Project": "MGS 0011 El Roble"
+    },
+    {
+        "Topic": "esmeralda",
+        "Project": "MGS 0017- Esmeralda"
+    },
+    {
+        "Topic": "gandalf",
+        "Project": "MGS 0004 Valle de Gandalf"
+    },
+    {
+        "Topic": "gimcampreibri_bloque4",
+        "Project": "Gimnasio Campestre Reino Británico"
+    },
+    {
+        "Topic": "gimcampreibri_comedor",
+        "Project": "Gimnasio Campestre Reino Británico"
+    },
+    {
+        "Topic": "gimsanangelo",
+        "Project": "Gimnasio San Angelo"
+    },
+    {
+        "Topic": "ibes",
+        "Project": "Instituto Bolivariano Esdiseños"
+    },
+    {
+        "Topic": "ibirico",
+        "Project": "MGS 0021 Ibirico"
+    },
+    {
+        "Topic": "iml_empaques",
+        "Project": "IML"
+    },
+    {
+        "Topic": "iml_etiquetas",
+        "Project": "IML"
+    },
+    {
+        "Topic": "jerico_el_son",
+        "Project": "Minigranja Solar El Son"
+    },
+    {
+        "Topic": "jerico_merengue",
+        "Project": "MGS 0019 El Merengue"
+    },
+    {
+        "Topic": "joropo",
+        "Project": "MGS 0023 Joropo"
+    },
+    {
+        "Topic": "lamesa",
+        "Project": "MGS 0013 La Mesa"
+    },
+    {
+        "Topic": "laurelescampestre_aires_123",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_aires_torre4",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_fuentes_torre_2",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_fuentes_torre_3",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "laurelescampestre_parques",
+        "Project": "Unidad Residencial Laureles Campestre"
+    },
+    {
+        "Topic": "leyenda",
+        "Project": "MGS 0018 La Paz Leyenda"
+    },
+    {
+        "Topic": "loscoches",
+        "Project": "Los Coches"
+    },
+    {
+        "Topic": "maderas",
+        "Project": "Central de Maderas"
+    },
+    {
+        "Topic": "marimonda",
+        "Project": "GD Marimonda"
+    },
+    {
+        "Topic": "mdm",
+        "Project": "MDM Científica"
+    },
+    {
+        "Topic": "naos1",
+        "Project": "GD NAOS 1"
+    },
+    {
+        "Topic": "naos2",
+        "Project": "MGS Naos 2"
+    },
+    {
+        "Topic": "naos3",
+        "Project": "MGS Naos 3"
+    },
+    {
+        "Topic": "nestle_valledupar",
+        "Project": "Nestlé Cicolac Valledupar"
+    },
+    {
+        "Topic": "ngs",
+        "Project": "Nuevo Gimnasio School"
+    },
+    {
+        "Topic": "nuestroatlantico",
+        "Project": "Centro Comercial Nuestro Atlántico"
+    },
+    {
+        "Topic": "obelisco",
+        "Project": "Centro Comercial Obelisco"
+    },
+    {
+        "Topic": "olimpo",
+        "Project": "MGS 0014 - El Olimpo"
+    },
+    {
+        "Topic": "pazderio",
+        "Project": "Triturados Paz de Río"
+    },
+    {
+        "Topic": "perija",
+        "Project": "MGS 0006 Perijá"
+    },
+    {
+        "Topic": "piloneras",
+        "Project": "MGS 0041 Piloneras"
+    },
+    {
+        "Topic": "poladelpub",
+        "Project": "Pola del Pub"
+    },
+    {
+        "Topic": "polaris_1",
+        "Project": "GD Polaris 1"
+    },
+    {
+        "Topic": "polaris_2",
+        "Project": "GD Polaris 2"
+    },
+    {
+        "Topic": "polikem",
+        "Project": "Polikem"
+    },
+    {
+        "Topic": "puya",
+        "Project": "MGS 0016 - Puya"
+    },
+    {
+        "Topic": "reserva",
+        "Project": "MGS 0012 La Reserva"
+    },
+    {
+        "Topic": "sabana_de_torres",
+        "Project": "Minigranja Solar Sabana de Torres"
+    },
+    {
+        "Topic": "salud_vegas",
+        "Project": "Salud Vegas - Torre Médica"
+    },
+    {
+        "Topic": "san_diego_sur",
+        "Project": "MGS 0024 - San Diego Sur"
+    },
+    {
+        "Topic": "san_onofre",
+        "Project": "GD 1MVA SAN ONOFRE"
+    },
+    {
+        "Topic": "san_pelayo",
+        "Project": "GD San Pelayo"
+    },
+    {
+        "Topic": "sanagustin_elektra",
+        "Project": "GRANJA SOLAR SAN AGUSTIN"
+    },
+    {
+        "Topic": "sanesteban",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanesteban2",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanesteban3",
+        "Project": "San Esteban del Poblado"
+    },
+    {
+        "Topic": "sanjose",
+        "Project": "Centro de atención al desamparado San José"
+    },
+    {
+        "Topic": "sanpedro",
+        "Project": "Minigranja Solar San Pedro"
+    },
+    {
+        "Topic": "sansimon",
+        "Project": "Ladrillera Arcillas San Simón"
+    },
+    {
+        "Topic": "savannaplaza",
+        "Project": "Centro Comercial Savanna Plaza"
+    },
+    {
+        "Topic": "seridme",
+        "Project": "Seridme"
+    },
+    {
+        "Topic": "sirius",
+        "Project": "GD Sirius"
+    },
+    {
+        "Topic": "somer_torre_1",
+        "Project": "Clínica Somer"
+    },
+    {
+        "Topic": "somer_torre_2",
+        "Project": "Clínica Somer"
+    },
+    {
+        "Topic": "tamalacue",
+        "Project": "Minigranja Solar Tamalacué"
+    },
+    {
+        "Topic": "taurus_ix",
+        "Project": "Taurus IX"
+    },
+    {
+        "Topic": "taurus_viii",
+        "Project": "Taurus VIII"
+    },
+    {
+        "Topic": "taurus_x",
+        "Project": "Taurus X"
+    },
+    {
+        "Topic": "tierraalta",
+        "Project": "Granja Solar Tierra Alta"
+    },
+    {
+        "Topic": "uruaco_gd",
+        "Project": "Minigranja Solar Uruaco"
+    },
+    {
+        "Topic": "valencia_oriente_2",
+        "Project": "MGS 0027 Valencia Oriente 2"
+    },
+    {
+        "Topic": "valenciaoriente",
+        "Project": "MGS 0026 Valencia Oriente 1"
+    },
+    {
+        "Topic": "vallenata",
+        "Project": "MGS 0007 La Paz Vallenata"
+    },
+    {
+        "Topic": "verso",
+        "Project": "MGS 0008 La Paz Verso"
+    },
+    {
+        "Topic": "villanueva",
+        "Project": "MGS 0010 - Villanueva"
+    },
+    {
+        "Topic": "yuan_solar",
+        "Project": "GD Yuan Solar"
+    },
+    {
+        "Topic": "yurbaqua",
+        "Project": "PSF - Yurbaqua"
+    },
+    {
+        "Topic": "zofiva",
+        "Project": "Zona Franca V.A."
+    }
+]

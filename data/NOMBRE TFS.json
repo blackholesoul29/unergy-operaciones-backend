@@ -1,0 +1,442 @@
+[
+    {
+        "Proyecto": "MiniGranja 0001 - Uruaco",
+        "TSF": "COLATLT14P2"
+    },
+    {
+        "Proyecto": "MiniGranja 0004 - Valle de Gandalf",
+        "TSF": "COLCEST61P3"
+    },
+    {
+        "Proyecto": "MiniGranja 0005 - Cañahuate",
+        "TSF": "COLCEST61P1"
+    },
+    {
+        "Proyecto": "MiniGranja 0006 - Perijá (La inglesa)",
+        "TSF": "COLCEST58P2"
+    },
+    {
+        "Proyecto": "MiniGranja 0007 - La Paz Vallenata (Medardo)",
+        "TSF": "COLCEST9P1"
+    },
+    {
+        "Proyecto": "MiniGranja 0008 - La Paz Verso (Villa Sonia)",
+        "TSF": "COLCEST2P3"
+    },
+    {
+        "Proyecto": "MiniGranja 0009 - El Molino (Macedonia)",
+        "TSF": "COLLAGT19P2"
+    },
+    {
+        "Proyecto": "MiniGranja 0010 - Villanueva (los suspiros)",
+        "TSF": "COLLAGT27P2"
+    },
+    {
+        "Proyecto": "MiniGranja 0013 - La Mesa (La Virginia 1)",
+        "TSF": "COLSANT10P1"
+    },
+    {
+        "Proyecto": "MiniGranja 0014 - El Olimpo",
+        "TSF": "COLSANT4P2"
+    },
+    {
+        "Proyecto": "Minigranja 0016 - La Puya - Valledupar, Cesar (Jericó 4_Cesar)",
+        "TSF": "COLCEST45P5"
+    },
+    {
+        "Proyecto": "MiniGranja 0017 - La Paz Esmeralda - La Esmeralda 1",
+        "TSF": "COLCEST17P1"
+    },
+    {
+        "Proyecto": "Minigranja 0038 - La Admirable I",
+        "TSF": "COLATLT13P1"
+    },
+    {
+        "Proyecto": "Minigranja 0039 - La Admirable II",
+        "TSF": "COLATLT13P2"
+    },
+    {
+        "Proyecto": "Minigranja 0056 - Magangué Occidente 3",
+        "TSF": "COLBOLT8P3"
+    },
+    {
+        "Proyecto": "Minigranja 0036 - Santo Tomás Sur 3",
+        "TSF": "COLATLT4P1"
+    },
+    {
+        "Proyecto": "Minigranja 0043 - San Martín Norte 2",
+        "TSF": "COLCEST27P2"
+    },
+    {
+        "Proyecto": "Minigranja 0048 - Gamarra Norte",
+        "TSF": "COLCEST26P2"
+    },
+    {
+        "Proyecto": "Minigranja 0049 - Gamarra Norte 2",
+        "TSF": "COLCEST26P1"
+    },
+    {
+        "Proyecto": "Minigranja 0050 - Gamarra Norte 3",
+        "TSF": "COLCEST26P3"
+    },
+    {
+        "Proyecto": "Minigranja 0051 - Sabanalarga Occidente",
+        "TSF": "COLATLT5P1"
+    },
+    {
+        "Proyecto": "Minigranja 0052 - Pijiño del Carmen Norte",
+        "TSF": "COLMAGT281P1"
+    },
+    {
+        "Proyecto": "Minigranja 0053 - Pijiño del Carmen Norte 3",
+        "TSF": "COLMAGT281P3"
+    },
+    {
+        "Proyecto": "Minigranja 0054 - Magangué Occidente",
+        "TSF": "COLBOLT8P1"
+    },
+    {
+        "Proyecto": "Minigranja 0055 - Magangué Occidente 2",
+        "TSF": "COLBOLT8P2"
+    },
+    {
+        "Proyecto": "Minigranja 0057 - Pijiño del Carmen Norte 2",
+        "TSF": "COLMAGT281P2"
+    },
+    {
+        "Proyecto": "Minigranja 0058 - Tamalameque Oriente",
+        "TSF": "COLCEST312P1"
+    },
+    {
+        "Proyecto": "Minigranja 0078 - Tamalameque Oriente 2",
+        "TSF": "COLCEST312P2"
+    },
+    {
+        "Proyecto": "Minigranja 0084 - Tamalameque Oriente 3",
+        "TSF": "COLCEST312P3"
+    },
+    {
+        "Proyecto": "MiniGranja 0042 - San Martín Norte",
+        "TSF": "COLCEST27P1"
+    },
+    {
+        "Proyecto": "Minigranja 0044 - Mompox Norte",
+        "TSF": "COLBOLT5P1"
+    },
+    {
+        "Proyecto": "Minigranja 0045 - Mompox Norte 2",
+        "TSF": "COLBOLT5P2"
+    },
+    {
+        "Proyecto": "Minigranja 0034 - Santo Tomás Sur",
+        "TSF": "COLATLT4P3"
+    },
+    {
+        "Proyecto": "Minigranja 0035 - Santo Tomás Sur 2",
+        "TSF": "COLATLT4P2"
+    },
+    {
+        "Proyecto": "COLBOYT123P1_FIRAVITOBA_OCCIDENTE",
+        "TSF": "COLBOYT123P1"
+    },
+    {
+        "Proyecto": "Minigranja 0062 - San Onofre 2",
+        "TSF": "COLSUCT151P2"
+    },
+    {
+        "Proyecto": "Minigranja 0028 - Chiriguaná Norte",
+        "TSF": "COLCEST60P1"
+    },
+    {
+        "Proyecto": "Minigranja 0029 - Monterrubio",
+        "TSF": "COLMAGT6P1"
+    },
+    {
+        "Proyecto": "Minigranja 0030 - Chimá Oriente",
+        "TSF": "COLCORT7P1"
+    },
+    {
+        "Proyecto": "Minigranja 0031 - Chimá Oriente 2",
+        "TSF": "COLCORT7P2"
+    },
+    {
+        "Proyecto": "Minigranja 0032 - El Paso Norte",
+        "TSF": "COLCEST35P2"
+    },
+    {
+        "Proyecto": "Minigranja 0080 - Chinú Sur 4",
+        "TSF": "COLCORT6P3"
+    },
+    {
+        "Proyecto": "Minigranja 0081 - Galeras Occidente",
+        "TSF": "COLSUCT6P1"
+    },
+    {
+        "Proyecto": "COLMAGT19P1_PIVIJAY_SUR",
+        "TSF": "COLMAGT19P1"
+    },
+    {
+        "Proyecto": "COLMAGT19P2_PIVIJAY_SUR",
+        "TSF": "COLMAGT19P2"
+    },
+    {
+        "Proyecto": "Minigranja 0059 - Chinú Sur",
+        "TSF": "COLCORT10P1"
+    },
+    {
+        "Proyecto": "Minigranja 0060 - Chinú Sur 2",
+        "TSF": "COLCORT10P2"
+    },
+    {
+        "Proyecto": "Minigranja 0061 - San Onofre 1",
+        "TSF": "COLSUCT151P1"
+    },
+    {
+        "Proyecto": "Minigranja 0066 - Chinú Sur 5",
+        "TSF": "COLCORT6P2"
+    },
+    {
+        "Proyecto": "Minigranja 0079 - Chinú Sur 3",
+        "TSF": "COLCORT6P1"
+    },
+    {
+        "Proyecto": "COLBOYT59P1_OICATA_SUR",
+        "TSF": "COLBOYT59P1"
+    },
+    {
+        "Proyecto": "COLMAGT283P1_SANTA-ANA_NORTE",
+        "TSF": "COLMAGT283P1"
+    },
+    {
+        "Proyecto": "COLMAGT283P2_SANTA-ANA_NORTE",
+        "TSF": "COLMAGT283P2"
+    },
+    {
+        "Proyecto": "COLMAGT48P1_SABANAS-DE-SAN-ANGEL_SUR",
+        "TSF": "COLMAGT48P1"
+    },
+    {
+        "Proyecto": "COLMAGT48P2_SABANAS-DE-SAN-ANGEL_SUR",
+        "TSF": "COLMAGT48P2"
+    },
+    {
+        "Proyecto": "COLNORT43P1_LA-ESPERANZA_OCCIDENTE",
+        "TSF": "COLNORT43P1"
+    },
+    {
+        "Proyecto": "COLSANT142P1_SABANA-DE-TORRES_OCCIDENTE",
+        "TSF": "COLSANT142P1"
+    },
+    {
+        "Proyecto": "Minigranja La Ceiba_Maria Guillen - Cesar",
+        "TSF": "COLCEST137P2"
+    },
+    {
+        "Proyecto": "COLCEST415P1_LA-GLORIA_ORIENTE",
+        "TSF": "COLCEST415P1"
+    },
+    {
+        "Proyecto": "COLCEST415P3_LA-GLORIA_ORIENTE",
+        "TSF": "COLCEST415P3"
+    },
+    {
+        "Proyecto": "Minigranja 0021 - Ibirico",
+        "TSF": "COLCEST49P2"
+    },
+    {
+        "Proyecto": "Minigranja 0020 - El Mapalé",
+        "TSF": "COLCEST45P6"
+    },
+    {
+        "Proyecto": "Minigranja 0037 - Merecumbé",
+        "TSF": "COLCEST45P8"
+    },
+    {
+        "Proyecto": "Minigranja 0094 - Agustín Codazzi Sur 3",
+        "TSF": "COLCEST14P1"
+    },
+    {
+        "Proyecto": "Minigranja 0095 - La Jagua de Ibirico Norte",
+        "TSF": "COLCEST49P5"
+    },
+    {
+        "Proyecto": "Minigranja 0096 - Oiba Occidente",
+        "TSF": "COLSANT188P2"
+    },
+    {
+        "Proyecto": "Minigranja 0040 - La Cacica",
+        "TSF": "COLCEST55P1"
+    },
+    {
+        "Proyecto": "Minigranja 0041 - Las piloneras",
+        "TSF": "COLCEST55P2"
+    },
+    {
+        "Proyecto": "Minigranja 0112 - El Copey Occidente 4",
+        "TSF": "COLCEST23P2"
+    },
+    {
+        "Proyecto": "Minigranja 0086 - Agustin Codazzi Sur 2",
+        "TSF": "COLCEST25P2"
+    },
+    {
+        "Proyecto": "COLLAGT177P2_SAN-JUAN-DEL-CESAR_OCCIDENTE",
+        "TSF": "COLLAGT177P2"
+    },
+    {
+        "Proyecto": "COLSANT391P1_VALLE-DE-SAN-JOSE_ORIENTE",
+        "TSF": "COLSANT391P1"
+    },
+    {
+        "Proyecto": "Minigranja - Costa Rica - Becerril, Cesar",
+        "TSF": "COLCEST6P1"
+    },
+    {
+        "Proyecto": "Minigranja 0085 - Curumani Occidente",
+        "TSF": "COLCEST232P1"
+    },
+    {
+        "Proyecto": "Minigranja 0087 - Curumani Occidente 2",
+        "TSF": "COLCEST232P2"
+    },
+    {
+        "Proyecto": "Minigranja 0088 - Curumani Occidente 3",
+        "TSF": "COLCEST232P3"
+    },
+    {
+        "Proyecto": "Minigranja 0097 - Giron Oriente",
+        "TSF": "COLSANT6P1"
+    },
+    {
+        "Proyecto": "Minigranja 0098 - Giron Oriente 2",
+        "TSF": "COLSANT6P3"
+    },
+    {
+        "Proyecto": "Minigranja 0076 - Chiriguaná Norte 3",
+        "TSF": "COLCEST60P3"
+    },
+    {
+        "Proyecto": "Minigranja 0075 - Chiriguaná Norte 2",
+        "TSF": "COLCEST60P4"
+    },
+    {
+        "Proyecto": "Minigranja 0077 - Chiriguaná Norte 4",
+        "TSF": "COLCEST60P2"
+    },
+    {
+        "Proyecto": "COLCEST19P1_LA-JAGUA-DE-IBIRICO_OCCIDENTE",
+        "TSF": "COLCEST19P1"
+    },
+    {
+        "Proyecto": "COLCEST611P1_BOSCONIA_NORTE",
+        "TSF": "COLCEST611P1"
+    },
+    {
+        "Proyecto": "COLCEST611P2_BOSCONIA_NORTE",
+        "TSF": "COLCEST611P2"
+    },
+    {
+        "Proyecto": "COLLAGT177P1_SAN-JUAN-DEL-CESAR_OCCIDENTE",
+        "TSF": "COLLAGT177P1"
+    },
+    {
+        "Proyecto": "Minigranja 0023 - El Joropo",
+        "TSF": "COLCEST45P2"
+    },
+    {
+        "Proyecto": "MiniGranja 0025 - El Copey Occidente",
+        "TSF": "COLCEST39P1"
+    },
+    {
+        "Proyecto": "Minigranja 0018 - La Paz Leyenda",
+        "TSF": "COLCEST53P1"
+    },
+    {
+        "Proyecto": "MiniGranja 0019 - El Merengue (Jericó 2_Cesar)",
+        "TSF": "COLCEST45P7"
+    },
+    {
+        "Proyecto": "Minigranja 0022 - La Cumbia",
+        "TSF": "COLCEST45P4"
+    },
+    {
+        "Proyecto": "MiniGranja 0024 - San Diego Sur",
+        "TSF": "COLCEST38P1"
+    },
+    {
+        "Proyecto": "Minigranja 0026 - Valencia Oriente",
+        "TSF": "COLCEST74P1"
+    },
+    {
+        "Proyecto": "Minigranja 0027 - Valencia Oriente 2",
+        "TSF": "COLCEST74P2"
+    },
+    {
+        "Proyecto": "Minigranja 0063 - Giron Occidente",
+        "TSF": "COLSANT53P1"
+    },
+    {
+        "Proyecto": "Minigranja 0064 -El Paseo",
+        "TSF": "COLCEST45P3"
+    },
+    {
+        "Proyecto": "Minigranja 0065 - San Diego Sur 2",
+        "TSF": "COLCEST38P3"
+    },
+    {
+        "Proyecto": "Minigranja 0067 - Girón Sur",
+        "TSF": "COLSANT5P1"
+    },
+    {
+        "Proyecto": "Minigranja 0068 - Girón Sur 2",
+        "TSF": "COLSANT5P2"
+    },
+    {
+        "Proyecto": "Minigranja 0070 - Confines Occidente 2",
+        "TSF": "COLSANT215P2"
+    },
+    {
+        "Proyecto": "Minigranja 0071 - Confines Occidente",
+        "TSF": "COLSANT215P1"
+    },
+    {
+        "Proyecto": "Minigranja 0099 - Tunja Occidente",
+        "TSF": "COLBOYT147P1"
+    },
+    {
+        "Proyecto": "COLSANT68P1_OIBA_ORIENTE",
+        "TSF": "COLSAN T68P1"
+    },
+    {
+        "Proyecto": "Minigranja 0015 - El Son",
+        "TSF": "COLCEST45P1"
+    },
+    {
+        "Proyecto": "Minigranja 0002 - Baraya",
+        "TSF": "COLSUCT17P2"
+    },
+    {
+        "Proyecto": "Minigranja 0012 - La Reserva",
+        "TSF": "COLSANT9P1"
+    },
+    {
+        "Proyecto": "Minigranja 0092 - San Luis de Since Occidente 2",
+        "TSF": "COLSUCT49P2"
+    },
+    {
+        "Proyecto": "Minigranja 0091 - San Luis de Since Occidente 2",
+        "TSF": "COLSUCT49P1"
+    },
+    {
+        "Proyecto": "Minigranja 0074 - Galapa Oriente",
+        "TSF": "COLATLT57P1"
+    },
+    {
+        "Proyecto": "Minigranja 0033 - Sabana de Torres (La Reserva 2)",
+        "TSF": "COLSANT9P2"
+    },
+    {
+        "Proyecto": "Minigranja 0083 - Villa Sol 1",
+        "TSF": "COLNORT31P1"
+    }
+]

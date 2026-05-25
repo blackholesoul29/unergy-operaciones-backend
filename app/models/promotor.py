@@ -26,7 +26,7 @@ class PromoterCatalogoRequisito(Base):
     plazo_dias: Mapped[int | None] = mapped_column(Integer, nullable=True)  # NULL para FDOC
     descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="requisito")
+    seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="requisito")
 
 
 class PromoterSeguimiento(Base):
@@ -34,8 +34,8 @@ class PromoterSeguimiento(Base):
     __table_args__ = (UniqueConstraint("proyecto_id", "requisito_id", name="uq_promotor_proyecto_requisito"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    requisito_id: Mapped[str] = mapped_column(String(10), ForeignKey("promotor_catalogo_requisitos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    requisito_id: Mapped[str] = mapped_column(String(10), ForeignKey("promotor_catalogo_requisitos.id"), nullable=False, index=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoSeguimientoEnum, name="estado_seguimiento_enum"), nullable=False, default="pendiente")
     estado_instancia: Mapped[str] = mapped_column(SAEnum(EstadoInstanciaEnum, name="estado_instancia_enum"), nullable=False, default="activo")
     fecha_primer_documento: Mapped[date | None] = mapped_column(Date, nullable=True)

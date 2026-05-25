@@ -13,6 +13,13 @@ class ProyectoInversionistaCreate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+    @field_validator("porcentaje_participacion")
+    @classmethod
+    def validar_porcentaje(cls, v):
+        if v is not None and not (0 <= v <= 1):
+            raise ValueError("El porcentaje de participación debe estar entre 0 y 1 (equivale a 0%–100%)")
+        return v
+
 
 class ProyectoInversionistaUpdate(BaseModel):
     porcentaje_participacion: Optional[float] = None
@@ -21,12 +28,20 @@ class ProyectoInversionistaUpdate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+    @field_validator("porcentaje_participacion")
+    @classmethod
+    def validar_porcentaje(cls, v):
+        if v is not None and not (0 <= v <= 1):
+            raise ValueError("El porcentaje de participación debe estar entre 0 y 1 (equivale a 0%–100%)")
+        return v
+
 
 class ProyectoInversionistaOut(ProyectoInversionistaCreate):
     id: int
     proyecto_id: int
     cliente_nombre: str = ""
     created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
@@ -122,11 +137,26 @@ class ProyectoContactoOut(ProyectoContactoCreate):
     model_config = {"from_attributes": True}
 
 
+# ── Servicio Representación ───────────────────────────────────────────────────
+
+class ServicioRepresentacionOut(BaseModel):
+    id: int
+    proyecto_id: int
+    nit_rf: Optional[str] = None
+    nombre_rf: Optional[str] = None
+    fecha_inicio_representacion: Optional[date] = None
+    modalidad_venta: Optional[str] = None
+    nombre_comercializador: Optional[str] = None
+    codigo_despacho_xm: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
-    cliente_id: int
     portafolio_id: Optional[int] = None
     proyecto_padre_id: Optional[int] = None
     nombre_bitacora: Optional[str] = None
@@ -143,6 +173,7 @@ class ProyectoCreate(BaseModel):
     codigo_cnd: Optional[str] = None
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
+    fecha_fin_representacion: Optional[date] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -155,17 +186,40 @@ class ProyectoCreate(BaseModel):
     estado_resultados_url: Optional[str] = None
     income_distribution_method: Optional[str] = None
     generar_liquidacion: Optional[bool] = None
+    p90_mensual_kwh: Optional[list] = None
+    p50_mensual_kwh: Optional[list] = None
+    p99_mensual_kwh: Optional[list] = None
+    codigo_tsf: Optional[str] = None
+    srv_operacion: Optional[bool] = None
+    srv_representacion: Optional[bool] = None
+    srv_cgm: Optional[bool] = None
+    srv_ppa: Optional[bool] = None
+    srv_promotor: Optional[bool] = None
+    srv_rec: Optional[bool] = None
+
+    @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
+    @classmethod
+    def coerce_json_list(cls, v):
+        import json as _json
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else None
+            except Exception:
+                return None
+        return v
 
 
 class ProyectoUpdate(ProyectoCreate):
     nombre_comercial: Optional[str] = None
-    cliente_id: Optional[int] = None
+    estado: Optional[str] = None
 
 
 class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
-    cliente_id: int
     portafolio_id: Optional[int]
     proyecto_padre_id: Optional[int]
     nombre_bitacora: Optional[str]
@@ -182,6 +236,7 @@ class ProyectoOut(BaseModel):
     codigo_cnd: Optional[str]
     estado: str
     fecha_entrada_operacion: Optional[date]
+    fecha_fin_representacion: Optional[date]
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]
@@ -194,12 +249,17 @@ class ProyectoOut(BaseModel):
     estado_resultados_url: Optional[str]
     income_distribution_method: Optional[str]
     generar_liquidacion: bool
+    p90_mensual_kwh: Optional[list] = None
+    p50_mensual_kwh: Optional[list] = None
+    p99_mensual_kwh: Optional[list] = None
+    codigo_tsf: Optional[str] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    servicio_representacion: Optional[ServicioRepresentacionOut] = None
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []
@@ -210,11 +270,26 @@ class ProyectoOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", mode="before")
+    @field_validator("inversionistas", "grupos_panel", "inversores", "contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:
             return []
         if not isinstance(v, list):
             return list(v) if hasattr(v, "__iter__") else [v]
+        return v
+
+    @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
+    @classmethod
+    def coerce_json_list(cls, v):
+        """Acepta list o JSON-string (datos históricos pre-JSONB)."""
+        import json as _json
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else None
+            except Exception:
+                return None
         return v

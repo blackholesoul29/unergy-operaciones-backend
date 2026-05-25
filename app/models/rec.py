@@ -39,7 +39,7 @@ class RecProceso(Base):
     __tablename__ = "rec_procesos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     codigo_proceso: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoRecEnum, name="estado_rec_enum"), nullable=False, default="en_preparacion")
     fecha_apertura: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -66,7 +66,7 @@ class RecCertificado(Base):
     __tablename__ = "rec_certificados"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proceso_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rec_procesos.id"), unique=True, nullable=False)
+    proceso_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rec_procesos.id"), unique=True, nullable=False, index=True)
     numero_certificado: Mapped[str] = mapped_column(String(100), nullable=False)
     fecha_emision: Mapped[date] = mapped_column(Date, nullable=False)
     energia_certificada_mwh: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)

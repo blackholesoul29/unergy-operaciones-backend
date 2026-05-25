@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from app.models.usuarios import RolEnum
@@ -13,6 +13,21 @@ class UsuarioOut(BaseModel):
     ultimo_acceso: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
+
+class UsuarioCreate(BaseModel):
+    email: str
+    nombre: str
+    rol: RolEnum = RolEnum.admin
+    password: str
+    activo: bool = True
+
+
+class UsuarioUpdate(BaseModel):
+    nombre: str | None = None
+    rol: RolEnum | None = None
+    activo: bool | None = None
+    password: str | None = None
 
 
 class TokenResponse(BaseModel):

@@ -12,8 +12,20 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    SECRET_KEY: str = ""
     JWT_EXPIRE_MINUTES: int = 480
+
+    @field_validator("SECRET_KEY", mode="after")
+    @classmethod
+    def secret_key_warn_if_weak(cls, v: str) -> str:
+        if not v or len(v) < 16:
+            import warnings
+            warnings.warn(
+                "[SEGURIDAD] SECRET_KEY no está configurado o es muy corto. "
+                "Define la variable de entorno SECRET_KEY en Railway con una clave segura.",
+                stacklevel=2,
+            )
+        return v
 
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_PATH: str = "./uploads"
@@ -21,6 +33,42 @@ class Settings(BaseSettings):
     S3_ENDPOINT: str = ""
     S3_ACCESS_KEY: str = ""
     S3_SECRET_KEY: str = ""
+
+    # Unergy API credentials (used by _legacy bridge)
+    UNERGY_API_URL: str = "https://api.unergy.io"
+    UNERGY_ACCOUNT_ID: str = ""
+    UNERGY_LOGIN: str = ""
+    UNERGY_PASSWORD: str = ""
+
+    # Solenium API (FMO inverter data) — OAuth2 username/password
+    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
+    SOLENIUM_USER: str = ""
+    SOLENIUM_PASS: str = ""
+
+    # Quoia CGM API (fronteras / medidores)
+    QUOIA_API_TOKEN: str = ""
+    QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"
+
+    # MGS Alarms polling
+    MGS_ENABLED: bool = True
+    MGS_POLL_INTERVAL_MINUTES: int = 15
+    TIMEZONE: str = "America/Bogota"
+
+    # EVO Energy API (DailySpot + Clima via Tailscale)
+    EVO_API_URL: str = ""
+    EVO_API_TOKEN: str = ""
+
+    # External databases (read-only correlation)
+    ORIGINA_DATABASE_URL: str = ""
+    REQUESTSDB_DATABASE_URL: str = ""
+
+    # SMTP — envío de informes aprobados
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "operaciones@unergy.io"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

@@ -1,7 +1,9 @@
 import enum
+import json
 from datetime import datetime, date, time
 from sqlalchemy import (BigInteger, String, Boolean, Date, Time,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
+                        DateTime, Integer, Numeric, ForeignKey, Enum as SAEnum, Text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -18,7 +20,7 @@ class FallaCatCategoria(Base):
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    tipos: Mapped[list] = relationship("FallaCatTipo", back_populates="categoria")
+    tipos: Mapped[list["FallaCatTipo"]] = relationship("FallaCatTipo", back_populates="categoria")
 
 
 class FallaCatTipo(Base):
@@ -32,7 +34,7 @@ class FallaCatTipo(Base):
     activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     categoria: Mapped["FallaCatCategoria"] = relationship("FallaCatCategoria", back_populates="tipos")
-    fallas: Mapped[list] = relationship("Falla", back_populates="tipo")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="tipo")
 
 
 class FallaCatEstado(Base):
@@ -45,8 +47,8 @@ class FallaCatEstado(Base):
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     es_estado_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="estado")
-    seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="estado_nuevo")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="estado")
+    seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="estado_nuevo")
 
 
 class FallaCatPrioridad(Base):
@@ -58,7 +60,7 @@ class FallaCatPrioridad(Base):
     color_hex: Mapped[str | None] = mapped_column(String(7), nullable=True)
     nivel: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="prioridad")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="prioridad")
 
 
 class FallaCatResolucion(Base):
@@ -68,7 +70,7 @@ class FallaCatResolucion(Base):
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    fallas: Mapped[list] = relationship("Falla", back_populates="resolucion")
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="resolucion")
 
 
 class Falla(Base):
@@ -77,22 +79,34 @@ class Falla(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo_interno: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
     codigo_legado: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False)
-    tipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_tipos.id"), nullable=False)
-    estado_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=False)
-    prioridad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_prioridades.id"), nullable=False)
-    resolucion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_resoluciones.id"), nullable=True)
-    registrado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
-    asignado_a_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    tipo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_tipos.id"), nullable=False, index=True)
+    estado_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=False, index=True)
+    prioridad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_prioridades.id"), nullable=False, index=True)
+    resolucion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_resoluciones.id"), nullable=True, index=True)
+    registrado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False, index=True)
+    asignado_a_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True, index=True)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
-    fecha_identificacion: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_identificacion: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     hora_identificacion: Mapped[time | None] = mapped_column(Time, nullable=True)
     fecha_ocurrencia: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fecha_resolucion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_limite_horas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sla_cumplido: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fotos_urls: Mapped[str | None] = mapped_column(JSONB, nullable=True)
+    centinela: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    # Feature 2: link to MGS alarm that auto-created this falla
+    alarma_monitoreo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    # Feature 4: impact on generation
+    kwh_perdidos_estimado: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    impacto_economico_cop: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    # Feature 5: documentation
+    causa_raiz: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acciones_correctivas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fallas")
     tipo: Mapped["FallaCatTipo"] = relationship("FallaCatTipo", back_populates="fallas")
@@ -101,7 +115,7 @@ class Falla(Base):
     resolucion: Mapped["FallaCatResolucion | None"] = relationship("FallaCatResolucion", back_populates="fallas")
     registrado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[registrado_por_id], back_populates="fallas_registradas")
     asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
-    seguimientos: Mapped[list] = relationship("FallaSeguimiento", back_populates="falla")
+    seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="falla")
 
     @property
     def dias_abierta(self) -> int | None:
@@ -116,17 +130,38 @@ class Falla(Base):
 
     @property
     def tiene_fotos(self) -> bool:
-        return False
+        return bool(self.fotos_urls)
+
+    @property
+    def fotos_lista(self) -> list[str]:
+        # Con JSONB el ORM ya devuelve list o str según cómo fue almacenado.
+        # Manejamos ambos casos + doble-codificación de datos históricos.
+        if not self.fotos_urls:
+            return []
+        if isinstance(self.fotos_urls, list):
+            return self.fotos_urls
+        # Caso legado: string JSON (antes de la migración a JSONB)
+        try:
+            result = json.loads(self.fotos_urls)
+            if isinstance(result, list):
+                return result
+            # Doble-codificación histórica → decodificar una vez más
+            if isinstance(result, str):
+                inner = json.loads(result)
+                return inner if isinstance(inner, list) else []
+            return []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
 
 class FallaSeguimiento(Base):
     __tablename__ = "fallas_seguimientos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    falla_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas.id"), nullable=False)
-    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
+    falla_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas.id"), nullable=False, index=True)
+    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False, index=True)
     nota: Mapped[str | None] = mapped_column(Text, nullable=True)
-    estado_nuevo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=True)
+    estado_nuevo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     falla: Mapped["Falla"] = relationship("Falla", back_populates="seguimientos")

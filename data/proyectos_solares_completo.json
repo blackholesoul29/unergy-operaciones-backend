@@ -1,0 +1,290 @@
+[
+  {
+    "nombre_topico": "Almacenes AMC",
+    "potencia_instalada_dc_kwp": 81,
+    "potencia_instalada_ac_kw": 60,
+    "numero_de_paneles": 150,
+    "ciudad": "Sincelejo",
+    "departamento": "Sucre Department",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Arboleda de Castilla",
+    "potencia_instalada_dc_kwp": 517,
+    "potencia_instalada_ac_kw": 48,
+    "numero_de_paneles": 94,
+    "ciudad": "Medellín",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Asociación Asprolesa",
+    "potencia_instalada_dc_kwp": 72,
+    "potencia_instalada_ac_kw": 60,
+    "numero_de_paneles": 144,
+    "ciudad": "Santuario",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Central de Maderas",
+    "potencia_instalada_dc_kwp": 55,
+    "potencia_instalada_ac_kw": 40,
+    "numero_de_paneles": 140,
+    "ciudad": "Turbaná",
+    "departamento": "Bolívar",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Centro Comercial Obelisco",
+    "potencia_instalada_dc_kwp": 120,
+    "potencia_instalada_ac_kw": 96,
+    "numero_de_paneles": 283,
+    "ciudad": "Medellín",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Centro Comercial Savanna Plaza",
+    "potencia_instalada_dc_kwp": 460,
+    "potencia_instalada_ac_kw": 40,
+    "numero_de_paneles": 88,
+    "ciudad": "Rionegro",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Clínica Somer",
+    "potencia_instalada_dc_kwp": 272,
+    "potencia_instalada_ac_kw": 220,
+    "numero_de_paneles": 538,
+    "ciudad": "Rionegro",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Colegio Cristo Rey Bogotá",
+    "potencia_instalada_dc_kwp": 432,
+    "potencia_instalada_ac_kw": 36,
+    "numero_de_paneles": 80,
+    "ciudad": "Bogotá",
+    "departamento": "Bogota D.C.",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Complejo Industrial Cedillanos",
+    "potencia_instalada_dc_kwp": 1208,
+    "potencia_instalada_ac_kw": 900,
+    "numero_de_paneles": 2158,
+    "ciudad": "Santa Rosa de Osos",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Cross Business Center",
+    "potencia_instalada_dc_kwp": 534,
+    "potencia_instalada_ac_kw": 45,
+    "numero_de_paneles": 118,
+    "ciudad": "Medellín",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Ecoimagen IPS",
+    "potencia_instalada_dc_kwp": 323,
+    "potencia_instalada_ac_kw": 252,
+    "numero_de_paneles": 84,
+    "ciudad": "Cúcuta",
+    "departamento": "Norte de Santander Department",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "GRANJA SOLAR SAN AGUSTIN",
+    "potencia_instalada_dc_kwp": 1408,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2184,
+    "ciudad": "",
+    "departamento": "",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Gimnasio San Angelo",
+    "potencia_instalada_dc_kwp": 767,
+    "potencia_instalada_ac_kw": 60,
+    "numero_de_paneles": 142,
+    "ciudad": "Bogotá",
+    "departamento": "Bogota D.C.",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "IML",
+    "potencia_instalada_dc_kwp": 1321,
+    "potencia_instalada_ac_kw": 940,
+    "numero_de_paneles": 2298,
+    "ciudad": "Pereira",
+    "departamento": "Risaralda Department",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "IPS Coopsana",
+    "potencia_instalada_dc_kwp": 32,
+    "potencia_instalada_ac_kw": 26,
+    "numero_de_paneles": 80,
+    "ciudad": "Medellín",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Ladrillera Arcillas San Simón",
+    "potencia_instalada_dc_kwp": 134,
+    "potencia_instalada_ac_kw": 96,
+    "numero_de_paneles": 252,
+    "ciudad": "El Zulia",
+    "departamento": "Norte de Santander Department",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "Los Coches",
+    "potencia_instalada_dc_kwp": 449,
+    "potencia_instalada_ac_kw": 40,
+    "numero_de_paneles": 84,
+    "ciudad": "Montelíbano",
+    "departamento": "Córdoba",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "MDM Científica",
+    "potencia_instalada_dc_kwp": 528,
+    "potencia_instalada_ac_kw": 40,
+    "numero_de_paneles": 132,
+    "ciudad": "Medellín",
+    "departamento": "Antioquia",
+    "tipo": "Autoconsumo"
+  },
+  {
+    "nombre_topico": "MGS 0004 Valle de Gandalf",
+    "potencia_instalada_dc_kwp": 1316,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2308,
+    "ciudad": "San Diego",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0005 Cañahuate",
+    "potencia_instalada_dc_kwp": 1316,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2308,
+    "ciudad": "San Diego",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0006 Perijá",
+    "potencia_instalada_dc_kwp": 1312,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2280,
+    "ciudad": "San Diego",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0007 La Paz Vallenata",
+    "potencia_instalada_dc_kwp": 1330,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2300,
+    "ciudad": "La Paz",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0008 La Paz Verso",
+    "potencia_instalada_dc_kwp": 1339,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2308,
+    "ciudad": "La Paz",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0009 El Molino",
+    "potencia_instalada_dc_kwp": 1315,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2280,
+    "ciudad": "El Molino",
+    "departamento": "La Guajira Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0010 - Villanueva",
+    "potencia_instalada_dc_kwp": 1339,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2308,
+    "ciudad": "Villanueva",
+    "departamento": "La Guajira Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0011 El Roble",
+    "potencia_instalada_dc_kwp": 1339,
+    "potencia_instalada_ac_kw": 996,
+    "numero_de_paneles": 2308,
+    "ciudad": "El Roble",
+    "departamento": "Sucre Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0013 La Mesa",
+    "potencia_instalada_dc_kwp": 1340,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2196,
+    "ciudad": "Los Santos",
+    "departamento": "Santander Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0014 - El Olimpo",
+    "potencia_instalada_dc_kwp": 1322,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2196,
+    "ciudad": "Los Santos",
+    "departamento": "Santander Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0016 - Puya",
+    "potencia_instalada_dc_kwp": 1300,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2032,
+    "ciudad": "Valledupar",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0017- Esmeralda",
+    "potencia_instalada_dc_kwp": 1321,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2196,
+    "ciudad": "La Paz",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0018 La Paz Leyenda",
+    "potencia_instalada_dc_kwp": 1318,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2196,
+    "ciudad": "La Paz",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  },
+  {
+    "nombre_topico": "MGS 0019 El Merengue",
+    "potencia_instalada_dc_kwp": 1322,
+    "potencia_instalada_ac_kw": 990,
+    "numero_de_paneles": 2280,
+    "ciudad": "Valledupar",
+    "departamento": "Cesar Department",
+    "tipo": "Minigranja"
+  }
+]

@@ -75,6 +75,14 @@ class FallaCreate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     codigo_legado: Optional[str] = None
+    fotos_urls: Optional[list[str]] = None
+    centinela: Optional[str] = None
+    notificacion: bool = False
+    alarma_monitoreo_id: Optional[int] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
 
 
 class FallaUpdate(BaseModel):
@@ -90,6 +98,13 @@ class FallaUpdate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     sla_cumplido: Optional[bool] = None
+    fotos_urls: Optional[list[str]] = None
+    centinela: Optional[str] = None
+    notificacion: Optional[bool] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -127,12 +142,35 @@ class FallaOut(BaseModel):
     sla_limite_horas: Optional[int]
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
+    fotos_lista: list[str] = []
+    centinela: Optional[str] = None
+    notificacion: bool = False
+    alarma_monitoreo_id: Optional[int] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
     dias_abierta: Optional[int] = None
     sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+    @field_validator("fotos_lista", mode="before")
+    @classmethod
+    def coerce_fotos_lista(cls, v):
+        """Acepta list o JSON-string; nunca falla con 500."""
+        import json as _json
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else []
+            except Exception:
+                return []
+        return []
 
     @field_validator("seguimientos", mode="before")
     @classmethod
@@ -145,3 +183,19 @@ class FallaCatalogos(BaseModel):
     prioridades: list[FallaCatPrioridadOut]
     tipos: list[FallaCatTipoOut]
     resoluciones: list[FallaCatResolucionOut]
+
+
+class FallaSLADashboard(BaseModel):
+    fallas_en_riesgo_sla: int
+    fallas_sla_vencido: int
+    promedio_tiempo_resolucion_horas: Optional[float]
+    cumplimiento_sla_pct: Optional[float]
+
+
+class FallaImpacto(BaseModel):
+    falla_id: int
+    proyecto_nombre: str
+    potencia_instalada_kwp: Optional[float]
+    horas_fuera: float
+    kwh_perdidos_estimado: float
+    impacto_economico_cop: float

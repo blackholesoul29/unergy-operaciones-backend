@@ -593,6 +593,12 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_api_keys_usuario ON api_keys (usuario_id)",
     "CREATE INDEX IF NOT EXISTS ix_api_keys_prefix ON api_keys (key_prefix)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys (key_hash)",
+    # fix — garantizar que operaciones@unergy.io tenga rol operaciones
+    # (si el rol actual no permite acceso a la sección Informes/Fallas/Monitoreo)
+    """UPDATE usuarios
+       SET rol = 'operaciones'
+       WHERE email = 'operaciones@unergy.io'
+         AND rol::text NOT IN ('admin', 'operaciones', 'monitoreo')""",
 ]
 
 

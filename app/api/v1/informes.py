@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -37,7 +37,7 @@ class InformeUpsertIn(BaseModel):
     periodo_display: Optional[str] = None
     proyecto_nombre: Optional[str] = None
     html_content: str
-    charts_data: Optional[str] = None     # JSON string del rptChartQueue
+    charts_data: Optional[Any] = None     # JSON del rptChartQueue (puede llegar como string o dict)
 
 
 class EstadoIn(BaseModel):
@@ -68,7 +68,7 @@ class InformeOut(BaseModel):
 
 class InformeDetailOut(InformeOut):
     html_content: str
-    charts_data: Optional[str]
+    charts_data: Optional[Any] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -114,6 +114,14 @@ def upsert_informe(
 
     now = datetime.now(timezone.utc)
 
+    # Normalizar charts_data: si llega como string JSON, parsearlo a dict para JSONB
+    charts_data_parsed = payload.charts_data
+    if isinstance(charts_data_parsed, str):
+        try:
+            charts_data_parsed = json.loads(charts_data_parsed)
+        except (ValueError, TypeError):
+            charts_data_parsed = None
+
     if existing:
         # Solo "borrador" se puede sobrescribir.
         # "revisado" y "aprobado" están bloqueados para no perder avances del flujo editorial.
@@ -126,7 +134,7 @@ def upsert_informe(
                 "Reviértelo a borrador antes de guardar una nueva versión.",
             )
         existing.html_content = payload.html_content
-        existing.charts_data = payload.charts_data
+        existing.charts_data = charts_data_parsed
         if payload.proyecto_nombre:
             existing.proyecto_nombre = payload.proyecto_nombre
         if payload.periodo_display:
@@ -146,7 +154,7 @@ def upsert_informe(
             periodo_display=payload.periodo_display,
             proyecto_nombre=payload.proyecto_nombre,
             html_content=payload.html_content,
-            charts_data=payload.charts_data,
+            charts_data=charts_data_parsed,
             estado="borrador",
             creado_por_id=current_user.id,
             creado_por_nombre=current_user.nombre,
@@ -261,6 +269,8 @@ def delete_informe(
     inf = db.get(InformeGuardado, informe_id)
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
+    if inf.estado == "aprobado":
+        raise HTTPException(400, "No se puede eliminar un informe aprobado")
     db.delete(inf)
     db.commit()
 

@@ -31,7 +31,7 @@ class InformeGuardado(Base):
     proyecto_nombre: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     html_content: Mapped[str] = mapped_column(Text)
-    charts_data: Mapped[str | None] = mapped_column(JSONB, nullable=True)
+    charts_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     estado: Mapped[str] = mapped_column(SAEnum(EstadoInformeEnum, name="estado_informe_enum"), default="borrador")
 

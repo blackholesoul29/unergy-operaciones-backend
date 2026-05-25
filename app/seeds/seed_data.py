@@ -11,15 +11,16 @@ from app.models import (
 
 
 USUARIOS = [
-    {"email": "juanjose@unergy.io", "nombre": "Juan José Pacheco Arias", "rol": "admin"},
-    {"email": "laurah@unergy.io",   "nombre": "Laura Vanessa Hurtado",    "rol": "admin"},
-    {"email": "jessica@unergy.io",  "nombre": "Jessica",                  "rol": "admin"},
-    {"email": "nicolas@unergy.io",  "nombre": "Nicolás Villegas",         "rol": "operaciones"},
-    {"email": "eduardo@unergy.io",  "nombre": "Eduardo",                  "rol": "admin"},
-    {"email": "victor@unergy.io",   "nombre": "Víctor",                   "rol": "admin"},
-    {"email": "camilo@unergy.io",   "nombre": "Camilo",                   "rol": "operaciones"},
-    {"email": "danielg@unergy.io",  "nombre": "Daniel G.",                "rol": "operaciones"},
-    {"email": "hillary@unergy.io", "nombre": "Hillary",                  "rol": "admin"},
+    {"email": "juanjose@unergy.io",    "nombre": "Juan José Pacheco Arias", "rol": "admin"},
+    {"email": "laurah@unergy.io",      "nombre": "Laura Vanessa Hurtado",   "rol": "admin"},
+    {"email": "jessica@unergy.io",     "nombre": "Jessica",                 "rol": "admin"},
+    {"email": "nicolas@unergy.io",     "nombre": "Nicolás Villegas",        "rol": "operaciones"},
+    {"email": "eduardo@unergy.io",     "nombre": "Eduardo",                 "rol": "admin"},
+    {"email": "victor@unergy.io",      "nombre": "Víctor",                  "rol": "admin"},
+    {"email": "camilo@unergy.io",      "nombre": "Camilo",                  "rol": "operaciones"},
+    {"email": "danielg@unergy.io",     "nombre": "Daniel G.",               "rol": "operaciones"},
+    {"email": "hillary@unergy.io",     "nombre": "Hillary",                 "rol": "admin"},
+    {"email": "operaciones@unergy.io", "nombre": "Operaciones Unergy",      "rol": "operaciones"},
 ]
 
 CATEGORIAS_FALLA = [

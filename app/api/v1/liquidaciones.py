@@ -799,7 +799,14 @@ def vista_por_inversionista(
 
     liq_por_proyecto: dict[int, list] = {pid: [] for pid in proy_ids}
     if proy_ids:
-        liq_q = db.query(Liquidacion).filter(Liquidacion.proyecto_id.in_(proy_ids), Liquidacion.deleted_at.is_(None))
+        liq_q = (
+            db.query(Liquidacion)
+            .options(
+                selectinload(Liquidacion.mandatos)
+                    .selectinload(LiquidacionMandato.lineas),
+            )
+            .filter(Liquidacion.proyecto_id.in_(proy_ids), Liquidacion.deleted_at.is_(None))
+        )
         if periodo_desde:
             liq_q = liq_q.filter(Liquidacion.periodo >= periodo_desde)
         if periodo_hasta:
@@ -808,12 +815,28 @@ def vista_por_inversionista(
             liq_q = liq_q.filter(Liquidacion.estado == estado)
         for liq in liq_q.order_by(Liquidacion.periodo.desc()).all():
             if liq.proyecto_id in liq_por_proyecto:
+                # Calcular ingreso neto desde mandatos Total (inversionista_id null)
+                mandatos_ing = [
+                    m for m in liq.mandatos
+                    if m.tipo.value == "ingresos" and m.inversionista_id is None
+                ]
+                # Si no hay mandato Total, usar mandatos de inversionistas
+                if not mandatos_ing:
+                    mandatos_ing = [m for m in liq.mandatos if m.tipo.value == "ingresos"]
+                valor_neto = sum(float(m.valor_neto_cop or 0) for m in mandatos_ing)
+                ingreso_bruto = sum(
+                    float(l.valor_cop)
+                    for m in mandatos_ing
+                    for l in m.lineas
+                    if l.tipo_linea is not None
+                    and l.tipo_linea.value in ("ingreso_bruto", "despacho", "ventas_en_bolsa")
+                )
                 liq_por_proyecto[liq.proyecto_id].append({
                     "liquidacion_id": liq.id,
                     "periodo": liq.periodo.isoformat(),
                     "estado": liq.estado,
                     "tipo_venta": liq.tipo_venta,
-                    "ingreso_neto_cop": float(liq.ingreso_neto_cop or 0),
+                    "ingreso_neto_cop": float(liq.ingreso_neto_cop or valor_neto or ingreso_bruto or 0),
                 })
 
     clientes: dict[int, dict] = {}

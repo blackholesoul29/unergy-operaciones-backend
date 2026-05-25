@@ -636,6 +636,7 @@ def vista_por_proyecto(
     periodo_hasta: date | None = None,
     proyecto_id: int | None = None,
     estado: str | None = None,
+    tipo_proyecto: str | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -643,6 +644,8 @@ def vista_por_proyecto(
         proy_q = db.query(Proyecto)
         if proyecto_id:
             proy_q = proy_q.filter(Proyecto.id == proyecto_id)
+        if tipo_proyecto:
+            proy_q = proy_q.filter(Proyecto.tipo_proyecto == tipo_proyecto)
         todos_proyectos = proy_q.order_by(Proyecto.nombre_comercial).all()
         proy_ids = [p.id for p in todos_proyectos]
 

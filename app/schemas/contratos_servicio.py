@@ -15,6 +15,7 @@ class FilaIndexacion(BaseModel):
 class FilaFactura(BaseModel):
     id: str                               # ID generado en cliente (str timestamp)
     fecha: str                            # formato YYYY-MM
+    inversionista: Optional[str] = None
     numero_factura: Optional[str] = None
     monto: Optional[float] = None
     enlace_soporte: Optional[str] = None

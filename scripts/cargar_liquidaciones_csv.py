@@ -34,7 +34,7 @@ TIPO_LINEA_MAP = [
     (r"ajuste.*administr",                     "otro_costo"),
     (r"arriendo",                              "arriendo"),
     (r"mantenimiento",                         "mantenimiento"),
-    (r"iva.*internet|internet.*iva",           "iva_internet"),  # Bug 2: before generic internet rule
+    (r"iva.*internet|internet.*iva",           "iva"),
     (r"internet",                              "servicio_internet"),
     (r"poliza.*cumplimiento|p.liza.*cumpl",    "poliza_cumplimiento"),
     (r"poliza|incendio|lucro cesante",         "seguro"),
@@ -72,6 +72,27 @@ def normalizar(s: str) -> str:
     import unicodedata
     s = unicodedata.normalize("NFD", str(s or "").lower().strip())
     return "".join(c for c in s if unicodedata.category(c) != "Mn")
+
+
+ALIASES: dict[str, str] = {
+    "ayura sas":                    "ayura",
+    "ayura s.a.s":                  "ayura",
+    "solenium sas":                 "solenium",
+    "solenium s.a.s":               "solenium",
+    "patrimonios autonomos":        "patrimonios",
+    "suno activos sostenibles":     "suno",
+    "rodriguez velez beatriz":      "rodriguez velez",
+    "inversiones estrada arbelaez": "estrada",
+    "strada asociados":             "estrada",
+}
+
+
+def normalizar_alias(nombre: str) -> str:
+    n = normalizar(nombre)
+    for patron, alias in ALIASES.items():
+        if patron in n:
+            return alias
+    return n
 
 
 def concepto_a_tipo_linea(concepto: str) -> str:
@@ -203,19 +224,57 @@ class API:
         return {"Authorization": f"Bearer {self.token}"}
 
     def get(self, path, **kw):
-        r = requests.get(f"{self.base}{path}", headers=self._h(), **kw)
-        r.raise_for_status()
-        return r.json()
+        import time
+        kw.setdefault("timeout", 30)
+        for attempt in range(4):
+            try:
+                r = requests.get(f"{self.base}{path}", headers=self._h(), **kw)
+                r.raise_for_status()
+                return r.json()
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt == 3:
+                    raise
+                wait = 2 ** attempt
+                print(f"    [retry {attempt+1}/3 en {wait}s — {e.__class__.__name__}]")
+                time.sleep(wait)
+            except requests.exceptions.HTTPError:
+                raise
 
     def post(self, path, body):
-        r = requests.post(f"{self.base}{path}", json=body, headers=self._h())
-        r.raise_for_status()
-        return r.json()
+        import time
+        for attempt in range(4):
+            try:
+                r = requests.post(f"{self.base}{path}", json=body, headers=self._h(), timeout=30)
+                r.raise_for_status()
+                return r.json()
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt == 3:
+                    raise
+                wait = 2 ** attempt
+                print(f"    [retry {attempt+1}/3 en {wait}s — {e.__class__.__name__}]")
+                time.sleep(wait)
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 500:
+                    print(f"    [500 body: {e.response.text[:300]}]")
+                raise
 
     def patch(self, path, body):
-        r = requests.patch(f"{self.base}{path}", json=body, headers=self._h())
-        r.raise_for_status()
-        return r.json()
+        import time
+        for attempt in range(4):
+            try:
+                r = requests.patch(f"{self.base}{path}", json=body, headers=self._h(), timeout=30)
+                r.raise_for_status()
+                return r.json()
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt == 3:
+                    raise
+                wait = 2 ** attempt
+                print(f"    [retry {attempt+1}/3 en {wait}s — {e.__class__.__name__}]")
+                time.sleep(wait)
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 500:
+                    print(f"    [500 body: {e.response.text[:300]}]")
+                raise
 
 
 # ── Match helpers ─────────────────────────────────────────────────────────────
@@ -241,20 +300,32 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
 def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
     if not nombre or nombre.upper() == "TOTAL":
         return None
+
+    def _nombre_db(inv: dict) -> str:
+        return (inv.get("cliente_nombre") or inv.get("razon_social_nombre") or
+                inv.get("nombre") or inv.get("razon_social") or "")
+
+    # Fase 1: match directo normalizado (sin aliases) — evita colisiones entre
+    # entidades distintas que comparten el mismo alias (ej. ESTRADA vs STRADA)
     norm = normalizar(nombre)
     for inv in inversionistas_db:
-        nombre_inv = (
-            inv.get("cliente_nombre") or
-            inv.get("razon_social_nombre") or
-            inv.get("nombre") or
-            inv.get("razon_social") or ""
-        )
-        cn = normalizar(nombre_inv)
-        if cn and (cn in norm or norm in cn):
+        cn = normalizar(_nombre_db(inv))
+        if cn and (cn == norm or cn in norm or norm in cn):
             return inv
-        palabras = [w for w in norm.split() if len(w) > 4]
+    palabras = [w for w in norm.split() if len(w) > 4]
+    for inv in inversionistas_db:
+        cn = normalizar(_nombre_db(inv))
         if palabras and cn and all(w in cn for w in palabras[:2]):
             return inv
+
+    # Fase 2: match por alias — solo si no hubo match directo
+    norm_alias = normalizar_alias(nombre)
+    if norm_alias != norm:
+        for inv in inversionistas_db:
+            cn = normalizar_alias(_nombre_db(inv))
+            if cn and cn == norm_alias:
+                return inv
+
     return None
 
 
@@ -304,7 +375,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
         grupos.setdefault(f["proyecto"], {}).setdefault(f["inversionista"], []).append(f)
 
     stats = {"ok": 0, "sin_match": [], "liq": 0,
-             "mandatos": 0, "lineas": 0, "costos": 0, "facturas": 0}
+             "mandatos": 0, "lineas": 0, "costos": 0, "facturas": 0,
+             "sin_match_inv": []}
 
     for nombre_proy, inv_grupos in grupos.items():
         proy_db = match_proyecto(proyectos_db, nombre_proy)
@@ -323,8 +395,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
             stats["ok"] += 1
             continue
 
-        proy_detail = api.get(f"/api/v1/proyectos/{pid}")
-        inversionistas_db = proy_detail.get("inversionistas", [])
+        inversionistas_db = api.get(f"/api/v1/proyectos/{pid}/inversionistas")
 
         # Crear / recuperar liquidación
         try:
@@ -399,6 +470,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
             inv_id = inv_db["id"] if inv_db else None
 
             if not es_total and inv_db is None and inv_nombre.strip():
+                stats["sin_match_inv"].append(f"{nombre_proy} → {inv_nombre}")
                 print(
                     f"  ⚠  Inversionista sin match en DB: '{inv_nombre}' "
                     f"(proyecto '{nombre_proy}'). Filas cargadas sin inversionista_id."
@@ -450,6 +522,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
                         ref_parts.append(f["cons_ing_txt"])
                     ref = " | ".join(p for p in ref_parts if p) or None
+                    if ref and len(ref) > 255:
+                        ref = ref[:252] + "..."
                     api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas", {
                         "tipo_linea": tipo_l,
                         "concepto": f["concepto"],
@@ -490,6 +564,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
                         ref_parts.append(f["cons_ing_txt"])
                     ref = " | ".join(p for p in ref_parts if p) or None
+                    if ref and len(ref) > 255:
+                        ref = ref[:252] + "..."
                     api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mcid}/lineas", {
                         "tipo_linea": tipo_l,
                         "concepto": f["concepto"],
@@ -538,8 +614,12 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
     print(f"Costos (nivel proy):    {stats['costos']}")
     print(f"Facturas creadas:       {stats['facturas']}")
     if stats["sin_match"]:
-        print(f"\nSin match en DB ({len(stats['sin_match'])}):")
+        print(f"\nProyectos sin match en DB ({len(stats['sin_match'])}):")
         for n in stats["sin_match"]:
+            print(f"  - {n}")
+    if stats["sin_match_inv"]:
+        print(f"\nInversionistas sin match en DB ({len(stats['sin_match_inv'])}) — usaron beneficiario_nombre:")
+        for n in stats["sin_match_inv"]:
             print(f"  - {n}")
 
 

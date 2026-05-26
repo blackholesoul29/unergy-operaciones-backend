@@ -831,12 +831,19 @@ def vista_por_inversionista(
                     if l.tipo_linea is not None
                     and l.tipo_linea.value in ("ingreso_bruto", "despacho", "ventas_en_bolsa")
                 )
+                mandatos_cos = [m for m in liq.mandatos if m.tipo.value == "costos"]
+                total_ingresos_cop = sum(float(m.total_ingresos_cop or 0) for m in mandatos_ing)
+                total_costos_cop   = sum(float(m.total_costos_cop   or 0) for m in mandatos_cos)
+                total_facturas_cop = sum(float(m.total_costos_cop   or 0) for m in mandatos_ing)
                 liq_por_proyecto[liq.proyecto_id].append({
-                    "liquidacion_id": liq.id,
-                    "periodo": liq.periodo.isoformat(),
-                    "estado": liq.estado,
-                    "tipo_venta": liq.tipo_venta,
-                    "ingreso_neto_cop": float(liq.ingreso_neto_cop or valor_neto or ingreso_bruto or 0),
+                    "liquidacion_id":   liq.id,
+                    "periodo":          liq.periodo.isoformat(),
+                    "estado":           liq.estado,
+                    "tipo_venta":       liq.tipo_venta,
+                    "ingreso_neto_cop":   float(liq.ingreso_neto_cop or valor_neto or ingreso_bruto or 0),
+                    "total_ingresos_cop": total_ingresos_cop,
+                    "total_costos_cop":   total_costos_cop,
+                    "total_facturas_cop": total_facturas_cop,
                 })
 
     clientes: dict[int, dict] = {}

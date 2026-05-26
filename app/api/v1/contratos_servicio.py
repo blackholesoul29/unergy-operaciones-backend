@@ -8,7 +8,7 @@ from app.models.clientes import Cliente
 from app.schemas.contratos_servicio import (
     ContratoServicioCreate, ContratoServicioUpdate, ContratoServicioOut,
     PagoServicioCreate, PagoServicioUpdate, PagoServicioOut,
-    ImportarIndexacionEntry,
+    ImportarIndexacionEntry, FilaFactura,
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
 
@@ -146,6 +146,36 @@ def delete_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_curren
     contrato = _get_or_404(id, db)
     db.delete(contrato)
     db.commit()
+
+
+# ── Facturas Solenium / Inversionistas ────────────────────────────────────────
+
+@router.patch("/{id}/facturas-solenium", response_model=ContratoServicioOut)
+def update_facturas_solenium(
+    id: int,
+    facturas: list[FilaFactura] = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    contrato = _get_or_404(id, db)
+    contrato.facturas_solenium = [f.model_dump() for f in facturas]
+    flag_modified(contrato, "facturas_solenium")
+    db.commit()
+    return _get_or_404(id, db)
+
+
+@router.patch("/{id}/facturas-inversionistas", response_model=ContratoServicioOut)
+def update_facturas_inversionistas(
+    id: int,
+    facturas: list[FilaFactura] = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    contrato = _get_or_404(id, db)
+    contrato.facturas_inversionistas = [f.model_dump() for f in facturas]
+    flag_modified(contrato, "facturas_inversionistas")
+    db.commit()
+    return _get_or_404(id, db)
 
 
 # ── Pagos de servicio ──────────────────────────────────────────────────────────

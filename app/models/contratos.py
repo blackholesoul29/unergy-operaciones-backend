@@ -87,6 +87,8 @@ class ContratoServicio(Base):
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     indexacion_anual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     indexacion_mensual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    facturas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    facturas_inversionistas: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

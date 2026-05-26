@@ -12,6 +12,14 @@ class FilaIndexacion(BaseModel):
     valor: float
 
 
+class FilaFactura(BaseModel):
+    id: str                               # ID generado en cliente (str timestamp)
+    fecha: str                            # formato YYYY-MM
+    numero_factura: Optional[str] = None
+    monto: Optional[float] = None
+    enlace_soporte: Optional[str] = None
+
+
 class ImportarIndexacionEntry(BaseModel):
     proyecto: str
     filas: List[FilaIndexacion]
@@ -137,6 +145,8 @@ class ContratoServicioOut(BaseModel):
     rec_vintage: Optional[str] = None
     indexacion_anual: Optional[List[FilaIndexacion]] = None
     indexacion_mensual: Optional[List[FilaIndexacion]] = None
+    facturas_solenium: Optional[List[FilaFactura]] = None
+    facturas_inversionistas: Optional[List[FilaFactura]] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

@@ -603,6 +603,9 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_mensual NUMERIC(14,2)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_anual JSONB",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_mensual JSONB",
+    # migration 020 — facturas Solenium e Inversionistas como JSONB
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_solenium JSONB",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_inversionistas JSONB",
 ]
 
 

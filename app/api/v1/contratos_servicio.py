@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.contratos import ContratoServicio, PagoServicio
@@ -7,7 +8,9 @@ from app.models.clientes import Cliente
 from app.schemas.contratos_servicio import (
     ContratoServicioCreate, ContratoServicioUpdate, ContratoServicioOut,
     PagoServicioCreate, PagoServicioUpdate, PagoServicioOut,
+    ImportarIndexacionEntry,
 )
+from app.utils.proyecto_matching import find_proyecto_by_name
 
 router = APIRouter(prefix="/contratos-servicio", tags=["ContratoServicio"])
 
@@ -67,6 +70,55 @@ def create_contrato(
     _sync_partes(contrato, db)
     db.commit()
     return _get_or_404(contrato.id, db)
+
+
+@router.post("/importar-indexacion")
+def importar_indexacion(
+    tipo: str = Query(..., description="'anual' o 'mensual'"),
+    payload: list[ImportarIndexacionEntry] = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Carga masiva de filas de indexación O&M para múltiples proyectos.
+
+    Body: [{proyecto: str, filas: [{anio, ipc_aplicado, valor}]}]
+    tipo: 'anual' | 'mensual'
+    Retorna: {actualizados: [str], no_encontrados: [str]}
+    """
+    if tipo not in ("anual", "mensual"):
+        raise HTTPException(400, "tipo debe ser 'anual' o 'mensual'")
+
+    campo = "indexacion_anual" if tipo == "anual" else "indexacion_mensual"
+    actualizados: list[str] = []
+    no_encontrados: list[str] = []
+
+    for entrada in payload:
+        nombre = entrada.proyecto.strip()
+        proy = find_proyecto_by_name(db, nombre)
+        if not proy:
+            no_encontrados.append(nombre)
+            continue
+
+        contrato = (
+            db.query(ContratoServicio)
+            .filter(
+                ContratoServicio.proyecto_id == proy.id,
+                ContratoServicio.servicio_aplica == "mantenimiento",
+            )
+            .first()
+        )
+        if not contrato:
+            no_encontrados.append(nombre)
+            continue
+
+        filas_serializadas = [f.model_dump() for f in entrada.filas]
+        setattr(contrato, campo, filas_serializadas)
+        flag_modified(contrato, campo)
+        actualizados.append(proy.nombre_comercial or nombre)
+
+    db.commit()
+    return {"actualizados": actualizados, "no_encontrados": no_encontrados}
 
 
 @router.get("/{id}", response_model=ContratoServicioOut)

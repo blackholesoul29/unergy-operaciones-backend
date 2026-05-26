@@ -1,8 +1,23 @@
 from __future__ import annotations
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 
+
+# ── Indexación O&M ────────────────────────────────────────────────────────────
+
+class FilaIndexacion(BaseModel):
+    anio: int
+    ipc_aplicado: Optional[float] = None   # None = año base
+    valor: float
+
+
+class ImportarIndexacionEntry(BaseModel):
+    proyecto: str
+    filas: List[FilaIndexacion]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ClienteBasico(BaseModel):
     id: int
@@ -30,6 +45,7 @@ class ContratoServicioCreate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
     tarifa_base: Optional[float] = None
+    tarifa_mensual: Optional[float] = None
     periodicidad_pago: Optional[str] = None
     indice_indexacion: Optional[str] = None
     canones_otros: Optional[float] = None
@@ -81,6 +97,8 @@ class ContratoServicioUpdate(BaseModel):
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
     rec_vintage: Optional[str] = None
+    indexacion_anual: Optional[List[FilaIndexacion]] = None
+    indexacion_mensual: Optional[List[FilaIndexacion]] = None
 
 
 class ContratoServicioOut(BaseModel):
@@ -99,6 +117,7 @@ class ContratoServicioOut(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
     tarifa_base: Optional[float] = None
+    tarifa_mensual: Optional[float] = None
     periodicidad_pago: Optional[str] = None
     indice_indexacion: Optional[str] = None
     canones_otros: Optional[float] = None
@@ -116,6 +135,8 @@ class ContratoServicioOut(BaseModel):
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
     rec_vintage: Optional[str] = None
+    indexacion_anual: Optional[List[FilaIndexacion]] = None
+    indexacion_mensual: Optional[List[FilaIndexacion]] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

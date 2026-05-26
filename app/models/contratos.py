@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import (BigInteger, Integer as sa_Integer, String, Numeric, Boolean, Date,
                         DateTime, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, Table,
                         Column, CheckConstraint)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -83,6 +84,9 @@ class ContratoServicio(Base):
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    indexacion_anual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    indexacion_mensual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

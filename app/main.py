@@ -599,6 +599,10 @@ _PENDING_DDLS = [
        SET rol = 'operaciones'
        WHERE email = 'operaciones@unergy.io'
          AND rol::text NOT IN ('admin', 'operaciones', 'monitoreo')""",
+    # migration 019 — tarifa_mensual + indexación O&M JSONB en contratos_servicio
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_mensual NUMERIC(14,2)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_anual JSONB",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_mensual JSONB",
 ]
 
 

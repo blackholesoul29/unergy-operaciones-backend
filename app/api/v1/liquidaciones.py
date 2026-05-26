@@ -832,9 +832,18 @@ def vista_por_inversionista(
                     and l.tipo_linea.value in ("ingreso_bruto", "despacho", "ventas_en_bolsa")
                 )
                 mandatos_cos = [m for m in liq.mandatos if m.tipo.value == "costos"]
-                total_ingresos_cop = sum(float(m.total_ingresos_cop or 0) for m in mandatos_ing)
-                total_costos_cop   = sum(float(m.total_costos_cop   or 0) for m in mandatos_cos)
-                total_facturas_cop = sum(float(m.total_costos_cop   or 0) for m in mandatos_ing)
+                # total_ingresos: suma de lineas ingreso_bruto/despacho/ventas (ya calculado)
+                total_ingresos_cop = ingreso_bruto
+                # total_facturas: deducción Unergy = bruto - valor_neto ingresos
+                #   incluye ajuste_comercializacion, ajuste_xm, CGM, etc.
+                total_facturas_cop = max(0.0, ingreso_bruto - valor_neto)
+                # total_costos: valor_neto del mandato costos; fallback a suma de lineas
+                total_costos_cop = 0.0
+                for m in mandatos_cos:
+                    if m.valor_neto_cop is not None:
+                        total_costos_cop += float(m.valor_neto_cop)
+                    else:
+                        total_costos_cop += sum(float(l.valor_cop or 0) for l in m.lineas)
                 liq_por_proyecto[liq.proyecto_id].append({
                     "liquidacion_id":   liq.id,
                     "periodo":          liq.periodo.isoformat(),

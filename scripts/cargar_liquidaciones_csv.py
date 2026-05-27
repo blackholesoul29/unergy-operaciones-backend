@@ -441,11 +441,21 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
     for f in filas:
         grupos.setdefault(f["proyecto"], {}).setdefault(f["inversionista"], []).append(f)
 
-    stats = {"ok": 0, "sin_match": [], "liq": 0,
+    # Patrón para proyectos que deben omitirse (trading, duplicados, gastos)
+    _OMITIR_PROY = re.compile(
+        r'\btrading\b|duplicado|dulicado|\bdup\b', re.IGNORECASE
+    )
+
+    stats = {"ok": 0, "omitidos": 0, "sin_match": [], "liq": 0,
              "mandatos": 0, "lineas": 0, "costos": 0, "facturas": 0,
              "sin_match_inv": []}
 
     for nombre_proy, inv_grupos in grupos.items():
+        # Omitir filas de trading y duplicados — no tienen liquidación propia en DB
+        if _OMITIR_PROY.search(nombre_proy):
+            stats["omitidos"] += 1
+            continue
+
         proy_db = match_proyecto(proyectos_db, nombre_proy)
         if not proy_db:
             stats["sin_match"].append(nombre_proy)
@@ -699,6 +709,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
 
     print("\n" + "=" * 50)
     print(f"Proyectos cargados:     {stats['ok']}")
+    print(f"Proyectos omitidos:     {stats['omitidos']}  (trading / duplicados)")
     print(f"Liquidaciones creadas:  {stats['liq']}")
     print(f"Mandatos creados:       {stats['mandatos']}")
     print(f"Líneas creadas:         {stats['lineas']}")

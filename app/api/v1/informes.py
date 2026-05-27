@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -76,6 +76,12 @@ class InformeOut(BaseModel):
     correo_enviado: bool
     correo_enviado_en: Optional[datetime]
     comentarios: list[ComentarioOut] = []
+
+    @field_validator('comentarios', mode='before')
+    @classmethod
+    def ensure_comentarios(cls, v):
+        """Filas creadas antes de migration 021 pueden tener comentarios=NULL."""
+        return v if isinstance(v, list) else []
 
     class Config:
         from_attributes = True

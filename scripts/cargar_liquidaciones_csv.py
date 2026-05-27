@@ -276,10 +276,17 @@ class API:
                 raise
 
     def patch(self, path, body):
-        import time
+        import time, sys
         for attempt in range(4):
             try:
                 r = requests.patch(f"{self.base}{path}", json=body, headers=self._h(), timeout=30)
+                # Retry transient 5xx (Railway cold-start / overload)
+                if r.status_code in (500, 502, 503, 504) and attempt < 3:
+                    wait = 2 ** attempt
+                    print(f"    [retry {attempt+1}/3 en {wait}s — {r.status_code}: {r.text[:120]}]")
+                    sys.stdout.flush()
+                    time.sleep(wait)
+                    continue
                 r.raise_for_status()
                 return r.json()
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
@@ -287,10 +294,13 @@ class API:
                     raise
                 wait = 2 ** attempt
                 print(f"    [retry {attempt+1}/3 en {wait}s — {e.__class__.__name__}]")
+                sys.stdout.flush()
                 time.sleep(wait)
             except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 500:
-                    print(f"    [500 body: {e.response.text[:300]}]")
+                if e.response is not None:
+                    print(f"    [HTTP {e.response.status_code} — path={path} body={body}]")
+                    print(f"    [response: {e.response.text[:400]}]")
+                    sys.stdout.flush()
                 raise
 
 
@@ -623,8 +633,13 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     stats["lineas"] += 1
 
                 if neto_pagar is not None:
-                    api.patch(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}",
-                              {"valor_neto_cop": neto_pagar})
+                    try:
+                        api.patch(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}",
+                                  {"valor_neto_cop": neto_pagar})
+                    except Exception as exc:
+                        import sys
+                        print(f"    ✗ patch valor_neto mandato {mid}: {exc}")
+                        sys.stdout.flush()
 
             # ── Mandato de costos ──
             lineas_cos = [f for f in filas_cos

@@ -297,20 +297,60 @@ class API:
 # ── Match helpers ─────────────────────────────────────────────────────────────
 def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
     norm = normalizar(nombre)
+
+    # ── Paso 1: match exacto normalizado ────────────────────────────────────────
     for p in proyectos_db:
         if normalizar(p["nombre_comercial"]) == norm:
             return p
+
+    # ── Número final y código MGS extraídos del nombre Excel ────────────────────
+    # Ej: "Valencia Oriente 2" → trailing_num="2"
+    #     "MGS 0026 Valencia Oriente 1" → mgs_code="mgs0026"
+    _m_trail = re.search(r'\b(\d+)\s*$', norm)
+    trailing_num: str | None = _m_trail.group(1) if _m_trail else None
+
+    _m_code = re.search(r'\b(mgs[\s\-]*\d+)\b', norm)
+    excel_mgs: str | None = re.sub(r'[\s\-]+', '', _m_code.group(1)) if _m_code else None
+
+    def _db_trailing(p: dict) -> str | None:
+        m = re.search(r'\b(\d+)\s*$', normalizar(p["nombre_comercial"]))
+        return m.group(1) if m else None
+
+    def _db_mgs(p: dict) -> str | None:
+        m = re.search(r'\b(mgs[\s\-]*\d+)\b', normalizar(p["nombre_comercial"]))
+        return re.sub(r'[\s\-]+', '', m.group(1)) if m else None
+
+    def _num_ok(p: dict) -> bool:
+        """Si Excel tiene número final, el proyecto DB debe tener el mismo número."""
+        if trailing_num is None:
+            return True
+        db_num = _db_trailing(p)
+        return db_num is None or db_num == trailing_num
+
+    # ── Paso 1.5: match por código MGS si el nombre Excel lo incluye ─────────────
+    if excel_mgs:
+        for p in proyectos_db:
+            if _db_mgs(p) == excel_mgs:
+                return p
+
+    # ── Paso 2: substring match con guard de número final ───────────────────────
     for p in proyectos_db:
         n = normalizar(p["nombre_comercial"])
-        if n in norm or norm in n:
+        if n and (n in norm or norm in n):
+            if not _num_ok(p):
+                continue
             return p
-    partes = norm.split()
+
+    # ── Paso 3: keyword match con guard de número final ─────────────────────────
+    # Omitir tokens numéricos puros para no hacer match sólo por "2" == "2"
+    partes = [t for t in norm.split() if len(t) >= 4 and not t.isdigit()]
     for parte in reversed(partes):
-        if len(parte) < 4:
-            continue
         for p in proyectos_db:
             if parte in normalizar(p["nombre_comercial"]):
+                if not _num_ok(p):
+                    continue
                 return p
+
     return None
 
 

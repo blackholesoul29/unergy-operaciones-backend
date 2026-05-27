@@ -237,7 +237,9 @@ def list_informes(
     tipo: Optional[str] = Query(None),
     sub_project: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
+    periodo_desde_gte: Optional[str] = Query(None, description="Filtrar periodo_desde >= YYYY-MM-DD"),
+    periodo_desde_lte: Optional[str] = Query(None, description="Filtrar periodo_desde <= YYYY-MM-DD"),
+    limit: int = Query(50, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -248,6 +250,10 @@ def list_informes(
         q = q.filter(InformeGuardado.sub_project == sub_project)
     if estado:
         q = q.filter(InformeGuardado.estado == estado)
+    if periodo_desde_gte:
+        q = q.filter(InformeGuardado.periodo_desde >= periodo_desde_gte)
+    if periodo_desde_lte:
+        q = q.filter(InformeGuardado.periodo_desde <= periodo_desde_lte)
     return q.order_by(InformeGuardado.editado_en.desc().nullslast()).limit(limit).all()
 
 
@@ -274,15 +280,24 @@ def change_estado(
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
 
-    allowed = {"borrador": ["revisado"], "revisado": ["aprobado", "borrador"]}
+    allowed = {
+        "borrador":  ["revisado"],
+        "revisado":  ["aprobado", "borrador"],
+        "aprobado":  ["borrador"],   # reabrir — sólo verificador/admin
+    }
     if payload.estado not in allowed.get(inf.estado, []):
         raise HTTPException(400, f"Transición inválida: {inf.estado} → {payload.estado}")
 
-    # Sólo el verificador (Juan José) o admin pueden aprobar.
+    # Sólo el verificador (Juan José) o admin pueden aprobar o reabrir un aprobado.
     if payload.estado == "aprobado" and not _es_verificador(current_user):
         raise HTTPException(
             403,
             "Sólo el verificador autorizado (Juan José) puede aprobar informes."
+        )
+    if inf.estado == "aprobado" and payload.estado == "borrador" and not _es_verificador(current_user):
+        raise HTTPException(
+            403,
+            "Sólo el verificador autorizado puede reabrir un informe ya aprobado."
         )
 
     # Si hay comentarios sin resolver, no se puede aprobar.
@@ -307,6 +322,11 @@ def change_estado(
         inf.editado_por_id = current_user.id
         inf.editado_por_nombre = current_user.nombre
         inf.editado_en = now
+    elif payload.estado == "borrador" and inf.estado == "aprobado":
+        # reabrir: limpiar campos de aprobación
+        inf.aprobado_por_id = None
+        inf.aprobado_por_nombre = None
+        inf.aprobado_en = None
 
     db.commit()
     db.refresh(inf)

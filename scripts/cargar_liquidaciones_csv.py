@@ -333,7 +333,9 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
     excel_mgs: str | None = re.sub(r'[\s\-]+', '', _m_code.group(1)) if _m_code else None
 
     def _db_trailing(p: dict) -> str | None:
-        m = re.search(r'\b(\d+)\s*$', normalizar(p["nombre_comercial"]))
+        # Reconoce números finales en estilos "Norte 2" Y "N1" / "N2"
+        # \bn? captura la 'n' opcional antes del número (ej: "N1" → "1")
+        m = re.search(r'\bn?(\d+)\s*$', normalizar(p["nombre_comercial"]))
         return m.group(1) if m else None
 
     def _db_mgs(p: dict) -> str | None:
@@ -341,11 +343,13 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
         return re.sub(r'[\s\-]+', '', m.group(1)) if m else None
 
     def _num_ok(p: dict) -> bool:
-        """Si Excel tiene número final, el proyecto DB debe tener el mismo número."""
+        """Si Excel tiene número final, el DB debe tener el mismo número.
+        Si DB no tiene número final → se rechaza (evita "Chiriguana N1" id=91
+        siendo aceptado para "Chiriguana 2" de Excel)."""
         if trailing_num is None:
             return True
         db_num = _db_trailing(p)
-        return db_num is None or db_num == trailing_num
+        return db_num == trailing_num  # None ya no pasa: debe coincidir exactamente
 
     # ── Paso 1.5: match por código MGS si el nombre Excel lo incluye ─────────────
     if excel_mgs:

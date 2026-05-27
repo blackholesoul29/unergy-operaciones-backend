@@ -19,6 +19,13 @@ import argparse, re, sys
 from openpyxl import load_workbook
 import requests
 
+# Forzar UTF-8 en stdout/stderr para que los símbolos Unicode (⚠, ✓, ✗)
+# no causen UnicodeEncodeError en entornos Windows con cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 # ── Mapping concepto → tipo_linea ─────────────────────────────────────────────
 TIPO_LINEA_MAP = [

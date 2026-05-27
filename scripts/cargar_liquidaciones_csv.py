@@ -304,9 +304,19 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
             return p
 
     # ── Número final y código MGS extraídos del nombre Excel ────────────────────
-    # Ej: "Valencia Oriente 2" → trailing_num="2"
-    #     "MGS 0026 Valencia Oriente 1" → mgs_code="mgs0026"
-    _m_trail = re.search(r'\b(\d+)\s*$', norm)
+    # Ej: "Valencia Oriente 2"   → trailing_num="2"
+    #     "Polaris 2 trading"    → trailing_num="2"  (número antes del sufijo)
+    #     "MGS 0026 Valencia..." → mgs_code="mgs0026"
+    #
+    # Sufijos que no forman parte del nombre del proyecto en DB y deben
+    # ignorarse para extraer el número significativo.
+    _SUFIJOS = re.compile(
+        r'\s*(trading|dup\b|duplicado|dulicado|terpel|excedentes|excendentes'
+        r'|gasto|gastos)\s*$'
+    )
+    norm_sin_sufijo = _SUFIJOS.sub('', norm).strip()
+
+    _m_trail = re.search(r'\b(\d+)\s*$', norm_sin_sufijo)
     trailing_num: str | None = _m_trail.group(1) if _m_trail else None
 
     _m_code = re.search(r'\b(mgs[\s\-]*\d+)\b', norm)

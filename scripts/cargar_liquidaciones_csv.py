@@ -491,7 +491,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
         try:
             inversionistas_db = api.get(f"/api/v1/proyectos/{pid}/inversionistas")
         except Exception as exc:
-            import sys
+
             print(f"  ✗ Error obteniendo inversionistas para {pid}: {exc}")
             sys.stdout.flush()
             continue
@@ -650,7 +650,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "orden": orden,
                         })
                     except Exception as exc:
-                        import sys
+            
                         print(f"    ✗ Linea-ing '{f['concepto']}' → {tipo_l}: {exc}")
                         sys.stdout.flush()
                         continue
@@ -661,7 +661,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                         api.patch(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}",
                                   {"valor_neto_cop": neto_pagar})
                     except Exception as exc:
-                        import sys
+            
                         print(f"    ✗ patch valor_neto mandato {mid}: {exc}")
                         sys.stdout.flush()
 
@@ -703,7 +703,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "orden": orden,
                         })
                     except Exception as exc:
-                        import sys
+            
                         print(f"    ✗ Linea-cos '{f['concepto']}' → {tipo_l}: {exc}")
                         sys.stdout.flush()
                         continue
@@ -738,7 +738,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "valor_cop": f["total"],
                         })
                     except Exception as exc:
-                        import sys
+            
                         print(f"    ✗ Factura '{f['concepto']}' falló: {exc}")
                         sys.stdout.flush()
                         continue

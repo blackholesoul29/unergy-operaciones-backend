@@ -344,12 +344,14 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
 
     def _num_ok(p: dict) -> bool:
         """Si Excel tiene número final, el DB debe tener el mismo número.
-        Si DB no tiene número final → se rechaza (evita "Chiriguana N1" id=91
-        siendo aceptado para "Chiriguana 2" de Excel)."""
+        - db_num None (sin número en DB) se acepta: el proyecto podría
+          tener un nombre abreviado sin número explícito.
+        - Con _db_trailing mejorado, "N1" → "1", así "Chiriguana N1" ya
+          devuelve "1" y no None, por lo que no será aceptado para "Chiriguana 2"."""
         if trailing_num is None:
             return True
         db_num = _db_trailing(p)
-        return db_num == trailing_num  # None ya no pasa: debe coincidir exactamente
+        return db_num is None or db_num == trailing_num
 
     # ── Paso 1.5: match por código MGS si el nombre Excel lo incluye ─────────────
     if excel_mgs:

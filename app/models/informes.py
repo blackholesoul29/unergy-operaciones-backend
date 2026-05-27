@@ -56,3 +56,13 @@ class InformeGuardado(Base):
 
     correo_enviado: Mapped[bool] = mapped_column(Boolean, default=False)
     correo_enviado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Pipeline de verificación: lista de comentarios del revisor (Juan José).
+    # Cada item: {id, autor_email, autor_nombre, mensaje, created_at,
+    #             resuelto, resuelto_en, resuelto_por_email, resuelto_por_nombre,
+    #             respuesta}
+    comentarios: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    enviado_por_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
+    enviado_por_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)

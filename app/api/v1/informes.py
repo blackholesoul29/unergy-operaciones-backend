@@ -44,6 +44,19 @@ class EstadoIn(BaseModel):
     estado: str   # "revisado" | "aprobado"
 
 
+class ComentarioOut(BaseModel):
+    id: str                              # uuid4 generado al crear
+    autor_email: str
+    autor_nombre: Optional[str] = None
+    mensaje: str
+    created_at: str                      # ISO-8601
+    resuelto: bool = False
+    resuelto_en: Optional[str] = None
+    resuelto_por_email: Optional[str] = None
+    resuelto_por_nombre: Optional[str] = None
+    respuesta: Optional[str] = None      # texto opcional del autor al subsanar
+
+
 class InformeOut(BaseModel):
     id: int
     tipo: str
@@ -56,11 +69,13 @@ class InformeOut(BaseModel):
     creado_por_nombre: Optional[str]
     editado_por_nombre: Optional[str]
     aprobado_por_nombre: Optional[str]
+    enviado_por_nombre: Optional[str] = None
     creado_en: datetime
     editado_en: Optional[datetime]
     aprobado_en: Optional[datetime]
     correo_enviado: bool
     correo_enviado_en: Optional[datetime]
+    comentarios: list[ComentarioOut] = []
 
     class Config:
         from_attributes = True
@@ -69,6 +84,27 @@ class InformeOut(BaseModel):
 class InformeDetailOut(InformeOut):
     html_content: str
     charts_data: Optional[Any] = None
+
+
+class ComentarioCreateIn(BaseModel):
+    mensaje: str
+
+
+class ComentarioResolverIn(BaseModel):
+    respuesta: Optional[str] = None
+
+
+# Emails con permisos especiales (configurables por env si fuera necesario).
+EMAIL_VERIFICADOR = "juan.jose@unergy.io"   # único que puede aprobar/verificar informes
+EMAIL_REMITENTE = "laura.h@unergy.io"       # única que puede disparar el envío por email
+# Admins también pueden todo
+def _es_verificador(u: Usuario) -> bool:
+    return (u.email or "").lower() in {EMAIL_VERIFICADOR, "juanjose@unergy.io"} or (u.rol or "") == "admin"
+
+def _es_remitente(u: Usuario) -> bool:
+    if _es_verificador(u):
+        return True  # el verificador puede enviar también (no se queda atascado el flujo)
+    return (u.email or "").lower() == EMAIL_REMITENTE
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -242,6 +278,23 @@ def change_estado(
     if payload.estado not in allowed.get(inf.estado, []):
         raise HTTPException(400, f"Transición inválida: {inf.estado} → {payload.estado}")
 
+    # Sólo el verificador (Juan José) o admin pueden aprobar.
+    if payload.estado == "aprobado" and not _es_verificador(current_user):
+        raise HTTPException(
+            403,
+            "Sólo el verificador autorizado (Juan José) puede aprobar informes."
+        )
+
+    # Si hay comentarios sin resolver, no se puede aprobar.
+    if payload.estado == "aprobado":
+        coms = inf.comentarios or []
+        pendientes = [c for c in coms if not c.get("resuelto")]
+        if pendientes:
+            raise HTTPException(
+                409,
+                f"No se puede aprobar: hay {len(pendientes)} comentario(s) sin subsanar."
+            )
+
     now = datetime.now(timezone.utc)
     inf.estado = payload.estado
 
@@ -255,6 +308,106 @@ def change_estado(
         inf.editado_por_nombre = current_user.nombre
         inf.editado_en = now
 
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+# ── Pipeline de verificación: comentarios ─────────────────────────────────
+
+@router.post("/{informe_id}/comentarios", response_model=InformeDetailOut, summary="Agregar comentario de verificación")
+def add_comentario(
+    informe_id: int,
+    payload: ComentarioCreateIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    import uuid
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    if inf.estado == "aprobado":
+        raise HTTPException(409, "El informe ya fue aprobado; no se aceptan más comentarios. Reábrelo antes.")
+    if not (payload.mensaje and payload.mensaje.strip()):
+        raise HTTPException(400, "El mensaje del comentario no puede estar vacío")
+
+    nuevo = {
+        "id": str(uuid.uuid4()),
+        "autor_email": current_user.email or "",
+        "autor_nombre": current_user.nombre or "",
+        "mensaje": payload.mensaje.strip(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "resuelto": False,
+        "resuelto_en": None,
+        "resuelto_por_email": None,
+        "resuelto_por_nombre": None,
+        "respuesta": None,
+    }
+    coms = list(inf.comentarios or [])
+    coms.append(nuevo)
+    inf.comentarios = coms
+    # Si estaba en 'revisado', vuelve a borrador hasta que se subsane.
+    if inf.estado == "revisado":
+        inf.estado = "borrador"
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+@router.patch("/{informe_id}/comentarios/{comentario_id}/resolver",
+              response_model=InformeDetailOut, summary="Marcar comentario como subsanado")
+def resolver_comentario(
+    informe_id: int,
+    comentario_id: str,
+    payload: ComentarioResolverIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    coms = list(inf.comentarios or [])
+    target = next((c for c in coms if c.get("id") == comentario_id), None)
+    if not target:
+        raise HTTPException(404, "Comentario no encontrado")
+    if target.get("resuelto"):
+        raise HTTPException(409, "Este comentario ya fue marcado como subsanado")
+    target["resuelto"] = True
+    target["resuelto_en"] = datetime.now(timezone.utc).isoformat()
+    target["resuelto_por_email"] = current_user.email or ""
+    target["resuelto_por_nombre"] = current_user.nombre or ""
+    if payload.respuesta and payload.respuesta.strip():
+        target["respuesta"] = payload.respuesta.strip()
+    inf.comentarios = coms
+    # Si todos los comentarios quedaron subsanados y estaba en borrador, lo movemos a revisado.
+    if all(c.get("resuelto") for c in coms) and inf.estado == "borrador":
+        inf.estado = "revisado"
+        inf.editado_por_id = current_user.id
+        inf.editado_por_nombre = current_user.nombre
+        inf.editado_en = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+@router.delete("/{informe_id}/comentarios/{comentario_id}",
+               response_model=InformeDetailOut, summary="Eliminar comentario (sólo el autor o admin)")
+def borrar_comentario(
+    informe_id: int,
+    comentario_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    coms = list(inf.comentarios or [])
+    target = next((c for c in coms if c.get("id") == comentario_id), None)
+    if not target:
+        raise HTTPException(404, "Comentario no encontrado")
+    if target.get("autor_email", "").lower() != (current_user.email or "").lower() and (current_user.rol or "") != "admin":
+        raise HTTPException(403, "Sólo el autor del comentario (o admin) puede eliminarlo")
+    inf.comentarios = [c for c in coms if c.get("id") != comentario_id]
     db.commit()
     db.refresh(inf)
     return inf
@@ -285,7 +438,12 @@ def enviar_informe(
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
     if inf.estado != "aprobado":
-        raise HTTPException(400, "Solo se pueden enviar informes aprobados")
+        raise HTTPException(400, "Solo se pueden enviar informes aprobados (verificados)")
+    if not _es_remitente(current_user):
+        raise HTTPException(
+            403,
+            "Sólo Laura H. (o el verificador/admin) puede disparar el envío del informe por correo."
+        )
 
     correo = _get_correo_operacional(db, inf.sub_project)
     if not correo:
@@ -311,5 +469,7 @@ def enviar_informe(
 
     inf.correo_enviado = True
     inf.correo_enviado_en = datetime.now(timezone.utc)
+    inf.enviado_por_id = current_user.id
+    inf.enviado_por_nombre = current_user.nombre
     db.commit()
     return {"ok": True, "enviado_a": correo}

@@ -606,6 +606,10 @@ _PENDING_DDLS = [
     # migration 020 — facturas Solenium e Inversionistas como JSONB
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_solenium JSONB",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_inversionistas JSONB",
+    # migration 021 — pipeline de verificación de informes
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS comentarios JSONB DEFAULT '[]'::jsonb",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_nombre VARCHAR(255)",
 ]
 
 

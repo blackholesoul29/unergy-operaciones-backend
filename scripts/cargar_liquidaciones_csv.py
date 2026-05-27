@@ -241,10 +241,17 @@ class API:
                 raise
 
     def post(self, path, body):
-        import time
+        import time, sys
         for attempt in range(4):
             try:
                 r = requests.post(f"{self.base}{path}", json=body, headers=self._h(), timeout=30)
+                # Retry transient 500s (Railway cold-start / overload)
+                if r.status_code == 500 and attempt < 3:
+                    wait = 2 ** attempt
+                    print(f"    [retry {attempt+1}/3 en {wait}s — 500: {r.text[:120]}]")
+                    sys.stdout.flush()
+                    time.sleep(wait)
+                    continue
                 r.raise_for_status()
                 return r.json()
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
@@ -252,10 +259,13 @@ class API:
                     raise
                 wait = 2 ** attempt
                 print(f"    [retry {attempt+1}/3 en {wait}s — {e.__class__.__name__}]")
+                sys.stdout.flush()
                 time.sleep(wait)
             except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 500:
-                    print(f"    [500 body: {e.response.text[:300]}]")
+                if e.response is not None:
+                    print(f"    [HTTP {e.response.status_code} — path={path} body={body}]")
+                    print(f"    [response: {e.response.text[:400]}]")
+                    sys.stdout.flush()
                 raise
 
     def patch(self, path, body):
@@ -395,7 +405,13 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
             stats["ok"] += 1
             continue
 
-        inversionistas_db = api.get(f"/api/v1/proyectos/{pid}/inversionistas")
+        try:
+            inversionistas_db = api.get(f"/api/v1/proyectos/{pid}/inversionistas")
+        except Exception as exc:
+            import sys
+            print(f"  ✗ Error obteniendo inversionistas para {pid}: {exc}")
+            sys.stdout.flush()
+            continue
 
         # Crear / recuperar liquidación
         try:
@@ -524,13 +540,19 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     ref = " | ".join(p for p in ref_parts if p) or None
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
-                    api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas", {
-                        "tipo_linea": tipo_l,
-                        "concepto": f["concepto"],
-                        "valor_cop": f["total"],
-                        "referencia_factura": ref,
-                        "orden": orden,
-                    })
+                    try:
+                        api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mid}/lineas", {
+                            "tipo_linea": tipo_l,
+                            "concepto": f["concepto"],
+                            "valor_cop": f["total"],
+                            "referencia_factura": ref,
+                            "orden": orden,
+                        })
+                    except Exception as exc:
+                        import sys
+                        print(f"    ✗ Linea-ing '{f['concepto']}' → {tipo_l}: {exc}")
+                        sys.stdout.flush()
+                        continue
                     stats["lineas"] += 1
 
                 if neto_pagar is not None:
@@ -566,13 +588,19 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                     ref = " | ".join(p for p in ref_parts if p) or None
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
-                    api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mcid}/lineas", {
-                        "tipo_linea": tipo_l,
-                        "concepto": f["concepto"],
-                        "valor_cop": f["total"],
-                        "referencia_factura": ref,
-                        "orden": orden,
-                    })
+                    try:
+                        api.post(f"/api/v1/liquidaciones/{liq_id}/mandatos/{mcid}/lineas", {
+                            "tipo_linea": tipo_l,
+                            "concepto": f["concepto"],
+                            "valor_cop": f["total"],
+                            "referencia_factura": ref,
+                            "orden": orden,
+                        })
+                    except Exception as exc:
+                        import sys
+                        print(f"    ✗ Linea-cos '{f['concepto']}' → {tipo_l}: {exc}")
+                        sys.stdout.flush()
+                        continue
                     stats["lineas"] += 1
 
                     # LiquidacionCosto solo para el Total (nivel proyecto)
@@ -595,13 +623,19 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                 for f in filas_fac:
                     if not f["concepto"] or f["total"] is None:
                         continue
-                    api.post(f"/api/v1/liquidaciones/{liq_id}/facturas", {
-                        "tipo_servicio": concepto_a_tipo_factura(f["concepto"]),
-                        "numero_factura": f["ref_factura"] or None,
-                        "nro_soporte": f["cons_ing_txt"] or None,
-                        "soporte_url": f["cons_ing_url"],   # ← link al PDF en Drive
-                        "valor_cop": f["total"],
-                    })
+                    try:
+                        api.post(f"/api/v1/liquidaciones/{liq_id}/facturas", {
+                            "tipo_servicio": concepto_a_tipo_factura(f["concepto"]),
+                            "numero_factura": f["ref_factura"] or None,
+                            "nro_soporte": f["cons_ing_txt"] or None,
+                            "soporte_url": f["cons_ing_url"],   # ← link al PDF en Drive
+                            "valor_cop": f["total"],
+                        })
+                    except Exception as exc:
+                        import sys
+                        print(f"    ✗ Factura '{f['concepto']}' falló: {exc}")
+                        sys.stdout.flush()
+                        continue
                     stats["facturas"] += 1
 
         stats["ok"] += 1

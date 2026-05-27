@@ -531,15 +531,33 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
 
                 if limpiar:
                     if not dry_run:
-                        try:
-                            r = requests.delete(
-                                f"{api.base}/api/v1/liquidaciones/{liq_id}/limpiar",
-                                headers=api._h(),
-                            )
-                            r.raise_for_status()
-                            print(f"  ~ Liquidación {liq_id} limpiada (mandatos/costos/facturas borrados)")
-                        except Exception as exc:
-                            print(f"  ✗ Error limpiando liquidación {liq_id}: {exc}")
+                        import time as _time
+                        for _attempt in range(3):
+                            try:
+                                r = requests.delete(
+                                    f"{api.base}/api/v1/liquidaciones/{liq_id}/limpiar",
+                                    headers=api._h(),
+                                    timeout=60,
+                                )
+                                r.raise_for_status()
+                                print(f"  ~ Liquidación {liq_id} limpiada (mandatos/costos/facturas borrados)")
+                                sys.stdout.flush()
+                                break
+                            except (requests.exceptions.ConnectionError,
+                                    requests.exceptions.Timeout) as exc:
+                                if _attempt == 2:
+                                    print(f"  ✗ Error limpiando liquidación {liq_id} (timeout): {exc}")
+                                    sys.stdout.flush()
+                                    break
+                                _wait = 2 ** _attempt
+                                print(f"  [retry limpiar {_attempt+1}/2 en {_wait}s]")
+                                sys.stdout.flush()
+                                _time.sleep(_wait)
+                            except Exception as exc:
+                                print(f"  ✗ Error limpiando liquidación {liq_id}: {exc}")
+                                sys.stdout.flush()
+                                break
+                        else:
                             continue
                     else:
                         print(f"  [DRY RUN] Se limpiaría liquidación {liq_id}")

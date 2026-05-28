@@ -610,6 +610,10 @@ _PENDING_DDLS = [
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS comentarios JSONB DEFAULT '[]'::jsonb",
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL",
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_nombre VARCHAR(255)",
+    # fix — informes_guardados: correo_enviado/correo_enviado_en pueden faltar si la
+    # tabla se creó antes de que se añadieran al modelo. ALTER TABLE IF NOT EXISTS es idempotente.
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado_en TIMESTAMPTZ",
 ]
 
 

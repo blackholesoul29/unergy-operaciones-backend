@@ -830,54 +830,12 @@ def _action_get_projects(db: Session) -> dict:
 
 
 def _action_get_portfolios(db: Session) -> dict:
-    """Clientes (inversionistas) con proyectos en operación, agrupados por cliente."""
+    """Agrupamiento por PORTAFOLIO (capa de proyectos, vía proyectos.portafolio_id).
+    Fuente de verdad gestionada en la vista de Gestión de portafolios. Se siembra una
+    vez desde el agrupamiento por cliente/inversionista para no perder lo existente."""
     try:
-        from sqlalchemy import or_
-        from app.models.proyectos import ProyectoInversionista
-
-        # Consultar directo desde la tabla de inversionistas
-        rows = (
-            db.query(ProyectoInversionista)
-            .join(ProyectoInversionista.proyecto)
-            .filter(
-                or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion")  # noqa: E712
-            )
-            .options(
-                selectinload(ProyectoInversionista.cliente),
-                selectinload(ProyectoInversionista.proyecto),
-            )
-            .all()
-        )
-        portfolios: dict = {}
-        for inv in rows:
-            if not inv.cliente or not inv.proyecto:
-                continue
-            p = inv.proyecto
-            proj_name = p.nombre_comercial  # usar nombre_comercial para coincidir con f.proj en el frontend
-            cliente_nombre = inv.cliente.razon_social_nombre
-            portfolios.setdefault(cliente_nombre, [])
-            if proj_name not in portfolios[cliente_nombre]:
-                portfolios[cliente_nombre].append(proj_name)
-
-        # Fallback: proyectos con cliente_id directo no cubiertos por inversionistas
-        if not portfolios:
-            proyectos = (
-                db.query(Proyecto)
-                .filter(
-                    or_(Proyecto.srv_operacion == True, Proyecto.estado == "en_operacion")  # noqa: E712
-                )
-                .options(selectinload(Proyecto.cliente))
-                .all()
-            )
-            for p in proyectos:
-                if p.cliente:
-                    nombre = p.cliente.razon_social_nombre
-                    proj_name = p.nombre_comercial
-                    portfolios.setdefault(nombre, [])
-                    if proj_name not in portfolios[nombre]:
-                        portfolios[nombre].append(proj_name)
-
-        return {"ok": True, "portfolios": portfolios}
+        from app.api.v1.portafolios import get_portfolios_grouping
+        return {"ok": True, "portfolios": get_portfolios_grouping(db)}
     except Exception as exc:
         import traceback
         traceback.print_exc()

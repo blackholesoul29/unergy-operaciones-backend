@@ -597,6 +597,27 @@ def delete_informe(
         raise HTTPException(404, "Informe no encontrado")
     if inf.estado == "aprobado":
         raise HTTPException(400, "No se puede eliminar un informe aprobado")
+
+    # Eliminar un individual NO debe afectar a los portafolios que lo incluyen:
+    # antes de borrar, congelamos su contenido en el html_inline del miembro del
+    # portafolio (del mismo período) para que la sección siga apareciendo.
+    if inf.tipo == "op":
+        portafolios = (
+            db.query(InformeGuardado)
+            .filter_by(tipo="port", periodo_desde=inf.periodo_desde, periodo_hasta=inf.periodo_hasta)
+            .all()
+        )
+        for port in portafolios:
+            miembros = list(port.miembros or [])
+            changed = False
+            for m in miembros:
+                if isinstance(m, dict) and m.get("sub_project") == inf.sub_project and not m.get("html_inline"):
+                    m["html_inline"] = inf.html_content
+                    changed = True
+            if changed:
+                port.miembros = miembros
+                flag_modified(port, "miembros")
+
     db.delete(inf)
     db.commit()
 

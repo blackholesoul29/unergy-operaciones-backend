@@ -616,6 +616,17 @@ _PENDING_DDLS = [
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado_en TIMESTAMPTZ",
     # migration 022 — portafolio compuesto: miembros (proyectos) del informe de portafolio
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS miembros JSONB",
+    # migration 023 — gestión de portafolios (capas de proyectos)
+    """CREATE TABLE IF NOT EXISTS portafolios (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(255) UNIQUE NOT NULL,
+        descripcion TEXT,
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS portafolio_id BIGINT REFERENCES portafolios(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_portafolio_id ON proyectos (portafolio_id)",
 ]
 
 

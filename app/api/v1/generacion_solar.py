@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, get_db
+from app.models.proyectos import Proyecto
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
@@ -24,6 +26,72 @@ def _get_client() -> SoleniumClient:
     if not _client.enabled:
         raise HTTPException(503, "Solenium credentials not configured")
     return _client
+
+
+@router.get("/generacion-hoy")
+def generacion_hoy(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Generación real de HOY por proyecto, desde Solenium project_detail.
+    Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
+    """
+    client = _get_client()
+
+    # 1. Summary en una sola llamada → {solenium_id: {frontier_generation_kwh, power_kw, ...}}
+    summary_list = client.get_project_summary()
+    summary_map: dict[int, dict] = {}
+    for s in summary_list:
+        pid = s.get("project_id")
+        if pid is not None:
+            summary_map[int(pid)] = s
+
+    # 2. Proyectos con project_id_solenium
+    proyectos_db = db.query(Proyecto).filter(
+        Proyecto.project_id_solenium.isnot(None),
+        Proyecto.estado == "en_operacion",
+    ).all()
+
+    result = []
+    for p in proyectos_db:
+        try:
+            sol_id = int(p.project_id_solenium)
+        except (ValueError, TypeError):
+            continue
+
+        s = summary_map.get(sol_id)
+
+        # Intentar project_detail si el summary no trae generación
+        kwh_real = 0.0
+        if s:
+            kwh_real = float(s.get("frontier_generation_kwh") or
+                             s.get("energy_today_kwh") or
+                             s.get("generation_today") or 0)
+        if kwh_real == 0.0:
+            # Fallback: project_detail/{id}/
+            detail = client.get_project_detail(sol_id) or {}
+            kwh_real = float(
+                detail.get("frontier_generation_kwh") or
+                detail.get("energy_today_kwh") or
+                detail.get("generation_today") or
+                detail.get("daily_generation") or 0
+            )
+
+        result.append({
+            "proyecto_id": p.id,
+            "nombre":      p.nombre_comercial,
+            "sol_id":      sol_id,
+            "kwh_real":    round(kwh_real, 1),
+            "power_kw":    round(float((s or {}).get("power_kw") or 0), 2),
+        })
+
+    result.sort(key=lambda x: x["kwh_real"], reverse=True)
+    return {
+        "fecha":    date.today().isoformat(),
+        "total":    round(sum(r["kwh_real"] for r in result), 1),
+        "proyectos": result,
+    }
 
 
 @router.get("/fleet")

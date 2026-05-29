@@ -13,12 +13,14 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
 from app.models.proyectos import Proyecto, TipoProyectoEnum
+from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_id
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
 router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar (Solenium)"])
 
 _client: SoleniumClient | None = None
+_gaia_client: GaiaClient | None = None
 
 
 def _get_client() -> SoleniumClient:
@@ -28,6 +30,14 @@ def _get_client() -> SoleniumClient:
     if not _client.enabled:
         raise HTTPException(503, "Solenium credentials not configured")
     return _client
+
+
+def _get_gaia() -> GaiaClient | None:
+    """Returns the GaiaClient if credentials are configured, else None (non-fatal)."""
+    global _gaia_client
+    if _gaia_client is None:
+        _gaia_client = GaiaClient()
+    return _gaia_client if _gaia_client.enabled else None
 
 
 def _normalize_name(s: str) -> str:
@@ -933,14 +943,25 @@ def project_monitoring_detail(
     today   = date.today()
     start30 = (today - timedelta(days=29)).isoformat()
 
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        inv_f = ex.submit(client.get_project_inverters, sol_id)
-        pow_f = ex.submit(client.get_power, sol_id)
-        gen_f = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+    # Resolve Gaia node_id for this project (non-fatal if not found)
+    gaia    = _get_gaia()
+    node_id = find_gaia_node_id(
+        p.nombre_comercial or "",
+        p.alias_monitoreo or "",
+        p.nombre_bitacora or "",
+    )
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        inv_f  = ex.submit(client.get_project_inverters, sol_id)
+        pow_f  = ex.submit(client.get_power, sol_id)
+        gen_f  = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+        gaia_f = ex.submit(gaia.get_node_electrical_snapshot, node_id) \
+                 if (gaia and node_id) else None
 
     inverters  = inv_f.result() or []
     power_data = pow_f.result() or {}
     gen_raw    = gen_f.result() or {}
+    gaia_snap  = gaia_f.result() if gaia_f else None
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
     def _fetch_detail(inv):
@@ -1021,21 +1042,20 @@ def project_monitoring_detail(
         for d, v in sorted(daily.items())
     ]
 
-    has_strings    = any(inv.get("strings") for inv in processed_inverters)
-    has_ac_metrics = any(
-        any(v is not None for v in inv.get("ac_metrics", {}).values())
-        for inv in processed_inverters
-    )
+    has_strings = any(inv.get("strings") for inv in processed_inverters)
 
     return {
         "proyecto_id":    p.id,
         "nombre":         p.nombre_comercial,
         "sol_id":         sol_id,
+        "gaia_node_id":   node_id,
         "capacity_kwp":   float(p.potencia_instalada_kwp or 0),
         "inverters":      processed_inverters,
         "power_curve":    power_curve,
         "generation_30d": generation_30d,
         "total_30d_kwh":  round(sum(d["kwh"] for d in generation_30d), 1),
         "has_strings":    has_strings,
-        "has_ac_metrics": has_ac_metrics,
+        "gaia_snapshot":  gaia_snap,
     }
+
+

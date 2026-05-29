@@ -46,9 +46,14 @@ class Settings(BaseSettings):
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
 
-    # Quoia CGM API (fronteras / medidores)
+    # Quoia CGM API (fronteras / medidores) — legacy token auth
     QUOIA_API_TOKEN: str = ""
     QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"
+
+    # Gaia JWT auth (for /api/cgm/v1/border + /api/node measurements)
+    GAIA_USER: str = ""
+    GAIA_PASS: str = ""
+    GAIA_BASE_URL: str = "https://gaia.quoia.energy"
 
     # MGS Alarms polling
     MGS_ENABLED: bool = True

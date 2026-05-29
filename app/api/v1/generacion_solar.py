@@ -666,3 +666,212 @@ def fleet_availability(_=Depends(get_current_user)):
             for k, v in categories.items()
         },
     }
+
+
+@router.get("/monitoring")
+def fleet_monitoring(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Fleet monitoring: only DB projects with project_id_solenium set.
+    Returns status (online/caido/degradado/sin_comunicacion) per project.
+    Status determined by Solenium availability category:
+      disconnect → sin_comunicacion
+      critical   → caido
+      low/medium → degradado
+      high       → online
+    """
+    client = _get_client()
+
+    proyectos = db.query(Proyecto).filter(
+        Proyecto.estado == "en_operacion",
+        Proyecto.project_id_solenium.isnot(None),
+    ).all()
+
+    if not proyectos:
+        return {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "fleet": {"total": 0, "online": 0, "caido": 0, "degradado": 0,
+                      "sin_comunicacion": 0, "total_power_kw": 0,
+                      "total_capacity_kwp": 0, "utilization_pct": 0},
+            "projects": [],
+        }
+
+    avail_map = client.get_availability()   # {sol_id_int: {name, availability, category}}
+
+    summary_list = client.get_project_summary()
+    summary_map: dict[int, dict] = {}
+    for s in summary_list:
+        pid = s.get("project_id") or s.get("id")
+        if pid is not None:
+            summary_map[int(pid)] = s
+
+    today_str = date.today().isoformat()
+    today_rows = db.execute(
+        text("SELECT proyecto_id, kwh_real FROM generacion_diaria "
+             "WHERE fecha = :today AND kwh_real IS NOT NULL"),
+        {"today": today_str},
+    ).fetchall()
+    today_gen_map = {int(r.proyecto_id): float(r.kwh_real) for r in today_rows}
+
+    projects_result = []
+    total_power = 0.0
+    total_capacity = 0.0
+    counts = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0}
+
+    for p in proyectos:
+        sol_id = int(p.project_id_solenium)
+        avail   = avail_map.get(sol_id, {})
+        summary = summary_map.get(sol_id, {})
+
+        availability_cat = avail.get("category", "disconnect")
+        power_kw     = float(summary.get("power_kw") or 0)
+        capacity_kwp = float(p.potencia_instalada_kwp or 0)
+        energy_today = today_gen_map.get(p.id)
+
+        if availability_cat == "disconnect":
+            status = "sin_comunicacion"
+        elif availability_cat == "critical":
+            status = "caido"
+        elif availability_cat in ("low", "medium"):
+            status = "degradado"
+        else:
+            status = "online"
+
+        counts[status] += 1
+        total_power    += power_kw
+        total_capacity += capacity_kwp
+
+        projects_result.append({
+            "proyecto_id":           p.id,
+            "nombre":                p.nombre_comercial,
+            "sol_id":                sol_id,
+            "status":                status,
+            "availability_category": availability_cat,
+            "availability_pct":      avail.get("availability"),
+            "power_kw":              round(power_kw, 2),
+            "capacity_kwp":          round(capacity_kwp, 1),
+            "utilization_pct":       round(power_kw / capacity_kwp * 100, 1) if capacity_kwp > 0 else 0,
+            "energy_today_kwh":      energy_today,
+            "last_update":           summary.get("power_time"),
+        })
+
+    _order = {"caido": 0, "sin_comunicacion": 1, "degradado": 2, "online": 3}
+    projects_result.sort(key=lambda x: (_order.get(x["status"], 4), -(x["power_kw"] or 0)))
+
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "fleet": {
+            "total":              len(proyectos),
+            "online":             counts["online"],
+            "caido":              counts["caido"],
+            "degradado":          counts["degradado"],
+            "sin_comunicacion":   counts["sin_comunicacion"],
+            "total_power_kw":     round(total_power, 1),
+            "total_capacity_kwp": round(total_capacity, 1),
+            "utilization_pct":    round(total_power / total_capacity * 100, 1) if total_capacity > 0 else 0,
+        },
+        "projects": projects_result,
+    }
+
+
+@router.get("/monitoring/{proyecto_id}")
+def project_monitoring_detail(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Detail monitoring for one project: inverter status + power curve today + 30d generation.
+    Uses our internal proyecto_id, resolves to Solenium ID via project_id_solenium.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    if not p.project_id_solenium:
+        raise HTTPException(422, "Proyecto sin ID Solenium")
+
+    sol_id = int(p.project_id_solenium)
+    client = _get_client()
+
+    today   = date.today()
+    start30 = (today - timedelta(days=29)).isoformat()
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        inv_f = ex.submit(client.get_project_inverters, sol_id)
+        pow_f = ex.submit(client.get_power, sol_id)
+        gen_f = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+
+    inverters  = inv_f.result() or []
+    power_data = pow_f.result() or {}
+    gen_raw    = gen_f.result() or {}
+
+    # ── Inverter status ──────────────────────────────────────────────────────
+    inv_powers = [float(inv.get("power") or inv.get("pac") or 0) for inv in inverters]
+    avg_power  = sum(inv_powers) / len(inv_powers) if inv_powers else 0
+
+    processed_inverters = []
+    for inv, pwr in zip(inverters, inv_powers):
+        state = (inv.get("state") or inv.get("status") or "").lower()
+        if "disconnect" in state or "off" in state:
+            inv_status = "sin_comunicacion"
+        elif "fault" in state or "error" in state:
+            inv_status = "caido"
+        elif avg_power > 0 and pwr == 0:
+            inv_status = "caido"
+        elif avg_power > 0 and pwr < avg_power * 0.6:
+            inv_status = "degradado"
+        elif pwr > 0:
+            inv_status = "online"
+        else:
+            inv_status = "offline"
+
+        processed_inverters.append({
+            "id":         inv.get("id"),
+            "name":       inv.get("dev_name") or inv.get("name") or f"INV-{inv.get('id', '')}",
+            "state":      inv.get("state") or inv.get("status") or "—",
+            "power_kw":   round(pwr, 2),
+            "inv_status": inv_status,
+        })
+
+    # ── Power curve today: sum all inverters per timestamp ────────────────
+    power_total: dict[str, float] = {}
+    raw_power = {}
+    if isinstance(power_data, dict):
+        raw_power = (power_data.get("power")
+                     or power_data.get("results", {}).get("power")
+                     or {})
+    for timeseries in raw_power.values():
+        if isinstance(timeseries, dict):
+            for ts, val in timeseries.items():
+                power_total[ts] = power_total.get(ts, 0.0) + float(val or 0)
+
+    power_curve = [
+        {"time": ts, "kw": round(v, 2)}
+        for ts, v in sorted(power_total.items())
+    ]
+
+    # ── 30d daily generation ─────────────────────────────────────────────
+    gen_kwh: dict[str, float] = gen_raw.get("generation_kwh") or {}
+    daily: dict[str, float] = {}
+    for ts, v in gen_kwh.items():
+        day = ts.split(" ")[0]
+        daily[day] = daily.get(day, 0.0) + float(v)
+    generation_30d = [
+        {"date": d, "kwh": round(v, 1)}
+        for d, v in sorted(daily.items())
+    ]
+
+    return {
+        "proyecto_id":    p.id,
+        "nombre":         p.nombre_comercial,
+        "sol_id":         sol_id,
+        "capacity_kwp":   float(p.potencia_instalada_kwp or 0),
+        "inverters":      processed_inverters,
+        "power_curve":    power_curve,
+        "generation_30d": generation_30d,
+        "total_30d_kwh":  round(sum(d["kwh"] for d in generation_30d), 1),
+    }

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,48 +30,104 @@ def _get_client() -> SoleniumClient:
     return _client
 
 
+def _normalize_name(s: str) -> str:
+    """Normaliza nombre para comparación fuzzy: sin tildes, minúsculas, solo alfanumérico."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"[^a-z0-9]", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
+    """Encuentra el Solenium project_id para un proyecto interno.
+
+    Prioridad:
+    1. Campo project_id_solenium (ID explícito).
+    2. Coincidencia exacta de nombre normalizado.
+    3. Coincidencia por subcadena (mínimo 5 chars).
+    """
+    # 1. ID explícito
+    if p.project_id_solenium:
+        try:
+            return int(p.project_id_solenium)
+        except (ValueError, TypeError):
+            pass
+
+    # 2/3. Matching por nombre
+    candidates = [p.nombre_comercial, p.alias_monitoreo, p.nombre_bitacora]
+    for name in candidates:
+        norm = _normalize_name(name or "")
+        if not norm:
+            continue
+        # Exacto
+        if norm in sol_name_map:
+            return sol_name_map[norm]
+        # Subcadena (bidireccional)
+        if len(norm) >= 5:
+            for sol_norm, sol_id in sol_name_map.items():
+                if len(sol_norm) >= 5 and (norm in sol_norm or sol_norm in norm):
+                    return sol_id
+    return None
+
+
 @router.get("/generacion-hoy")
 def generacion_hoy(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """
-    Generación real de HOY por proyecto, desde Solenium project_detail.
+    Generación real de HOY por proyecto, desde Solenium.
+    Empareja proyectos por project_id_solenium (explícito) o por nombre (fuzzy).
     Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
     """
     client = _get_client()
 
-    # 1. Summary en una sola llamada → {solenium_id: {frontier_generation_kwh, power_kw, ...}}
+    # 1. Todos los proyectos Solenium → nombre_normalizado → sol_id
+    sol_projects = client.get_projects()
+    sol_name_map: dict[str, int] = {}
+    for sp in sol_projects:
+        pid = sp.get("id")
+        name = sp.get("name") or ""
+        if pid is not None:
+            sol_name_map[_normalize_name(name)] = int(pid)
+    logger.info("solenium projects loaded: %d", len(sol_projects))
+
+    # 2. Summary en una sola llamada → {sol_id: {frontier_generation_kwh, power_kw, ...}}
     summary_list = client.get_project_summary()
     summary_map: dict[int, dict] = {}
     for s in summary_list:
         pid = s.get("project_id")
         if pid is not None:
             summary_map[int(pid)] = s
+    logger.info("solenium summary loaded: %d entries", len(summary_map))
 
-    # 2. Proyectos con project_id_solenium
+    # 3. Todos nuestros proyectos en operación
     proyectos_db = db.query(Proyecto).filter(
-        Proyecto.project_id_solenium.isnot(None),
         Proyecto.estado == "en_operacion",
     ).all()
 
     result = []
     for p in proyectos_db:
-        try:
-            sol_id = int(p.project_id_solenium)
-        except (ValueError, TypeError):
+        sol_id = _find_solenium_id(p, sol_name_map)
+        if sol_id is None:
+            logger.debug("sin match solenium: proyecto_id=%d nombre='%s'", p.id, p.nombre_comercial)
             continue
 
         s = summary_map.get(sol_id)
 
-        # Intentar project_detail si el summary no trae generación
+        # Generación desde summary
         kwh_real = 0.0
         if s:
-            kwh_real = float(s.get("frontier_generation_kwh") or
-                             s.get("energy_today_kwh") or
-                             s.get("generation_today") or 0)
-        if kwh_real == 0.0:
-            # Fallback: project_detail/{id}/
+            kwh_real = float(
+                s.get("frontier_generation_kwh") or
+                s.get("energy_today_kwh") or
+                s.get("generation_today") or 0
+            )
+
+        # Fallback: project_detail solo si el proyecto sí aparece en summary (pero con 0)
+        if kwh_real == 0.0 and s is not None:
             detail = client.get_project_detail(sol_id) or {}
             kwh_real = float(
                 detail.get("frontier_generation_kwh") or
@@ -91,6 +149,52 @@ def generacion_hoy(
         "fecha":    date.today().isoformat(),
         "total":    round(sum(r["kwh_real"] for r in result), 1),
         "proyectos": result,
+    }
+
+
+@router.get("/debug-matching")
+def debug_matching(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Debug: muestra qué proyectos Solenium tenemos y cómo emparejan con nuestra DB."""
+    client = _get_client()
+
+    sol_projects = client.get_projects()
+    sol_name_map: dict[str, int] = {}
+    for sp in sol_projects:
+        pid = sp.get("id")
+        name = sp.get("name") or ""
+        if pid is not None:
+            sol_name_map[_normalize_name(name)] = int(pid)
+
+    proyectos_db = db.query(Proyecto).filter(Proyecto.estado == "en_operacion").all()
+
+    matched = []
+    unmatched_ours = []
+    for p in proyectos_db:
+        sol_id = _find_solenium_id(p, sol_name_map)
+        if sol_id is not None:
+            matched.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "sol_id": sol_id})
+        else:
+            unmatched_ours.append({"proyecto_id": p.id, "nombre": p.nombre_comercial,
+                                   "alias": p.alias_monitoreo, "bitacora": p.nombre_bitacora})
+
+    matched_sol_ids = {m["sol_id"] for m in matched}
+    unmatched_solenium = [
+        {"sol_id": sol_id, "nombre_norm": norm}
+        for norm, sol_id in sol_name_map.items()
+        if sol_id not in matched_sol_ids
+    ]
+
+    return {
+        "solenium_total": len(sol_projects),
+        "nuestros_en_operacion": len(proyectos_db),
+        "matched": len(matched),
+        "unmatched_ours": len(unmatched_ours),
+        "matches": matched,
+        "sin_match_nuestros": unmatched_ours,
+        "sin_match_solenium": sorted(unmatched_solenium, key=lambda x: x["nombre_norm"]),
     }
 
 

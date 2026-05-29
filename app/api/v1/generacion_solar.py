@@ -72,6 +72,88 @@ def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
     return None
 
 
+@router.get("/proyecto/{proyecto_id}/historial")
+def proyecto_historial(
+    proyecto_id: int,
+    fecha_inicio: str = Query(..., description="YYYY-MM-DD"),
+    fecha_fin: str = Query(..., description="YYYY-MM-DD"),
+    granularidad: str = Query("day", description="day | hour"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Generación histórica de un proyecto desde Solenium.
+
+    Acepta el ID interno de nuestra BD y resuelve el Solenium project_id
+    usando project_id_solenium.  Devuelve puntos diarios u horarios.
+
+    Respuesta:
+      {
+        proyecto_id, nombre, sol_id,
+        granularidad,           # 'day' | 'hour'
+        puntos: [{ label, kwh }],
+        total_kwh
+      }
+    """
+    # 1. Buscar proyecto en nuestra BD
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+
+    # 2. Resolver Solenium ID
+    sol_id: int | None = None
+    if p.project_id_solenium:
+        try:
+            sol_id = int(p.project_id_solenium)
+        except (ValueError, TypeError):
+            pass
+
+    if sol_id is None:
+        # Fallback: matching por nombre (por si la migración no corrió aún)
+        client = _get_client()
+        sol_projects = client.get_projects()
+        sol_name_map = {_normalize_name(sp.get("name", "")): int(sp["id"]) for sp in sol_projects if sp.get("id")}
+        sol_id = _find_solenium_id(p, sol_name_map)
+
+    if sol_id is None:
+        raise HTTPException(404, "Este proyecto no tiene ID en Solenium. Agrega project_id_solenium en la BD.")
+
+    # 3. Llamar al endpoint de generación de Solenium
+    client = _get_client()
+    raw = client.get_generation(sol_id, fecha_inicio, fecha_fin) or {}
+
+    # La generación viene en generation_kwh: {"2026-05-22 08:00": 123.4, ...}
+    gen_kwh: dict[str, float] = raw.get("generation_kwh") or {}
+
+    if granularidad == "hour":
+        # Devolver cada punto horario directamente
+        puntos = [
+            {"label": ts, "kwh": round(float(v), 2)}
+            for ts, v in sorted(gen_kwh.items())
+        ]
+    else:
+        # Agregar por día: sumar todas las horas del mismo día
+        daily: dict[str, float] = {}
+        for ts, v in gen_kwh.items():
+            day = ts.split(" ")[0]       # "2026-05-22 08:00" → "2026-05-22"
+            daily[day] = daily.get(day, 0.0) + float(v)
+        puntos = [
+            {"label": day, "kwh": round(kwh, 1)}
+            for day, kwh in sorted(daily.items())
+        ]
+
+    total_kwh = round(sum(pt["kwh"] for pt in puntos), 1)
+
+    return {
+        "proyecto_id": p.id,
+        "nombre":      p.nombre_comercial,
+        "sol_id":      sol_id,
+        "granularidad": granularidad,
+        "puntos":      puntos,
+        "total_kwh":   total_kwh,
+    }
+
+
 @router.get("/generacion-hoy")
 def generacion_hoy(
     db: Session = Depends(get_db),

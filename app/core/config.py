@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     UNERGY_PASSWORD: str = ""
 
     # Solenium API (FMO inverter data) — OAuth2 username/password
-    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api"
     SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""

@@ -17,7 +17,13 @@ TOKEN_MARGIN_SECONDS = 60
 
 class SoleniumClient:
     def __init__(self):
-        self._auth_url = settings.SOLENIUM_AUTH_URL.rstrip("/")
+        # SOLENIUM_AUTH_URL debe ser la BASE (ej: https://auth.solenium.co/api)
+        # El cliente agrega /token/ y /token/refresh/ según necesite.
+        auth = settings.SOLENIUM_AUTH_URL.rstrip("/")
+        # Si la URL ya incluye /token al final, quitar para quedarnos con la base
+        if auth.endswith("/token"):
+            auth = auth[:-len("/token")]
+        self._auth_url = auth
         self._data_url = settings.SOLENIUM_DATA_URL.rstrip("/")
         self._username = settings.SOLENIUM_USER
         self._password = settings.SOLENIUM_PASS
@@ -127,8 +133,12 @@ class SoleniumClient:
     def get_projects(self) -> list[dict]:
         url = f"{self._data_url}/project/"
         all_projects = []
+        first = True
         while url:
-            data = self._get(url)
+            # menu=1 en la primera llamada (igual que la interfaz web de Solenium)
+            params = {"menu": 1} if first else None
+            data = self._get(url, params=params)
+            first = False
             if not data:
                 break
             results = data.get("results", data) if isinstance(data, dict) else data

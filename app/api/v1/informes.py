@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -372,6 +373,7 @@ def add_comentario(
     coms = list(inf.comentarios or [])
     coms.append(nuevo)
     inf.comentarios = coms
+    flag_modified(inf, "comentarios")   # JSONB: forzar UPDATE (reasignar no basta en este proyecto)
     # Si estaba en 'revisado', vuelve a borrador hasta que se subsane.
     if inf.estado == "revisado":
         inf.estado = "borrador"
@@ -405,6 +407,9 @@ def resolver_comentario(
     if payload.respuesta and payload.respuesta.strip():
         target["respuesta"] = payload.respuesta.strip()
     inf.comentarios = coms
+    # JSONB: la lista nueva comparte refs de dicts con la vieja → SQLAlchemy no detecta
+    # el cambio al comparar. flag_modified fuerza el UPDATE para que se guarde "resuelto".
+    flag_modified(inf, "comentarios")
     # Si todos los comentarios quedaron subsanados y estaba en borrador, lo movemos a revisado.
     if all(c.get("resuelto") for c in coms) and inf.estado == "borrador":
         inf.estado = "revisado"
@@ -434,6 +439,7 @@ def borrar_comentario(
     if target.get("autor_email", "").lower() != (current_user.email or "").lower() and (current_user.rol or "") != "admin":
         raise HTTPException(403, "Sólo el autor del comentario (o admin) puede eliminarlo")
     inf.comentarios = [c for c in coms if c.get("id") != comentario_id]
+    flag_modified(inf, "comentarios")   # JSONB: forzar UPDATE
     db.commit()
     db.refresh(inf)
     return inf

@@ -39,6 +39,7 @@ class InformeUpsertIn(BaseModel):
     proyecto_nombre: Optional[str] = None
     html_content: str
     charts_data: Optional[Any] = None     # JSON del rptChartQueue (puede llegar como string o dict)
+    miembros: Optional[list] = None        # sólo portafolio: [{sub_project, nombre, orden, html_inline}]
 
 
 class EstadoIn(BaseModel):
@@ -77,12 +78,25 @@ class InformeOut(BaseModel):
     correo_enviado: bool
     correo_enviado_en: Optional[datetime]
     comentarios: list[ComentarioOut] = []
+    miembros: list = []   # sólo portafolio; html_inline se omite (uso interno del backend)
 
     @field_validator('comentarios', mode='before')
     @classmethod
     def ensure_comentarios(cls, v):
         """Filas creadas antes de migration 021 pueden tener comentarios=NULL."""
         return v if isinstance(v, list) else []
+
+    @field_validator('miembros', mode='before')
+    @classmethod
+    def ensure_miembros(cls, v):
+        """Lista de miembros del portafolio. Se omite html_inline (puede ser grande;
+        el backend lo usa sólo para componer/enviar, el frontend no lo necesita)."""
+        if not isinstance(v, list):
+            return []
+        return [
+            {k: val for k, val in m.items() if k != "html_inline"}
+            for m in v if isinstance(m, dict)
+        ]
 
     class Config:
         from_attributes = True
@@ -99,6 +113,12 @@ class ComentarioCreateIn(BaseModel):
 
 class ComentarioResolverIn(BaseModel):
     respuesta: Optional[str] = None
+
+
+class SeccionIn(BaseModel):
+    """Write-back de una sección de proyecto editada dentro del portafolio."""
+    sub_project: str
+    html_content: str
 
 
 # Emails con permisos especiales (configurables por env si fuera necesario).
@@ -133,6 +153,60 @@ def _get_correo_operacional(db: Session, sub_project: str) -> Optional[str]:
     if row and row[0]:
         return row[0]
     return None
+
+
+# Separador de páginas usado por el frontend al unir las páginas del informe.
+_PAGE_SEP = '<div class="rpt-page-sep"></div>'
+
+
+def _tag_seccion(html: str, sub_project: str) -> str:
+    """Marca la página de proyecto con data-sub-project para que el editor del portafolio
+    pueda mapear la sección de vuelta a su proyecto al guardar (write-back). Idempotente:
+    si ya viene marcada (p.ej. un individual editado antes desde el portafolio), no la duplica."""
+    if not html or not sub_project:
+        return html or ""
+    if "data-sub-project=" in html[:300]:
+        return html
+    return html.replace(
+        '<div class="rpt-page">',
+        f'<div class="rpt-page" data-sub-project="{sub_project}">',
+        1,
+    )
+
+
+def _find_individual(db: Session, sub_project: str, periodo_desde: str, periodo_hasta: str):
+    """Busca el informe individual ('op') de un proyecto para el mismo período."""
+    if not sub_project:
+        return None
+    return (
+        db.query(InformeGuardado)
+        .filter_by(tipo="op", sub_project=sub_project,
+                   periodo_desde=periodo_desde, periodo_hasta=periodo_hasta)
+        .first()
+    )
+
+
+def _componer_portafolio(db: Session, inf: InformeGuardado) -> str:
+    """Compone el HTML completo de un portafolio:
+    página consolidada (html_content del portafolio) + por cada miembro, en orden,
+    el HTML del informe individual vinculado si existe (fuente viva), o el html_inline
+    embebido en el miembro si el proyecto no tiene informe individual guardado.
+    """
+    partes = [inf.html_content or ""]
+    miembros = sorted(
+        (inf.miembros or []),
+        key=lambda m: m.get("orden", 0) if isinstance(m, dict) else 0,
+    )
+    for m in miembros:
+        if not isinstance(m, dict):
+            continue
+        sp = m.get("sub_project")
+        indiv = _find_individual(db, sp, inf.periodo_desde, inf.periodo_hasta)
+        if indiv and indiv.html_content:
+            partes.append(_tag_seccion(indiv.html_content, sp))
+        elif m.get("html_inline"):
+            partes.append(_tag_seccion(m["html_inline"], sp))
+    return _PAGE_SEP.join(p for p in partes if p)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -178,6 +252,9 @@ def upsert_informe(
             )
         existing.html_content = payload.html_content
         existing.charts_data = charts_data_parsed
+        if payload.miembros is not None:
+            existing.miembros = payload.miembros
+            flag_modified(existing, "miembros")
         if payload.proyecto_nombre:
             existing.proyecto_nombre = payload.proyecto_nombre
         if payload.periodo_display:
@@ -198,6 +275,7 @@ def upsert_informe(
             proyecto_nombre=payload.proyecto_nombre,
             html_content=payload.html_content,
             charts_data=charts_data_parsed,
+            miembros=payload.miembros,
             estado="borrador",
             creado_por_id=current_user.id,
             creado_por_nombre=current_user.nombre,
@@ -273,6 +351,69 @@ def get_informe(
     inf = db.get(InformeGuardado, informe_id)
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
+    return inf
+
+
+@router.get("/{informe_id}/compuesto", summary="HTML compuesto (portafolio = consolidada + secciones vivas)")
+def get_compuesto(
+    informe_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Devuelve el HTML listo para previsualizar/imprimir/enviar.
+    Para portafolios compone consolidada + secciones (individuales vivos o html_inline);
+    para op/fmo devuelve su html_content tal cual."""
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    html = _componer_portafolio(db, inf) if inf.tipo == "port" else (inf.html_content or "")
+    return {"id": inf.id, "tipo": inf.tipo, "html_content": html}
+
+
+@router.patch("/{informe_id}/seccion", response_model=InformeDetailOut,
+              summary="Write-back de una sección de proyecto editada dentro del portafolio")
+def update_seccion(
+    informe_id: int,
+    payload: SeccionIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Edición bidireccional: si la sección corresponde a un informe individual editable,
+    se escribe ahí (queda actualizado en ambas vistas); si el proyecto no tiene individual,
+    se guarda en el html_inline del miembro del portafolio."""
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    if inf.tipo != "port":
+        raise HTTPException(400, "Sólo aplica a informes de portafolio")
+
+    now = datetime.now(timezone.utc)
+    indiv = _find_individual(db, payload.sub_project, inf.periodo_desde, inf.periodo_hasta)
+    if indiv:
+        if indiv.estado != "borrador":
+            raise HTTPException(
+                409,
+                f"El informe individual de '{payload.sub_project}' está en estado "
+                f"'{indiv.estado}' y no se puede editar desde el portafolio. Reábrelo primero.",
+            )
+        indiv.html_content = payload.html_content
+        indiv.editado_por_id = current_user.id
+        indiv.editado_por_nombre = current_user.nombre
+        indiv.editado_en = now
+    else:
+        miembros = list(inf.miembros or [])
+        target = next((m for m in miembros if isinstance(m, dict)
+                       and m.get("sub_project") == payload.sub_project), None)
+        if target is None:
+            target = {"sub_project": payload.sub_project, "nombre": payload.sub_project,
+                      "orden": len(miembros)}
+            miembros.append(target)
+        target["html_inline"] = payload.html_content
+        inf.miembros = miembros
+        flag_modified(inf, "miembros")
+
+    db.commit()
+    db.refresh(inf)
     return inf
 
 
@@ -485,6 +626,9 @@ def enviar_informe(
             "Configúralo en la ficha del cliente.",
         )
 
+    # Portafolio: enviar siempre el HTML compuesto vivo (consolidada + individuales actuales).
+    html_to_send = _componer_portafolio(db, inf) if inf.tipo == "port" else inf.html_content
+
     try:
         from app.services.email_service import send_informe_email
         send_informe_email(
@@ -492,7 +636,7 @@ def enviar_informe(
             proyecto_nombre=inf.proyecto_nombre or inf.sub_project,
             periodo_display=inf.periodo_display or f"{inf.periodo_desde} — {inf.periodo_hasta}",
             aprobado_por=inf.aprobado_por_nombre or current_user.nombre,
-            html_content=inf.html_content,
+            html_content=html_to_send,
         )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc

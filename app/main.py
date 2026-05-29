@@ -614,6 +614,8 @@ _PENDING_DDLS = [
     # tabla se creó antes de que se añadieran al modelo. ALTER TABLE IF NOT EXISTS es idempotente.
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado_en TIMESTAMPTZ",
+    # migration 022 — portafolio compuesto: miembros (proyectos) del informe de portafolio
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS miembros JSONB",
 ]
 
 

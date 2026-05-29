@@ -121,34 +121,58 @@ def generacion_hoy(
 
     logger.info("proyectos emparejados: %d / %d", len(matched), len(proyectos_db))
 
-    # 5. Obtener kwh_real: GET /project/{id}/generation/ con fecha de hoy
+    # 5. Obtener kwh_real e indicador de fuente por proyecto
+    #    Fuentes posibles:
+    #    - "inversor"  → /project/{id}/generation/ → total_generation_kwh (kWh, datos de inversores)
+    #    - "medidor"   → /project_detail/{id}/ → generation.value en MWh (medidor de frontera)
+    #    - "sin_dato"  → ninguna fuente disponible
     today_str = date.today().isoformat()
 
     def _fetch_kwh(item: tuple) -> tuple:
         p, sol_id, s = item
         kwh = 0.0
         power_kw = float((s or {}).get("power_kw") or 0)
+        fuente = "sin_dato"
 
+        # Fuente 1: endpoint /generation/ (datos de inversores, en kWh)
         try:
             gen = client.get_generation(sol_id, today_str, today_str) or {}
-            # La API devuelve el resultado directamente o anidado en "results"
             if "results" in gen:
                 gen = gen["results"]
             kwh = float(gen.get("total_generation_kwh") or 0)
+            if kwh > 0:
+                fuente = "inversor"
         except Exception as exc:
             logger.warning("generation fallo sol_id=%d: %s", sol_id, exc)
 
-        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), round(power_kw, 2))
+        # Fuente 2: project_detail → generation.value en MWh (medidor de frontera)
+        if kwh == 0.0:
+            try:
+                detail = client.get_project_detail(sol_id) or {}
+                if "results" in detail:
+                    detail = detail["results"]
+                gen_detail = detail.get("generation") or {}
+                if gen_detail and gen_detail.get("value"):
+                    unit = gen_detail.get("unit", "kWh")
+                    val = float(gen_detail["value"])
+                    kwh = val * 1000 if unit == "MWh" else val
+                    if kwh > 0:
+                        fuente = "medidor"
+            except Exception as exc:
+                logger.warning("project_detail fallo sol_id=%d: %s", sol_id, exc)
+
+        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), round(power_kw, 2), fuente)
 
     result = []
     with ThreadPoolExecutor(max_workers=8) as executor:
-        for pid, nombre, sol_id, kwh_real, power_kw in executor.map(_fetch_kwh, matched):
+        for pid, nombre, sol_id, kwh_real, power_kw, fuente in executor.map(_fetch_kwh, matched):
             result.append({
                 "proyecto_id": pid,
                 "nombre":      nombre,
                 "sol_id":      sol_id,
                 "kwh_real":    kwh_real,
                 "power_kw":    power_kw,
+                "fuente":      fuente,
             })
 
     result.sort(key=lambda x: x["kwh_real"], reverse=True)

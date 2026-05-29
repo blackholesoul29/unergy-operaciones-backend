@@ -1062,6 +1062,89 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
     }
 
 
+# ── GET /monitoreo/resumen-generacion ─────────────────────────────────────────
+@router.get("/resumen-generacion")
+async def resumen_generacion_fleet(
+    date_from: str = Query(..., description="YYYY-MM-DD"),
+    date_to:   str = Query(..., description="YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    """
+    Generación real (API Unergy) de todos los proyectos activos con sub_project,
+    agregada por fecha y también por proyecto, para el rango indicado.
+    Usado por los gráficos de Monitoreo de Fallas.
+    """
+    from sqlalchemy import or_
+    import asyncio
+
+    proyectos_db = db.query(Proyecto).filter(
+        or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
+        Proyecto.estado == "en_operacion",
+    ).all()
+
+    if not proyectos_db:
+        return {"projects_count": 0, "dates": [], "by_project": []}
+
+    try:
+        d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+        d_to   = datetime.strptime(date_to,   "%Y-%m-%d").date()
+    except Exception:
+        return {"projects_count": 0, "dates": [], "by_project": []}
+
+    d_from_dt    = datetime(d_from.year, d_from.month, d_from.day, 0, 0, 0, tzinfo=_COL_TZ)
+    d_to_dt      = datetime(d_to.year,   d_to.month,   d_to.day,  23, 59, 59, tzinfo=_COL_TZ)
+    fetch_from   = (d_from_dt - timedelta(days=2)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fetch_to     = d_to_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        token = await _unergy_token()
+    except Exception:
+        return {"projects_count": len(proyectos_db), "dates": [], "by_project": [], "error": "token_error"}
+
+    by_date: dict[str, float] = {}
+    by_project: list[dict] = []
+
+    async def fetch_one(p: Proyecto):
+        sub = p.sub_project or p.alias_monitoreo
+        try:
+            readings = await _fetch_unergy_raw(token, sub, fetch_from, fetch_to, verified_only=True)
+            if not readings:
+                readings = await _fetch_unergy_raw(token, sub, fetch_from, fetch_to, verified_only=False)
+            return p, _compute_deltas(readings, d_from_dt, d_to_dt)
+        except Exception:
+            return p, []
+
+    results = await asyncio.gather(*[fetch_one(p) for p in proyectos_db], return_exceptions=True)
+
+    for item in results:
+        if not isinstance(item, tuple):
+            continue
+        p, entries = item
+        total_kwh = 0.0
+        for e in entries:
+            fecha = e.get("date", "")
+            kwh   = float(e.get("kwh") or 0)
+            if fecha:
+                by_date[fecha] = by_date.get(fecha, 0.0) + kwh
+                total_kwh += kwh
+        by_project.append({
+            "proyecto_id":  p.id,
+            "nombre":       p.nombre_comercial,
+            "sub_project":  p.sub_project or p.alias_monitoreo,
+            "kwh_real":     round(total_kwh, 1),
+        })
+
+    return {
+        "projects_count": len(proyectos_db),
+        "dates": [
+            {"fecha": f, "kwh_real": round(v, 1)}
+            for f, v in sorted(by_date.items())
+        ],
+        "by_project": sorted(by_project, key=lambda x: x["kwh_real"], reverse=True),
+    }
+
+
 # ── GET /monitoreo/_legacy ────────────────────────────────────────────────────
 @router.get("/_legacy")
 async def legacy_bridge(

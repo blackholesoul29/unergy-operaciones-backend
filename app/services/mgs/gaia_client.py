@@ -289,6 +289,26 @@ class GaiaClient:
         all_times = [r[-1].get("time") for r in results.values() if r]
         last_time = max((t for t in all_times if t), default=None)
 
+        # ── Time series for charts ─────────────────────────────────────────────
+        def _running_sum_series(data: list, field: str) -> list:
+            """Cumulative sum over the day → kWh timeline."""
+            total = 0.0
+            out = []
+            for row in data:
+                v = row.get(field)
+                t = row.get("time")
+                if v is not None and t:
+                    total += float(v)
+                    out.append({"time": t, "kwh": round(total / 1000, 3)})
+            return out
+
+        # Instantaneous power from ap (W → kW)
+        power_series = [
+            {"time": r["time"], "kw": round(float(r["ap"]) / 1000, 3)}
+            for r in results["ap"]
+            if r.get("ap") is not None and r.get("time")
+        ]
+
         return {
             # Voltage per phase [V]
             "vp1": lv.get("vp1"), "vp2": lv.get("vp2"), "vp3": lv.get("vp3"),
@@ -317,4 +337,10 @@ class GaiaClient:
             "ere2_wh": _sum("ere2", data=ere),
             "ere3_wh": _sum("ere3", data=ere),
             "last_time": last_time,
+            # Time series for frontend charts
+            "time_series": {
+                "power":      power_series,
+                "energy_exp": _running_sum_series(eae, "eae"),
+                "energy_imp": _running_sum_series(iae, "iae"),
+            },
         }

@@ -182,3 +182,17 @@ class SoleniumClient:
         if not data:
             return []
         return data.get("results", data) if isinstance(data, dict) else data
+
+    def get_inverter_detail(self, project_id: int, inverter_id: int) -> dict | None:
+        """Real-time detail for a single inverter (includes string/MPPT data)."""
+        url = f"{self._data_url}/project/{project_id}/inverter/{inverter_id}/"
+        return self._get(url)
+
+    def get_measurements_variable(self, project_id: int, variable: str,
+                                   time_scale: int = 0) -> dict | None:
+        """Fetch a specific measurement variable for a project."""
+        url = f"{self._data_url}/project/{project_id}/measurement/"
+        data = self._get(url, params={"variable": variable, "time_scale": time_scale})
+        if not data:
+            return None
+        return data.get("results") or data

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, TipoProyectoEnum
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
@@ -70,6 +70,137 @@ def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
                 if len(sol_norm) >= 5 and (norm in sol_norm or sol_norm in norm):
                     return sol_id
     return None
+
+
+def _extract_strings(detail: dict) -> list[dict]:
+    """Extract DC string data from a raw Solenium inverter-detail response.
+
+    Tries multiple naming conventions:
+    • vpv1/ipv1 … vpvN/ipvN  (most common)
+    • pv{N}vol / pv{N}cur
+    • u_pv{N} / i_pv{N}
+    • mppt{N}_vpv / mppt{N}_ipv
+    • nested list under key "pv" or "strings"
+    """
+    raw = detail
+    if isinstance(detail, dict):
+        raw = detail.get("results") or detail
+    if not isinstance(raw, dict):
+        return []
+
+    strings: list[dict] = []
+
+    # ── Pattern 1: numbered flat keys ─────────────────────────────────────────
+    for i in range(1, 25):
+        vpv = None
+        ipv = None
+
+        for key in (f"vpv{i}", f"pv{i}vol", f"pv{i}_vol",
+                    f"u_pv{i}", f"mppt{i}_vpv", f"string{i}_v"):
+            v = raw.get(key)
+            if v is not None:
+                try:
+                    vpv = float(v)
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+        for key in (f"ipv{i}", f"pv{i}cur", f"pv{i}_cur",
+                    f"i_pv{i}", f"mppt{i}_ipv", f"string{i}_i"):
+            v = raw.get(key)
+            if v is not None:
+                try:
+                    ipv = float(v)
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+        if vpv is None and ipv is None:
+            break
+
+        ppv = round(vpv * ipv / 1000, 3) if (vpv is not None and ipv is not None) else None
+        strings.append({
+            "string": i,
+            "label": f"S{i}",
+            "voltage_v": round(vpv, 1) if vpv is not None else None,
+            "current_a": round(ipv, 2) if ipv is not None else None,
+            "power_kw": ppv,
+        })
+
+    if strings:
+        return strings
+
+    # ── Pattern 2: list under "pv" or "strings" key ───────────────────────────
+    for list_key in ("pv", "strings", "mppt"):
+        items = raw.get(list_key)
+        if isinstance(items, list):
+            for j, item in enumerate(items, 1):
+                if not isinstance(item, dict):
+                    continue
+                vpv_raw = item.get("vpv") or item.get("voltage") or item.get("vol")
+                ipv_raw = item.get("ipv") or item.get("current") or item.get("cur")
+                vpv = float(vpv_raw) if vpv_raw is not None else None
+                ipv = float(ipv_raw) if ipv_raw is not None else None
+                ppv = round(vpv * ipv / 1000, 3) if (vpv is not None and ipv is not None) else None
+                strings.append({
+                    "string": j,
+                    "label": f"S{j}",
+                    "voltage_v": round(vpv, 1) if vpv is not None else None,
+                    "current_a": round(ipv, 2) if ipv is not None else None,
+                    "power_kw": ppv,
+                })
+            if strings:
+                return strings
+
+    return strings
+
+
+def _extract_ac_metrics(detail: dict) -> dict:
+    """Extract AC/electrical metrics from a raw Solenium inverter-detail response.
+
+    Returns a dict with normalized keys. Values are floats or None when absent.
+    pac_kw and qac_kvar are converted from W/VAr if the value seems to be in those units.
+    """
+    raw = detail
+    if isinstance(detail, dict):
+        raw = detail.get("results") or detail
+    if not isinstance(raw, dict):
+        return {}
+
+    def _get(*keys):
+        for k in keys:
+            v = raw.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    pass
+        return None
+
+    pac_raw = _get("pac", "active_power", "p_ac", "pac_w", "power_ac")
+    qac_raw = _get("qac", "reactive_power", "q_ac", "qac_w", "reactive_ac")
+
+    # Heuristic: if value > 500, it is probably in W → convert to kW
+    def _to_kw(v):
+        if v is None:
+            return None
+        return round(v / 1000, 3) if abs(v) > 500 else round(v, 3)
+
+    return {
+        "vac_a":        _get("vac_a", "ua", "voltage_a", "v_a", "u_a", "u1", "uac_a"),
+        "vac_b":        _get("vac_b", "ub", "voltage_b", "v_b", "u_b", "u2", "uac_b"),
+        "vac_c":        _get("vac_c", "uc", "voltage_c", "v_c", "u_c", "u3", "uac_c"),
+        "iac_a":        _get("iac_a", "ia", "current_a", "i_a", "i1", "iac_l1"),
+        "iac_b":        _get("iac_b", "ib", "current_b", "i_b", "i2", "iac_l2"),
+        "iac_c":        _get("iac_c", "ic", "current_c", "i_c", "i3", "iac_l3"),
+        "power_factor": _get("pf", "power_factor", "cos_phi", "pf_total", "power_factor_total"),
+        "pac_kw":       _to_kw(pac_raw),
+        "qac_kvar":     _to_kw(qac_raw),
+        "efficiency_pct": _get("efficiency", "eff", "efficiency_pct", "total_efficiency"),
+        "e_day_kwh":    _get("eday", "e_day", "daily_energy", "today_energy",
+                             "daily_gen", "generation_today", "etotal_today"),
+        "temperature_c": _get("temperature", "temp", "t_inner", "inner_temp", "module_temp"),
+    }
 
 
 @router.get("/proyecto/{proyecto_id}/historial")
@@ -687,6 +818,8 @@ def fleet_monitoring(
     proyectos = db.query(Proyecto).filter(
         Proyecto.estado == "en_operacion",
         Proyecto.project_id_solenium.isnot(None),
+        Proyecto.tipo_proyecto == TipoProyectoEnum.minigranja,
+        Proyecto.srv_operacion == True,  # noqa: E712
     ).all()
 
     if not proyectos:
@@ -809,6 +942,25 @@ def project_monitoring_detail(
     power_data = pow_f.result() or {}
     gen_raw    = gen_f.result() or {}
 
+    # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
+    def _fetch_detail(inv):
+        inv_id = inv.get("id")
+        if not inv_id:
+            return inv_id, [], {}
+        try:
+            detail = client.get_inverter_detail(sol_id, inv_id) or {}
+        except Exception as exc:
+            logger.warning("inverter_detail failed sol=%d inv=%s: %s", sol_id, inv_id, exc)
+            detail = {}
+        return inv_id, _extract_strings(detail), _extract_ac_metrics(detail)
+
+    detail_map: dict[int, dict] = {}
+    if inverters:
+        with ThreadPoolExecutor(max_workers=min(len(inverters), 10)) as ex:
+            for inv_id, strings, ac in ex.map(_fetch_detail, inverters):
+                if inv_id is not None:
+                    detail_map[inv_id] = {"strings": strings, "ac_metrics": ac}
+
     # ── Inverter status ──────────────────────────────────────────────────────
     inv_powers = [float(inv.get("power") or inv.get("pac") or 0) for inv in inverters]
     avg_power  = sum(inv_powers) / len(inv_powers) if inv_powers else 0
@@ -829,12 +981,16 @@ def project_monitoring_detail(
         else:
             inv_status = "offline"
 
+        inv_id  = inv.get("id")
+        detail  = detail_map.get(inv_id, {})
         processed_inverters.append({
-            "id":         inv.get("id"),
-            "name":       inv.get("dev_name") or inv.get("name") or f"INV-{inv.get('id', '')}",
+            "id":         inv_id,
+            "name":       inv.get("dev_name") or inv.get("name") or f"INV-{inv_id or '?'}",
             "state":      inv.get("state") or inv.get("status") or "—",
             "power_kw":   round(pwr, 2),
             "inv_status": inv_status,
+            "strings":    detail.get("strings", []),
+            "ac_metrics": detail.get("ac_metrics", {}),
         })
 
     # ── Power curve today: sum all inverters per timestamp ────────────────
@@ -865,6 +1021,12 @@ def project_monitoring_detail(
         for d, v in sorted(daily.items())
     ]
 
+    has_strings    = any(inv.get("strings") for inv in processed_inverters)
+    has_ac_metrics = any(
+        any(v is not None for v in inv.get("ac_metrics", {}).values())
+        for inv in processed_inverters
+    )
+
     return {
         "proyecto_id":    p.id,
         "nombre":         p.nombre_comercial,
@@ -874,4 +1036,6 @@ def project_monitoring_detail(
         "power_curve":    power_curve,
         "generation_30d": generation_30d,
         "total_30d_kwh":  round(sum(d["kwh"] for d in generation_30d), 1),
+        "has_strings":    has_strings,
+        "has_ac_metrics": has_ac_metrics,
     }

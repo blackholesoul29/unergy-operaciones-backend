@@ -82,6 +82,8 @@ def generacion_hoy(
     Empareja proyectos por project_id_solenium (explícito) o por nombre (fuzzy).
     Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     client = _get_client()
 
     # 1. Todos los proyectos Solenium → nombre_normalizado → sol_id
@@ -94,11 +96,11 @@ def generacion_hoy(
             sol_name_map[_normalize_name(name)] = int(pid)
     logger.info("solenium projects loaded: %d", len(sol_projects))
 
-    # 2. Summary en una sola llamada → {sol_id: {frontier_generation_kwh, power_kw, ...}}
+    # 2. Summary batch (campo puede ser project_id o id según versión de la API)
     summary_list = client.get_project_summary()
     summary_map: dict[int, dict] = {}
     for s in summary_list:
-        pid = s.get("project_id")
+        pid = s.get("project_id") or s.get("id")
         if pid is not None:
             summary_map[int(pid)] = s
     logger.info("solenium summary loaded: %d entries", len(summary_map))
@@ -108,41 +110,61 @@ def generacion_hoy(
         Proyecto.estado == "en_operacion",
     ).all()
 
-    result = []
+    # 4. Emparejar proyectos con Solenium
+    matched: list[tuple] = []   # (proyecto, sol_id, summary_or_None)
     for p in proyectos_db:
         sol_id = _find_solenium_id(p, sol_name_map)
         if sol_id is None:
             logger.debug("sin match solenium: proyecto_id=%d nombre='%s'", p.id, p.nombre_comercial)
             continue
+        matched.append((p, sol_id, summary_map.get(sol_id)))
 
-        s = summary_map.get(sol_id)
+    logger.info("proyectos emparejados: %d / %d", len(matched), len(proyectos_db))
 
-        # Generación desde summary
-        kwh_real = 0.0
+    # 5. Obtener kwh_real: summary primero, luego project_detail en paralelo
+    def _fetch_kwh(item: tuple) -> tuple:
+        p, sol_id, s = item
+        kwh = 0.0
+        power_kw = 0.0
+
         if s:
-            kwh_real = float(
+            kwh = float(
                 s.get("frontier_generation_kwh") or
                 s.get("energy_today_kwh") or
                 s.get("generation_today") or 0
             )
+            power_kw = float(s.get("power_kw") or 0)
 
-        # Fallback: project_detail solo si el proyecto sí aparece en summary (pero con 0)
-        if kwh_real == 0.0 and s is not None:
-            detail = client.get_project_detail(sol_id) or {}
-            kwh_real = float(
-                detail.get("frontier_generation_kwh") or
-                detail.get("energy_today_kwh") or
-                detail.get("generation_today") or
-                detail.get("daily_generation") or 0
-            )
+        # Fallback a project_detail cuando summary no trajo dato
+        # (ocurre cuando el endpoint /project_summary/ no existe o devuelve 0)
+        if kwh == 0.0:
+            try:
+                detail = client.get_project_detail(sol_id) or {}
+                kwh = float(
+                    detail.get("frontier_generation_kwh") or
+                    detail.get("energy_today_kwh") or
+                    detail.get("generation_today") or
+                    detail.get("daily_generation") or
+                    detail.get("totalEnergy") or
+                    detail.get("today_kwh") or 0
+                )
+                if power_kw == 0.0:
+                    power_kw = float(detail.get("power_kw") or detail.get("current_power") or 0)
+            except Exception as exc:
+                logger.warning("project_detail fallo sol_id=%d: %s", sol_id, exc)
 
-        result.append({
-            "proyecto_id": p.id,
-            "nombre":      p.nombre_comercial,
-            "sol_id":      sol_id,
-            "kwh_real":    round(kwh_real, 1),
-            "power_kw":    round(float((s or {}).get("power_kw") or 0), 2),
-        })
+        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), round(power_kw, 2))
+
+    result = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for pid, nombre, sol_id, kwh_real, power_kw in executor.map(_fetch_kwh, matched):
+            result.append({
+                "proyecto_id": pid,
+                "nombre":      nombre,
+                "sol_id":      sol_id,
+                "kwh_real":    kwh_real,
+                "power_kw":    power_kw,
+            })
 
     result.sort(key=lambda x: x["kwh_real"], reverse=True)
     return {
@@ -187,6 +209,15 @@ def debug_matching(
         if sol_id not in matched_sol_ids
     ]
 
+    # Muestra el primer project_detail para ver qué campos devuelve la API
+    first_detail = None
+    if matched:
+        first_detail = client.get_project_detail(matched[0]["sol_id"])
+
+    # Summary sample
+    summary_list = client.get_project_summary()
+    first_summary = summary_list[0] if summary_list else None
+
     return {
         "solenium_total": len(sol_projects),
         "nuestros_en_operacion": len(proyectos_db),
@@ -195,6 +226,12 @@ def debug_matching(
         "matches": matched,
         "sin_match_nuestros": unmatched_ours,
         "sin_match_solenium": sorted(unmatched_solenium, key=lambda x: x["nombre_norm"]),
+        "debug_project_detail_sample": first_detail,
+        "debug_summary_sample": first_summary,
+        "debug_solenium_names": [
+            {"sol_id": sid, "nombre_norm": norm}
+            for norm, sid in list(sol_name_map.items())[:30]
+        ],
     }
 
 

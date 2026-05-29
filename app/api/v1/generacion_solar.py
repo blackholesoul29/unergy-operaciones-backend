@@ -121,37 +121,22 @@ def generacion_hoy(
 
     logger.info("proyectos emparejados: %d / %d", len(matched), len(proyectos_db))
 
-    # 5. Obtener kwh_real: summary primero, luego project_detail en paralelo
+    # 5. Obtener kwh_real: GET /project/{id}/generation/ con fecha de hoy
+    today_str = date.today().isoformat()
+
     def _fetch_kwh(item: tuple) -> tuple:
         p, sol_id, s = item
         kwh = 0.0
-        power_kw = 0.0
+        power_kw = float((s or {}).get("power_kw") or 0)
 
-        if s:
-            kwh = float(
-                s.get("frontier_generation_kwh") or
-                s.get("energy_today_kwh") or
-                s.get("generation_today") or 0
-            )
-            power_kw = float(s.get("power_kw") or 0)
-
-        # Fallback a project_detail cuando summary no trajo dato
-        # (ocurre cuando el endpoint /project_summary/ no existe o devuelve 0)
-        if kwh == 0.0:
-            try:
-                detail = client.get_project_detail(sol_id) or {}
-                kwh = float(
-                    detail.get("frontier_generation_kwh") or
-                    detail.get("energy_today_kwh") or
-                    detail.get("generation_today") or
-                    detail.get("daily_generation") or
-                    detail.get("totalEnergy") or
-                    detail.get("today_kwh") or 0
-                )
-                if power_kw == 0.0:
-                    power_kw = float(detail.get("power_kw") or detail.get("current_power") or 0)
-            except Exception as exc:
-                logger.warning("project_detail fallo sol_id=%d: %s", sol_id, exc)
+        try:
+            gen = client.get_generation(sol_id, today_str, today_str) or {}
+            # La API devuelve el resultado directamente o anidado en "results"
+            if "results" in gen:
+                gen = gen["results"]
+            kwh = float(gen.get("total_generation_kwh") or 0)
+        except Exception as exc:
+            logger.warning("generation fallo sol_id=%d: %s", sol_id, exc)
 
         return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), round(power_kw, 2))
 

@@ -176,6 +176,18 @@ def create_portafolio(payload: PortafolioCreate, db: Session = Depends(get_db), 
     return _port_out(pt, [])
 
 
+@router.patch("/asignar", summary="Asignar/desasignar un proyecto a un portafolio")
+def asignar_proyecto(payload: AsignarIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    p = db.get(Proyecto, payload.proyecto_id)
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    if payload.portafolio_id is not None and not db.get(Portafolio, payload.portafolio_id):
+        raise HTTPException(404, "Portafolio no encontrado")
+    p.portafolio_id = payload.portafolio_id
+    db.commit()
+    return {"ok": True, "proyecto_id": p.id, "portafolio_id": p.portafolio_id}
+
+
 @router.patch("/{portafolio_id}", summary="Renombrar / actualizar portafolio")
 def update_portafolio(portafolio_id: int, payload: PortafolioUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     pt = db.get(Portafolio, portafolio_id)
@@ -210,15 +222,3 @@ def delete_portafolio(portafolio_id: int, db: Session = Depends(get_db), _=Depen
     )
     db.delete(pt)
     db.commit()
-
-
-@router.patch("/asignar", summary="Asignar/desasignar un proyecto a un portafolio")
-def asignar_proyecto(payload: AsignarIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    p = db.get(Proyecto, payload.proyecto_id)
-    if not p:
-        raise HTTPException(404, "Proyecto no encontrado")
-    if payload.portafolio_id is not None and not db.get(Portafolio, payload.portafolio_id):
-        raise HTTPException(404, "Portafolio no encontrado")
-    p.portafolio_id = payload.portafolio_id
-    db.commit()
-    return {"ok": True, "proyecto_id": p.id, "portafolio_id": p.portafolio_id}

@@ -339,7 +339,7 @@ def delete_falla(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
     falla = db.query(Falla).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
-    db.delete(falla)
+    falla.deleted_at = datetime.now(timezone.utc)
     db.commit()
 
 

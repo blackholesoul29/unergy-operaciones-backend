@@ -25,6 +25,10 @@ logger = logging.getLogger("mgs.gaia")
 TIMEOUT = 30.0
 TOKEN_REFRESH_SEC = 4 * 60   # refresh access token every 4 min (they typically expire in 5)
 
+# Nodos cuyo firmware reporta eaepd en Wh en lugar de kWh.
+# Para todos los demás se asume kWh directamente.
+_EAE_WH_NODES: frozenset[int] = frozenset({860})  # MGS 0014 El Olimpo
+
 # ── Hardcoded node map: frt_code → (principal_node_id, respaldo_node_id) ──────
 # Source: nodos.json from the Plataforma Central de Monitoreo.
 # Key = frontera SIC code, Value = (principal, respaldo) — None if not registered.
@@ -374,9 +378,11 @@ class GaiaClient:
             if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
         ]
 
-        # ── Detect eae unit: if sum > 50000, values are in Wh → convert to kWh ─
+        # ── eae unit: nodos en _EAE_WH_NODES retornan Wh; el resto ya es kWh ──
         _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)
-        _eae_kwh = (round(_eae_raw / 1000.0, 3) if (_eae_raw and _eae_raw > 50000) else _eae_raw)
+        _eae_kwh = (round(_eae_raw / 1000.0, 3)
+                    if (_eae_raw and node_id in _EAE_WH_NODES)
+                    else _eae_raw)
 
         return {
             # Voltage per phase [V]  — vp1/vp2/vp3 correct

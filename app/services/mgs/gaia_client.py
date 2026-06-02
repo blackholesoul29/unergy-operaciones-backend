@@ -88,11 +88,40 @@ _NUM_TO_FRT: dict[int, str] = {
     77: "frt92221",
 }
 
-# keyword → frontera code (for early minigranjas without numbers)
+# keyword → frontera code
+# Cubre proyectos cuyos nombres en BD no tienen el patrón "minigranja NNN" / "mgs NNN"
 _KW_TO_FRT: dict[str, str] = {
-    "baraya":    "frt55044",
-    "gandalf":   "frt55090",
-    "canahuate": "frt55093",
+    # Primeras minigranjas (sin número en el nombre comercial)
+    "baraya":           "frt55044",
+    "gandalf":          "frt55090",
+    "canahuate":        "frt55093",
+    # La Paz (varias — orden importa: más específico primero)
+    "vallenata":        "frt58839",
+    "perija":           "frt60629",
+    "verso":            "frt63879",
+    "leyenda":          "frt65205",
+    "esmeralda":        "frt66597",
+    # MGS con nombres propios
+    "el son":           "frt67475",
+    "merengue":         "frt67496",
+    "la puya":          "frt68269",
+    "ibirico":          "frt73414",
+    "la cumbia":        "frt74080",
+    "san diego sur":    "frt76578",
+    "mapale":           "frt76581",
+    "joropo":           "frt76586",
+    "valencia oriente 2":"frt82546",
+    "copey occidente":  "frt82576",
+    "los bongos":       "frt82846",
+    "san pelayo":       "frt84587",
+    "valencia oriente": "frt86234",   # después de "valencia oriente 2"
+    "la cacica":        "frt87017",
+    "las piloneras":    "frt87018",
+    "la catedral":      "frt87336",
+    "cienaga generacion":"frt89202",
+    "chiriquana norte 2":"frt92219",
+    "chiriquana norte 4":"frt92221",
+    "olimpo":           "frt_olimpo14",
 }
 
 
@@ -109,6 +138,8 @@ def _mgs_number(name: str) -> int | None:
 
 def _find_frt(*names: str) -> str | None:
     """Resolve frontera code from project name(s)."""
+    # Sort keywords longest-first so "valencia oriente 2" matches before "valencia oriente"
+    _kw_sorted = sorted(_KW_TO_FRT.items(), key=lambda x: -len(x[0]))
     for name in names:
         if not name:
             continue
@@ -118,7 +149,7 @@ def _find_frt(*names: str) -> str | None:
             if frt:
                 return frt
         n = _norm(name)
-        for kw, frt in _KW_TO_FRT.items():
+        for kw, frt in _kw_sorted:
             if kw in n:
                 return frt
     return None

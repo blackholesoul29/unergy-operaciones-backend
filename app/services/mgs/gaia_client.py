@@ -311,7 +311,8 @@ class GaiaClient:
         iae = results["iae"]
         ere = results["ere"]
 
-        if not lv and not lc and not lap:
+        # Retorna None solo si no hay absolutamente ningún dato útil
+        if not lv and not lc and not lap and not eae and not iae:
             return None
 
         # Most recent timestamp across all vars

@@ -12,6 +12,7 @@ Uso:
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -51,12 +52,55 @@ CAT_META: dict[str, dict] = {
 
 DATA_FILE = Path(__file__).parent.parent / "data" / "fallas_clasificadas_unergy.json"
 
+# Mapping from "Tipo" field prefix-stripped values → CAT_META key
+# Handles the fallas_unergy.json source format where HSE is blanked out
+_TYPE_ALIAS: dict[str, str] = {
+    "Fallas   / Seguridad Laboral": "Fallas HSE / Seguridad Laboral",
+}
+
+def _resolve_cat_name(raw: str) -> str:
+    """Strip 'N. ' prefix from Tipo field and resolve aliases."""
+    name = re.sub(r"^\d+\.\s*", "", raw).strip()
+    return _TYPE_ALIAS.get(name, name)
+
+def _normalize_code(raw) -> str:
+    """Convert numeric codes (1.1, 2.0) to strings, preserving decimals."""
+    if isinstance(raw, float):
+        # Format: remove trailing .0 only if it's exactly an integer
+        s = f"{raw:.10g}"
+        return s
+    return str(raw).strip()
+
 
 def main():
     print(f"\n{'[DRY-RUN] ' if DRY_RUN else ''}Seedeando catálogo de fallas desde JSON…\n")
 
-    data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-    print(f"  {len(data)} entradas en el JSON")
+    # Accept fallas_unergy.json (source format) OR fallas_clasificadas_unergy.json
+    source_file = DATA_FILE
+    if not source_file.exists():
+        alt = Path(__file__).parent.parent / "data" / "fallas_unergy.json"
+        if alt.exists():
+            source_file = alt
+        else:
+            print(f"ERROR: No se encontró {DATA_FILE} ni fallas_unergy.json en data/")
+            sys.exit(1)
+
+    raw_data = json.loads(source_file.read_text(encoding="utf-8"))
+    print(f"  {len(raw_data)} entradas en {source_file.name}")
+
+    # Normalize entries: support both "Categoría" and "Tipo" fields, numeric codes
+    data = []
+    for entry in raw_data:
+        cat_raw = entry.get("Categoría") or entry.get("Tipo", "")
+        code_raw = entry.get("Código de Falla", "")
+        data.append({
+            "_cat_name": _resolve_cat_name(cat_raw),
+            "_code": _normalize_code(code_raw),
+            "_evento": entry.get("Evento", "").strip(),
+            "_desc": entry.get(
+                "Descripción detallada de la actividad (requisitos, controles, documentos)", ""
+            ).strip(),
+        })
 
     db = Session()
     try:
@@ -92,12 +136,10 @@ def main():
 
         # ── Paso 2: upsert tipos ──────────────────────────────────────────────
         for entry in data:
-            cat_name = entry.get("Categoría", "").strip()
-            code = entry.get("Código de Falla", "").strip()
-            evento = entry.get("Evento", "").strip()
-            desc = entry.get(
-                "Descripción detallada de la actividad (requisitos, controles, documentos)", ""
-            ).strip()
+            cat_name = entry["_cat_name"]
+            code = entry["_code"]
+            evento = entry["_evento"]
+            desc = entry["_desc"]
 
             if not code or not evento:
                 continue

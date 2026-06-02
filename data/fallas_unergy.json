@@ -1,0 +1,893 @@
+[
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Pérdida de comunicación de inversores",
+    "Código de Falla": 1.1,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Sucede cuando el sistema de comunicación de los inversores no funciona y se pierde el monitoreo de la planta. Se debe enviar un técnico a sitio para revisar la red local (switches, router, fibra óptica o RS-485) y realizar la reconexión. Si persiste, verificar configuración IP y gateway del inversor.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Pérdida de comunicación de medidor bidireccional",
+    "Código de Falla": 1.2,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Sucede cuando la telemedida de alguno de los medidores del CGM pierde conexión y no se pueden realizar lecturas. Se revisa inicialmente el estado de pago del plan de datos SIM, estado del módem, señal celular y alimentación eléctrica del equipo. Si la conexión no se restablece remotamente, se envía técnico a sitio.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-002, DOC-OM-010"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Módem dañado",
+    "Código de Falla": 1.3,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se requiere revisar el módem de telemedida de la frontera. Puede deberse a falla de alimentación, sobretensión, daño físico o fin de vida útil. Verificar LEDs de estado, realizar reset de fábrica y, si no hay respuesta, proceder con la reparación o reemplazo del equipo.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-002, DOC-OM-010"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Medidor dañado",
+    "Código de Falla": 1.4,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se requiere revisar el medidor de la frontera. El daño puede ser físico, por sobretensión o por fin de vida útil del equipo. Verificar con multímetro la alimentación auxiliar, continuidad del circuito de medida y comunicación RS-485/DLMS. Puede requerir revisión por parte del operador de red o reemplazo certificado.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe solo si se solicita. Gestión ante OR si aplica. Ref: DOC-OM-010"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "PT o CT mal instalado / dañado",
+    "Código de Falla": 1.5,
+    "A quién afecta": "Área de monitoreo, CGM y rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta que un PT o CT no está enviando señales adecuadas: lectura en cero, inversión de polaridad, saturación o conector suelto. Se verifica físicamente la relación de transformación, la conexión de bornes y la carga secundaria. Si hay daño eléctrico o mecánico, se procede al reemplazo con certificación de metrólogo si aplica.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Lecturas inconsistentes del medidor bidireccional",
+    "Código de Falla": 1.6,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detectan mediciones con valores atípicos, saltos bruscos o signos incorrectos en el medidor bidireccional. Se verifica la calidad de la señal de comunicación, se compara con lectura directa en campo y se revisan los parámetros de configuración (CT ratio, PT ratio, clase de precisión). Puede requerir recalibración o cambio del equipo.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-010"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Lecturas inconsistentes de inversores",
+    "Código de Falla": 1.7,
+    "A quién afecta": "Área de monitoreo y CGM",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detectan lecturas inconsistentes en la plataforma de inversores (potencia negativa, valores fuera de rango, registro de temperatura anormal). Se requiere revisión en sitio, comparación con analizador de red portátil y usualmente solicitud de garantía o soporte técnico al fabricante.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe solo si se solicita. Ref: DOC-OM-009"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Pérdida de comunicación de estación meteorológica",
+    "Código de Falla": 1.8,
+    "A quién afecta": "Área de monitoreo y análisis de desempeño",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La estación meteorológica (piranómetro, anemómetro, sensor de temperatura) pierde comunicación con el SCADA o plataforma de monitoreo. Se verifica la alimentación eléctrica del datalogger, el cableado de comunicación (RS-485 o Modbus TCP) y la configuración de parámetros. Si hay daño físico por agentes externos se evalúa reparación o reemplazo.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe de indisponibilidad de datos si la ventana supera 4 horas. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Sensor de irradiancia dañado o descalibrado",
+    "Código de Falla": 1.9,
+    "A quién afecta": "Área de monitoreo y análisis de PR/desempeño",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El piranómetro o celda de referencia reporta valores fuera de rango, en cero o con desviaciones superiores a ±5% respecto a fuentes de referencia (satélite o estación cercana). Se realiza limpieza del domo, verificación de nivelación y, si el sensor está fuera de calibración, se gestiona recalibración certificada o reemplazo.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe técnico y se gestiona certificado de calibración. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Sensor de temperatura de módulo dañado",
+    "Código de Falla": 1.1,
+    "A quién afecta": "Área de monitoreo y análisis de desempeño",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sensor de temperatura de módulo (PT100 o NTC) reporta valores constantes, fuera de rango físico o en cero. Se verifica la continuidad del cable, el montaje adhesivo en la cara trasera del módulo y la correcta configuración del canal en el datalogger. Si hay daño irreparable, se reemplaza el sensor.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe de indisponibilidad de datos. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Falla en plataforma de monitoreo / SCADA",
+    "Código de Falla": 1.11,
+    "A quién afecta": "Área de monitoreo, CGM y cliente",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El software de monitoreo (SCADA, plataforma cloud) no muestra datos actualizados, presenta errores de acceso o pérdida de histórico. Se verifica la conexión a internet del servidor, el estado del servicio de base de datos y se contacta al proveedor de la plataforma. Si hay pérdida de datos, se recuperan desde los dataloggers locales.",
+    "Cargos responsables": "Operador de Monitoreo; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera ticket en sistema de soporte del proveedor. Ref: DOC-OM-001"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Desconexión del proyecto sin causa identificada",
+    "Código de Falla": 2.0,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se identifica que el proyecto está desconectado pero no se identifica la causa raíz en el primer análisis remoto. Usualmente se requiere inspección en sitio para determinar el origen: falla de red, disparo de protección, falla de inversor u otro. Se inicia protocolo de diagnóstico escalonado.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se reporta la falla por el sistema de monitoreo. Se registra en bitácora de eventos. Ref: DOC-OM-001, DOC-OM-003"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Pérdida de red eléctrica (utility)",
+    "Código de Falla": 2.1,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta ausencia de tensión en la red por alguna de las siguientes causas: mantenimiento programado del OR, falla trifásica/bifásica/monofásica, desbalance de fases, sobrefrecuencia o subtensión. El inversor se desconecta por protección anti-isla. Se monitorea el restablecimiento de la red y se registra la duración del evento para cálculo de energía no generada.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se anexa al informe mensual. Se genera informe individual si el cliente lo solicita o para reclamar a la póliza de operación. Ref: DOC-OM-001, DOC-OM-014"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Avería en TP o CT de potencia",
+    "Código de Falla": 2.29,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta un TP o CT quemado, con corto en el secundario o con aislamiento degradado. Esto puede causar disparo de protecciones y pérdida total o parcial de la generación. Se requiere LOTO, diagnóstico con megóhmetro, sustitución del equipo dañado y verificación de relaciones de transformación antes de reenergizar.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de falla y reporte de intervención eléctrica. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-011"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de reconectador (RECO)",
+    "Código de Falla": 2.3,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El reconectador no puede cumplir su función de apertura/cierre automático por falla de comunicación, batería de control descargada, DPS disparado o falla mecánica del mecanismo de actuación. Se verifica la tensión de alimentación del control, el estado de los DPS y la comunicación SCADA. Si el equipo no opera, se gestiona soporte del fabricante.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de intervención. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-011"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Relé de protección acciona o falla en operar",
+    "Código de Falla": 2.4,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se dispara una protección (sobrecorriente, diferencial, distancia, anti-isla, subfrecuencia, sobretensión) o, por el contrario, no opera ante una falla. Se registra el evento del relé, se analiza el oscilógrafo si está disponible, se verifica la configuración de curvas y umbrales y se determina si fue una actuación correcta o una mala operación.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de protecciones. Se coordina con OR si aplica. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de transformador de servicios auxiliares (baja tensión)",
+    "Código de Falla": 2.5,
+    "A quién afecta": "Comunicación, servicios auxiliares y monitoreo de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El transformador de servicios auxiliares presenta avería (sobrecalentamiento, cortocircuito en devanados, falla del aislamiento), dejando sin alimentación los equipos de comunicación, iluminación y ventilación de la planta. Se aplica LOTO, se realiza diagnóstico térmico y eléctrico y se procede con la reparación o reemplazo.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de intervención eléctrica. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de transformador principal (elevador)",
+    "Código de Falla": 2.6,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El transformador principal presenta problemas: sobrecalentamiento excesivo, ineficiencias, fuga de aceite, disparo de protección de temperatura (Buchholz, termostato) o cortocircuito entre espiras. Se requiere análisis de aceite dieléctrico, termografía, pruebas de relación de transformación y coordinación con el fabricante para la reparación o sustitución.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte técnico detallado y se notifica al cliente y OR. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-005"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo de interruptor AC (trafo/inversores)",
+    "Código de Falla": 2.7,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se dispara algún interruptor termomagnético o de potencia en AC, impidiendo la inyección de energía al trafo o a la red. Se identifica el interruptor disparado, se analiza la causa (sobrecorriente, cortocircuito, falla a tierra, temperatura), se corrige la causa raíz y se restablece el circuito bajo LOTO.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora eléctrica. Se genera informe si supera el umbral de energía no generada. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de inversor",
+    "Código de Falla": 2.8,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El inversor presenta un código de falla o alarma que impide la generación. Puede ser falla de aislamiento, sobretensión DC, sobretemperatura, falla de IGBT, falla de ventilador o error de comunicación. Se consulta el manual de fallas del fabricante (DOC-OM-009), se reinicia si es permitido y se escala al soporte del fabricante si no se resuelve.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se adjunta reporte de código de falla y acción tomada. Ref: DOC-OM-009, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de resistencia de aislamiento (IR) en strings o cableado DC",
+    "Código de Falla": 2.9,
+    "A quién afecta": "Generación de energía del proyecto; seguridad eléctrica",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El inversor detecta baja resistencia de aislamiento en el lado DC, disparando por falla a tierra. Se realiza medición de IR string por string con megóhmetro para identificar el string o tramo afectado. Las causas frecuentes son conector MC4 degradado, daño de cable por roedor o pisada, o panel con falla interna de aislamiento.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de inspección eléctrica DC. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-007"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Fusible de string quemado",
+    "Código de Falla": 2.1,
+    "A quién afecta": "Generación de energía del proyecto (string afectado)",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta que uno o varios fusibles de string en la caja combinadora están fundidos, dejando sin aporte ese string. Se realiza verificación con multímetro de la continuidad del fusible, se identifica la causa (sobrecorriente, cortocircuito, envejecimiento) y se reemplaza con fusible de la misma especificación. Se verifica el string antes de reconectar.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-005"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Tracker no opera correctamente",
+    "Código de Falla": 2.11,
+    "A quién afecta": "Generación de energía del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sistema de seguimiento solar no sigue la trayectoria del sol, queda en posición fija, se mueve en sentido incorrecto o presenta vibración excesiva. Las causas pueden ser: TCU dañada, motor DC averiado, encoder falla, problema de comunicación o falla mecánica en el eje/reducción. Se inspecciona en sitio y se contacta al fabricante si es necesario.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Mecánico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de falla de tracker. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla en sistema de puesta a tierra",
+    "Código de Falla": 2.12,
+    "A quién afecta": "Seguridad eléctrica del personal y continuidad operativa",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta continuidad deficiente o rotura del sistema de puesta a tierra (conductores de tierra, electrodos de tierra, bornes). Esto puede ocurrir por corrosión, robo de conductores o trabajos civiles. Se realiza medición de resistencia de tierra con telurómetro; si supera el límite normativo, se reemplaza o amplía el sistema.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de medición de tierra. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla de DPS (pararrayos / protector de sobretensión)",
+    "Código de Falla": 2.13,
+    "A quién afecta": "Equipos eléctricos y seguridad de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta un DPS disparado, degradado o con ventana de estado en rojo, indicando que absorbió una sobretensión (rayo, maniobra). Se reemplaza el cartucho o el equipo completo según el tipo. Se verifica que el nuevo DPS cumpla con la clasificación (Clase I, II o III) requerida en el punto de instalación.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora eléctrica. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Punto caliente (hotspot) en módulo o conector",
+    "Código de Falla": 2.14,
+    "A quién afecta": "Generación, seguridad y vida útil del módulo",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Mediante termografía infrarroja se detecta un punto caliente en un módulo fotovoltaico (célula sombreada, célula degradada, bypass diode) o en un conector MC4 (mala crimpa, oxidación). Se documenta con imagen termográfica, se evalúa la severidad (temperatura diferencial) y se procede a reemplazo del módulo o conector afectado.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte termográfico. Ref: DOC-OM-006, DOC-OM-007"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Incendio",
+    "Código de Falla": 3.1,
+    "A quién afecta": "Falla de subestación, equipos; alto impacto en   y generación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se genera un incendio que puede afectar equipos eléctricos y comprometer la generación total o parcial de la planta. Activar protocolo de emergencia: evacuar personal, notificar a bomberos y autoridades, aislar el área afectada con LOTO total. Posterior al control, realizar inspección forense para determinar causa y evaluar daños. Solo personal autorizado y con EPP adecuado puede ingresar al área afectada.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M;  ; Coordinación con Bomberos/Autoridades",
+    "Documentación": "Se genera reporte de emergencia, informe de incidente   y se notifica a la aseguradora. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Descarga atmosférica (rayo)",
+    "Código de Falla": 3.2,
+    "A quién afecta": "Falla de equipos; riesgo  ; posible comunicado a cliente",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Impacto directo o indirecto de un rayo que puede causar: disparo de DPS, falla de inversores, daño de equipos de comunicación o módulos fotovoltaicos. Se inspecciona visualmente la planta luego del evento, se verifican DPS, se comprueba la operación de inversores y se documenta la afectación. Si hay equipos dañados, se gestionan garantías y seguros.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de evento climático extremo. Se notifica aseguradora si hay daños. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Inundación",
+    "Código de Falla": 3.3,
+    "A quién afecta": "Riesgo   y posible indisponibilidad total/parcial de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Nivel del agua supera límites seguros en la planta, comprometiendo equipos eléctricos en el piso (inversores string, cajas combinadoras, celdas de media tensión). Se desconecta la planta de forma segura antes de que el agua alcance los equipos. Se evalúa el ingreso solo cuando el nivel sea seguro y con EPP adecuado. Se documenta el alcance del daño y se gestiona con aseguradora.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M;  ; Coordinación con Autoridades/Defensa Civil",
+    "Documentación": "Se genera informe de emergencia e informe de daños. Se notifica aseguradora. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Sismo / Temblor",
+    "Código de Falla": 3.4,
+    "A quién afecta": "Riesgo  ; inspección estructural y eléctrica requerida",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Ante un evento sísmico se evacúa inmediatamente el personal. Posterior al evento, se realiza inspección de seguridad estructural (módulos, estructura de soporte, cimentaciones) y eléctrica (conexiones, cableado, equipos en tableros). No se reenergiza la planta hasta confirmar la integridad estructural y eléctrica. Se registra el evento y se notifica a las aseguradoras.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M;  ; Coordinación con Autoridades",
+    "Documentación": "Se genera informe de inspección post-sismo. Notificación a aseguradora si hay daños. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Huracán / Vendaval severo",
+    "Código de Falla": 3.5,
+    "A quién afecta": "Riesgo  ; posibles daños generalizados en módulos, estructura y cableado",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Vientos huracanados o vendavales severos pueden arrancar módulos, dañar estructuras de soporte, romper cables aéreos y afectar edificaciones de la planta. Se monitorea la velocidad del viento y se activa protocolo preventivo (posición de stow en trackers si aplica). Posterior al evento, se inspecciona toda la planta y se documenta el daño para gestión de seguros.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Mecánico; Supervisor O&M;  ; Coordinación con Autoridades",
+    "Documentación": "Se genera informe de daños y reporte a aseguradora. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Daño causado por fauna",
+    "Código de Falla": 3.6,
+    "A quién afecta": "Daños en cableado/equipos; riesgo de recurrencia",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Animales (roedores, aves, reptiles, insectos) causan daños en cables, conectores, aislamiento o equipos eléctricos. Los roedores son los más frecuentes, mordiendo cables DC y AC. Se realiza inspección visual y eléctrica, se reparan o reemplazan los elementos dañados y se implementan medidas de control de fauna (bandejas de cable cerradas, mallas, repelentes).",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento. Se implementa plan de control de fauna. Ref: DOC-OM-005, DOC-OM-007"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Granizo",
+    "Código de Falla": 3.7,
+    "A quién afecta": "Daño en módulos fotovoltaicos; riesgo de microfisuras y pérdida de generación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Caída de granizo con diámetro o energía cinética suficiente para fisurar el vidrio frontal de los módulos o generar microfisuras en las células. Posterior al evento, se realiza inspección visual de todos los módulos y, si se dispone del equipo, inspección con electroluminiscencia (EL) para detectar microfisuras no visibles. Los módulos con daño estructural se reemplazan.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de inspección post-granizo. Notificación a aseguradora. Ref: DOC-OM-007, DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Vandalismo / Robo de equipos",
+    "Código de Falla": 3.8,
+    "A quién afecta": "Pérdida de equipos, daño a la planta y riesgo  ",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Ingreso no autorizado a la planta con robo de módulos, cableado de cobre, inversores u otros equipos, o actos de vandalismo que dañan equipos e infraestructura. Se notifica inmediatamente a las autoridades y se realiza un inventario de pérdidas y daños. Se revisan las cámaras de seguridad, se refuerzan las medidas de seguridad física y se tramita el siniestro ante la aseguradora.",
+    "Cargos responsables": "Supervisor O&M;  ; Coordinación con Autoridades/Policía",
+    "Documentación": "Se genera denuncia penal, informe de siniestro y reporte a aseguradora. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Contaminación severa (ceniza, polvo industrial, sal)",
+    "Código de Falla": 3.9,
+    "A quién afecta": "Disminución significativa de la generación por suciedad en módulos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Eventos de alta contaminación (erupciones volcánicas, actividad industrial cercana, tormentas de arena o salinidad costera extrema) depositan capas densas de material sobre los módulos, reduciendo drásticamente la irradiancia efectiva. Se programa una limpieza de emergencia fuera del ciclo preventivo, se documentan las pérdidas de generación y se evalúa el impacto en el PR mensual.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se documenta el evento y la limpieza realizada. Se calcula la energía no generada. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Panel quebrado o con fisura en vidrio",
+    "Código de Falla": 4.1,
+    "A quién afecta": "Pérdida de generación localizada; riesgo   por fragmentos de vidrio",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta un módulo con el vidrio frontal roto (impacto mecánico, granizo, expansión térmica, error de montaje) o con fisura visible. El módulo puede seguir generando parcialmente, pero representa un riesgo de seguridad y de degradación acelerada por humedad. Se señaliza el área, se desconecta el string y se procede al reemplazo del módulo con los EPP adecuados.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento. Se documenta con fotografía. Ref: DOC-OM-007, DOC-OM-004"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Módulo con microfisuras (crack invisible)",
+    "Código de Falla": 4.2,
+    "A quién afecta": "Disminución silenciosa de generación y aceleración del proceso de degradación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Mediante inspección de electroluminiscencia (EL) o termografía se detectan módulos con microfisuras en las células que no son visibles al ojo humano. Estas microfisuras reducen la superficie activa del módulo y pueden crecer con los ciclos térmicos. Se mapean los módulos afectados, se cuantifica el impacto en la producción y se evalúa el reemplazo en la siguiente ventana de mantenimiento.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe de inspección EL/termografía. Ref: DOC-OM-006, DOC-OM-007"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Estructura de soporte en mal estado",
+    "Código de Falla": 4.3,
+    "A quién afecta": "Riesgo  ; posible afectación de la producción y vida útil de los módulos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta corrosión severa, tornillos flojos, deformación plástica o fractura en los perfiles de la estructura de soporte. Esto puede comprometer la integridad de los módulos y la seguridad del personal. Se realiza inspección estructural visual y con torquímetro, se aprietan o reemplazan los elementos deficientes y se aplica tratamiento anticorrosivo si aplica.",
+    "Cargos responsables": "Técnico O&M Mecánico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de inspección estructural. Ref: DOC-OM-004, DOC-OM-005"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Tracker en mal estado (desgaste mecánico)",
+    "Código de Falla": 4.4,
+    "A quién afecta": "Falla de equipamiento; posible generación parcial o nula del array",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sistema de seguimiento presenta desgaste mecánico: rodamientos desgastados, lubricación insuficiente en el eje de giro, juego excesivo en la caja reductora o corrosión en las articulaciones. Esto genera ruido, vibración y eventualmente bloqueo del movimiento. Se realiza mantenimiento mecánico preventivo/correctivo según el plan del fabricante.",
+    "Cargos responsables": "Técnico O&M Mecánico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento mecánico. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Módulo con degradación acelerada (por debajo de garantía)",
+    "Código de Falla": 4.5,
+    "A quién afecta": "Disminución de generación y desempeño (PR); afectación financiera",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta que uno o varios módulos presentan una tasa de degradación superior a la garantizada por el fabricante (habitualmente >0.7% anual). Se verifica con curva IV (I-V tracer) la Pmax del módulo y se compara con la potencia nominal ajustada por temperatura e irradiancia. Si la degradación supera la garantía, se gestiona el reclamo de garantía con el fabricante.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe de desempeño con curva IV. Se gestiona garantía de potencia con el fabricante. Ref: DOC-OM-007, DOC-OM-009"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Inversor con derating o eficiencia reducida",
+    "Código de Falla": 4.6,
+    "A quién afecta": "Disminución de generación; aumento de pérdidas de conversión",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El inversor opera en modo derating (reducción automática de potencia por sobretemperatura, alta tensión DC, falla de ventilador o condición de red) o presenta una eficiencia de conversión inferior al umbral de referencia. Se verifica la ventilación del gabinete, se limpia el filtro de aire, se revisa el ventilador y se escala al fabricante si el derating persiste con condiciones normales.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se registra en bitácora y se genera informe de desempeño de inversores. Ref: DOC-OM-009"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Degradación acelerada por PID (Potential Induced Degradation)",
+    "Código de Falla": 4.7,
+    "A quién afecta": "Disminución progresiva y significativa de la generación en strings completos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta una caída de potencia sistemática en módulos con potencial negativo a tierra (frecuente en configuraciones sin transformador o con transformador no aislado). El efecto PID se manifiesta como pérdidas de hasta un 30% en módulos afectados. Se verifica con curva IV y termografía, se implementa PID recovery nocturno en el inversor (si la función está disponible) y se evalúa el cambio de configuración de puesta a tierra.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe de análisis de PID. Ref: DOC-OM-007, DOC-OM-009"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Corrosión de conectores MC4 o terminales",
+    "Código de Falla": 4.8,
+    "A quién afecta": "Resistencia de contacto elevada; pérdidas de potencia y riesgo de arco eléctrico",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta oxidación o corrosión en conectores MC4, terminales de string o bornes de caja combinadora, causando aumento de la resistencia de contacto, caída de tensión y potencial arco eléctrico. Se identifica mediante termografía (punto caliente en conector). Se reemplazan los conectores corroídos bajo LOTO y se aplica grasa dieléctrica para prevenir recurrencia.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte termográfico y de mantenimiento. Ref: DOC-OM-006, DOC-OM-004"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Degradación de cableado DC/AC (aislamiento)",
+    "Código de Falla": 4.9,
+    "A quién afecta": "Riesgo eléctrico; fuga de corriente; posible incendio",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta deterioro del aislamiento de cables DC o AC por UV, calor excesivo, abrasión mecánica, aplastamiento o ataque de fauna. El inversor puede disparar por baja resistencia de aislamiento. Se localiza el tramo afectado con megóhmetro, se reemplaza el cable dañado, se asegura el tendido y se verifica que cumpla con la especificación de la planta.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento eléctrico. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-007"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Decoloración o delaminación del encapsulante del módulo",
+    "Código de Falla": 4.1,
+    "A quién afecta": "Disminución de generación; aceleración del proceso de degradación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se observa amarillamiento, burbujas o separación del encapsulante EVA o POE del módulo fotovoltaico, causado por humedad, ciclos térmicos extremos o materiales fuera de especificación. Esto reduce la transmitancia óptica y acelera la degradación de las células. Se documenta fotográficamente, se cuantifica el impacto en potencia con curva IV y se evalúa el reclamo de garantía.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera informe de inspección visual y curva IV. Se gestiona garantía de producto con el fabricante. Ref: DOC-OM-007"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Daño en cimentación o anclaje de estructura",
+    "Código de Falla": 5.1,
+    "A quién afecta": "Integridad estructural de la planta; riesgo  ",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta asentamiento diferencial, fisura en dado de concreto, extracción de pilotin hincado o aflojamiento del anclaje de la estructura al suelo. Esto puede comprometer la estabilidad de filas completas de módulos. Se acota el área afectada, se desconecta el string si hay riesgo de caída, y se contrata una evaluación geotécnica y estructural para definir el refuerzo o reposición del anclaje.",
+    "Cargos responsables": "Supervisor O&M;  ; Consultor Civil/Estructural",
+    "Documentación": "Se genera informe de inspección estructural y se escala al equipo de ingeniería. Ref: DOC-OM-008"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Deterioro de vías internas / acceso restringido",
+    "Código de Falla": 5.2,
+    "A quién afecta": "Operatividad del mantenimiento y tiempos de respuesta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Las vías internas de la planta presentan erosión, baches profundos, encharcamiento o socavación que impiden el acceso con vehículos de mantenimiento. Esto aumenta los tiempos de respuesta ante fallas. Se realiza un diagnóstico vial, se definen obras de recuperación (afirmado, cunetas, alcantarillas) y se incorpora en el plan de mantenimiento civil.",
+    "Cargos responsables": "Supervisor O&M;  ",
+    "Documentación": "Se registra en el plan de mantenimiento civil. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Falla en sistema de drenaje de la planta",
+    "Código de Falla": 5.3,
+    "A quién afecta": "Riesgo de inundación de equipos; daño a cimentaciones",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sistema de drenaje pluvial presenta obstrucciones, socavones o colmatación de cunetas, canales o alcantarillas, generando acumulación de agua en zonas con equipos. Se limpia el sistema de drenaje, se reparan las zonas dañadas y se verifica el correcto funcionamiento antes del inicio de la temporada de lluvias.",
+    "Cargos responsables": "Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de mantenimiento civil. Ref: DOC-OM-005, DOC-OM-008"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Daño en cerramiento / malla perimetral",
+    "Código de Falla": 5.4,
+    "A quién afecta": "Seguridad física de la planta; riesgo de ingreso no autorizado y daño por fauna",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta apertura, corte, deformación o caída de secciones del cerramiento perimetral de la planta. Esto facilita el ingreso de personas no autorizadas y de fauna mayor. Se repara la sección afectada con prontitud, se refuerza si el daño es recurrente y se documenta el evento para ajustar el plan de seguridad física.",
+    "Cargos responsables": "Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora de seguridad. Ref: DOC-OM-008"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por sobrecorriente",
+    "Código de Falla": 2.15,
+    "A quién afecta": "Pérdida total de generación del proyecto; rentabilidad",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El interruptor totalizador principal de la planta se dispara por detección de sobrecorriente (fase o neutro). Puede originarse en un cortocircuito aguas abajo, sobrecarga de la red interna o falla de un inversor que inyecta corriente excesiva. Se aplica LOTO, se mide la corriente de aislamiento en cada ramal para identificar el origen, se corrige la causa raíz y se restablece el totalizador siguiendo el procedimiento de reconexión segura.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra el evento con hora exacta y código de disparo. Se genera informe de falla. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-014"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por cortocircuito",
+    "Código de Falla": 2.16,
+    "A quién afecta": "Pérdida total de generación; posible daño de equipos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El totalizador opera por detección de una corriente de cortocircuito (trifásica, bifásica o monofásica). El evento puede dañar el propio interruptor si la corriente de cortocircuito supera su poder de corte. Se verifica el estado mecánico del interruptor (pitting en contactos), se localiza el punto de cortocircuito con medición de aislamiento por ramales, se corrige la falla y, si el totalizador quedó dañado, se reemplaza antes de reenergizar.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de falla eléctrica grave. Notificación al cliente y OR si aplica. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-011"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por falla a tierra",
+    "Código de Falla": 2.17,
+    "A quién afecta": "Generación de energía; seguridad eléctrica del personal",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La protección de falla a tierra del totalizador detecta una corriente de fuga hacia tierra que supera el umbral configurado. Puede deberse a degradación del aislamiento de cables, conector MC4 dañado, módulo con falla interna o humedad en una caja de conexiones. Se localiza el ramal afectado midiendo la resistencia de aislamiento string por string con megóhmetro, se corrige la falla y se restablece el circuito.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra el evento y el ramal afectado. Ref: DOC-OM-003, DOC-OM-004, DOC-OM-007"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por sobretensión en AC",
+    "Código de Falla": 2.18,
+    "A quién afecta": "Generación de energía; protección de inversores y equipos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El totalizador (o la protección de interface) detecta una tensión AC superior al umbral máximo permitido (p. ej. >1.1 pu). Puede deberse a una perturbación de la red, rechazo de carga brusco o falla del control de tensión de los inversores. Se registra la tensión en el momento del disparo, se verifica la tensión de red con multímetro y se coordina con el OR si la sobretensión se originó aguas arriba.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de calidad de energía y se notifica al OR si la causa es externa. Ref: DOC-OM-003, DOC-OM-014"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por subtensión en AC",
+    "Código de Falla": 2.19,
+    "A quién afecta": "Generación de energía; protección anti-isla",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La protección de subtensión del totalizador detecta una tensión AC por debajo del umbral mínimo configurado (p. ej. <0.85 pu), posiblemente por una caída de tensión pronunciada en la red, pérdida de una fase o inicio de una falla de red. Los inversores deben desconectarse por protección anti-isla. Se verifica la tensión de red y se espera el restablecimiento dentro del rango normal antes de reconectar.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M",
+    "Documentación": "Se registra el evento en bitácora. Se coordina reconexión con OR si aplica. Ref: DOC-OM-003, DOC-OM-014"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por pérdida de fase",
+    "Código de Falla": 2.2,
+    "A quién afecta": "Generación de energía; protección del transformador e inversores",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La protección de pérdida de fase detecta la ausencia de una de las tres fases en el punto de conexión o en el bus AC interno. Esto puede dañar el transformador y los inversores si no se desconectan a tiempo. Se verifica con multímetro las tres fases en el punto de conexión, se identifica si la pérdida es interna (fusible, interruptor) o externa (red) y se actúa en consecuencia.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra el evento y se coordina con OR si la causa es externa. Ref: DOC-OM-003, DOC-OM-014"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por sobretemperatura del interruptor",
+    "Código de Falla": 2.21,
+    "A quién afecta": "Disponibilidad de la planta; vida útil del totalizador",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sensor térmico del totalizador o la inspección termográfica detecta una temperatura superior al límite admisible en los contactos o en las barras de conexión. Generalmente se debe a conexiones con torque insuficiente, oxidación de contactos o sobrecarga prolongada. Se aplica LOTO, se revisan y aprietan las conexiones, se limpia la superficie de contacto y se programa una termografía de seguimiento.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte termográfico. Se programa mantenimiento preventivo de conexiones. Ref: DOC-OM-006, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Falla mecánica del totalizador (no abre o no cierra)",
+    "Código de Falla": 2.22,
+    "A quién afecta": "Disponibilidad de la planta; imposibilidad de maniobra segura",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El mecanismo de operación del totalizador (muelle de disparo, bobina de mínima o de apertura, accionamiento motorizado) falla y el interruptor no puede abrir o cerrar ante una orden manual o automática. Esto impide tanto aislar la planta de forma segura como reenergizarla tras una intervención. Se verifica la tensión de la bobina, el estado del muelle y el mecanismo de enclavamiento; si no se puede reparar en sitio, se gestiona el reemplazo del equipo.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de intervención. Se gestiona repuesto con urgencia si impide operación. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por protección diferencial",
+    "Código de Falla": 2.23,
+    "A quién afecta": "Pérdida total de generación; posible falla interna en transformador o bus",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La protección diferencial del totalizador (si está configurada) detecta un desequilibrio entre la corriente que entra y la que sale del elemento protegido, indicando una falla interna. Este tipo de protección es de alta selectividad. Se registra el evento del relé diferencial, se realiza diagnóstico completo del transformador (prueba de relación, resistencia de devanados, análisis de aceite si aplica) antes de intentar reconectar.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera informe de protecciones. Se coordina con OR. No reconectar sin diagnóstico completo. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Disparo del totalizador por error de maniobra (operación humana)",
+    "Código de Falla": 2.24,
+    "A quién afecta": "Indisponibilidad de la planta; riesgo   para el operador",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El totalizador se dispara accidentalmente durante una maniobra de mantenimiento por error en el procedimiento (secuencia incorrecta, falta de coordinación, energización de un circuito con falla activa). Se detiene la maniobra, se evalúa si hay daños en equipos o lesiones al personal, se documenta el evento como no conformidad y se refuerzan los controles operacionales (permisos de trabajo, LOTO, check-lists).",
+    "Cargos responsables": "Supervisor O&M;  ; Técnico O&M Eléctrico",
+    "Documentación": "Se genera informe de no conformidad y, si hay lesiones, informe de incidente  . Ref: DOC-OM-004, DOC-OM-013"
+  },
+  {
+    "Tipo": "2. Fallas Eléctricas",
+    "Evento": "Totalizador disparado sin causa aparente (falsa operación)",
+    "Código de Falla": 2.25,
+    "A quién afecta": "Indisponibilidad de la planta; confiabilidad del sistema de protecciones",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El totalizador se dispara sin que exista una falla real en el circuito (falsa operación de la protección). Puede deberse a perturbaciones transitorias en la red, ajuste incorrecto de las curvas de protección, ruido en el circuito de medición o deterioro del relé. Se revisan los registros del relé, se comparan los parámetros de disparo con los ajustes de coordinación y se corrige la curva o se reemplaza el relé si está en mal estado.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera reporte de análisis de protecciones. Revisión de coordinación de ajustes. Ref: DOC-OM-003"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Falla de datalogger local",
+    "Código de Falla": 1.12,
+    "A quién afecta": "Área de monitoreo; pérdida de datos locales en planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El datalogger encargado de recopilar datos de inversores, estación meteorológica y medidores presenta falla (corrupción de firmware, falla de almacenamiento interno, pérdida de alimentación o daño por sobretensión). Se reinicia el equipo, se verifica la integridad de los datos almacenados y si no hay recuperación se reemplaza la unidad. Los datos faltantes se recuperan desde los registros internos de los inversores o desde la nube.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se registra la ventana de pérdida de datos. Informe de indisponibilidad. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Error de sincronización horaria (NTP) en equipos de medición",
+    "Código de Falla": 1.13,
+    "A quién afecta": "Calidad de datos; correlación de registros; reportes regulatorios",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Los registros de inversores, datalogger o medidores presentan desfases de tiempo (timestamps incorrectos) por pérdida del servidor NTP. Esto genera inconsistencias en la correlación de datos de generación vs. irradiancia y puede afectar reportes regulatorios. Se reconfigura el servidor NTP en cada equipo y se implementa sincronización automática periódica.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera nota en informe mensual si afecta los datos. Ref: DOC-OM-001, DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Falla de anemómetro o veleta (sensor de viento)",
+    "Código de Falla": 1.14,
+    "A quién afecta": "Análisis de desempeño; seguridad mecánica del tracker",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El anemómetro no reporta velocidad de viento o reporta valores constantes. En plantas con tracker la falta de esta señal puede impedir la activación de la posición de stow ante vientos fuertes, representando un riesgo mecánico. Se verifica alimentación, cableado y estado mecánico; si hay daño físico se reemplaza el sensor.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M",
+    "Documentación": "Se genera alerta de riesgo mecánico si hay tracker. Se registra en bitácora. Ref: DOC-OM-002"
+  },
+  {
+    "Tipo": "1. Fallas de Medición",
+    "Evento": "Pérdida o corrupción de datos históricos de generación",
+    "Código de Falla": 1.15,
+    "A quién afecta": "Reportes de desempeño; facturación; cumplimiento contractual",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta ausencia o corrupción de datos históricos de generación o irradiancia en la plataforma o en el datalogger. Se intenta recuperar datos desde los registros internos de los inversores, se documentan las brechas y se estiman los valores faltantes mediante regresión o interpolación con referencia satelital. El impacto se reporta en el informe mensual.",
+    "Cargos responsables": "Operador de Monitoreo; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe de recuperación de datos con metodología de estimación. Ref: DOC-OM-001"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Niebla o neblina densa persistente",
+    "Código de Falla": 3.1,
+    "A quién afecta": "Disminución de generación; posible subestimación del PR si no se registra",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Episodios de niebla o neblina densa con duración prolongada reducen significativamente la irradiancia efectiva sobre los módulos. Se documenta el evento con registros del piranómetro, se compara con datos de referencia satelital y se justifica la desviación del PR al cliente. En plantas con tracker se verifica que el sistema siga operando correctamente.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M",
+    "Documentación": "Se documenta en el informe mensual como evento climático. Ref: DOC-OM-001"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Helada o nieve (zonas de altitud)",
+    "Código de Falla": 3.11,
+    "A quién afecta": "Pérdida de generación; posible daño mecánico por peso de nieve",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "En plantas en zonas de altitud o con climas extremos, la acumulación de nieve sobre los módulos reduce la generación y puede generar cargas mecánicas adicionales sobre la estructura. Se monitorea remotamente, se evalúa el acceso seguro y, una vez controlado el evento, se inspeccionan módulos y estructura en busca de daños.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se documenta el evento y la energía no generada. Se inspecciona post-evento. Ref: DOC-OM-008"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Accidente de vehículo dentro de la planta",
+    "Código de Falla": 3.12,
+    "A quién afecta": "Riesgo  ; posible daño a módulos, cableado o infraestructura",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un vehículo de mantenimiento o transporte sufre un accidente dentro del predio de la planta, pudiendo dañar módulos, cableado o estructura. Se activa el protocolo de emergencia  , se atiende a los lesionados, se desconecta el área afectada si hay riesgo eléctrico y se documenta el daño para gestión de seguros.",
+    "Cargos responsables": "Supervisor O&M;  ; Coordinación con Autoridades si hay lesionados",
+    "Documentación": "Se genera informe de incidente  . Notificación a aseguradora. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Incendio forestal o quema agrícola en zonas aledañas",
+    "Código de Falla": 3.13,
+    "A quién afecta": "Riesgo  ; afectación de módulos por hollín y reducción de irradiancia",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un incendio forestal o quema agrícola en predios aledaños genera humo, hollín y calor que pueden reducir la irradiancia, ensuciar los módulos y dañar el aislamiento de cableado en casos extremos. Se monitorea remotamente, se coordina con las autoridades, se evalúa evacuación del personal si es necesario y se realiza limpieza de módulos una vez controlado el evento.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M;  ; Coordinación con Bomberos/Autoridades",
+    "Documentación": "Se documenta el evento y sus impactos. Informe de emergencia si aplica. Ref: DOC-OM-008"
+  },
+  {
+    "Tipo": "3. Fallas por Eventos Adversos",
+    "Evento": "Derrame de sustancias peligrosas en la planta",
+    "Código de Falla": 3.14,
+    "A quién afecta": "Riesgo ambiental y  ; posible contaminación del suelo",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Derrame de aceite dieléctrico del transformador, electrolito de baterías u otras sustancias peligrosas dentro de la planta. Se activa el plan de contingencia ambiental, se contiene el derrame con materiales absorbentes, se notifica a la autoridad ambiental competente dentro de los tiempos establecidos y se gestiona la remediación del suelo afectado.",
+    "Cargos responsables": "Supervisor O&M;  ; Coordinación con Autoridad Ambiental",
+    "Documentación": "Se genera reporte de emergencia ambiental obligatorio. Notificación a autoridad competente. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Falla de junction box (caja de conexiones del módulo)",
+    "Código de Falla": 4.11,
+    "A quién afecta": "Riesgo de arco eléctrico; pérdida de generación del módulo afectado",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La caja de conexiones trasera del módulo presenta sellado deficiente (entrada de humedad), conector interno quemado, bypass diode averiado o terminal suelto. Se detecta mediante termografía (punto caliente en la junction box) o por falla de aislamiento del string. Se reemplaza la junction box o el módulo completo según la gravedad del daño.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte termográfico. Se documenta módulo afectado con serialización. Ref: DOC-OM-006, DOC-OM-007"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Falla de bypass diode del módulo",
+    "Código de Falla": 4.12,
+    "A quién afecta": "Pérdida de generación parcial del módulo; riesgo de hotspot severo",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Uno o varios bypass diodes internos del módulo fallan en circuito abierto o en cortocircuito. En circuito abierto, la célula sombreada genera un hotspot severo. En cortocircuito, el subcircuito queda permanentemente cortocircuitado, reduciendo la potencia del módulo en 1/3. Se detecta con curva IV o termografía. Si el fabricante no permite reparación en campo, se reemplaza el módulo y se gestiona garantía.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera reporte de inspección y se gestiona garantía con el fabricante. Ref: DOC-OM-006, DOC-OM-007"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Obstrucción de filtros de aire del inversor",
+    "Código de Falla": 4.13,
+    "A quién afecta": "Sobretemperatura del inversor; derating y reducción de generación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Los filtros de aire del inversor acumulan polvo, insectos o fibras vegetales hasta obstruir parcial o totalmente el flujo de ventilación, causando sobretemperatura interna y activación del derating térmico. Se limpia o reemplaza el filtro según la programación de mantenimiento preventivo o ante la alarma de sobretemperatura. Se ajusta la frecuencia de limpieza según las condiciones de polvo del sitio.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M",
+    "Documentación": "Se registra en bitácora de mantenimiento preventivo. Ref: DOC-OM-005, DOC-OM-009"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Falla de ventilador de refrigeración del inversor",
+    "Código de Falla": 4.14,
+    "A quién afecta": "Sobretemperatura del inversor; derating y posible apagado de protección",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Uno o varios ventiladores internos del inversor dejan de girar por falla del motor, rodamiento dañado o falla del controlador de velocidad. El inversor entra en derating térmico y puede apagarse por protección si la temperatura supera el límite. Se identifica el ventilador defectuoso, se reemplaza como spare part y se verifica la correcta refrigeración antes de reiniciar la producción.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se registra en bitácora de mantenimiento. Se gestiona repuesto con el fabricante. Ref: DOC-OM-009, DOC-OM-005"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Falla de condensadores electrolíticos del inversor",
+    "Código de Falla": 4.15,
+    "A quién afecta": "Reducción de eficiencia; posible falla catastrófica del inversor",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Los condensadores electrolíticos del bus DC o del filtro de salida del inversor presentan degradación (capacitancia reducida, ESR elevada, fuga de electrolito). Esto incrementa el rizado de tensión en el bus DC, reduce la eficiencia y puede generar fallas de protección por tensión. Se detecta mediante análisis de curva de rendimiento y, en mantenimiento programado mayor, se reemplazan preventivamente según la vida útil del fabricante.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se programa reemplazo preventivo según horas de operación. Ref: DOC-OM-009, DOC-OM-005"
+  },
+  {
+    "Tipo": "4. Fallos por Desgaste / Degradación",
+    "Evento": "Suciedad acumulada en módulos (soiling)",
+    "Código de Falla": 4.16,
+    "A quién afecta": "Disminución directa de la generación; degradación del PR mensual",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La acumulación de polvo, excrementos de aves, polen o lodo sobre la superficie de los módulos reduce la irradiancia efectiva y la generación. El impacto puede superar el 5–10% en zonas áridas o con alta actividad de aves. Se monitorea el índice de soiling con sensores dedicados o con comparativa entre strings limpios y sucios, y se ejecuta la limpieza según el plan preventivo o cuando el umbral de pérdida económica lo justifique.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M",
+    "Documentación": "Se documenta fecha de limpieza y estimación de ganancia de energía post-limpieza. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Crecimiento excesivo de vegetación bajo módulos",
+    "Código de Falla": 5.5,
+    "A quién afecta": "Sombreado de módulos; hábitat para fauna; riesgo de incendio",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La vegetación bajo los módulos crece hasta alcanzar la superficie de estos, generando sombreado parcial y posible cortocircuito de strings, y sirviendo de refugio para roedores. En época seca representa un riesgo de incendio. Se programa corte de vegetación según la estación, se mantiene una altura máxima de 30 cm bajo los módulos y se evalúa la aplicación de cobertura vegetal de bajo crecimiento o vegetación controlada.",
+    "Cargos responsables": "Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se registra en plan de mantenimiento civil. Se documenta la intervención. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "5. Fallas Civiles / Estructurales",
+    "Evento": "Erosión o socavación del terreno bajo módulos",
+    "Código de Falla": 5.6,
+    "A quién afecta": "Integridad estructural; posible daño a cimentaciones y cableado enterrado",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La escorrentía de agua lluvia genera surcos de erosión o socavones bajo la estructura de soporte, exponiendo el cableado enterrado y comprometiendo la estabilidad de los anclajes. Se realiza inspección visual tras eventos de lluvia intensa, se rellenan y compactan los surcos, se protege el cableado expuesto con tubería conduit adicional y se mejoran las cunetas de drenaje para evitar recurrencia.",
+    "Cargos responsables": "Técnico O&M Mecánico; Supervisor O&M;  ",
+    "Documentación": "Se registra en plan de mantenimiento civil. Ref: DOC-OM-005, DOC-OM-008"
+  },
+  {
+    "Tipo": "6. Fallas   / Seguridad Laboral",
+    "Evento": "Accidente laboral durante labores de O&M",
+    "Código de Falla": 6.1,
+    "A quién afecta": "Integridad física del personal; responsabilidad legal del operador",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un técnico o trabajador sufre una lesión (caída, golpe, corte, quemadura eléctrica) durante labores de operación o mantenimiento. Se activa inmediatamente el plan de emergencia médica, se presta los primeros auxilios y se traslada al lesionado a un centro médico. Se asegura la escena, se notifica a la ARL y a la dirección en los tiempos establecidos y se inicia la investigación de causas raíz para implementar acciones correctivas.",
+    "Cargos responsables": " ; Supervisor O&M; Dirección",
+    "Documentación": "Se genera informe de accidente laboral obligatorio ante la ARL y autoridad competente. Ref: DOC-OM-013"
+  },
+  {
+    "Tipo": "6. Fallas   / Seguridad Laboral",
+    "Evento": "Exposición a arco eléctrico o contacto con partes energizadas",
+    "Código de Falla": 6.2,
+    "A quién afecta": "Riesgo de vida para el trabajador expuesto; daño de equipos",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un trabajador se expone accidentalmente a un arco eléctrico o hace contacto directo con partes energizadas por falta de LOTO, EPP inadecuado o procedimiento incorrecto. Se activa protocolo de emergencia médica, se desconecta la instalación de forma segura y se brinda atención especializada al afectado. Se investiga el evento y se refuerzan los controles: permisos de trabajo, análisis de riesgo eléctrico y capacitación.",
+    "Cargos responsables": " ; Supervisor O&M; Dirección",
+    "Documentación": "Se genera informe de incidente grave. Notificación obligatoria a ARL y autoridad. Ref: DOC-OM-004, DOC-OM-013"
+  },
+  {
+    "Tipo": "6. Fallas   / Seguridad Laboral",
+    "Evento": "Caída en altura durante mantenimiento de módulos o estructura",
+    "Código de Falla": 6.3,
+    "A quién afecta": "Integridad física del personal; responsabilidad legal",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un técnico cae desde una altura mayor a 1.5 m durante trabajos de mantenimiento en módulos, estructura o equipos elevados por falta o falla del sistema de protección contra caídas (arnés, línea de vida, andamio). Se activa el protocolo de emergencia médica, se asegura la escena y se inicia la investigación. Se refuerza el uso obligatorio del arnés y línea de vida en todos los trabajos en altura.",
+    "Cargos responsables": " ; Supervisor O&M; Dirección",
+    "Documentación": "Se genera informe de incidente/accidente. Notificación a ARL y autoridad. Ref: DOC-OM-004, DOC-OM-013"
+  },
+  {
+    "Tipo": "6. Fallas   / Seguridad Laboral",
+    "Evento": "Golpe de calor / exposición térmica extrema del personal",
+    "Código de Falla": 6.4,
+    "A quién afecta": "Salud del personal; riesgo de incapacitación en campo",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un técnico presenta síntomas de golpe de calor (temperatura corporal elevada, confusión, desmayo) por exposición prolongada al sol sin hidratación ni pausas adecuadas. Se traslada a la sombra, se administra líquidos y se gestiona atención médica inmediata. Se implementan controles: jornadas con horarios de alta radiación solar restringidos, hidratación obligatoria, uso de ropa de protección UV y sistema de vigilancia del bienestar del personal en campo.",
+    "Cargos responsables": " ; Supervisor O&M",
+    "Documentación": "Se genera reporte de emergencia médica. Se documenta en bitácora  . Ref: DOC-OM-013"
+  },
+  {
+    "Tipo": "7. Fallas BESS / Almacenamiento (si aplica)",
+    "Evento": "Falla del BMS (Battery Management System)",
+    "Código de Falla": 7.1,
+    "A quién afecta": "Pérdida de control del sistema de almacenamiento; riesgo de seguridad de la batería",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El BMS que gestiona el estado de carga, temperatura y equilibrio de celdas del banco de baterías presenta falla de software o hardware. Sin BMS operativo el sistema de almacenamiento se desconecta por seguridad. Se verifica la comunicación entre el BMS y el PCS, se reinicia el sistema según el procedimiento del fabricante y, si el BMS está dañado, se reemplaza la unidad con soporte del fabricante.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de falla de BESS. No operar el BESS sin BMS funcional. Ref: DOC-OM-009"
+  },
+  {
+    "Tipo": "7. Fallas BESS / Almacenamiento (si aplica)",
+    "Evento": "Sobrecalentamiento de celda de batería (thermal runaway)",
+    "Código de Falla": 7.2,
+    "A quién afecta": "Riesgo de incendio grave; pérdida total del sistema de almacenamiento",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Una o varias celdas del banco de baterías presentan aumento incontrolado de temperatura (thermal runaway) por defecto de fabricación, sobrecarga, cortocircuito interno o daño físico. Este evento representa el mayor riesgo de seguridad en un BESS. Se activa el sistema de extinción automático si existe, se evacúa el área, se notifica a los bomberos y se coordina la respuesta con el fabricante. No intentar intervenir sin equipamiento especializado.",
+    "Cargos responsables": " ; Supervisor O&M; Coordinación con Bomberos/Fabricante",
+    "Documentación": "Se genera informe de emergencia grave. Notificación a aseguradora y autoridades. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "7. Fallas BESS / Almacenamiento (si aplica)",
+    "Evento": "Falla del PCS (Power Conversion System) del BESS",
+    "Código de Falla": 7.3,
+    "A quién afecta": "Pérdida de la función de almacenamiento y despacho de energía",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El inversor bidireccional (PCS) del sistema de almacenamiento presenta falla de hardware o software que impide la carga o descarga de la batería. Se verifica el código de falla en la pantalla del PCS, se reinicia según el procedimiento del fabricante y, si la falla persiste, se escala al soporte técnico especializado para diagnóstico y reemplazo del módulo defectuoso.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera reporte de falla de BESS. Ref: DOC-OM-009"
+  },
+  {
+    "Tipo": "7. Fallas BESS / Almacenamiento (si aplica)",
+    "Evento": "Degradación de capacidad de almacenamiento",
+    "Código de Falla": 7.4,
+    "A quién afecta": "Disminución del servicio contratado de almacenamiento; afectación financiera",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La capacidad utilizable del banco de baterías disminuye por debajo del umbral garantizado (habitualmente 80% de la capacidad inicial al final de la vida útil contractual) antes de lo esperado, por ciclos excesivos, sobrecargas o condiciones de temperatura inadecuadas. Se realiza una prueba de capacidad certificada, se documenta la degradación y se gestiona el reclamo de garantía con el fabricante si la degradación supera la curva garantizada.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se genera informe de prueba de capacidad. Se gestiona garantía si aplica. Ref: DOC-OM-009"
+  },
+  {
+    "Tipo": "8. Fallas Administrativas / Regulatorias",
+    "Evento": "Vencimiento de permiso o licencia operativa",
+    "Código de Falla": 8.1,
+    "A quién afecta": "Riesgo de suspensión de operaciones por incumplimiento regulatorio",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Un permiso ambiental, licencia de conexión, certificado de conformidad técnica o póliza de seguro vence sin haber sido renovado a tiempo, poniendo en riesgo la continuidad legal de la operación. Se mantiene una matriz de vencimientos con alertas anticipadas (mínimo 60 días antes), se gestionan las renovaciones con antelación y se escala a la dirección si hay riesgo de vencimiento inminente.",
+    "Cargos responsables": "Supervisor O&M; Área Legal/Administrativa; Dirección",
+    "Documentación": "Se documenta la gestión de renovación. Se mantiene matriz de vigencia de permisos. Ref: DOC-OM-012"
+  },
+  {
+    "Tipo": "8. Fallas Administrativas / Regulatorias",
+    "Evento": "Incumplimiento de condiciones técnicas de conexión con el OR",
+    "Código de Falla": 8.2,
+    "A quién afecta": "Riesgo de penalización o desconexión por el OR; afectación financiera",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La planta incumple alguno de los parámetros técnicos establecidos en el contrato de conexión con el operador de red (factor de potencia, perfil de tensión, curva de capacidad, respuesta ante huecos de tensión LVRT). Se analiza la causa, se ajustan los parámetros del inversor o se implementan equipos de compensación y se notifica al OR el plan de corrección dentro del plazo establecido.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M; Coordinación con OR",
+    "Documentación": "Se genera informe de no conformidad y plan de acción. Notificación al OR. Ref: DOC-OM-003, DOC-OM-012"
+  },
+  {
+    "Tipo": "8. Fallas Administrativas / Regulatorias",
+    "Evento": "Falla en reporte regulatorio (AGC, telemando, disponibilidad)",
+    "Código de Falla": 8.3,
+    "A quién afecta": "Incumplimiento contractual con el OR; posibles penalizaciones",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La planta no entrega dentro de los plazos establecidos los reportes de disponibilidad, datos de producción para el despacho o las señales de AGC/telemando requeridas por el OR o por el ente regulador. Se identifica la causa (falla de comunicación, falla del sistema de control, error en el formato del reporte), se corrige y se entrega el reporte con la justificación del retraso. Se refuerzan los procedimientos de reporte automático.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M; Coordinación con OR",
+    "Documentación": "Se documenta el retraso y la causa. Notificación al OR con justificación. Ref: DOC-OM-001, DOC-OM-012"
+  },
+  {
+    "Tipo": "8. Fallas Administrativas / Regulatorias",
+    "Evento": "Falla en la gestión de garantías de equipos",
+    "Código de Falla": 8.4,
+    "A quién afecta": "Pérdida económica por no reclamar garantías en tiempo y forma",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se vence el plazo para reclamar una garantía de producto (módulos, inversores, tracker) o de rendimiento sin que se haya gestionado formalmente el reclamo, por falta de documentación o seguimiento. Se mantiene una matriz de garantías activas con fechas de vencimiento, se documentan todos los eventos relevantes durante la garantía (fallas, pruebas, mediciones) y se gestiona el reclamo con la documentación técnica requerida antes del vencimiento.",
+    "Cargos responsables": "Supervisor O&M; Área Comercial/Legal",
+    "Documentación": "Se mantiene registro de garantías activas. Ref: DOC-OM-007, DOC-OM-012"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Sin suministro eléctrico – causa no identificada",
+    "Código de Falla": 9.0,
+    "A quién afecta": "Operación total de la planta: generación, control, comunicaciones y monitoreo",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Se detecta que el proyecto no tiene ningún tipo de suministro eléctrico (ni generación propia, ni red, ni respaldo) pero no se ha identificado la causa raíz en el primer análisis remoto. La plataforma de monitoreo pierde señal completamente. Se activa el protocolo de respuesta inmediata: se intenta comunicación telefónica con el personal en sitio o guardia de seguridad, se despacha un técnico de guardia para inspección física urgente y se notifica al cliente.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M; Supervisor O&M;  ",
+    "Documentación": "Se registra hora de pérdida de señal. Se genera alerta inmediata en sistema. Ref: DOC-OM-001, DOC-OM-012"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Ausencia total de red eléctrica (blackout del OR)",
+    "Código de Falla": 9.1,
+    "A quién afecta": "Generación, servicios auxiliares, comunicaciones y control de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El operador de red presenta un apagón total (blackout) en la zona, dejando sin tensión tanto el punto de conexión del proyecto como la acometida de servicios auxiliares. Los inversores se desconectan por protección anti-isla, los equipos de control y comunicación se sostienen brevemente con el UPS y luego se apagan al agotarse la autonomía. Se monitorea el restablecimiento de la red, se documenta la duración total del evento y, al restablecerse la tensión, se sigue el procedimiento de reconexión segura verificando la secuencia de arranque de los inversores.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M",
+    "Documentación": "Se anexa al informe mensual. Se calcula energía no generada para reporte al cliente y póliza. Ref: DOC-OM-001, DOC-OM-014"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Falla de acometida de servicios auxiliares (alimentación interna)",
+    "Código de Falla": 9.2,
+    "A quién afecta": "Control, comunicaciones, monitoreo y seguridad de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "La acometida eléctrica interna que alimenta el tablero de servicios auxiliares (TSA) se interrumpe por un interruptor disparado, fusible fundido, cable dañado o falla del transformador de SSAA. El proyecto puede seguir generando si los inversores siguen conectados a la red, pero sin servicios auxiliares se pierde el monitoreo, la comunicación, la iluminación y los sistemas de control. Se localiza el punto de corte, se aplica LOTO y se restablece el suministro de SSAA.",
+    "Cargos responsables": "Operador de Monitoreo; Técnico O&M Eléctrico; Supervisor O&M",
+    "Documentación": "Se registra ventana sin monitoreo. Se genera reporte de intervención. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "UPS agotado: sin respaldo para sistemas de control y comunicaciones",
+    "Código de Falla": 9.3,
+    "A quién afecta": "Control, comunicaciones y monitoreo de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El sistema UPS que respalda los equipos de control (PLC, RTU, relés, SCADA local) y comunicaciones agota su autonomía de batería durante un corte de red prolongado, dejando sin alimentación todos los sistemas de gestión de la planta. Al restablecerse la red o el SSAA, se verifica que los equipos arranquen correctamente, se reinician los que lo requieran y se comprueba la integridad de la programación del PLC/RTU. Se revisa el estado de las baterías del UPS para confirmar que mantienen la autonomía de diseño.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M",
+    "Documentación": "Se registra el evento. Se programa revisión del banco de baterías del UPS. Ref: DOC-OM-003, DOC-OM-005"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Interruptor de acometida principal de SSAA disparado",
+    "Código de Falla": 9.4,
+    "A quién afecta": "Servicios auxiliares, control, comunicaciones y seguridad de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El interruptor termomagnético o de caja moldeada que protege la acometida principal de servicios auxiliares se dispara por sobrecorriente, cortocircuito o falla a tierra en la red interna de SSAA. Se identifica el interruptor disparado, se analiza la causa (carga excesiva, falla en equipos conectados), se corrige el problema aguas abajo y se restablece el interruptor. Si el interruptor se disparó por una falla permanente en la carga, se aísla el ramal defectuoso antes de reconectar.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se registra en bitácora eléctrica. Se genera reporte si la causa es una falla mayor. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Falla del generador de respaldo (planta eléctrica)",
+    "Código de Falla": 9.5,
+    "A quién afecta": "Servicios auxiliares y continuidad operativa durante cortes prolongados de red",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El generador diésel o a gas de respaldo no arranca o se detiene durante un corte de red prolongado, dejando sin alimentación los servicios auxiliares. Las causas más frecuentes son: batería de arranque descargada, falta de combustible, falla del arrancador automático (ATS), filtros obstruidos o falla mecánica del motor. Se verifica el nivel de combustible, el estado de la batería de arranque y el ATS; se arranca manualmente si es posible y se gestiona el mantenimiento correctivo.",
+    "Cargos responsables": "Técnico O&M; Soporte Fabricante/Proveedor; Supervisor O&M",
+    "Documentación": "Se registra en bitácora de mantenimiento. Se verifica nivel de combustible semanalmente. Ref: DOC-OM-005"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Robo o vandalismo del cableado de servicios auxiliares",
+    "Código de Falla": 9.6,
+    "A quién afecta": "Pérdida total de servicios auxiliares, monitoreo y seguridad de la planta",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "Personas no autorizadas ingresan a la planta y extraen el cableado de cobre de la acometida de servicios auxiliares, dejando sin alimentación eléctrica toda la instrumentación, comunicaciones e iluminación. Se notifica a las autoridades, se realiza un inventario del cableado sustraído, se asegura la zona y se procede a la reposición del cableado. Se refuerzan las medidas de seguridad física (cámaras, alarmas, cerco eléctrico) para prevenir recurrencia.",
+    "Cargos responsables": "Supervisor O&M;  ; Coordinación con Autoridades/Policía",
+    "Documentación": "Se genera denuncia penal y reporte a aseguradora. Se documenta el daño. Ref: DOC-OM-008, DOC-OM-013"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Falla en el tablero de distribución de servicios auxiliares (TSA)",
+    "Código de Falla": 9.7,
+    "A quién afecta": "Todos los servicios auxiliares de la planta: control, comunicaciones, iluminación",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El tablero de servicios auxiliares presenta falla interna (barra dañada, interruptor principal fundido, incendio parcial en el tablero, arco eléctrico interno) que deja sin alimentación todos los circuitos derivados. Se aplica LOTO completo del TSA, se evalúa el daño, se aislan los circuitos afectados y se procede a la reparación o reemplazo de los componentes dañados. Se verifica cada circuito antes de reconectar.",
+    "Cargos responsables": "Técnico O&M Eléctrico; Supervisor O&M;  ",
+    "Documentación": "Se genera reporte de intervención eléctrica. Notificación al cliente. Ref: DOC-OM-003, DOC-OM-004"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Sin suministro por mantenimiento programado del OR (ventana de mantenimiento)",
+    "Código de Falla": 9.8,
+    "A quién afecta": "Generación del proyecto durante la ventana de mantenimiento",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El operador de red programa y ejecuta un mantenimiento en la infraestructura de transporte o distribución que implica la desconexión temporal de la planta. El evento es conocido con anticipación y se coordina con el OR. Se registra la ventana de indisponibilidad programada en el sistema de monitoreo para no computarla como falla del proyecto, se informa al cliente y se calcula la energía no generada para efectos del informe mensual.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M; Coordinación con OR",
+    "Documentación": "Se documenta como indisponibilidad de red planificada. Se informa al cliente. Ref: DOC-OM-001, DOC-OM-012"
+  },
+  {
+    "Tipo": "9. Sin Suministro Eléctrico en el Proyecto",
+    "Evento": "Sin suministro por limitación de capacidad de red (restricción técnica del OR)",
+    "Código de Falla": 9.9,
+    "A quién afecta": "Generación del proyecto; rentabilidad; cumplimiento de contratos de energía",
+    "Descripción detallada de la actividad (requisitos, controles, documentos)": "El operador de red limita o interrumpe la inyección del proyecto por congestión de la línea, sobretensión en el nodo de conexión o insuficiencia de capacidad de evacuación en el punto de entronque. No es una falla de la planta sino una restricción del sistema. Se documenta el evento con registros del medidor y del SCADA, se notifica al cliente, se calcula la energía no generada y se gestiona ante el OR la compensación o la ampliación de capacidad según el contrato de conexión.",
+    "Cargos responsables": "Operador de Monitoreo; Supervisor O&M; Coordinación con OR; Área Comercial/Legal",
+    "Documentación": "Se documenta la restricción y la energía no generada. Gestión contractual ante el OR. Ref: DOC-OM-001, DOC-OM-012"
+  }
+]

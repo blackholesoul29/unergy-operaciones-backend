@@ -37,6 +37,7 @@ FRONTERA_NODE_MAP: dict[str, tuple[int | None, int | None]] = {
     "frt63879": (1022, 1020),  # Minigranja 0009 La Paz Verso
     "frt65205": (1283, 1282),  # Minigranja 0018 - La Paz Leyenda
     "frt66597": (1459, 1460),  # Minigranja 0017 - La Paz Esmeralda
+    "frt_olimpo14": (860, None), # MGS 0014 - El Olimpo (solo principal registrado)
     "frt67475": (1481, 1482),  # MGS 0015 - El Son
     "frt67496": (1489, 1490),  # MGS 0019 - El Merengue
     "frt68269": (1514, 1515),  # MGS 0016 - La Puya
@@ -63,6 +64,7 @@ _NUM_TO_FRT: dict[int, str] = {
     5:  "frt58839",
     6:  "frt60629",
     9:  "frt63879",
+    14: "frt_olimpo14",
     15: "frt67475",
     16: "frt68269",
     17: "frt66597",

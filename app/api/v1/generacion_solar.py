@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
 from app.models.proyectos import Proyecto, TipoProyectoEnum
-from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_id
+from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_id, find_gaia_node_pair
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
@@ -943,25 +943,42 @@ def project_monitoring_detail(
     today   = date.today()
     start30 = (today - timedelta(days=29)).isoformat()
 
-    # Resolve Gaia node_id for this project (non-fatal if not found)
-    gaia    = _get_gaia()
-    node_id = find_gaia_node_id(
+    # Resolve Gaia node IDs for this project (non-fatal if not found)
+    gaia = _get_gaia()
+    node_principal, node_respaldo = find_gaia_node_pair(
         p.nombre_comercial or "",
         p.alias_monitoreo or "",
         p.nombre_bitacora or "",
     )
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        inv_f  = ex.submit(client.get_project_inverters, sol_id)
-        pow_f  = ex.submit(client.get_power, sol_id)
-        gen_f  = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
-        gaia_f = ex.submit(gaia.get_node_electrical_snapshot, node_id) \
-                 if (gaia and node_id) else None
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        inv_f   = ex.submit(client.get_project_inverters, sol_id)
+        pow_f   = ex.submit(client.get_power, sol_id)
+        gen_f   = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+        eae_p_f = ex.submit(gaia.get_node_eae_today, node_principal) \
+                  if (gaia and node_principal) else None
+        eae_r_f = ex.submit(gaia.get_node_eae_today, node_respaldo) \
+                  if (gaia and node_respaldo) else None
 
     inverters  = inv_f.result() or []
     power_data = pow_f.result() or {}
     gen_raw    = gen_f.result() or {}
-    gaia_snap  = gaia_f.result() if gaia_f else None
+
+    # Pick the meter node with more exported energy today
+    eae_p = eae_p_f.result() if eae_p_f else 0.0
+    eae_r = eae_r_f.result() if eae_r_f else 0.0
+    if node_principal and node_respaldo:
+        best_node = node_principal if eae_p >= eae_r else node_respaldo
+    elif node_principal:
+        best_node = node_principal
+    elif node_respaldo:
+        best_node = node_respaldo
+    else:
+        best_node = None
+
+    node_id = best_node  # kept for gaia_node_id field in response
+
+    gaia_snap = gaia.get_node_electrical_snapshot(best_node) if (gaia and best_node) else None
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
     def _fetch_detail(inv):

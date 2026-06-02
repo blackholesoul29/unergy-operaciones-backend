@@ -412,6 +412,29 @@ class GaiaClient:
             if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
         ]
 
+        # Fallback: si no hay datos de AP, derivar potencia de los deltas de eae
+        if not power_series and eae:
+            _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
+            _prev_t: str | None = None
+            for r in eae:
+                t = r.get("time")
+                if not t:
+                    continue
+                delta_kwh = sum(float(r.get(k) or 0) for k in ("eaepd1", "eaepd2", "eaepd3")) / _eae_factor
+                if delta_kwh <= 0 or _prev_t is None:
+                    _prev_t = t
+                    continue
+                try:
+                    from datetime import datetime, timezone
+                    def _parse(s: str):
+                        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    dt_h = (_parse(t) - _parse(_prev_t)).total_seconds() / 3600.0
+                    if dt_h > 0:
+                        power_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
+                except Exception:
+                    pass
+                _prev_t = t
+
         # ── eae unit: nodos en _EAE_WH_NODES retornan Wh; el resto ya es kWh ──
         _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)
         _eae_kwh = (round(_eae_raw / 1000.0, 3)

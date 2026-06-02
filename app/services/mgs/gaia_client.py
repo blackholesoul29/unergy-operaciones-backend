@@ -355,14 +355,28 @@ class GaiaClient:
         pf3 = lpf.get("pfp3")
         pf_avg = _phase_avg(lpf, "pfp1", "pfp2", "pfp3")
 
-        # ── Time series for power chart (W → kW per timestamp) ────────────────
+        # ── Detect AP unit: if any |app| value > 5000, values are in W ──────────
+        _max_ap = max(
+            (abs(float(r.get(f) or 0))
+             for r in results["ap"]
+             for f in ("app1", "app2", "app3")
+             if r.get(f) is not None),
+            default=0
+        )
+        _ap_divisor = 1000.0 if _max_ap > 5000 else 1.0
+
+        # ── Time series for power chart → always kW ───────────────────────────
         power_series = [
             {"time": r["time"], "kw": round(
-                sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / 1000, 3
+                sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor, 3
             )}
             for r in results["ap"]
             if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
         ]
+
+        # ── Detect eae unit: if sum > 50000, values are in Wh → convert to kWh ─
+        _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)
+        _eae_kwh = (round(_eae_raw / 1000.0, 3) if (_eae_raw and _eae_raw > 50000) else _eae_raw)
 
         return {
             # Voltage per phase [V]  — vp1/vp2/vp3 correct
@@ -375,8 +389,8 @@ class GaiaClient:
             "rp1": rp1, "rp2": rp2, "rp3": rp3, "rp_total": rp_total,
             # Power factor          — API: pfp1/pfp2/pfp3
             "pf1": pf1, "pf2": pf2, "pf3": pf3, "pf_avg": pf_avg,
-            # Cumulative energy today [Wh] — API: eaepd1/eaepd2/eaepd3
-            "eae_wh":  _sum("eaepd1", "eaepd2", "eaepd3", data=eae),
+            # Cumulative energy today [kWh] — unit-normalized
+            "eae_wh":  _eae_kwh,
             "eae1_wh": _sum("eaepd1", data=eae),
             "eae2_wh": _sum("eaepd2", data=eae),
             "eae3_wh": _sum("eaepd3", data=eae),

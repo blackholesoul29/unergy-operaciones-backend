@@ -13,6 +13,7 @@ Uso:
 Requiere:
     pip install requests
 """
+import os
 import sys
 import json
 import time
@@ -29,9 +30,24 @@ SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
-API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+API_BASE  = os.environ.get("MIGRATE_API_BASE")
+API_EMAIL = os.environ.get("MIGRATE_API_EMAIL")
+API_PASS  = os.environ.get("MIGRATE_API_PASS")
+
+_FALTANTES = [
+    nombre for nombre, valor in (
+        ("MIGRATE_API_BASE", API_BASE),
+        ("MIGRATE_API_EMAIL", API_EMAIL),
+        ("MIGRATE_API_PASS", API_PASS),
+    ) if not valor
+]
+if _FALTANTES:
+    sys.exit(
+        "ERROR: faltan variables de entorno requeridas: "
+        + ", ".join(_FALTANTES)
+        + ".\nDefínelas antes de ejecutar la migración "
+        "(ver .env.example)."
+    )
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26

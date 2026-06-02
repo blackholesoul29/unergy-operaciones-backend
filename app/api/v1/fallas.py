@@ -465,7 +465,10 @@ async def upload_falla_attachment(
     file_meta = {"name": nombre_original, "parents": [falla_folder_id]}
     uploaded = service.files().create(body=file_meta, media_body=media, fields="id, webViewLink").execute()
 
-    url = uploaded.get("webViewLink", f"https://drive.google.com/file/d/{uploaded['id']}/view")
+    file_id  = uploaded["id"]
+    view_url = uploaded.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")
+    # Encode filename in URL fragment so frontend can detect type and show name
+    url = f"{view_url}#{nombre_original}"
 
     current_urls = falla.fotos_lista
     current_urls.append(url)
@@ -475,6 +478,7 @@ async def upload_falla_attachment(
     return {
         "status": "ok",
         "url": url,
+        "file_id": file_id,
         "filename": nombre_original,
         "fotos_urls": current_urls,
     }

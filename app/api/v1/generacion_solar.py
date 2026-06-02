@@ -951,34 +951,31 @@ def project_monitoring_detail(
         p.nombre_bitacora or "",
     )
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        inv_f   = ex.submit(client.get_project_inverters, sol_id)
-        pow_f   = ex.submit(client.get_power, sol_id)
-        gen_f   = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
-        eae_p_f = ex.submit(gaia.get_node_eae_today, node_principal) \
-                  if (gaia and node_principal) else None
-        eae_r_f = ex.submit(gaia.get_node_eae_today, node_respaldo) \
-                  if (gaia and node_respaldo) else None
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        inv_f    = ex.submit(client.get_project_inverters, sol_id)
+        pow_f    = ex.submit(client.get_power, sol_id)
+        gen_f    = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+        snap_p_f = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \
+                   if (gaia and node_principal) else None
+        snap_r_f = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) \
+                   if (gaia and node_respaldo) else None
 
     inverters  = inv_f.result() or []
     power_data = pow_f.result() or {}
     gen_raw    = gen_f.result() or {}
 
-    # Pick the meter node with more exported energy today
-    eae_p = eae_p_f.result() if eae_p_f else 0.0
-    eae_r = eae_r_f.result() if eae_r_f else 0.0
+    snap_p = snap_p_f.result() if snap_p_f else None
+    snap_r = snap_r_f.result() if snap_r_f else None
+
+    # Best node = whichever has more exported energy today
+    eae_p = float((snap_p or {}).get("eae_wh") or 0)
+    eae_r = float((snap_r or {}).get("eae_wh") or 0)
     if node_principal and node_respaldo:
         best_node = node_principal if eae_p >= eae_r else node_respaldo
-    elif node_principal:
-        best_node = node_principal
-    elif node_respaldo:
-        best_node = node_respaldo
     else:
-        best_node = None
+        best_node = node_principal or node_respaldo
 
-    node_id = best_node  # kept for gaia_node_id field in response
-
-    gaia_snap = gaia.get_node_electrical_snapshot(best_node) if (gaia and best_node) else None
+    gaia_snap = snap_p if best_node == node_principal else snap_r
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
     def _fetch_detail(inv):
@@ -1062,17 +1059,21 @@ def project_monitoring_detail(
     has_strings = any(inv.get("strings") for inv in processed_inverters)
 
     return {
-        "proyecto_id":    p.id,
-        "nombre":         p.nombre_comercial,
-        "sol_id":         sol_id,
-        "gaia_node_id":   node_id,
-        "capacity_kwp":   float(p.potencia_instalada_kwp or 0),
-        "inverters":      processed_inverters,
-        "power_curve":    power_curve,
-        "generation_30d": generation_30d,
-        "total_30d_kwh":  round(sum(d["kwh"] for d in generation_30d), 1),
-        "has_strings":    has_strings,
-        "gaia_snapshot":  gaia_snap,
+        "proyecto_id":            p.id,
+        "nombre":                 p.nombre_comercial,
+        "sol_id":                 sol_id,
+        "gaia_node_id":           best_node,
+        "gaia_node_principal":    node_principal,
+        "gaia_node_respaldo":     node_respaldo,
+        "capacity_kwp":           float(p.potencia_instalada_kwp or 0),
+        "inverters":              processed_inverters,
+        "power_curve":            power_curve,
+        "generation_30d":         generation_30d,
+        "total_30d_kwh":          round(sum(d["kwh"] for d in generation_30d), 1),
+        "has_strings":            has_strings,
+        "gaia_snapshot":          gaia_snap,
+        "gaia_snapshot_principal": snap_p,
+        "gaia_snapshot_respaldo":  snap_r,
     }
 
 

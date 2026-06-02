@@ -1035,6 +1035,14 @@ def project_monitoring_detail(
         raw_power = (power_data.get("power")
                      or power_data.get("results", {}).get("power")
                      or {})
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "POWER_DEBUG sol_id=%s power_data_keys=%s raw_power_type=%s raw_power_sample=%s",
+        sol_id,
+        list(power_data.keys()) if isinstance(power_data, dict) else type(power_data).__name__,
+        type(raw_power).__name__,
+        str(raw_power)[:300],
+    )
     for timeseries in raw_power.values():
         if isinstance(timeseries, dict):
             for ts, val in timeseries.items():

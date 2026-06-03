@@ -144,30 +144,21 @@ def _sunfactory_project_map(token: str) -> dict[str, int]:
     return out
 
 
-def _sunfactory_energization(token: str, project_id: int) -> dict | None:
-    """Hito de energización (RETIE/legalización) de un proyecto: fecha + % avance.
+def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
+    """Función PURA: elige el hito de energización de una lista de milestones.
 
-    Devuelve { energization_date, avance_pct, milestone } o None.
+    Prioriza por nombre (RETIE/legalización/energización); si ninguno coincide,
+    usa el hito final (mayor fecha planeada). Devuelve
+    { energization_date, avance_pct, milestone } o None. Sin I/O — testeable.
     """
-    base = settings.SUNFACTORY_API_URL.rstrip("/")
-    try:
-        with httpx.Client(timeout=40) as client:
-            resp = client.get(f"{base}/project/{project_id}/milestones/",
-                             headers={"Authorization": f"Bearer {token}"})
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:
-        logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
+    if not milestones:
         return None
-
-    milestones = data.get("results", data) if isinstance(data, dict) else data
     dated = [m for m in milestones if m.get("date") or m.get("planned_date")]
     if not dated:
         return None
-    # Prioriza el hito de energización por nombre; si no hay, usa el hito final.
-    matches = [m for m in dated if _ENERG_MILESTONE_RE.search(m.get("name", ""))]
+    matches = [m for m in dated if _ENERG_MILESTONE_RE.search(m.get("name", "") or "")]
     pool = matches or dated
-    chosen = max(pool, key=lambda m: m.get("planned_date") or m.get("date") or "")
+    chosen = max(pool, key=lambda m: (m.get("planned_date") or m.get("date") or ""))
 
     ed = _parse_iso_date(chosen.get("date") or chosen.get("planned_date"))
     if not ed:
@@ -177,6 +168,27 @@ def _sunfactory_energization(token: str, project_id: int) -> dict | None:
     if avance is None:
         avance = progress.get("activity_percentage")
     return {"energization_date": ed, "avance_pct": avance, "milestone": chosen.get("name")}
+
+
+def _sunfactory_energization(token: str, project_id: int) -> dict | None:
+    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
+    base = settings.SUNFACTORY_API_URL.rstrip("/")
+    milestones: list[dict] = []
+    url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
+    try:
+        with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
+            pages = 0
+            while url and pages < 20:
+                resp = client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
+                url = data.get("next") if isinstance(data, dict) else None
+                pages += 1
+    except Exception as exc:
+        logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
+        return None
+    return _pick_energization_milestone(milestones)
 
 
 def _build_sunfactory_map(token: str, base_names: list[str]) -> dict[str, dict]:
@@ -248,6 +260,23 @@ def _recent_avg_daily_mwh(token: str, sub_project: str, n_days_window: int = 30)
     return round((diff_kwh / 1000) / n_days_window, 4)
 
 
+def _build_generation_map(token: str, names: list[str]) -> dict[str, float]:
+    """{ name.upper(): avg_daily_mwh } concurrente. Solo entradas con generación > 0.
+
+    Concurrente para no serializar ~N llamadas HTTP (cada una ~1-2s) dentro del
+    request — secuencialmente provocaría timeouts.
+    """
+    targets = [n for n in names if n]
+    if not targets:
+        return {}
+    out: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=min(len(targets), 12)) as pool:
+        for name, avg in pool.map(lambda n: (n, _recent_avg_daily_mwh(token, n)), targets):
+            if avg and avg > 0:
+                out[name.upper()] = avg
+    return out
+
+
 @router.get("")
 def proximos_energizar(
     cross_sunfactory: bool = Query(True, description="Cruzar con cronogramas Sun Factory para fecha de energización real + % de avance."),
@@ -298,15 +327,17 @@ def proximos_energizar(
             logger.warning("Sun Factory auth/sync failed: %s", exc)
             warnings.append("Sun Factory no disponible — fecha de energización estimada.")
 
-    # Generación Unergy: ¿ya está generando?
-    gen_token = None
+    # Generación Unergy: ¿ya está generando? (concurrente)
+    gen_map: dict[str, float] = {}
     if cross_generacion:
         try:
             gen_token = _unergy_token()
-            if gen_token is None:
+            if gen_token:
+                gen_map = _build_generation_map(gen_token, [r[1] for r in rows])
+            else:
                 warnings.append("Credenciales de generación Unergy no configuradas — proyección teórica.")
         except Exception as exc:
-            logger.warning("Unergy generation auth failed: %s", exc)
+            logger.warning("Unergy generation auth/sync failed: %s", exc)
             warnings.append("API de generación Unergy no disponible — proyección teórica.")
 
     projects = []
@@ -331,14 +362,13 @@ def proximos_energizar(
             energ_source = "review_date" if review_date else ("estimado" if energ else "desconocido")
 
         # ¿Ya genera? → energizada de hecho + promedio real.
-        if gen_token and name:
-            avg = _recent_avg_daily_mwh(gen_token, name)
-            if avg and avg > 0:
-                already_generating = True
-                monthly = round(avg * 30, 2)
-                projection_basis = "generacion_real_unergy"
-                if status != "Energizado":
-                    status = "Próximo a energizar"
+        avg = gen_map.get(name.upper()) if name else None
+        if avg and avg > 0:
+            already_generating = True
+            monthly = round(avg * 30, 2)
+            projection_basis = "generacion_real_unergy"
+            if status != "Energizado":
+                status = "Próximo a energizar"
 
         projects.append({
             "id": pid,

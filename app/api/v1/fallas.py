@@ -103,6 +103,17 @@ _PRECIO_ENERGIA_COP_KWH = 800.0
 _SOLAR_CAPACITY_FACTOR = 0.18
 
 
+def _estimar_perdida_falla(potencia_kwp, horas_fuera: float) -> tuple[float, float]:
+    """Estima (kWh perdidos, impacto COP) de una falla. `solar_hours` aproxima las
+    horas productivas como ~50% del downtime (≈12 h solares por 24 h). Función pura
+    y testeable; alimenta el reporte SLA/económico, por eso conviene fijarla con tests.
+    """
+    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
+    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
+    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+    return kwh_perdidos, impacto_cop
+
+
 @router.get("/sla-dashboard", response_model=FallaSLADashboard)
 def sla_dashboard(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """SLA monitoring dashboard with risk, overdue, and compliance metrics."""
@@ -408,11 +419,7 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
     end = falla.fecha_resolucion or datetime.now(timezone.utc)
     horas_fuera = max(0, (end - start).total_seconds() / 3600)
 
-    # Estimate kWh lost = capacity_kWp * capacity_factor * solar_hours_per_day * days
-    # More accurate: capacity * capacity_factor * actual_hours (capped at ~12 solar hrs/day)
-    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
-    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
-    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+    kwh_perdidos, impacto_cop = _estimar_perdida_falla(potencia_kwp, horas_fuera)
 
     # Persist the estimate back to the falla if not already set
     if falla.kwh_perdidos_estimado is None:

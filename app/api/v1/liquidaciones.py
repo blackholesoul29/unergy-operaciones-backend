@@ -205,8 +205,8 @@ def _serializar_costo(c: LiquidacionCosto) -> dict:
         "proveedor": c.proveedor,
         "nro_soporte": c.nro_soporte,
         "soporte_url": c.soporte_url,
-        "valor_cop": float(c.valor_cop),
-        "created_at": c.created_at.isoformat(),
+        "valor_cop": float(c.valor_cop) if c.valor_cop is not None else None,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
 
@@ -215,7 +215,7 @@ def _serializar_linea(l: LiquidacionMandatoLinea) -> dict:
         "id": l.id,
         "tipo_linea": str(l.tipo_linea) if l.tipo_linea is not None else None,
         "concepto": l.concepto,
-        "valor_cop": float(l.valor_cop),
+        "valor_cop": float(l.valor_cop) if l.valor_cop is not None else None,
         "porcentaje": float(l.porcentaje) if l.porcentaje is not None else None,
         "base_calculo_cop": float(l.base_calculo_cop) if l.base_calculo_cop is not None else None,
         "referencia_factura": l.referencia_factura,

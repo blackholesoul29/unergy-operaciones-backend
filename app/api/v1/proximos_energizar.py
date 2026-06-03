@@ -11,8 +11,9 @@ Cruces de datos:
   • originabotdb (minifarm_project)        → pipeline, etapa, potencia. [FUENTE PRINCIPAL]
   • API de generación Unergy (api.unergy.io) → ¿la planta ya genera? Si sí, está
     energizada de hecho y usamos su promedio real. [best-effort, degradación elegante]
-  • TODO: API Solarverso de construcción     → avance de obra / fecha de energización
-    real. Pendiente de credenciales/endpoint — ver `_fetch_solarverso_construccion`.
+  • TODO: Sun Factory (Solenium EPC)         → cronograma: avance de obra / fecha de
+    energización real. Bloqueado: cuenta sin proyectos asociados — ver
+    `_fetch_sunfactory_cronograma`.
 
 Si una fuente no está disponible, el endpoint sigue devolviendo el pipeline de
 originabotdb con la proyección teórica desde la potencia instalada.
@@ -152,13 +153,19 @@ def _recent_avg_daily_mwh(token: str, sub_project: str, n_days_window: int = 30)
     return round((diff_kwh / 1000) / n_days_window, 4)
 
 
-# ── TODO: API Solarverso de construcción ────────────────────────────────────────
-# Solarverso es el tracker de avance de obra. Cuando se tengan credenciales/endpoint,
-# esta función debe devolver, por proyecto: fecha de energización REAL (programada),
-# % de avance de construcción, y cualquier hito. Esos datos tienen prioridad sobre
-# la estimación derivada de minifarm_projectstagechange.
-def _fetch_solarverso_construccion(project_name: str) -> dict | None:
-    """No implementado: falta base URL / auth / endpoint de Solarverso."""
+# ── TODO: cronogramas de construcción Sun Factory (Solenium EPC) ────────────────
+# Sun Factory (sunfactory.solenium.co) expone los cronogramas EPC: fecha de
+# energización REAL programada + % de avance de obra por proyecto. Cuando esté
+# disponible debe devolver, por proyecto: {energization_date, avance_pct, hito}.
+# Esos datos tienen PRIORIDAD sobre la estimación de minifarm_projectstagechange.
+#
+# BLOQUEO ACTUAL (2026-06-02): la cuenta `eduardo` responde "Sin proyectos
+# asociados al usuario en sesión" en /api/project/ — no hay proyectos asignados,
+# así que los cronogramas per-proyecto no son accesibles. Pendiente: asociar los
+# proyectos a la cuenta (admin Solenium) o usar una cuenta de servicio con acceso.
+# Auth confirmado OK vía SUNFACTORY_AUTH_URL (JWT). Endpoints: project/, activities/.
+def _fetch_sunfactory_cronograma(project_name: str) -> dict | None:
+    """No implementado: la cuenta Sun Factory no tiene proyectos asociados (ver nota)."""
     return None
 
 

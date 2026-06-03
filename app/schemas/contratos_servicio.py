@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 
 
 # ── Indexación O&M ────────────────────────────────────────────────────────────
@@ -10,6 +10,14 @@ class FilaIndexacion(BaseModel):
     anio: int
     ipc_aplicado: Optional[float] = None   # None = año base
     valor: float
+    es_base: Optional[bool] = None
+
+
+class FilaIndexacionCGM(BaseModel):
+    año: int
+    ipc: Optional[float] = None
+    valor: float
+    esBase: Optional[bool] = None
 
 
 class FilaFactura(BaseModel):
@@ -75,6 +83,15 @@ class ContratoServicioCreate(BaseModel):
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
     rec_vintage: Optional[str] = None
+    # CGM / Representación
+    inversionista_nombre: Optional[str] = None
+    portafolio: Optional[str] = None
+    codigo_sun_factory: Optional[str] = None
+    tarifa_admin: Optional[float] = None
+    tarifa_cgm: Optional[float] = None
+    tarifa_representacion: Optional[float] = None
+    indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
+    indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
 
 
 class ContratoServicioUpdate(BaseModel):
@@ -108,6 +125,15 @@ class ContratoServicioUpdate(BaseModel):
     rec_vintage: Optional[str] = None
     indexacion_anual: Optional[List[FilaIndexacion]] = None
     indexacion_mensual: Optional[List[FilaIndexacion]] = None
+    # CGM / Representación
+    inversionista_nombre: Optional[str] = None
+    portafolio: Optional[str] = None
+    codigo_sun_factory: Optional[str] = None
+    tarifa_admin: Optional[float] = None
+    tarifa_cgm: Optional[float] = None
+    tarifa_representacion: Optional[float] = None
+    indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
+    indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
 
 
 class ContratoServicioOut(BaseModel):
@@ -148,6 +174,15 @@ class ContratoServicioOut(BaseModel):
     indexacion_mensual: Optional[List[FilaIndexacion]] = None
     facturas_solenium: Optional[List[FilaFactura]] = None
     facturas_inversionistas: Optional[List[FilaFactura]] = None
+    # CGM / Representación
+    inversionista_nombre: Optional[str] = None
+    portafolio: Optional[str] = None
+    codigo_sun_factory: Optional[str] = None
+    tarifa_admin: Optional[float] = None
+    tarifa_cgm: Optional[float] = None
+    tarifa_representacion: Optional[float] = None
+    indexacion_cgm: Optional[List[Any]] = None
+    indexacion_representacion: Optional[List[Any]] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

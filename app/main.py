@@ -627,6 +627,15 @@ _PENDING_DDLS = [
     )""",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS portafolio_id BIGINT REFERENCES portafolios(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_portafolio_id ON proyectos (portafolio_id)",
+    # migration 024 — contratos CGM/Representación: campos específicos
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS inversionista_nombre VARCHAR(255)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS portafolio VARCHAR(255)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS codigo_sun_factory VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_admin NUMERIC(8,4)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_cgm NUMERIC(10,6)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_representacion NUMERIC(10,6)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_cgm JSONB",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_representacion JSONB",
 ]
 
 

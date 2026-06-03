@@ -89,6 +89,15 @@ class ContratoServicio(Base):
     indexacion_mensual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     facturas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     facturas_inversionistas: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Campos específicos de contratos CGM / Representación
+    inversionista_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    portafolio: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    codigo_sun_factory: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tarifa_admin: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    tarifa_cgm: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    tarifa_representacion: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    indexacion_cgm: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    indexacion_representacion: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

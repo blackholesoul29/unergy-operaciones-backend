@@ -606,6 +606,27 @@ _PENDING_DDLS = [
     # migration 020 — facturas Solenium e Inversionistas como JSONB
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_solenium JSONB",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS facturas_inversionistas JSONB",
+    # migration 021 — pipeline de verificación de informes
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS comentarios JSONB DEFAULT '[]'::jsonb",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS enviado_por_nombre VARCHAR(255)",
+    # fix — informes_guardados: correo_enviado/correo_enviado_en pueden faltar si la
+    # tabla se creó antes de que se añadieran al modelo. ALTER TABLE IF NOT EXISTS es idempotente.
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS correo_enviado_en TIMESTAMPTZ",
+    # migration 022 — portafolio compuesto: miembros (proyectos) del informe de portafolio
+    "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS miembros JSONB",
+    # migration 023 — gestión de portafolios (capas de proyectos)
+    """CREATE TABLE IF NOT EXISTS portafolios (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(255) UNIQUE NOT NULL,
+        descripcion TEXT,
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS portafolio_id BIGINT REFERENCES portafolios(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_portafolio_id ON proyectos (portafolio_id)",
 ]
 
 
@@ -1109,7 +1130,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="1.0.0",
+    version="1.1.0",  # informes pipeline + filtros fecha
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

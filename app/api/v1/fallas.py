@@ -53,9 +53,39 @@ def _gen_codigo(db: Session) -> str:
     return f"FAL-{year}-{max_id + 1:05d}"
 
 
-FALLA_UPLOADS_DIR = Path("uploads/fallas")
-FALLA_ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+FALLA_ALLOWED_MIME = {
+    "application/pdf", "image/jpeg", "image/png", "image/webp",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword", "text/csv",
+}
 FALLA_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+DRIVE_ROOT_FOLDER_ID = "1GlX0E_OKdyT2kkS9y6gtYyTuASnsrbHc"
+
+def _get_drive_service():
+    import json, os
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    creds_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not creds_json:
+        raise HTTPException(500, "Google Drive no configurado (falta GOOGLE_SERVICE_ACCOUNT_JSON)")
+    info = json.loads(creds_json)
+    creds = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+def _get_or_create_folder(service, name: str, parent_id: str) -> str:
+    q = (f"name='{name}' and mimeType='application/vnd.google-apps.folder' "
+         f"and '{parent_id}' in parents and trashed=false")
+    res = service.files().list(q=q, fields="files(id)").execute()
+    files = res.get("files", [])
+    if files:
+        return files[0]["id"]
+    meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+    folder = service.files().create(body=meta, fields="id").execute()
+    return folder["id"]
 
 # ── SLA defaults ─────────────────────────────────────────────────────────────
 # Default SLA hours by priority level (used when sla_limite_horas is not set)
@@ -71,6 +101,17 @@ _PRECIO_ENERGIA_COP_KWH = 800.0
 
 # Solar capacity factor for kWh loss estimation
 _SOLAR_CAPACITY_FACTOR = 0.18
+
+
+def _estimar_perdida_falla(potencia_kwp, horas_fuera: float) -> tuple[float, float]:
+    """Estima (kWh perdidos, impacto COP) de una falla. `solar_hours` aproxima las
+    horas productivas como ~50% del downtime (≈12 h solares por 24 h). Función pura
+    y testeable; alimenta el reporte SLA/económico, por eso conviene fijarla con tests.
+    """
+    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
+    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
+    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+    return kwh_perdidos, impacto_cop
 
 
 @router.get("/sla-dashboard", response_model=FallaSLADashboard)
@@ -309,7 +350,7 @@ def delete_falla(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
     falla = db.query(Falla).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
-    db.delete(falla)
+    falla.deleted_at = datetime.now(timezone.utc)
     db.commit()
 
 
@@ -378,11 +419,7 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
     end = falla.fecha_resolucion or datetime.now(timezone.utc)
     horas_fuera = max(0, (end - start).total_seconds() / 3600)
 
-    # Estimate kWh lost = capacity_kWp * capacity_factor * solar_hours_per_day * days
-    # More accurate: capacity * capacity_factor * actual_hours (capped at ~12 solar hrs/day)
-    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
-    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
-    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+    kwh_perdidos, impacto_cop = _estimar_perdida_falla(potencia_kwp, horas_fuera)
 
     # Persist the estimate back to the falla if not already set
     if falla.kwh_perdidos_estimado is None:
@@ -400,7 +437,8 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
     )
 
 
-# ── Feature 6: File attachments for fallas ───────────────────────────────────
+# ── Feature 6: File attachments for fallas → Google Drive ────────────────────
+@router.post("/{id}/archivos")
 @router.post("/{id}/attachments")
 async def upload_falla_attachment(
     id: int,
@@ -408,32 +446,38 @@ async def upload_falla_attachment(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """
-    Upload a file attachment (photo, PDF) for a falla.
-    Stores under uploads/fallas/{id}/ and appends URL to fotos_urls JSONB.
-    """
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
 
     if archivo.content_type not in FALLA_ALLOWED_MIME:
-        raise HTTPException(400, "Tipo de archivo no permitido. Use PDF, JPG, PNG o WebP.")
+        raise HTTPException(400, "Tipo de archivo no permitido.")
 
     contenido = await archivo.read()
     if len(contenido) > FALLA_MAX_FILE_SIZE:
-        raise HTTPException(400, "El archivo supera el limite de 20 MB")
+        raise HTTPException(400, "El archivo supera el límite de 20 MB")
 
-    ext = Path(archivo.filename).suffix.lower() if archivo.filename else ".jpg"
-    nombre_guardado = f"{uuid.uuid4().hex}{ext}"
-    carpeta = FALLA_UPLOADS_DIR / str(id)
-    carpeta.mkdir(parents=True, exist_ok=True)
-    ruta_nueva = carpeta / nombre_guardado
-    ruta_nueva.write_bytes(contenido)
+    import io
+    from googleapiclient.http import MediaIoBaseUpload
 
-    url = f"/static/uploads/fallas/{id}/{nombre_guardado}"
+    service = _get_drive_service()
 
-    # Append to existing fotos_urls JSONB
-    current_urls = falla.fotos_lista  # property that safely parses JSONB
+    # Estructura: Raíz → Proyecto → Código falla
+    proyecto_nombre = falla.proyecto.nombre_comercial if falla.proyecto else f"Proyecto {falla.proyecto_id}"
+    proyecto_folder_id = _get_or_create_folder(service, proyecto_nombre, DRIVE_ROOT_FOLDER_ID)
+    falla_folder_id    = _get_or_create_folder(service, falla.codigo_interno or f"FAL-{id}", proyecto_folder_id)
+
+    nombre_original = archivo.filename or f"archivo_{uuid.uuid4().hex}"
+    media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype=archivo.content_type or "application/octet-stream")
+    file_meta = {"name": nombre_original, "parents": [falla_folder_id]}
+    uploaded = service.files().create(body=file_meta, media_body=media, fields="id, webViewLink").execute()
+
+    file_id  = uploaded["id"]
+    view_url = uploaded.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")
+    # Encode filename in URL fragment so frontend can detect type and show name
+    url = f"{view_url}#{nombre_original}"
+
+    current_urls = falla.fotos_lista
     current_urls.append(url)
     falla.fotos_urls = current_urls
     db.commit()
@@ -441,6 +485,7 @@ async def upload_falla_attachment(
     return {
         "status": "ok",
         "url": url,
-        "filename": archivo.filename or nombre_guardado,
+        "file_id": file_id,
+        "filename": nombre_original,
         "fotos_urls": current_urls,
     }

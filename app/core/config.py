@@ -40,15 +40,27 @@ class Settings(BaseSettings):
     UNERGY_LOGIN: str = ""
     UNERGY_PASSWORD: str = ""
 
+    # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
+    # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
+    SUNFACTORY_API_URL: str = "https://sunfactory.solenium.co/api"
+    SUNFACTORY_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SUNFACTORY_USERNAME: str = ""
+    SUNFACTORY_PASSWORD: str = ""
+
     # Solenium API (FMO inverter data) — OAuth2 username/password
-    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api"
     SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
 
-    # Quoia CGM API (fronteras / medidores)
+    # Quoia CGM API (fronteras / medidores) — legacy token auth
     QUOIA_API_TOKEN: str = ""
     QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"
+
+    # Gaia JWT auth (for /api/cgm/v1/border + /api/node measurements)
+    GAIA_USER: str = ""
+    GAIA_PASS: str = ""
+    GAIA_BASE_URL: str = "https://gaia.quoia.energy"
 
     # MGS Alarms polling
     MGS_ENABLED: bool = True

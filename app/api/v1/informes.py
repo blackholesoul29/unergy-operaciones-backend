@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -38,10 +39,24 @@ class InformeUpsertIn(BaseModel):
     proyecto_nombre: Optional[str] = None
     html_content: str
     charts_data: Optional[Any] = None     # JSON del rptChartQueue (puede llegar como string o dict)
+    miembros: Optional[list] = None        # sólo portafolio: [{sub_project, nombre, orden, html_inline}]
 
 
 class EstadoIn(BaseModel):
     estado: str   # "revisado" | "aprobado"
+
+
+class ComentarioOut(BaseModel):
+    id: str                              # uuid4 generado al crear
+    autor_email: str
+    autor_nombre: Optional[str] = None
+    mensaje: str
+    created_at: str                      # ISO-8601
+    resuelto: bool = False
+    resuelto_en: Optional[str] = None
+    resuelto_por_email: Optional[str] = None
+    resuelto_por_nombre: Optional[str] = None
+    respuesta: Optional[str] = None      # texto opcional del autor al subsanar
 
 
 class InformeOut(BaseModel):
@@ -56,11 +71,32 @@ class InformeOut(BaseModel):
     creado_por_nombre: Optional[str]
     editado_por_nombre: Optional[str]
     aprobado_por_nombre: Optional[str]
+    enviado_por_nombre: Optional[str] = None
     creado_en: datetime
     editado_en: Optional[datetime]
     aprobado_en: Optional[datetime]
     correo_enviado: bool
     correo_enviado_en: Optional[datetime]
+    comentarios: list[ComentarioOut] = []
+    miembros: list = []   # sólo portafolio; html_inline se omite (uso interno del backend)
+
+    @field_validator('comentarios', mode='before')
+    @classmethod
+    def ensure_comentarios(cls, v):
+        """Filas creadas antes de migration 021 pueden tener comentarios=NULL."""
+        return v if isinstance(v, list) else []
+
+    @field_validator('miembros', mode='before')
+    @classmethod
+    def ensure_miembros(cls, v):
+        """Lista de miembros del portafolio. Se omite html_inline (puede ser grande;
+        el backend lo usa sólo para componer/enviar, el frontend no lo necesita)."""
+        if not isinstance(v, list):
+            return []
+        return [
+            {k: val for k, val in m.items() if k != "html_inline"}
+            for m in v if isinstance(m, dict)
+        ]
 
     class Config:
         from_attributes = True
@@ -69,6 +105,33 @@ class InformeOut(BaseModel):
 class InformeDetailOut(InformeOut):
     html_content: str
     charts_data: Optional[Any] = None
+
+
+class ComentarioCreateIn(BaseModel):
+    mensaje: str
+
+
+class ComentarioResolverIn(BaseModel):
+    respuesta: Optional[str] = None
+
+
+class SeccionIn(BaseModel):
+    """Write-back de una sección de proyecto editada dentro del portafolio."""
+    sub_project: str
+    html_content: str
+
+
+# Emails con permisos especiales (configurables por env si fuera necesario).
+EMAIL_VERIFICADOR = "juan.jose@unergy.io"   # único que puede aprobar/verificar informes
+EMAIL_REMITENTE = "laura.h@unergy.io"       # única que puede disparar el envío por email
+# Admins también pueden todo
+def _es_verificador(u: Usuario) -> bool:
+    return (u.email or "").lower() in {EMAIL_VERIFICADOR, "juanjose@unergy.io"} or (u.rol or "") == "admin"
+
+def _es_remitente(u: Usuario) -> bool:
+    if _es_verificador(u):
+        return True  # el verificador puede enviar también (no se queda atascado el flujo)
+    return (u.email or "").lower() == EMAIL_REMITENTE
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -90,6 +153,60 @@ def _get_correo_operacional(db: Session, sub_project: str) -> Optional[str]:
     if row and row[0]:
         return row[0]
     return None
+
+
+# Separador de páginas usado por el frontend al unir las páginas del informe.
+_PAGE_SEP = '<div class="rpt-page-sep"></div>'
+
+
+def _tag_seccion(html: str, sub_project: str) -> str:
+    """Marca la página de proyecto con data-sub-project para que el editor del portafolio
+    pueda mapear la sección de vuelta a su proyecto al guardar (write-back). Idempotente:
+    si ya viene marcada (p.ej. un individual editado antes desde el portafolio), no la duplica."""
+    if not html or not sub_project:
+        return html or ""
+    if "data-sub-project=" in html[:300]:
+        return html
+    return html.replace(
+        '<div class="rpt-page">',
+        f'<div class="rpt-page" data-sub-project="{sub_project}">',
+        1,
+    )
+
+
+def _find_individual(db: Session, sub_project: str, periodo_desde: str, periodo_hasta: str):
+    """Busca el informe individual ('op') de un proyecto para el mismo período."""
+    if not sub_project:
+        return None
+    return (
+        db.query(InformeGuardado)
+        .filter_by(tipo="op", sub_project=sub_project,
+                   periodo_desde=periodo_desde, periodo_hasta=periodo_hasta)
+        .first()
+    )
+
+
+def _componer_portafolio(db: Session, inf: InformeGuardado) -> str:
+    """Compone el HTML completo de un portafolio:
+    página consolidada (html_content del portafolio) + por cada miembro, en orden,
+    el HTML del informe individual vinculado si existe (fuente viva), o el html_inline
+    embebido en el miembro si el proyecto no tiene informe individual guardado.
+    """
+    partes = [inf.html_content or ""]
+    miembros = sorted(
+        (inf.miembros or []),
+        key=lambda m: m.get("orden", 0) if isinstance(m, dict) else 0,
+    )
+    for m in miembros:
+        if not isinstance(m, dict):
+            continue
+        sp = m.get("sub_project")
+        indiv = _find_individual(db, sp, inf.periodo_desde, inf.periodo_hasta)
+        if indiv and indiv.html_content:
+            partes.append(_tag_seccion(indiv.html_content, sp))
+        elif m.get("html_inline"):
+            partes.append(_tag_seccion(m["html_inline"], sp))
+    return _PAGE_SEP.join(p for p in partes if p)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -135,6 +252,9 @@ def upsert_informe(
             )
         existing.html_content = payload.html_content
         existing.charts_data = charts_data_parsed
+        if payload.miembros is not None:
+            existing.miembros = payload.miembros
+            flag_modified(existing, "miembros")
         if payload.proyecto_nombre:
             existing.proyecto_nombre = payload.proyecto_nombre
         if payload.periodo_display:
@@ -155,6 +275,7 @@ def upsert_informe(
             proyecto_nombre=payload.proyecto_nombre,
             html_content=payload.html_content,
             charts_data=charts_data_parsed,
+            miembros=payload.miembros,
             estado="borrador",
             creado_por_id=current_user.id,
             creado_por_nombre=current_user.nombre,
@@ -201,7 +322,9 @@ def list_informes(
     tipo: Optional[str] = Query(None),
     sub_project: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
+    periodo_desde_gte: Optional[str] = Query(None, description="Filtrar periodo_desde >= YYYY-MM-DD"),
+    periodo_desde_lte: Optional[str] = Query(None, description="Filtrar periodo_desde <= YYYY-MM-DD"),
+    limit: int = Query(50, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -212,6 +335,10 @@ def list_informes(
         q = q.filter(InformeGuardado.sub_project == sub_project)
     if estado:
         q = q.filter(InformeGuardado.estado == estado)
+    if periodo_desde_gte:
+        q = q.filter(InformeGuardado.periodo_desde >= periodo_desde_gte)
+    if periodo_desde_lte:
+        q = q.filter(InformeGuardado.periodo_desde <= periodo_desde_lte)
     return q.order_by(InformeGuardado.editado_en.desc().nullslast()).limit(limit).all()
 
 
@@ -227,6 +354,69 @@ def get_informe(
     return inf
 
 
+@router.get("/{informe_id}/compuesto", summary="HTML compuesto (portafolio = consolidada + secciones vivas)")
+def get_compuesto(
+    informe_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Devuelve el HTML listo para previsualizar/imprimir/enviar.
+    Para portafolios compone consolidada + secciones (individuales vivos o html_inline);
+    para op/fmo devuelve su html_content tal cual."""
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    html = _componer_portafolio(db, inf) if inf.tipo == "port" else (inf.html_content or "")
+    return {"id": inf.id, "tipo": inf.tipo, "html_content": html}
+
+
+@router.patch("/{informe_id}/seccion", response_model=InformeDetailOut,
+              summary="Write-back de una sección de proyecto editada dentro del portafolio")
+def update_seccion(
+    informe_id: int,
+    payload: SeccionIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Edición bidireccional: si la sección corresponde a un informe individual editable,
+    se escribe ahí (queda actualizado en ambas vistas); si el proyecto no tiene individual,
+    se guarda en el html_inline del miembro del portafolio."""
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    if inf.tipo != "port":
+        raise HTTPException(400, "Sólo aplica a informes de portafolio")
+
+    now = datetime.now(timezone.utc)
+    indiv = _find_individual(db, payload.sub_project, inf.periodo_desde, inf.periodo_hasta)
+    if indiv:
+        if indiv.estado != "borrador":
+            raise HTTPException(
+                409,
+                f"El informe individual de '{payload.sub_project}' está en estado "
+                f"'{indiv.estado}' y no se puede editar desde el portafolio. Reábrelo primero.",
+            )
+        indiv.html_content = payload.html_content
+        indiv.editado_por_id = current_user.id
+        indiv.editado_por_nombre = current_user.nombre
+        indiv.editado_en = now
+    else:
+        miembros = list(inf.miembros or [])
+        target = next((m for m in miembros if isinstance(m, dict)
+                       and m.get("sub_project") == payload.sub_project), None)
+        if target is None:
+            target = {"sub_project": payload.sub_project, "nombre": payload.sub_project,
+                      "orden": len(miembros)}
+            miembros.append(target)
+        target["html_inline"] = payload.html_content
+        inf.miembros = miembros
+        flag_modified(inf, "miembros")
+
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
 @router.patch("/{informe_id}/estado", response_model=InformeOut, summary="Cambiar estado del informe")
 def change_estado(
     informe_id: int,
@@ -238,9 +428,35 @@ def change_estado(
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
 
-    allowed = {"borrador": ["revisado"], "revisado": ["aprobado", "borrador"]}
+    allowed = {
+        "borrador":  ["revisado"],
+        "revisado":  ["aprobado", "borrador"],
+        "aprobado":  ["borrador"],   # reabrir — sólo verificador/admin
+    }
     if payload.estado not in allowed.get(inf.estado, []):
         raise HTTPException(400, f"Transición inválida: {inf.estado} → {payload.estado}")
+
+    # Sólo el verificador (Juan José) o admin pueden aprobar o reabrir un aprobado.
+    if payload.estado == "aprobado" and not _es_verificador(current_user):
+        raise HTTPException(
+            403,
+            "Sólo el verificador autorizado (Juan José) puede aprobar informes."
+        )
+    if inf.estado == "aprobado" and payload.estado == "borrador" and not _es_verificador(current_user):
+        raise HTTPException(
+            403,
+            "Sólo el verificador autorizado puede reabrir un informe ya aprobado."
+        )
+
+    # Si hay comentarios sin resolver, no se puede aprobar.
+    if payload.estado == "aprobado":
+        coms = inf.comentarios or []
+        pendientes = [c for c in coms if not c.get("resuelto")]
+        if pendientes:
+            raise HTTPException(
+                409,
+                f"No se puede aprobar: hay {len(pendientes)} comentario(s) sin subsanar."
+            )
 
     now = datetime.now(timezone.utc)
     inf.estado = payload.estado
@@ -254,7 +470,117 @@ def change_estado(
         inf.editado_por_id = current_user.id
         inf.editado_por_nombre = current_user.nombre
         inf.editado_en = now
+    elif payload.estado == "borrador" and inf.estado == "aprobado":
+        # reabrir: limpiar campos de aprobación
+        inf.aprobado_por_id = None
+        inf.aprobado_por_nombre = None
+        inf.aprobado_en = None
 
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+# ── Pipeline de verificación: comentarios ─────────────────────────────────
+
+@router.post("/{informe_id}/comentarios", response_model=InformeDetailOut, summary="Agregar comentario de verificación")
+def add_comentario(
+    informe_id: int,
+    payload: ComentarioCreateIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    import uuid
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    if inf.estado == "aprobado":
+        raise HTTPException(409, "El informe ya fue aprobado; no se aceptan más comentarios. Reábrelo antes.")
+    if not (payload.mensaje and payload.mensaje.strip()):
+        raise HTTPException(400, "El mensaje del comentario no puede estar vacío")
+
+    nuevo = {
+        "id": str(uuid.uuid4()),
+        "autor_email": current_user.email or "",
+        "autor_nombre": current_user.nombre or "",
+        "mensaje": payload.mensaje.strip(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "resuelto": False,
+        "resuelto_en": None,
+        "resuelto_por_email": None,
+        "resuelto_por_nombre": None,
+        "respuesta": None,
+    }
+    coms = list(inf.comentarios or [])
+    coms.append(nuevo)
+    inf.comentarios = coms
+    flag_modified(inf, "comentarios")   # JSONB: forzar UPDATE (reasignar no basta en este proyecto)
+    # Si estaba en 'revisado', vuelve a borrador hasta que se subsane.
+    if inf.estado == "revisado":
+        inf.estado = "borrador"
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+@router.patch("/{informe_id}/comentarios/{comentario_id}/resolver",
+              response_model=InformeDetailOut, summary="Marcar comentario como subsanado")
+def resolver_comentario(
+    informe_id: int,
+    comentario_id: str,
+    payload: ComentarioResolverIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    coms = list(inf.comentarios or [])
+    target = next((c for c in coms if c.get("id") == comentario_id), None)
+    if not target:
+        raise HTTPException(404, "Comentario no encontrado")
+    if target.get("resuelto"):
+        raise HTTPException(409, "Este comentario ya fue marcado como subsanado")
+    target["resuelto"] = True
+    target["resuelto_en"] = datetime.now(timezone.utc).isoformat()
+    target["resuelto_por_email"] = current_user.email or ""
+    target["resuelto_por_nombre"] = current_user.nombre or ""
+    if payload.respuesta and payload.respuesta.strip():
+        target["respuesta"] = payload.respuesta.strip()
+    inf.comentarios = coms
+    # JSONB: la lista nueva comparte refs de dicts con la vieja → SQLAlchemy no detecta
+    # el cambio al comparar. flag_modified fuerza el UPDATE para que se guarde "resuelto".
+    flag_modified(inf, "comentarios")
+    # Si todos los comentarios quedaron subsanados y estaba en borrador, lo movemos a revisado.
+    if all(c.get("resuelto") for c in coms) and inf.estado == "borrador":
+        inf.estado = "revisado"
+        inf.editado_por_id = current_user.id
+        inf.editado_por_nombre = current_user.nombre
+        inf.editado_en = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
+@router.delete("/{informe_id}/comentarios/{comentario_id}",
+               response_model=InformeDetailOut, summary="Eliminar comentario (sólo el autor o admin)")
+def borrar_comentario(
+    informe_id: int,
+    comentario_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    inf = db.get(InformeGuardado, informe_id)
+    if not inf:
+        raise HTTPException(404, "Informe no encontrado")
+    coms = list(inf.comentarios or [])
+    target = next((c for c in coms if c.get("id") == comentario_id), None)
+    if not target:
+        raise HTTPException(404, "Comentario no encontrado")
+    if target.get("autor_email", "").lower() != (current_user.email or "").lower() and (current_user.rol or "") != "admin":
+        raise HTTPException(403, "Sólo el autor del comentario (o admin) puede eliminarlo")
+    inf.comentarios = [c for c in coms if c.get("id") != comentario_id]
+    flag_modified(inf, "comentarios")   # JSONB: forzar UPDATE
     db.commit()
     db.refresh(inf)
     return inf
@@ -271,6 +597,27 @@ def delete_informe(
         raise HTTPException(404, "Informe no encontrado")
     if inf.estado == "aprobado":
         raise HTTPException(400, "No se puede eliminar un informe aprobado")
+
+    # Eliminar un individual NO debe afectar a los portafolios que lo incluyen:
+    # antes de borrar, congelamos su contenido en el html_inline del miembro del
+    # portafolio (del mismo período) para que la sección siga apareciendo.
+    if inf.tipo == "op":
+        portafolios = (
+            db.query(InformeGuardado)
+            .filter_by(tipo="port", periodo_desde=inf.periodo_desde, periodo_hasta=inf.periodo_hasta)
+            .all()
+        )
+        for port in portafolios:
+            miembros = list(port.miembros or [])
+            changed = False
+            for m in miembros:
+                if isinstance(m, dict) and m.get("sub_project") == inf.sub_project and not m.get("html_inline"):
+                    m["html_inline"] = inf.html_content
+                    changed = True
+            if changed:
+                port.miembros = miembros
+                flag_modified(port, "miembros")
+
     db.delete(inf)
     db.commit()
 
@@ -285,7 +632,12 @@ def enviar_informe(
     if not inf:
         raise HTTPException(404, "Informe no encontrado")
     if inf.estado != "aprobado":
-        raise HTTPException(400, "Solo se pueden enviar informes aprobados")
+        raise HTTPException(400, "Solo se pueden enviar informes aprobados (verificados)")
+    if not _es_remitente(current_user):
+        raise HTTPException(
+            403,
+            "Sólo Laura H. (o el verificador/admin) puede disparar el envío del informe por correo."
+        )
 
     correo = _get_correo_operacional(db, inf.sub_project)
     if not correo:
@@ -295,6 +647,9 @@ def enviar_informe(
             "Configúralo en la ficha del cliente.",
         )
 
+    # Portafolio: enviar siempre el HTML compuesto vivo (consolidada + individuales actuales).
+    html_to_send = _componer_portafolio(db, inf) if inf.tipo == "port" else inf.html_content
+
     try:
         from app.services.email_service import send_informe_email
         send_informe_email(
@@ -302,7 +657,7 @@ def enviar_informe(
             proyecto_nombre=inf.proyecto_nombre or inf.sub_project,
             periodo_display=inf.periodo_display or f"{inf.periodo_desde} — {inf.periodo_hasta}",
             aprobado_por=inf.aprobado_por_nombre or current_user.nombre,
-            html_content=inf.html_content,
+            html_content=html_to_send,
         )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
@@ -311,5 +666,7 @@ def enviar_informe(
 
     inf.correo_enviado = True
     inf.correo_enviado_en = datetime.now(timezone.utc)
+    inf.enviado_por_id = current_user.id
+    inf.enviado_por_nombre = current_user.nombre
     db.commit()
     return {"ok": True, "enviado_a": correo}

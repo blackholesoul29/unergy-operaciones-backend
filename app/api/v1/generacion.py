@@ -22,7 +22,7 @@ def list_generacion(
     fecha_inicio: date | None = Query(None),
     fecha_fin: date | None = Query(None),
     page: int = Query(1, ge=1),
-    size: int = Query(90, ge=1, le=1000),
+    size: int = Query(90, ge=1, le=2000),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):

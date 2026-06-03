@@ -146,3 +146,51 @@ def test_pipeline_stages_ordered_closest_first():
     # uci (más cercano a energizar) debe ir primero para el ORDER BY array_position.
     assert pe._PIPELINE_STAGES[0] == "uci"
     assert "operation" not in pe._PIPELINE_STAGES  # ya energizado, no es "próximo"
+
+
+# ── _sunfactory_token: reúso de credenciales Solenium ───────────────────────────
+
+class _FakeResp:
+    def raise_for_status(self): pass
+    def json(self): return {"access": "tok-123"}
+
+
+class _FakeClient:
+    last_json = None
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def post(self, url, json=None):
+        _FakeClient.last_json = json
+        return _FakeResp()
+
+
+def _set(monkeypatch, **vals):
+    for k, v in vals.items():
+        monkeypatch.setattr(pe.settings, k, v, raising=False)
+
+
+def test_sunfactory_token_falls_back_to_solenium_creds(monkeypatch):
+    # Sin credenciales SUNFACTORY_* dedicadas → debe reusar SOLENIUM_USER/PASS.
+    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
+         SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
+         SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
+    monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
+    assert pe._sunfactory_token() == "tok-123"
+    assert _FakeClient.last_json == {"username": "sol-user", "password": "sol-pass"}
+
+
+def test_sunfactory_token_prefers_dedicated_creds(monkeypatch):
+    # Si SUNFACTORY_* están seteadas, ganan sobre las de Solenium.
+    _set(monkeypatch, SUNFACTORY_USERNAME="sf-user", SUNFACTORY_PASSWORD="sf-pass",
+         SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
+         SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
+    monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
+    assert pe._sunfactory_token() == "tok-123"
+    assert _FakeClient.last_json["username"] == "sf-user"
+
+
+def test_sunfactory_token_none_without_any_creds(monkeypatch):
+    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
+         SOLENIUM_USER="", SOLENIUM_PASS="")
+    assert pe._sunfactory_token() is None

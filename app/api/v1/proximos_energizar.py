@@ -109,12 +109,18 @@ def _parse_iso_date(raw: str | None) -> date | None:
 # ── Cronogramas EPC de Sun Factory (Solenium) ───────────────────────────────────
 
 def _sunfactory_token() -> str | None:
-    if not (settings.SUNFACTORY_USERNAME and settings.SUNFACTORY_PASSWORD and settings.SUNFACTORY_AUTH_URL):
+    # Sun Factory authenticates against auth.solenium.co — the SAME IdP as the rest of
+    # the Solenium integration (solenium_client, monitoreo). Reuse the existing
+    # SOLENIUM_USER/SOLENIUM_PASS creds so prod needs NO new secrets; SUNFACTORY_* win
+    # if set, for the day Sun Factory ever gets a dedicated account.
+    user = settings.SUNFACTORY_USERNAME or settings.SOLENIUM_USER
+    password = settings.SUNFACTORY_PASSWORD or settings.SOLENIUM_PASS
+    if not (user and password and settings.SUNFACTORY_AUTH_URL):
         return None
     with httpx.Client(timeout=30) as client:
         resp = client.post(
             settings.SUNFACTORY_AUTH_URL,
-            json={"username": settings.SUNFACTORY_USERNAME, "password": settings.SUNFACTORY_PASSWORD},
+            json={"username": user, "password": password},
         )
         resp.raise_for_status()
         return resp.json()["access"]

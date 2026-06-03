@@ -18,8 +18,18 @@ router = APIRouter(prefix="/mapa", tags=["Mapa"])
 
 
 def _fix_url(url: str) -> str:
+    """Normalize a DB URL to the scheme psycopg3 accepts (`postgresql://`).
+
+    Handles the SQLAlchemy driver scheme (`postgresql+psycopg://`) and the bare
+    `postgres://` that Railway/Heroku emit for DATABASE_URL — psycopg3 rejects the
+    latter, so an unnormalized Railway URL would fail to connect.
+    """
+    if not url:
+        return url
     if url.startswith("postgresql+psycopg://"):
         return url.replace("postgresql+psycopg://", "postgresql://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
     return url
 
 

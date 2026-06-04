@@ -69,6 +69,13 @@ ALIASES: dict[str, str] = {
     "strada asociados":             "estrada",
 }
 
+ALIASES_INVERSIONISTA: dict[str, str | None] = {
+    "17844 sol de la sierra":       "patrimonios autonomos fiduciaria bancolombia",
+    "patrimonios autonomos fiduciaria bancolombia s a sociedad fiduciaria - 17844 sol de la sierra":
+                                    "patrimonios autonomos fiduciaria bancolombia",
+    "nacional de transformadores":  None,  # reemplazado por JEMMA GROUP SAS
+}
+
 _OMITIR_PROY = re.compile(r'\btrading\b|duplicado|dulicado|\bdup\b|\bgasto\b', re.IGNORECASE)
 
 
@@ -84,6 +91,15 @@ def normalizar_alias(nombre: str) -> str:
     for patron, alias in ALIASES.items():
         if patron in n:
             return alias
+    return n
+
+
+def normalizar_alias_inv(nombre: str) -> str | None:
+    """Retorna alias canónico, o None si el inversionista debe ignorarse."""
+    n = normalizar(nombre)
+    for patron, alias in ALIASES_INVERSIONISTA.items():
+        if patron in n:
+            return alias  # None = sin match explícito
     return n
 
 
@@ -268,7 +284,10 @@ def match_inversionista(inversionistas_db: list[dict], nombre: str) -> dict | No
         return (inv.get("cliente_nombre") or inv.get("razon_social_nombre") or
                 inv.get("nombre") or inv.get("razon_social") or "")
 
-    norm = normalizar(nombre)
+    norm_inv = normalizar_alias_inv(nombre)
+    if norm_inv is None:
+        return None  # alias explícito "sin match"
+    norm = norm_inv
     for inv in inversionistas_db:
         cn = normalizar(_nombre_db(inv))
         if cn and (cn == norm or cn in norm or norm in cn):

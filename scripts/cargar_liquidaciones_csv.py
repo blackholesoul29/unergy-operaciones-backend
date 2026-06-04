@@ -645,7 +645,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "concepto": f["concepto"],
                             "valor_cop": f["total"],
                             "referencia_factura": ref or None,
-                            "soporte_url": f["cons_ing_url"],
+                            "soporte_url": f["ref_factura_url"] or f["cons_ing_url"],
                             "orden": orden,
                         })
                     except Exception as exc:
@@ -698,7 +698,7 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "concepto": f["concepto"],
                             "valor_cop": f["total"],
                             "referencia_factura": ref or None,
-                            "soporte_url": f["cons_ing_url"],
+                            "soporte_url": f["ref_factura_url"] or f["cons_ing_url"],
                             "orden": orden,
                         })
                     except Exception as exc:

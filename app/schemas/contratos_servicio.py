@@ -178,6 +178,7 @@ class ContratoServicioOut(BaseModel):
     inversionista_nombre: Optional[str] = None
     portafolio: Optional[str] = None
     codigo_sun_factory: Optional[str] = None
+    nombre_proyecto_ref: Optional[str] = None
     tarifa_admin: Optional[float] = None
     tarifa_cgm: Optional[float] = None
     tarifa_representacion: Optional[float] = None

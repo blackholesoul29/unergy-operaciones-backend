@@ -46,16 +46,48 @@ def _sync_partes(contrato: ContratoServicio, db: Session):
 def list_contratos(
     tipo: str | None = Query(None),
     proyecto_id: int | None = Query(None),
+    codigo_tsf: str | None = Query(None),
     limit: int = Query(500, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    import re
+    from sqlalchemy import or_, text as sa_text
     q = db.query(ContratoServicio).options(*_load_options())
     if tipo:
         q = q.filter(ContratoServicio.servicio_aplica == tipo)
+
     if proyecto_id:
-        q = q.filter(ContratoServicio.proyecto_id == proyecto_id)
-    return q.order_by(ContratoServicio.fecha_inicio.desc().nullslast(), ContratoServicio.id.desc()).limit(limit).all()
+        conds = [ContratoServicio.proyecto_id == proyecto_id]
+
+        # Coincidencia por código Sun Factory si el proyecto tiene codigo_tsf
+        if codigo_tsf:
+            conds.append(ContratoServicio.codigo_sun_factory == codigo_tsf)
+
+        # Fallback: busca en nombre_proyecto_ref usando el número de 4 dígitos
+        # del nombre del proyecto (ej. "MGS 0010 - Villanueva" → "0010")
+        try:
+            row = db.execute(
+                sa_text("SELECT nombre_comercial FROM proyectos WHERE id = :id"),
+                {"id": proyecto_id},
+            ).first()
+            if row and row[0]:
+                nums = re.findall(r'\d{4}', row[0])
+                for num in nums:
+                    conds.append(
+                        ContratoServicio.nombre_proyecto_ref.ilike(f'%{num}%')
+                    )
+        except Exception:
+            pass
+
+        q = q.filter(or_(*conds))
+    elif codigo_tsf:
+        q = q.filter(ContratoServicio.codigo_sun_factory == codigo_tsf)
+
+    return q.order_by(
+        ContratoServicio.fecha_inicio.desc().nullslast(),
+        ContratoServicio.id.desc(),
+    ).limit(limit).all()
 
 
 @router.post("", response_model=ContratoServicioOut, status_code=201)

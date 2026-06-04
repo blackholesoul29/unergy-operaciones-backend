@@ -636,6 +636,9 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tarifa_representacion NUMERIC(10,6)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_cgm JSONB",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS indexacion_representacion JSONB",
+    # migration 025 — nombre_proyecto_ref para búsqueda fuzzy por proyecto
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS nombre_proyecto_ref VARCHAR(255)",
+    "CREATE INDEX IF NOT EXISTS ix_contratos_servicio_nombre_ref ON contratos_servicio (nombre_proyecto_ref) WHERE nombre_proyecto_ref IS NOT NULL",
 ]
 
 
@@ -858,7 +861,156 @@ def _run_create_tables() -> None:
 
 
 # Datos iniciales de contratos CGM/Representación — fuente: Data/contratosCGM.json
+# Indexaciones Ayura 1 (firma 2024-10-11, tarifa base 5 $/kWh)
+_IDX_AYURA1 = [
+    {"año": 2024, "ipc": None, "valor": 5.0,     "esBase": True},
+    {"año": 2025, "ipc": 5.2,  "valor": 5.26},
+    {"año": 2026, "ipc": 5.1,  "valor": 5.52826},
+]
+_SOPORTE_AYURA1 = "https://drive.google.com/file/d/1y8m6vU3SNumR85BNcVGBgTEfqZnq0PJ_/view?usp=sharing"
+
+# Indexaciones "Legalizar" firma 2024 (mismas tasas que Ayurá 1)
+_IDX_LEG24 = [
+    {"año": 2024, "ipc": None, "valor": 5.0,     "esBase": True},
+    {"año": 2025, "ipc": 5.2,  "valor": 5.26},
+    {"año": 2026, "ipc": 5.1,  "valor": 5.52826},
+]
+# Indexaciones "Legalizar" firma 2025 (solo 2026 IPC)
+_IDX_LEG25 = [
+    {"año": 2025, "ipc": None, "valor": 5.0,     "esBase": True},
+    {"año": 2026, "ipc": 5.1,  "valor": 5.255},
+]
+
 _CGM_CONTRATOS = [
+    # ── Portafolio Ayurá 1 (inversionista inferido: Ayurá S.A.S.) ─────────────
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco",          codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0004 - Valle de Gandalf", codigo_sun_factory="COLCEST61P3",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0005 - Canahuate",       codigo_sun_factory="COLCEST61P1",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0006 - Perija",          codigo_sun_factory="COLCEST58P2",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0007 - La Paz Vallenata", codigo_sun_factory="COLCEST9P1",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0008 - La Paz Verso",    codigo_sun_factory="COLCEST2P3",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0009 - El Molino",       codigo_sun_factory="COLLAGT19P2",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0010 - Villanueva",      codigo_sun_factory="COLLAGT27P2",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0013 - La Mesa",         codigo_sun_factory="COLSANT10P1",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0014 - El Olimpo",       codigo_sun_factory="COLSANT4P2",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="Minigranja 0016 - La Puya",         codigo_sun_factory="COLCEST45P5",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0017 - La Paz Esmeralda", codigo_sun_factory="COLCEST17P1",
+         portafolio="Ayura 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+
+    # ── Sol de la Sierra 1 / Legalizar contratos ──────────────────────────────
+    dict(proyecto_nombre="Minigranja 0018 - La Paz Leyenda",  codigo_sun_factory="COLCEST53P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-11-23",
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="MiniGranja 0019 - El Merengue",     codigo_sun_factory="COLCEST45P7",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038, fecha_firma_contrato="2025-03-28",
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG25, indexacion_representacion=_IDX_LEG25),
+    dict(proyecto_nombre="MiniGranja 0019 - El Merengue",     codigo_sun_factory="COLCEST45P7",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG25, indexacion_representacion=_IDX_LEG25),
+    dict(proyecto_nombre="Minigranja 0022 - La Cumbia",       codigo_sun_factory="COLCEST45P4",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="Minigranja 0023 - El Joropo",       codigo_sun_factory="COLCEST45P2",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038,
+         tarifa_cgm=0.0, tarifa_representacion=0.0,
+         indexacion_cgm=[], indexacion_representacion=[]),
+    dict(proyecto_nombre="Minigranja 0023 - El Joropo",       codigo_sun_factory="COLCEST45P2",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=0.0, tarifa_representacion=0.0,
+         indexacion_cgm=[], indexacion_representacion=[]),
+    dict(proyecto_nombre="MiniGranja 0024 - San Diego Sur",   codigo_sun_factory="COLCEST38P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="MiniGranja 0024 - San Diego Sur",   codigo_sun_factory="COLCEST38P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="MiniGranja 0025 - El Copey Occidente", codigo_sun_factory="COLCEST39P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="MiniGranja 0025 - El Copey Occidente", codigo_sun_factory="COLCEST39P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="Minigranja 0026 - Valencia Oriente", codigo_sun_factory="COLCEST74P1",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Ayura S.A.S.",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+    dict(proyecto_nombre="Minigranja 0027 - Valencia Oriente 2", codigo_sun_factory="COLCEST74P2",
+         portafolio="Sol de la Sierra 1", inversionista_nombre="Solenium S.A.S",
+         tarifa_admin=0.038,
+         tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_LEG24, indexacion_representacion=_IDX_LEG24),
+
+    # ── MGS Mapale ────────────────────────────────────────────────────────────
+    dict(proyecto_nombre="MGS Mapale",
+         inversionista_nombre="FIDEICOMISOS BBVA ASSET MANAGEMENT S. A. SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, tarifa_cgm=0.0, tarifa_representacion=0.0,
+         indexacion_cgm=[], indexacion_representacion=[]),
     dict(proyecto_nombre="Minigranja 0012 - La Reserva", codigo_sun_factory="COLSANT9P1",
          portafolio="Suno - Solenium - Sandra Estrada", inversionista_nombre="Strada Asociados S.A.S.",
          tarifa_admin=0.038, fecha_firma_contrato="2024-04-02",
@@ -1136,8 +1288,12 @@ _CGM_CONTRATOS = [
 
 
 def _run_cgm_seed() -> None:
-    """Carga inicial de contratos CGM/Representación. Idempotente — omite los que ya existen."""
-    import json as _json
+    """
+    Carga y mantiene contratos CGM/Representacion.
+    Idempotente: usa (inversionista + codigo_sun_factory) como clave de dedup.
+    Corre en cada startup: inserta nuevos y repara proyecto_id NULL.
+    """
+    import re as _re
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.contratos import ContratoServicio
@@ -1145,44 +1301,61 @@ def _run_cgm_seed() -> None:
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
-        ya_existen = db.query(ContratoServicio).filter(
-            ContratoServicio.servicio_aplica == "representacion",
-            ContratoServicio.inversionista_nombre.isnot(None),
-        ).count()
+        # Mapa de proyectos para matching
+        proyectos_rows = db.execute(
+            text("SELECT id, nombre_comercial, codigo_tsf FROM proyectos")
+        ).fetchall()
+        por_nombre = {(r[1] or "").lower(): r[0] for r in proyectos_rows if r[1]}
+        por_tsf    = {(r[2] or "").lower(): r[0] for r in proyectos_rows if r[2]}
 
-        if ya_existen >= len(_CGM_CONTRATOS):
-            print(f"[cgm seed] ya existen {ya_existen} contratos — omitiendo")
-            return
+        def _buscar(nombre, sf):
+            # 1. Por codigo Sun Factory == codigo_tsf del proyecto
+            if sf and sf.lower() in por_tsf:
+                return por_tsf[sf.lower()]
+            # 2. Por numero de 4 digitos (ej. "0010" de "MGS 0010 - Villanueva")
+            for num in _re.findall(r'\d{4}', nombre):
+                for db_n, db_id in por_nombre.items():
+                    if num in db_n:
+                        return db_id
+            # 3. Por palabras clave largas
+            clean = _re.sub(r'[-()]', ' ', nombre)
+            for p in [w.lower() for w in clean.split() if len(w) > 4]:
+                for db_n, db_id in por_nombre.items():
+                    if p in db_n:
+                        return db_id
+            return None
 
+        # ── Paso 1: insertar contratos faltantes ─────────────────────────────────
         insertados = 0
         for c in _CGM_CONTRATOS:
-            nombre = c.get("proyecto_nombre", "")
-            inv = c.get("inversionista_nombre")
+            nombre  = c.get("proyecto_nombre", "")
+            inv     = c.get("inversionista_nombre")
+            sf      = c.get("codigo_sun_factory")
 
-            ya = db.query(ContratoServicio).filter(
+            # Dedup por (inversionista + codigo_sun_factory) o (inversionista + nombre_ref)
+            filtros = [
                 ContratoServicio.servicio_aplica == "representacion",
                 ContratoServicio.inversionista_nombre == inv,
-            ).first()
+                ContratoServicio.codigo_sun_factory == sf if sf
+                    else ContratoServicio.nombre_proyecto_ref == nombre,
+            ]
+            ya = db.query(ContratoServicio).filter(*filtros).first()
             if ya:
+                if not ya.nombre_proyecto_ref:
+                    ya.nombre_proyecto_ref = nombre  # retroalimentar registros viejos
                 continue
 
             fecha_str = c.get("fecha_firma_contrato")
             fecha = date.fromisoformat(fecha_str) if fecha_str else None
 
-            proyecto = db.execute(
-                text("SELECT id FROM proyectos WHERE LOWER(nombre_comercial) LIKE LOWER(:q) LIMIT 1"),
-                {"q": f"%{nombre.split(' - ')[-1].strip()[:20]}%"},
-            ).first()
-
-            obj = ContratoServicio(
-                proyecto_id=proyecto[0] if proyecto else None,
+            db.add(ContratoServicio(
+                proyecto_id=_buscar(nombre, sf),
                 servicio_aplica="representacion",
-                contratante_nombre="Unergy Energia Digital S.A.S. E.S.P.",
-                prestador_nombre="Unergy Energia Digital S.A.S. E.S.P.",
                 estado="vigente",
                 inversionista_nombre=inv,
                 portafolio=c.get("portafolio"),
-                codigo_sun_factory=c.get("codigo_sun_factory"),
+                codigo_sun_factory=sf,
+                nombre_proyecto_ref=nombre,
                 tarifa_admin=c.get("tarifa_admin"),
                 tarifa_cgm=c.get("tarifa_cgm"),
                 tarifa_representacion=c.get("tarifa_representacion"),
@@ -1190,12 +1363,35 @@ def _run_cgm_seed() -> None:
                 indexacion_representacion=c.get("indexacion_representacion") or [],
                 fecha_firma_contrato=fecha,
                 enlace_drive=c.get("enlace_drive"),
-            )
-            db.add(obj)
+            ))
             insertados += 1
 
         db.commit()
-        print(f"[cgm seed] {insertados} contratos insertados")
+        if insertados:
+            print(f"[cgm seed] {insertados} contratos nuevos insertados")
+
+        # ── Paso 2: reparar proyecto_id = NULL en registros existentes ────────────
+        sin_pid = db.execute(text("""
+            SELECT id, codigo_sun_factory, nombre_proyecto_ref
+            FROM contratos_servicio
+            WHERE proyecto_id IS NULL
+              AND servicio_aplica = 'representacion'
+              AND inversionista_nombre IS NOT NULL
+        """)).fetchall()
+
+        reparados = 0
+        for cid, sf, ref in sin_pid:
+            pid = _buscar(ref or "", sf or "")
+            if pid:
+                db.execute(
+                    text("UPDATE contratos_servicio SET proyecto_id = :pid WHERE id = :cid"),
+                    {"pid": pid, "cid": cid},
+                )
+                reparados += 1
+        db.commit()
+        if reparados:
+            print(f"[cgm seed] {reparados} proyecto_id reparados")
+
     except Exception as e:
         db.rollback()
         print(f"[cgm seed] ERROR: {e}")

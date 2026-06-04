@@ -93,6 +93,7 @@ class ContratoServicio(Base):
     inversionista_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     portafolio: Mapped[str | None] = mapped_column(String(255), nullable=True)
     codigo_sun_factory: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    nombre_proyecto_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tarifa_admin: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     tarifa_cgm: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     tarifa_representacion: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)

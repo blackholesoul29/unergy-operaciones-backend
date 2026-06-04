@@ -82,14 +82,17 @@ def _get_user_token(username: str, password: str) -> str:
 def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> bool | None:
     """
     Llama GET /project/{sol_id}/relay/ y retorna el campo `active`.
-    Usa el cliente interno (credenciales del servidor).
+    Respuesta Solenium: {"results": {"active": true|false|null, ...}, "success": true}
+    404 = proyecto sin reconectador → retorna None.
     """
     url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
     try:
-        data = client._get(url)          # usa el mismo helper con retry/token
-        if data is None:
+        data = client._get(url)   # retorna None en 404
+        if not data:
             return None
-        val = data.get("active")
+        # active está en data["results"]["active"]
+        results = data.get("results") or {}
+        val = results.get("active")
         if val is None:
             return None
         return bool(val)

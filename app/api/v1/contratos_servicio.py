@@ -46,15 +46,25 @@ def _sync_partes(contrato: ContratoServicio, db: Session):
 def list_contratos(
     tipo: str | None = Query(None),
     proyecto_id: int | None = Query(None),
+    codigo_tsf: str | None = Query(None),
     limit: int = Query(500, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    from sqlalchemy import or_
     q = db.query(ContratoServicio).options(*_load_options())
     if tipo:
         q = q.filter(ContratoServicio.servicio_aplica == tipo)
-    if proyecto_id:
+    if proyecto_id and codigo_tsf:
+        # Devuelve contratos vinculados al proyecto O que coincidan por código Sun Factory
+        q = q.filter(or_(
+            ContratoServicio.proyecto_id == proyecto_id,
+            ContratoServicio.codigo_sun_factory == codigo_tsf,
+        ))
+    elif proyecto_id:
         q = q.filter(ContratoServicio.proyecto_id == proyecto_id)
+    elif codigo_tsf:
+        q = q.filter(ContratoServicio.codigo_sun_factory == codigo_tsf)
     return q.order_by(ContratoServicio.fecha_inicio.desc().nullslast(), ContratoServicio.id.desc()).limit(limit).all()
 
 

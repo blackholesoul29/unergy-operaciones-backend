@@ -1137,7 +1137,6 @@ _CGM_CONTRATOS = [
 
 def _run_cgm_seed() -> None:
     """Carga inicial de contratos CGM/Representación. Idempotente — omite los que ya existen."""
-    import json as _json
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.contratos import ContratoServicio
@@ -1145,13 +1144,70 @@ def _run_cgm_seed() -> None:
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
+        # ── Paso 1: reparar proyecto_id = NULL vinculando por codigo_sun_factory ─
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    UPDATE contratos_servicio cs
+                    SET proyecto_id = p.id
+                    FROM proyectos p
+                    WHERE cs.proyecto_id IS NULL
+                      AND cs.servicio_aplica = 'representacion'
+                      AND cs.codigo_sun_factory IS NOT NULL
+                      AND LOWER(p.codigo_tsf) = LOWER(cs.codigo_sun_factory)
+                """))
+                conn.commit()
+                if result.rowcount:
+                    print(f"[cgm seed] {result.rowcount} contratos vinculados por codigo_tsf")
+        except Exception as e:
+            print(f"[cgm seed] fix proyecto_ids: {e}")
+
+        # ── Paso 2: reparar restantes por coincidencia de nombre ─────────────────
+        try:
+            proyectos_db = {
+                row[1].lower(): row[0]
+                for row in db.execute(text("SELECT id, nombre_comercial FROM proyectos")).fetchall()
+                if row[1]
+            }
+            sin_proyecto = db.execute(text("""
+                SELECT id, inversionista_nombre
+                FROM contratos_servicio
+                WHERE proyecto_id IS NULL
+                  AND servicio_aplica = 'representacion'
+                  AND inversionista_nombre IS NOT NULL
+            """)).fetchall()
+
+            for cid, inv in sin_proyecto:
+                # Busca en _CGM_CONTRATOS la entrada con ese inversionista
+                ref = next((c for c in _CGM_CONTRATOS if c.get("inversionista_nombre") == inv), None)
+                if not ref:
+                    continue
+                nombre_ref = ref.get("proyecto_nombre", "")
+                # Intenta coincidencia por fragmentos del nombre
+                candidato = None
+                for db_name, db_id in proyectos_db.items():
+                    partes = [p.strip().lower() for p in nombre_ref.replace("-", " ").split() if len(p.strip()) > 3]
+                    if any(p in db_name for p in partes):
+                        candidato = db_id
+                        break
+                if candidato:
+                    db.execute(
+                        text("UPDATE contratos_servicio SET proyecto_id = :pid WHERE id = :cid"),
+                        {"pid": candidato, "cid": cid},
+                    )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[cgm seed] fix nombres: {e}")
+
+        # ── Paso 3: insertar los que todavía no existen ──────────────────────────
         ya_existen = db.query(ContratoServicio).filter(
             ContratoServicio.servicio_aplica == "representacion",
             ContratoServicio.inversionista_nombre.isnot(None),
         ).count()
 
         if ya_existen >= len(_CGM_CONTRATOS):
-            print(f"[cgm seed] ya existen {ya_existen} contratos — omitiendo")
+            print(f"[cgm seed] ya existen {ya_existen} contratos — sin inserciones nuevas")
             return
 
         insertados = 0

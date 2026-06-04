@@ -390,7 +390,8 @@ def send_falla_notification_email(
   <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
     <div style="background:#F7F4FD;border-left:3px solid #915BD8;border-radius:0 8px 8px 0;padding:12px 16px">
       <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">CÓDIGO DE FALLA</div>
-      <div style="font-size:15px;font-weight:700;color:#1A0F2E;margin-bottom:8px;font-family:monospace">{codigo_falla}</div>
+      <div style="font-size:15px;font-weight:700;color:#1A0F2E;margin-bottom:6px;font-family:monospace">{codigo_falla}</div>
+      {f'<div style="font-size:13px;font-weight:600;color:#7B6BA0;margin-bottom:10px">{tipo_nombre}</div>' if tipo_nombre else ''}
       <span style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;background:#915BD820;color:#915BD8;border:1px solid #915BD840;padding:2px 10px;border-radius:999px">{prioridad_etiqueta}</span>
     </div>
   </td></tr>

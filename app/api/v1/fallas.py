@@ -369,6 +369,7 @@ def _enviar_notificacion(
         estado_codigo=falla.estado.codigo if falla.estado else "",
         estado_etiqueta=falla.estado.etiqueta if falla.estado else "",
         prioridad_etiqueta=falla.prioridad.etiqueta if falla.prioridad else "",
+        tipo_nombre=falla.tipo.etiqueta if falla.tipo else (falla.tipo_libre or ""),
         fecha_identificacion=str(falla.fecha_identificacion or ""),
         hora_identificacion=str(falla.hora_identificacion or ""),
         asignado_a=falla.asignado_a.nombre if falla.asignado_a else None,

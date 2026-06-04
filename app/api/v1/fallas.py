@@ -254,6 +254,8 @@ def list_fallas(
     asignado_a_id: int | None = None,
     codigo_legado: str | None = None,
     solo_alerta: bool = False,
+    fecha_programada_desde: date | None = None,
+    fecha_programada_hasta: date | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -298,6 +300,10 @@ def list_fallas(
         if not estado_joined:
             query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
         query = query.filter(~FallaCatEstado.es_estado_final, Falla.fecha_identificacion <= alert_cutoff)
+    if fecha_programada_desde:
+        query = query.filter(Falla.fecha_programada >= fecha_programada_desde)
+    if fecha_programada_hasta:
+        query = query.filter(Falla.fecha_programada <= fecha_programada_hasta)
 
     total = query.count()
     items = query.order_by(Falla.created_at.desc()).offset((page - 1) * effective_size).limit(effective_size).all()

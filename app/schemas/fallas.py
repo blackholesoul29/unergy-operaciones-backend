@@ -84,6 +84,7 @@ class FallaCreate(BaseModel):
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
+    fecha_programada: Optional[date] = None
 
 
 class FallaUpdate(BaseModel):
@@ -107,6 +108,7 @@ class FallaUpdate(BaseModel):
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
+    fecha_programada: Optional[date] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -153,6 +155,7 @@ class FallaOut(BaseModel):
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
+    fecha_programada: Optional[date] = None
     dias_abierta: Optional[int] = None
     sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []

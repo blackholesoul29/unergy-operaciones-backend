@@ -60,6 +60,7 @@ TIPOS_FALLA = [
 ]
 
 ESTADOS_FALLA = [
+    {"codigo": "programado",   "etiqueta": "Programado",    "color_hex": "#3B82F6", "orden": 0, "es_estado_final": False},
     {"codigo": "abierta",      "etiqueta": "Abierta",       "color_hex": "#EF4444", "orden": 1, "es_estado_final": False},
     {"codigo": "en_gestion",   "etiqueta": "En gestión",    "color_hex": "#F97316", "orden": 2, "es_estado_final": False},
     {"codigo": "en_espera",    "etiqueta": "En espera",     "color_hex": "#EAB308", "orden": 3, "es_estado_final": False},

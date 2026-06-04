@@ -105,6 +105,8 @@ class Falla(Base):
     # Feature 5: documentation
     causa_raiz: Mapped[str | None] = mapped_column(Text, nullable=True)
     acciones_correctivas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Feature 6: programado state — scheduled date for intervention
+    fecha_programada: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

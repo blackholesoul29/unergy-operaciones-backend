@@ -376,6 +376,7 @@ def _enviar_notificacion(
         registrado_por=usuario_nombre,
         accion=accion,
         frontend_url=settings.FRONTEND_URL,
+        falla_id=falla.id,
     )
     resultado["sin_correos"] = False
 

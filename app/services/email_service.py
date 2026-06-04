@@ -302,6 +302,7 @@ def send_falla_notification_email(
     registrado_por: str,
     accion: str = "creada",
     frontend_url: str = "",
+    falla_id: int | None = None,
     # backwards-compat
     estado_color: str = "",
     tipo_nombre: str = "",
@@ -335,7 +336,7 @@ def send_falla_notification_email(
     )
 
     fecha_hora = f"{fecha_identificacion}" + (f" · {hora_identificacion}" if hora_identificacion else "")
-    falla_url  = f"{frontend_url}/fallas" if frontend_url else ""
+    falla_url  = f"{frontend_url}/fallas/{falla_id}" if (frontend_url and falla_id) else (f"{frontend_url}/fallas" if frontend_url else "")
     logo_svg   = (
         '<svg width="44" height="36" viewBox="0 0 44 36" fill="none" xmlns="http://www.w3.org/2000/svg">'
         '<circle cx="22" cy="4" r="3" fill="white"/>'

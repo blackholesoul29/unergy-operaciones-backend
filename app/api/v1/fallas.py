@@ -372,6 +372,7 @@ def _enviar_notificacion(
         tipo_nombre=falla.tipo.etiqueta if falla.tipo else (falla.tipo_libre or ""),
         fecha_identificacion=str(falla.fecha_identificacion or ""),
         hora_identificacion=str(falla.hora_identificacion or ""),
+        fecha_programada=str(falla.fecha_programada or ""),
         asignado_a=falla.asignado_a.nombre if falla.asignado_a else None,
         registrado_por=usuario_nombre,
         accion=accion,

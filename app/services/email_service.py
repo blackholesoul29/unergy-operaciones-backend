@@ -298,6 +298,7 @@ def send_falla_notification_email(
     prioridad_etiqueta: str,
     fecha_identificacion: str,
     hora_identificacion: str = "",
+    fecha_programada: str = "",
     asignado_a: str | None,
     registrado_por: str,
     accion: str = "creada",
@@ -336,6 +337,27 @@ def send_falla_notification_email(
     )
 
     fecha_hora = f"{fecha_identificacion}" + (f" · {hora_identificacion}" if hora_identificacion else "")
+
+    # Texto dinámico del aviso verde según estado
+    _AVISO_MAP = {
+        "abierta":      ("Falla activa — en seguimiento",
+                         "Esta falla ha sido registrada y está siendo atendida por nuestro equipo de operaciones. Te notificaremos ante cualquier cambio de estado."),
+        "en_gestion":   ("En revisión técnica",
+                         "Nuestro equipo está analizando la causa raíz y ejecutando las acciones correctivas. Te informaremos cuando se resuelva o haya una actualización importante."),
+        "en_espera":    ("En espera de acción externa",
+                         "La falla está pendiente de una gestión con un tercero (operador de red, proveedor u otro). Haremos seguimiento y te notificaremos con el avance."),
+        "programado":   ("Intervención programada",
+                         f"Se ha programado una intervención para atender esta falla el <strong>{fecha_programada or fecha_identificacion}</strong>. El equipo de O&M ejecutará las acciones en la fecha acordada."),
+        "cerrada":      ("Falla resuelta ✓",
+                         "Esta falla ha sido cerrada satisfactoriamente. Puedes consultar el detalle de la resolución y las acciones correctivas aplicadas en la plataforma."),
+        "sin_solucion": ("Cerrada sin solución",
+                         "Esta falla fue cerrada sin solución definitiva. Queda registrada en el historial. Si el problema persiste, por favor crea un nuevo reporte."),
+    }
+    aviso_titulo, aviso_texto = _AVISO_MAP.get(
+        estado_codigo,
+        ("Seguimiento en curso",
+         "Nuestro equipo está gestionando esta falla. Recibirás actualizaciones ante cualquier cambio de estado o resolución.")
+    )
     falla_url  = f"{frontend_url}/fallas/{falla_id}" if (frontend_url and falla_id) else (f"{frontend_url}/fallas" if frontend_url else "")
     logo_svg   = (
         '<svg width="44" height="36" viewBox="0 0 44 36" fill="none" xmlns="http://www.w3.org/2000/svg">'
@@ -431,8 +453,8 @@ def send_falla_notification_email(
   <!-- 7. AVISO VERDE -->
   <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
     <div style="border-left:3px solid #4ADE80;background:#F0FFF6;border-radius:0 8px 8px 0;padding:12px 16px">
-      <div style="font-size:12px;font-weight:700;color:#1A3D2B;margin-bottom:2px">Seguimiento en curso</div>
-      <div style="font-size:12px;color:#1A3D2B;opacity:.8">Nuestro equipo está gestionando esta falla. Recibirás actualizaciones ante cualquier cambio de estado o resolución.</div>
+      <div style="font-size:12px;font-weight:700;color:#1A3D2B;margin-bottom:4px">{aviso_titulo}</div>
+      <div style="font-size:12px;color:#1A3D2B;opacity:.85;line-height:1.6">{aviso_texto}</div>
     </div>
   </td></tr>
 

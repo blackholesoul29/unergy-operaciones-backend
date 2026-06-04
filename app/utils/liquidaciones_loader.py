@@ -69,7 +69,7 @@ ALIASES: dict[str, str] = {
     "strada asociados":             "estrada",
 }
 
-_OMITIR_PROY = re.compile(r'\btrading\b|duplicado|dulicado|\bdup\b', re.IGNORECASE)
+_OMITIR_PROY = re.compile(r'\btrading\b|duplicado|dulicado|\bdup\b|\bgasto\b', re.IGNORECASE)
 
 
 # ── Helpers puros ──────────────────────────────────────────────────────────────

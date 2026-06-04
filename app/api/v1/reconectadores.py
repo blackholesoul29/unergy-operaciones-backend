@@ -100,6 +100,24 @@ def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> bool | None:
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
+@router.get("/debug-relay/{proyecto_id}")
+def debug_relay(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Debug: muestra la respuesta raw de Solenium para el relay de un proyecto."""
+    client = _get_client()
+    proyecto = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not proyecto or not proyecto.project_id_solenium:
+        raise HTTPException(404, "Proyecto sin sol_id")
+    sol_id = int(proyecto.project_id_solenium)
+    url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
+    raw = client._get(url)
+    return {"sol_id": sol_id, "url": url, "raw": raw,
+            "parsed_active": _fetch_relay_estado(sol_id, client)}
+
+
 @router.get("/estados", response_model=list[RelayEstado])
 def get_estados(
     db: Session = Depends(get_db),

@@ -1141,6 +1141,7 @@ def _run_cgm_seed() -> None:
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.contratos import ContratoServicio
+    from app.utils.proyecto_matching import find_proyecto_by_name
 
     Session = sessionmaker(bind=engine)
     db = Session()
@@ -1155,6 +1156,7 @@ def _run_cgm_seed() -> None:
             return
 
         insertados = 0
+        sin_enlazar = 0
         for c in _CGM_CONTRATOS:
             nombre = c.get("proyecto_nombre", "")
             inv = c.get("inversionista_nombre")
@@ -1169,13 +1171,21 @@ def _run_cgm_seed() -> None:
             fecha_str = c.get("fecha_firma_contrato")
             fecha = date.fromisoformat(fecha_str) if fecha_str else None
 
-            proyecto = db.execute(
-                text("SELECT id FROM proyectos WHERE LOWER(nombre_comercial) LIKE LOWER(:q) LIMIT 1"),
-                {"q": f"%{nombre.split(' - ')[-1].strip()[:20]}%"},
-            ).first()
+            # Reuse the team's robust matcher (exact→partial→fuzzy, accent-insensitive,
+            # also matches aliases/bitácora/clientes) instead of a naive LIKE. The old
+            # `LIKE %{tail[:20]}%` linked the contract to an ARBITRARY proyecto when the
+            # derived name was empty/short (`LIKE %%`); find_proyecto_by_name returns None
+            # on empty input, so an unmatched contract stays unlinked instead of mislinked.
+            # fuzzy=False: en un seed, mal-enlazar es peor que no enlazar. El paso fuzzy
+            # confunde familias numeradas ('GD Polaris 2'≈'GD Polaris 1'); exacto/parcial/
+            # alias bastan y son seguros. Sin match → proyecto_id=None (reconciliable).
+            nombre_proyecto = nombre.split(" - ")[-1].strip()
+            proy = find_proyecto_by_name(db, nombre_proyecto, fuzzy=False)
+            if proy is None:
+                sin_enlazar += 1
 
             obj = ContratoServicio(
-                proyecto_id=proyecto[0] if proyecto else None,
+                proyecto_id=proy.id if proy else None,
                 servicio_aplica="representacion",
                 contratante_nombre="Unergy Energia Digital S.A.S. E.S.P.",
                 prestador_nombre="Unergy Energia Digital S.A.S. E.S.P.",
@@ -1195,7 +1205,8 @@ def _run_cgm_seed() -> None:
             insertados += 1
 
         db.commit()
-        print(f"[cgm seed] {insertados} contratos insertados")
+        print(f"[cgm seed] {insertados} contratos insertados, "
+              f"{sin_enlazar} sin proyecto_id (revisar Representación)")
     except Exception as e:
         db.rollback()
         print(f"[cgm seed] ERROR: {e}")

@@ -37,8 +37,12 @@ def _all_names(proyecto: Proyecto) -> list[str]:
     return [n for n in names if n]
 
 
-def find_proyecto_by_name(db: Session, nombre_externo: str) -> Proyecto | None:
-    """Devuelve el Proyecto que mejor coincide con nombre_externo, o None."""
+def find_proyecto_by_name(db: Session, nombre_externo: str, fuzzy: bool = True) -> Proyecto | None:
+    """Devuelve el Proyecto que mejor coincide con nombre_externo, o None.
+
+    fuzzy=False desactiva el paso 5 (SequenceMatcher ≥0.75): úsalo cuando un falso
+    positivo sea costoso, p.ej. familias numeradas ('GD Polaris 2' tiene ratio 0.93
+    con 'GD Polaris 1'). Exacto/alias/parcial (pasos 1-4) NO confunden hermanos así."""
     if not nombre_externo or not nombre_externo.strip():
         return None
 
@@ -67,7 +71,9 @@ def find_proyecto_by_name(db: Session, nombre_externo: str) -> Proyecto | None:
     if best_partial:
         return best_partial
 
-    # Paso 5: similitud SequenceMatcher
+    # Paso 5: similitud SequenceMatcher (omitible: confunde familias numeradas)
+    if not fuzzy:
+        return None
     best_score = 0.0
     best_fuzzy: Proyecto | None = None
     for proy in proyectos:

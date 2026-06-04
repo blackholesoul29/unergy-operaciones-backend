@@ -380,6 +380,20 @@ def match_proyecto(proyectos_db: list, nombre: str) -> dict | None:
     return None
 
 
+ALIASES_INVERSIONISTA = {
+    "17844 sol de la sierra": "patrimonios autonomos fiduciaria bancolombia",
+    "patrimonios autonomos fiduciaria bancolombia s a sociedad fiduciaria - 17844 sol de la sierra": "patrimonios autonomos fiduciaria bancolombia",
+}
+
+
+def normalizar_alias_inv(nombre: str) -> str:
+    n = normalizar(nombre)
+    for patron, alias in ALIASES_INVERSIONISTA.items():
+        if patron in n:
+            return alias
+    return n
+
+
 def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
     if not nombre or nombre.upper() == "TOTAL":
         return None
@@ -390,7 +404,7 @@ def match_inversionista(inversionistas_db: list, nombre: str) -> dict | None:
 
     # Fase 1: match directo normalizado (sin aliases) — evita colisiones entre
     # entidades distintas que comparten el mismo alias (ej. ESTRADA vs STRADA)
-    norm = normalizar(nombre)
+    norm = normalizar_alias_inv(nombre)
     for inv in inversionistas_db:
         cn = normalizar(_nombre_db(inv))
         if cn and (cn == norm or cn in norm or norm in cn):

@@ -252,8 +252,8 @@ class API:
         for attempt in range(4):
             try:
                 r = requests.post(f"{self.base}{path}", json=body, headers=self._h(), timeout=30)
-                # Retry transient 500s (Railway cold-start / overload)
-                if r.status_code == 500 and attempt < 3:
+                # Retry transient 5xx (Railway cold-start / overload)
+                if r.status_code in (500, 502, 503, 504) and attempt < 3:
                     wait = 2 ** attempt
                     print(f"    [retry {attempt+1}/3 en {wait}s — 500: {r.text[:120]}]")
                     sys.stdout.flush()

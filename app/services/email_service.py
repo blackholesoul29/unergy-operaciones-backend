@@ -293,23 +293,23 @@ def send_falla_notification_email(
     codigo_falla: str,
     proyecto_nombre: str,
     descripcion: str,
+    estado_codigo: str = "",
     estado_etiqueta: str,
-    estado_color: str,
     prioridad_etiqueta: str,
     fecha_identificacion: str,
+    hora_identificacion: str = "",
     asignado_a: str | None,
     registrado_por: str,
-    accion: str = "creada",   # "creada" | "actualizada" | "cerrada"
+    accion: str = "creada",
     frontend_url: str = "",
+    # backwards-compat
+    estado_color: str = "",
+    tipo_nombre: str = "",
+    categoria_etiqueta: str = "",
 ) -> dict:
     """
-    Envía notificación de falla a los correos operacionales del cliente.
-
-    Retorna:
-        {"ok": True, "enviados": [...], "errores": [...]}
-
-    Si SMTP no está configurado, registra en logs y retorna con ok=False.
-    No lanza excepción — siempre retorna sin romper el flujo de la falla.
+    Envía notificación de falla con diseño Unergy de 9 secciones.
+    No lanza excepción — retorna {"ok", "enviados", "errores"}.
     """
     if not to_emails:
         logger.warning("[FALLA_EMAIL] Sin destinatarios para %s", codigo_falla)
@@ -321,68 +321,142 @@ def send_falla_notification_email(
         print(msg)
         return {"ok": False, "enviados": [], "errores": ["SMTP no configurado"]}
 
-    acciones_label = {"creada": "Nueva falla registrada", "actualizada": "Falla actualizada", "cerrada": "Falla cerrada"}.get(accion, accion.title())
-    subject = f"[{acciones_label}] {codigo_falla} — {proyecto_nombre}"
-    falla_url = f"{frontend_url}/fallas/{codigo_falla}" if frontend_url else ""
-    ver_link = f'<a href="{falla_url}" style="color:#915BD8;font-weight:700">Ver falla →</a>' if falla_url else ""
+    # ── Colores y labels según estado ────────────────────────────────────────
+    _ESTADO_MAP = {
+        "abierta":      ("#FF5757", "Falla Activa",     "⚠️"),
+        "en_gestion":   ("#F6A623", "En Revisión",      "🔧"),
+        "en_espera":    ("#F6A623", "En Revisión",      "🔧"),
+        "programado":   ("#915BD8", "Falla Programada", "📅"),
+        "cerrada":      ("#4ADE80", "Falla Resuelta",   "✅"),
+        "sin_solucion": ("#A89EC0", "Sin Solución",     "🔕"),
+    }
+    strip_color, strip_label, emoji = _ESTADO_MAP.get(
+        estado_codigo, ("#915BD8", estado_etiqueta or "Notificación", "🔔")
+    )
 
-    body_html = f"""
-<html>
-<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:600px;margin:0 auto;padding:0">
-  <div style="background:#1A0F2E;padding:20px 28px;border-radius:10px 10px 0 0">
-    <div style="color:#F6FF72;font-size:18px;font-weight:800;letter-spacing:1px">UNERGY</div>
-    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Gestión de Fallas</div>
-  </div>
+    fecha_hora = f"{fecha_identificacion}" + (f" · {hora_identificacion}" if hora_identificacion else "")
+    falla_url  = f"{frontend_url}/fallas" if frontend_url else ""
+    logo_svg   = (
+        '<svg width="44" height="36" viewBox="0 0 44 36" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<circle cx="22" cy="4" r="3" fill="white"/>'
+        '<path d="M8 10 L8 24 Q8 34 22 34 Q36 34 36 24 L36 10" stroke="white" stroke-width="5" fill="none" stroke-linecap="round"/>'
+        '</svg>'
+    )
 
-  <div style="background:#F7F4FD;padding:20px 28px;border:1px solid #EDE8F5;border-top:none">
-    <div style="font-size:13px;color:#6B5F80;margin-bottom:4px">{acciones_label}</div>
-    <h2 style="margin:0 0 4px;font-size:20px;font-weight:800">{proyecto_nombre}</h2>
-    <span style="display:inline-block;font-family:monospace;font-size:13px;font-weight:700;background:#1A0F2E;color:#F6FF72;padding:2px 10px;border-radius:4px">{codigo_falla}</span>
-  </div>
+    subject = f"Unergy {emoji} {strip_label} — {proyecto_nombre} | {codigo_falla}"
 
-  <div style="background:#fff;padding:20px 28px;border:1px solid #EDE8F5;border-top:none">
+    body_html = f"""<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px 0;background:#F4F1F9;font-family:-apple-system,'Segoe UI',Arial,sans-serif">
 
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <tr style="border-bottom:1px solid #F3F0FA">
-        <td style="padding:8px 0;color:#A89EC0;width:150px;font-weight:600">Estado</td>
-        <td style="padding:8px 0">
-          <span style="background:{estado_color}22;color:{estado_color};border:1px solid {estado_color}44;padding:2px 10px;border-radius:999px;font-weight:700;font-size:12px">
-            {estado_etiqueta}
-          </span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center">
+<table role="presentation" width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%">
+
+  <!-- 1. HEADER -->
+  <tr><td style="background:#1A0F2E;padding:20px 28px;border-radius:12px 12px 0 0">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="vertical-align:middle">{logo_svg}</td>
+        <td style="vertical-align:middle;text-align:right">
+          <span style="font-family:monospace;font-size:13px;font-weight:700;color:#F6FF72;letter-spacing:.5px">{codigo_falla}</span>
         </td>
       </tr>
-      <tr style="border-bottom:1px solid #F3F0FA">
-        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Prioridad</td>
-        <td style="padding:8px 0;font-weight:600">{prioridad_etiqueta}</td>
-      </tr>
-      <tr style="border-bottom:1px solid #F3F0FA">
-        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Identificada</td>
-        <td style="padding:8px 0">{fecha_identificacion}</td>
-      </tr>
-      <tr style="border-bottom:1px solid #F3F0FA">
-        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Asignado a</td>
-        <td style="padding:8px 0">{asignado_a or "Sin asignar"}</td>
-      </tr>
-      <tr style="border-bottom:1px solid #F3F0FA">
-        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Registrado por</td>
-        <td style="padding:8px 0">{registrado_por}</td>
+    </table>
+  </td></tr>
+
+  <!-- 2. STRIP -->
+  <tr><td style="background:{strip_color};padding:10px 28px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td>
+          <span style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#fff;opacity:.85">{strip_label}</span>
+        </td>
+        <td style="text-align:right">
+          <span style="font-size:10px;font-weight:600;color:#fff;opacity:.9">{proyecto_nombre} &nbsp;·&nbsp; {fecha_hora}</span>
+        </td>
       </tr>
     </table>
+  </td></tr>
 
-    <div style="margin-top:16px;background:#F7F4FD;border-radius:8px;padding:14px 16px;border:1px solid #EDE8F5">
-      <div style="font-size:11px;font-weight:700;color:#A89EC0;letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px">DESCRIPCIÓN</div>
-      <div style="font-size:14px;color:#1A0F2E;line-height:1.5">{descripcion}</div>
+  <!-- 3. NOMBRE DEL PROYECTO -->
+  <tr><td style="background:#ffffff;padding:22px 28px 16px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    <div style="font-size:22px;font-weight:800;color:#1A0F2E;margin:0 0 14px">{proyecto_nombre}</div>
+    <div style="height:1px;background:#EDE8F5"></div>
+  </td></tr>
+
+  <!-- 4. CAJA DE FALLA -->
+  <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    <div style="background:#F7F4FD;border-left:3px solid #915BD8;border-radius:0 8px 8px 0;padding:12px 16px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">CÓDIGO DE FALLA</div>
+      <div style="font-size:15px;font-weight:700;color:#1A0F2E;margin-bottom:8px;font-family:monospace">{codigo_falla}</div>
+      <span style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;background:#915BD820;color:#915BD8;border:1px solid #915BD840;padding:2px 10px;border-radius:999px">{prioridad_etiqueta}</span>
     </div>
+  </td></tr>
 
-    {f'<div style="margin-top:16px;text-align:right">{ver_link}</div>' if ver_link else ''}
-  </div>
+  <!-- 5. DESCRIPCIÓN -->
+  <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    <div style="background:#F7F4FD;border-radius:8px;padding:14px 16px;border:1px solid #EDE8F5">
+      <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:8px">DESCRIPCIÓN</div>
+      <div style="font-size:13px;font-weight:400;color:#1A0F2E;line-height:1.75">{descripcion}</div>
+    </div>
+  </td></tr>
 
-  <div style="padding:14px 28px;text-align:center;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
-    <p style="color:#6B5F80;font-size:12px;margin:0">
-      Notificación automática enviada desde la Plataforma de Operaciones Unergy.<br>
-      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
-    </p>
-  </div>
+  <!-- 6. METADATOS -->
+  <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="width:33%;vertical-align:top;padding-right:8px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">FECHA IDENTIFICACIÓN</div>
+          <div style="font-size:12px;font-weight:700;color:#1A0F2E">{fecha_hora or "—"}</div>
+        </td>
+        <td style="width:33%;vertical-align:top;padding:0 8px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">ESTADO</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{strip_color};flex-shrink:0"></span>
+            <span style="font-size:12px;font-weight:700;color:#1A0F2E">{estado_etiqueta}</span>
+          </div>
+        </td>
+        <td style="width:33%;vertical-align:top;padding-left:8px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">RESPONSABLE</div>
+          <div style="font-size:12px;font-weight:700;color:#1A0F2E">{asignado_a or registrado_por}</div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <!-- 7. AVISO VERDE -->
+  <tr><td style="background:#ffffff;padding:14px 28px;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    <div style="border-left:3px solid #4ADE80;background:#F0FFF6;border-radius:0 8px 8px 0;padding:12px 16px">
+      <div style="font-size:12px;font-weight:700;color:#1A3D2B;margin-bottom:2px">Seguimiento en curso</div>
+      <div style="font-size:12px;color:#1A3D2B;opacity:.8">Nuestro equipo está gestionando esta falla. Recibirás actualizaciones ante cualquier cambio de estado o resolución.</div>
+    </div>
+  </td></tr>
+
+  <!-- 8. CTA -->
+  <tr><td style="background:#ffffff;padding:20px 28px;text-align:center;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
+    {'<a href="' + falla_url + '" style="display:inline-block;background:#1A0F2E;color:#F6FF72;font-size:13px;font-weight:800;padding:13px 32px;border-radius:8px;text-decoration:none;letter-spacing:.3px">Ver detalle de la falla →</a>' if falla_url else '<span style="display:inline-block;background:#1A0F2E;color:#F6FF72;font-size:13px;font-weight:800;padding:13px 32px;border-radius:8px;letter-spacing:.3px">Plataforma Unergy Operaciones</span>'}
+  </td></tr>
+
+  <!-- 9. FOOTER -->
+  <tr><td style="background:#F7F4FD;padding:14px 28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 12px 12px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="vertical-align:middle">
+          <span style="font-size:11px;font-weight:600;color:#7B6BA0">Unergy · Operación y Mantenimiento Solar</span>
+        </td>
+        <td style="text-align:right;vertical-align:middle">
+          <span style="font-size:11px;font-weight:600;color:#A89EC0">Notificación automática — no responder</span>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+
 </body>
 </html>"""
 

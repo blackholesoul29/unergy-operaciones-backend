@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -332,20 +333,35 @@ def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
     return []
 
 
-def _notificar_falla(falla, accion: str, db) -> None:
-    """Envía email de notificación si falla.notificacion == True. No lanza excepción."""
-    if not falla.notificacion:
-        return
+_notif_logger = logging.getLogger("fallas.notificacion")
+
+
+def _enviar_notificacion(
+    falla,
+    accion: str,
+    usuario_nombre: str,
+    db,
+) -> dict:
+    """
+    Envía email de notificación y retorna el resultado.
+    Nunca lanza excepción — la falla se guarda siempre.
+    Retorna: {"ok": bool, "enviados": [...], "errores": [...], "sin_correos": bool}
+    """
     from app.services.email_service import send_falla_notification_email
     from app.core.config import settings
+    from datetime import datetime, timezone
+
     correos = _get_correos_cliente(falla.proyecto_id, db)
+    ts = datetime.now(timezone.utc).isoformat()
+
     if not correos:
-        import logging
-        logging.getLogger("fallas").warning(
-            "notificacion=True pero sin correos operacionales para proyecto %s", falla.proyecto_id
+        _notif_logger.warning(
+            "[%s] usuario=%s falla=%s accion=%s — SIN correos operacionales para proyecto %s",
+            ts, usuario_nombre, falla.codigo_interno, accion, falla.proyecto_id,
         )
-        return
-    send_falla_notification_email(
+        return {"ok": False, "enviados": [], "errores": ["Sin correos operacionales configurados para este cliente"], "sin_correos": True}
+
+    resultado = send_falla_notification_email(
         to_emails=correos,
         codigo_falla=falla.codigo_interno,
         proyecto_nombre=falla.proyecto.nombre_comercial if falla.proyecto else str(falla.proyecto_id),
@@ -355,10 +371,24 @@ def _notificar_falla(falla, accion: str, db) -> None:
         prioridad_etiqueta=falla.prioridad.etiqueta if falla.prioridad else "",
         fecha_identificacion=str(falla.fecha_identificacion or ""),
         asignado_a=falla.asignado_a.nombre if falla.asignado_a else None,
-        registrado_por=falla.registrado_por.nombre if falla.registrado_por else "",
+        registrado_por=usuario_nombre,
         accion=accion,
         frontend_url=settings.FRONTEND_URL,
     )
+    resultado["sin_correos"] = False
+
+    if resultado.get("ok"):
+        _notif_logger.info(
+            "[%s] usuario=%s falla=%s accion=%s — ENVIADO a: %s",
+            ts, usuario_nombre, falla.codigo_interno, accion, resultado["enviados"],
+        )
+    else:
+        _notif_logger.error(
+            "[%s] usuario=%s falla=%s accion=%s — ERROR: %s",
+            ts, usuario_nombre, falla.codigo_interno, accion, resultado["errores"],
+        )
+
+    return resultado
 
 
 @router.post("", response_model=FallaOut, status_code=201)
@@ -377,9 +407,7 @@ def create_falla(
     )
     db.add(falla)
     db.commit()
-    result = _get_or_404(falla.id, db)
-    _notificar_falla(result, "creada", db)
-    return result
+    return _get_or_404(falla.id, db)
 
 
 @router.get("/{id}", response_model=FallaOut)
@@ -401,11 +429,28 @@ def update_falla(
     for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()
-    result = _get_or_404(id, db)
-    # Determinar acción según estado final
-    accion = "cerrada" if result.estado and result.estado.es_estado_final else "actualizada"
-    _notificar_falla(result, accion, db)
-    return result
+    return _get_or_404(id, db)
+
+
+@router.post("/{id}/notificar")
+def notificar_falla(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Envía la notificación por correo para la falla indicada.
+    Se llama desde el frontend tras guardar cuando notificacion=True.
+    Retorna: {"ok", "enviados", "errores", "sin_correos"}
+    """
+    falla = _get_or_404(id, db)
+    accion = "cerrada" if falla.estado and falla.estado.es_estado_final else "creada"
+    return _enviar_notificacion(
+        falla=falla,
+        accion=accion,
+        usuario_nombre=current_user.nombre,
+        db=db,
+    )
 
 
 @router.delete("/{id}", status_code=204)

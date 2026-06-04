@@ -29,10 +29,29 @@ router = APIRouter(prefix="/representacion", tags=["Representacion"])
 _DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
 
 
+def _read_json(filename: str) -> Any:
+    """Lee un archivo JSON manejando BOM y errores de encoding."""
+    path = _DATA_DIR / filename
+    # utf-8-sig maneja BOM automáticamente
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return json.loads(path.read_text(encoding=enc))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+    return None
+
+
 def _load_data_cgm() -> list[dict]:
     """DataCGM.json → sección 'Indexación' (metadatos por proyecto/inversionista)."""
-    raw = json.loads((_DATA_DIR / "DataCGM.json").read_text(encoding="utf-8"))
-    return raw.get("Indexación", [])
+    try:
+        raw = _read_json("DataCGM.json")
+        if isinstance(raw, dict):
+            # La clave puede tener acento o no
+            return raw.get("Indexación", raw.get("Indexacion", []))
+        return []
+    except Exception as e:
+        print(f"[representacion] Error cargando DataCGM.json: {e}")
+        return []
 
 
 def _load_idx_cgm() -> list[dict]:
@@ -40,17 +59,37 @@ def _load_idx_cgm() -> list[dict]:
     IndexacionCGM.json — el archivo NO tiene corchetes de array externo.
     Lo envolvemos para parsearlo como JSON válido.
     """
-    text = (_DATA_DIR / "IndexacionCGM.json").read_text(encoding="utf-8").strip()
-    # Si no empieza con '[', envolverlo
-    if not text.startswith("["):
-        text = "[" + text + "]"
-    return json.loads(text)
+    try:
+        path = _DATA_DIR / "IndexacionCGM.json"
+        for enc in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                text = path.read_text(encoding=enc).strip()
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            return []
+        # Si es un array ya válido, parsear directamente
+        if text.startswith("["):
+            return json.loads(text)
+        # Envolver: el archivo es una secuencia de objetos separados por comas
+        wrapped = "[" + text + "]"
+        return json.loads(wrapped)
+    except Exception as e:
+        print(f"[representacion] Error cargando IndexacionCGM.json: {e}")
+        return []
 
 
 def _load_idx_rep() -> list[dict]:
     """IndexacionRepre.json → sección 'Indexación'."""
-    raw = json.loads((_DATA_DIR / "IndexacionRepre.json").read_text(encoding="utf-8"))
-    return raw.get("Indexación", [])
+    try:
+        raw = _read_json("IndexacionRepre.json")
+        if isinstance(raw, dict):
+            return raw.get("Indexación", raw.get("Indexacion", []))
+        return []
+    except Exception as e:
+        print(f"[representacion] Error cargando IndexacionRepre.json: {e}")
+        return []
 
 
 # ── IPC rates (DANE) ──────────────────────────────────────────────────────────

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +23,25 @@ router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar (Soleniu
 
 _client: SoleniumClient | None = None
 _gaia_client: GaiaClient | None = None
+
+# ── TTL cache en memoria ───────────────────────────────────────────────────────
+# Evita llamar a Solenium/Gaia en cada request; se invalida solo pasado el TTL.
+_cache: dict[str, tuple[float, object]] = {}   # key → (timestamp, data)
+
+CACHE_TTL_FLEET  = 60    # segundos — fleet monitoring (datos de flota)
+CACHE_TTL_DETAIL = 90    # segundos — detalle por proyecto
+CACHE_TTL_GENHOY = 120   # segundos — generación de hoy
+
+
+def _cache_get(key: str) -> object | None:
+    entry = _cache.get(key)
+    if entry and time.monotonic() - entry[0] < entry[1][0]:  # type: ignore[index]
+        return entry[1][1]
+    return None
+
+
+def _cache_set(key: str, ttl: int, data: object) -> None:
+    _cache[key] = (time.monotonic(), (ttl, data))
 
 
 def _get_client() -> SoleniumClient:
@@ -305,7 +326,10 @@ def generacion_hoy(
     Empareja proyectos por project_id_solenium (explícito) o por nombre (fuzzy).
     Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    _GENHOY_KEY = f"genhoy:{date.today().isoformat()}"
+    cached = _cache_get(_GENHOY_KEY)
+    if cached:
+        return cached
 
     client = _get_client()
 
@@ -399,11 +423,13 @@ def generacion_hoy(
             })
 
     result.sort(key=lambda x: x["kwh_real"], reverse=True)
-    return {
+    data = {
         "fecha":    date.today().isoformat(),
         "total":    round(sum(r["kwh_real"] for r in result), 1),
         "proyectos": result,
     }
+    _cache_set(_GENHOY_KEY, CACHE_TTL_GENHOY, data)
+    return data
 
 
 @router.get("/debug-matching")
@@ -841,9 +867,19 @@ def fleet_monitoring(
             "projects": [],
         }
 
-    avail_map = client.get_availability()   # {sol_id_int: {name, availability, category}}
+    # Caché de flota (evita 2 llamadas Solenium por cada refresh)
+    _FLEET_CACHE_KEY = f"fleet:{date.today().isoformat()}"
+    cached = _cache_get(_FLEET_CACHE_KEY)
+    if cached:
+        return cached
 
-    summary_list = client.get_project_summary()
+    # Paralelizar las 2 llamadas Solenium que antes eran seriales
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        avail_f   = ex.submit(client.get_availability)
+        summary_f = ex.submit(client.get_project_summary)
+    avail_map    = avail_f.result() or {}
+    summary_list = summary_f.result() or []
+
     summary_map: dict[int, dict] = {}
     for s in summary_list:
         pid = s.get("project_id") or s.get("id")
@@ -903,7 +939,7 @@ def fleet_monitoring(
     _order = {"caido": 0, "sin_comunicacion": 1, "degradado": 2, "online": 3}
     projects_result.sort(key=lambda x: (_order.get(x["status"], 4), -(x["power_kw"] or 0)))
 
-    return {
+    result = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "fleet": {
             "total":              len(proyectos),
@@ -917,6 +953,8 @@ def fleet_monitoring(
         },
         "projects": projects_result,
     }
+    _cache_set(_FLEET_CACHE_KEY, CACHE_TTL_FLEET, result)
+    return result
 
 
 @router.get("/monitoring/{proyecto_id}")
@@ -929,13 +967,17 @@ def project_monitoring_detail(
     Detail monitoring for one project: inverter status + power curve today + 30d generation.
     Uses our internal proyecto_id, resolves to Solenium ID via project_id_solenium.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
     if not p.project_id_solenium:
         raise HTTPException(422, "Proyecto sin ID Solenium")
+
+    # Caché de detalle por proyecto (evita 21-30 llamadas externas por cada tarjeta)
+    _detail_key = f"detail:{proyecto_id}:{date.today().isoformat()}"
+    cached = _cache_get(_detail_key)
+    if cached:
+        return cached
 
     sol_id = int(p.project_id_solenium)
     client = _get_client()
@@ -1067,7 +1109,7 @@ def project_monitoring_detail(
 
     has_strings = any(inv.get("strings") for inv in processed_inverters)
 
-    return {
+    result = {
         "proyecto_id":            p.id,
         "nombre":                 p.nombre_comercial,
         "sol_id":                 sol_id,
@@ -1084,5 +1126,7 @@ def project_monitoring_detail(
         "gaia_snapshot_principal": snap_p,
         "gaia_snapshot_respaldo":  snap_r,
     }
+    _cache_set(_detail_key, CACHE_TTL_DETAIL, result)
+    return result
 
 

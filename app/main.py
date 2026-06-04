@@ -1579,6 +1579,155 @@ def _scheduled_evo_forecast_ingest():
         print(f"[evo_forecast_ingest] Failed: {e}")
 
 
+_ALERTA_EMAILS = ["adhara@unergy.io", "jessica@unergy.io"]
+
+
+def _scheduled_representacion_alertas():
+    """
+    Revisa aniversarios de contratos CGM/Representación.
+    Envía email 30 y 15 días antes del aniversario a _ALERTA_EMAILS.
+    Corre diariamente a las 08:00.
+    """
+    import json as _json
+    from datetime import date, timedelta
+    from pathlib import Path as _Path
+
+    try:
+        from app.services.email_service import _smtp_send, _log_send
+        from app.core.config import settings as _s
+        import smtplib, ssl
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        if not _s.SMTP_HOST:
+            return
+
+        data_dir = _Path(__file__).parent.parent / "data"
+        raw = _json.loads((data_dir / "DataCGM.json").read_text(encoding="utf-8"))
+        contratos = raw.get("Indexación", [])
+
+        today = date.today()
+        alertas_enviadas = 0
+
+        for c in contratos:
+            firma_str = c.get("Firma contrato")
+            proyecto = (c.get("Proyecto") or "").strip()
+            inv = (c.get("Inversionista") or "").strip()
+            tarifa_cgm = c.get("Tarifa CGM (kWh)", 0) or 0
+            tarifa_rep = c.get("Tarifa Representación (kWh)", 0) or 0
+
+            if not firma_str or not proyecto:
+                continue
+
+            try:
+                firma = date.fromisoformat(firma_str)
+            except ValueError:
+                continue
+
+            # Calcular próximo aniversario
+            base_year = firma.year
+            for offset in range(1, 10):
+                aniv_year = base_year + offset
+                try:
+                    aniv = date(aniv_year, firma.month, firma.day)
+                except ValueError:
+                    # Feb 29 en año no bisiesto → Feb 28
+                    aniv = date(aniv_year, firma.month, 28)
+
+                if aniv < today:
+                    continue  # ya pasó
+
+                dias_restantes = (aniv - today).days
+                if dias_restantes not in (30, 15):
+                    continue
+
+                # Calcular valor indexado para ese aniversario
+                # IPC dic del año anterior al aniversario
+                ipc_key = aniv_year - 1  # IPC dic 2024 → aniversario 2025
+                ipc_rates = {2023: 0.0928, 2024: 0.052, 2025: 0.051}
+                ipc = ipc_rates.get(ipc_key, 0.051)
+
+                # Valor del aniversario anterior * (1 + IPC)
+                # Aproximación: usamos tarifa base para simplicidad
+                valor_cgm_nuevo = round(tarifa_cgm * ((1 + ipc) ** offset), 4) if tarifa_cgm else None
+                valor_rep_nuevo = round(tarifa_rep * ((1 + ipc) ** offset), 4) if tarifa_rep else None
+
+                subject = (
+                    f"Alerta de renovacion CGM — {proyecto} — "
+                    f"{dias_restantes} dias para aniversario"
+                )
+                body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:560px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">
+      Alerta de Renovacion CGM
+    </div>
+  </div>
+  <div style="background:#F7F4FD;padding:28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 16px;margin-bottom:20px">
+      <strong>En {dias_restantes} dias</strong> se cumple el aniversario del contrato
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:14px">
+      <tr><td style="padding:6px 0;color:#6B5F80;width:180px">Proyecto</td>
+          <td style="padding:6px 0;font-weight:600">{proyecto}</td></tr>
+      <tr><td style="padding:6px 0;color:#6B5F80">Inversionista</td>
+          <td style="padding:6px 0;font-weight:600">{inv or "—"}</td></tr>
+      <tr><td style="padding:6px 0;color:#6B5F80">Fecha aniversario</td>
+          <td style="padding:6px 0;font-weight:600">{aniv.strftime("%d/%m/%Y")}</td></tr>
+      <tr><td style="padding:6px 0;color:#6B5F80">IPC aplicado</td>
+          <td style="padding:6px 0;font-weight:600">{ipc*100:.2f}% (IPC dic {ipc_key})</td></tr>
+      {'<tr><td style="padding:6px 0;color:#6B5F80">Nueva tarifa CGM</td><td style="padding:6px 0;font-weight:600;color:#f59e0b">' + f'{valor_cgm_nuevo} $/kWh</td></tr>' if valor_cgm_nuevo else ""}
+      {'<tr><td style="padding:6px 0;color:#6B5F80">Nueva tarifa Rep.</td><td style="padding:6px 0;font-weight:600;color:#3b82f6">' + f'{valor_rep_nuevo} $/kWh</td></tr>' if valor_rep_nuevo else ""}
+    </table>
+    <p style="color:#6B5F80;font-size:12px;margin-top:20px">
+      Este es un mensaje automatico del sistema de Operaciones Unergy.<br>
+      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = _s.SMTP_FROM
+                msg["To"] = ", ".join(_ALERTA_EMAILS)
+                msg.attach(MIMEText(body_html, "html", "utf-8"))
+
+                try:
+                    context = ssl.create_default_context()
+                    with smtplib.SMTP(_s.SMTP_HOST, _s.SMTP_PORT) as server:
+                        server.ehlo()
+                        server.starttls(context=context)
+                        server.login(_s.SMTP_USER, _s.SMTP_PASSWORD)
+                        server.sendmail(_s.SMTP_FROM, _ALERTA_EMAILS, msg.as_string())
+                    _log_send(
+                        to_email=_ALERTA_EMAILS[0],
+                        cc=_ALERTA_EMAILS[1:],
+                        subject=subject,
+                        tipo="alerta_cgm",
+                        success=True,
+                    )
+                    alertas_enviadas += 1
+                except Exception as exc:
+                    _log_send(
+                        to_email=_ALERTA_EMAILS[0],
+                        cc=_ALERTA_EMAILS[1:],
+                        subject=subject,
+                        tipo="alerta_cgm",
+                        success=False,
+                        error_msg=str(exc),
+                    )
+                    print(f"[cgm_alertas] Error email {proyecto}: {exc}")
+                break  # solo el próximo aniversario
+
+        if alertas_enviadas:
+            print(f"[cgm_alertas] {alertas_enviadas} alertas enviadas")
+
+    except Exception as e:
+        print(f"[cgm_alertas] ERROR: {e}")
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -1655,6 +1804,13 @@ def _deferred_init():
                 CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
                 id="correlation_sync",
                 name="Daily correlation sync",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_representacion_alertas,
+                CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
+                id="cgm_alertas",
+                name="Alertas renovacion CGM/Representacion",
             )
 
             _mgs_scheduler.start()

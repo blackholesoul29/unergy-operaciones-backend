@@ -1,0 +1,570 @@
+
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0001 - Uruaco",
+  "Código Sun Factory": "COLATLT14P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995,
+  "Column12": "Año",
+  "Column13": "Tasa IPC",
+  "Column14": "Nota"
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0004 - Valle de Gandalf",
+  "Código Sun Factory": "COLCEST61P3",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995,
+  "Column12": 2024,
+  "Column13": 0.0928,
+  "Column14": "IPC acumulado 2023 — Certificado DANE"
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0005 - Cañahuate",
+  "Código Sun Factory": "COLCEST61P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995,
+  "Column12": 2025,
+  "Column13": 0.052,
+  "Column14": "IPC acumulado 2024 — Certificado DANE"
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0006 - Perijá (La inglesa)",
+  "Código Sun Factory": "COLCEST58P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995,
+  "Column12": 2026,
+  "Column13": 0.051,
+  "Column14": "IPC acumulado 2025 — Estimado \/ Proyectado"
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0007 - La Paz Vallenata (Medardo)",
+  "Código Sun Factory": "COLCEST9P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0008 - La Paz Verso (Villa Sonia)",
+  "Código Sun Factory": "COLCEST2P3",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0009 - El Molino (Macedonia)",
+  "Código Sun Factory": "COLLAGT19P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0010 - Villanueva (los suspiros)",
+  "Código Sun Factory": "COLLAGT27P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0013 - La Mesa (La Virginia 1)",
+  "Código Sun Factory": "COLSANT10P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0014 - El Olimpo",
+  "Código Sun Factory": "COLSANT4P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "Minigranja 0016 - La Puya - Valledupar, Cesar (Jericó 4_Cesar)",
+  "Código Sun Factory": "COLCEST45P5",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Ayurá 1",
+  "Proyecto": "MiniGranja 0017 - La Paz Esmeralda - La Esmeralda 1",
+  "Código Sun Factory": "COLCEST17P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-10-11",
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Suno - Solenium - Sandra Estrada",
+  "Proyecto": "Minigranja 0012 - La Reserva",
+  "Código Sun Factory": "COLSANT9P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2024-04-02",
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Suno - Solenium - Sandra Estrada",
+  "Proyecto": "Minigranja 0012 - La Reserva",
+  "Código Sun Factory": "COLSANT9P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2024-04-02",
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Proyecto": "GD Marimonda",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-03-17",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD NAOS 1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2024-07-17",
+  "IPC aplicado CGM (2025) 5.20%": 7.364000000000001,
+  "IPC aplicado CGM (2026) 5.10%": 7.7395640000000006
+ },
+ {
+  "Portafolio": "Suno - Solenium",
+  "Proyecto": "Minigranja 0015 - El Son",
+  "Código Sun Factory": "COLCEST45P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2024-08-09",
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Suno - Solenium",
+  "Proyecto": "Minigranja 0015 - El Son",
+  "Código Sun Factory": "COLCEST45P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Suno - Solenium",
+  "Proyecto": "Minigranja 0002 - Baraya",
+  "Código Sun Factory": "COLSUCT17P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Suno - Solenium",
+  "Proyecto": "Minigranja 0002 - Baraya",
+  "Código Sun Factory": "COLSUCT17P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2024-01-19",
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Suno - Solenium",
+  "Proyecto": "Minigranja 0002 - Baraya",
+  "Código Sun Factory": "COLSUCT17P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Serranía de Perijá",
+  "Proyecto": "Minigranja 0040 - La Cacica",
+  "Código Sun Factory": "COLCEST55P1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Serranía de Perijá",
+  "Proyecto": "Minigranja 0041  - Las piloneras",
+  "Código Sun Factory": "COLCEST55P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Cox",
+  "Proyecto": "Minigranja 0030 - Chimá Oriente",
+  "Código Sun Factory": "COLCORT7P1",
+  "Estado": "Construcción",
+  "Tarifa CGM (kWh)": 0,
+  "IPC aplicado CGM (2025) 5.20%": 0,
+  "IPC aplicado CGM (2026) 5.10%": 0
+ },
+ {
+  "Portafolio": "Cox",
+  "Proyecto": "Minigranja 0030 - Chimá Oriente",
+  "Código Sun Factory": "COLCORT7P1",
+  "Estado": "Construcción",
+  "Tarifa CGM (kWh)": 0,
+  "IPC aplicado CGM (2025) 5.20%": 0,
+  "IPC aplicado CGM (2026) 5.10%": 0
+ },
+ {
+  "Portafolio": "Kai",
+  "Proyecto": "Minigranja 0021 - Ibirico",
+  "Código Sun Factory": "COLCEST49P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Kai",
+  "Proyecto": "Minigranja 0020 - El Mapalé",
+  "Código Sun Factory": "COLCEST45P6",
+  "Estado": "Construcción",
+  "Tarifa CGM (kWh)": 0,
+  "IPC aplicado CGM (2025) 5.20%": 0,
+  "IPC aplicado CGM (2026) 5.10%": 0
+ },
+ {
+  "Portafolio": "Skandia",
+  "Proyecto": "Minigranja 0075 - Chiriguaná Norte 2",
+  "Código Sun Factory": "COLCEST60P4",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Portafolio": "Skandia",
+  "Proyecto": "Minigranja 0077 - Chiriguaná Norte 4",
+  "Código Sun Factory": "COLCEST60P2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "IPC aplicado CGM (2025) 5.20%": 6.312,
+  "IPC aplicado CGM (2026) 5.10%": 6.633912
+ },
+ {
+  "Proyecto": "MGS Naos 2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-02-20",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "Bayunca",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 0,
+  "Firma contrato": "2025-04-07",
+  "IPC aplicado CGM (2026) 5.10%": 0
+ },
+ {
+  "Proyecto": "MGS Naos 3",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-04-04",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "GD Delta 1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-06-11",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "GD Polaris 1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-06-11",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "PSF - Yurbaqua",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2025-08-20",
+  "IPC aplicado CGM (2026) 5.10%": 5.255
+ },
+ {
+  "Proyecto": "GD Sirius",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-06-09",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD Biosolar",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-06-09",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD Astrolumen La Garita",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-06-09",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD Agustin 1",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-06-09",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD 1MVA SAN ONOFRE",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 0,
+  "Firma contrato": "2025-07-12",
+  "IPC aplicado CGM (2026) 5.10%": 0
+ },
+ {
+  "Proyecto": "GD Yuan Solar",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2025-08-09",
+  "IPC aplicado CGM (2026) 5.10%": 5.255
+ },
+ {
+  "Proyecto": "GD Polaris 2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-09-02",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "GD delta 2",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 7,
+  "Firma contrato": "2025-08-25",
+  "IPC aplicado CGM (2026) 5.10%": 7.356999999999999
+ },
+ {
+  "Proyecto": "Sol Y Cielo 7 Los Bongos",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-11-19",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "La Catedral",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-08-22",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD San Pelayo",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-09-05",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "Monterrey ",
+  "Estado": "Construcción",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-10-17",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "GD La Hormiga",
+  "Estado": "Construcción",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2025-11-19",
+  "IPC aplicado CGM (2026) 5.10%": 5.7805
+ },
+ {
+  "Proyecto": "Sol&Cielo 9 - Ciénaga",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2025-11-19",
+  "IPC aplicado CGM (2026) 5.10%": 6.305999999999999
+ },
+ {
+  "Proyecto": "Taurus VIII",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2025-12-22",
+  "IPC aplicado CGM (2026) 5.10%": 5.7805
+ },
+ {
+  "Proyecto": "Taurus IX",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2025-12-22",
+  "IPC aplicado CGM (2026) 5.10%": 5.7805
+ },
+ {
+  "Proyecto": "Taurus X",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2025-12-22",
+  "IPC aplicado CGM (2026) 5.10%": 5.7805
+ },
+ {
+  "Proyecto": "GD Garza ",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2026-01-22"
+ },
+ {
+  "Proyecto": "La Perdiz",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2026-01-22"
+ },
+ {
+  "Proyecto": "GD El Mandarino",
+  "Tarifa CGM (kWh)": 5.5,
+  "Firma contrato": "2026-02-03"
+ },
+ {
+  "Proyecto": "GD Isabela",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2026-02-13"
+ },
+ {
+  "Proyecto": "GD ELEKTRA",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2026-03-12"
+ },
+ {
+  "Proyecto": "Agustín 2",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2026-03-12"
+ },
+ {
+  "Proyecto": "Agustín 3",
+  "Tarifa CGM (kWh)": 6,
+  "Firma contrato": "2026-03-12"
+ },
+ {
+  "Proyecto": "MGS 0011 El Roble",
+  "Tarifa CGM (kWh)": 6
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0018 - La Paz Leyenda",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2024-11-23"
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0019 - El Merengue (Jericó 2_Cesar)",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "Firma contrato": "2025-03-28"
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0019 - El Merengue (Jericó 2_Cesar)",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0023 - El Joropo",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Construcción"
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0023 - El Joropo",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Construcción"
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0025 - El Copey Occidente",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "IPC aplicado CGM (2025) 5.20%": 5.26,
+  "IPC aplicado CGM (2026) 5.10%": 5.5282599999999995
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0025 - El Copey Occidente",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5,
+  "IPC aplicado CGM (2026) 5.10%": 5.255
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0022 - La Cumbia",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0024 - San Diego Sur",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "MiniGranja 0024 - San Diego Sur",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0026 - Valencia Oriente",
+  "Código Sun Factory": "Ayurá S.A.S.",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ },
+ {
+  "Portafolio": "Sol de la Sierra 1",
+  "Proyecto": "Minigranja 0027 - Valencia Oriente 2",
+  "Código Sun Factory": "Solenium S.A.S",
+  "Estado": "Operación ",
+  "Tarifa CGM (kWh)": 5
+ }

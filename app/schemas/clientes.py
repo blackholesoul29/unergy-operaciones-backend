@@ -1,6 +1,23 @@
+import re
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime, date
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+def _validate_email_list(v: list) -> list:
+    """Validate each address in the list and return trimmed, lowercase entries."""
+    if not v:
+        return []
+    result = []
+    for raw in v:
+        addr = str(raw).strip().lower()
+        if not addr:
+            continue
+        if not _EMAIL_RE.match(addr):
+            raise ValueError(f"Dirección de correo inválida: {addr}")
+        result.append(addr)
+    return result
 
 
 class ClienteCreate(BaseModel):
@@ -12,6 +29,8 @@ class ClienteCreate(BaseModel):
     correo_liquidacion: Optional[str] = None
     correo_monitoreo: Optional[str] = None
     correo_soporte: Optional[str] = None
+    correo_operacional: Optional[str] = None
+    correos_operacionales: list[str] = []
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -24,6 +43,11 @@ class ClienteCreate(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     rut_url: Optional[str] = None
+
+    @field_validator("correos_operacionales", mode="before")
+    @classmethod
+    def validate_correos(cls, v):
+        return _validate_email_list(v or [])
 
 
 class ClienteUpdate(ClienteCreate):
@@ -84,6 +108,8 @@ class ClienteBase(BaseModel):
     correo_liquidacion: Optional[str] = None
     correo_monitoreo: Optional[str] = None
     correo_soporte: Optional[str] = None
+    correo_operacional: Optional[str] = None
+    correos_operacionales: list[str] = []
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -114,3 +140,10 @@ class ClienteOut(ClienteBase):
     @classmethod
     def none_to_list(cls, v):
         return v if v is not None else []
+
+    @field_validator("correos_operacionales", mode="before")
+    @classmethod
+    def coerce_correos(cls, v):
+        if isinstance(v, list):
+            return [str(x) for x in v if x]
+        return []

@@ -285,3 +285,172 @@ def send_alarm_notification_email(
     except Exception as exc:
         _log_send(to_email=to_emails[0], cc=to_emails[1:] or None, subject=subject, tipo="alarma", success=False, error_msg=str(exc))
         print(f"[ALARM_EMAIL] Failed to send to {to_emails}: {exc}")
+
+
+def send_falla_notification_email(
+    *,
+    to_emails: list[str],
+    codigo_falla: str,
+    proyecto_nombre: str,
+    descripcion: str,
+    estado_etiqueta: str,
+    estado_color: str,
+    prioridad_etiqueta: str,
+    fecha_identificacion: str,
+    asignado_a: str | None,
+    registrado_por: str,
+    accion: str = "creada",   # "creada" | "actualizada" | "cerrada"
+    frontend_url: str = "",
+) -> dict:
+    """
+    Envía notificación de falla a los correos operacionales del cliente.
+
+    Retorna:
+        {"ok": True, "enviados": [...], "errores": [...]}
+
+    Si SMTP no está configurado, registra en logs y retorna con ok=False.
+    No lanza excepción — siempre retorna sin romper el flujo de la falla.
+    """
+    if not to_emails:
+        logger.warning("[FALLA_EMAIL] Sin destinatarios para %s", codigo_falla)
+        return {"ok": False, "enviados": [], "errores": ["Sin destinatarios configurados"]}
+
+    if not settings.SMTP_HOST:
+        msg = f"[FALLA_EMAIL] SMTP no configurado — falla {codigo_falla} ({accion}) para {proyecto_nombre}"
+        logger.warning(msg)
+        print(msg)
+        return {"ok": False, "enviados": [], "errores": ["SMTP no configurado"]}
+
+    acciones_label = {"creada": "Nueva falla registrada", "actualizada": "Falla actualizada", "cerrada": "Falla cerrada"}.get(accion, accion.title())
+    subject = f"[{acciones_label}] {codigo_falla} — {proyecto_nombre}"
+    falla_url = f"{frontend_url}/fallas/{codigo_falla}" if frontend_url else ""
+    ver_link = f'<a href="{falla_url}" style="color:#915BD8;font-weight:700">Ver falla →</a>' if falla_url else ""
+
+    body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:600px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:20px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:18px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Gestión de Fallas</div>
+  </div>
+
+  <div style="background:#F7F4FD;padding:20px 28px;border:1px solid #EDE8F5;border-top:none">
+    <div style="font-size:13px;color:#6B5F80;margin-bottom:4px">{acciones_label}</div>
+    <h2 style="margin:0 0 4px;font-size:20px;font-weight:800">{proyecto_nombre}</h2>
+    <span style="display:inline-block;font-family:monospace;font-size:13px;font-weight:700;background:#1A0F2E;color:#F6FF72;padding:2px 10px;border-radius:4px">{codigo_falla}</span>
+  </div>
+
+  <div style="background:#fff;padding:20px 28px;border:1px solid #EDE8F5;border-top:none">
+
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="border-bottom:1px solid #F3F0FA">
+        <td style="padding:8px 0;color:#A89EC0;width:150px;font-weight:600">Estado</td>
+        <td style="padding:8px 0">
+          <span style="background:{estado_color}22;color:{estado_color};border:1px solid {estado_color}44;padding:2px 10px;border-radius:999px;font-weight:700;font-size:12px">
+            {estado_etiqueta}
+          </span>
+        </td>
+      </tr>
+      <tr style="border-bottom:1px solid #F3F0FA">
+        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Prioridad</td>
+        <td style="padding:8px 0;font-weight:600">{prioridad_etiqueta}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #F3F0FA">
+        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Identificada</td>
+        <td style="padding:8px 0">{fecha_identificacion}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #F3F0FA">
+        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Asignado a</td>
+        <td style="padding:8px 0">{asignado_a or "Sin asignar"}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #F3F0FA">
+        <td style="padding:8px 0;color:#A89EC0;font-weight:600">Registrado por</td>
+        <td style="padding:8px 0">{registrado_por}</td>
+      </tr>
+    </table>
+
+    <div style="margin-top:16px;background:#F7F4FD;border-radius:8px;padding:14px 16px;border:1px solid #EDE8F5">
+      <div style="font-size:11px;font-weight:700;color:#A89EC0;letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px">DESCRIPCIÓN</div>
+      <div style="font-size:14px;color:#1A0F2E;line-height:1.5">{descripcion}</div>
+    </div>
+
+    {f'<div style="margin-top:16px;text-align:right">{ver_link}</div>' if ver_link else ''}
+  </div>
+
+  <div style="padding:14px 28px;text-align:center;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <p style="color:#6B5F80;font-size:12px;margin:0">
+      Notificación automática enviada desde la Plataforma de Operaciones Unergy.<br>
+      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+    enviados = []
+    errores  = []
+
+    for to_email in to_emails:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = settings.SMTP_FROM
+            msg["To"]      = to_email
+            msg.attach(MIMEText(body_html, "html", "utf-8"))
+            _smtp_send(msg, [to_email])
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=True)
+            enviados.append(to_email)
+            logger.info("[FALLA_EMAIL] Sent to %s for %s", to_email, codigo_falla)
+        except Exception as exc:
+            err_msg = str(exc)
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=False, error_msg=err_msg)
+            errores.append(f"{to_email}: {err_msg}")
+            logger.error("[FALLA_EMAIL] Failed to send to %s for %s: %s", to_email, codigo_falla, exc)
+
+    return {"ok": len(enviados) > 0, "enviados": enviados, "errores": errores}
+
+
+def send_test_email(*, to_email: str, cliente_nombre: str) -> None:
+    """
+    Envía un correo de prueba para verificar la configuración del correo operacional.
+    Lanza RuntimeError si SMTP no está configurado o falla el envío.
+    """
+    if not settings.SMTP_HOST:
+        raise RuntimeError(
+            "SMTP no configurado. Define SMTP_HOST, SMTP_PORT, SMTP_USER, "
+            "SMTP_PASSWORD y SMTP_FROM en las variables de entorno."
+        )
+
+    subject = f"✓ Correo de prueba — {cliente_nombre} — Unergy"
+    body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:480px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Correo de prueba</div>
+  </div>
+  <div style="background:#F7F4FD;padding:28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <div style="background:#16a34a22;color:#16a34a;border:1px solid #16a34a44;border-radius:8px;padding:12px 16px;font-weight:700;font-size:14px;margin-bottom:16px">
+      ✓ Configuración correcta
+    </div>
+    <p style="margin:0 0 12px">Este correo confirma que la dirección <strong>{to_email}</strong> está correctamente configurada como correo operacional para el cliente <strong>{cliente_nombre}</strong>.</p>
+    <p style="margin:0 0 12px">Las notificaciones de fallas serán enviadas a esta dirección cuando se active la opción de notificación.</p>
+    <p style="color:#6B5F80;font-size:12px;margin:0">
+      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = settings.SMTP_FROM
+    msg["To"]      = to_email
+    msg.attach(MIMEText(body_html, "html", "utf-8"))
+
+    try:
+        _smtp_send(msg, [to_email])
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="prueba", success=True)
+        logger.info("[TEST_EMAIL] Sent to %s for cliente %s", to_email, cliente_nombre)
+    except Exception as exc:
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="prueba", success=False, error_msg=str(exc))
+        raise RuntimeError(f"No se pudo enviar el correo de prueba: {exc}") from exc

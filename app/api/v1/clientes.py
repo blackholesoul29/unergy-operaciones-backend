@@ -78,6 +78,30 @@ def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current
     db.commit()
 
 
+@router.post("/{id}/test-correo")
+def test_correo_operacional(
+    id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Envía un correo de prueba a la dirección indicada para verificar
+    que los correos operacionales del cliente están bien configurados.
+    body: {"email": "destino@empresa.com"}
+    """
+    from app.services.email_service import send_test_email
+    cliente = _get_cliente_or_404(id, db)
+    email = (body.get("email") or "").strip()
+    if not email:
+        raise HTTPException(400, "Debes indicar el campo 'email'")
+    try:
+        send_test_email(to_email=email, cliente_nombre=cliente.razon_social_nombre)
+        return {"ok": True, "enviado_a": email}
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 # ── Servicios ────────────────────────────────────────────────────────────────
 
 @router.get("/{id}/servicios", response_model=list[ClienteServicioOut])

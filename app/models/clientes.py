@@ -1,6 +1,7 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -47,6 +48,7 @@ class Cliente(Base):
     correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_operacional: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    correos_operacionales: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default="'[]'::jsonb")
     telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)

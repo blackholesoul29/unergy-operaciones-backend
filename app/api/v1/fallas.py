@@ -313,6 +313,54 @@ def list_fallas(
     return {"items": items, "total": total, "page": page, "size": effective_size, "pages": -(-total // effective_size)}
 
 
+def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
+    """Retorna la lista de correos operacionales del cliente del proyecto."""
+    from app.models.proyectos import Proyecto
+    from app.models.clientes import Cliente
+    proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not proy or not proy.cliente_id:
+        return []
+    cliente = db.query(Cliente).filter(Cliente.id == proy.cliente_id).first()
+    if not cliente:
+        return []
+    # Preferir array; fallback al campo string si el array está vacío
+    arr = cliente.correos_operacionales or []
+    if isinstance(arr, list) and arr:
+        return [str(e) for e in arr if e]
+    if cliente.correo_operacional:
+        return [cliente.correo_operacional]
+    return []
+
+
+def _notificar_falla(falla, accion: str, db) -> None:
+    """Envía email de notificación si falla.notificacion == True. No lanza excepción."""
+    if not falla.notificacion:
+        return
+    from app.services.email_service import send_falla_notification_email
+    from app.core.config import settings
+    correos = _get_correos_cliente(falla.proyecto_id, db)
+    if not correos:
+        import logging
+        logging.getLogger("fallas").warning(
+            "notificacion=True pero sin correos operacionales para proyecto %s", falla.proyecto_id
+        )
+        return
+    send_falla_notification_email(
+        to_emails=correos,
+        codigo_falla=falla.codigo_interno,
+        proyecto_nombre=falla.proyecto.nombre_comercial if falla.proyecto else str(falla.proyecto_id),
+        descripcion=falla.descripcion or "",
+        estado_etiqueta=falla.estado.etiqueta if falla.estado else "",
+        estado_color=falla.estado.color_hex or "#915BD8" if falla.estado else "#915BD8",
+        prioridad_etiqueta=falla.prioridad.etiqueta if falla.prioridad else "",
+        fecha_identificacion=str(falla.fecha_identificacion or ""),
+        asignado_a=falla.asignado_a.nombre if falla.asignado_a else None,
+        registrado_por=falla.registrado_por.nombre if falla.registrado_por else "",
+        accion=accion,
+        frontend_url=settings.FRONTEND_URL,
+    )
+
+
 @router.post("", response_model=FallaOut, status_code=201)
 def create_falla(
     data: FallaCreate,
@@ -329,7 +377,9 @@ def create_falla(
     )
     db.add(falla)
     db.commit()
-    return _get_or_404(falla.id, db)
+    result = _get_or_404(falla.id, db)
+    _notificar_falla(result, "creada", db)
+    return result
 
 
 @router.get("/{id}", response_model=FallaOut)
@@ -351,7 +401,11 @@ def update_falla(
     for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()
-    return _get_or_404(id, db)
+    result = _get_or_404(id, db)
+    # Determinar acción según estado final
+    accion = "cerrada" if result.estado and result.estado.es_estado_final else "actualizada"
+    _notificar_falla(result, accion, db)
+    return result
 
 
 @router.delete("/{id}", status_code=204)

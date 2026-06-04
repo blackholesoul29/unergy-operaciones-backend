@@ -2,7 +2,7 @@ import logging
 import traceback
 from datetime import date
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
@@ -1115,3 +1115,67 @@ def auto_populate_xm_datos(
         "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} ({tarifa_source}) = ${valor_bruto:,.0f} COP",
         "xm_datos": [_serializar_xm_dato(dato)],
     }
+
+
+# ── Carga masiva desde Excel ───────────────────────────────────────────────────
+
+@router.post("/cargar-excel")
+async def cargar_excel(
+    file: UploadFile = File(...),
+    hoja: str = Form(...),
+    periodo: str = Form(...),
+    limpiar: str = Form("false"),
+    dry_run: str = Form("false"),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(_require_liquidaciones_write),
+):
+    """
+    Carga un archivo Excel de panel de seguimiento contable.
+    periodo: YYYY-MM  (ej: 2026-05)
+    dry_run=true: retorna preview sin escribir en DB.
+    limpiar=true: borra mandatos/costos/facturas existentes antes de reimportar.
+    """
+    import tempfile, os
+    from app.utils.liquidaciones_loader import leer_hoja, cargar_desde_db
+
+    limpiar_bool = limpiar.lower() in ("true", "1", "yes", "on")
+    dry_run_bool = dry_run.lower() in ("true", "1", "yes", "on")
+
+    # Validar período
+    try:
+        y, m = periodo.strip().split("-")
+        periodo_date = f"{int(y):04d}-{int(m):02d}-01"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    # Guardar en tempfile
+    suffix = ".xlsx"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        contents = await file.read()
+        tmp.write(contents)
+        tmp.flush()
+        tmp.close()
+
+        filas, er_map = leer_hoja(tmp.name, hoja)
+        resultado = cargar_desde_db(
+            db=db,
+            filas=filas,
+            er_map=er_map,
+            periodo_date=periodo_date,
+            limpiar=limpiar_bool,
+            dry_run=dry_run_bool,
+            usuario_id=current.id,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        logger.exception("Error procesando Excel de liquidaciones")
+        raise HTTPException(500, f"Error procesando el archivo: {e}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    return resultado

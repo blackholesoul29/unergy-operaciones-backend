@@ -634,11 +634,9 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                         neto_pagar = f["total"]
                         continue
                     tipo_l = concepto_a_tipo_linea(f["concepto"])
-                    # referencia: combina ref_factura + nombre soporte si son distintos
-                    ref_parts = [f["ref_factura"]]
-                    if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
-                        ref_parts.append(f["cons_ing_txt"])
-                    ref = " | ".join(p for p in ref_parts if p) or None
+                    ref = f["ref_factura"]
+                    if ref and ' | ' in ref:
+                        ref = ref.split(' | ')[0].strip()
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
                     try:
@@ -646,7 +644,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "tipo_linea": tipo_l,
                             "concepto": f["concepto"],
                             "valor_cop": f["total"],
-                            "referencia_factura": ref,
+                            "referencia_factura": ref or None,
+                            "soporte_url": f["cons_ing_url"],
                             "orden": orden,
                         })
                     except Exception as exc:
@@ -688,10 +687,9 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                         neto_cos = f["total"]
                         continue
                     tipo_l = concepto_a_tipo_linea(f["concepto"])
-                    ref_parts = [f["ref_factura"]]
-                    if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
-                        ref_parts.append(f["cons_ing_txt"])
-                    ref = " | ".join(p for p in ref_parts if p) or None
+                    ref = f["ref_factura"]
+                    if ref and ' | ' in ref:
+                        ref = ref.split(' | ')[0].strip()
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
                     try:
@@ -699,7 +697,8 @@ def cargar(api: API, filas: list[dict], er_map: dict[str, str], periodo_date: st
                             "tipo_linea": tipo_l,
                             "concepto": f["concepto"],
                             "valor_cop": f["total"],
-                            "referencia_factura": ref,
+                            "referencia_factura": ref or None,
+                            "soporte_url": f["cons_ing_url"],
                             "orden": orden,
                         })
                     except Exception as exc:

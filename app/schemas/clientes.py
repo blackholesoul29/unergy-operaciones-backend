@@ -136,14 +136,15 @@ class ClienteOut(ClienteBase):
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 
-    @field_validator("servicios", "documentos_comerciales", mode="before")
+    @field_validator("servicios", "documentos_comerciales", "correos_operacionales", mode="before")
     @classmethod
     def none_to_list(cls, v):
-        return v if v is not None else []
-
-    @field_validator("correos_operacionales", mode="before")
-    @classmethod
-    def coerce_correos(cls, v):
+        if v is None:
+            return []
         if isinstance(v, list):
-            return [str(x) for x in v if x]
-        return []
+            return v
+        # SQLAlchemy InstrumentedList o cualquier iterable
+        try:
+            return list(v)
+        except TypeError:
+            return []

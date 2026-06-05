@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -31,3 +31,4 @@ api_router.include_router(mapa.router)
 api_router.include_router(proximos_energizar.router)
 api_router.include_router(representacion.router)
 api_router.include_router(reconectadores.router)
+api_router.include_router(om.router)

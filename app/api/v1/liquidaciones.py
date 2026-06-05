@@ -369,7 +369,7 @@ def create_liquidacion(
 
 
 @router.get("/{id}")
-def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
+def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     try:
         liq = db.query(Liquidacion).options(selectinload(Liquidacion.proyecto)).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
         if not liq:
@@ -421,6 +421,44 @@ def update_liquidacion(
         setattr(liq, field, value)
     db.commit()
     return {"msg": "Actualizada"}
+
+
+class InformeLiquidacionUpdate(BaseModel):
+    html_content: str | None = None
+
+
+@router.get("/{id}/informe")
+def get_informe_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Informe PDF editable de la liquidación (HTML embebido)."""
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
+    if not liq:
+        raise HTTPException(404, "Liquidación no encontrada")
+    return {
+        "id": liq.id,
+        "html_content": liq.informe_html,
+        "actualizado_en": liq.informe_actualizado_en.isoformat() if liq.informe_actualizado_en else None,
+    }
+
+
+@router.put("/{id}/informe")
+def guardar_informe_liquidacion(
+    id: int,
+    body: InformeLiquidacionUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(_require_liquidaciones_write),
+):
+    """Guarda (upsert) el HTML del informe PDF de la liquidación en la BD."""
+    liq = db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first()
+    if not liq:
+        raise HTTPException(404, "Liquidación no encontrada")
+    liq.informe_html = body.html_content
+    liq.informe_actualizado_en = func.now()
+    db.commit()
+    db.refresh(liq)
+    return {
+        "msg": "Informe guardado",
+        "actualizado_en": liq.informe_actualizado_en.isoformat() if liq.informe_actualizado_en else None,
+    }
 
 
 @router.delete("/{id}", status_code=204)

@@ -276,9 +276,24 @@ def match_proyecto(proyectos_db: list[dict], nombre: str) -> dict | None:
     return None
 
 
-def match_inversionista(inversionistas_db: list[dict], nombre: str) -> dict | None:
+def match_inversionista(
+    inversionistas_db: list[dict],
+    nombre: str,
+    periodo_date=None,
+) -> dict | None:
     if not nombre or nombre.upper() == "TOTAL":
         return None
+
+    if periodo_date:
+        activos = [
+            inv for inv in inversionistas_db
+            if (not inv.get("fecha_inicio") or
+                inv["fecha_inicio"] <= periodo_date.isoformat())
+            and (not inv.get("fecha_fin") or
+                inv["fecha_fin"] >= periodo_date.isoformat())
+        ]
+        if activos:
+            inversionistas_db = activos
 
     def _nombre_db(inv: dict) -> str:
         return (inv.get("cliente_nombre") or inv.get("razon_social_nombre") or
@@ -472,13 +487,15 @@ def cargar_desde_db(
                 "id": inv.id,
                 "cliente_nombre": inv.cliente.razon_social_nombre if inv.cliente else "",
                 "es_patrimonio_autonomo": inv.es_patrimonio_autonomo,
+                "fecha_inicio": inv.fecha_inicio.isoformat() if inv.fecha_inicio else None,
+                "fecha_fin": inv.fecha_fin.isoformat() if inv.fecha_fin else None,
             }
             for inv in inversionistas_orm
         ]
 
         for inv_nombre, filas_inv in inv_grupos.items():
             es_total = inv_nombre.upper() == "TOTAL"
-            inv_db = None if es_total else match_inversionista(inversionistas_db, inv_nombre)
+            inv_db = None if es_total else match_inversionista(inversionistas_db, inv_nombre, period)
             inv_id = inv_db["id"] if inv_db else None
 
             if not es_total and inv_db is None and inv_nombre.strip():

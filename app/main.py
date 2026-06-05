@@ -1753,6 +1753,130 @@ def _scheduled_representacion_alertas():
         print(f"[cgm_alertas] ERROR: {e}")
 
 
+_OM_IPC_SEED = [
+    {"año": 2024, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
+    {"año": 2025, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
+    {"año": 2026, "tasa": 0.0510, "confirmado": True, "fuente": "DANE"},
+]
+
+_OM_PROYECTOS_SEED = [
+    {"nombre": "Minigranja Solar Uruaco",            "fecha_inicio": "2023-06-17", "valor_base_anual": 25880000},
+    {"nombre": "Minigranja Solar Baraya",             "fecha_inicio": "2024-02-17", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Cañahuate",          "fecha_inicio": "2024-02-19", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Gandalf",            "fecha_inicio": "2024-02-19", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Paz Vallenata",   "fecha_inicio": "2024-08-16", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Perijá",             "fecha_inicio": "2024-09-15", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Molino",          "fecha_inicio": "2024-09-20", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Paz Verso",       "fecha_inicio": "2024-12-05", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Esmeralda",          "fecha_inicio": "2025-02-14", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Son",             "fecha_inicio": "2025-02-16", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Puya",            "fecha_inicio": "2025-02-19", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Villanueva",         "fecha_inicio": "2025-04-04", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Merengue",           "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar La Reserva",         "fecha_inicio": "2025-04-25", "valor_base_anual": 48000000},
+    {"nombre": "Nestlé",                              "fecha_inicio": "2025-06-26", "valor_base_anual": 78000000},
+    {"nombre": "Minigranja Solar Ibirico",            "fecha_inicio": "2025-07-08", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Olimpo",          "fecha_inicio": "2025-07-20", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Mesa",            "fecha_inicio": "2025-09-12", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar San Diego Sur",      "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Valencia Oriente 1", "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar La Cacica",          "fecha_inicio": "2026-01-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Las Piloneras",      "fecha_inicio": "2026-01-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Valencia Oriente 2", "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Cumbia",             "fecha_inicio": "2025-01-01", "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Copey",              "fecha_inicio": "2025-01-01", "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Chiriguana 2",       "fecha_inicio": "2026-03-14", "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Chiriguana 4",       "fecha_inicio": "2026-03-17", "valor_base_anual": None},
+]
+
+
+def _run_om_seed() -> None:
+    """
+    Siembra datos iniciales de O&M: tasas IPC y contratos de mantenimiento.
+    Idempotente — no duplica si ya existen.
+    """
+    import re as _re
+    from datetime import date
+    from sqlalchemy.orm import sessionmaker
+    from app.models.om import IPCTasa
+    from app.models.contratos import ContratoServicio
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        # ── IPC seed ──────────────────────────────────────────────────────────
+        for item in _OM_IPC_SEED:
+            existing = db.query(IPCTasa).filter(IPCTasa.año == item["año"]).first()
+            if not existing:
+                db.add(IPCTasa(**item))
+        db.commit()
+
+        # ── Contratos mantenimiento seed ──────────────────────────────────────
+        proyectos_db = db.execute(
+            text("SELECT id, nombre_comercial FROM proyectos WHERE deleted_at IS NULL")
+        ).fetchall()
+        por_nombre = {(r[1] or "").lower(): r[0] for r in proyectos_db}
+
+        def _match(nombre: str):
+            n = nombre.lower()
+            if n in por_nombre:
+                return por_nombre[n]
+            for num in _re.findall(r"\d{4}", nombre):
+                for db_n, db_id in por_nombre.items():
+                    if num in db_n:
+                        return db_id
+            partes = [w.lower() for w in _re.sub(r"[-()]", " ", nombre).split() if len(w) > 4]
+            for p in partes:
+                for db_n, db_id in por_nombre.items():
+                    if p in db_n:
+                        return db_id
+            return None
+
+        insertados = 0
+        for item in _OM_PROYECTOS_SEED:
+            proyecto_id = _match(item["nombre"])
+            ya = None
+            if proyecto_id:
+                ya = db.query(ContratoServicio).filter(
+                    ContratoServicio.proyecto_id == proyecto_id,
+                    ContratoServicio.servicio_aplica == "mantenimiento",
+                ).first()
+            if not ya:
+                ya = db.query(ContratoServicio).filter(
+                    ContratoServicio.servicio_aplica == "mantenimiento",
+                    ContratoServicio.prestador_nombre == item["nombre"],
+                ).first()
+
+            if ya:
+                if not ya.tarifa_base and item["valor_base_anual"]:
+                    ya.tarifa_base = item["valor_base_anual"]
+                if not ya.fecha_inicio and item["fecha_inicio"]:
+                    ya.fecha_inicio = date.fromisoformat(item["fecha_inicio"])
+                continue
+
+            fecha = date.fromisoformat(item["fecha_inicio"]) if item["fecha_inicio"] else None
+            db.add(ContratoServicio(
+                proyecto_id=proyecto_id,
+                servicio_aplica="mantenimiento",
+                estado="vigente",
+                tarifa_base=item["valor_base_anual"],
+                fecha_inicio=fecha,
+                prestador_nombre=item["nombre"],
+                contratante_nombre="Unergy Energía Digital S.A.S. E.S.P.",
+            ))
+            insertados += 1
+
+        db.commit()
+        if insertados:
+            print(f"[om_seed] {insertados} contratos mantenimiento insertados")
+
+    except Exception as e:
+        db.rollback()
+        print(f"[om_seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -1766,6 +1890,7 @@ def _deferred_init():
         ("tipo_migration", _run_tipo_migration),
         ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),
+        ("om_seed", _run_om_seed),
     ]:
         try:
             fn()

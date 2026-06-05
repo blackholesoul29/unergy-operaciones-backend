@@ -252,7 +252,12 @@ def match_proyecto(proyectos_db: list[dict], nombre: str) -> dict | None:
         if trailing_num is None:
             return True
         db_num = _db_trailing(p)
-        return db_num is None or db_num == trailing_num
+        # Si el Excel tiene número final, exigir que el proyecto DB también lo tenga
+        # y que coincida. Evita que proyectos sin número (ej. "Chima Oriente")
+        # capturen nombres numerados (ej. "Valencia Oriente 1").
+        if db_num is None:
+            return False
+        return db_num == trailing_num
 
     if excel_mgs:
         for p in proyectos_db:
@@ -377,7 +382,7 @@ def cargar_desde_db(
     y_str, m_str, _ = periodo_date.split("-")
     period = date_type(int(y_str), int(m_str), 1)
 
-    proyectos_db_objs = db.query(Proyecto).all()
+    proyectos_db_objs = db.query(Proyecto).order_by(Proyecto.id).all()
     proyectos_db = [{"id": p.id, "nombre_comercial": p.nombre_comercial} for p in proyectos_db_objs]
 
     grupos: dict[str, dict[str, list]] = {}
@@ -393,7 +398,6 @@ def cargar_desde_db(
         "costos": 0,
         "facturas": 0,
         "inversionistas_sin_match": [],
-        "_debug_inversionistas": {},  # temporal: eliminar después del diagnóstico
     }
 
     if dry_run:
@@ -501,10 +505,6 @@ def cargar_desde_db(
             }
             for row in inv_rows
         ]
-
-        # debug temporal: capturar inversionistas_db para proyectos con sin_match
-        if pid in (50, 51):
-            stats["_debug_inversionistas"][pid] = inversionistas_db
 
         for inv_nombre, filas_inv in inv_grupos.items():
             es_total = inv_nombre.upper() == "TOTAL"

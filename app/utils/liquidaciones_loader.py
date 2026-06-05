@@ -672,26 +672,29 @@ def cargar_desde_db(
                         db.rollback()
                         errores.append(f"{nombre_proy}/{inv_nombre}: patch valor_neto costos — {exc}")
 
-            # ── Facturas de servicio (solo nivel Total) ──
-            if es_total:
-                for f in filas_fac:
-                    if not f["concepto"] or f["total"] is None:
-                        continue
-                    try:
-                        factura = LiquidacionFactura(
-                            liquidacion_id=liq_id,
-                            tipo_servicio=concepto_a_tipo_factura(f["concepto"]),
-                            numero_factura=f["ref_factura"] or None,
-                            nro_soporte=f["cons_ing_txt"] or None,
-                            soporte_url=f["cons_ing_url"],
-                            valor_cop=f["total"],
-                        )
-                        db.add(factura)
-                        db.commit()
-                        stats["facturas"] += 1
-                    except Exception as exc:
-                        db.rollback()
-                        errores.append(f"{nombre_proy}: factura '{f['concepto']}' — {exc}")
+            # ── Facturas de servicio — Total y por inversionista ──
+            for f in filas_fac:
+                if not f["concepto"] or f["total"] is None:
+                    continue
+                try:
+                    nro_fac = (f["ref_factura"].split(" | ")[0].strip()
+                               if " | " in f["ref_factura"]
+                               else f["ref_factura"]) or None
+                    factura = LiquidacionFactura(
+                        liquidacion_id=liq_id,
+                        proyecto_inversionista_id=inv_db["id"] if inv_db else None,
+                        tipo_servicio=concepto_a_tipo_factura(f["concepto"]),
+                        numero_factura=nro_fac,
+                        nro_soporte=f["cons_ing_txt"] or None,
+                        soporte_url=f["cons_ing_url"],
+                        valor_cop=f["total"],
+                    )
+                    db.add(factura)
+                    db.commit()
+                    stats["facturas"] += 1
+                except Exception as exc:
+                    db.rollback()
+                    errores.append(f"{nombre_proy}: factura '{f['concepto']}' — {exc}")
 
         stats["proyectos_cargados"] += 1
 

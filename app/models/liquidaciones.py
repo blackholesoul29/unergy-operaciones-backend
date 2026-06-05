@@ -230,6 +230,7 @@ class LiquidacionFactura(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
+    proyecto_inversionista_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyecto_inversionistas.id", ondelete="SET NULL"), nullable=True, index=True)
     tipo_servicio: Mapped[str] = mapped_column(SAEnum(TipoFacturaServicioEnum, name="tipo_factura_servicio_enum"), nullable=False)
     numero_factura: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nro_soporte: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -242,6 +243,7 @@ class LiquidacionFactura(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="facturas")
+    inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
 
 
 class ReglaContable(Base):

@@ -639,6 +639,9 @@ _PENDING_DDLS = [
     # migration 025 — nombre_proyecto_ref para búsqueda fuzzy por proyecto
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS nombre_proyecto_ref VARCHAR(255)",
     "CREATE INDEX IF NOT EXISTS ix_contratos_servicio_nombre_ref ON contratos_servicio (nombre_proyecto_ref) WHERE nombre_proyecto_ref IS NOT NULL",
+    # migration 026 — proyecto_inversionista_id en liquidacion_facturas
+    "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_liquidacion_facturas_inv_id ON liquidacion_facturas (proyecto_inversionista_id) WHERE proyecto_inversionista_id IS NOT NULL",
 ]
 
 

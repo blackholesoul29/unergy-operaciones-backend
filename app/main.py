@@ -1877,6 +1877,37 @@ def _run_om_seed() -> None:
         db.close()
 
 
+def _scheduled_om_ipc_check():
+    """
+    Corre cada 1 de enero a las 09:00.
+    Verifica si falta la tasa IPC del año actual.
+    Si falta, crea un registro pendiente de confirmación.
+    """
+    from datetime import datetime
+    from sqlalchemy.orm import sessionmaker
+    from app.models.om import IPCTasa
+
+    año_actual = datetime.now().year
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        ya_existe = db.query(IPCTasa).filter(IPCTasa.año == año_actual).first()
+        if not ya_existe:
+            db.add(IPCTasa(
+                año=año_actual,
+                tasa=0.0,
+                confirmado=False,
+                fuente="pendiente_confirmacion",
+            ))
+            db.commit()
+            print(f"[om_ipc_check] Tasa IPC {año_actual} pendiente de confirmación creada")
+    except Exception as e:
+        db.rollback()
+        print(f"[om_ipc_check] ERROR: {e}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -1961,6 +1992,13 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_om_ipc_check,
+                CronTrigger(month=1, day=1, hour=9, minute=0, timezone=settings.TIMEZONE),
+                id="om_ipc_check",
+                name="Check IPC anual O&M",
             )
 
             _mgs_scheduler.start()

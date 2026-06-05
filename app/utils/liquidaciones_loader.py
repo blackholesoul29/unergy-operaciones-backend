@@ -8,6 +8,7 @@ from datetime import date as date_type
 
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.clientes import Cliente
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionMandato,
     LiquidacionMandatoLinea, LiquidacionFactura,
@@ -475,22 +476,29 @@ def cargar_desde_db(
                 setattr(liq, k, v)
             db.commit()
 
-        # Obtener inversionistas del proyecto
-        inversionistas_orm = (
-            db.query(ProyectoInversionista)
-            .options(selectinload(ProyectoInversionista.cliente))
+        # Obtener inversionistas del proyecto con JOIN explícito para garantizar
+        # que razon_social_nombre esté disponible sin depender de lazy loading.
+        inv_rows = (
+            db.query(
+                ProyectoInversionista.id,
+                ProyectoInversionista.es_patrimonio_autonomo,
+                ProyectoInversionista.fecha_inicio,
+                ProyectoInversionista.fecha_fin,
+                Cliente.razon_social_nombre,
+            )
+            .outerjoin(Cliente, ProyectoInversionista.cliente_id == Cliente.id)
             .filter(ProyectoInversionista.proyecto_id == pid)
             .all()
         )
         inversionistas_db = [
             {
-                "id": inv.id,
-                "cliente_nombre": inv.cliente.razon_social_nombre if inv.cliente else "",
-                "es_patrimonio_autonomo": inv.es_patrimonio_autonomo,
-                "fecha_inicio": inv.fecha_inicio.isoformat() if inv.fecha_inicio else None,
-                "fecha_fin": inv.fecha_fin.isoformat() if inv.fecha_fin else None,
+                "id": row.id,
+                "cliente_nombre": row.razon_social_nombre or "",
+                "es_patrimonio_autonomo": row.es_patrimonio_autonomo,
+                "fecha_inicio": row.fecha_inicio.isoformat() if row.fecha_inicio else None,
+                "fecha_fin": row.fecha_fin.isoformat() if row.fecha_fin else None,
             }
-            for inv in inversionistas_orm
+            for row in inv_rows
         ]
 
         for inv_nombre, filas_inv in inv_grupos.items():

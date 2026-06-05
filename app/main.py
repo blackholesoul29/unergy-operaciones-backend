@@ -642,6 +642,28 @@ _PENDING_DDLS = [
     # migration 026 — proyecto_inversionista_id en liquidacion_facturas
     "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_facturas_inv_id ON liquidacion_facturas (proyecto_inversionista_id) WHERE proyecto_inversionista_id IS NOT NULL",
+    # migration O&M — panel mensual de facturación O&M
+    """CREATE TABLE IF NOT EXISTS om_ipc_tasas (
+        id          BIGSERIAL PRIMARY KEY,
+        año         INTEGER NOT NULL UNIQUE,
+        tasa        NUMERIC(8,6) NOT NULL,
+        confirmado  BOOLEAN NOT NULL DEFAULT FALSE,
+        fuente      VARCHAR(100),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS om_seleccion_mensual (
+        id          BIGSERIAL PRIMARY KEY,
+        contrato_id BIGINT NOT NULL REFERENCES contratos_servicio(id) ON DELETE CASCADE,
+        periodo     VARCHAR(7) NOT NULL,
+        incluido    BOOLEAN NOT NULL DEFAULT TRUE,
+        facturado   BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_om_seleccion_contrato_periodo UNIQUE (contrato_id, periodo)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_om_seleccion_periodo ON om_seleccion_mensual (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_om_seleccion_contrato ON om_seleccion_mensual (contrato_id)",
 ]
 
 

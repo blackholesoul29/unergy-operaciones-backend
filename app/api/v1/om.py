@@ -232,3 +232,114 @@ def ipc_pendiente(_=Depends(get_current_user)):
     from datetime import datetime
     año_consulta = datetime.now().year - 1
     return {"año": año_consulta, "tasa_sugerida": None, "fuente": "manual"}
+
+
+# ── Factura consolidada mensual del proveedor ─────────────────────────────────
+
+from pathlib import Path as _Path
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+from app.models.om import OMFacturaMensual
+
+_UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "om"
+
+
+@router.get("/factura/{periodo}")
+def get_factura_mensual(
+    periodo: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Devuelve info de la factura consolidada del período."""
+    factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
+    if not factura:
+        return {"periodo": periodo, "nombre_archivo": None, "enlace_pdf": None,
+                "tiene_archivo": False, "subido_en": None}
+    tiene_archivo = bool(
+        factura.ruta_local and _Path(factura.ruta_local).exists()
+    )
+    return {
+        "periodo":        periodo,
+        "nombre_archivo": factura.nombre_archivo,
+        "enlace_pdf":     factura.enlace_pdf,
+        "tiene_archivo":  tiene_archivo,
+        "subido_en":      factura.subido_en,
+    }
+
+
+@router.post("/factura/{periodo}/upload")
+async def upload_factura_mensual(
+    periodo: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Recibe el PDF consolidado del proveedor y lo guarda en el servidor."""
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Nombre seguro: periodo + nombre original
+    ext = _Path(file.filename or "factura.pdf").suffix or ".pdf"
+    safe_name = f"{periodo}{ext}"
+    file_path  = _UPLOADS_DIR / safe_name
+
+    content = await file.read()
+    file_path.write_bytes(content)
+
+    factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
+    if factura:
+        factura.nombre_archivo = file.filename
+        factura.ruta_local     = str(file_path)
+        factura.enlace_pdf     = None   # archivo prevalece sobre link
+    else:
+        factura = OMFacturaMensual(
+            periodo=periodo,
+            nombre_archivo=file.filename,
+            ruta_local=str(file_path),
+        )
+        db.add(factura)
+    db.commit()
+    return {"ok": True, "nombre_archivo": file.filename, "periodo": periodo}
+
+
+@router.put("/factura/{periodo}/enlace")
+def set_enlace_factura(
+    periodo: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Guarda un link externo (Drive, etc.) como factura consolidada del período."""
+    factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
+    if factura:
+        factura.enlace_pdf     = payload.get("enlace_pdf")
+        factura.nombre_archivo = payload.get("nombre_archivo") or payload.get("enlace_pdf")
+        factura.ruta_local     = None
+    else:
+        factura = OMFacturaMensual(
+            periodo=periodo,
+            enlace_pdf=payload.get("enlace_pdf"),
+            nombre_archivo=payload.get("nombre_archivo") or payload.get("enlace_pdf"),
+        )
+        db.add(factura)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/factura/{periodo}/file")
+def download_factura_mensual(
+    periodo: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Descarga el archivo PDF guardado en el servidor."""
+    factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
+    if not factura or not factura.ruta_local:
+        raise HTTPException(404, "No hay archivo subido para este período")
+    file_path = _Path(factura.ruta_local)
+    if not file_path.exists():
+        raise HTTPException(404, "Archivo no encontrado en el servidor")
+    return FileResponse(
+        path=str(file_path),
+        filename=factura.nombre_archivo or f"factura-{periodo}.pdf",
+        media_type="application/octet-stream",
+    )

@@ -36,3 +36,16 @@ class OMSeleccion(Base):
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     contrato: Mapped["ContratoServicio"] = relationship("ContratoServicio")
+
+
+class OMFacturaMensual(Base):
+    """Factura consolidada que el proveedor sube al cerrar el mes."""
+    __tablename__ = "om_factura_mensual"
+
+    id:             Mapped[int]        = mapped_column(BigInteger, primary_key=True)
+    periodo:        Mapped[str]        = mapped_column(String(7), unique=True, nullable=False, index=True)
+    nombre_archivo: Mapped[str | None] = mapped_column(String(500),  nullable=True)
+    enlace_pdf:     Mapped[str | None] = mapped_column(String(2000), nullable=True)   # Drive URL alternativo
+    ruta_local:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # path en el servidor
+    subido_en:      Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at:     Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

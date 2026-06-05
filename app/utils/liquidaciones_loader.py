@@ -393,6 +393,7 @@ def cargar_desde_db(
         "costos": 0,
         "facturas": 0,
         "inversionistas_sin_match": [],
+        "_debug_inversionistas": {},  # temporal: eliminar después del diagnóstico
     }
 
     if dry_run:
@@ -500,6 +501,10 @@ def cargar_desde_db(
             }
             for row in inv_rows
         ]
+
+        # debug temporal: capturar inversionistas_db para proyectos con sin_match
+        if pid in (50, 51):
+            stats["_debug_inversionistas"][pid] = inversionistas_db
 
         for inv_nombre, filas_inv in inv_grupos.items():
             es_total = inv_nombre.upper() == "TOTAL"

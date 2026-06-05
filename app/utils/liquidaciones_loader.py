@@ -561,12 +561,11 @@ def cargar_desde_db(
                         neto_pagar = f["total"]
                         continue
                     tipo_l = concepto_a_tipo_linea(f["concepto"])
-                    ref_parts = [f["ref_factura"]]
-                    if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
-                        ref_parts.append(f["cons_ing_txt"])
-                    ref = " | ".join(p for p in ref_parts if p) or None
+                    ref = (f["ref_factura"].split(" | ")[0].strip()
+                           if " | " in f["ref_factura"] else f["ref_factura"]) or None
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
+                    soporte = f["ref_factura_url"] or f["cons_ing_url"] or None
                     try:
                         linea = LiquidacionMandatoLinea(
                             mandato_id=mid,
@@ -574,6 +573,7 @@ def cargar_desde_db(
                             concepto=f["concepto"],
                             valor_cop=f["total"],
                             referencia_factura=ref,
+                            soporte_url=soporte,
                             orden=orden,
                         )
                         db.add(linea)
@@ -625,12 +625,11 @@ def cargar_desde_db(
                         neto_cos = f["total"]
                         continue
                     tipo_l = concepto_a_tipo_linea(f["concepto"])
-                    ref_parts = [f["ref_factura"]]
-                    if f["cons_ing_txt"] and not f["cons_ing_txt"].isdigit() and f["cons_ing_txt"] != f["ref_factura"]:
-                        ref_parts.append(f["cons_ing_txt"])
-                    ref = " | ".join(p for p in ref_parts if p) or None
+                    ref = (f["ref_factura"].split(" | ")[0].strip()
+                           if " | " in f["ref_factura"] else f["ref_factura"]) or None
                     if ref and len(ref) > 255:
                         ref = ref[:252] + "..."
+                    soporte = f["ref_factura_url"] or f["cons_ing_url"] or None
                     try:
                         linea_c = LiquidacionMandatoLinea(
                             mandato_id=mcid,
@@ -638,6 +637,7 @@ def cargar_desde_db(
                             concepto=f["concepto"],
                             valor_cop=f["total"],
                             referencia_factura=ref,
+                            soporte_url=soporte,
                             orden=orden,
                         )
                         db.add(linea_c)

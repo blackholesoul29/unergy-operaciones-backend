@@ -261,6 +261,7 @@ def _serializar_mandato(m: LiquidacionMandato) -> dict:
 def _serializar_factura(f: LiquidacionFactura) -> dict:
     return {
         "id": f.id,
+        "proyecto_inversionista_id": f.proyecto_inversionista_id,
         "tipo_servicio": f.tipo_servicio,
         "numero_factura": f.numero_factura,
         "nro_soporte": f.nro_soporte,

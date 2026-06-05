@@ -74,7 +74,6 @@ ALIASES_INVERSIONISTA: dict[str, str | None] = {
     "17844 sol de la sierra":       "patrimonios autonomos fiduciaria bancolombia",
     "patrimonios autonomos fiduciaria bancolombia s a sociedad fiduciaria - 17844 sol de la sierra":
                                     "patrimonios autonomos fiduciaria bancolombia",
-    "nacional de transformadores":  None,  # reemplazado por JEMMA GROUP SAS
 }
 
 _OMITIR_PROY = re.compile(r'\btrading\b|duplicado|dulicado|\bdup\b|\bgasto\b', re.IGNORECASE)

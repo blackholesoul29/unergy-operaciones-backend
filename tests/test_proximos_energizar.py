@@ -35,19 +35,20 @@ def test_monthly_mwh_no_power_returns_none(bad):
 
 # ── _estimate_energization ──────────────────────────────────────────────────────
 
-def test_estimate_prefers_review_date():
-    rd = date(2026, 6, 8)
-    assert pe._estimate_energization("uci", rd, datetime(2026, 5, 1, tzinfo=timezone.utc)) == rd
-
-
-def test_estimate_falls_back_to_stage_offset():
+def test_estimate_uses_stage_offset_from_last_change():
     last = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    got = pe._estimate_energization("construction", None, last)
+    got = pe._estimate_energization("construction", last)
     assert got == date(2026, 1, 1) + timedelta(days=pe._STAGE_OFFSET_DAYS["construction"])
 
 
-def test_estimate_none_when_no_dates():
-    assert pe._estimate_energization("uci", None, None) is None
+def test_estimate_accepts_plain_date():
+    last = date(2026, 1, 1)
+    got = pe._estimate_energization("deploy", last)
+    assert got == date(2026, 1, 1) + timedelta(days=pe._STAGE_OFFSET_DAYS["deploy"])
+
+
+def test_estimate_none_when_no_date():
+    assert pe._estimate_energization("construction", None) is None
 
 
 # ── _ENERG_MILESTONE_RE ─────────────────────────────────────────────────────────
@@ -137,12 +138,34 @@ def test_pick_real_project_103_shape():
 # ── _STAGE_TO_STATUS ────────────────────────────────────────────────────────────
 
 def test_stage_status_mapping():
-    assert pe._STAGE_TO_STATUS["uci"] == "Próximo a energizar"
+    assert pe._STAGE_TO_STATUS["deploy"] == "Próximo a energizar"
     assert pe._STAGE_TO_STATUS["construction"] == "En construcción"
     assert pe._STAGE_TO_STATUS["operation"] == "Energizado"
 
 
 def test_pipeline_stages_ordered_closest_first():
-    # uci (más cercano a energizar) debe ir primero para el ORDER BY array_position.
-    assert pe._PIPELINE_STAGES[0] == "uci"
+    # deploy (PEM/pruebas, última etapa antes de operation) es la más cercana a
+    # energizar → va primero para el ORDER BY array_position.
+    assert pe._PIPELINE_STAGES[0] == "deploy"
     assert "operation" not in pe._PIPELINE_STAGES  # ya energizado, no es "próximo"
+
+
+# Etapas reales de minifarm_project (originabotdb). Fuente: docs/UNERGY_DATABASE_ATLAS.md
+# y docs/unergy-data-graph.md. Guarda contra etapas inventadas (p.ej. el viejo "uci").
+_CANONICAL_STAGES = {
+    "prospect", "due_diligence", "viability", "negociation", "signed",
+    "bt_and_contract", "construction", "deploy", "operation",
+    "portfolio", "reevaluation", "paused", "dead",
+}
+
+
+def test_pipeline_and_status_stages_are_canonical():
+    assert set(pe._PIPELINE_STAGES) <= _CANONICAL_STAGES
+    assert set(pe._STAGE_TO_STATUS) <= _CANONICAL_STAGES
+    assert set(pe._STAGE_OFFSET_DAYS) <= _CANONICAL_STAGES
+
+
+def test_status_labels_match_frontend_options():
+    # Deben pertenecer a STATUS_OPTIONS de ProyectosProximosEnergizar.vue.
+    frontend_options = {"En construcción", "Pruebas", "Próximo a energizar", "Energizado"}
+    assert set(pe._STAGE_TO_STATUS.values()) <= frontend_options

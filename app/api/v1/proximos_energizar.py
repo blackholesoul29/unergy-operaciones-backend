@@ -9,7 +9,7 @@ Cruces de datos (en orden de prioridad para la fecha de energización):
   1. Sun Factory (sunfactory.solenium.co) → hito de energización (RETIE/legalización):
      `date` proyectada + `progress.calculated_percentage`. Cruce por `base_name`
      ↔ minifarm_project.name. [PRIORIDAD para fecha y avance]
-  2. originabotdb minifarm_projectstagechange.review_date → estimación de respaldo.
+  2. originabotdb minifarm_projectstagechange.date + offset por etapa → estimación de respaldo.
   3. API de generación Unergy (api.unergy.io) → ¿la planta ya genera? Si sí, está
      energizada de hecho y usamos su promedio real para MWh/mes.
 
@@ -35,23 +35,27 @@ from app.core.config import settings
 logger = logging.getLogger("proximos_energizar")
 router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"])
 
-# Etapas del pipeline de originabotdb que cuentan como "próximo a energizarse",
-# ordenadas de la MÁS cercana a energización a la más lejana.
-_PIPELINE_STAGES = ["uci", "deploy", "construction", "bt_and_contract"]
+# Etapas REALES del ciclo de vida de minifarm_project (originabotdb), de la más
+# cercana a energización a la más lejana. El ciclo es:
+#   signed → bt_and_contract → construction → deploy → operation
+# `deploy` (PEM/pruebas) es la última etapa antes de `operation` (ya energizado),
+# así que es la más cercana a energizarse. NO existe ninguna etapa "uci".
+_PIPELINE_STAGES = ["deploy", "construction", "bt_and_contract"]
 
 # minifarm_project.stage → etiqueta de estado que consume el frontend.
+# Las etiquetas deben pertenecer a STATUS_OPTIONS del componente Vue
+# (ProyectosProximosEnergizar.vue): "En construcción"/"Pruebas"/"Próximo a energizar"/"Energizado".
 _STAGE_TO_STATUS = {
-    "uci": "Próximo a energizar",
-    "deploy": "Pruebas",
+    "deploy": "Próximo a energizar",
     "construction": "En construcción",
     "bt_and_contract": "En construcción",
     "operation": "Energizado",
 }
 
-# Cuando no hay fecha de Sun Factory ni `review_date`, estimamos sumando estos días
-# a la fecha del último cambio de etapa. Refleja el tiempo típico restante por etapa.
+# Cuando no hay fecha de Sun Factory, estimamos sumando estos días a la fecha del
+# último cambio de etapa. Refleja el tiempo típico restante por etapa.
 _STAGE_OFFSET_DAYS = {
-    "uci": 15, "deploy": 30, "construction": 90, "bt_and_contract": 150, "operation": 0,
+    "deploy": 30, "construction": 90, "bt_and_contract": 150, "operation": 0,
 }
 
 # Rendimiento específico para proyectar MWh/mes desde la potencia instalada.
@@ -91,10 +95,9 @@ def _oconn():
         conn.close()
 
 
-def _estimate_energization(stage: str, review_date, last_stage_date) -> date | None:
-    """Estimación de respaldo de la fecha de energización (sin Sun Factory)."""
-    if review_date:
-        return review_date if isinstance(review_date, date) else review_date.date()
+def _estimate_energization(stage: str, last_stage_date) -> date | None:
+    """Estimación de respaldo de la fecha de energización (sin Sun Factory):
+    fecha del último cambio de etapa + offset típico restante por etapa."""
     if last_stage_date:
         base = last_stage_date.date() if isinstance(last_stage_date, datetime) else last_stage_date
         return base + timedelta(days=_STAGE_OFFSET_DAYS.get(stage, 60))
@@ -299,28 +302,36 @@ def proximos_energizar(
     Forma de cada proyecto (compatible con el frontend):
     `{ id, name, status, energizationDate, contracts, monthlyMwh, avancePct, ... }`.
     """
-    with _oconn() as conn:
-        if conn is None:
-            return {"projects": [], "source": "unavailable",
-                    "warning": "ORIGINA_DATABASE_URL no configurada — pipeline no disponible."}
-        rows = conn.execute(
-            """
-            SELECT p.id, p.name, p.stage,
-                   p.project_installed_power, p.project_dc_capacity, p.contract_type,
-                   sc.last_stage_date, sc.review_date
-            FROM minifarm_project p
-            LEFT JOIN LATERAL (
-                SELECT created_at AS last_stage_date, review_date
-                FROM minifarm_projectstagechange c
-                WHERE c.project_id = p.id
-                ORDER BY created_at DESC
-                LIMIT 1
-            ) sc ON TRUE
-            WHERE p.stage = ANY(%s)
-            ORDER BY array_position(%s::text[], p.stage), sc.review_date NULLS LAST
-            """,
-            (_PIPELINE_STAGES, _PIPELINE_STAGES),
-        ).fetchall()
+    try:
+        with _oconn() as conn:
+            if conn is None:
+                return {"projects": [], "source": "unavailable",
+                        "warning": "ORIGINA_DATABASE_URL no configurada — pipeline no disponible."}
+            rows = conn.execute(
+                """
+                SELECT p.id, p.name, p.stage,
+                       p.project_installed_power, p.project_dc_capacity, p.contract_type,
+                       sc.last_stage_date
+                FROM minifarm_project p
+                LEFT JOIN LATERAL (
+                    SELECT c.date AS last_stage_date
+                    FROM minifarm_projectstagechange c
+                    WHERE c.project_id = p.id
+                    ORDER BY c.date DESC
+                    LIMIT 1
+                ) sc ON TRUE
+                WHERE p.stage = ANY(%s)
+                ORDER BY array_position(%s::text[], p.stage), sc.last_stage_date DESC NULLS LAST
+                """,
+                (_PIPELINE_STAGES, _PIPELINE_STAGES),
+            ).fetchall()
+    except Exception as exc:
+        # No tumbar la vista por un fallo de conexión/esquema: degradar con elegancia
+        # igual que cuando faltan las credenciales (el frontend muestra el aviso).
+        logger.warning("originabotdb pipeline query failed: %s", exc)
+        return {"projects": [], "source": "error",
+                "warning": "No se pudo leer el pipeline desde originabotdb — revisar "
+                           "conexión/credenciales o el esquema de minifarm_projectstagechange."}
 
     warnings = []
 
@@ -353,7 +364,7 @@ def proximos_energizar(
     projects = []
     for r in rows:
         (pid, name, stage, installed_power, dc_capacity, contract_type,
-         last_stage_date, review_date) = r
+         last_stage_date) = r
 
         status = _STAGE_TO_STATUS.get(stage, "En construcción")
         monthly = _project_monthly_mwh(installed_power, yield_kwh_kwp_day)
@@ -368,8 +379,8 @@ def proximos_energizar(
             energ_source = "sunfactory"
             avance_pct = sf.get("avance_pct")
         else:
-            energ = _estimate_energization(stage, review_date, last_stage_date)
-            energ_source = "review_date" if review_date else ("estimado" if energ else "desconocido")
+            energ = _estimate_energization(stage, last_stage_date)
+            energ_source = "estimado" if energ else "desconocido"
 
         # ¿Ya genera? → energizada de hecho + promedio real.
         avg = gen_map.get(name.upper()) if name else None

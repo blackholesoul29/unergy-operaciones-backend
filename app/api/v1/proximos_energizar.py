@@ -9,7 +9,7 @@ Cruces de datos (en orden de prioridad para la fecha de energización):
   1. Sun Factory (sunfactory.solenium.co) → hito de energización (RETIE/legalización):
      `date` proyectada + `progress.calculated_percentage`. Cruce por `base_name`
      ↔ minifarm_project.name. [PRIORIDAD para fecha y avance]
-  2. originabotdb minifarm_projectstagechange.date + offset por etapa → estimación de respaldo.
+  2. originabotdb minifarm_projectstagechange.created_at + offset por etapa → estimación de respaldo.
   3. API de generación Unergy (api.unergy.io) → ¿la planta ya genera? Si sí, está
      energizada de hecho y usamos su promedio real para MWh/mes.
 
@@ -314,10 +314,10 @@ def proximos_energizar(
                        sc.last_stage_date
                 FROM minifarm_project p
                 LEFT JOIN LATERAL (
-                    SELECT c.date AS last_stage_date
+                    SELECT c.created_at AS last_stage_date
                     FROM minifarm_projectstagechange c
                     WHERE c.project_id = p.id
-                    ORDER BY c.date DESC
+                    ORDER BY c.created_at DESC
                     LIMIT 1
                 ) sc ON TRUE
                 WHERE p.stage = ANY(%s)

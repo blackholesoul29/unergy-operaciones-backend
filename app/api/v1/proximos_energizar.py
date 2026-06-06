@@ -63,8 +63,18 @@ _ENERG_MILESTONE_RE = re.compile(r"retie|legaliz|energiz|puesta\s+en\s+marcha|\b
 
 
 def _fix_url(url: str) -> str:
+    """Normaliza la URL al esquema que acepta psycopg3 (`postgresql://`).
+
+    Contempla el esquema de driver de SQLAlchemy (`postgresql+psycopg://`) y el
+    `postgres://` que emiten Railway/Heroku para DATABASE_URL — psycopg3 rechaza
+    este último, así que una URL de Railway sin normalizar fallaría al conectar.
+    """
+    if not url:
+        return url
     if url.startswith("postgresql+psycopg://"):
         return url.replace("postgresql+psycopg://", "postgresql://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
     return url
 
 

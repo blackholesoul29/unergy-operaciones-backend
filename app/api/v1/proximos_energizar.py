@@ -335,6 +335,10 @@ def proximos_energizar(
                           "conexión/credenciales o el esquema de minifarm_projectstagechange."}
         if debug:
             out["detail"] = f"{type(exc).__name__}: {exc}"
+            try:
+                out["egress_ip"] = httpx.get("https://api.ipify.org", timeout=10).text
+            except Exception as e2:
+                out["egress_ip_error"] = str(e2)[:160]
         return out
 
     warnings = []

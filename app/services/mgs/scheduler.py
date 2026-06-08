@@ -45,6 +45,13 @@ def poll_once():
 
     _poll_running = True
     try:
+        # Alarmas de desconexión (inversores vs medidor) — aislado, no debe romper MGS
+        try:
+            from app.services.alarmas.desconexion import evaluar_desconexiones
+            evaluar_desconexiones()
+        except Exception:
+            logger.exception("evaluar_desconexiones falló (no afecta MGS)")
+
         nodes = _quoia.get_all_nodes()
         if not nodes:
             logger.warning("Quoia returned empty node list")

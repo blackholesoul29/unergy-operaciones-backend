@@ -12,6 +12,16 @@ from app.api.v1.router import api_router
 
 # Idempotent DDL run at startup — safe to run on every boot
 _PENDING_DDLS = [
+    # alarmas de desconexión — estado por proyecto (anti-spam + re-aviso diario)
+    """CREATE TABLE IF NOT EXISTS alarma_estado (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL,
+        categoria VARCHAR(20) NOT NULL,
+        estado VARCHAR(30) NOT NULL,
+        dia DATE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_alarma_estado ON alarma_estado (proyecto_id, categoria)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS codigo_legado VARCHAR(30)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_fallas_codigo_legado_unique ON fallas (codigo_legado) WHERE codigo_legado IS NOT NULL",
     # migration 003 — monitoreo fields

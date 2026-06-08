@@ -73,6 +73,33 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     return {"access_token": token}
 
 
+@router.post("/token/mobile", response_model=TokenResponse)
+def login_mobile(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Login para la app móvil (PWA): mismas credenciales, token de larga duración.
+
+    El token expira en `MOBILE_JWT_EXPIRE_MINUTES` (default 30 días) para que el
+    usuario no tenga que volver a ingresar a diario. Revocable cambiando contraseña.
+    """
+    from app.core.config import settings
+    user = db.query(Usuario).filter(Usuario.email == form.username).first()
+    if not user or not user.password_hash or not verify_password(form.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas")
+    if not user.activo:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuario inactivo")
+    user.ultimo_acceso = datetime.now(timezone.utc)
+    db.commit()
+    token = create_access_token(
+        {
+            "sub": str(user.id),
+            "rol": user.rol.value,
+            "nombre": user.nombre,
+            "email": user.email,
+        },
+        expires_minutes=settings.MOBILE_JWT_EXPIRE_MINUTES,
+    )
+    return {"access_token": token}
+
+
 @router.get("/me")
 def me(current: Usuario = Depends(get_current_user)):
     return UsuarioOut.model_validate(current).model_dump(mode="json")

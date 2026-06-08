@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = ""
     JWT_EXPIRE_MINUTES: int = 480
+    # Token de larga duración para la app móvil (PWA) — default 30 días
+    MOBILE_JWT_EXPIRE_MINUTES: int = 43200
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod

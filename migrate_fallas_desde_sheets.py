@@ -13,6 +13,7 @@ Uso:
 Requiere:
     pip install requests
 """
+import os
 import sys
 import json
 import time
@@ -23,6 +24,9 @@ from datetime import datetime, date
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
@@ -30,8 +34,14 @@ SCRIPT_URL = (
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
 API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+API_EMAIL = os.getenv("UNERGY_API_EMAIL")
+API_PASS  = os.getenv("UNERGY_API_PASSWORD")
+
+if not API_EMAIL or not API_PASS:
+    raise ValueError(
+        "Faltan las variables de entorno UNERGY_API_EMAIL y/o UNERGY_API_PASSWORD. "
+        "Defínelas en el archivo .env o en el entorno antes de ejecutar este script."
+    )
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26

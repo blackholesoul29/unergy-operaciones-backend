@@ -71,6 +71,8 @@ class ProyectoInfoTecnicaCreate(BaseModel):
     marca_modem_reconectador: Optional[str] = None
     marca_modems_frontera: Optional[str] = None
     ip_modem_reconectador: Optional[str] = None
+    # Ubicación
+    url_ubicacion: Optional[str] = None
     # CCTV y seguridad
     cctv_estado: Optional[str] = None
     marca_cctv: Optional[str] = None

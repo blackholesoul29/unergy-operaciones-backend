@@ -182,6 +182,9 @@ class ProyectoInfoTecnica(Base):
     marca_modems_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ip_modem_reconectador: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Ubicación
+    url_ubicacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # CCTV y seguridad
     cctv_estado: Mapped[str | None] = mapped_column(Text, nullable=True)
     marca_cctv: Mapped[str | None] = mapped_column(String(255), nullable=True)

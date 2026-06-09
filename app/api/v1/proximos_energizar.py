@@ -295,7 +295,6 @@ def proximos_energizar(
     cross_sunfactory: bool = Query(True, description="Cruzar con cronogramas Sun Factory para fecha de energización real + % de avance."),
     cross_generacion: bool = Query(True, description="Cruzar con la API de generación de Unergy para detectar plantas ya energizadas."),
     yield_kwh_kwp_day: float = Query(_DEFAULT_YIELD_KWH_KWP_DAY, ge=1.0, le=8.0, description="Rendimiento específico para la proyección de MWh/mes."),
-    debug: bool = Query(False, description="Incluir el detalle de la excepción en la respuesta de error (diagnóstico)."),
     _=Depends(get_current_user),
 ) -> dict:
     """Proyectos en pipeline de construcción con su proyección de generación.
@@ -330,16 +329,9 @@ def proximos_energizar(
         # No tumbar la vista por un fallo de conexión/esquema: degradar con elegancia
         # igual que cuando faltan las credenciales (el frontend muestra el aviso).
         logger.warning("originabotdb pipeline query failed: %s", exc)
-        out = {"projects": [], "source": "error",
-               "warning": "No se pudo leer el pipeline desde originabotdb — revisar "
-                          "conexión/credenciales o el esquema de minifarm_projectstagechange."}
-        if debug:
-            out["detail"] = f"{type(exc).__name__}: {exc}"
-            try:
-                out["egress_ip"] = httpx.get("https://api.ipify.org", timeout=10).text
-            except Exception as e2:
-                out["egress_ip_error"] = str(e2)[:160]
-        return out
+        return {"projects": [], "source": "error",
+                "warning": "No se pudo leer el pipeline desde originabotdb — revisar "
+                           "conexión/credenciales o el esquema de minifarm_projectstagechange."}
 
     warnings = []
 

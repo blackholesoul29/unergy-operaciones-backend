@@ -1,6 +1,6 @@
 # OriginabotDB Schema Discovery
 
-> **Database:** `originabotdb` on `34.74.198.101:5432`
+> **Database:** `originabotdb` on `34.24.192.147:5432`
 > **Framework:** Django ORM (Python)
 > **Discovered:** 2026-05-18
 > **Size:** 30 GB | **Tables:** 269 | **Indexes:** 1,000 | **Views:** 0 | **Foreign Keys:** 0 (Django manages at app level, `db_constraint=False`)

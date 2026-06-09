@@ -12,8 +12,8 @@ Se auditaron las 6 bases de datos PostgreSQL que soportan la operación de Unerg
 
 | Base de datos | Servidor | Tamaño | Tablas | Tablas vacías | Salud |
 |--------------|----------|--------|--------|---------------|-------|
-| **originabotdb** | GCP 34.74.198.101 | 30 GB | 269 | 141 (52%) | ⚠️ Requiere limpieza |
-| **requestsdb** | GCP 34.74.198.101 | 17 GB | 101 | 65 (64%) | ⚠️ Requiere limpieza |
+| **originabotdb** | GCP 34.24.192.147 | 30 GB | 269 | 141 (52%) | ⚠️ Requiere limpieza |
+| **requestsdb** | GCP 34.24.192.147 | 17 GB | 101 | 65 (64%) | ⚠️ Requiere limpieza |
 | **operations** | Railway | — | 62 | — | ✅ Bien estructurada |
 | **rag** | AWS 54.174.147.51 | 1 GB | 11 | 0 | ✅ OK |
 | **edubotapp** | AWS 54.174.147.51 | 42 MB | 7 | 0 | ✅ OK |

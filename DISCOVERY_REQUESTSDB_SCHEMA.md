@@ -1,6 +1,6 @@
 # RequestsDB Schema Discovery
 
-**Database:** `requestsdb` on `34.74.198.101:5432`  
+**Database:** `requestsdb` on `34.24.192.147:5432`  
 **Framework:** Django + Celery + PostGIS  
 **Total tables:** 67 (21 domain, 18 Django/auth/admin, 10 Silk profiler, 8 Celery, 5 audit, 5 PostGIS system)  
 **Date discovered:** 2026-05-18 (refreshed)

@@ -6,8 +6,8 @@
 
 | # | Database | Host | PG | Size | Tables | Rows (est.) | Purpose |
 |---|----------|------|----|------|--------|-------------|---------|
-| 1 | **originabotdb** | 34.74.198.101:5432 | 17.2 | 30 GB | 269 | 3.4M | Django OriginaBot — legacy Klima/Unergy platform (projects, terrain, investments, contracts, validation) |
-| 2 | **requestsdb** | 34.74.198.101:5432 | 17.2 | 17 GB | 101 | 2.5M | Django — supply requests, grid entities, transformers, PostGIS |
+| 1 | **originabotdb** | 34.24.192.147:5432 | 17.2 | 30 GB | 269 | 3.4M | Django OriginaBot — legacy Klima/Unergy platform (projects, terrain, investments, contracts, validation) |
+| 2 | **requestsdb** | 34.24.192.147:5432 | 17.2 | 17 GB | 101 | 2.5M | Django — supply requests, grid entities, transformers, PostGIS |
 | 3 | **operations** | Railway (internal) | — | — | 62 | — | FastAPI — modern operations platform (proyectos, fallas, liquidaciones, PPA, monitoreo, clima) |
 | 4 | **rag** | 54.174.147.51:5434 | 16.13 | 1 GB | 11 | 126K | LightRAG knowledge graph (pgvector 1536d + Neo4j) |
 | 5 | **edubotapp** | 54.174.147.51:5434 | 16.13 | 42 MB | 7 | 86K | Discord message ingestion + chronological summaries |
@@ -16,7 +16,7 @@
 ### Server Map
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  GCP 34.74.198.101:5432  (PG 17.2)                         │
+│  GCP 34.24.192.147:5432  (PG 17.2)                         │
 │  ├── originabotdb  (30 GB, 269 tables) — Django OriginaBot │
 │  └── requestsdb    (17 GB, 101 tables) — Django Requests   │
 ├─────────────────────────────────────────────────────────────┤

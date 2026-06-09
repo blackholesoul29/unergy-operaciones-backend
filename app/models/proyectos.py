@@ -154,11 +154,46 @@ class ProyectoInfoTecnica(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), unique=True, index=True, nullable=False)
+
+    # Datos eléctricos generales
+    voltaje_red: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    potencia_ac_kw: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    capacidad_instalada_kwp: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    tipo_tracker: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    # Paneles
     cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    potencia_panel_kwp: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    marca_paneles: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Inversores
+    cantidad_inversores: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    potencia_inversores_kwp: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    marca_inversores: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cantidad_strings: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Marcas de equipos
+    marca_transformador: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    marca_reconectador_rele: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    marca_totalizador: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    marca_seguidor_solar: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    marca_medidores_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    marca_modem_reconectador: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    marca_modems_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ip_modem_reconectador: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # CCTV y seguridad
+    cctv_estado: Mapped[str | None] = mapped_column(Text, nullable=True)
+    marca_cctv: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    seguridad_fisica: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tiene_internet: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    # Almacenamiento
     tiene_almacenamiento: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     capacidad_almacenamiento_kwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     marca_almacenamiento: Mapped[str | None] = mapped_column(String(255), nullable=True)
     modelo_almacenamiento: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

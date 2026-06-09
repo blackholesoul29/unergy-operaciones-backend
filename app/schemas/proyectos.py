@@ -48,7 +48,35 @@ class ProyectoInversionistaOut(ProyectoInversionistaCreate):
 # ── Info Técnica ──────────────────────────────────────────────────────────────
 
 class ProyectoInfoTecnicaCreate(BaseModel):
+    # Eléctrico general
+    voltaje_red: Optional[str] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+    tipo_tracker: Optional[str] = None
+    # Paneles
     cantidad_total_paneles: Optional[int] = None
+    potencia_panel_kwp: Optional[str] = None
+    marca_paneles: Optional[str] = None
+    # Inversores
+    cantidad_inversores: Optional[int] = None
+    potencia_inversores_kwp: Optional[str] = None
+    marca_inversores: Optional[str] = None
+    cantidad_strings: Optional[int] = None
+    # Marcas de equipos
+    marca_transformador: Optional[str] = None
+    marca_reconectador_rele: Optional[str] = None
+    marca_totalizador: Optional[str] = None
+    marca_seguidor_solar: Optional[str] = None
+    marca_medidores_frontera: Optional[str] = None
+    marca_modem_reconectador: Optional[str] = None
+    marca_modems_frontera: Optional[str] = None
+    ip_modem_reconectador: Optional[str] = None
+    # CCTV y seguridad
+    cctv_estado: Optional[str] = None
+    marca_cctv: Optional[str] = None
+    seguridad_fisica: Optional[str] = None
+    tiene_internet: Optional[str] = None
+    # Almacenamiento
     tiene_almacenamiento: bool = False
     capacidad_almacenamiento_kwh: Optional[float] = None
     marca_almacenamiento: Optional[str] = None

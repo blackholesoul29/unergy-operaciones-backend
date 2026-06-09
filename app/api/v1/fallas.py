@@ -549,6 +549,71 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
 
 
 # ── Feature 6: File attachments for fallas → Google Drive ────────────────────
+
+def _fotos_as_objects(raw_list: list) -> list[dict]:
+    """Normaliza la lista almacenada en fotos_urls a objetos con campos completos.
+    Soporta tanto el formato legado (strings de URL) como el nuevo (dicts)."""
+    result = []
+    for item in raw_list:
+        if isinstance(item, dict):
+            result.append(item)
+        elif isinstance(item, str):
+            # Formato legado: "url#nombre"
+            if "#" in item:
+                url_part, nombre_part = item.rsplit("#", 1)
+            else:
+                url_part, nombre_part = item, item.split("/")[-1]
+            result.append({
+                "id": url_part.split("/d/")[-1].split("/")[0] if "/d/" in url_part else uuid.uuid4().hex,
+                "nombre": nombre_part,
+                "url": url_part,
+                "tamaño": None,
+                "tipo_mime": None,
+                "created_at": None,
+            })
+    return result
+
+
+@router.get("/{id}/archivos")
+def get_falla_archivos(
+    id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    falla = db.query(Falla).filter(Falla.id == id).first()
+    if not falla:
+        raise HTTPException(404, "Falla no encontrada")
+    return _fotos_as_objects(falla.fotos_lista)
+
+
+@router.delete("/{id}/archivos/{archivo_id}")
+def delete_falla_archivo(
+    id: int,
+    archivo_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    falla = db.query(Falla).filter(Falla.id == id).first()
+    if not falla:
+        raise HTTPException(404, "Falla no encontrada")
+
+    items = _fotos_as_objects(falla.fotos_lista)
+    nueva_lista = [i for i in items if i.get("id") != archivo_id]
+    if len(nueva_lista) == len(items):
+        raise HTTPException(404, "Archivo no encontrado")
+
+    # Intentar eliminar de Drive (no crítico si falla)
+    try:
+        service = _get_drive_service()
+        service.files().delete(fileId=archivo_id, supportsAllDrives=True).execute()
+    except Exception:
+        pass
+
+    falla.fotos_urls = nueva_lista if nueva_lista else None
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/{id}/archivos")
 @router.post("/{id}/attachments")
 async def upload_falla_attachment(
@@ -562,7 +627,8 @@ async def upload_falla_attachment(
         raise HTTPException(404, "Falla no encontrada")
 
     contenido = await archivo.read()
-    if len(contenido) > FALLA_MAX_FILE_SIZE:
+    tamaño = len(contenido)
+    if tamaño > FALLA_MAX_FILE_SIZE:
         raise HTTPException(400, "El archivo supera el límite de 20 MB")
 
     import io
@@ -584,7 +650,8 @@ async def upload_falla_attachment(
         raise HTTPException(500, f"Error accediendo carpeta Drive: {e}")
 
     nombre_original = archivo.filename or f"archivo_{uuid.uuid4().hex}"
-    media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype=archivo.content_type or "application/octet-stream")
+    tipo_mime = archivo.content_type or "application/octet-stream"
+    media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype=tipo_mime)
     file_meta = {"name": nombre_original, "parents": [falla_folder_id]}
     try:
         uploaded = service.files().create(
@@ -596,18 +663,20 @@ async def upload_falla_attachment(
 
     file_id  = uploaded["id"]
     view_url = uploaded.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")
-    # Encode filename in URL fragment so frontend can detect type and show name
-    url = f"{view_url}#{nombre_original}"
 
-    current_urls = falla.fotos_lista
-    current_urls.append(url)
-    falla.fotos_urls = current_urls
+    nuevo_archivo = {
+        "id": file_id,
+        "nombre": nombre_original,
+        "url": view_url,
+        "tamaño": tamaño,
+        "tipo_mime": tipo_mime,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Normalizar lista existente (por si hay strings legados) y agregar nuevo
+    items = _fotos_as_objects(falla.fotos_lista)
+    items.append(nuevo_archivo)
+    falla.fotos_urls = items
     db.commit()
 
-    return {
-        "status": "ok",
-        "url": url,
-        "file_id": file_id,
-        "filename": nombre_original,
-        "fotos_urls": current_urls,
-    }
+    return nuevo_archivo

@@ -73,12 +73,18 @@ def _get_drive_service():
 def _get_or_create_folder(service, name: str, parent_id: str) -> str:
     q = (f"name='{name}' and mimeType='application/vnd.google-apps.folder' "
          f"and '{parent_id}' in parents and trashed=false")
-    res = service.files().list(q=q, fields="files(id)").execute()
+    res = service.files().list(
+        q=q, fields="files(id)",
+        supportsAllDrives=True, includeItemsFromAllDrives=True
+    ).execute()
     files = res.get("files", [])
     if files:
         return files[0]["id"]
     meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
-    folder = service.files().create(body=meta, fields="id").execute()
+    folder = service.files().create(
+        body=meta, fields="id",
+        supportsAllDrives=True
+    ).execute()
     return folder["id"]
 
 # ── SLA defaults ─────────────────────────────────────────────────────────────
@@ -581,7 +587,10 @@ async def upload_falla_attachment(
     media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype=archivo.content_type or "application/octet-stream")
     file_meta = {"name": nombre_original, "parents": [falla_folder_id]}
     try:
-        uploaded = service.files().create(body=file_meta, media_body=media, fields="id, webViewLink").execute()
+        uploaded = service.files().create(
+            body=file_meta, media_body=media, fields="id, webViewLink",
+            supportsAllDrives=True
+        ).execute()
     except Exception as e:
         raise HTTPException(500, f"Error subiendo archivo a Drive: {e}")
 

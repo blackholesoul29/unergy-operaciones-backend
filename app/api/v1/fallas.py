@@ -54,13 +54,6 @@ def _gen_codigo(db: Session) -> str:
     return f"FAL-{year}-{max_id + 1:05d}"
 
 
-FALLA_ALLOWED_MIME = {
-    "application/pdf", "image/jpeg", "image/png", "image/webp",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/msword", "text/csv",
-}
 FALLA_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 DRIVE_ROOT_FOLDER_ID = "1GlX0E_OKdyT2kkS9y6gtYyTuASnsrbHc"
 
@@ -561,9 +554,6 @@ async def upload_falla_attachment(
     falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
-
-    if archivo.content_type not in FALLA_ALLOWED_MIME:
-        raise HTTPException(400, "Tipo de archivo no permitido.")
 
     contenido = await archivo.read()
     if len(contenido) > FALLA_MAX_FILE_SIZE:

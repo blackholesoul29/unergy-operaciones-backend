@@ -381,16 +381,28 @@ def generacion_hoy(
         power_kw = float((s or {}).get("power_kw") or 0)
         fuente = "sin_dato"
 
-        # Fuente 1: endpoint /generation/ (datos de inversores, en kWh)
+        # Fuente 1: endpoint /energy/?granularity=day (totales diarios reales)
+        # get_generation() devuelve lecturas acumuladas de vida útil — NO usar para hoy.
         try:
-            gen = client.get_generation(sol_id, today_str, today_str) or {}
-            if "results" in gen:
-                gen = gen["results"]
-            kwh = float(gen.get("total_generation_kwh") or 0)
+            energy = client.get_energy(sol_id, granularity="day",
+                                       date_from=today_str, date_to=today_str) or {}
+            raw = energy.get("results") or energy.get("data") or energy
+            if isinstance(raw, dict):
+                for v in raw.values():
+                    if isinstance(v, (int, float)):
+                        kwh += float(v)
+                    elif isinstance(v, dict) and "value" in v:
+                        kwh += float(v["value"])
+            elif isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, dict):
+                        val = item.get("kwh") or item.get("value") or item.get("energy")
+                        if val:
+                            kwh += float(val)
             if kwh > 0:
                 fuente = "inversor"
         except Exception as exc:
-            logger.warning("generation fallo sol_id=%d: %s", sol_id, exc)
+            logger.warning("energy fallo sol_id=%d: %s", sol_id, exc)
 
         # Fuente 2: project_detail → generation.value en MWh (medidor de frontera)
         if kwh == 0.0:
@@ -996,7 +1008,8 @@ def project_monitoring_detail(
     with ThreadPoolExecutor(max_workers=5) as ex:
         inv_f    = ex.submit(client.get_project_inverters, sol_id)
         pow_f    = ex.submit(client.get_power, sol_id)
-        gen_f    = ex.submit(client.get_generation, sol_id, start30, today.isoformat())
+        gen_f    = ex.submit(client.get_energy, sol_id,
+                             granularity="day", date_from=start30, date_to=today.isoformat())
         snap_p_f = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \
                    if (gaia and node_principal) else None
         snap_r_f = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) \
@@ -1087,21 +1100,23 @@ def project_monitoring_detail(
         for ts, v in sorted(power_total.items())
     ]
 
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "POWER_DEBUG sol_id=%s raw_power_keys=%s power_curve_len=%s first=%s",
-        sol_id,
-        list(raw_power.keys()),
-        len(power_curve),
-        power_curve[:2] if power_curve else [],
-    )
-
-    # ── 30d daily generation ─────────────────────────────────────────────
-    gen_kwh: dict[str, float] = gen_raw.get("generation_kwh") or {}
+    # ── 30d daily generation (desde get_energy granularity=day) ─────────────
+    gen_raw_energy = gen_raw  # get_energy response
+    raw_energy = (gen_raw_energy.get("results") or gen_raw_energy.get("data") or gen_raw_energy
+                  if isinstance(gen_raw_energy, dict) else gen_raw_energy)
     daily: dict[str, float] = {}
-    for ts, v in gen_kwh.items():
-        day = ts.split(" ")[0]
-        daily[day] = daily.get(day, 0.0) + float(v)
+    if isinstance(raw_energy, dict):
+        for k, v in raw_energy.items():
+            kwh_val = float(v) if isinstance(v, (int, float)) else float(v["value"]) if isinstance(v, dict) and "value" in v else None
+            if kwh_val is not None:
+                daily[k[:10]] = daily.get(k[:10], 0.0) + kwh_val
+    elif isinstance(raw_energy, list):
+        for item in raw_energy:
+            if isinstance(item, dict):
+                d = item.get("date") or item.get("day") or item.get("time", "")[:10]
+                val = item.get("kwh") or item.get("value") or item.get("energy")
+                if d and val:
+                    daily[d] = daily.get(d, 0.0) + float(val)
     generation_30d = [
         {"date": d, "kwh": round(v, 1)}
         for d, v in sorted(daily.items())

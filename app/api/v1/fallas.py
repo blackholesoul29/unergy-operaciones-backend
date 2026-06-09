@@ -562,17 +562,28 @@ async def upload_falla_attachment(
     import io
     from googleapiclient.http import MediaIoBaseUpload
 
-    service = _get_drive_service()
+    try:
+        service = _get_drive_service()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error iniciando Drive: {e}")
 
     # Estructura: Raíz → Proyecto → Código falla
     proyecto_nombre = falla.proyecto.nombre_comercial if falla.proyecto else f"Proyecto {falla.proyecto_id}"
-    proyecto_folder_id = _get_or_create_folder(service, proyecto_nombre, DRIVE_ROOT_FOLDER_ID)
-    falla_folder_id    = _get_or_create_folder(service, falla.codigo_interno or f"FAL-{id}", proyecto_folder_id)
+    try:
+        proyecto_folder_id = _get_or_create_folder(service, proyecto_nombre, DRIVE_ROOT_FOLDER_ID)
+        falla_folder_id    = _get_or_create_folder(service, falla.codigo_interno or f"FAL-{id}", proyecto_folder_id)
+    except Exception as e:
+        raise HTTPException(500, f"Error accediendo carpeta Drive: {e}")
 
     nombre_original = archivo.filename or f"archivo_{uuid.uuid4().hex}"
     media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype=archivo.content_type or "application/octet-stream")
     file_meta = {"name": nombre_original, "parents": [falla_folder_id]}
-    uploaded = service.files().create(body=file_meta, media_body=media, fields="id, webViewLink").execute()
+    try:
+        uploaded = service.files().create(body=file_meta, media_body=media, fields="id, webViewLink").execute()
+    except Exception as e:
+        raise HTTPException(500, f"Error subiendo archivo a Drive: {e}")
 
     file_id  = uploaded["id"]
     view_url = uploaded.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")

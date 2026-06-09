@@ -381,28 +381,24 @@ def generacion_hoy(
         power_kw = float((s or {}).get("power_kw") or 0)
         fuente = "sin_dato"
 
-        # Fuente 1: endpoint /energy/?granularity=day (totales diarios reales)
-        # get_generation() devuelve lecturas acumuladas de vida útil — NO usar para hoy.
+        # Fuente 1: get_generation(ayer, hoy) → filtramos solo entradas de hoy.
+        # Llamar con un solo día devuelve el acumulado histórico; con rango ayer→hoy
+        # devuelve valores incrementales por franja horaria y filtramos las de hoy.
         try:
-            energy = client.get_energy(sol_id, granularity="day",
-                                       date_from=today_str, date_to=today_str) or {}
-            raw = energy.get("results") or energy.get("data") or energy
-            if isinstance(raw, dict):
-                for v in raw.values():
-                    if isinstance(v, (int, float)):
-                        kwh += float(v)
-                    elif isinstance(v, dict) and "value" in v:
-                        kwh += float(v["value"])
-            elif isinstance(raw, list):
-                for item in raw:
-                    if isinstance(item, dict):
-                        val = item.get("kwh") or item.get("value") or item.get("energy")
-                        if val:
-                            kwh += float(val)
+            from datetime import timedelta
+            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+            gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
+            if "results" in gen:
+                gen = gen["results"]
+            gen_kwh_map = gen.get("generation_kwh") or {}
+            kwh = sum(
+                float(v) for k, v in gen_kwh_map.items()
+                if str(k).startswith(today_str)
+            )
             if kwh > 0:
                 fuente = "inversor"
         except Exception as exc:
-            logger.warning("energy fallo sol_id=%d: %s", sol_id, exc)
+            logger.warning("generation fallo sol_id=%d: %s", sol_id, exc)
 
         # Fuente 2: project_detail → generation.value en MWh (medidor de frontera)
         if kwh == 0.0:
@@ -446,23 +442,27 @@ def generacion_hoy(
 
 @router.get("/debug-energy/{sol_id}")
 def debug_energy(sol_id: int, _=Depends(get_current_user)):
-    """Temporal: ver respuesta cruda de get_energy y get_generation para un sol_id."""
-    from datetime import date
+    """Temporal: ver respuesta cruda de get_generation ayer→hoy para un sol_id."""
+    from datetime import date, timedelta
     client = _get_client()
-    today = date.today().isoformat()
+    today     = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
 
-    energy = client.get_energy(sol_id, granularity="day", date_from=today, date_to=today) or {}
-    gen    = client.get_generation(sol_id, today, today) or {}
-    gen_kwh = gen.get("generation_kwh") or {}
+    gen     = client.get_generation(sol_id, yesterday, today) or {}
+    gen_kwh = (gen.get("results") or gen if "results" in gen else gen).get("generation_kwh") or {}
+    today_entries   = {k: v for k, v in gen_kwh.items() if str(k).startswith(today)}
+    yest_entries    = {k: v for k, v in gen_kwh.items() if str(k).startswith(yesterday)}
 
     return {
         "today": today,
         "sol_id": sol_id,
-        "get_energy_raw": energy,
-        "get_generation_total_field": gen.get("total_generation_kwh"),
-        "get_generation_kwh_count": len(gen_kwh),
-        "get_generation_kwh_sample": dict(list(gen_kwh.items())[:5]),
-        "get_generation_kwh_sum": round(sum(float(v) for v in gen_kwh.values()), 2),
+        "total_entries": len(gen_kwh),
+        "today_entries_count": len(today_entries),
+        "today_entries_sample": dict(list(today_entries.items())[:8]),
+        "today_kwh_sum": round(sum(float(v) for v in today_entries.values()), 2),
+        "yesterday_entries_count": len(yest_entries),
+        "yesterday_kwh_sum": round(sum(float(v) for v in yest_entries.values()), 2),
+        "total_generation_kwh_field": gen.get("total_generation_kwh"),
     }
 
 

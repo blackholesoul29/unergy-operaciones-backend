@@ -444,6 +444,28 @@ def generacion_hoy(
     return data
 
 
+@router.get("/debug-energy/{sol_id}")
+def debug_energy(sol_id: int, _=Depends(get_current_user)):
+    """Temporal: ver respuesta cruda de get_energy y get_generation para un sol_id."""
+    from datetime import date
+    client = _get_client()
+    today = date.today().isoformat()
+
+    energy = client.get_energy(sol_id, granularity="day", date_from=today, date_to=today) or {}
+    gen    = client.get_generation(sol_id, today, today) or {}
+    gen_kwh = gen.get("generation_kwh") or {}
+
+    return {
+        "today": today,
+        "sol_id": sol_id,
+        "get_energy_raw": energy,
+        "get_generation_total_field": gen.get("total_generation_kwh"),
+        "get_generation_kwh_count": len(gen_kwh),
+        "get_generation_kwh_sample": dict(list(gen_kwh.items())[:5]),
+        "get_generation_kwh_sum": round(sum(float(v) for v in gen_kwh.values()), 2),
+    }
+
+
 @router.get("/debug-matching")
 def debug_matching(
     db: Session = Depends(get_db),

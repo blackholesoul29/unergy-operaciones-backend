@@ -55,7 +55,7 @@ def _gen_codigo(db: Session) -> str:
 
 
 FALLA_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-DRIVE_ROOT_FOLDER_ID = "1GlX0E_OKdyT2kkS9y6gtYyTuASnsrbHc"
+DRIVE_ROOT_FOLDER_ID = "0AD_e3wIWHByDUk9PVA"
 
 def _get_drive_service():
     import json, os

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, date, time
 
 
@@ -147,7 +147,7 @@ class FallaOut(BaseModel):
     sla_limite_horas: Optional[int]
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
-    fotos_lista: list[str] = []
+    fotos_lista: list[Any] = []
     centinela: Optional[str] = None
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
@@ -166,7 +166,7 @@ class FallaOut(BaseModel):
     @field_validator("fotos_lista", mode="before")
     @classmethod
     def coerce_fotos_lista(cls, v):
-        """Acepta list o JSON-string; nunca falla con 500."""
+        """Normaliza fotos_lista: acepta list[dict], list[str] o JSON-string."""
         import json as _json
         if isinstance(v, list):
             return v

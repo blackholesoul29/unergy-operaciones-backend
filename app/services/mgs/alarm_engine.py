@@ -154,7 +154,11 @@ class AlarmEngine:
             else:
                 self.bad_streak.pop(key, None)
 
-            if is_bad and self.bad_streak.get(key, 0) == DEBOUNCE_POLLS:
+            # >= (no ==): si un sondeo se salta y el contador pasa de DEBOUNCE_POLLS
+            # sin caer justo en el valor exacto, con == la alarma NUNCA dispararía
+            # para una planta realmente caída. El guard `not in proj_alarms` de abajo
+            # ya evita disparos duplicados, así que >= es seguro.
+            if is_bad and self.bad_streak.get(key, 0) >= DEBOUNCE_POLLS:
                 if AlarmType.PLANTA_CAIDA not in proj_alarms:
                     alarms.append(Alarm(
                         severity=Severity.CRITICAL,

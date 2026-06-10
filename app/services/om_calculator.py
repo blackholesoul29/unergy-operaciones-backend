@@ -28,15 +28,20 @@ def factor_acumulado(
     ipc_tasas: dict[int, float],
 ) -> float:
     """
-    Producto de (1 + IPC[y]) para cada año y desde año_inicio+1 hasta año_periodo.
+    Producto de (1 + IPC_dic[año-1]) para cada año desde año_inicio+1 hasta año_periodo.
 
-    Ejemplo — inicio 2023, periodo 2026:
-      (1 + 0.0928) × (1 + 0.052) × (1 + 0.051) = 1.208257
+    Las tasas se almacenan con clave = año de diciembre del DANE (N).
+    El incremento de enero N+1 usa ipc_tasas[N].
+
+    Ejemplo — inicio 2024, periodo 2026, tasas {2024: 0.052, 2025: 0.051}:
+      año 2025 → ipc_tasas[2024] = 0.052  → ×1.052
+      año 2026 → ipc_tasas[2025] = 0.051  → ×1.051
+      factor = 1.052 × 1.051 = 1.105772
     Si año_inicio >= año_periodo → factor = 1.0 (año base, sin indexación).
     """
     factor = 1.0
     for año in range(año_inicio + 1, año_periodo + 1):
-        ipc = ipc_tasas.get(año, 0.0)
+        ipc = ipc_tasas.get(año - 1, 0.0)   # IPC dic del año anterior
         factor *= (1.0 + ipc)
     return factor
 
@@ -51,13 +56,13 @@ def historial_indexaciones(
     """
     Devuelve string legible del historial de IPC aplicados.
 
-    Ejemplo: "IPC 2024: 9.28% → IPC 2025: 5.20% → IPC 2026: 5.10% | Acum: 16.96%"
+    Ejemplo: "IPC dic 2024: 5.20% → IPC dic 2025: 5.10% | Acum: 10.58%"
     Si no hay indexación: "Sin indexación (año inicio)"
     """
     pasos = []
     for año in range(año_inicio + 1, año_periodo + 1):
-        ipc = ipc_tasas.get(año, 0.0)
-        pasos.append(f"IPC {año}: {ipc * 100:.2f}%")
+        ipc = ipc_tasas.get(año - 1, 0.0)   # IPC dic del año anterior
+        pasos.append(f"IPC dic {año - 1}: {ipc * 100:.2f}%")
 
     if not pasos:
         return "Sin indexación (año inicio)"

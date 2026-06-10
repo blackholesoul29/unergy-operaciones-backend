@@ -174,8 +174,10 @@ def resumen_por_proyecto(
         {
             "proyecto_id": r.proyecto_id,
             "nombre_comercial": r.nombre_comercial,
-            "total_kwh_real": float(r.total_kwh_real) if r.total_kwh_real else None,
-            "total_kwh_p90": float(r.total_kwh_p90) if r.total_kwh_p90 else None,
+            # `is not None`: una generación real de exactamente 0.0 (planta caída
+            # todo el periodo) es un dato válido y debe mostrarse 0, no null.
+            "total_kwh_real": float(r.total_kwh_real) if r.total_kwh_real is not None else None,
+            "total_kwh_p90": float(r.total_kwh_p90) if r.total_kwh_p90 is not None else None,
             "dias_con_dato": r.dias_con_dato,
             "fecha_inicio": r.fecha_inicio,
             "fecha_fin": r.fecha_fin,

@@ -73,6 +73,53 @@ def _unergy_token() -> str:
         return resp.json()["access"]
 
 
+_COL_TZ = timezone(timedelta(hours=-5))
+
+
+def _monthly_mwh_from_records(records: list) -> dict:
+    """Calcula los MWh del mes a partir de registros de un contador acumulado.
+
+    Reglas (función pura, testeable):
+    - Ignora lecturas con ``generacion`` None: una lectura faltante NO es 0; antes
+      ``or 0`` la forzaba a 0 y podía hacer que el mes reportara 0 MWh en vez de
+      "sin dato" cuando la lectura de borde venía nula.
+    - Suma los deltas positivos entre lecturas consecutivas. Esto es robusto ante
+      reinicios de contador (un paso negativo aporta 0 en vez de corromper el
+      total) y es EXACTAMENTE igual a (último − primero) cuando el contador es
+      monótono creciente, que es el caso normal. Así el cálculo no cambia para los
+      meses sanos y solo se corrige el caso anómalo (reinicio / lectura nula).
+
+    Devuelve ``mwh`` (float redondeado a 3) o None si no hay lecturas válidas, y
+    el datetime tz-aware (Colombia) de la última lectura válida en ``last_dt``.
+    """
+    rows = []
+    for r in sorted(records, key=lambda r: r.get("time_stamp", "")):
+        g = r.get("generacion")
+        if g is None:
+            continue
+        rows.append((r.get("time_stamp", ""), float(g)))
+
+    if not rows:
+        return {"mwh": None, "n_used": 0, "last_dt": None}
+
+    total_kwh = 0.0
+    for (_, prev), (_, cur) in zip(rows, rows[1:]):
+        if cur > prev:
+            total_kwh += cur - prev
+
+    last_dt = None
+    try:
+        last_aware = datetime.fromisoformat(rows[-1][0].replace("Z", "+00:00"))
+        # Normalizar a hora Colombia antes de leer el día: si la API entrega el
+        # timestamp en UTC ("...Z"), el .day crudo podía rodar al mes siguiente
+        # en lecturas cercanas a medianoche (fin de mes).
+        last_dt = last_aware.astimezone(_COL_TZ)
+    except Exception:
+        last_dt = None
+
+    return {"mwh": round(total_kwh / 1000, 3), "n_used": len(rows), "last_dt": last_dt}
+
+
 def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     """
     Consulta la generación acumulada de un mes para un sub_project.
@@ -109,25 +156,11 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     if not records:
         return {"mwh": None, "n_records": 0, "ultimo_dia": None}
 
-    records_sorted = sorted(records, key=lambda r: r.get("time_stamp", ""))
-    gen_first = records_sorted[0].get("generacion") or 0
-    gen_last = records_sorted[-1].get("generacion") or 0
-    diff_kwh = gen_last - gen_first
-    if diff_kwh < 0:
-        diff_kwh = gen_last  # contador reiniciado — usar solo el último
-
-    ultimo_dia = None
-    try:
-        last_ts = records_sorted[-1].get("time_stamp", "")
-        # La API devuelve timestamps con offset Colombia (-05:00) o Z.
-        # fromisoformat los parsea correctamente — el .day es ya hora Colombia.
-        last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-        ultimo_dia = last_dt.day
-    except Exception:
-        pass
+    calc = _monthly_mwh_from_records(records)
+    ultimo_dia = calc["last_dt"].day if calc["last_dt"] is not None else None
 
     return {
-        "mwh": round(diff_kwh / 1000, 3),
+        "mwh": calc["mwh"],
         "n_records": len(records),
         "ultimo_dia": ultimo_dia,
     }

@@ -10,6 +10,14 @@ if config.config_file_name is not None:
 
 # Override sqlalchemy.url from environment if available
 db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    pg_user = os.getenv("POSTGRES_USER")
+    pg_pass = os.getenv("POSTGRES_PASSWORD")
+    pg_host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
+    pg_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "5432")
+    pg_db   = os.getenv("POSTGRES_DB")
+    if pg_user and pg_pass and pg_host and pg_db:
+        db_url = f"postgresql+psycopg://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 

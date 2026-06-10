@@ -506,6 +506,27 @@ def create_falla(
     )
     db.add(falla)
     db.commit()
+
+    # Notificar a todos los coordinadores
+    from app.api.v1.notificaciones import crear_notificacion
+    from app.models.usuarios import RolEnum
+    coordinadores = db.query(Usuario).filter(
+        Usuario.rol == RolEnum.coordinador,
+        Usuario.activo == True,
+    ).all()
+    proyecto_nombre = falla.proyecto.nombre_comercial if falla.proyecto else f"Proyecto {falla.proyecto_id}"
+    for coord in coordinadores:
+        crear_notificacion(
+            db=db,
+            usuario_id=coord.id,
+            tipo="accion",
+            titulo="Nueva falla registrada",
+            mensaje=f"{falla.codigo_interno} — {proyecto_nombre}: {(falla.descripcion or '')[:80]}",
+            link="/m/coordinador",
+        )
+    if coordinadores:
+        db.commit()
+
     return _get_or_404(falla.id, db)
 
 
@@ -519,15 +540,37 @@ def update_falla(
     id: int,
     data: FallaUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
     falla = db.query(Falla).filter(Falla.id == id).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     dump = data.model_dump(exclude_unset=True)
+
+    nuevo_asignado_id = dump.get("asignado_a_id")
+    notificar_asignacion = (
+        "asignado_a_id" in dump
+        and nuevo_asignado_id is not None
+        and nuevo_asignado_id != falla.asignado_a_id
+    )
+
     for k, v in dump.items():
         setattr(falla, k, v)
     db.commit()
+
+    if notificar_asignacion:
+        from app.api.v1.notificaciones import crear_notificacion
+        proyecto_nombre = falla.proyecto.nombre_comercial if falla.proyecto else f"Proyecto {falla.proyecto_id}"
+        crear_notificacion(
+            db=db,
+            usuario_id=nuevo_asignado_id,
+            tipo="accion",
+            titulo="Falla asignada a ti",
+            mensaje=f"{falla.codigo_interno} — {proyecto_nombre}: {(falla.descripcion or '')[:80]}",
+            link="/m/tecnico",
+        )
+        db.commit()
+
     return _get_or_404(id, db)
 
 

@@ -28,9 +28,12 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 import psycopg
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
+from app.core.database import get_db
 
 logger = logging.getLogger("proximos_energizar")
 router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"])
@@ -117,6 +120,44 @@ def _parse_iso_date(raw: str | None) -> date | None:
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
     except (ValueError, AttributeError):
         return None
+
+
+# ── Nombre comercial (BD de operaciones + respaldo derivado del código) ─────────
+
+def _derive_commercial_name(code: str) -> str:
+    """Nombre legible derivado del código de proyecto de origina.
+
+    Los códigos tienen la forma `<PREFIJO>_<SITIO>`, p. ej.
+    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur". El prefijo de origina empieza por
+    `COL` o contiene dígitos (p. ej. `COLSUCT3P1`); solo se descarta si lo parece,
+    así nombres como `MORROSQUILLO_2` se conservan completos ("Morrosquillo 2").
+    Es el respaldo cuando el proyecto aún no está en la tabla `proyectos` (típico
+    en el pipeline pre-operación)."""
+    if not code:
+        return ""
+    parts = code.split("_", 1)
+    prefix = parts[0]
+    is_code_prefix = bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
+    readable = (parts[1] if len(parts) > 1 and is_code_prefix else code)
+    readable = readable.replace("_", " ").strip()
+    return readable.title() if readable else code
+
+
+def _commercial_name_map(db: Session) -> dict[str, str]:
+    """{ origina_code.upper(): nombre_comercial } desde la BD de operaciones.
+
+    Permite mostrar el nombre comercial REAL cuando el proyecto del pipeline ya
+    existe en `proyectos` (correlacionado vía origina_code). Best-effort: si la
+    consulta falla, se cae al nombre derivado del código."""
+    try:
+        rows = db.execute(text(
+            "SELECT origina_code, nombre_comercial FROM proyectos "
+            "WHERE origina_code IS NOT NULL AND nombre_comercial IS NOT NULL"
+        )).all()
+        return {code.upper(): nombre for code, nombre in rows if code and nombre}
+    except Exception as exc:
+        logger.warning("commercial name map query failed: %s", exc)
+        return {}
 
 
 # ── Cronogramas EPC de Sun Factory (Solenium) ───────────────────────────────────
@@ -301,13 +342,15 @@ def proximos_energizar(
     cross_sunfactory: bool = Query(True, description="Cruzar con cronogramas Sun Factory para fecha de energización real + % de avance."),
     cross_generacion: bool = Query(True, description="Cruzar con la API de generación de Unergy para detectar plantas ya energizadas."),
     yield_kwh_kwp_day: float = Query(_DEFAULT_YIELD_KWH_KWP_DAY, ge=1.0, le=8.0, description="Rendimiento específico para la proyección de MWh/mes."),
+    db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> dict:
     """Proyectos en pipeline de construcción con su proyección de generación.
 
     Forma de cada proyecto (compatible con el frontend):
-    `{ id, name, status, energizationDate, contracts, monthlyMwh, avancePct, ... }`.
-    """
+    `{ id, name, commercialName, status, energizationDate, contracts, monthlyMwh, avancePct, ... }`.
+    `name` es el código de origina (p. ej. COLSUCT3P1_MORROA_SUR) y `commercialName`
+    el nombre comercial (real desde `proyectos`, o derivado del código)."""
     try:
         with _oconn() as conn:
             if conn is None:
@@ -367,11 +410,16 @@ def proximos_energizar(
             logger.warning("Unergy generation auth/sync failed: %s", exc)
             warnings.append("API de generación Unergy no disponible — proyección teórica.")
 
+    # Nombre comercial: real desde la BD de operaciones (cruce por origina_code);
+    # si el proyecto aún no existe ahí, se deriva del código.
+    comm_map = _commercial_name_map(db)
+
     projects = []
     for r in rows:
         (pid, name, stage, installed_power, dc_capacity, contract_type,
          last_stage_date) = r
 
+        commercial_name = (comm_map.get(name.upper()) if name else None) or _derive_commercial_name(name)
         status = _STAGE_TO_STATUS.get(stage, "En construcción")
         monthly = _project_monthly_mwh(installed_power, yield_kwh_kwp_day)
         projection_basis = "potencia_instalada"
@@ -400,6 +448,7 @@ def proximos_energizar(
         projects.append({
             "id": pid,
             "name": name,
+            "commercialName": commercial_name,
             "status": status,
             "stage": stage,
             "energizationDate": energ.isoformat() if energ else None,

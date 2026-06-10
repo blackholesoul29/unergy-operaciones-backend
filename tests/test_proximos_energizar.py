@@ -171,6 +171,24 @@ def test_status_labels_match_frontend_options():
     assert set(pe._STAGE_TO_STATUS.values()) <= frontend_options
 
 
+# ── _derive_commercial_name ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("code,expected", [
+    ("COLSUCT3P1_MORROA_SUR", "Morroa Sur"),      # prefijo de código con dígitos → se descarta
+    ("COLBOLT2P3_LA_UNION", "La Union"),
+    ("COLSUCT3P1_MORROA_SUR_2", "Morroa Sur 2"),  # el sitio puede tener sufijo numérico
+    ("MORROSQUILLO_2", "Morrosquillo 2"),         # 1er token sin pinta de código → se conserva
+    ("SINGLEWORD", "Singleword"),                  # sin separador
+])
+def test_derive_commercial_name(code, expected):
+    assert pe._derive_commercial_name(code) == expected
+
+
+@pytest.mark.parametrize("bad", [None, ""])
+def test_derive_commercial_name_empty(bad):
+    assert pe._derive_commercial_name(bad) == ""
+
+
 # ── _sunfactory_token: reúso de credenciales Solenium ───────────────────────────
 
 class _FakeResp:

@@ -875,6 +875,196 @@ def get_plantas_contratos(
     }
 
 
+@router.get("/energia-transada")
+def get_energia_transada(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Energía transada por planta en el mes (solo datos reales, sin proyección).
+
+    Para cada planta representada: generación del período (mes cerrado completo,
+    mes actual hasta hoy), cuánta se transó vía PPA (asignación GESCON ×
+    % despacho, prorrateado por días activos dentro del período) y cuánta
+    quedó en bolsa (remanente sin asignación). Asignaciones duplicadas
+    (exposición bolsa) no cuentan como PPA.
+
+    Optimizado: 2 queries DB principales + un solo fetch por planta en paralelo.
+    """
+    from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
+
+    today = date.today()
+    es_mes_actual = year == today.year and month == today.month
+    es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
+    total_dias = calendar.monthrange(year, month)[1]
+    dia_corte = today.day if es_mes_actual else total_dias
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
+    corte = date(year, month, dia_corte)
+
+    periodo = {
+        "year": year,
+        "month": month,
+        "dias_mes": total_dias,
+        "dia_corte": dia_corte,
+        "fecha_corte": corte.isoformat(),
+        "es_mes_actual": es_mes_actual,
+        "es_mes_futuro": es_mes_futuro,
+    }
+
+    if es_mes_futuro:
+        return {
+            "periodo": periodo,
+            "plantas": [],
+            "totales": {"gen_mwh": 0.0, "ppa_mwh": 0.0, "bolsa_mwh": 0.0, "n_plantas": 0},
+        }
+
+    # ── 1. Plantas representadas activas en el período (1 query) ──────────────
+    plantas_db = (
+        db.query(Proyecto)
+        .filter(
+            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
+            Proyecto.estado == EstadoProyectoEnum.en_operacion,
+            Proyecto.sub_project.isnot(None),
+            or_(Proyecto.fecha_entrada_operacion.is_(None), Proyecto.fecha_entrada_operacion <= last_day),
+            or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
+        )
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    plantas_by_id = {p.id: p for p in plantas_db}
+
+    # ── 2. Asignaciones GESCON de contratos de venta vigentes ─────────────────
+    contratos_venta = [
+        c for c in _contratos_vigentes(db, year, month)
+        if (getattr(c, "tipo_contrato", None) or "venta") != "compra"
+    ]
+    asignaciones: dict[int, list[dict]] = defaultdict(list)
+    for c in contratos_venta:
+        if not c.numero_codigo_contrato:
+            continue
+        nombre_c = c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}"
+        for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
+            if not asic.proyecto_id:
+                continue
+            # Prorrateo sobre los días transcurridos del período (corte)
+            eff_start = max(first_day, asic.fecha_inicio) if asic.fecha_inicio else first_day
+            eff_end = min(corte, asic.fecha_fin) if asic.fecha_fin else corte
+            dias_activos = max(0, (eff_end - eff_start).days + 1)
+            if dias_activos == 0:
+                continue
+            asignaciones[asic.proyecto_id].append({
+                "contrato_id": c.id,
+                "contrato": nombre_c,
+                "pct": float(asic.porcentaje_despacho or 0),
+                "dias_activos": dias_activos,
+                "proration": dias_activos / dia_corte,
+                "es_duplicado": bool(asic.es_duplicado),
+            })
+
+    # Plantas con GESCON que no entraron en el filtro inicial (1 query extra solo si hace falta)
+    missing_ids = set(asignaciones) - set(plantas_by_id)
+    if missing_ids:
+        extra = db.query(Proyecto).filter(Proyecto.id.in_(missing_ids), Proyecto.sub_project.isnot(None)).all()
+        for p in extra:
+            plantas_by_id[p.id] = p
+        plantas_db = sorted(plantas_by_id.values(), key=lambda p: p.nombre_comercial or "")
+
+    # ── 3. Generación en paralelo (un fetch por sub_project único) ────────────
+    sp_set = {p.sub_project for p in plantas_db if p.sub_project}
+    gen_cache: dict[str, dict] = {}
+    warning = None
+    if sp_set:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in energia-transada: %s", exc)
+            token = None
+            warning = "No se pudo autenticar con la API de generación."
+        if token:
+            sp_list = list(sp_set)
+
+            def _fetch_sp(sp: str) -> tuple:
+                return sp, _fetch_month(token, sp, year, month)
+
+            with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
+                for sp, res in pool.map(_fetch_sp, sp_list):
+                    gen_cache[sp] = res
+
+    # ── 4. Cálculo por planta ─────────────────────────────────────────────────
+    plantas_out = []
+    total_gen = total_ppa = total_bolsa = 0.0
+    for p in plantas_db:
+        gd = gen_cache.get(p.sub_project, {"mwh": None, "ultimo_dia": None})
+        gen = gd.get("mwh")
+        asigs = asignaciones.get(p.id, [])
+        contratos_planta = [
+            {
+                "id": a["contrato_id"],
+                "nombre": a["contrato"],
+                "pct": a["pct"],
+                "dias_activos": a["dias_activos"],
+                "es_duplicado": a["es_duplicado"],
+            }
+            for a in asigs
+        ]
+        if gen is None:
+            plantas_out.append({
+                "id": p.id,
+                "nombre": p.nombre_comercial,
+                "sub_project": p.sub_project,
+                "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+                "gen_mwh": None, "ppa_mwh": None, "bolsa_mwh": None,
+                "modo": "sin_datos", "contratos": contratos_planta, "ultimo_dia": None,
+            })
+            continue
+
+        ppa = sum(gen * a["pct"] * a["proration"] for a in asigs if not a["es_duplicado"])
+        ppa = round(min(ppa, gen), 3)
+        bolsa = round(max(0.0, gen - ppa), 3)
+        if not any(not a["es_duplicado"] for a in asigs) or ppa <= 0:
+            modo = "bolsa"
+        elif bolsa <= max(0.001, gen * 0.005):
+            modo, bolsa = "ppa", 0.0
+        else:
+            modo = "mixto"
+
+        total_gen += gen
+        total_ppa += ppa
+        total_bolsa += bolsa
+        plantas_out.append({
+            "id": p.id,
+            "nombre": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "gen_mwh": round(gen, 3),
+            "ppa_mwh": ppa,
+            "bolsa_mwh": bolsa,
+            "modo": modo,
+            "contratos": contratos_planta,
+            "ultimo_dia": gd.get("ultimo_dia"),
+        })
+
+    plantas_out.sort(key=lambda x: -(x["gen_mwh"] or 0))
+
+    result = {
+        "periodo": periodo,
+        "plantas": plantas_out,
+        "totales": {
+            "gen_mwh": round(total_gen, 3),
+            "ppa_mwh": round(total_ppa, 3),
+            "bolsa_mwh": round(total_bolsa, 3),
+            "n_plantas": len([x for x in plantas_out if x["gen_mwh"] is not None]),
+            "n_sin_datos": len([x for x in plantas_out if x["gen_mwh"] is None]),
+        },
+    }
+    if warning:
+        result["warning"] = warning
+    return result
+
+
 @router.get("/ppa/{contrato_id}/anual")
 def get_anual(
     contrato_id: int,

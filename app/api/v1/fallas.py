@@ -237,6 +237,102 @@ def stats_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)):
     }
 
 
+_COL_TZ = timezone(timedelta(hours=-5))
+
+
+def _col_day_start_utc() -> datetime:
+    """Inicio del día actual en hora de Colombia (UTC-5), expresado en UTC."""
+    now_col = datetime.now(_COL_TZ)
+    start_col = now_col.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start_col.astimezone(timezone.utc)
+
+
+@router.get("/actividad-hoy")
+def actividad_hoy(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Fallas creadas hoy y fallas que cambiaron de estado hoy (hora Colombia).
+
+    Respuesta:
+      { fecha,
+        creadas: [FallaOut],
+        cambios_estado: [{ falla: FallaOut, estado_anterior, estado_nuevo, hora }] }
+    El `estado_anterior` se deduce del seguimiento de cambio inmediatamente previo.
+    """
+    day_start = _col_day_start_utc()
+    hoy_str = datetime.now(_COL_TZ).date().isoformat()
+
+    creadas = (
+        db.query(Falla)
+        .filter(Falla.deleted_at.is_(None), Falla.created_at >= day_start)
+        .options(*_FALLA_LOAD)
+        .order_by(Falla.created_at.desc())
+        .all()
+    )
+
+    segs_hoy = (
+        db.query(FallaSeguimiento)
+        .filter(
+            FallaSeguimiento.estado_nuevo_id.isnot(None),
+            FallaSeguimiento.created_at >= day_start,
+        )
+        .all()
+    )
+    falla_ids = {s.falla_id for s in segs_hoy}
+
+    cambios: list[dict] = []
+    if falla_ids:
+        # Historial de cambios de estado de esas fallas (ordenado) para deducir el anterior.
+        hist = (
+            db.query(FallaSeguimiento)
+            .filter(
+                FallaSeguimiento.falla_id.in_(falla_ids),
+                FallaSeguimiento.estado_nuevo_id.isnot(None),
+            )
+            .options(selectinload(FallaSeguimiento.estado_nuevo))
+            .order_by(FallaSeguimiento.falla_id, FallaSeguimiento.created_at)
+            .all()
+        )
+        por_falla: dict[int, list] = {}
+        for s in hist:
+            por_falla.setdefault(s.falla_id, []).append(s)
+
+        fallas = (
+            db.query(Falla)
+            .filter(Falla.id.in_(falla_ids), Falla.deleted_at.is_(None))
+            .options(*_FALLA_LOAD)
+            .all()
+        )
+        fallas_map = {f.id: f for f in fallas}
+
+        def _estado_dict(estado):
+            if not estado:
+                return None
+            return {"etiqueta": estado.etiqueta, "color_hex": estado.color_hex}
+
+        for fid, segs in por_falla.items():
+            falla = fallas_map.get(fid)
+            if not falla:
+                continue
+            today_positions = [i for i, s in enumerate(segs) if s.created_at >= day_start]
+            if not today_positions:
+                continue
+            last_i = today_positions[-1]
+            ultimo = segs[last_i]
+            anterior = segs[last_i - 1] if last_i > 0 else None
+            cambios.append({
+                "falla": FallaOut.model_validate(falla),
+                "estado_anterior": _estado_dict(anterior.estado_nuevo if anterior else None),
+                "estado_nuevo": _estado_dict(ultimo.estado_nuevo),
+                "hora": ultimo.created_at.isoformat(),
+            })
+        cambios.sort(key=lambda c: c["hora"], reverse=True)
+
+    return {
+        "fecha": hoy_str,
+        "creadas": [FallaOut.model_validate(f) for f in creadas],
+        "cambios_estado": cambios,
+    }
+
+
 @router.get("", response_model=PaginatedResponse[FallaOut])
 def list_fallas(
     page: int = Query(1, ge=1),

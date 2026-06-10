@@ -234,6 +234,36 @@ def _extract_ac_metrics(detail: dict) -> dict:
     }
 
 
+def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str) -> float:
+    """Suma las entradas de HOY de un mapa generation_kwh de Solenium.
+
+    `get_generation(ayer, hoy)` devuelve valores incrementales por franja horaria
+    con claves tipo "2026-06-09 08:00"; nos quedamos solo con las de hoy."""
+    if not gen_kwh_map:
+        return 0.0
+    total = 0.0
+    for k, v in gen_kwh_map.items():
+        if str(k).startswith(today_str):
+            try:
+                total += float(v)
+            except (ValueError, TypeError):
+                continue
+    return total
+
+
+def _meter_kwh_from_summary(summary: dict | None) -> float | None:
+    """Energía del día del medidor (frontera) desde un item de project_summary."""
+    if not summary:
+        return None
+    raw = summary.get("frontier_generation_kwh")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return None
+
+
 @router.get("/proyecto/{proyecto_id}/historial")
 def proyecto_historial(
     proyecto_id: int,
@@ -437,6 +467,87 @@ def generacion_hoy(
         "proyectos": result,
     }
     _cache_set(_GENHOY_KEY, CACHE_TTL_GENHOY, data)
+    return data
+
+
+@router.get("/resumen-dia")
+def resumen_dia(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Resumen del día: top de generación por medidores y por inversores.
+
+    - Medidor: `frontier_generation_kwh` del summary de Solenium (1 batch).
+    - Inversor: `get_generation(ayer, hoy)` por proyecto, sumando las entradas de hoy
+      (paralelo). Ambas listas ordenadas desc. Cacheado en memoria (TTL corto).
+    """
+    _KEY = f"resumendia:{date.today().isoformat()}"
+    cached = _cache_get(_KEY)
+    if cached:
+        return cached
+
+    client = _get_client()
+    today_str = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+
+    # Matching proyectos ↔ Solenium (mismo criterio que generacion-hoy)
+    sol_projects = client.get_projects()
+    sol_name_map: dict[str, int] = {}
+    for sp in sol_projects:
+        pid = sp.get("id")
+        if pid is not None:
+            sol_name_map[_normalize_name(sp.get("name") or "")] = int(pid)
+
+    summary_list = client.get_project_summary()
+    summary_map: dict[int, dict] = {}
+    for s in summary_list:
+        pid = s.get("project_id") or s.get("id")
+        if pid is not None:
+            summary_map[int(pid)] = s
+
+    proyectos_db = db.query(Proyecto).filter(Proyecto.estado == "en_operacion").all()
+    matched: list[tuple] = []
+    for p in proyectos_db:
+        sol_id = _find_solenium_id(p, sol_name_map)
+        if sol_id is not None:
+            matched.append((p, sol_id))
+
+    # Medidor (frontera) desde el batch de summary — sin llamadas extra.
+    medidor: list[dict] = []
+    for p, sol_id in matched:
+        kwh = _meter_kwh_from_summary(summary_map.get(sol_id))
+        if kwh and kwh > 0:
+            medidor.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "kwh": round(kwh, 1)})
+
+    # Inversores desde get_generation (paralelo, como generacion-hoy).
+    def _inv(item: tuple) -> tuple:
+        p, sol_id = item
+        try:
+            gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
+            if "results" in gen:
+                gen = gen["results"]
+            kwh = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str)
+        except Exception as exc:
+            logger.warning("resumen-dia inversor sol_id=%s: %s", sol_id, exc)
+            kwh = 0.0
+        return (p.id, p.nombre_comercial, round(kwh, 1))
+
+    inversor: list[dict] = []
+    if matched:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for pid, nombre, kwh in ex.map(_inv, matched):
+                if kwh > 0:
+                    inversor.append({"proyecto_id": pid, "nombre": nombre, "kwh": kwh})
+
+    medidor.sort(key=lambda x: x["kwh"], reverse=True)
+    inversor.sort(key=lambda x: x["kwh"], reverse=True)
+
+    data = {
+        "fecha":    today_str,
+        "medidor":  {"total": round(sum(x["kwh"] for x in medidor), 1),  "top": medidor},
+        "inversor": {"total": round(sum(x["kwh"] for x in inversor), 1), "top": inversor},
+    }
+    _cache_set(_KEY, CACHE_TTL_GENHOY, data)
     return data
 
 

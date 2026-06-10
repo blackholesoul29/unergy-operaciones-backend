@@ -120,3 +120,86 @@ def test_hoy_col_differs_from_utc_in_evening():
     col = timezone(timedelta(hours=-5))
     assert instante_utc.astimezone(col).date() == date(2026, 6, 9)
     assert instante_utc.date() == date(2026, 6, 10)
+
+
+# ── O&M (financiero): red de seguridad sobre cálculos puros existentes ───────
+# Estos tests NO cambian la lógica; fijan el comportamiento actual para que
+# cualquier edición futura (humana o de Samantha) que altere un número de dinero
+# falle de inmediato. Acordar cambios reales con Finanzas antes de modificarlos.
+
+from app.services.om_calculator import (
+    factor_acumulado,
+    calcular_prorrateo,
+    calcular_proyecto,
+    _redondear,
+)
+
+IPC = {2024: 0.0928, 2025: 0.052, 2026: 0.051}
+
+
+def test_factor_acumulado_ejemplo_documentado():
+    # inicio 2023, periodo 2026 → (1.0928)(1.052)(1.051)
+    assert round(factor_acumulado(2023, 2026, IPC), 6) == 1.208257
+
+
+def test_factor_acumulado_anio_base_sin_indexacion():
+    assert factor_acumulado(2026, 2026, IPC) == 1.0
+    assert factor_acumulado(2027, 2026, IPC) == 1.0  # inicio > periodo
+
+
+def test_redondear_half_up_y_cop_entero():
+    assert _redondear(100.5) == 101
+    assert _redondear(100.49) == 100
+    assert _redondear(2.5) == 3
+    assert isinstance(_redondear(1_000_000.0), int)
+
+
+def test_prorrateo_menos_de_15_dias_no_factura():
+    # inicio 20-jun: 30-20+1 = 11 días ≤ 15
+    assert calcular_prorrateo(date(2026, 6, 20), "2026-06") == ("No se factura", 0.0)
+
+
+def test_prorrateo_mas_de_15_dias_parcial():
+    # inicio 10-jun: 30-10+1 = 21 días > 15 → 21/30 = 0.7
+    label, factor = calcular_prorrateo(date(2026, 6, 10), "2026-06")
+    assert label == "21/30 días" and factor == 0.7
+
+
+def test_prorrateo_periodo_posterior_es_completo():
+    assert calcular_prorrateo(date(2026, 5, 1), "2026-06") == ("Completo", 1.0)
+
+
+def test_prorrateo_periodo_anterior_al_inicio_no_factura():
+    assert calcular_prorrateo(date(2026, 6, 1), "2026-05") == ("No se factura", 0.0)
+
+
+def test_calcular_proyecto_sin_valor_base_queda_deshabilitado():
+    out = calcular_proyecto(
+        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2025, 1, 1),
+        valor_base_anual=None, periodo="2026-06", ipc_tasas=IPC,
+    )
+    assert out["habilitado"] is False
+    assert out["valor_a_facturar"] is None
+
+
+def test_calcular_proyecto_mes_completo_oracle_entero():
+    # IPC 0 ⇒ factor 1.0; base 12.000.000 / 12 = 1.000.000 exacto, mes completo
+    out = calcular_proyecto(
+        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2024, 1, 1),
+        valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
+    )
+    assert out["habilitado"] is True
+    assert out["factor_acumulado"] == 1.0
+    assert out["prorrateo_label"] == "Completo"
+    assert out["valor_mes_completo"] == 1_000_000
+    assert out["valor_a_facturar"] == 1_000_000
+
+
+def test_calcular_proyecto_prorrateo_aplica_al_valor():
+    # mes de inicio, 21/30 días ⇒ 1.000.000 * 0.7 = 700.000
+    out = calcular_proyecto(
+        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2026, 6, 10),
+        valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
+    )
+    assert out["prorrateo_factor"] == 0.7
+    assert out["valor_a_facturar"] == 700_000

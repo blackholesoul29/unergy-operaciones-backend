@@ -30,6 +30,7 @@ from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
+from app.models.costos_variables import CostoVariable
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -50,4 +51,5 @@ __all__ = [
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",
     "Notificacion", "TipoNotificacionEnum",
+    "CostoVariable",
 ]

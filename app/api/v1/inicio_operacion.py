@@ -5,7 +5,6 @@ from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.proyectos import Proyecto
-from app.models.servicios import ServicioOperacion
 from app.schemas.inicio_operacion import (
     InicioOperacionDetail, InicioOperacionFicha,
     InicioOperacionListItem, InicioOperacionProyecto,
@@ -48,8 +47,7 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
     """Proyectos con servicio de operación, con su % de avance de checklist."""
     proyectos = (
         db.query(Proyecto)
-        .join(ServicioOperacion, ServicioOperacion.proyecto_id == Proyecto.id)
-        .filter(Proyecto.deleted_at.is_(None))
+        .filter(Proyecto.srv_operacion == True, Proyecto.deleted_at.is_(None))
         .order_by(Proyecto.nombre_comercial)
         .all()
     )

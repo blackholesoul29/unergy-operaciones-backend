@@ -922,6 +922,9 @@ def _cargar_autoconsumo_db(
             if tipo_l == "valor_a_pagar":
                 neto_pagar = f["total"]
                 continue
+            # Administración no se carga como línea de mandato en autoconsumo.
+            if tipo_l == "administracion":
+                continue
             ref = f["ref_factura"] or None
             if ref and len(ref) > 255:
                 ref = ref[:252] + "..."

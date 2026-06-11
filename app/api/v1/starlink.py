@@ -2,16 +2,24 @@
 API de procesamiento de facturas Starlink.
 
 Endpoints:
-  POST /starlink/procesar-pdf   → parsea el PDF y devuelve ítems + agrupado
-  POST /starlink/excel          → genera y descarga el Excel con dos hojas
+  POST /starlink/procesar-pdf          → parsea el PDF y devuelve ítems + agrupado
+  POST /starlink/excel                 → genera y descarga el Excel con dos hojas
+  GET  /starlink/periodos              → lista períodos con datos guardados
+  GET  /starlink/factura/{periodo}     → datos guardados de un período
+  PUT  /starlink/factura/{periodo}     → guardar (crear/sobreescribir) un período
+  DELETE /starlink/factura/{periodo}   → eliminar datos de un período
 """
 from __future__ import annotations
 
 import io
+import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+from app.models.starlink import StarlinkFactura
 from app.services.starlink_parser import parsear_pdf, ResultadoStarlink
 
 router = APIRouter(prefix="/starlink", tags=["Starlink"])
@@ -41,6 +49,97 @@ async def procesar_pdf(
         raise HTTPException(422, "No se encontraron ítems en el PDF. Verifica que sea una factura Starlink válida.")
 
     return resultado
+
+
+# ── GET /starlink/periodos ────────────────────────────────────────────────────
+
+@router.get("/periodos")
+def listar_periodos(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Devuelve la lista de períodos con datos guardados, ordenados desc."""
+    rows = db.query(StarlinkFactura.periodo).order_by(StarlinkFactura.periodo.desc()).all()
+    return [r.periodo for r in rows]
+
+
+# ── GET /starlink/factura/{periodo} ──────────────────────────────────────────
+
+@router.get("/factura/{periodo}")
+def obtener_factura(
+    periodo: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Devuelve los datos guardados de un período específico."""
+    fac = db.query(StarlinkFactura).filter(StarlinkFactura.periodo == periodo).first()
+    if not fac:
+        raise HTTPException(404, f"No hay datos para el período {periodo}.")
+    return {
+        "periodo":        fac.periodo,
+        "items":          json.loads(fac.items_json),
+        "agrupado":       json.loads(fac.agrupado_json),
+        "cargos_totales": float(fac.cargos_totales) if fac.cargos_totales else None,
+        "suma_items":     float(fac.suma_items),
+        "updated_at":     fac.updated_at.isoformat() if fac.updated_at else None,
+    }
+
+
+# ── PUT /starlink/factura/{periodo} ──────────────────────────────────────────
+
+@router.put("/factura/{periodo}")
+def guardar_factura(
+    periodo: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Crea o sobreescribe los datos de un período."""
+    import re
+    if not re.match(r"^\d{4}-\d{2}$", periodo):
+        raise HTTPException(400, "Período debe tener formato YYYY-MM.")
+
+    items    = payload.get("items", [])
+    agrupado = payload.get("agrupado", [])
+    if not items:
+        raise HTTPException(400, "Sin ítems para guardar.")
+
+    fac = db.query(StarlinkFactura).filter(StarlinkFactura.periodo == periodo).first()
+    if fac:
+        fac.items_json     = json.dumps(items,    ensure_ascii=False)
+        fac.agrupado_json  = json.dumps(agrupado, ensure_ascii=False)
+        fac.cargos_totales = payload.get("cargos_totales")
+        fac.suma_items     = payload.get("suma_items", 0)
+    else:
+        fac = StarlinkFactura(
+            periodo        = periodo,
+            items_json     = json.dumps(items,    ensure_ascii=False),
+            agrupado_json  = json.dumps(agrupado, ensure_ascii=False),
+            cargos_totales = payload.get("cargos_totales"),
+            suma_items     = payload.get("suma_items", 0),
+        )
+        db.add(fac)
+
+    db.commit()
+    db.refresh(fac)
+    return {"ok": True, "periodo": fac.periodo}
+
+
+# ── DELETE /starlink/factura/{periodo} ────────────────────────────────────────
+
+@router.delete("/factura/{periodo}")
+def eliminar_factura(
+    periodo: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Elimina los datos de un período."""
+    fac = db.query(StarlinkFactura).filter(StarlinkFactura.periodo == periodo).first()
+    if not fac:
+        raise HTTPException(404, f"No hay datos para el período {periodo}.")
+    db.delete(fac)
+    db.commit()
+    return {"ok": True}
 
 
 # ── POST /starlink/excel ──────────────────────────────────────────────────────

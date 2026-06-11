@@ -67,6 +67,7 @@ class ResultadoStarlink(TypedDict):
     suma_items:     float
     coincide:       bool | None
     advertencia:    str | None
+    periodo:        str | None          # 'YYYY-MM' extraído de la fecha de factura
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -93,6 +94,26 @@ def _sin_iva(monto: float) -> float:
 def _iva(monto: float) -> float:
     return _round2(monto - _sin_iva(monto))
 
+_MESES_ES = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12,
+}
+
+def _extraer_periodo(texto_pag1: str) -> str | None:
+    """Extrae 'YYYY-MM' de 'Fecha de Factura: ..., DD de MMMM de YYYY'."""
+    m = re.search(
+        r"Fecha de Factura[:\s]+[^,\n]+,?\s*\d{1,2}\s+de\s+(\w+)\s+de\s+(\d{4})",
+        texto_pag1, re.IGNORECASE
+    )
+    if m:
+        mes_str = m.group(1).lower()
+        año     = m.group(2)
+        mes_num = _MESES_ES.get(mes_str)
+        if mes_num:
+            return f"{año}-{mes_num:02d}"
+    return None
+
+
 def _fmt(v: float) -> str:
     return f"COP {v:,.0f}"
 
@@ -104,6 +125,7 @@ def parsear_pdf(pdf_bytes: bytes) -> ResultadoStarlink:
 
     items:          list[ItemDetalle] = []
     cargos_totales: float             = 0.0
+    periodo_str:    str | None        = None
     tipo_actual:    str | None        = None
 
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -127,6 +149,8 @@ def parsear_pdf(pdf_bytes: bytes) -> ResultadoStarlink:
                 )
                 if m:
                     cargos_totales = _limpiar_cop(m.group(1))
+                # Extraer período de "Fecha de Factura: ..., DD de MMMM de YYYY"
+                periodo_str = _extraer_periodo(texto)
                 continue
 
             # Activar solo desde la primera página de detalle
@@ -242,6 +266,7 @@ def parsear_pdf(pdf_bytes: bytes) -> ResultadoStarlink:
         "suma_items":     suma,
         "coincide":       coincide,
         "advertencia":    advertencia,
+        "periodo":        periodo_str,
     }
 
 

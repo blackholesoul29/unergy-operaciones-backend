@@ -32,6 +32,7 @@ from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.models.costos_variables import CostoVariable
 from app.models.starlink import StarlinkFactura
+from app.models.inicio_operacion import ProyectoInicioOperacion
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -54,4 +55,5 @@ __all__ = [
     "Notificacion", "TipoNotificacionEnum",
     "CostoVariable",
     "StarlinkFactura",
+    "ProyectoInicioOperacion",
 ]

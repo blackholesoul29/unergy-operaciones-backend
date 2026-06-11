@@ -1,19 +1,27 @@
 """
 Parser de facturas PDF de Starlink Colombia.
 
-Extrae ítems de las páginas de detalle (ignora el resumen de la página 1).
-Secciones reconocidas: "Líneas de servicio" y "Líneas adicionales".
+Estrategia (igual al script starlink_pdf_a_excel.py):
+  - extract_words() con coordenadas X,Y de cada palabra
+  - Columna '#' detectada por x0 < 15
+  - Columna 'Cant.' por x0 en 405–435
+  - Valores COP por formato ^\d[\d.]+,\d{2}$
+  - Cada ítem = fila con '#' + TODAS las filas siguientes hasta el
+    próximo '#' (necesario porque ítems de 500 GB tienen precios en 2 filas)
+  - COP values se acumulan de TODAS las filas del ítem y se ordenan por X
+    para garantizar [precio, impuestos, monto] correcto
+  - Nombre del sitio = última línea del grupo con 'KIT'
 """
 from __future__ import annotations
+
 import io
 import re
+from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
-from typing import TypedDict, Literal
+from typing import Literal, TypedDict
 
 
 # ── Splits 50/50 ──────────────────────────────────────────────────────────────
-# Clave: fragmento a buscar en la descripción (case-insensitive)
-# Valor: (nombre_proyecto_1, nombre_proyecto_2)
 SPLITS: dict[str, tuple[str, str]] = {
     "JOROPO MAPALE":              ("Joropo",     "Mapale"),
     "CACICA Y PILONERAS":         ("Cacica",     "Piloneras"),
@@ -25,6 +33,11 @@ SPLITS: dict[str, tuple[str, str]] = {
     "GANDALF Y CANAHUATE":        ("Gandalf",    "Cañahuate"),
     "GANDALF Y CAÑAHUATE":        ("Gandalf",    "Cañahuate"),
 }
+
+# Posiciones X de columnas en el PDF
+_X_NUM_MAX  = 15     # columna '#'  (los números de ítem están en x0 ≈ 1)
+_X_CANT_MIN = 405    # columna 'Cant.' (x ≈ 417)
+_X_CANT_MAX = 435
 
 
 class ItemDetalle(TypedDict):
@@ -56,170 +69,175 @@ class ResultadoStarlink(TypedDict):
     advertencia:    str | None
 
 
-# ── Helpers numéricos ─────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _round2(v: float) -> float:
     return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
+def _limpiar_cop(s: str) -> float:
+    """'70.588,00' → 70588.0"""
+    return float(s.replace(".", "").replace(",", "."))
 
-def _parsear_monto(s: str) -> float:
-    """'$1.234.567,89'  →  1234567.89"""
-    s = s.strip().lstrip("$").replace("\xa0", "").replace(" ", "")
-    # Formato colombiano: punto = miles, coma = decimal
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    else:
-        s = s.replace(".", "")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
+def _es_cop(s: str) -> bool:
+    """Reconoce montos COP con formato colombiano: 70.588,00 / 294.118,00"""
+    return bool(re.match(r"^\d[\d.]*,\d{2}$", s))
 
-
-def _limpiar_descripcion(raw: str) -> str:
-    """Elimina códigos KIT y espacios extras."""
-    cleaned = re.sub(r"\s*KIT[A-Z0-9]{6,}\s*", " ", raw, flags=re.IGNORECASE)
-    return " ".join(cleaned.split())
-
+def _limpiar_descripcion(s: str) -> str:
+    """'AGUSTÍN CODAZZI S2 KIT404472730CZX, KIT...' → 'AGUSTÍN CODAZZI S2'"""
+    s = re.sub(r",?\s*KIT\S+", "", s, flags=re.IGNORECASE)
+    return " ".join(s.split())
 
 def _sin_iva(monto: float) -> float:
     return _round2(monto / 1.19)
 
-
 def _iva(monto: float) -> float:
     return _round2(monto - _sin_iva(monto))
 
-
-# ── Parser principal ─────────────────────────────────────────────────────────
-
-# Regex para detectar una o más columnas numéricas al final de la línea
-# Captura los últimos 4 grupos numéricos (precio_unit, cantidad, impuestos, total)
-_RE_FILA_4 = re.compile(
-    r"^(.+?)\s+"                           # descripcion (lazy)
-    r"\$?([\d.,]+)\s+"                     # precio_unitario
-    r"(\d+)\s+"                            # cantidad
-    r"\$?([\d.,]+)\s+"                     # total_impuestos
-    r"\$?([\d.,]+)\s*$",                   # monto_total
-)
-
-# Fallback: solo 2 columnas al final (impuestos + total)
-_RE_FILA_2 = re.compile(
-    r"^(.+?)\s+"
-    r"\$?([\d.,]+)\s+"
-    r"\$?([\d.,]+)\s*$",
-)
-
-_RE_MONTO_FINAL = re.compile(r"\$[\d.,]+$")
+def _fmt(v: float) -> str:
+    return f"COP {v:,.0f}"
 
 
-def _parsear_linea(line: str, tipo: str) -> ItemDetalle | None:
-    """Intenta extraer un ítem de una línea de texto."""
-    m = _RE_FILA_4.match(line)
-    if m:
-        desc       = _limpiar_descripcion(m.group(1))
-        precio     = _parsear_monto(m.group(2))
-        cantidad   = int(m.group(3))
-        impuestos  = _parsear_monto(m.group(4))
-        total      = _parsear_monto(m.group(5))
-        s_iva      = _sin_iva(total)
-        return {
-            "tipo":            tipo,
-            "descripcion":     desc,
-            "precio_unitario": precio,
-            "cantidad":        cantidad,
-            "total_impuestos": impuestos,
-            "monto_total":     total,
-            "sin_iva":         s_iva,
-            "iva":             _iva(total),
-        }
-    return None
-
+# ── Parser principal ──────────────────────────────────────────────────────────
 
 def parsear_pdf(pdf_bytes: bytes) -> ResultadoStarlink:
-    """
-    Abre el PDF y extrae todos los ítems de las páginas de detalle.
-    """
     import pdfplumber
 
-    items: list[ItemDetalle] = []
-    cargos_totales: float = 0.0
-    tipo_actual: str | None = None
+    items:          list[ItemDetalle] = []
+    cargos_totales: float             = 0.0
+    tipo_actual:    str | None        = None
 
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page_idx, page in enumerate(pdf.pages):
+        # Buffer del ítem en construcción
+        # cop_with_x: list of (x_position, value) para ordenar correctamente
+        current: dict | None = None
 
-            # ── Página 1: solo capturar Cargos totales ──────────────────────
-            if page_idx == 0:
-                text = page.extract_text() or ""
-                m = re.search(
-                    r"Cargos?\s+totales?\s*\$?\s*([\d.,]+)",
-                    text, re.IGNORECASE
-                )
-                if m:
-                    cargos_totales = _parsear_monto(m.group(1))
+        for page_idx, page in enumerate(pdf.pages):
+            words = page.extract_words()
+            if not words:
                 continue
 
-            # ── Páginas de detalle ───────────────────────────────────────────
-            # Intentar primero con tablas estructuradas de pdfplumber
-            tables = page.extract_tables()
-            if tables:
-                texto_pagina = page.extract_text() or ""
-                # Detectar sección activa por el texto de la página
-                if re.search(r"L[ií]neas?\s+adicionales?", texto_pagina, re.IGNORECASE):
-                    tipo_pagina = "adicionales"
-                elif re.search(r"L[ií]neas?\s+de\s+servicio", texto_pagina, re.IGNORECASE):
-                    tipo_pagina = "servicio"
-                else:
-                    tipo_pagina = tipo_actual or "servicio"
+            texto = " ".join(w["text"] for w in words)
 
-                for table in tables:
-                    for row in table:
-                        if not row or not any(row):
-                            continue
-                        cells = [c.strip() if c else "" for c in row]
-                        # Ignorar cabeceras
-                        if any(re.search(r"descripci[oó]n|precio|cantidad|total|impuesto", c, re.IGNORECASE)
-                               for c in cells if c):
-                            continue
-                        item = _parsear_fila_tabla(cells, tipo_pagina)
+            # ── Página 1: solo Cargos totales ──────────────────────────────
+            if page_idx == 0:
+                # "Cargos totales COP 9.632.022,00"
+                m = re.search(
+                    r"Cargos\s+totales\s+(?:COP\s+)?([\d.,]+)",
+                    texto, re.IGNORECASE
+                )
+                if m:
+                    cargos_totales = _limpiar_cop(m.group(1))
+                continue
+
+            # Activar solo desde la primera página de detalle
+            if "Líneas de servicio" in texto and tipo_actual is None:
+                tipo_actual = "servicio"
+            if tipo_actual is None:
+                continue
+
+            # ── Agrupar palabras por Y redondeada ──────────────────────────
+            filas: dict[int, list] = defaultdict(list)
+            for w in words:
+                filas[round(w["top"], 0)].append(w)
+            tops = sorted(filas.keys())
+
+            # Detectar inicio de sección 'Líneas adicionales' en esta página
+            adicionales_y: int | None = None
+            for top in tops:
+                row_txt = " ".join(w["text"] for w in filas[top])
+                if "Líneas" in row_txt and "adicionales" in row_txt:
+                    adicionales_y = top
+                    break
+
+            for top in tops:
+                fila = filas[top]
+
+                # Sección según posición Y
+                sec = (
+                    "adicionales"
+                    if adicionales_y is not None and top >= adicionales_y
+                    else tipo_actual or "servicio"
+                )
+
+                # ── ¿Fila con número de ítem '#' en columna izquierda? ──────
+                num_ws = [
+                    w for w in fila
+                    if w["x0"] < _X_NUM_MAX and re.match(r"^\d+$", w["text"])
+                ]
+
+                if num_ws:
+                    # Guardar ítem anterior (si existe y es válido)
+                    if current is not None:
+                        item = _construir_item(current)
                         if item:
                             items.append(item)
-            else:
-                # Fallback: parseo línea a línea
-                text = page.extract_text() or ""
-                for line in text.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if re.search(r"L[ií]neas?\s+de\s+servicio", line, re.IGNORECASE):
-                        tipo_actual = "servicio"
-                        continue
-                    if re.search(r"L[ií]neas?\s+adicionales?", line, re.IGNORECASE):
-                        tipo_actual = "adicionales"
-                        continue
-                    if tipo_actual and _RE_MONTO_FINAL.search(line):
-                        item = _parsear_linea(line, tipo_actual)
-                        if item:
-                            items.append(item)
 
-    suma = _round2(sum(it["monto_total"] for it in items))
-    coincide: bool | None = None
+                    # Cantidad en columna Cant.
+                    cant_ws = [
+                        w for w in fila
+                        if _X_CANT_MIN < w["x0"] < _X_CANT_MAX
+                        and re.match(r"^\d+$", w["text"])
+                    ]
+                    cantidad = int(cant_ws[0]["text"]) if cant_ws else 1
+
+                    # COP values DE ESTA FILA (solo los numéricos, no "COP" label)
+                    cops_fila = [
+                        (w["x0"], _limpiar_cop(w["text"]))
+                        for w in fila
+                        if _es_cop(w["text"])
+                    ]
+
+                    current = {
+                        "tipo":       sec,
+                        "cantidad":   cantidad,
+                        "cop_with_x": cops_fila,   # (x, valor) — se amplía en continuaciones
+                        "site_line":  None,
+                    }
+
+                elif current is not None:
+                    # ── Fila de continuación del ítem actual ─────────────────
+                    row_txt = " ".join(
+                        w["text"] for w in sorted(fila, key=lambda x: x["x0"])
+                    ).strip()
+
+                    if not row_txt:
+                        continue
+
+                    # Acumular COP values (con su x) — necesario para ítems
+                    # de 500 GB cuyo precio está en una fila distinta al '#'
+                    for w in fila:
+                        if _es_cop(w["text"]):
+                            current["cop_with_x"].append((w["x0"], _limpiar_cop(w["text"])))
+
+                    # Detectar línea con nombre del sitio (tiene 'KIT')
+                    if "KIT" in row_txt:
+                        current["site_line"] = row_txt
+
+                # (Las filas antes del primer '#' se ignoran → current=None)
+
+        # Cerrar el último ítem
+        if current is not None:
+            item = _construir_item(current)
+            if item:
+                items.append(item)
+
+    suma = _round2(sum(i["monto_total"] for i in items))
+    coincide: bool | None   = None
     advertencia: str | None = None
+
     if cargos_totales > 0:
-        diff = abs(suma - cargos_totales)
-        coincide = diff < 1.0
+        diff     = abs(suma - cargos_totales)
+        coincide = diff < 2.0
         if not coincide:
             advertencia = (
-                f"La suma de ítems (${suma:,.2f}) no coincide con "
-                f"'Cargos totales' del PDF (${cargos_totales:,.2f}). "
-                f"Diferencia: ${diff:,.2f}. Verifica los datos antes de continuar."
+                f"La suma de ítems ({_fmt(suma)}) no coincide con "
+                f"'Cargos totales' del PDF ({_fmt(cargos_totales)}). "
+                f"Diferencia: {_fmt(diff)}. Revisa los datos antes de continuar."
             )
-
-    agrupado = _construir_agrupado(items)
 
     return {
         "items":          items,
-        "agrupado":       agrupado,
+        "agrupado":       _construir_agrupado(items),
         "cargos_totales": cargos_totales,
         "suma_items":     suma,
         "coincide":       coincide,
@@ -227,71 +245,51 @@ def parsear_pdf(pdf_bytes: bytes) -> ResultadoStarlink:
     }
 
 
-def _parsear_fila_tabla(cells: list[str], tipo: str) -> ItemDetalle | None:
-    """Parsea una fila de tabla extraída por pdfplumber."""
-    # Filtrar celdas vacías para detectar columnas útiles
-    non_empty = [c for c in cells if c]
-    if len(non_empty) < 3:
-        return None
-    # La primera celda no vacía es la descripción, las últimas son números
-    desc_raw = non_empty[0]
-    # Intentar extraer los 3-4 últimos valores como montos
-    montos = []
-    for c in non_empty[1:]:
-        v = _parsear_monto(c)
-        if v > 0:
-            montos.append(v)
-    if len(montos) < 2:
+def _construir_item(buf: dict) -> ItemDetalle | None:
+    """
+    Convierte el buffer acumulado en ItemDetalle.
+    Los COP values se ordenan por X para garantizar [precio, impuestos, monto].
+    """
+    # Ordenar por X → [precio_unitario, total_impuestos, monto_total]
+    cops_sorted = sorted(buf.get("cop_with_x", []), key=lambda t: t[0])
+    cops        = [t[1] for t in cops_sorted]
+
+    if len(cops) < 2:
         return None
 
-    desc = _limpiar_descripcion(desc_raw)
-    if not desc or re.match(r"^\d+$", desc):
-        return None
+    monto     = cops[-1]
+    impuestos = cops[-2] if len(cops) >= 2 else 0.0
+    precio    = cops[-3] if len(cops) >= 3 else cops[0]
 
-    total = montos[-1]
-    impuestos = montos[-2] if len(montos) >= 2 else 0.0
-    precio = montos[0] if len(montos) >= 3 else total
-    cantidad = 1
-    # Intentar detectar cantidad (entero pequeño entre descripción y montos)
-    for c in non_empty[1:]:
-        try:
-            v = int(c)
-            if 1 <= v <= 100:
-                cantidad = v
-                break
-        except ValueError:
-            pass
+    site_raw    = buf.get("site_line") or ""
+    descripcion = _limpiar_descripcion(site_raw)
+    if not descripcion:
+        return None
 
     return {
-        "tipo":            tipo,
-        "descripcion":     desc,
+        "tipo":            buf["tipo"],
+        "descripcion":     descripcion,
         "precio_unitario": precio,
-        "cantidad":        cantidad,
+        "cantidad":        buf["cantidad"],
         "total_impuestos": impuestos,
-        "monto_total":     total,
-        "sin_iva":         _sin_iva(total),
-        "iva":             _iva(total),
+        "monto_total":     monto,
+        "sin_iva":         _sin_iva(monto),
+        "iva":             _iva(monto),
     }
 
 
-# ── Construcción de tabla Agrupado ────────────────────────────────────────────
+# ── Tabla Agrupado ────────────────────────────────────────────────────────────
 
 def _match_split(descripcion: str) -> tuple[str, str] | None:
-    """Devuelve (nombre1, nombre2) si aplica división 50/50, None si no."""
-    desc_upper = descripcion.upper()
+    desc_up = descripcion.upper()
     for key, pair in SPLITS.items():
-        if key.upper() in desc_upper:
+        if key.upper() in desc_up:
             return pair
     return None
 
 
 def _construir_agrupado(items: list[ItemDetalle]) -> list[ItemAgrupado]:
-    """
-    Construye la tabla agrupada aplicando divisiones 50/50 y sumando
-    ítems del mismo sitio.
-    """
-    # Primero expandir los splits
-    expandidos: list[tuple[str, ItemDetalle]] = []
+    expandidos: list[tuple[str, dict]] = []
     for item in items:
         pair = _match_split(item["descripcion"])
         if pair:
@@ -302,41 +300,39 @@ def _construir_agrupado(items: list[ItemDetalle]) -> list[ItemAgrupado]:
                     "sin_iva":         _round2(item["sin_iva"]         / 2),
                     "iva":             _round2(item["iva"]             / 2),
                     "total_impuestos": _round2(item["total_impuestos"] / 2),
-                    # precio_unitario_promedio se calcula al agrupar
                 }))
         else:
             expandidos.append((item["descripcion"], item))
 
-    # Agrupar por nombre de sitio
     grupos: dict[str, dict] = {}
     for nombre, it in expandidos:
         if nombre not in grupos:
             grupos[nombre] = {
-                "descripcion":  nombre,
-                "cantidad_sum": 0,
-                "precio_sum":   0.0,
-                "precio_count": 0,
-                "sin_iva":      0.0,
-                "iva":          0.0,
-                "monto_total":  0.0,
+                "descripcion": nombre,
+                "cant_sum":    0,
+                "precio_sum":  0.0,
+                "precio_cnt":  0,
+                "sin_iva":     0.0,
+                "iva":         0.0,
+                "monto":       0.0,
             }
         g = grupos[nombre]
-        g["cantidad_sum"] += it["cantidad"]
-        g["precio_sum"]   += it["precio_unitario"]
-        g["precio_count"] += 1
-        g["sin_iva"]      += it["sin_iva"]
-        g["iva"]          += it["iva"]
-        g["monto_total"]  += it["monto_total"]
+        g["cant_sum"]   += it["cantidad"]
+        g["precio_sum"] += it["precio_unitario"]
+        g["precio_cnt"] += 1
+        g["sin_iva"]    += it["sin_iva"]
+        g["iva"]        += it["iva"]
+        g["monto"]      += it["monto_total"]
 
     result: list[ItemAgrupado] = []
-    for nombre in sorted(grupos.keys(), key=str.upper):
+    for nombre in sorted(grupos, key=str.upper):
         g = grupos[nombre]
         result.append({
             "descripcion":              g["descripcion"],
-            "cantidad_total":           g["cantidad_sum"],
-            "precio_unitario_promedio": _round2(g["precio_sum"] / g["precio_count"]),
+            "cantidad_total":           g["cant_sum"],
+            "precio_unitario_promedio": _round2(g["precio_sum"] / g["precio_cnt"]),
             "sin_iva":                  _round2(g["sin_iva"]),
             "iva":                      _round2(g["iva"]),
-            "monto_total":              _round2(g["monto_total"]),
+            "monto_total":              _round2(g["monto"]),
         })
     return result

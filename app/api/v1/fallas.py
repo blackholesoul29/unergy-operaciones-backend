@@ -136,7 +136,7 @@ def sla_dashboard(db: Session = Depends(get_db), _=Depends(get_current_user)):
             falla.fecha_identificacion.year,
             falla.fecha_identificacion.month,
             falla.fecha_identificacion.day,
-            tzinfo=timezone.utc,
+            tzinfo=_COL_TZ,
         ) + timedelta(hours=sla_hours)
 
         if now > sla_deadline:
@@ -168,7 +168,7 @@ def sla_dashboard(db: Session = Depends(get_db), _=Depends(get_current_user)):
                 f.fecha_identificacion.year,
                 f.fecha_identificacion.month,
                 f.fecha_identificacion.day,
-                tzinfo=timezone.utc,
+                tzinfo=_COL_TZ,
             )
             hours = (f.fecha_resolucion - start).total_seconds() / 3600
             total_hours += hours
@@ -500,11 +500,13 @@ def create_falla(
     fotos = dump.pop("fotos_urls", None)
     falla = Falla(
         **dump,
-        codigo_interno=_gen_codigo(db),
+        codigo_interno=f"TMP-{uuid.uuid4().hex[:12]}",
         registrado_por_id=current_user.id,
         fotos_urls=fotos if fotos else None,
     )
     db.add(falla)
+    db.flush()  # asigna falla.id por autoincremento (evita colisiones de código)
+    falla.codigo_interno = f"FAL-{datetime.now(timezone.utc).year}-{falla.id:05d}"
     db.commit()
 
     # Notificar a todos los coordinadores
@@ -623,6 +625,15 @@ def add_seguimiento(
     )
     if data.estado_nuevo_id:
         falla.estado_id = data.estado_nuevo_id
+        # Mantener fecha_resolucion en sincronía con el estado, igual que el
+        # botón "Marcar resuelta": al pasar a estado final se sella la fecha;
+        # al reabrir (estado no final) se limpia.
+        nuevo_estado = db.get(FallaCatEstado, data.estado_nuevo_id)
+        if nuevo_estado and nuevo_estado.es_estado_final:
+            if not falla.fecha_resolucion:
+                falla.fecha_resolucion = datetime.now(timezone.utc)
+        elif nuevo_estado and not nuevo_estado.es_estado_final:
+            falla.fecha_resolucion = None
 
     db.add(seg)
     db.commit()
@@ -658,7 +669,7 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
         falla.fecha_identificacion.year,
         falla.fecha_identificacion.month,
         falla.fecha_identificacion.day,
-        tzinfo=timezone.utc,
+        tzinfo=_COL_TZ,
     )
     if falla.hora_identificacion:
         start = start.replace(

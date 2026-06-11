@@ -81,6 +81,13 @@ ALIASES: dict[str, str] = {
     "strada asociados":             "estrada",
 }
 
+# Alias de nombre de proyecto (Excel → nombre/match en DB), aplicado antes
+# del match. Ej: el Excel de autoconsumo trae "Instituto Bolivariano" pero en
+# DB el proyecto se llama "IBES".
+ALIASES_PROYECTO: dict[str, str] = {
+    "instituto bolivariano": "ibes",
+}
+
 ALIASES_INVERSIONISTA: dict[str, str | None] = {
     "17844 sol de la sierra":       "patrimonios autonomos fiduciaria bancolombia",
     "patrimonios autonomos fiduciaria bancolombia s a sociedad fiduciaria - 17844 sol de la sierra":
@@ -279,6 +286,7 @@ def obtener_nombres_hojas(xlsx_path: str) -> list[str]:
 
 def match_proyecto(proyectos_db: list[dict], nombre: str) -> dict | None:
     norm = normalizar(nombre)
+    norm = ALIASES_PROYECTO.get(norm, norm)
 
     for p in proyectos_db:
         if normalizar(p["nombre_comercial"]) == norm:

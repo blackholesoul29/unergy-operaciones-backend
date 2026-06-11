@@ -685,6 +685,21 @@ _PENDING_DDLS = [
         updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_om_factura_periodo ON om_factura_mensual (periodo)",
+    # migration — garantias_ajustes: ajustes XM (semanal/txr/mensual)
+    "CREATE TYPE tipo_ajuste_xm_enum AS ENUM ('semanal', 'txr', 'mensual')",
+    """CREATE TABLE IF NOT EXISTS garantias_ajustes (
+    id BIGSERIAL PRIMARY KEY,
+    tipo tipo_ajuste_xm_enum NOT NULL,
+    fecha DATE NOT NULL,
+    pb NUMERIC(18,2), restricciones NUMERIC(18,2), stn NUMERIC(18,2),
+    trm NUMERIC(18,2), ptb NUMERIC(18,2), total_ungc NUMERIC(18,2),
+    total_ungg NUMERIC(18,2), total_consignar NUMERIC(18,2),
+    disponible_custodia NUMERIC(18,2), congelado NUMERIC(18,2),
+    saldo NUMERIC(18,2), total_ajuste_txr NUMERIC(18,2),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)""",
+    "CREATE INDEX IF NOT EXISTS ix_garantias_ajustes_fecha ON garantias_ajustes (fecha)",
 ]
 
 

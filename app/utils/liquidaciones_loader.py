@@ -49,6 +49,17 @@ TIPO_LINEA_MAP = [
     (r"intereses",                             "intereses"),
 ]
 
+# Conceptos del Excel de autoconsumo → tipo_linea del mandato.
+# Estructura distinta al panel PPA: no hay Comercialización XM.
+CONCEPTO_AUTOCONSUMO_MAP = [
+    (r"ingreso bruto",   "ingreso_bruto"),
+    (r"interes",         "intereses"),
+    (r"valor.*pagar",    "valor_a_pagar"),
+    (r"administraci",    "administracion"),
+    (r"representaci",    "representacion"),
+    (r"retenci",         "retencion_fuente"),
+]
+
 _DOC_CONTABLE_MAP = {
     "informacion": "Información",
     "mandato":     "Mandato",
@@ -134,6 +145,14 @@ def concepto_a_tipo_factura(concepto: str) -> str:
     return "administracion_operacion"
 
 
+def concepto_autoconsumo_a_tipo_linea(concepto: str) -> str:
+    norm = normalizar(concepto)
+    for patron, tipo in CONCEPTO_AUTOCONSUMO_MAP:
+        if re.search(patron, norm):
+            return tipo
+    return "otro_ingreso"
+
+
 def parse_valor(v) -> float | None:
     if v is None:
         return None
@@ -210,6 +229,42 @@ def leer_hoja(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
         })
     wb.close()
     return rows, er_map
+
+
+def leer_hoja_autoconsumo(xlsx_path: str, hoja: str) -> tuple[list[dict], dict[str, str]]:
+    """
+    Lee una hoja del Excel de autoconsumo (estructura distinta al panel PPA).
+    Columnas: Proyecto | CLIENTE | Inversionista | Documento contable
+              | Ciudad | Concepto | Total | Factura
+    Sin tabla lateral de estado de resultados → er_map vacío.
+    """
+    from openpyxl import load_workbook
+    wb = load_workbook(xlsx_path, data_only=True)
+    if hoja not in wb.sheetnames:
+        raise ValueError(f"Hoja '{hoja}' no encontrada. Disponibles: {wb.sheetnames}")
+    sh = wb[hoja]
+
+    rows = []
+    for xl_row in sh.iter_rows(min_row=2, max_row=sh.max_row):
+        proy = valor(xl_row, 0)
+        if not proy:
+            continue
+        concepto = str(valor(xl_row, 5) or "").strip()
+        if not concepto:
+            continue
+        rows.append({
+            "proyecto":        str(proy).strip(),
+            "cliente":         str(valor(xl_row, 1) or "").strip(),
+            "inversionista":   str(valor(xl_row, 2) or "").strip(),
+            "doc_contable":    str(valor(xl_row, 3) or "").strip(),
+            "ciudad":          str(valor(xl_row, 4) or "").strip(),
+            "concepto":        concepto,
+            "total":           parse_valor(valor(xl_row, 6)),
+            "ref_factura":     str(valor(xl_row, 7) or "").strip(),
+            "ref_factura_url": link(xl_row, 7),
+        })
+    wb.close()
+    return rows, {}
 
 
 def obtener_nombres_hojas(xlsx_path: str) -> list[str]:
@@ -364,11 +419,16 @@ def cargar_desde_db(
     limpiar: bool,
     dry_run: bool,
     usuario_id: int,
+    tipo_venta: str = "ppa",
 ) -> dict:
     """
     Versión DB-directa de cargar(). Usa SQLAlchemy en lugar de llamadas HTTP.
     periodo_date: 'YYYY-MM-DD' (primer día del mes).
+    tipo_venta: "ppa" (panel de seguimiento) o "autoconsumo" (estructura SUNO).
     """
+    if tipo_venta == "autoconsumo":
+        return _cargar_autoconsumo_db(db, filas, periodo_date, limpiar, dry_run, usuario_id)
+
     errores: list[str] = []
 
     # Validar tipos de documento desconocidos
@@ -695,6 +755,192 @@ def cargar_desde_db(
                 except Exception as exc:
                     db.rollback()
                     errores.append(f"{nombre_proy}: factura '{f['concepto']}' — {exc}")
+
+        stats["proyectos_cargados"] += 1
+
+    return {"ok": True, "stats": stats, "errores": errores}
+
+
+# ── Carga autoconsumo ───────────────────────────────────────────────────────────
+
+def _buscar_cliente_suno(db: Session) -> dict | None:
+    """Localiza el cliente SUNO ACTIVOS SOSTENIBLES S.A.S. por nombre normalizado."""
+    for c in db.query(Cliente.id, Cliente.razon_social_nombre).all():
+        if "suno" in normalizar(c.razon_social_nombre or ""):
+            return {"id": c.id, "nombre": c.razon_social_nombre}
+    return None
+
+
+def _cargar_autoconsumo_db(
+    db: Session,
+    filas: list[dict],
+    periodo_date: str,
+    limpiar: bool,
+    dry_run: bool,
+    usuario_id: int,
+) -> dict:
+    """
+    Carga liquidaciones de autoconsumo. El inversionista es siempre SUNO al 100%
+    y no se procesa Comercialización XM. Cada proyecto genera un mandato de
+    ingresos cuyas líneas salen de los conceptos del Excel.
+    """
+    errores: list[str] = []
+    y_str, m_str, _ = periodo_date.split("-")
+    period = date_type(int(y_str), int(m_str), 1)
+
+    proyectos_db_objs = db.query(Proyecto).order_by(Proyecto.id).all()
+    proyectos_db = [{"id": p.id, "nombre_comercial": p.nombre_comercial} for p in proyectos_db_objs]
+
+    grupos: dict[str, list] = {}
+    for f in filas:
+        grupos.setdefault(f["proyecto"], []).append(f)
+
+    if dry_run:
+        encontrados, no_encontrados = [], []
+        for nombre_proy in grupos:
+            if _OMITIR_PROY.search(nombre_proy):
+                continue
+            (encontrados if match_proyecto(proyectos_db, nombre_proy) else no_encontrados).append(nombre_proy)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "tipo_venta": "autoconsumo",
+            "proyectos_encontrados": encontrados,
+            "proyectos_no_encontrados": no_encontrados,
+        }
+
+    stats = {
+        "proyectos_cargados": 0,
+        "proyectos_omitidos": 0,
+        "proyectos_sin_match": [],
+        "mandatos": 0,
+        "lineas": 0,
+        "costos": 0,
+        "facturas": 0,
+        "inversionistas_sin_match": [],
+    }
+
+    suno = _buscar_cliente_suno(db)
+    if suno is None:
+        errores.append(
+            "No se encontró el cliente 'SUNO ACTIVOS SOSTENIBLES S.A.S.' en la base de datos; "
+            "los mandatos se crearán solo con beneficiario_nombre."
+        )
+    beneficiario_suno = suno["nombre"] if suno else "SUNO ACTIVOS SOSTENIBLES S.A.S."
+
+    for nombre_proy, filas_proy in grupos.items():
+        if _OMITIR_PROY.search(nombre_proy):
+            stats["proyectos_omitidos"] += 1
+            continue
+
+        proy_db = match_proyecto(proyectos_db, nombre_proy)
+        if not proy_db:
+            stats["proyectos_sin_match"].append(nombre_proy)
+            continue
+
+        pid = proy_db["id"]
+
+        liq = (
+            db.query(Liquidacion)
+            .filter(Liquidacion.proyecto_id == pid, Liquidacion.periodo == period)
+            .filter(Liquidacion.deleted_at.is_(None))
+            .first()
+        )
+        if liq is None:
+            liq = Liquidacion(
+                proyecto_id=pid,
+                periodo=period,
+                tipo_venta="autoconsumo",
+                generado_por_id=usuario_id,
+            )
+            db.add(liq)
+            try:
+                db.commit()
+                db.refresh(liq)
+            except Exception as exc:
+                db.rollback()
+                errores.append(f"{nombre_proy}: error creando liquidación — {exc}")
+                continue
+        else:
+            if not limpiar and _tiene_mandatos_db(db, liq.id):
+                stats["proyectos_omitidos"] += 1
+                continue
+            if limpiar:
+                _limpiar_db(db, liq.id)
+            if liq.tipo_venta != "autoconsumo":
+                liq.tipo_venta = "autoconsumo"
+                db.commit()
+
+        liq_id = liq.id
+
+        # Inversionista: siempre SUNO. Buscar su participación registrada en el proyecto.
+        inv_id = None
+        if suno:
+            pi = (
+                db.query(ProyectoInversionista.id)
+                .filter(
+                    ProyectoInversionista.proyecto_id == pid,
+                    ProyectoInversionista.cliente_id == suno["id"],
+                )
+                .first()
+            )
+            inv_id = pi.id if pi else None
+        if inv_id is None:
+            stats["inversionistas_sin_match"].append(f"{nombre_proy} → {beneficiario_suno}")
+
+        mandato = LiquidacionMandato(
+            liquidacion_id=liq_id,
+            tipo="ingresos",
+            inversionista_id=inv_id,
+            beneficiario_nombre=None if inv_id else beneficiario_suno,
+            pa_aplica=False,
+        )
+        db.add(mandato)
+        try:
+            db.commit()
+            db.refresh(mandato)
+            mid = mandato.id
+            stats["mandatos"] += 1
+        except Exception as exc:
+            db.rollback()
+            errores.append(f"{nombre_proy}: error creando mandato — {exc}")
+            continue
+
+        neto_pagar = None
+        for orden, f in enumerate(filas_proy):
+            if not f["concepto"] or f["total"] is None:
+                continue
+            tipo_l = concepto_autoconsumo_a_tipo_linea(f["concepto"])
+            if tipo_l == "valor_a_pagar":
+                neto_pagar = f["total"]
+                continue
+            ref = f["ref_factura"] or None
+            if ref and len(ref) > 255:
+                ref = ref[:252] + "..."
+            try:
+                linea = LiquidacionMandatoLinea(
+                    mandato_id=mid,
+                    tipo_linea=tipo_l,
+                    concepto=f["concepto"],
+                    valor_cop=f["total"],
+                    referencia_factura=ref,
+                    soporte_url=f.get("ref_factura_url"),
+                    orden=orden,
+                )
+                db.add(linea)
+                db.commit()
+                stats["lineas"] += 1
+            except Exception as exc:
+                db.rollback()
+                errores.append(f"{nombre_proy}: línea '{f['concepto']}' — {exc}")
+
+        if neto_pagar is not None:
+            try:
+                mandato.valor_neto_cop = neto_pagar
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                errores.append(f"{nombre_proy}: patch valor_neto — {exc}")
 
         stats["proyectos_cargados"] += 1
 

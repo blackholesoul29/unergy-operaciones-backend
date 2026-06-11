@@ -1165,20 +1165,25 @@ async def cargar_excel(
     periodo: str = Form(...),
     limpiar: str = Form("false"),
     dry_run: str = Form("false"),
+    tipo_venta: str = Form("ppa"),
     db: Session = Depends(get_db),
     current: Usuario = Depends(_require_liquidaciones_write),
 ):
     """
     Carga un archivo Excel de panel de seguimiento contable.
     periodo: YYYY-MM  (ej: 2026-05)
+    tipo_venta: "ppa" (panel de seguimiento) o "autoconsumo" (estructura SUNO).
     dry_run=true: retorna preview sin escribir en DB.
     limpiar=true: borra mandatos/costos/facturas existentes antes de reimportar.
     """
     import tempfile, os
-    from app.utils.liquidaciones_loader import leer_hoja, cargar_desde_db
+    from app.utils.liquidaciones_loader import leer_hoja, leer_hoja_autoconsumo, cargar_desde_db
 
     limpiar_bool = limpiar.lower() in ("true", "1", "yes", "on")
     dry_run_bool = dry_run.lower() in ("true", "1", "yes", "on")
+    tipo_venta = (tipo_venta or "ppa").strip().lower()
+    if tipo_venta not in ("ppa", "autoconsumo"):
+        raise HTTPException(422, "tipo_venta debe ser 'ppa' o 'autoconsumo'")
 
     # Validar período
     try:
@@ -1196,7 +1201,10 @@ async def cargar_excel(
         tmp.flush()
         tmp.close()
 
-        filas, er_map = leer_hoja(tmp.name, hoja)
+        if tipo_venta == "autoconsumo":
+            filas, er_map = leer_hoja_autoconsumo(tmp.name, hoja)
+        else:
+            filas, er_map = leer_hoja(tmp.name, hoja)
         resultado = cargar_desde_db(
             db=db,
             filas=filas,
@@ -1205,6 +1213,7 @@ async def cargar_excel(
             limpiar=limpiar_bool,
             dry_run=dry_run_bool,
             usuario_id=current.id,
+            tipo_venta=tipo_venta,
         )
     except ValueError as e:
         raise HTTPException(422, str(e))

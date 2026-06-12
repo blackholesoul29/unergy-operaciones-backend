@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,6 +24,8 @@ class GarantiaAjusteCreate(BaseModel):
 
     total_ajuste_txr:    Optional[float] = None
 
+    snapshot:            Optional[dict[str, Any]] = None
+
 
 class GarantiaAjusteUpdate(BaseModel):
     fecha: Optional[date] = None
@@ -43,6 +45,8 @@ class GarantiaAjusteUpdate(BaseModel):
     saldo:               Optional[float] = None
 
     total_ajuste_txr:    Optional[float] = None
+
+    snapshot:            Optional[dict[str, Any]] = None
 
 
 class GarantiaAjusteOut(BaseModel):
@@ -67,6 +71,8 @@ class GarantiaAjusteOut(BaseModel):
     saldo:               Optional[float] = None
 
     total_ajuste_txr:    Optional[float] = None
+
+    snapshot:            Optional[dict[str, Any]] = None
 
     created_at: datetime
     updated_at: datetime

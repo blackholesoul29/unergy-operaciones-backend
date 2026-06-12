@@ -25,7 +25,8 @@ from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable, PanelContableLinea
 from app.utils.er_loader import (
-    recalcular_er, parsear_er, match_proyecto, normalizar, IVA, FEE_ADMIN,
+    recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
+    normalizar, IVA, FEE_ADMIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,7 +168,8 @@ async def cargar_er(
         for p in db.query(Proyecto).order_by(Proyecto.id).all()
     ]
 
-    resultados = {"cargados": [], "sin_match": [], "errores": [], "warnings": []}
+    resultados = {"cargados": [], "sin_match": [], "errores": [], "warnings": [], "duplicados": []}
+    proyectos_vistos: set[int] = set()
 
     for uf in files:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -180,12 +182,20 @@ async def cargar_er(
             recalc_path = recalcular_er(tmp.name)
             parsed = parsear_er(recalc_path)
 
-            # Match por nombre de archivo (sin extensión) o por contenido.
-            nombre_busqueda = os.path.splitext(uf.filename or "")[0]
-            proy = match_proyecto(proyectos_db, nombre_busqueda)
+            # El proyecto va al final del nombre de archivo; ventanas deslizantes.
+            proy = extraer_proyecto_de_archivo(uf.filename or "", proyectos_db)
             if not proy:
                 resultados["sin_match"].append(uf.filename)
                 continue
+
+            # Multi-ER: cada ER es el 100% del proyecto. Si ya cargamos uno de
+            # este proyecto en esta llamada, ignoramos los demás (El Son, Baraya…).
+            if proy["id"] in proyectos_vistos:
+                resultados["duplicados"].append({
+                    "archivo": uf.filename, "proyecto": proy["nombre_comercial"],
+                })
+                continue
+            proyectos_vistos.add(proy["id"])
 
             panel = _guardar_panel(
                 db, proy["id"], periodo_norm, tipo, parsed,

@@ -86,6 +86,10 @@ ALIASES: dict[str, str] = {
 # DB el proyecto se llama "IBES".
 ALIASES_PROYECTO: dict[str, str] = {
     "instituto bolivariano": "ibes",
+    # ER de El Remolino traen el nombre pegado ("naos2"/"naos3") y en DB son
+    # "MGS Naos 2" / "MGS Naos 3".
+    "naos2": "mgs naos 2",
+    "naos3": "mgs naos 3",
 }
 
 ALIASES_INVERSIONISTA: dict[str, str | None] = {

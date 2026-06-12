@@ -32,6 +32,36 @@ COMERCIALIZADORES = [
     "enermas", "unergy",
 ]
 
+# Tokens de razón social que NO aparecen nunca en un nombre de proyecto y que
+# contaminan el match (ej. "S.A.S." matcheaba con "M.D.M. Cientifica S.A.S").
+_RAZON_SOCIAL = re.compile(r'^(s\.?a\.?s\.?|e\.?s\.?p\.?|s\.?a\.?|ltda\.?|cia\.?)$', re.I)
+
+
+# ── Nombre de proyecto desde el nombre de archivo ───────────────────────────────
+
+def extraer_proyecto_de_archivo(nombre: str, proyectos_db: list[dict]) -> dict | None:
+    """
+    Los ER se llaman "Estado resultados {INVERSIONISTA} {PROYECTO} N 2026.xlsx".
+    El inversionista tiene longitud variable (1 a 8+ palabras), así que en vez de
+    adivinar dónde termina, probamos match_proyecto() con ventanas deslizantes
+    desde la derecha (el proyecto siempre va al final) y nos quedamos con el match
+    de la ventana más larga que exista en DB. Reusa el match_proyecto compartido
+    (con sus aliases de NAOS, Valencia Oriente, etc.).
+    """
+    base = re.sub(r'^Estado\s+resultados\s+', '', nombre or '', flags=re.I)
+    base = re.sub(r'\.xlsx?$', '', base, flags=re.I)
+    # Quitar el sufijo " N 2026" (consecutivo + año), conservando números que
+    # son parte del nombre del proyecto (ej. "Valencia Oriente 1", "GD NAOS 1").
+    base = re.sub(r'\s+\d+\s+20\d{2}$', '', base)
+
+    palabras = [w for w in base.split() if not _RAZON_SOCIAL.match(w)]
+    for n in range(min(6, len(palabras)), 0, -1):
+        candidato = " ".join(palabras[-n:])
+        m = match_proyecto(proyectos_db, candidato)
+        if m:
+            return m
+    return None
+
 
 # ── LibreOffice: recalcular fórmulas ────────────────────────────────────────────
 

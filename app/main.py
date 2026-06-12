@@ -700,6 +700,41 @@ _PENDING_DDLS = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )""",
     "CREATE INDEX IF NOT EXISTS ix_garantias_ajustes_fecha ON garantias_ajustes (fecha)",
+    # migration — Panel Contable (preliquidaciones / liquidaciones oficiales)
+    """CREATE TABLE IF NOT EXISTS panel_contable (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        periodo VARCHAR(7) NOT NULL,
+        tipo VARCHAR(20) NOT NULL DEFAULT 'preliquidacion',
+        liquidar BOOLEAN NOT NULL DEFAULT TRUE,
+        generar_mandatos BOOLEAN NOT NULL DEFAULT FALSE,
+        tiene_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
+        tiene_costos BOOLEAN NOT NULL DEFAULT FALSE,
+        ingreso_bruto_cop NUMERIC(18,2),
+        comercializador VARCHAR(120),
+        fecha_firma DATE,
+        consecutivo_ingresos INTEGER,
+        consecutivo_costos INTEGER,
+        er_filename VARCHAR(300),
+        generado_por_id BIGINT REFERENCES usuarios(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_proyecto_periodo_tipo ON panel_contable (proyecto_id, periodo, tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_panel_periodo_tipo ON panel_contable (periodo, tipo)",
+    """CREATE TABLE IF NOT EXISTS panel_contable_linea (
+        id BIGSERIAL PRIMARY KEY,
+        panel_id BIGINT NOT NULL REFERENCES panel_contable(id) ON DELETE CASCADE,
+        proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL,
+        inversionista_nombre VARCHAR(255),
+        porcentaje NUMERIC(10,7),
+        grupo VARCHAR(20) NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        valor_cop NUMERIC(18,2),
+        comprobante_contable VARCHAR(120),
+        orden INTEGER NOT NULL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_panel_linea_panel ON panel_contable_linea (panel_id)",
 ]
 
 

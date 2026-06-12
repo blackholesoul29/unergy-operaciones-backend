@@ -33,6 +33,9 @@ from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.models.costos_variables import CostoVariable
 from app.models.starlink import StarlinkFactura
 from app.models.inicio_operacion import ProyectoInicioOperacion
+from app.models.panel_contable import (
+    PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
+)
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -56,4 +59,5 @@ __all__ = [
     "CostoVariable",
     "StarlinkFactura",
     "ProyectoInicioOperacion",
+    "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
 ]

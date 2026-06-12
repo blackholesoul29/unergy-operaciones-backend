@@ -31,6 +31,7 @@ def _to_out(r: GarantiaAjuste) -> dict:
         "congelado":           float(r.congelado)           if r.congelado           is not None else None,
         "saldo":               float(r.saldo)               if r.saldo               is not None else None,
         "total_ajuste_txr":    float(r.total_ajuste_txr)    if r.total_ajuste_txr    is not None else None,
+        "snapshot": r.snapshot,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }

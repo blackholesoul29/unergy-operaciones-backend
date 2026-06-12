@@ -1,9 +1,10 @@
 """GarantiaAjuste — registro de ajustes XM semanales/TXR/mensuales."""
 import enum
 from datetime import date
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import BigInteger, Date, Enum as SAEnum, Numeric
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -39,3 +40,6 @@ class GarantiaAjuste(Base, TimestampMixin):
     saldo:               Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
 
     total_ajuste_txr:    Mapped[Optional[float]] = mapped_column(Numeric(18, 2), nullable=True)
+
+    # Snapshot completo de la hoja madre (bloques, panel, precios) para re-renderizar.
+    snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)

@@ -700,6 +700,7 @@ _PENDING_DDLS = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )""",
     "CREATE INDEX IF NOT EXISTS ix_garantias_ajustes_fecha ON garantias_ajustes (fecha)",
+    "ALTER TABLE garantias_ajustes ADD COLUMN IF NOT EXISTS snapshot JSONB",
 ]
 
 

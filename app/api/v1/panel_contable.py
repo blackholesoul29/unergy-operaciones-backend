@@ -464,45 +464,134 @@ def diferencia(
         for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()
     }
 
-    def _utilidad(panel: PanelContable) -> float:
-        return float(sum((ln.valor_cop or 0) for ln in panel.lineas))
-
-    por_proy: dict = {}
+    # Indexar paneles por proyecto y tipo.
+    pre_por_proy: dict[int, PanelContable] = {}
+    ofi_por_proy: dict[int, PanelContable] = {}
     for p in paneles:
-        d = por_proy.setdefault(p.proyecto_id, {
-            "proyecto_id": p.proyecto_id,
-            "proyecto": nombres.get(p.proyecto_id, f"Proyecto {p.proyecto_id}"),
-            "preliquidacion": None,
-            "oficial": None,
-        })
-        d[p.tipo] = round(_utilidad(p), 2)
+        if p.tipo == "preliquidacion":
+            pre_por_proy[p.proyecto_id] = p
+        elif p.tipo == "oficial":
+            ofi_por_proy[p.proyecto_id] = p
 
-    filas = []
-    tot_pre = tot_of = 0.0
-    for d in por_proy.values():
-        pre = d["preliquidacion"]
-        ofi = d["oficial"]
-        diff = (ofi - pre) if (pre is not None and ofi is not None) else None
-        pct = (diff / abs(pre) * 100) if (diff is not None and pre) else None
-        if pre is not None:
-            tot_pre += pre
-        if ofi is not None:
-            tot_of += ofi
-        filas.append({
-            "proyecto_id": d["proyecto_id"],
-            "proyecto": d["proyecto"],
-            "preliquidacion": pre,
-            "oficial": ofi,
-            "diferencia": round(diff, 2) if diff is not None else None,
-            "porcentaje": round(pct, 2) if pct is not None else None,
+    tiene_oficial = bool(ofi_por_proy)
+
+    def _inv_key(ln: PanelContableLinea):
+        return ln.proyecto_inversionista_id if ln.proyecto_inversionista_id is not None \
+            else f"_{ln.inversionista_nombre}"
+
+    def _indexar_inversionistas(panel: PanelContable | None) -> dict:
+        """inv_key → {nombre, porcentaje, orden, lineas: {(grupo,concepto): {valor, orden}}}"""
+        out: dict = {}
+        if panel is None:
+            return out
+        for ln in sorted(panel.lineas, key=lambda x: x.orden):
+            k = _inv_key(ln)
+            inv = out.setdefault(k, {
+                "nombre": ln.inversionista_nombre,
+                "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
+                "orden": len(out),
+                "lineas": {},
+            })
+            inv["lineas"][(ln.grupo, ln.concepto)] = {
+                "valor": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
+                "orden": ln.orden,
+            }
+        return out
+
+    proyectos_out = []
+    tot_pre_global = tot_ofi_global = 0.0
+    proyecto_ids = sorted(set(pre_por_proy) | set(ofi_por_proy),
+                          key=lambda pid: (pre_por_proy.get(pid) or ofi_por_proy.get(pid)).id)
+
+    for pid in proyecto_ids:
+        pre_panel = pre_por_proy.get(pid)
+        ofi_panel = ofi_por_proy.get(pid)
+        hay_ofi = ofi_panel is not None
+
+        pre_invs = _indexar_inversionistas(pre_panel)
+        ofi_invs = _indexar_inversionistas(ofi_panel)
+
+        # Unión de inversionistas, ordenada por aparición en pre y luego oficial.
+        inv_keys = list(pre_invs.keys())
+        for k in ofi_invs:
+            if k not in inv_keys:
+                inv_keys.append(k)
+
+        inversionistas_out = []
+        u_pre_proy = u_ofi_proy = 0.0
+        for k in inv_keys:
+            pi = pre_invs.get(k)
+            oi = ofi_invs.get(k)
+            nombre = (pi or oi)["nombre"]
+            porcentaje = (pi or oi)["porcentaje"]
+
+            # Unión de líneas (grupo, concepto), preservando el orden de pre y
+            # añadiendo las que solo existan en oficial.
+            claves = []
+            vistos = set()
+            for src in ((pi["lineas"] if pi else {}), (oi["lineas"] if oi else {})):
+                for clave, meta in sorted(src.items(), key=lambda kv: kv[1]["orden"]):
+                    if clave not in vistos:
+                        vistos.add(clave)
+                        claves.append(clave)
+
+            lineas_out = []
+            u_pre = u_ofi = 0.0
+            for (grupo, concepto) in claves:
+                pre_v = pi["lineas"][(grupo, concepto)]["valor"] if (pi and (grupo, concepto) in pi["lineas"]) else 0.0
+                if hay_ofi:
+                    ofi_v = oi["lineas"][(grupo, concepto)]["valor"] if (oi and (grupo, concepto) in oi["lineas"]) else 0.0
+                else:
+                    ofi_v = None
+                dif = (ofi_v - pre_v) if ofi_v is not None else None
+                pct = (dif / abs(pre_v) * 100) if (dif is not None and pre_v) else None
+                u_pre += pre_v
+                if ofi_v is not None:
+                    u_ofi += ofi_v
+                lineas_out.append({
+                    "grupo": grupo,
+                    "concepto": concepto,
+                    "preliquidacion": round(pre_v, 2),
+                    "oficial": round(ofi_v, 2) if ofi_v is not None else None,
+                    "diferencia": round(dif, 2) if dif is not None else None,
+                    "pct_variacion": round(pct, 2) if pct is not None else None,
+                })
+
+            u_dif = (u_ofi - u_pre) if hay_ofi else None
+            inversionistas_out.append({
+                "proyecto_inversionista_id": None if isinstance(k, str) else k,
+                "nombre": nombre,
+                "porcentaje": porcentaje,
+                "lineas": lineas_out,
+                "utilidad_pre": round(u_pre, 2),
+                "utilidad_oficial": round(u_ofi, 2) if hay_ofi else None,
+                "utilidad_dif": round(u_dif, 2) if u_dif is not None else None,
+            })
+            u_pre_proy += u_pre
+            if hay_ofi:
+                u_ofi_proy += u_ofi
+
+        tot_pre_global += u_pre_proy
+        if hay_ofi:
+            tot_ofi_global += u_ofi_proy
+
+        proyectos_out.append({
+            "proyecto_id": pid,
+            "proyecto_nombre": nombres.get(pid, f"Proyecto {pid}"),
+            "tiene_oficial": hay_ofi,
+            "utilidad_pre": round(u_pre_proy, 2),
+            "utilidad_oficial": round(u_ofi_proy, 2) if hay_ofi else None,
+            "utilidad_dif": round(u_ofi_proy - u_pre_proy, 2) if hay_ofi else None,
+            "inversionistas": inversionistas_out,
         })
 
     return {
         "periodo": periodo_norm,
-        "filas": filas,
+        "tiene_oficial": tiene_oficial,
+        "proyectos": proyectos_out,
         "resumen": {
-            "utilidad_estimada": round(tot_pre, 2),
-            "utilidad_real": round(tot_of, 2),
-            "diferencia": round(tot_of - tot_pre, 2),
+            "utilidad_estimada": round(tot_pre_global, 2),
+            "utilidad_real": round(tot_ofi_global, 2) if tiene_oficial else None,
+            "diferencia": round(tot_ofi_global - tot_pre_global, 2) if tiene_oficial else None,
         },
     }

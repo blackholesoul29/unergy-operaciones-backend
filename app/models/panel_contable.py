@@ -42,7 +42,11 @@ class PanelContable(Base):
     periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
     tipo: Mapped[str] = mapped_column(String(20), nullable=False, default="preliquidacion")
 
+    # Liquidación de ingresos y de costos son independientes; cada una consume su
+    # propia cadena de consecutivos. (liquidar se mantiene por compatibilidad.)
     liquidar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    liquidar_ingresos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    liquidar_costos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     generar_mandatos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tiene_bolsa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tiene_costos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

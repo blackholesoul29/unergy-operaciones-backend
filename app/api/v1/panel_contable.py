@@ -50,6 +50,8 @@ class LineaPatch(BaseModel):
 
 class PanelPatch(BaseModel):
     liquidar: bool | None = None
+    liquidar_ingresos: bool | None = None
+    liquidar_costos: bool | None = None
     generar_mandatos: bool | None = None
     fecha_firma: date | None = None
     consecutivo_ingresos: int | None = None
@@ -242,6 +244,9 @@ def _guardar_panel(
     panel.comercializador = parsed.get("comercializador")
     panel.tiene_bolsa = bool(parsed.get("tiene_bolsa"))
     panel.tiene_costos = tiene_costos
+    # Sin costos → no se puede liquidar costos (checkbox deshabilitado en la vista).
+    if not tiene_costos:
+        panel.liquidar_costos = False
     panel.er_filename = er_filename
     panel.generado_por_id = usuario_id
     db.flush()
@@ -334,6 +339,8 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
         "periodo": p.periodo,
         "tipo": p.tipo,
         "liquidar": p.liquidar,
+        "liquidar_ingresos": p.liquidar_ingresos,
+        "liquidar_costos": p.liquidar_costos,
         "generar_mandatos": p.generar_mandatos,
         "tiene_bolsa": p.tiene_bolsa,
         "tiene_costos": p.tiene_costos,
@@ -360,7 +367,8 @@ def actualizar(
     if not panel:
         raise HTTPException(404, "Panel no encontrado")
 
-    for campo in ("liquidar", "generar_mandatos", "fecha_firma",
+    for campo in ("liquidar", "liquidar_ingresos", "liquidar_costos",
+                  "generar_mandatos", "fecha_firma",
                   "consecutivo_ingresos", "consecutivo_costos"):
         val = getattr(body, campo)
         if val is not None:
@@ -400,8 +408,9 @@ def reasignar_consecutivos(
     _=Depends(_require_write),
 ):
     """
-    Asigna consecutivos en cadena solo a proyectos con liquidar=true.
-    Costos numera únicamente si el panel tiene líneas de costos.
+    Asigna consecutivos en dos cadenas independientes:
+      - Ingresos: a cada panel con liquidar_ingresos=true.
+      - Costos: a cada panel con liquidar_costos=true y que tenga costos.
     """
     try:
         y, m = body.periodo.strip().split("-")
@@ -419,13 +428,12 @@ def reasignar_consecutivos(
     cc = body.consecutivo_costos_inicial
     asignados = []
     for p in paneles:
-        if not p.liquidar:
+        if p.liquidar_ingresos:
+            p.consecutivo_ingresos = ci
+            ci += 1
+        else:
             p.consecutivo_ingresos = None
-            p.consecutivo_costos = None
-            continue
-        p.consecutivo_ingresos = ci
-        ci += 1
-        if p.tiene_costos:
+        if p.liquidar_costos and p.tiene_costos:
             p.consecutivo_costos = cc
             cc += 1
         else:

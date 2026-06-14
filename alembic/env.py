@@ -18,6 +18,11 @@ if not db_url:
     pg_db   = os.getenv("POSTGRES_DB")
     if pg_user and pg_pass and pg_host and pg_db:
         db_url = f"postgresql+psycopg://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
+if not db_url:
+    # Fall back to the application settings so `alembic` and `init_db.py` always
+    # target the same database the app uses (settings reads .env / env vars too).
+    from app.core.config import settings  # noqa: E402
+    db_url = settings.DATABASE_URL
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 

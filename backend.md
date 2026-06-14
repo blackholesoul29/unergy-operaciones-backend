@@ -233,6 +233,18 @@ uvicorn app.main:app --reload
 - **URL backend:** https://backend-production-63d8.up.railway.app
 - **Docs producción:** https://backend-production-63d8.up.railway.app/docs
 
+## Seguridad — SECRET_KEY
+La app **no arranca** (lanza `ValueError` al instanciar `Settings`) si `SECRET_KEY`
+falta, usa un valor placeholder conocido (p. ej. `changeme`, `change-me-to-a-secure-random-string`)
+o tiene menos de **32 caracteres**. El enforce es estricto en **todos los entornos**.
+
+Genera una clave fuerte (única por entorno, nunca commitearla):
+```
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+Define el resultado en la variable de entorno `SECRET_KEY` (Railway en producción,
+`.env` en local). Ver `MIN_SECRET_KEY_LENGTH` / `WEAK_SECRET_KEYS` en `app/core/config.py`.
+
 ## Convenciones
 - Un archivo por dominio en `app/models/`, `app/schemas/` y `app/api/v1/`.
 - Modelos en estilo SQLAlchemy 2.0: `Mapped[...]` + `mapped_column`, heredando `TimestampMixin`.

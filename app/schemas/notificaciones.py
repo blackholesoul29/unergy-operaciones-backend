@@ -22,3 +22,32 @@ class NotificacionOut(BaseModel):
     leida: bool
     link: Optional[str] = None
     created_at: datetime
+
+
+# ── Notificaciones de alertas (contratos PPA) ────────────────────────────────
+
+class NotificacionAlertaBase(BaseModel):
+    titulo: str
+    mensaje: str
+    severidad: str = "critica"  # critica | persistente | info
+    canal: str = "in_app"       # in_app | email | ambos
+    alerta_ref: Optional[str] = None
+
+
+class NotificacionAlertaCreate(NotificacionAlertaBase):
+    usuario_id: int
+
+
+class NotificacionAlertaResponse(NotificacionAlertaBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: int
+    leida: bool
+    email_enviado: bool
+    created_at: datetime
+    leida_at: Optional[datetime] = None
+
+
+class NotificacionAlertaMarkRead(BaseModel):
+    ids: list[int]

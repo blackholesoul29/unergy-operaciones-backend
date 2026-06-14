@@ -9,7 +9,8 @@ Lógica GESCON (GESCON_LOGICA.md):
 Usa DISTINCT ON (PostgreSQL) para obtener la última fila por SIC en una sola
 pasada — mucho más eficiente que la alternativa subquery+join.
 """
-from datetime import date
+import logging
+from datetime import date, datetime, timedelta, timezone
 from collections import defaultdict
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -17,11 +18,64 @@ from sqlalchemy import text
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.api.v1.notificaciones import create_notificacion_alerta
 from app.models.proyectos import Proyecto
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.models.notificaciones import NotificacionAlerta
+from app.models.usuarios import RolEnum, Usuario
+
+logger = logging.getLogger("alertas")
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
+
+# Roles que reciben notificaciones proactivas de alertas de contratos PPA.
+_ROLES_NOTIFICABLES = (
+    RolEnum.admin.value,
+    RolEnum.operaciones.value,
+    RolEnum.liquidaciones.value,
+)
+# Ventana anti-duplicados: no re-notificar la misma alerta_ref dentro de este lapso.
+_DEDUP_WINDOW = timedelta(hours=24)
+
+
+def _emitir_notificaciones_alerta(db: Session, alerta_ref: str, titulo: str, mensaje: str) -> None:
+    """Crea notificaciones críticas para los usuarios elegibles, sin duplicar.
+
+    No-fatal: cualquier fallo se registra pero nunca interrumpe el flujo de
+    cálculo de alertas.
+    """
+    try:
+        desde = datetime.now(timezone.utc) - _DEDUP_WINDOW
+        usuarios = (
+            db.query(Usuario)
+            .filter(Usuario.activo == True, Usuario.rol.in_(_ROLES_NOTIFICABLES))
+            .all()
+        )
+        for u in usuarios:
+            ya_existe = (
+                db.query(NotificacionAlerta.id)
+                .filter(
+                    NotificacionAlerta.usuario_id == u.id,
+                    NotificacionAlerta.alerta_ref == alerta_ref,
+                    NotificacionAlerta.created_at >= desde,
+                )
+                .first()
+            )
+            if ya_existe:
+                continue
+            create_notificacion_alerta(
+                db,
+                usuario_id=u.id,
+                titulo=titulo,
+                mensaje=mensaje,
+                severidad="critica",
+                canal="ambos",
+                alerta_ref=alerta_ref,
+                email_to=u.email,
+            )
+    except Exception as exc:  # pragma: no cover — defensivo
+        logger.error("Fallo emitiendo notificaciones para %s: %s", alerta_ref, exc)
 
 _LATEST_SIC_SQL = text("""
     SELECT DISTINCT ON (codigo_sic_contrato)
@@ -199,6 +253,18 @@ def alertas_cumplimiento_ppa(
         })
 
     alertas.sort(key=lambda a: a.get("cobertura_pct", 100))
+
+    # ── Hook: notificar proactivamente las alertas de severidad alta ─────────
+    for a in alertas:
+        if a["severidad"] != "alta":
+            continue
+        alerta_ref = f"cumplimiento_ppa:{a['contrato_ppa_id']}:{year}-{month:02d}"
+        _emitir_notificaciones_alerta(
+            db,
+            alerta_ref=alerta_ref,
+            titulo=f"Déficit crítico de cumplimiento PPA — {a['contrato_nombre'] or 'Contrato'}",
+            mensaje=a["mensaje"],
+        )
 
     return {
         "fecha_consulta": str(hoy),

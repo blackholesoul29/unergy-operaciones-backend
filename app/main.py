@@ -739,6 +739,22 @@ _PENDING_DDLS = [
     # Panel Contable — liquidación de ingresos y costos independientes
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_ingresos BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_costos BOOLEAN NOT NULL DEFAULT TRUE",
+    # migration — Notificaciones de alertas (contratos PPA)
+    """CREATE TABLE IF NOT EXISTS notificaciones_alertas (
+        id BIGSERIAL PRIMARY KEY,
+        usuario_id BIGINT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        alerta_ref VARCHAR(255),
+        titulo VARCHAR(255) NOT NULL,
+        mensaje TEXT NOT NULL,
+        severidad VARCHAR(20) NOT NULL DEFAULT 'critica',
+        canal VARCHAR(20) NOT NULL DEFAULT 'in_app',
+        leida BOOLEAN NOT NULL DEFAULT FALSE,
+        email_enviado BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        leida_at TIMESTAMPTZ
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_notificaciones_alertas_usuario ON notificaciones_alertas (usuario_id)",
+    "CREATE INDEX IF NOT EXISTS ix_notif_alertas_usuario_leida ON notificaciones_alertas (usuario_id, leida)",
 ]
 
 

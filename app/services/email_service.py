@@ -507,6 +507,65 @@ def send_falla_notification_email(
     return {"ok": len(enviados) > 0, "enviados": enviados, "errores": errores}
 
 
+def send_alerta_email(*, to_email: str, titulo: str, mensaje: str, severidad: str) -> bool:
+    """
+    Envía una notificación de alerta de contrato PPA por email.
+
+    No lanza excepción — retorna True si se envió correctamente, False en caso
+    contrario (SMTP no configurado o fallo de envío). El llamador puede así
+    persistir la notificación aunque el email falle.
+    """
+    if not settings.SMTP_HOST:
+        print(
+            f"[ALERTA_EMAIL] SMTP no configurado — alerta para {to_email}: "
+            f"[{severidad}] {titulo}"
+        )
+        return False
+
+    severidad_color = {
+        "critica": "#FF3B30",
+        "persistente": "#FF9500",
+        "info": "#34C759",
+    }.get(severidad, "#915BD8")
+
+    subject = f"[Alerta {severidad.upper()}] {titulo}"
+    body_html = f"""
+<html>
+<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:560px;margin:0 auto;padding:0">
+  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
+    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
+    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Alerta de Contratos</div>
+  </div>
+  <div style="background:#F7F4FD;padding:24px 28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
+    <div style="background:{severidad_color};color:#fff;display:inline-block;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:700;letter-spacing:.5px;margin-bottom:16px">{severidad.upper()}</div>
+    <h2 style="margin:0 0 12px;font-size:18px">{titulo}</h2>
+    <div style="background:#fff;border:1px solid #EDE8F5;border-radius:8px;padding:14px 18px;margin:0 0 20px">
+      <div style="font-size:14px;color:#1A0F2E;line-height:1.6">{mensaje}</div>
+    </div>
+    <p style="color:#6B5F80;font-size:12px;margin:0">
+      Este es un mensaje automático del sistema de alertas de Unergy Operaciones.<br>
+      <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_html, "html", "utf-8"))
+
+    try:
+        _smtp_send(msg, [to_email])
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="alerta", success=True)
+        return True
+    except Exception as exc:
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="alerta", success=False, error_msg=str(exc))
+        logger.error("[ALERTA_EMAIL] Failed to send to %s: %s", to_email, exc)
+        return False
+
+
 def send_test_email(*, to_email: str, cliente_nombre: str) -> None:
     """
     Envía un correo de prueba para verificar la configuración del correo operacional.

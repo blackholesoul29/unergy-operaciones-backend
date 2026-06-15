@@ -313,7 +313,116 @@ def _build_generation_map(token: str, names: list[str]) -> dict[str, float]:
     return out
 
 
-# ── Pipeline enriquecido (fuente para el sync) ──────────────────────────────────
+# ── Sun Factory como FUENTE PRINCIPAL (la "BD de Solenium/TSF") ─────────────────
+# El endpoint /project/ de Sun Factory ya trae nombre, base_name, ubicación
+# (lat/lon/city/department) y estado — accesible por internet, sin depender de
+# originabotdb (que solo es alcanzable desde la red interna de Unergy y hace
+# timeout desde Railway/fuera). Esta es la vía que pidió el usuario: copiar
+# directo desde Solenium/TSF.
+
+# state (int) de Sun Factory → etiqueta de fase. Solo estos estados se importan
+# como "próximos a energizarse"; se excluyen 2 (Operación y Mantenimiento, ya
+# energizado) y 5 (Debida diligencia, demasiado temprano). Se usa el int y no la
+# descripción para evitar problemas de acentos/encoding.
+_SF_IMPORT_STATES = {
+    1: "En construcción",      # Construcción
+    3: "Próximo a energizar",  # Despliegue (PEM/pruebas, lo más cercano)
+    4: "En construcción",      # BT y Contrato
+}
+
+
+def _sunfactory_all_projects(token: str) -> list[dict]:
+    """Lista completa de proyectos de Sun Factory (paginando /project/)."""
+    base = settings.SUNFACTORY_API_URL.rstrip("/")
+    url: str | None = f"{base}/project/?limit=200"
+    out: list[dict] = []
+    with httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}"}) as client:
+        pages = 0
+        while url and pages < 30:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            out += data.get("results", []) if isinstance(data, dict) else (data or [])
+            url = data.get("next") if isinstance(data, dict) else None
+            pages += 1
+    return out
+
+
+def _next_milestone_date(project: dict) -> date | None:
+    """Fecha del próximo hito pendiente (respaldo cuando no se enriquece con
+    el hito de energización RETIE/legalización)."""
+    nm = project.get("next_milestone") or {}
+    return _parse_iso_date(nm.get("planned_end_date") or nm.get("end_date")
+                           or nm.get("planned_date") or nm.get("date"))
+
+
+def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], list[str]]:
+    """Proyectos del pipeline DIRECTO desde Sun Factory (Solenium/TSF).
+
+    Devuelve `(proyectos, warnings)`. Cada proyecto:
+    `{ origina_code, solenium_id, commercial_name, status, municipio,
+       departamento, latitud, longitud, energization_date, avance_pct,
+       monthly_mwh }`. `origina_code` = base_name (o `SF-<id>` si no tiene),
+    usado como llave estable de upsert."""
+    warnings: list[str] = []
+    try:
+        token = _sunfactory_token()
+    except Exception as exc:
+        logger.warning("Sun Factory auth falló: %s", exc)
+        return [], [f"No se pudo autenticar contra Sun Factory: {exc}"]
+    if not token:
+        return [], ["Credenciales de Sun Factory no configuradas (SUNFACTORY_/SOLENIUM_)."]
+
+    try:
+        raw = _sunfactory_all_projects(token)
+    except Exception as exc:
+        logger.warning("Sun Factory lista de proyectos falló: %s", exc)
+        return [], [f"No se pudo leer la lista de proyectos de Sun Factory: {exc}"]
+
+    wanted = [p for p in raw if p.get("state") in _SF_IMPORT_STATES]
+
+    # Enriquecer con el hito de energización (RETIE/legalización) por proyecto,
+    # concurrente y best-effort. Si falla, se usa el next_milestone como respaldo.
+    energ_map: dict[int, dict] = {}
+    if enrich_dates and wanted:
+        ids = [p["id"] for p in wanted if p.get("id") is not None]
+        try:
+            with ThreadPoolExecutor(max_workers=min(len(ids), 12)) as pool:
+                for pid, energ in pool.map(lambda i: (i, _sunfactory_energization(token, i)), ids):
+                    if energ:
+                        energ_map[pid] = energ
+        except Exception as exc:
+            logger.warning("Sun Factory enriquecimiento de hitos falló: %s", exc)
+            warnings.append("No se pudieron leer los hitos de energización; se usan fechas tentativas.")
+
+    projects: list[dict] = []
+    for p in wanted:
+        pid = p.get("id")
+        base_name = p.get("base_name")
+        code = base_name or (f"SF-{pid}" if pid is not None else None)
+        if not code:
+            continue
+        energ_info = energ_map.get(pid) or {}
+        energ = energ_info.get("energization_date") or _next_milestone_date(p)
+        lat = p.get("lat")
+        lon = p.get("lon")
+        projects.append({
+            "origina_code": code,
+            "solenium_id": pid,
+            "commercial_name": p.get("name") or _derive_commercial_name(base_name or ""),
+            "status": _SF_IMPORT_STATES.get(p.get("state"), "En construcción"),
+            "municipio": p.get("city"),
+            "departamento": p.get("department"),
+            "latitud": float(lat) if lat not in (None, "") else None,
+            "longitud": float(lon) if lon not in (None, "") else None,
+            "energization_date": energ,
+            "avance_pct": energ_info.get("avance_pct"),
+            "monthly_mwh": None,  # Sun Factory no expone potencia en el listado
+        })
+    return projects, warnings
+
+
+# ── Pipeline enriquecido (originabotdb, opcional/legacy) ─────────────────────────
 
 def fetch_pipeline_projects(
     *,
@@ -456,10 +565,13 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
     """Upsert del pipeline TSF en `proyectos`. Devuelve estadísticas.
 
     `force=True`: sobrescribe la fecha estimada incluso si el operador la editó
-    manualmente, y resetea la marca (Solenium suele tener la fecha más fresca)."""
-    projects, warnings = fetch_pipeline_projects()
+    manualmente, y resetea la marca (Solenium suele tener la fecha más fresca).
+
+    Fuente principal: Sun Factory (la "BD de Solenium/TSF"), accesible por internet.
+    No depende de originabotdb (que solo es alcanzable desde la red interna)."""
+    projects, warnings = fetch_sunfactory_projects()
     stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
-             "total_pipeline": len(projects), "warnings": warnings}
+             "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory"}
 
     for p in projects:
         code = p["origina_code"]
@@ -499,9 +611,9 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                         "code": code,
                         "fase": fase,
                         "energ": energ,
-                        "avance": p["avance_pct"],
-                        "mwh": p["monthly_mwh"],
-                        "potencia": p["installed_power_kwp"],
+                        "avance": p.get("avance_pct"),
+                        "mwh": p.get("monthly_mwh"),
+                        "potencia": p.get("installed_power_kwp"),
                         "municipio": p["municipio"],
                         "departamento": p["departamento"],
                         "latitud": p["latitud"],
@@ -516,8 +628,8 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                 params = {
                     "id": existing.id,
                     "fase": fase,
-                    "avance": p["avance_pct"],
-                    "potencia": p["installed_power_kwp"],
+                    "avance": p.get("avance_pct"),
+                    "potencia": p.get("installed_power_kwp"),
                 }
                 date_sql = ""
                 if set_date and energ is not None:

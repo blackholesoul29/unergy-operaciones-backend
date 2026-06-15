@@ -305,7 +305,8 @@ def _one_project():
 
 
 def _patch_fetch(monkeypatch, projects):
-    monkeypatch.setattr(pe, "fetch_pipeline_projects", lambda **k: (projects, []))
+    # sync_tsf_projects ahora lee de Sun Factory (fuente principal).
+    monkeypatch.setattr(pe, "fetch_sunfactory_projects", lambda **k: (projects, []))
 
 
 def test_sync_creates_when_not_existing(monkeypatch):

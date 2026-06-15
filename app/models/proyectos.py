@@ -113,6 +113,24 @@ class Proyecto(Base):
     p99_mensual_kwh = mapped_column(JSONB, nullable=True)
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # ── Pipeline TSF / próximos a energizarse ───────────────────────────────────
+    # Correlación con originabotdb.minifarm_project.name / base_name de Sun Factory.
+    origina_code: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    # Fase del pipeline de construcción (complementa `estado`, que se queda en
+    # 'en_desarrollo' mientras la planta no opera). Etiquetas: en_construccion |
+    # pruebas | proximo_energizar | energizado.
+    fase_construccion: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Fecha tentativa de energización (de TSF la 1ª vez; editable por operaciones).
+    fecha_estimada_energizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # El operador cambió la fecha estimada → el sync periódico no la pisa (salvo force).
+    fecha_estimada_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # % de avance de obra (Sun Factory).
+    avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # Proyección de generación mensual (MWh), editable por operaciones.
+    mwh_mes_estimado: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Origen del registro: 'manual' (alta normal) | 'tsf_sync' (auto-importado).
+    origen: Mapped[str | None] = mapped_column(String(20), default="manual", nullable=True)
+
     # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)

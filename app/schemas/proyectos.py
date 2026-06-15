@@ -226,6 +226,14 @@ class ProyectoCreate(BaseModel):
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Pipeline TSF / próximos a energizarse
+    origina_code: Optional[str] = None
+    fase_construccion: Optional[str] = None
+    fecha_estimada_energizacion: Optional[date] = None
+    fecha_estimada_editada_manual: Optional[bool] = None
+    avance_obra_pct: Optional[float] = None
+    mwh_mes_estimado: Optional[float] = None
+    origen: Optional[str] = None
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod
@@ -289,6 +297,14 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Pipeline TSF / próximos a energizarse
+    origina_code: Optional[str] = None
+    fase_construccion: Optional[str] = None
+    fecha_estimada_energizacion: Optional[date] = None
+    fecha_estimada_editada_manual: Optional[bool] = None
+    avance_obra_pct: Optional[float] = None
+    mwh_mes_estimado: Optional[float] = None
+    origen: Optional[str] = None
     servicio_representacion: Optional[ServicioRepresentacionOut] = None
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None

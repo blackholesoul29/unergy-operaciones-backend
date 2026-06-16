@@ -24,7 +24,9 @@ from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.clientes import Cliente
-from app.models.panel_contable import PanelContable, PanelContableLinea
+from app.models.panel_contable import (
+    PanelContable, PanelContableLinea, ClasificacionLiquidacion,
+)
 from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
     normalizar, IVA, FEE_ADMIN,
@@ -68,6 +70,16 @@ class ReasignarConsecutivos(BaseModel):
     consecutivo_costos_inicial: int
 
 
+class AsignacionClasif(BaseModel):
+    proyecto_id: int
+    tipo: str  # 'normal' | 'neu' | 'nitro'
+
+
+class ClasificacionBody(BaseModel):
+    periodo: str
+    asignaciones: list[AsignacionClasif]
+
+
 # ── Construcción de líneas a partir del ER parseado ────────────────────────────
 
 def _construir_lineas_base(parsed: dict) -> list[dict]:
@@ -76,16 +88,23 @@ def _construir_lineas_base(parsed: dict) -> list[dict]:
     Los totales y la utilidad los calcula el frontend; aquí solo van renglones base.
     """
     lineas: list[dict] = []
-    com = parsed.get("comercializador") or ""
-    etiqueta_ing = f"Ingreso Bruto{(' ' + com) if com else ''}".strip()
+    tipo = (parsed.get("tipo") or "normal").lower()
 
-    # INGRESOS
-    lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing, "valor": parsed["ingreso_bruto"]})
-    if parsed.get("tiene_bolsa"):
-        if parsed.get("venta_bolsa"):
-            lineas.append({"grupo": "ingresos", "concepto": "Venta en bolsa", "valor": parsed["venta_bolsa"]})
-        if parsed.get("compra_bolsa"):
-            lineas.append({"grupo": "ingresos", "concepto": "Compra en bolsa", "valor": -abs(parsed["compra_bolsa"])})
+    # INGRESOS. Para NEU/NITRO los conceptos vienen ya desglosados desde el parser
+    # (sección "Ingresos y costos"). Para normal se conserva el formato histórico
+    # con el comercializador en la etiqueta del ingreso bruto.
+    if tipo in ("neu", "nitro"):
+        for d in parsed.get("ingresos_detalle", []):
+            lineas.append({"grupo": "ingresos", "concepto": d["concepto"], "valor": d["valor"]})
+    else:
+        com = parsed.get("comercializador") or ""
+        etiqueta_ing = f"Ingreso Bruto{(' ' + com) if com else ''}".strip()
+        lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing, "valor": parsed["ingreso_bruto"]})
+        if parsed.get("tiene_bolsa"):
+            if parsed.get("venta_bolsa"):
+                lineas.append({"grupo": "ingresos", "concepto": "Venta en bolsa", "valor": parsed["venta_bolsa"]})
+            if parsed.get("compra_bolsa"):
+                lineas.append({"grupo": "ingresos", "concepto": "Compra en bolsa", "valor": -abs(parsed["compra_bolsa"])})
 
     # COMERCIALIZACIÓN XM (desglosada)
     for c in parsed.get("comercializacion", []):
@@ -171,6 +190,7 @@ async def cargar_er(
     files: list[UploadFile] = File(...),
     periodo: str = Form(...),
     tipo: str = Form("preliquidacion"),
+    tipo_carga: str = Form("normal"),
     db: Session = Depends(get_db),
     current: Usuario = Depends(_require_write),
 ):
@@ -178,10 +198,18 @@ async def cargar_er(
     Sube uno o varios ER. Por cada archivo: recalcula con LibreOffice, parsea,
     matchea el proyecto, divide por % del backend y guarda el panel + líneas.
     periodo: YYYY-MM. tipo: 'preliquidacion' | 'oficial'.
+    tipo_carga: 'normal' | 'neu' | 'nitro' — cómo se lee la sección de ingresos.
+
+    VALIDACIÓN CRUZADA: cada ER debe cargarse en su sección. Si el proyecto está
+    clasificado distinto a `tipo_carga` para el período, se rechaza (no se guarda)
+    y se reporta aparte, sin romper la carga de los válidos.
     """
     tipo = (tipo or "preliquidacion").strip().lower()
     if tipo not in ("preliquidacion", "oficial"):
         raise HTTPException(422, "tipo debe ser 'preliquidacion' u 'oficial'")
+    tipo_carga = (tipo_carga or "normal").strip().lower()
+    if tipo_carga not in ("normal", "neu", "nitro"):
+        raise HTTPException(422, "tipo_carga debe ser 'normal', 'neu' o 'nitro'")
     try:
         y, m = periodo.strip().split("-")
         periodo_norm = f"{int(y):04d}-{int(m):02d}"
@@ -193,7 +221,17 @@ async def cargar_er(
         for p in db.query(Proyecto).order_by(Proyecto.id).all()
     ]
 
-    resultados = {"cargados": [], "sin_match": [], "errores": [], "warnings": [], "duplicados": []}
+    # Clasificación del período: proyecto_id → tipo (default 'normal').
+    clasif_map = {
+        c.proyecto_id: c.tipo
+        for c in db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
+    }
+
+    resultados = {
+        "cargados": [], "sin_match": [], "errores": [],
+        "warnings": [], "duplicados": [], "rechazados": [],
+    }
     proyectos_vistos: set[int] = set()
 
     for uf in files:
@@ -203,9 +241,6 @@ async def cargar_er(
             tmp.write(await uf.read())
             tmp.flush()
             tmp.close()
-
-            recalc_path = recalcular_er(tmp.name)
-            parsed = parsear_er(recalc_path)
 
             # El proyecto va al final del nombre de archivo; ventanas deslizantes.
             proy = extraer_proyecto_de_archivo(uf.filename or "", proyectos_db)
@@ -220,7 +255,28 @@ async def cargar_er(
                     "archivo": uf.filename, "proyecto": proy["nombre_comercial"],
                 })
                 continue
+
+            # Validación cruzada: la clasificación del período debe coincidir con
+            # el tipo de carga elegido.
+            clasif = clasif_map.get(proy["id"], "normal")
+            if clasif != tipo_carga:
+                resultados["rechazados"].append({
+                    "archivo": uf.filename,
+                    "proyecto": proy["nombre_comercial"],
+                    "clasificacion": clasif,
+                    "tipo_carga": tipo_carga,
+                    "mensaje": (
+                        f"{proy['nombre_comercial']} está clasificado como "
+                        f"{clasif.upper()} para {periodo_norm}, debe cargarse en "
+                        f"su sección correspondiente"
+                    ),
+                })
+                continue
+
             proyectos_vistos.add(proy["id"])
+
+            recalc_path = recalcular_er(tmp.name)
+            parsed = parsear_er(recalc_path, tipo=tipo_carga)
 
             panel = _guardar_panel(
                 db, proy["id"], periodo_norm, tipo, parsed,
@@ -247,7 +303,7 @@ async def cargar_er(
                     except Exception:
                         pass
 
-    return {"ok": True, "periodo": periodo_norm, "tipo": tipo, **resultados}
+    return {"ok": True, "periodo": periodo_norm, "tipo": tipo, "tipo_carga": tipo_carga, **resultados}
 
 
 def _guardar_panel(
@@ -314,6 +370,88 @@ def _guardar_panel(
     db.commit()
     db.refresh(panel)
     return panel
+
+
+# ── Clasificación de liquidación por período ────────────────────────────────────
+
+@router.get("/clasificacion")
+def listar_clasificacion(
+    periodo: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Todos los proyectos con su tipo de liquidación asignado para el período
+    ('normal' por defecto si no tiene registro). La clasificación es POR PERÍODO.
+    """
+    try:
+        y, m = periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    asignados = {
+        c.proyecto_id: c.tipo
+        for c in db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
+    }
+    proyectos = db.query(Proyecto).order_by(Proyecto.nombre_comercial).all()
+    return {
+        "periodo": periodo_norm,
+        "proyectos": [
+            {
+                "proyecto_id": p.id,
+                "proyecto": p.nombre_comercial,
+                "tipo": asignados.get(p.id, "normal"),
+            }
+            for p in proyectos
+        ],
+    }
+
+
+@router.post("/clasificacion")
+def guardar_clasificacion(
+    body: ClasificacionBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    Upsert de la clasificación del período. Solo persiste las que difieren de
+    'normal' (default); reasignar a 'normal' elimina el registro previo.
+    """
+    try:
+        y, m = body.periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    existentes = {
+        c.proyecto_id: c
+        for c in db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
+    }
+    guardados = 0
+    for a in body.asignaciones:
+        tipo = (a.tipo or "normal").strip().lower()
+        if tipo not in ("normal", "neu", "nitro"):
+            raise HTTPException(422, f"tipo inválido para proyecto {a.proyecto_id}: {a.tipo}")
+        actual = existentes.get(a.proyecto_id)
+        if tipo == "normal":
+            # 'normal' es el default → no se almacena; eliminar registro previo.
+            if actual is not None:
+                db.delete(actual)
+                guardados += 1
+            continue
+        if actual is None:
+            db.add(ClasificacionLiquidacion(
+                proyecto_id=a.proyecto_id, periodo=periodo_norm, tipo=tipo,
+            ))
+        else:
+            actual.tipo = tipo
+        guardados += 1
+
+    db.commit()
+    return {"ok": True, "periodo": periodo_norm, "guardados": guardados}
 
 
 # ── Listar ─────────────────────────────────────────────────────────────────────

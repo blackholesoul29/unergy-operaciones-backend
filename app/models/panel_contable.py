@@ -72,6 +72,41 @@ class PanelContable(Base):
     )
 
 
+class TipoLiquidacionEnum(str, enum.Enum):
+    normal = "normal"
+    neu = "neu"
+    nitro = "nitro"
+
+
+class ClasificacionLiquidacion(Base):
+    """
+    Tipo de liquidación de un proyecto PARA UN PERÍODO concreto. Un proyecto
+    puede ser NEU en enero y normal en marzo, por eso la clave es
+    (proyecto_id, periodo). Sin registro → se asume 'normal'.
+
+    El tipo determina cómo se parsea la sección de ingresos del ER:
+      - normal: ingreso bruto venta de energía
+      - neu:    despacho + ventas/compras bolsa + distribución superávit + ajuste
+      - nitro:  ingreso bruto + ventas/compras bolsa + comercialización
+    """
+    __tablename__ = "clasificacion_liquidacion"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "periodo", name="uq_clasif_proyecto_periodo"),
+        Index("ix_clasif_periodo", "periodo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False, default="normal")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class PanelContableLinea(Base):
     """
     Una línea del detalle contable de un panel, ya dividida por inversionista.

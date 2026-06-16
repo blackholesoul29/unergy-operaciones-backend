@@ -148,15 +148,20 @@ def _norm(s) -> str:
 
 # ── Parser principal ─────────────────────────────────────────────────────────────
 
-def parsear_er(path: str) -> dict:
+def parsear_er(path: str, tipo: str = "normal") -> dict:
     """
-    Extrae del ER (ya recalculado) un dict estructurado:
+    Extrae del ER (ya recalculado) un dict estructurado. La hoja
+    "Estado_de_resultados" es la misma en los 3 tipos; SOLO cambia cómo se lee
+    la sección de ingresos (`tipo` ∈ {'normal','neu','nitro'}). Comercialización
+    XM, costos operativos y fee de administración se leen igual en los 3.
 
     {
+      "tipo": str,
       "comercializador": str | None,
       "tiene_bolsa": bool,
       "ingreso_bruto": float,
       "total_ingresos": float,
+      "ingresos_detalle": [ {concepto, valor}, ... ],   # renglones de ingreso
       "comercializacion": [ {concepto, valor}, ... ],   # XM desglosada (negativos)
       "costos": [ {concepto, valor, iva} ],             # operativos
       "facturas": [ {concepto, valor} ],                # representación, CGM, admin
@@ -166,6 +171,10 @@ def parsear_er(path: str) -> dict:
     """
     from openpyxl import load_workbook
 
+    tipo = (tipo or "normal").strip().lower()
+    if tipo not in ("normal", "neu", "nitro"):
+        tipo = "normal"
+
     wb = load_workbook(path, data_only=True)
     sh = wb[wb.sheetnames[0]]
     grid = [[c.value for c in row] for row in sh.iter_rows()]
@@ -173,7 +182,12 @@ def parsear_er(path: str) -> dict:
 
     warnings: list[str] = []
 
-    ing = _parse_ingresos(grid, warnings)
+    if tipo == "neu":
+        ing = _parse_ingresos_neu(grid, warnings)
+    elif tipo == "nitro":
+        ing = _parse_ingresos_nitro(grid, warnings)
+    else:
+        ing = _parse_ingresos(grid, warnings)
     ingreso_bruto = ing["ingreso_bruto"]
     total_ingresos = ing["total_ingresos"]
 
@@ -190,12 +204,14 @@ def parsear_er(path: str) -> dict:
     facturas.append({"concepto": "Administración", "valor": -round(total_ingresos * FEE_ADMIN, 2)})
 
     return {
+        "tipo": tipo,
         "comercializador": ing["comercializador"],
         "tiene_bolsa": ing["tiene_bolsa"],
         "ingreso_bruto": round(ingreso_bruto, 2),
         "total_ingresos": round(total_ingresos, 2),
         "venta_bolsa": round(ing["venta_bolsa"], 2),
         "compra_bolsa": round(ing["compra_bolsa"], 2),
+        "ingresos_detalle": ing.get("ingresos_detalle", []),
         "comercializacion": comercializacion,
         "costos": costos,
         "facturas": facturas,
@@ -276,6 +292,14 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
     ingreso_bruto = venta
     total_ingresos = venta + venta_bolsa - compra_bolsa
 
+    # Renglones de ingreso para el panel (mismo formato que neu/nitro).
+    detalle = [{"concepto": "Ingreso Bruto", "valor": round(ingreso_bruto, 2)}]
+    if tiene_bolsa:
+        if venta_bolsa:
+            detalle.append({"concepto": "Venta en bolsa", "valor": round(venta_bolsa, 2)})
+        if compra_bolsa:
+            detalle.append({"concepto": "Compra en bolsa", "valor": -abs(round(compra_bolsa, 2))})
+
     return {
         "comercializador": comercializador,
         "tiene_bolsa": tiene_bolsa,
@@ -283,6 +307,144 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
         "total_ingresos": total_ingresos,
         "venta_bolsa": venta_bolsa,
         "compra_bolsa": compra_bolsa,
+        "ingresos_detalle": detalle,
+    }
+
+
+# ── Ingresos NEU / NITRO (sección "Ingresos y costos", NO la XM) ────────────────
+
+def _ingresos_section_bounds(grid: list[list]) -> tuple[int | None, int | None]:
+    """
+    Acota la sección "Ingresos y costos" (la de conceptos de ingreso, NO la
+    "Ingresos y costos XM"). Empieza en su encabezado y termina en la fila de
+    "Total ingresos" (inclusive) o, si no la hay, al toparse con "Costos
+    operativos" / "Comercialización XM".
+    """
+    start = None
+    for i, row in enumerate(grid):
+        nm = _norm(_row_label(row)).replace(".", "")
+        if nm.startswith("ingresos y costos") and "xm" not in nm:
+            start = i
+            break
+    if start is None:
+        return None, None
+    end = len(grid)
+    for j in range(start + 1, len(grid)):
+        nm = _norm(_row_label(grid[j])).replace(".", "")
+        if not nm:
+            continue
+        if "total ingreso" in nm:
+            end = j + 1  # incluir la fila de total
+            break
+        if "costos operativos" in nm or "ingresos y costos xm" in nm or "comercializacion xm" in nm:
+            end = j
+            break
+    return start, end
+
+
+def _buscar_concepto(grid: list[list], start: int, end: int, variantes: list[tuple]) -> float | None:
+    """
+    Primer valor (columna contigua) de la fila cuya etiqueta normalizada (sin
+    puntos) contenga TODOS los tokens de alguna de las `variantes`. Recorre solo
+    el bloque [start, end) para no leer conceptos de otras secciones.
+    """
+    for r in range(start, end):
+        nm = _norm(_row_label(grid[r])).replace(".", "")
+        if not nm:
+            continue
+        for tokens in variantes:
+            if all(tok in nm for tok in tokens):
+                return _value_after_label(grid[r])
+    return None
+
+
+def _parse_ingresos_neu(grid: list[list], warnings: list[str]) -> dict:
+    """
+    NEU (Baraya, El Son, Ibirico, Mapale, Puya). Ingresos =
+      Despacho de energía + Ventas en bolsa − Compras en bolsa
+      + Distribución Superávit (Redistribución de ingresos) + Ajuste.
+    """
+    start, end = _ingresos_section_bounds(grid)
+    if start is None:
+        warnings.append("NEU: no se encontró la sección 'Ingresos y costos'; ingresos = 0.")
+        return _ingresos_vacio()
+
+    despacho = _buscar_concepto(grid, start, end, [("despacho",)])
+    ventas = _buscar_concepto(grid, start, end, [("ventas", "bolsa"), ("venta", "bolsa")])
+    compras = _buscar_concepto(grid, start, end, [("compras", "bolsa"), ("compra", "bolsa")])
+    distrib = _buscar_concepto(grid, start, end, [("distribucion", "superavit"), ("redistribucion",)])
+    ajuste = _buscar_concepto(grid, start, end, [("ajuste",)])
+
+    detalle: list[dict] = []
+    if despacho is None:
+        warnings.append("NEU: no se encontró 'Despacho de energía'.")
+    else:
+        detalle.append({"concepto": "Despacho de energía", "valor": round(despacho, 2)})
+    if ventas:
+        detalle.append({"concepto": "Venta en bolsa", "valor": round(ventas, 2)})
+    if compras:
+        detalle.append({"concepto": "Compra en bolsa", "valor": -abs(round(compras, 2))})
+    if distrib:
+        detalle.append({"concepto": "Distribución Superávit", "valor": round(distrib, 2)})
+    if ajuste:
+        detalle.append({"concepto": "Ajuste", "valor": round(ajuste, 2)})
+
+    total = sum(d["valor"] for d in detalle)
+    return {
+        "comercializador": None,
+        "tiene_bolsa": bool(ventas or compras),
+        "ingreso_bruto": round(despacho or 0.0, 2),
+        "total_ingresos": round(total, 2),
+        "venta_bolsa": round(ventas or 0.0, 2),
+        "compra_bolsa": round(compras or 0.0, 2),
+        "ingresos_detalle": detalle,
+    }
+
+
+def _parse_ingresos_nitro(grid: list[list], warnings: list[str]) -> dict:
+    """
+    NITRO (La Cacica, Las Piloneras). Ingresos =
+      Ingreso Bruto + Ventas en bolsa − Compras en bolsa + Comercialización.
+    """
+    start, end = _ingresos_section_bounds(grid)
+    if start is None:
+        warnings.append("NITRO: no se encontró la sección 'Ingresos y costos'; ingresos = 0.")
+        return _ingresos_vacio()
+
+    bruto = _buscar_concepto(grid, start, end, [("ingreso", "bruto")])
+    ventas = _buscar_concepto(grid, start, end, [("ventas", "bolsa"), ("venta", "bolsa")])
+    compras = _buscar_concepto(grid, start, end, [("compras", "bolsa"), ("compra", "bolsa")])
+    comerc = _buscar_concepto(grid, start, end, [("comercializacion",)])
+
+    detalle: list[dict] = []
+    if bruto is None:
+        warnings.append("NITRO: no se encontró 'Ingreso Bruto'.")
+    else:
+        detalle.append({"concepto": "Ingreso Bruto", "valor": round(bruto, 2)})
+    if ventas:
+        detalle.append({"concepto": "Venta en bolsa", "valor": round(ventas, 2)})
+    if compras:
+        detalle.append({"concepto": "Compra en bolsa", "valor": -abs(round(compras, 2))})
+    if comerc:
+        detalle.append({"concepto": "Comercialización", "valor": round(comerc, 2)})
+
+    total = sum(d["valor"] for d in detalle)
+    return {
+        "comercializador": None,
+        "tiene_bolsa": bool(ventas or compras),
+        "ingreso_bruto": round(bruto or 0.0, 2),
+        "total_ingresos": round(total, 2),
+        "venta_bolsa": round(ventas or 0.0, 2),
+        "compra_bolsa": round(compras or 0.0, 2),
+        "ingresos_detalle": detalle,
+    }
+
+
+def _ingresos_vacio() -> dict:
+    return {
+        "comercializador": None, "tiene_bolsa": False,
+        "ingreso_bruto": 0.0, "total_ingresos": 0.0,
+        "venta_bolsa": 0.0, "compra_bolsa": 0.0, "ingresos_detalle": [],
     }
 
 

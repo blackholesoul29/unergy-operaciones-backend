@@ -739,6 +739,15 @@ _PENDING_DDLS = [
     # Panel Contable — liquidación de ingresos y costos independientes
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_ingresos BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_costos BOOLEAN NOT NULL DEFAULT TRUE",
+    # migration 020 — pipeline TSF / próximos a energizarse
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
 ]
 
 
@@ -1655,6 +1664,23 @@ def _scheduled_correlation_sync():
         print(f"[correlation_sync] Failed to get DB session: {e}")
 
 
+def _scheduled_tsf_sync():
+    """Sincronización periódica del pipeline TSF → tabla proyectos (cada 6 h)."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.tsf_sync import sync_tsf_projects
+            stats = sync_tsf_projects(db, force=False)
+            print(f"[tsf_sync] OK — creados={stats.get('creados', 0)} "
+                  f"actualizados={stats.get('actualizados', 0)} errores={stats.get('errores', 0)}")
+        except Exception as e:
+            print(f"[tsf_sync] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[tsf_sync] Failed to get DB session: {e}")
+
+
 def _scheduled_evo_forecast_ingest():
     """Daily ingest of climate forecast from EVO energy-api."""
     if not settings.EVO_API_URL:
@@ -2075,6 +2101,14 @@ def _deferred_init():
                 id="om_ipc_check",
                 name="Check IPC anual O&M",
             )
+
+            if settings.ORIGINA_DATABASE_URL:
+                _mgs_scheduler.add_job(
+                    _scheduled_tsf_sync,
+                    IntervalTrigger(hours=6),
+                    id="tsf_sync",
+                    name="Sync pipeline TSF -> proyectos",
+                )
 
             _mgs_scheduler.start()
             poll_once_async()

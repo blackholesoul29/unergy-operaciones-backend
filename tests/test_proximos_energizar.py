@@ -1,9 +1,14 @@
-"""Tests de la lógica pura de proximos_energizar (sin red ni DB)."""
+"""Tests de la lógica pura del pipeline TSF (sin red ni DB).
+
+La lógica de enriquecimiento (Sun Factory, generación, estimaciones) vive en
+`app/services/tsf_sync.py`; el router `proximos_energizar` solo lee/escribe en la
+BD. Por eso estos tests apuntan al servicio.
+"""
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app.api.v1 import proximos_energizar as pe
+from app.services import tsf_sync as pe
 
 
 # ── _parse_iso_date ─────────────────────────────────────────────────────────────
@@ -235,3 +240,147 @@ def test_sunfactory_token_none_without_any_creds(monkeypatch):
     _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
          SOLENIUM_USER="", SOLENIUM_PASS="")
     assert pe._sunfactory_token() is None
+
+
+# ── Mapeo fase ↔ etiqueta ───────────────────────────────────────────────────────
+
+def test_status_to_fase_roundtrip():
+    for label, slug in pe._STATUS_TO_FASE.items():
+        assert pe._FASE_TO_LABEL[slug] == label
+
+
+def test_fase_slugs_known():
+    assert set(pe._STATUS_TO_FASE.values()) == {
+        "en_construccion", "pruebas", "proximo_energizar", "energizado",
+    }
+
+
+# ── sync_tsf_projects (upsert) — DB falsa, sin red ──────────────────────────────
+
+class _FakeResult:
+    def __init__(self, row):
+        self._row = row
+    def first(self):
+        return self._row
+
+
+class _ExistingRow:
+    def __init__(self, id, manual):
+        self.id = id
+        self.fecha_estimada_editada_manual = manual
+
+
+class _FakeDB:
+    """Captura las sentencias ejecutadas y simula el SELECT de existencia."""
+    def __init__(self, existing=None):
+        self.existing = existing  # _ExistingRow o None
+        self.statements = []      # [(sql, params)]
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        self.statements.append((sql, params or {}))
+        if sql.strip().upper().startswith("SELECT"):
+            return _FakeResult(self.existing)
+        return _FakeResult(None)
+
+    def commit(self): pass
+    def rollback(self): pass
+
+
+def _one_project():
+    return [{
+        "origina_code": "COLSUCT3P1_MORROA_SUR",
+        "base_name": "COLSUCT3P1_MORROA_SUR",
+        "tsf_code": "COLSUCT3P1",
+        "commercial_name": "Morroa Sur",
+        "status": "Próximo a energizar",
+        "stage": "deploy",
+        "energization_date": date(2026, 9, 1),
+        "energization_source": "sunfactory",
+        "avance_pct": 88.5,
+        "monthly_mwh": 127.71,
+        "installed_power_kwp": 990,
+        "already_generating": False,
+        "municipio": "Morroa", "departamento": "Sucre",
+        "latitud": None, "longitud": None,
+    }]
+
+
+def _patch_fetch(monkeypatch, projects):
+    # sync_tsf_projects ahora lee de Sun Factory (fuente principal).
+    monkeypatch.setattr(pe, "fetch_sunfactory_projects", lambda **k: (projects, []))
+
+
+def test_sync_creates_when_not_existing(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=None)
+    stats = pe.sync_tsf_projects(db, force=False)
+    assert stats["creados"] == 1 and stats["actualizados"] == 0
+    inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
+    assert len(inserts) == 1
+    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
+    assert params["code"] == "COLSUCT3P1_MORROA_SUR"
+    assert params["tsf"] == "COLSUCT3P1"   # codigo_tsf persistido para cruce
+    assert params["fase"] == "proximo_energizar"
+    assert params["energ"] == date(2026, 9, 1)
+
+
+# ── _tsf_code_from_base_name ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("base_name,expected", [
+    ("COLSUCT3P1_MORROA_SUR", "COLSUCT3P1"),
+    ("COLCEST55P2_VALLEDUPAR_NORTE", "COLCEST55P2"),
+    ("COLSUCT49P1_SAN-LUIS-DE-SINCE_OCCIDENTE", "COLSUCT49P1"),
+    ("SMGS_0006_FEN5_Barrancabermeja", None),  # no es código CREG
+    (None, None),
+    ("", None),
+])
+def test_tsf_code_from_base_name(base_name, expected):
+    assert pe._tsf_code_from_base_name(base_name) == expected
+
+
+def test_sync_update_links_codigo_tsf_and_origina_code():
+    # Proyecto ya existente (registrado a mano con codigo_tsf) → el sync lo
+    # ACTUALIZA (no duplica) y enlaza origina_code/codigo_tsf vía COALESCE.
+    import types
+    projects = _one_project()
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False))
+    # parchear el fetch directamente (sin monkeypatch fixture)
+    orig = pe.fetch_sunfactory_projects
+    pe.fetch_sunfactory_projects = lambda **k: (projects, [])
+    try:
+        stats = pe.sync_tsf_projects(db, force=False)
+    finally:
+        pe.fetch_sunfactory_projects = orig
+    assert stats["actualizados"] == 1 and stats["creados"] == 0
+    upd_sql = next(s for s, _ in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "origina_code = COALESCE(origina_code, :code)" in upd_sql
+    assert "codigo_tsf = COALESCE(codigo_tsf, :tsf)" in upd_sql
+
+
+def test_sync_updates_date_when_not_manual(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=42, manual=False))
+    stats = pe.sync_tsf_projects(db, force=False)
+    assert stats["actualizados"] == 1 and stats["creados"] == 0
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fecha_estimada_energizacion" in upd_sql  # sí actualiza la fecha
+    assert upd_params["energ"] == date(2026, 9, 1)
+
+
+def test_sync_respects_manual_date_without_force(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=42, manual=True))
+    pe.sync_tsf_projects(db, force=False)
+    upd_sql = next(s for s, _ in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fecha_estimada_energizacion" not in upd_sql  # NO toca la fecha editada a mano
+
+
+def test_sync_force_overwrites_manual_date(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=42, manual=True))
+    pe.sync_tsf_projects(db, force=True)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fecha_estimada_energizacion" in upd_sql      # force sí la sobrescribe
+    assert "fecha_estimada_editada_manual = FALSE" in upd_sql  # y resetea la marca
+    assert upd_params["energ"] == date(2026, 9, 1)

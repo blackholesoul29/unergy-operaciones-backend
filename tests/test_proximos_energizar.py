@@ -290,6 +290,8 @@ class _FakeDB:
 def _one_project():
     return [{
         "origina_code": "COLSUCT3P1_MORROA_SUR",
+        "base_name": "COLSUCT3P1_MORROA_SUR",
+        "tsf_code": "COLSUCT3P1",
         "commercial_name": "Morroa Sur",
         "status": "Próximo a energizar",
         "stage": "deploy",
@@ -318,8 +320,42 @@ def test_sync_creates_when_not_existing(monkeypatch):
     assert len(inserts) == 1
     _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
     assert params["code"] == "COLSUCT3P1_MORROA_SUR"
+    assert params["tsf"] == "COLSUCT3P1"   # codigo_tsf persistido para cruce
     assert params["fase"] == "proximo_energizar"
     assert params["energ"] == date(2026, 9, 1)
+
+
+# ── _tsf_code_from_base_name ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("base_name,expected", [
+    ("COLSUCT3P1_MORROA_SUR", "COLSUCT3P1"),
+    ("COLCEST55P2_VALLEDUPAR_NORTE", "COLCEST55P2"),
+    ("COLSUCT49P1_SAN-LUIS-DE-SINCE_OCCIDENTE", "COLSUCT49P1"),
+    ("SMGS_0006_FEN5_Barrancabermeja", None),  # no es código CREG
+    (None, None),
+    ("", None),
+])
+def test_tsf_code_from_base_name(base_name, expected):
+    assert pe._tsf_code_from_base_name(base_name) == expected
+
+
+def test_sync_update_links_codigo_tsf_and_origina_code():
+    # Proyecto ya existente (registrado a mano con codigo_tsf) → el sync lo
+    # ACTUALIZA (no duplica) y enlaza origina_code/codigo_tsf vía COALESCE.
+    import types
+    projects = _one_project()
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False))
+    # parchear el fetch directamente (sin monkeypatch fixture)
+    orig = pe.fetch_sunfactory_projects
+    pe.fetch_sunfactory_projects = lambda **k: (projects, [])
+    try:
+        stats = pe.sync_tsf_projects(db, force=False)
+    finally:
+        pe.fetch_sunfactory_projects = orig
+    assert stats["actualizados"] == 1 and stats["creados"] == 0
+    upd_sql = next(s for s, _ in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "origina_code = COALESCE(origina_code, :code)" in upd_sql
+    assert "codigo_tsf = COALESCE(codigo_tsf, :tsf)" in upd_sql
 
 
 def test_sync_updates_date_when_not_manual(monkeypatch):

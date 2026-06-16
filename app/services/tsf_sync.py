@@ -135,6 +135,19 @@ def _derive_commercial_name(code: str) -> str:
     return readable.title() if readable else code
 
 
+def _tsf_code_from_base_name(base_name: str | None) -> str | None:
+    """Código de frontera CREG/TSF derivado del `base_name` de Sun Factory.
+
+    `COLCEST55P2_VALLEDUPAR_NORTE` → `COLCEST55P2`. Es el "Código TSF" que el
+    equipo registra manualmente en `proyectos.codigo_tsf`, así que sirve para
+    cruzar y evitar duplicados. Devuelve None si el prefijo no tiene pinta de
+    código CREG (p. ej. `SMGS_0006_FEN5_...`)."""
+    if not base_name:
+        return None
+    prefix = base_name.split("_", 1)[0]
+    return prefix if re.match(r"^COL[A-Z0-9]+$", prefix) else None
+
+
 # ── Ubicación: introspección del esquema de minifarm_project ────────────────────
 
 def _location_columns(conn) -> dict[str, str]:
@@ -408,6 +421,8 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
         lon = p.get("lon")
         projects.append({
             "origina_code": code,
+            "base_name": base_name,
+            "tsf_code": _tsf_code_from_base_name(base_name),
             "solenium_id": pid,
             "commercial_name": p.get("name") or _derive_commercial_name(base_name or ""),
             "status": _SF_IMPORT_STATES.get(p.get("state"), "En construcción"),
@@ -578,10 +593,24 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
         if not code:
             continue
         try:
+            # El equipo registra el "Código TSF" (prefijo CREG, p. ej. COLCEST55P2)
+            # al crear un proyecto a mano. Cruzamos por codigo_tsf (prefijo o
+            # base_name completo) ADEMÁS de origina_code para no duplicar lo que
+            # ya existe en la BD.
+            tsf_code = p.get("tsf_code")
+            base_name = p.get("base_name")
             existing = db.execute(
-                text("SELECT id, fecha_estimada_editada_manual FROM proyectos "
-                     "WHERE origina_code = :code AND deleted_at IS NULL"),
-                {"code": code},
+                text("""
+                    SELECT id, fecha_estimada_editada_manual FROM proyectos
+                    WHERE deleted_at IS NULL AND (
+                        origina_code = :code
+                        OR (:tsf IS NOT NULL AND codigo_tsf = :tsf)
+                        OR (:bn  IS NOT NULL AND codigo_tsf = :bn)
+                    )
+                    ORDER BY id
+                    LIMIT 1
+                """),
+                {"code": code, "tsf": tsf_code, "bn": base_name},
             ).first()
 
             fase = _STATUS_TO_FASE.get(p["status"], "en_construccion")
@@ -591,14 +620,14 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                 db.execute(
                     text("""
                         INSERT INTO proyectos (
-                            nombre_comercial, origina_code, fase_construccion,
+                            nombre_comercial, origina_code, codigo_tsf, fase_construccion,
                             fecha_estimada_energizacion, fecha_estimada_editada_manual,
                             avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
                             municipio, departamento, latitud, longitud,
                             estado, tipo_proyecto, origen,
                             created_at, updated_at
                         ) VALUES (
-                            :nombre, :code, :fase,
+                            :nombre, :code, :tsf, :fase,
                             :energ, FALSE,
                             :avance, :mwh, :potencia,
                             :municipio, :departamento, :latitud, :longitud,
@@ -609,6 +638,7 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                     {
                         "nombre": p["commercial_name"] or code,
                         "code": code,
+                        "tsf": tsf_code,
                         "fase": fase,
                         "energ": energ,
                         "avance": p.get("avance_pct"),
@@ -630,18 +660,32 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                     "fase": fase,
                     "avance": p.get("avance_pct"),
                     "potencia": p.get("installed_power_kwp"),
+                    "code": code,
+                    "tsf": tsf_code,
+                    "municipio": p["municipio"],
+                    "departamento": p["departamento"],
+                    "latitud": p["latitud"],
+                    "longitud": p["longitud"],
                 }
                 date_sql = ""
                 if set_date and energ is not None:
                     date_sql = (", fecha_estimada_energizacion = :energ, "
                                 "fecha_estimada_editada_manual = FALSE")
                     params["energ"] = energ
+                # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
+                # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 db.execute(
                     text(f"""
                         UPDATE proyectos SET
                             fase_construccion = :fase,
                             avance_obra_pct = COALESCE(:avance, avance_obra_pct),
-                            potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp){date_sql},
+                            potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp),
+                            origina_code = COALESCE(origina_code, :code),
+                            codigo_tsf = COALESCE(codigo_tsf, :tsf),
+                            municipio = COALESCE(municipio, :municipio),
+                            departamento = COALESCE(departamento, :departamento),
+                            latitud = COALESCE(latitud, :latitud),
+                            longitud = COALESCE(longitud, :longitud){date_sql},
                             updated_at = NOW()
                         WHERE id = :id
                     """),

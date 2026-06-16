@@ -7,12 +7,34 @@ Pasos que ejecuta:
   3. Inserta cada falla en PostgreSQL (idempotente via codigo_legado)
   4. Crea seguimiento inicial con datos históricos
 
+Configuración (credenciales de la API):
+    Las credenciales NO están hardcodeadas. Se resuelven en tiempo de
+    ejecución con la siguiente prioridad (mayor a menor):
+
+        1. Argumentos de línea de comandos (--api-email / --api-pass / --api-base)
+        2. Variables de entorno (API_EMAIL / API_PASS / API_BASE), que pueden
+           definirse en un archivo .env (ver .env.example)
+
+    API_EMAIL y API_PASS son obligatorios; si faltan el script aborta con un
+    mensaje claro. API_BASE es opcional: si no se define se usa el endpoint de
+    producción por defecto y se emite una advertencia.
+
 Uso:
+    # con variables de entorno (.env o exportadas)
+    export API_EMAIL=usuario@unergy.io
+    export API_PASS=tu_password
     python migrate_fallas_desde_sheets.py [--dry-run]
+
+    # sobrescribiendo por línea de comandos
+    python migrate_fallas_desde_sheets.py \\
+        --api-email usuario@unergy.io --api-pass tu_password \\
+        --api-base https://mi-backend/api/v1 [--dry-run]
 
 Requiere:
     pip install requests
+    pip install python-dotenv   # opcional, para cargar .env automáticamente
 """
+import os
 import sys
 import json
 import time
@@ -24,14 +46,62 @@ from typing import Optional
 
 import requests
 
+# Carga opcional de un archivo .env. Si python-dotenv no está instalado el
+# script sigue funcionando con las variables de entorno ya presentes.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
-API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+
+# La URL base de la API NO es un secreto. Si no se define explícitamente se usa
+# el entorno de producción por defecto (se emite una advertencia para que el
+# uso del valor por defecto sea visible y consciente).
+DEFAULT_API_BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+
+# Credenciales y URL base. Se resuelven en tiempo de ejecución mediante
+# resolve_config() a partir de argumentos CLI y variables de entorno.
+# NO contienen valores hardcodeados de credenciales.
+API_BASE: str = ""
+API_EMAIL: str = ""
+API_PASS: str = ""
+
+
+def resolve_config(args) -> None:
+    """Resuelve API_BASE / API_EMAIL / API_PASS y los fija como globales.
+
+    Prioridad: argumentos CLI > variables de entorno. API_EMAIL y API_PASS son
+    obligatorios; si faltan se aborta con un mensaje claro. API_BASE usa un
+    valor por defecto de producción (con advertencia) si no se proporciona.
+    """
+    global API_BASE, API_EMAIL, API_PASS
+
+    api_base_src  = args.api_base  or os.getenv("API_BASE")
+    API_BASE  = api_base_src or DEFAULT_API_BASE
+    API_EMAIL = args.api_email or os.getenv("API_EMAIL") or ""
+    API_PASS  = args.api_pass  or os.getenv("API_PASS")  or ""
+
+    if not api_base_src:
+        print(f"  [AVISO] API_BASE no definido; usando valor por defecto "
+              f"(producción): {DEFAULT_API_BASE}")
+
+    faltantes = [n for n, v in (("API_EMAIL", API_EMAIL), ("API_PASS", API_PASS)) if not v]
+    if faltantes:
+        raise SystemExit(
+            "ERROR: faltan credenciales obligatorias: " + ", ".join(faltantes) + "\n"
+            "  Defínelas como variables de entorno (o en un archivo .env), o\n"
+            "  pásalas por línea de comandos. Por ejemplo:\n\n"
+            "    export API_EMAIL=usuario@unergy.io API_PASS=tu_password\n"
+            "    python migrate_fallas_desde_sheets.py\n\n"
+            "    python migrate_fallas_desde_sheets.py \\\n"
+            "        --api-email usuario@unergy.io --api-pass tu_password\n"
+        )
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26
@@ -418,9 +488,21 @@ def migrar_falla(raw: dict, proyecto_id: int, catalogos: dict,
 # -- Main -----------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Migra fallas desde Google Apps Script a la Plataforma de "
+                    "Operaciones. Las credenciales se toman de variables de "
+                    "entorno (API_EMAIL/API_PASS/API_BASE) y pueden "
+                    "sobrescribirse con los argumentos siguientes.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Simula sin escribir nada en la BD")
+    parser.add_argument("--api-base", metavar="URL",
+                        help="URL base de la API (sobrescribe la variable de "
+                             "entorno API_BASE; por defecto el endpoint de "
+                             "producción)")
+    parser.add_argument("--api-email", metavar="EMAIL",
+                        help="Email de autenticación (sobrescribe API_EMAIL)")
+    parser.add_argument("--api-pass", metavar="PASSWORD",
+                        help="Password de autenticación (sobrescribe API_PASS)")
     args = parser.parse_args()
     dry_run = args.dry_run
 
@@ -429,6 +511,9 @@ def main():
     if dry_run:
         print("  MODO DRY-RUN — no se escribirá nada")
     print("=" * 65)
+
+    # Resuelve y valida credenciales (CLI > entorno) antes de cualquier llamada.
+    resolve_config(args)
 
     token = get_token()
     print(f"Autenticado como {API_EMAIL}\n")

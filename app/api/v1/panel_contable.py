@@ -9,6 +9,7 @@ Flujo:
   - patch: actualizar flags/consecutivos del panel o editar una línea.
   - diferencia: cruza preliquidación vs oficial.
 """
+import calendar
 import logging
 import os
 import tempfile
@@ -107,17 +108,41 @@ def _construir_lineas_base(parsed: dict) -> list[dict]:
     return lineas
 
 
-def _inversionistas_de(db: Session, proyecto_id: int) -> list[dict]:
+def _rango_periodo(periodo: str) -> tuple[date, date]:
+    """Devuelve (primer_dia, ultimo_dia) del mes 'YYYY-MM'."""
+    y, m = (int(x) for x in periodo.split("-"))
+    return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+
+
+def _inversionistas_de(db: Session, proyecto_id: int, periodo: str | None = None) -> list[dict]:
     rows = (
         db.query(
             ProyectoInversionista.id,
             ProyectoInversionista.porcentaje_participacion,
+            ProyectoInversionista.fecha_inicio,
+            ProyectoInversionista.fecha_fin,
             Cliente.razon_social_nombre,
         )
         .outerjoin(Cliente, ProyectoInversionista.cliente_id == Cliente.id)
         .filter(ProyectoInversionista.proyecto_id == proyecto_id)
         .all()
     )
+
+    # Filtrar por período: solo inversionistas activos durante el mes. Un
+    # inversionista está activo si empezó antes del fin de mes y no terminó antes
+    # de que empiece (misma lógica que match_inversionista de liquidaciones).
+    if periodo:
+        ini, fin = _rango_periodo(periodo)
+        activos = [
+            r for r in rows
+            if (r.fecha_inicio is None or r.fecha_inicio <= fin)
+            and (r.fecha_fin is None or r.fecha_fin >= ini)
+        ]
+        # Si el filtro deja a todos fuera (datos sin fechas o inconsistentes),
+        # caer al conjunto completo para no perder la división.
+        if activos:
+            rows = activos
+
     out = []
     for r in rows:
         pct = float(r.porcentaje_participacion) if r.porcentaje_participacion is not None else None
@@ -261,7 +286,7 @@ def _guardar_panel(
     panel.generado_por_id = usuario_id
     db.flush()
 
-    invs = _inversionistas_de(db, proyecto_id)
+    invs = _inversionistas_de(db, proyecto_id, periodo)
     if not invs:
         invs = [{"id": None, "nombre": "Sin inversionistas", "fraccion": 1.0, "pct": 100.0}]
 

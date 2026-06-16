@@ -517,6 +517,7 @@ def diferencia(
             ofi_por_proy[p.proyecto_id] = p
 
     tiene_oficial = bool(ofi_por_proy)
+    tiene_preliquidacion = bool(pre_por_proy)
 
     def _inv_key(ln: PanelContableLinea):
         return ln.proyecto_inversionista_id if ln.proyecto_inversionista_id is not None \
@@ -550,6 +551,7 @@ def diferencia(
         pre_panel = pre_por_proy.get(pid)
         ofi_panel = ofi_por_proy.get(pid)
         hay_ofi = ofi_panel is not None
+        hay_pre = pre_panel is not None
 
         pre_invs = _indexar_inversionistas(pre_panel)
         ofi_invs = _indexar_inversionistas(ofi_panel)
@@ -581,60 +583,69 @@ def diferencia(
             lineas_out = []
             u_pre = u_ofi = 0.0
             for (grupo, concepto) in claves:
-                pre_v = pi["lineas"][(grupo, concepto)]["valor"] if (pi and (grupo, concepto) in pi["lineas"]) else 0.0
+                # Si falta uno de los dos paneles, esa columna va en null (no 0).
+                if hay_pre:
+                    pre_v = pi["lineas"][(grupo, concepto)]["valor"] if (pi and (grupo, concepto) in pi["lineas"]) else 0.0
+                else:
+                    pre_v = None
                 if hay_ofi:
                     ofi_v = oi["lineas"][(grupo, concepto)]["valor"] if (oi and (grupo, concepto) in oi["lineas"]) else 0.0
                 else:
                     ofi_v = None
-                dif = (ofi_v - pre_v) if ofi_v is not None else None
+                dif = (ofi_v - pre_v) if (pre_v is not None and ofi_v is not None) else None
                 pct = (dif / abs(pre_v) * 100) if (dif is not None and pre_v) else None
-                u_pre += pre_v
+                if pre_v is not None:
+                    u_pre += pre_v
                 if ofi_v is not None:
                     u_ofi += ofi_v
                 lineas_out.append({
                     "grupo": grupo,
                     "concepto": concepto,
-                    "preliquidacion": round(pre_v, 2),
+                    "preliquidacion": round(pre_v, 2) if pre_v is not None else None,
                     "oficial": round(ofi_v, 2) if ofi_v is not None else None,
                     "diferencia": round(dif, 2) if dif is not None else None,
                     "pct_variacion": round(pct, 2) if pct is not None else None,
                 })
 
-            u_dif = (u_ofi - u_pre) if hay_ofi else None
+            u_dif = (u_ofi - u_pre) if (hay_pre and hay_ofi) else None
             inversionistas_out.append({
                 "proyecto_inversionista_id": None if isinstance(k, str) else k,
                 "nombre": nombre,
                 "porcentaje": porcentaje,
                 "lineas": lineas_out,
-                "utilidad_pre": round(u_pre, 2),
+                "utilidad_pre": round(u_pre, 2) if hay_pre else None,
                 "utilidad_oficial": round(u_ofi, 2) if hay_ofi else None,
                 "utilidad_dif": round(u_dif, 2) if u_dif is not None else None,
             })
-            u_pre_proy += u_pre
+            if hay_pre:
+                u_pre_proy += u_pre
             if hay_ofi:
                 u_ofi_proy += u_ofi
 
-        tot_pre_global += u_pre_proy
+        if hay_pre:
+            tot_pre_global += u_pre_proy
         if hay_ofi:
             tot_ofi_global += u_ofi_proy
 
         proyectos_out.append({
             "proyecto_id": pid,
             "proyecto_nombre": nombres.get(pid, f"Proyecto {pid}"),
+            "tiene_preliquidacion": hay_pre,
             "tiene_oficial": hay_ofi,
-            "utilidad_pre": round(u_pre_proy, 2),
+            "utilidad_pre": round(u_pre_proy, 2) if hay_pre else None,
             "utilidad_oficial": round(u_ofi_proy, 2) if hay_ofi else None,
-            "utilidad_dif": round(u_ofi_proy - u_pre_proy, 2) if hay_ofi else None,
+            "utilidad_dif": round(u_ofi_proy - u_pre_proy, 2) if (hay_pre and hay_ofi) else None,
             "inversionistas": inversionistas_out,
         })
 
     return {
         "periodo": periodo_norm,
+        "tiene_preliquidacion": tiene_preliquidacion,
         "tiene_oficial": tiene_oficial,
         "proyectos": proyectos_out,
         "resumen": {
-            "utilidad_estimada": round(tot_pre_global, 2),
+            "utilidad_estimada": round(tot_pre_global, 2) if tiene_preliquidacion else None,
             "utilidad_real": round(tot_ofi_global, 2) if tiene_oficial else None,
-            "diferencia": round(tot_ofi_global - tot_pre_global, 2) if tiene_oficial else None,
+            "diferencia": round(tot_ofi_global - tot_pre_global, 2) if (tiene_preliquidacion and tiene_oficial) else None,
         },
     }

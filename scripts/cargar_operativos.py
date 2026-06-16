@@ -10,13 +10,19 @@ Servicios vacíos (None) → no se modifican.
 Uso:
     python scripts/cargar_operativos.py [--dry-run] [--force]
 """
+import os
 import sys
 from datetime import date
 import requests
 
 BASE = "https://backend-production-63d8.up.railway.app"
-USER = "juanjose@unergy.io"
-PASS = "Unergy2025!"
+USER = os.environ.get("API_EMAIL", "")
+PASS = os.environ.get("API_PASS", "")
+if not (USER and PASS):
+    raise SystemExit(
+        "ERROR: faltan credenciales. Define API_EMAIL y API_PASS en el "
+        "entorno antes de ejecutar este script."
+    )
 
 args = sys.argv[1:]
 FORCE   = "--force"   in args

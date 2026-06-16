@@ -2,6 +2,7 @@
 Carga la Hoja 6 de GESCON.xlsx (cambios de contratos) en asic_cambios_contratos.
 Uso: python scripts/cargar_gescon_hoja6.py [--dry-run]
 """
+import os
 import sys, re
 from datetime import datetime
 import requests
@@ -9,8 +10,13 @@ import openpyxl
 
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("API_EMAIL", "")
+PASSWORD = os.environ.get("API_PASS", "")
+if not (EMAIL and PASSWORD):
+    raise SystemExit(
+        "ERROR: faltan credenciales. Define API_EMAIL y API_PASS en el "
+        "entorno antes de ejecutar este script."
+    )
 DRY_RUN  = "--dry-run" in sys.argv
 
 

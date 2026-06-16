@@ -3,12 +3,18 @@ Reconcilia proyecto_id en asic_solicitudes para los registros que quedaron sin m
 Usa el campo requerimiento_asic (ID del Excel) para cruzar con la planta del GESCON.xlsx
 y aplicar el mapa manual confirmado de nombres similares.
 """
+import os
 import unicodedata, requests
 import openpyxl
 
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("API_EMAIL", "")
+PASSWORD = os.environ.get("API_PASS", "")
+if not (EMAIL and PASSWORD):
+    raise SystemExit(
+        "ERROR: faltan credenciales. Define API_EMAIL y API_PASS en el "
+        "entorno antes de ejecutar este script."
+    )
 XLSX     = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 
 # Mapa manual: nombre GESCON (normalizado) → nombre_comercial en BD

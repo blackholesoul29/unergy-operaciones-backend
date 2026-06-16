@@ -14,8 +14,8 @@ Uso:
       --xlsx data/2026_Autoconsumo_Panel_Seguimiento_Contable.xlsx \
       --hojas Enero Febrero Marzo Abril \
       --api-url https://backend-production-63d8.up.railway.app \
-      --usuario jessica@unergy.io \
-      --password Unergy2025! \
+      --usuario TU_USUARIO@unergy.io \
+      --password TU_PASSWORD \
       --limpiar
 """
 

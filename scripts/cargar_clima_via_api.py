@@ -6,6 +6,7 @@ Usage:
     python3 scripts/cargar_clima_via_api.py
 """
 import csv
+import os
 import json
 import sys
 from pathlib import Path
@@ -13,6 +14,13 @@ from pathlib import Path
 import httpx
 
 BACKEND_URL = "https://backend-production-63d8.up.railway.app"
+API_EMAIL = os.environ.get("API_EMAIL", "")
+API_PASSWORD = os.environ.get("API_PASS", "")
+if not (API_EMAIL and API_PASSWORD):
+    raise SystemExit(
+        "ERROR: faltan credenciales. Define API_EMAIL y API_PASS en el "
+        "entorno antes de ejecutar este script."
+    )
 CLIMA_DATA = Path("/home/eduardo/Claude/clima/data/raw")
 
 REGIONS = {
@@ -46,7 +54,7 @@ def read_index_csv(path):
 
 def get_token():
     resp = httpx.post(f"{BACKEND_URL}/api/v1/auth/token",
-        data={"username": "eduardo@unergy.io", "password": "Unergy2025!"},
+        data={"username": API_EMAIL, "password": API_PASSWORD},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15)
     resp.raise_for_status()

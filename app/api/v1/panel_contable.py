@@ -266,11 +266,16 @@ def _guardar_panel(
     if panel is None:
         panel = PanelContable(proyecto_id=proyecto_id, periodo=periodo, tipo=tipo)
         db.add(panel)
+        db.flush()  # asignar panel.id antes de insertar líneas
     else:
-        # Recarga: limpiar líneas previas (preserva flags/consecutivos).
-        for ln in list(panel.lineas):
-            db.delete(ln)
-        db.flush()
+        # Recarga (reemplazo): borrar líneas previas con un único DELETE en vez de
+        # eliminar fila por fila vía ORM, que con decenas de paneles se vuelve tan
+        # lento que el proxy corta la petición (504 → "Fallo al procesar ER").
+        # Se preservan los flags/consecutivos del panel.
+        db.query(PanelContableLinea).filter(
+            PanelContableLinea.panel_id == panel.id
+        ).delete(synchronize_session=False)
+        db.expire(panel, ["lineas"])
 
     base = _construir_lineas_base(parsed)
     tiene_costos = any(l["grupo"] == "costos" for l in base)

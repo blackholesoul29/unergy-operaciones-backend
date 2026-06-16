@@ -27,8 +27,9 @@ from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
     CumplimientoMensualOut, CerrarPeriodoRequest, CerrarPeriodoResponse,
-    FacturarRequest,
+    FacturarRequest, FleetCumplimientoSummary, ProjectCumplimientoDetail,
 )
+from app.services.ppa_compliance import PPAComplianceService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cumplimiento", tags=["Cumplimiento"])
@@ -291,6 +292,41 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.get("/fleet", response_model=FleetCumplimientoSummary)
+def get_fleet_compliance(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    KPI de Cumplimiento PPA a nivel flota (MWh comprometidos vs. generados).
+
+    Solo usa datos de la base de datos (generacion_diaria + compromisos PPA),
+    por lo que responde rápido y sin depender de la API externa de Unergy.
+    Incluye el resumen agregado y el desglose por proyecto.
+    """
+    return PPAComplianceService(db).calculate_fleet_compliance(year, month)
+
+
+@router.get("/proyecto/{project_id}", response_model=ProjectCumplimientoDetail)
+def get_project_compliance(
+    project_id: int,
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    KPI de Cumplimiento PPA de un proyecto específico.
+
+    Si el proyecto no tiene PPA definido para el período, ``target_mwh``,
+    ``delta_mwh`` y ``compliance_pct`` se devuelven en ``null`` y
+    ``has_ppa = false`` (la generación real sigue reportándose).
+    """
+    return PPAComplianceService(db).calculate_project_compliance(project_id, year, month)
+
 
 @router.get("/ppa")
 def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):

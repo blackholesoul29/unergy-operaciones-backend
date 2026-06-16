@@ -59,3 +59,36 @@ class CerrarPeriodoResponse(BaseModel):
 
 class FacturarRequest(BaseModel):
     liquidacion_id: int | None = None
+
+
+# ── KPI Cumplimiento PPA (comprometido vs. generado) ─────────────────────────
+
+
+class PPACumplimientoResponse(BaseModel):
+    """KPI base de cumplimiento PPA de un proyecto: comprometido vs. generado."""
+    project_id: int
+    nombre: str | None = None
+    target_mwh: float | None = None
+    actual_mwh: float
+    delta_mwh: float | None = None
+    compliance_pct: float | None = None
+    has_ppa: bool
+
+
+class ProjectCumplimientoDetail(PPACumplimientoResponse):
+    """Detalle de cumplimiento PPA para un proyecto específico en un período."""
+    year: int
+    month: int
+
+
+class FleetCumplimientoSummary(BaseModel):
+    """Cumplimiento PPA agregado a nivel flota más el desglose por proyecto."""
+    year: int
+    month: int
+    total_target_mwh: float
+    total_actual_mwh: float
+    total_delta_mwh: float
+    fleet_compliance_pct: float | None = None
+    n_proyectos: int
+    n_con_ppa: int
+    proyectos: list[PPACumplimientoResponse]

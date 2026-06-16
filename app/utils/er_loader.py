@@ -286,46 +286,65 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
     }
 
 
-# Conceptos de Comercialización XM (filas ~44-51), buscados por etiqueta.
-_XM_CONCEPTOS = [
-    ("arranque y parada", "Arranque y parada"),
-    ("energia en bolsa", "Energía en Bolsa (Gen)"),
-    ("iva comercializador", "IVA Comercializador"),
-    ("iva generador", "IVA Generador"),
-    ("despacho cnd", "Serv. Despacho CND"),
-    ("admin sic", "Serv. Admin SIC"),
-    ("administracion sic", "Serv. Admin SIC"),
-    ("sic", "Serv. Admin SIC"),
-]
+def _xm_concepto(nm: str) -> str | None:
+    """
+    Resuelve la etiqueta de un renglón de Comercialización XM a su concepto.
+    `nm` viene normalizado y SIN puntos (para que 'i.v.a.' == 'iva').
+    Distingue Generador/Comercializador a partir de la propia etiqueta.
+    """
+    gen = "generador" in nm
+    com = "comercializador" in nm
+    suf = " (Gen)" if gen else (" (Com)" if com else "")
+    if "arranque y parada" in nm:
+        return "Arranque y parada"
+    if "energia en bolsa" in nm:
+        return "Energía en Bolsa" + suf
+    if "iva" in nm:
+        return "IVA " + ("Generador" if gen else ("Comercializador" if com else "")).strip()
+    if "despacho" in nm and "cnd" in nm:
+        return "Serv. Despacho CND" + suf
+    if ("administracion sic" in nm) or ("admin" in nm and "sic" in nm):
+        return "Serv. Admin SIC" + suf
+    return None
 
 
 def _parse_comercializacion(grid: list[list]) -> list[dict]:
-    """Comercialización XM desglosada — un renglón por concepto detectado."""
+    """
+    Comercialización XM desglosada. La etiqueta está en una columna (C) y el
+    valor TOTAL en COP en la columna inmediatamente siguiente (D). A la derecha
+    hay una sección de tarifas (Tarifa plataforma/operación…) que NO debe leerse:
+    por eso el valor se toma como el PRIMER numérico tras la etiqueta, nunca el
+    último. Los renglones en 0 (p.ej. la versión Comercializador cuando solo
+    aplica el Generador) se descartan para no duplicar conceptos.
+    """
+    # Acotar al bloque entre "Ingresos y costos XM" y "Total Comercialización".
+    start = end = None
+    for i, row in enumerate(grid):
+        nm = _norm(_row_label(row)).replace(".", "")
+        if start is None and "ingresos y costos xm" in nm:
+            start = i
+        elif start is not None and "total comercializa" in nm:
+            end = i
+            break
+    rows = grid[start + 1:end] if (start is not None and end is not None) else grid
+
     out: list[dict] = []
     vistos: set[str] = set()
-    for row in grid:
+    for row in rows:
         etiqueta = _row_label(row)
         if not etiqueta:
             continue
-        ne = _norm(etiqueta)
-        for key, label in _XM_CONCEPTOS:
-            if key in ne:
-                val = _row_value(row)
-                if val is None:
-                    continue
-                clave = label + ("_com" if "com" in ne else ("_gen" if "gen" in ne else ""))
-                if clave in vistos:
-                    continue
-                vistos.add(clave)
-                # Distinguir Com/Gen cuando aparece en la etiqueta.
-                lbl = label
-                if "despacho cnd" in key or "admin sic" in key or "sic" == key:
-                    if "gen" in ne:
-                        lbl = label + " (Gen)"
-                    elif "com" in ne:
-                        lbl = label + " (Com)"
-                out.append({"concepto": lbl, "valor": -abs(val)})
-                break
+        nm = _norm(etiqueta).replace(".", "")
+        concepto = _xm_concepto(nm)
+        if not concepto:
+            continue
+        val = _value_after_label(row)
+        if val is None or round(val, 2) == 0:
+            continue
+        if concepto in vistos:
+            continue
+        vistos.add(concepto)
+        out.append({"concepto": concepto, "valor": -abs(val)})
     return out
 
 
@@ -359,8 +378,10 @@ def _parse_costos(grid: list[list]) -> list[dict]:
             if key in ne:
                 if label in vistos:
                     continue
-                val = _row_value(row)
-                if val is None:
+                # Igual que en XM: el valor en COP está en la columna contigua a la
+                # etiqueta; tomar el primer numérico (no el último, que sería una tarifa).
+                val = _value_after_label(row)
+                if val is None or round(val, 2) == 0:
                     break
                 vistos.add(label)
                 out.append({"concepto": label, "valor": -abs(val), "iva": aplica_iva})
@@ -401,3 +422,24 @@ def _row_value(row: list):
         if n is not None:
             val = n
     return val
+
+
+def _value_after_label(row: list):
+    """
+    Primer valor numérico que aparece DESPUÉS de la celda de etiqueta (la primera
+    celda de texto). En los ER el monto en COP está justo a la derecha del concepto
+    (columna D si la etiqueta está en C); las columnas más a la derecha contienen
+    tarifas/factores que no deben leerse.
+    """
+    label_idx = None
+    for i, c in enumerate(row):
+        if isinstance(c, str) and c.strip() and _num(c) is None:
+            label_idx = i
+            break
+    if label_idx is None:
+        return None
+    for c in row[label_idx + 1:]:
+        n = _num(c) if not isinstance(c, str) else (_num(c) if re.search(r"\d", str(c)) else None)
+        if n is not None:
+            return n
+    return None

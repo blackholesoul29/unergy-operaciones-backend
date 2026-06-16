@@ -18,7 +18,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -28,6 +28,36 @@ from app.services.tsf_sync import _FASE_TO_LABEL, _STATUS_TO_FASE, sync_tsf_proj
 
 logger = logging.getLogger("proximos_energizar")
 router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"])
+
+# Auto-reparado: si el DDL de arranque / la migración no crearon las columnas del
+# pipeline TSF en la BD (p. ej. el deploy no alcanzó a correrlas), las creamos aquí
+# de forma idempotente para que la vista nunca dé 500 por columna inexistente.
+_TSF_COLUMNS_DDL = [
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
+]
+_columns_ensured = False
+
+
+def _ensure_tsf_columns(db: Session) -> None:
+    """Crea las columnas del pipeline TSF si faltan (idempotente, 1 vez/proceso)."""
+    global _columns_ensured
+    if _columns_ensured:
+        return
+    for stmt in _TSF_COLUMNS_DDL:
+        try:
+            db.execute(text(stmt))
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("ensure TSF column falló (%s): %s", stmt[:50], exc)
+    _columns_ensured = True
 
 
 def _contract_names(proyecto: Proyecto) -> list[str]:
@@ -70,24 +100,33 @@ def listar_proximos_energizar(
 ) -> dict:
     """Proyectos del pipeline TSF (fase activa) + proyectos registrados cuya fecha
     de inicio aún no ha llegado. Todo leído de la BD de operaciones."""
+    _ensure_tsf_columns(db)
     today = date.today()
-    rows = (
-        db.query(Proyecto)
-        .filter(Proyecto.deleted_at.is_(None))
-        .filter(
-            or_(
-                # Pipeline TSF: en alguna fase de construcción y aún no energizado.
-                and_(
-                    Proyecto.fase_construccion.isnot(None),
-                    Proyecto.fase_construccion != "energizado",
-                ),
-                # Registrados cuya energización estimada aún no llega.
-                Proyecto.fecha_estimada_energizacion > today,
+    try:
+        rows = (
+            db.query(Proyecto)
+            .filter(Proyecto.deleted_at.is_(None))
+            .filter(
+                or_(
+                    # Pipeline TSF: en alguna fase de construcción y aún no energizado.
+                    and_(
+                        Proyecto.fase_construccion.isnot(None),
+                        Proyecto.fase_construccion != "energizado",
+                    ),
+                    # Registrados cuya energización estimada aún no llega.
+                    Proyecto.fecha_estimada_energizacion > today,
+                )
             )
+            .order_by(Proyecto.fecha_estimada_energizacion.asc().nullslast())
+            .all()
         )
-        .order_by(Proyecto.fecha_estimada_energizacion.asc().nullslast())
-        .all()
-    )
+    except Exception as exc:
+        # Nunca tumbar la vista por un problema de esquema/consulta: degradar.
+        db.rollback()
+        logger.warning("listar_proximos_energizar falló: %s", exc)
+        return {"projects": [], "source": "error", "count": 0,
+                "warning": "No se pudo cargar la lista. Intenta «Sincronizar ahora» "
+                           "para poblar el pipeline desde Solenium/TSF."}
     return {"projects": [_serialize(p) for p in rows], "source": "operaciones_db", "count": len(rows)}
 
 
@@ -97,8 +136,18 @@ def sincronizar(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> dict:
-    """Dispara la sincronización TSF → proyectos on-demand (botones de la vista)."""
-    stats = sync_tsf_projects(db, force=force)
+    """Dispara la sincronización TSF → proyectos on-demand (botones de la vista).
+
+    On-demand corre con `enrich_dates=False` (rápido: solo el listado de Sun Factory
+    + upserts, sin las ~99 llamadas de hitos que harían timeout el request). El job
+    programado de 6h trae luego la fecha de energización precisa (RETIE)."""
+    _ensure_tsf_columns(db)
+    try:
+        stats = sync_tsf_projects(db, force=force, enrich_dates=False)
+    except Exception as exc:
+        logger.warning("sync TSF falló: %s", exc)
+        raise HTTPException(status_code=502,
+                            detail=f"No se pudo sincronizar con Solenium/TSF: {exc}")
     return stats
 
 

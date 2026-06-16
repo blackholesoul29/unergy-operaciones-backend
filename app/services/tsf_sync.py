@@ -576,15 +576,20 @@ _STATUS_TO_FASE = {
 _FASE_TO_LABEL = {v: k for k, v in _STATUS_TO_FASE.items()}
 
 
-def sync_tsf_projects(db: Session, force: bool = False) -> dict:
+def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = True) -> dict:
     """Upsert del pipeline TSF en `proyectos`. Devuelve estadísticas.
 
     `force=True`: sobrescribe la fecha estimada incluso si el operador la editó
     manualmente, y resetea la marca (Solenium suele tener la fecha más fresca).
 
+    `enrich_dates=False`: NO consulta los hitos de cada proyecto (que son ~99
+    llamadas HTTP y pueden hacer timeout en un request síncrono); usa la fecha del
+    `next_milestone` del listado. Úsalo para el botón on-demand. El job de 6h corre
+    con `enrich_dates=True` para traer la fecha de energización precisa (RETIE).
+
     Fuente principal: Sun Factory (la "BD de Solenium/TSF"), accesible por internet.
     No depende de originabotdb (que solo es alcanzable desde la red interna)."""
-    projects, warnings = fetch_sunfactory_projects()
+    projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
     stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
              "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory"}
 
@@ -604,13 +609,13 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                     SELECT id, fecha_estimada_editada_manual FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         origina_code = :code
-                        OR (:tsf IS NOT NULL AND codigo_tsf = :tsf)
-                        OR (:bn  IS NOT NULL AND codigo_tsf = :bn)
+                        OR (CAST(:tsf AS text) <> '' AND codigo_tsf = CAST(:tsf AS text))
+                        OR (CAST(:bn  AS text) <> '' AND codigo_tsf = CAST(:bn  AS text))
                     )
                     ORDER BY id
                     LIMIT 1
                 """),
-                {"code": code, "tsf": tsf_code, "bn": base_name},
+                {"code": code, "tsf": tsf_code or "", "bn": base_name or ""},
             ).first()
 
             fase = _STATUS_TO_FASE.get(p["status"], "en_construccion")
@@ -625,6 +630,8 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                             avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
                             municipio, departamento, latitud, longitud,
                             estado, tipo_proyecto, origen,
+                            srv_operacion, srv_representacion, srv_cgm,
+                            srv_ppa, srv_promotor, srv_rec, generar_liquidacion,
                             created_at, updated_at
                         ) VALUES (
                             :nombre, :code, :tsf, :fase,
@@ -632,6 +639,8 @@ def sync_tsf_projects(db: Session, force: bool = False) -> dict:
                             :avance, :mwh, :potencia,
                             :municipio, :departamento, :latitud, :longitud,
                             'en_desarrollo', 'minigranja', 'tsf_sync',
+                            FALSE, FALSE, FALSE,
+                            FALSE, FALSE, FALSE, FALSE,
                             NOW(), NOW()
                         )
                     """),

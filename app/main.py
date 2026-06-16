@@ -2102,6 +2102,14 @@ def _deferred_init():
                 name="Check IPC anual O&M",
             )
 
+            from app.services.mgs.scheduler import run_ppa_indexation
+            _mgs_scheduler.add_job(
+                run_ppa_indexation,
+                CronTrigger(day=1, hour=4, minute=0, timezone=settings.TIMEZONE),
+                id="ppa_indexation",
+                name="Indexación mensual tarifas PPA",
+            )
+
             if settings.ORIGINA_DATABASE_URL:
                 _mgs_scheduler.add_job(
                     _scheduled_tsf_sync,

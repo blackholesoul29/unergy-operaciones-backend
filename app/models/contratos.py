@@ -169,6 +169,49 @@ class PPATarifa(Base):
         UniqueConstraint("contrato_id", "año", "mes", name="uq_ppa_tarifa_contrato_periodo"),
     )
 
+    @classmethod
+    def create_bulk_from_contract(cls, db, contrato_id: int, tarifas) -> dict:
+        """Upsert idempotente de tarifas para un contrato.
+
+        Actualiza la fila existente (por contrato_id + año + mes) o inserta una
+        nueva, evitando duplicados. `tarifas` es un iterable de objetos o dicts
+        con `año`, `mes` y la tarifa (`tarifa` o `final_rate`).
+
+        No hace commit (responsabilidad del caller). Devuelve {created, updated}.
+        """
+        def _get(item, *names):
+            for n in names:
+                if isinstance(item, dict):
+                    if n in item:
+                        return item[n]
+                elif hasattr(item, n):
+                    return getattr(item, n)
+            return None
+
+        existentes = {
+            (t.año, t.mes): t
+            for t in db.query(cls).filter(cls.contrato_id == contrato_id).all()
+        }
+        created = 0
+        updated = 0
+        for item in tarifas:
+            año = _get(item, "año", "anio", "year")
+            mes = _get(item, "mes", "month")
+            valor = _get(item, "tarifa", "final_rate")
+            if año is None or mes is None:
+                continue
+            existente = existentes.get((año, mes))
+            if existente is not None:
+                existente.tarifa = valor
+                updated += 1
+            else:
+                nueva = cls(contrato_id=contrato_id, año=año, mes=mes, tarifa=valor)
+                db.add(nueva)
+                existentes[(año, mes)] = nueva
+                created += 1
+        db.flush()
+        return {"created": created, "updated": updated}
+
 
 class PPACompromisoEnergia(Base):
     __tablename__ = "ppa_compromisos_energia"

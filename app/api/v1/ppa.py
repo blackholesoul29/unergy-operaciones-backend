@@ -19,6 +19,10 @@ from app.schemas.ppa import (
 
 router = APIRouter(prefix="/ppa", tags=["PPA"])
 
+# Motor de indexación de tarifas (preview / indexate)
+from app.api.v1 import ppa_indexation  # noqa: E402
+router.include_router(ppa_indexation.router)
+
 
 def _load_options():
     return [

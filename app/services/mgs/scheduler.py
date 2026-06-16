@@ -340,6 +340,23 @@ def get_status() -> dict:
     }
 
 
+def run_ppa_indexation():
+    """Job mensual: recalcula y persiste las tarifas de los PPA activos.
+
+    Pensado para correr el día 1 de cada mes. Idempotente — re-ejecutarlo no
+    duplica filas (upsert por contrato+año+mes).
+    """
+    try:
+        from app.services.ppa_indexation import calculate_and_persist_tariffs
+        stats = calculate_and_persist_tariffs()
+        logger.info(
+            "Indexación PPA mensual: %d contratos, %d tarifas, %d errores",
+            stats["contratos"], stats["tarifas"], stats["errores"],
+        )
+    except Exception:
+        logger.exception("run_ppa_indexation falló")
+
+
 def get_plants() -> list[dict]:
     nodes = _last_nodes
     inv_obs = _last_inverter_obs

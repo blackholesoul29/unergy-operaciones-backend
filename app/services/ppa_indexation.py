@@ -78,6 +78,11 @@ def calcular_tarifas(
     Returns:
         Lista de `TariffCalculationResult`, una por periodo.
     """
+    # `tarifa_base` es nullable: un contrato sin tarifa base no es calculable.
+    # Coercionar a 0.0 produciría final_rate=0.0 facturable (contrato cobrado a
+    # cero) sin señal — mismo riesgo financiero que un índice degradado. Se marca
+    # todo el rango como degradado (no facturable) hasta capturar la tarifa base.
+    base_rate_missing = base_rate is None
     base_rate = float(base_rate) if base_rate is not None else 0.0
     año_base = int(base_period[:4]) if base_period else (min(p[0] for p in periodos) if periodos else date.today().year)
 
@@ -85,11 +90,27 @@ def calcular_tarifas(
     for año, mes in periodos:
         applied_index: float | None
         nota: str | None = None
+        degraded = False
 
         if index_type == IndexType.IPC:
+            # `factor_acumulado` toma ipc_tasas[a-1] para cada a en
+            # range(año_base+1, año+1) y trata una tasa ausente como 0%. Para una
+            # tarifa que se factura ese silencio sub-indexa: un año de IPC sin
+            # certificar (p.ej. el dic más reciente aún no cargado) produciría una
+            # tarifa = base, indistinguible de un 0% legítimo. Detectamos los años
+            # faltantes y marcamos el periodo como degradado (no facturable).
+            años_requeridos = range(año_base, año)  # claves "dic del año N" necesarias
+            faltantes = [y for y in años_requeridos if y not in (index_history or {})]
             factor = factor_acumulado(año_base, año, index_history)
             applied_index = round(factor, 6)
             final = base_rate * factor
+            if faltantes:
+                degraded = True
+                años = ", ".join(str(y) for y in faltantes)
+                nota = (
+                    f"IPC sin tasa certificada para {años}: indexación incompleta "
+                    f"(tarifa parcial, NO facturable hasta cargar el IPC)"
+                )
 
         elif index_type in _SERIE_TYPES:
             valor = index_history.get(_periodo_str(año, mes)) if index_history else None
@@ -101,11 +122,23 @@ def calcular_tarifas(
                 # Sin serie histórica configurada todavía → placeholder honesto.
                 applied_index = None
                 final = base_rate
-                nota = f"Índice {index_type.value} sin serie histórica: se mantiene tarifa base"
+                degraded = True
+                nota = (
+                    f"Índice {index_type.value} sin serie histórica: se mantiene "
+                    f"tarifa base (NO facturable hasta integrar la fuente)"
+                )
 
         else:  # FIJO
             applied_index = 1.0
             final = base_rate
+
+        # Sin tarifa_base no hay número facturable, sea cual sea el índice.
+        if base_rate_missing:
+            degraded = True
+            nota = (
+                "Contrato sin tarifa_base configurada: no se puede calcular la "
+                "tarifa (NO facturable hasta capturar la tarifa base)"
+            )
 
         results.append(TariffCalculationResult(
             año=año,
@@ -115,6 +148,7 @@ def calcular_tarifas(
             final_rate=_q(final),
             currency=currency,
             nota=nota,
+            degraded=degraded,
         ))
     return results
 
@@ -190,6 +224,7 @@ class PPAIndexationService:
             index_history=history,
             currency=rule.currency,
         )
+        degraded_count = sum(1 for t in tarifas if t.degraded)
         return IndexationSummary(
             contrato_id=contrato_id,
             index_type=rule.index_type,
@@ -200,6 +235,8 @@ class PPAIndexationService:
             periodo_desde=_periodo_str(*periodos[0]) if periodos else None,
             periodo_hasta=_periodo_str(*periodos[-1]) if periodos else None,
             total=len(tarifas),
+            degraded=degraded_count > 0,
+            degraded_count=degraded_count,
             tarifas=tarifas,
         )
 
@@ -209,13 +246,24 @@ class PPAIndexationService:
         desde: str | None = None,
         hasta: str | None = None,
     ) -> IndexationSummary:
-        """Calcula y persiste (upsert idempotente) las tarifas del contrato."""
+        """Calcula y persiste (upsert idempotente) las tarifas del contrato.
+
+        Solo se persisten las tarifas NO degradadas: una tarifa degradada (IPC con
+        un año sin certificar, o serie USD/IPP/DIPREM aún sin fuente) no refleja una
+        indexación real y `ppa_tarifas` no tiene dónde registrar esa salvedad —
+        persistirla la convertiría en el número de facturación oficial, silenciando
+        la `nota`. El preview (`calculate_tariffs`) las sigue mostrando con su flag
+        para que un humano las revise; aquí se omiten y se cuentan en
+        `skipped_degraded`.
+        """
         summary = self.calculate_tariffs(contrato_id, desde, hasta)
-        stats = PPATarifa.create_bulk_from_contract(self.db, contrato_id, summary.tarifas)
+        facturables = [t for t in summary.tarifas if not t.degraded]
+        stats = PPATarifa.create_bulk_from_contract(self.db, contrato_id, facturables)
         self.db.commit()
         summary.persisted = True
         summary.created = stats["created"]
         summary.updated = stats["updated"]
+        summary.skipped_degraded = len(summary.tarifas) - len(facturables)
         return summary
 
 
@@ -284,6 +332,11 @@ def calculate_and_persist_tariffs(db: Session | None = None) -> dict:
     total_contratos = 0
     total_tarifas = 0
     errores = 0
+    # Contratos con ≥1 periodo degradado (no persistido): un humano debe cargar el
+    # IPC faltante o integrar la serie antes de facturarlos. No son errores, pero
+    # tampoco "éxitos limpios" — hay que poder verlos en el log de la corrida.
+    degradados = 0
+    contratos_degradados: list[int] = []
     try:
         today = date.today()
         contratos = (
@@ -299,16 +352,27 @@ def calculate_and_persist_tariffs(db: Session | None = None) -> dict:
                 summary = service.calculate_and_persist(c.id)
                 total_contratos += 1
                 total_tarifas += summary.total
+                if summary.degraded:
+                    degradados += 1
+                    contratos_degradados.append(c.id)
             except Exception:
                 errores += 1
                 db.rollback()
                 logger.exception("Indexación falló para contrato PPA %s", c.id)
         logger.info(
-            "Indexación PPA completa: %d contratos, %d tarifas, %d errores",
-            total_contratos, total_tarifas, errores,
+            "Indexación PPA completa: %d contratos, %d tarifas, %d errores, "
+            "%d con datos degradados (no facturables)%s",
+            total_contratos, total_tarifas, errores, degradados,
+            f" → contratos {contratos_degradados}" if contratos_degradados else "",
         )
     finally:
         if own_session:
             db.close()
 
-    return {"contratos": total_contratos, "tarifas": total_tarifas, "errores": errores}
+    return {
+        "contratos": total_contratos,
+        "tarifas": total_tarifas,
+        "errores": errores,
+        "degradados": degradados,
+        "contratos_degradados": contratos_degradados,
+    }

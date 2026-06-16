@@ -89,6 +89,83 @@ def test_serie_sin_dato_es_placeholder_con_nota():
     )
     assert res[0].final_rate == pytest.approx(50.0)   # sin serie → factor 1.0
     assert res[0].nota is not None
+    assert res[0].degraded is True                    # placeholder → NO facturable
+
+
+# ── Degradación: IPC con un año sin certificar ─────────────────────────────────
+
+def test_ipc_anio_faltante_marca_degraded():
+    # Falta la tasa de 2025 → el periodo 2026 sub-indexa silenciosamente (sería
+    # = base si faltaran ambas). Debe marcarse degraded con nota, NO como un 0%
+    # legítimo. El año base (2024) nunca es degraded.
+    res = calcular_tarifas(
+        index_type=IndexType.IPC,
+        base_rate=100.0,
+        base_period="2024-01",
+        base_index_value=None,
+        frequency=Frequency.anual,
+        periodos=[(2024, 6), (2025, 6), (2026, 6)],
+        index_history={2024: 0.052},   # falta 2025
+    )
+    by = {(r.año, r.mes): r for r in res}
+    assert by[(2024, 6)].degraded is False            # año base, indexación 1.0 legítima
+    assert by[(2025, 6)].degraded is False            # solo necesita 2024 (presente)
+    assert by[(2026, 6)].degraded is True             # necesita 2025 (ausente)
+    assert by[(2026, 6)].nota is not None
+    assert "2025" in by[(2026, 6)].nota
+
+
+def test_sin_tarifa_base_es_degraded():
+    # tarifa_base NULL → no calculable. Debe marcarse degraded (no facturable),
+    # nunca persistir 0.0 como tarifa oficial silenciosamente.
+    res = calcular_tarifas(
+        index_type=IndexType.IPC,
+        base_rate=None,
+        base_period="2024-01",
+        base_index_value=None,
+        frequency=Frequency.anual,
+        periodos=[(2024, 1), (2025, 1)],
+        index_history={2024: 0.05},
+    )
+    assert all(r.degraded is True for r in res)
+    assert all(r.nota is not None and "tarifa_base" in r.nota for r in res)
+
+
+def test_ipc_completo_no_es_degraded():
+    res = calcular_tarifas(
+        index_type=IndexType.IPC,
+        base_rate=100.0,
+        base_period="2024-01",
+        base_index_value=None,
+        frequency=Frequency.anual,
+        periodos=[(2025, 6), (2026, 6)],
+        index_history={2024: 0.052, 2025: 0.051},
+    )
+    assert all(r.degraded is False for r in res)
+    assert all(r.nota is None for r in res)
+
+
+def test_persist_omite_degradadas(db_session, monkeypatch):
+    """Una corrida con persistencia NO escribe tarifas degradadas en ppa_tarifas."""
+    from app.models.contratos import PPATarifa
+    from app.schemas.ppa_indexation import IndexationSummary, IndexType, Frequency
+    from app.schemas.ppa_indexation import TariffCalculationResult as T
+    from app.services.ppa_indexation import PPAIndexationService
+
+    service = PPAIndexationService(db_session)
+    summary = IndexationSummary(
+        contrato_id=42, index_type=IndexType.IPC, frequency=Frequency.anual,
+        currency="COP", base_rate=100.0, base_period="2024-01", total=2,
+        tarifas=[
+            T(año=2025, mes=1, base_rate=100, final_rate=105, degraded=False),
+            T(año=2026, mes=1, base_rate=100, final_rate=100, degraded=True, nota="IPC faltante"),
+        ],
+    )
+    monkeypatch.setattr(service, "calculate_tariffs", lambda *a, **k: summary)
+    out = service.calculate_and_persist(42)
+    assert out.skipped_degraded == 1
+    persisted = db_session.query(PPATarifa).filter_by(contrato_id=42).all()
+    assert {(p.año, p.mes) for p in persisted} == {(2025, 1)}   # la degradada NO se persiste
 
 
 # ── Normalización de índices ───────────────────────────────────────────────────

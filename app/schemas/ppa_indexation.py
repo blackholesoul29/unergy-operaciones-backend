@@ -122,6 +122,16 @@ class TariffCalculationResult(BaseModel):
     final_rate: float
     currency: str = "COP"
     nota: str | None = None
+    degraded: bool = Field(
+        False,
+        description=(
+            "True cuando la tarifa NO refleja una indexación completa con datos "
+            "reales: falta una tasa IPC certificada de un año requerido, o el "
+            "índice de serie (USD/IPP/DIPREM) aún no tiene fuente integrada y se "
+            "devolvió la tarifa base. Una tarifa degraded NO debe facturarse como "
+            "oficial: el motor no la persiste."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 
@@ -140,4 +150,14 @@ class IndexationSummary(BaseModel):
     persisted: bool = False
     created: int = 0
     updated: int = 0
+    degraded: bool = Field(
+        False,
+        description="True si AL MENOS un periodo quedó degradado (sin indexación real).",
+    )
+    degraded_count: int = Field(
+        0, description="Número de periodos degradados (no facturables / no persistidos)."
+    )
+    skipped_degraded: int = Field(
+        0, description="Periodos degradados que NO se persistieron en una corrida con persistencia."
+    )
     tarifas: list[TariffCalculationResult] = []

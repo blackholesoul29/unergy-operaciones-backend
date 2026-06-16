@@ -350,9 +350,16 @@ def run_ppa_indexation():
         from app.services.ppa_indexation import calculate_and_persist_tariffs
         stats = calculate_and_persist_tariffs()
         logger.info(
-            "Indexación PPA mensual: %d contratos, %d tarifas, %d errores",
+            "Indexación PPA mensual: %d contratos, %d tarifas, %d errores, "
+            "%d con datos degradados (revisar antes de facturar)",
             stats["contratos"], stats["tarifas"], stats["errores"],
+            stats.get("degradados", 0),
         )
+        if stats.get("contratos_degradados"):
+            logger.warning(
+                "PPA con indexación degradada (no facturable sin revisión): %s",
+                stats["contratos_degradados"],
+            )
     except Exception:
         logger.exception("run_ppa_indexation falló")
 

@@ -1,6 +1,6 @@
 import enum
 import json
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timezone, timedelta
 from sqlalchemy import (BigInteger, String, Boolean, Date, Time,
                         DateTime, Integer, Numeric, ForeignKey, Enum as SAEnum, Text)
 from sqlalchemy.dialects.postgresql import JSONB
@@ -119,6 +119,10 @@ class Falla(Base):
     registrado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[registrado_por_id], back_populates="fallas_registradas")
     asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
     seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="falla")
+    intervalos: Mapped[list["FallaIntervalo"]] = relationship(
+        "FallaIntervalo", back_populates="falla",
+        cascade="all, delete-orphan", order_by="FallaIntervalo.inicio",
+    )
 
     @property
     def dias_abierta(self) -> int | None:
@@ -126,6 +130,56 @@ class Falla(Base):
             return None
         end = self.fecha_resolucion.date() if self.fecha_resolucion else date.today()
         return max(0, (end - self.fecha_identificacion).days)
+
+    @property
+    def tiempo_afectacion_horas(self) -> float | None:
+        """Tiempo total de afectación de la falla en horas.
+
+        - Si la falla tiene intervalos de disparo registrados, suma la duración
+          de cada intervalo (fin − inicio); los intervalos aún abiertos (sin fin)
+          se cierran provisionalmente con la hora actual.
+        - Si no hay intervalos, cae al cálculo single-span: (fecha/hora solución
+          − fecha/hora ocurrencia). Si no se registró fecha_ocurrencia, usa la
+          fecha de identificación combinada con la hora_identificacion.
+        Devuelve None si no hay forma de calcularlo (falla abierta sin intervalos).
+        """
+        col_tz = timezone(timedelta(hours=-5))  # Colombia (UTC-5)
+
+        def _aware(dt: datetime, ref: datetime | None = None) -> datetime:
+            if dt.tzinfo is not None:
+                return dt
+            return dt.replace(tzinfo=ref.tzinfo if ref and ref.tzinfo else col_tz)
+
+        # 1) Preferir intervalos de disparo si los hay.
+        intervalos = self.intervalos or []
+        if intervalos:
+            total_seg = 0.0
+            ahora = datetime.now(col_tz)
+            for iv in intervalos:
+                if not iv.inicio:
+                    continue
+                inicio = _aware(iv.inicio)
+                fin = _aware(iv.fin, inicio) if iv.fin else ahora
+                total_seg += max(0.0, (fin - inicio).total_seconds())
+            return round(total_seg / 3600, 2)
+
+        # 2) Respaldo: span único ocurrencia → resolución.
+        if not self.fecha_resolucion:
+            return None
+        inicio = self.fecha_ocurrencia
+        if inicio is None:
+            if not self.fecha_identificacion:
+                return None
+            inicio = datetime.combine(
+                self.fecha_identificacion,
+                self.hora_identificacion or time(0, 0),
+                tzinfo=col_tz,
+            )
+        fin = self.fecha_resolucion
+        inicio = _aware(inicio, fin)
+        fin = _aware(fin, inicio)
+        horas = (fin - inicio).total_seconds() / 3600
+        return round(max(0.0, horas), 2)
 
     @property
     def sla_limite_dias(self) -> int | None:
@@ -170,3 +224,34 @@ class FallaSeguimiento(Base):
     falla: Mapped["Falla"] = relationship("Falla", back_populates="seguimientos")
     usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="seguimientos_falla")
     estado_nuevo: Mapped["FallaCatEstado | None"] = relationship("FallaCatEstado", back_populates="seguimientos")
+
+
+class FallaIntervalo(Base):
+    """Intervalo de afectación (disparo) de una falla.
+
+    Permite agrupar varios disparos del mismo proyecto bajo una sola falla,
+    guardando el inicio y fin exactos de cada afectación. El tiempo total de
+    afectación de la falla es la suma de las duraciones de sus intervalos.
+    """
+    __tablename__ = "fallas_intervalos"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    falla_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas.id"), nullable=False, index=True)
+    inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    nota: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    falla: Mapped["Falla"] = relationship("Falla", back_populates="intervalos")
+
+    @property
+    def duracion_horas(self) -> float | None:
+        if not self.inicio:
+            return None
+        col_tz = timezone(timedelta(hours=-5))
+        ini = self.inicio if self.inicio.tzinfo else self.inicio.replace(tzinfo=col_tz)
+        if self.fin:
+            fin = self.fin if self.fin.tzinfo else self.fin.replace(tzinfo=col_tz)
+        else:
+            fin = datetime.now(col_tz)
+        return round(max(0.0, (fin - ini).total_seconds() / 3600), 2)

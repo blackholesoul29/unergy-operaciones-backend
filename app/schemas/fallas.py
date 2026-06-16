@@ -61,6 +61,24 @@ class ProyectoResumen(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FallaIntervaloIn(BaseModel):
+    """Intervalo de disparo enviado desde el cliente (al crear o editar)."""
+    inicio: datetime
+    fin: Optional[datetime] = None
+    nota: Optional[str] = None
+
+
+class FallaIntervaloOut(BaseModel):
+    id: int
+    falla_id: int
+    inicio: datetime
+    fin: Optional[datetime]
+    nota: Optional[str]
+    duracion_horas: Optional[float] = None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class FallaCreate(BaseModel):
     proyecto_id: int
     tipo_id: Optional[int] = None
@@ -85,6 +103,7 @@ class FallaCreate(BaseModel):
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
+    intervalos: Optional[list[FallaIntervaloIn]] = None
 
 
 class FallaUpdate(BaseModel):
@@ -109,6 +128,7 @@ class FallaUpdate(BaseModel):
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
+    intervalos: Optional[list[FallaIntervaloIn]] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -157,8 +177,10 @@ class FallaOut(BaseModel):
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
     dias_abierta: Optional[int] = None
+    tiempo_afectacion_horas: Optional[float] = None
     sla_limite_dias: Optional[int] = None
     seguimientos: list[FallaSeguimientoOut] = []
+    intervalos: list[FallaIntervaloOut] = []
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -178,7 +200,7 @@ class FallaOut(BaseModel):
                 return []
         return []
 
-    @field_validator("seguimientos", mode="before")
+    @field_validator("seguimientos", "intervalos", mode="before")
     @classmethod
     def none_to_list(cls, v):
         return v if v is not None else []

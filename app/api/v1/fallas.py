@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import (
-    Falla, FallaSeguimiento,
+    Falla, FallaSeguimiento, FallaIntervalo,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
 from app.models.proyectos import Proyecto
@@ -37,8 +37,28 @@ _FALLA_LOAD = [
     selectinload(Falla.resolucion),
     selectinload(Falla.registrado_por),
     selectinload(Falla.asignado_a),
+    selectinload(Falla.intervalos),
     _SEGS_LOAD,
 ]
+
+
+def _sync_intervalos(falla: Falla, intervalos: list | None, db: Session) -> None:
+    """Reemplaza los intervalos de disparo de una falla con la lista recibida.
+    `intervalos` es una lista de dicts {inicio, fin, nota}. Si es None, no se
+    toca nada (no se enviaron). Si es [], se eliminan todos."""
+    if intervalos is None:
+        return
+    # Borrar los existentes y recrear (replace-all). La lista suele ser pequeña.
+    db.query(FallaIntervalo).filter(FallaIntervalo.falla_id == falla.id).delete(synchronize_session=False)
+    for iv in intervalos:
+        if not iv.get("inicio"):
+            continue
+        db.add(FallaIntervalo(
+            falla_id=falla.id,
+            inicio=iv["inicio"],
+            fin=iv.get("fin"),
+            nota=(iv.get("nota") or None),
+        ))
 
 
 def _get_or_404(id: int, db: Session) -> Falla:
@@ -498,6 +518,7 @@ def create_falla(
 ):
     dump = data.model_dump()
     fotos = dump.pop("fotos_urls", None)
+    intervalos = dump.pop("intervalos", None)
     falla = Falla(
         **dump,
         codigo_interno=f"TMP-{uuid.uuid4().hex[:12]}",
@@ -507,6 +528,7 @@ def create_falla(
     db.add(falla)
     db.flush()  # asigna falla.id por autoincremento (evita colisiones de código)
     falla.codigo_interno = f"FAL-{datetime.now(timezone.utc).year}-{falla.id:05d}"
+    _sync_intervalos(falla, intervalos, db)
     db.commit()
 
     # Notificar a todos los coordinadores
@@ -549,6 +571,10 @@ def update_falla(
         raise HTTPException(404, "Falla no encontrada")
     dump = data.model_dump(exclude_unset=True)
 
+    # Los intervalos de disparo se sincronizan aparte (no son una columna).
+    sync_ints = "intervalos" in dump
+    intervalos = dump.pop("intervalos", None)
+
     nuevo_asignado_id = dump.get("asignado_a_id")
     notificar_asignacion = (
         "asignado_a_id" in dump
@@ -558,6 +584,21 @@ def update_falla(
 
     for k, v in dump.items():
         setattr(falla, k, v)
+
+    if sync_ints:
+        _sync_intervalos(falla, intervalos or [], db)
+
+    # Sellar fecha+hora de solución automáticamente al cerrar la falla (estado
+    # final) si el usuario no la indicó explícitamente; al reabrir se limpia.
+    # Replica el comportamiento de los seguimientos y del botón "Marcar resuelta".
+    if "estado_id" in dump and dump["estado_id"] is not None:
+        nuevo_estado = db.get(FallaCatEstado, dump["estado_id"])
+        if nuevo_estado and nuevo_estado.es_estado_final:
+            if not falla.fecha_resolucion:
+                falla.fecha_resolucion = datetime.now(timezone.utc)
+        elif nuevo_estado and not nuevo_estado.es_estado_final and "fecha_resolucion" not in dump:
+            falla.fecha_resolucion = None
+
     db.commit()
 
     if notificar_asignacion:

@@ -14,7 +14,7 @@ from app.models.fronteras import Frontera, FronteraLectura
 from app.models.equipos import Equipo, EquipoSello
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
-    FallaCatPrioridad, FallaCatResolucion, Falla, FallaSeguimiento,
+    FallaCatPrioridad, FallaCatResolucion, Falla, FallaSeguimiento, FallaIntervalo,
 )
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
@@ -45,7 +45,7 @@ __all__ = [
     "ContratoServicio", "PPAContrato", "ContratoArriendo", "PPATarifa", "PPACompromisoEnergia",
     "Frontera", "FronteraLectura", "Equipo", "EquipoSello",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
-    "FallaCatResolucion", "Falla", "FallaSeguimiento",
+    "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
     "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",

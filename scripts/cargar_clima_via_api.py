@@ -5,6 +5,7 @@ Bypasses direct DB connection (Railway public networking not enabled).
 Usage:
     python3 scripts/cargar_clima_via_api.py
 """
+import os
 import csv
 import json
 import sys
@@ -46,7 +47,7 @@ def read_index_csv(path):
 
 def get_token():
     resp = httpx.post(f"{BACKEND_URL}/api/v1/auth/token",
-        data={"username": "eduardo@unergy.io", "password": "Unergy2025!"},
+        data={"username": os.environ.get("ADMIN_USER", "eduardo@unergy.io"), "password": os.environ.get("ADMIN_PASS", "")},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15)
     resp.raise_for_status()

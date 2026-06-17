@@ -8,3 +8,6 @@ venv/
 uploads/
 *.egg-info/
 .pytest_cache/
+# Contraseñas iniciales generadas por el seed — NUNCA versionar
+seed_passwords.json.enc
+app/seeds/seed_passwords.json.enc

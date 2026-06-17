@@ -2,6 +2,7 @@
 Carga la Hoja 4 de GESCON.xlsx (solicitudes antiguas) en asic_solicitudes.
 Uso: python scripts/cargar_gescon_hoja4.py [--dry-run]
 """
+import os
 import sys, unicodedata
 from datetime import datetime
 import requests
@@ -9,8 +10,8 @@ import openpyxl
 
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("ADMIN_USER", "juanjose@unergy.io")
+PASSWORD = os.environ.get("ADMIN_PASS", "")
 DRY_RUN  = "--dry-run" in sys.argv
 
 TIPO_MAP = {

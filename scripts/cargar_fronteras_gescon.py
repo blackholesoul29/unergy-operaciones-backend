@@ -3,6 +3,7 @@ Carga las Fronteras comerciales de GESCON.xlsx en la tabla fronteras.
 Hace upsert por codigo_frontera. Intenta asociar proyecto_id por nombre.
 Uso: python scripts/cargar_fronteras_gescon.py [--dry-run]
 """
+import os
 import sys, unicodedata, re
 from datetime import datetime
 import difflib
@@ -11,8 +12,8 @@ import openpyxl
 
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("ADMIN_USER", "juanjose@unergy.io")
+PASSWORD = os.environ.get("ADMIN_PASS", "")
 DRY_RUN  = "--dry-run" in sys.argv
 
 TIPO_MAP = {

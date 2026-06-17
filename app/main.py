@@ -759,6 +759,13 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_clasif_proyecto_periodo ON clasificacion_liquidacion (proyecto_id, periodo)",
     "CREATE INDEX IF NOT EXISTS ix_clasif_periodo ON clasificacion_liquidacion (periodo)",
+    # migration seguridad (alembic 024) — forzar cambio de contraseña en primer acceso
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS force_password_reset BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ",
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_hash_version INTEGER NOT NULL DEFAULT 1",
+    # La contraseña semilla "Unergy2025!" se filtró: obliga a TODOS los usuarios
+    # existentes con contraseña a rotarla en el próximo acceso. Idempotente.
+    "UPDATE usuarios SET force_password_reset = TRUE WHERE password_hash IS NOT NULL AND password_changed_at IS NULL",
 ]
 
 

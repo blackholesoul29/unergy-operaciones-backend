@@ -13,6 +13,7 @@ Uso:
 Requiere:
     pip install requests
 """
+import os
 import sys
 import json
 import time
@@ -24,14 +25,26 @@ from typing import Optional
 
 import requests
 
+try:  # carga opcional de .env (no es dependencia dura del script)
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # -- Configuración --------------------------------------------------------------
-SCRIPT_URL = (
+# Credenciales y endpoints SIEMPRE desde el entorno — nunca hardcodeadas.
+#   ADMIN_API_KEY  → autenticación por API key (recomendado: cuenta de servicio)
+#   ADMIN_USER / ADMIN_PASS → fallback por usuario/contraseña (login OAuth2)
+#   OPS_API_BASE   → URL base de la API (opcional)
+SCRIPT_URL = os.environ.get(
+    "FALLAS_SCRIPT_URL",
     "https://script.google.com/macros/s/"
-    "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
+    "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec",
 )
-API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+API_BASE = os.environ.get("OPS_API_BASE", "https://backend-production-63d8.up.railway.app/api/v1")
+API_KEY = os.environ.get("ADMIN_API_KEY")
+API_EMAIL = os.environ.get("ADMIN_USER")
+API_PASS = os.environ.get("ADMIN_PASS")
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26
@@ -176,15 +189,30 @@ def parse_datetime(raw: str) -> Optional[str]:
 
 # -- Autenticación --------------------------------------------------------------
 
-def get_token() -> str:
-    r = requests.post(f"{API_BASE}/auth/token",
-                      data={"username": API_EMAIL, "password": API_PASS})
-    r.raise_for_status()
-    return r.json()["access_token"]
+def get_token() -> Optional[str]:
+    """Devuelve un token JWT (modo usuario/contraseña) o None (modo API key).
+
+    Aborta con un mensaje claro si no hay credenciales en el entorno.
+    """
+    if API_KEY:
+        return None  # se usará X-API-Key en las cabeceras
+    if API_EMAIL and API_PASS:
+        r = requests.post(f"{API_BASE}/auth/token",
+                          data={"username": API_EMAIL, "password": API_PASS})
+        r.raise_for_status()
+        return r.json()["access_token"]
+    sys.exit(
+        "ERROR: faltan credenciales. Define ADMIN_API_KEY (recomendado) o "
+        "ADMIN_USER + ADMIN_PASS en el entorno (.env)."
+    )
 
 
-def hdrs(token: str) -> dict:
-    return {"Authorization": f"Bearer {token}"}
+def hdrs(token: Optional[str]) -> dict:
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    if API_KEY:
+        return {"X-API-Key": API_KEY}
+    return {}
 
 
 # -- Catálogos ------------------------------------------------------------------
@@ -431,7 +459,7 @@ def main():
     print("=" * 65)
 
     token = get_token()
-    print(f"Autenticado como {API_EMAIL}\n")
+    print(f"Autenticado vía {'API key' if API_KEY else API_EMAIL}\n")
 
     # -- 1. Proyectos ----------------------------------------------
     print("-- Paso 1: Verificando / creando proyectos ------------------")

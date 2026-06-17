@@ -1,13 +1,33 @@
 """
 Ejecutar una sola vez después de crear las tablas:
-    python -m app.seeds.seed_data
+
+    # Producción — escribe las contraseñas cifradas a seed_passwords.json.enc
+    SEED_FERNET_KEY=... python -m app.seeds.seed_data
+
+    # Desarrollo — imprime las contraseñas a stdout (NUNCA en producción)
+    python -m app.seeds.seed_data --dev
+
+Seguridad: NO se hardcodean contraseñas. Cada usuario nuevo recibe una
+contraseña aleatoria fuerte y queda con `force_password_reset=True`, por lo que
+debe cambiarla en el primer acceso. Las contraseñas iniciales se entregan una
+sola vez: por stdout (--dev) o cifradas con Fernet (producción).
 """
+import argparse
+import datetime as _dt
+import json
+import os
+
 from app.core.database import SessionLocal
 from app.core.security import hash_password
+from app.utils.password_generator import generate_secure_password
 from app.models import (
     Usuario, FallaCatCategoria, FallaCatTipo, FallaCatEstado,
     FallaCatPrioridad, FallaCatResolucion, PromoterCatalogoRequisito,
 )
+
+# Archivo donde se escriben las contraseñas cifradas en producción.
+# NUNCA se versiona (ver .gitignore) — es un artefacto de despliegue efímero.
+SEED_PASSWORDS_FILE = os.path.join(os.path.dirname(__file__), "seed_passwords.json.enc")
 
 
 USUARIOS = [
@@ -101,23 +121,77 @@ REQUISITOS_PROMOTOR = [
 ]
 
 
-def seed():
+def _emit_credentials(creds: list[dict], dev: bool) -> None:
+    """Entrega las contraseñas iniciales generadas, de forma segura.
+
+    dev=True  → imprime a stdout (solo para desarrollo local).
+    dev=False → cifra con Fernet (clave en `SEED_FERNET_KEY`) y escribe a disco.
+                Si no hay clave, aborta en vez de filtrar las contraseñas.
+    """
+    if not creds:
+        print("OK No se crearon usuarios nuevos — sin contraseñas que entregar")
+        return
+
+    if dev:
+        print("\n⚠️  CONTRASEÑAS INICIALES (solo desarrollo — cámbialas en el primer acceso):")
+        for c in creds:
+            print(f"   {c['email']:<28} {c['password']}")
+        print()
+        return
+
+    key = os.environ.get("SEED_FERNET_KEY")
+    if not key:
+        raise SystemExit(
+            "ERROR: define SEED_FERNET_KEY (clave Fernet) para cifrar las "
+            "contraseñas iniciales, o usa --dev para imprimirlas en local. "
+            "Genera una con: python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\""
+        )
+
+    from cryptography.fernet import Fernet
+
+    payload = json.dumps(
+        {
+            "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "note": "Contraseñas iniciales — el usuario DEBE cambiarlas en el primer acceso.",
+            "credentials": creds,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    token = Fernet(key.encode()).encrypt(payload)
+    # 0600: solo el propietario puede leerlo.
+    fd = os.open(SEED_PASSWORDS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(token)
+    print(
+        f"OK {len(creds)} contraseñas cifradas escritas en {SEED_PASSWORDS_FILE}\n"
+        f"   Descífralas con SEED_FERNET_KEY y entrégalas por un canal seguro."
+    )
+
+
+def seed(dev: bool = False):
     db = SessionLocal()
+    nuevas_credenciales: list[dict] = []
     try:
-        # Usuarios — inserta si no existe, actualiza rol si cambió
+        # Usuarios — inserta si no existe, actualiza rol si cambió.
+        # Los usuarios nuevos reciben una contraseña aleatoria fuerte y quedan
+        # con force_password_reset=True (deben cambiarla en el primer acceso).
         for u in USUARIOS:
             existing = db.query(Usuario).filter_by(email=u["email"]).first()
             if existing:
                 existing.rol = u["rol"]
                 existing.nombre = u["nombre"]
             else:
+                initial_password = generate_secure_password()
                 db.add(Usuario(
                     email=u["email"],
                     nombre=u["nombre"],
                     rol=u["rol"],
-                    password_hash=hash_password("Unergy2025!"),
+                    password_hash=hash_password(initial_password),
                     activo=True,
+                    force_password_reset=True,
                 ))
+                nuevas_credenciales.append({"email": u["email"], "password": initial_password})
 
         # Categorías de falla
         cat_map = {}
@@ -167,6 +241,16 @@ def seed():
     finally:
         db.close()
 
+    # Entrega de contraseñas iniciales fuera de la transacción de BD.
+    _emit_credentials(nuevas_credenciales, dev=dev)
+
 
 if __name__ == "__main__":
-    seed()
+    parser = argparse.ArgumentParser(description="Carga de datos semilla")
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Imprime las contraseñas iniciales en stdout (solo desarrollo local)",
+    )
+    args = parser.parse_args()
+    seed(dev=args.dev)

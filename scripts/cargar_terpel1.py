@@ -7,13 +7,14 @@ Uso:
   python scripts/cargar_terpel1.py --ids 1,2,3,... --dry-run  # simular sin guardar
 """
 
+import os
 import sys
 import argparse
 import requests
 
 BASE_URL = "https://backend-production-63d8.up.railway.app"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("ADMIN_USER", "juanjose@unergy.io")
+PASSWORD = os.environ.get("ADMIN_PASS", "")
 
 MESES = {
     "Enero":1,"Febrero":2,"Marzo":3,"Abril":4,"Mayo":5,"Junio":6,

@@ -1,5 +1,7 @@
+import time
 import uuid
 import hashlib
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -11,9 +13,29 @@ from app.core.security import verify_password, create_access_token, decode_token
 from app.models.usuarios import Usuario
 from app.schemas.usuarios import TokenResponse, UsuarioOut, UsuarioCreate, UsuarioUpdate
 from app.core.security import hash_password
+from app.utils.password_generator import needs_password_reset, validate_password_strength
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
+
+# Rate-limit en memoria para /auth/change-password: máx. N intentos por usuario
+# en una ventana deslizante, para frenar fuerza bruta sobre la contraseña actual.
+_CHANGE_PW_MAX_ATTEMPTS = 5
+_CHANGE_PW_WINDOW_SECONDS = 300
+_change_pw_attempts: dict[int, list[float]] = defaultdict(list)
+
+
+def _check_change_pw_rate_limit(user_id: int) -> None:
+    now = time.time()
+    recent = [t for t in _change_pw_attempts[user_id] if now - t < _CHANGE_PW_WINDOW_SECONDS]
+    if len(recent) >= _CHANGE_PW_MAX_ATTEMPTS:
+        _change_pw_attempts[user_id] = recent
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+        )
+    recent.append(now)
+    _change_pw_attempts[user_id] = recent
 
 
 def get_current_user(
@@ -50,6 +72,13 @@ def get_current_user(
     user = db.query(Usuario).filter(Usuario.id == int(payload.get("sub"))).first()
     if not user or not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no encontrado")
+    # Si el usuario debe cambiar su contraseña, solo se permiten las rutas para
+    # hacerlo (change-password / me / token). El resto se bloquea con 403.
+    if needs_password_reset(getattr(user, "force_password_reset", False), request.url.path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Debe cambiar su contraseña primero",
+        )
     from app.services.audit import set_audit_user
     set_audit_user(user.id, user.nombre)
     return user
@@ -157,7 +186,53 @@ def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
     user.password_hash = hash_password(data.new_password)
     user.password_reset_token = None
     user.password_reset_expires = None
+    user.force_password_reset = False
+    user.password_changed_at = datetime.now(timezone.utc)
+    user.password_hash_version = 1
     db.commit()
+    return {"msg": "Contraseña actualizada exitosamente"}
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    current: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cambia la contraseña del usuario autenticado.
+
+    Valida la contraseña actual, exige complejidad en la nueva y desactiva
+    `force_password_reset`. Limitado por tasa para frenar fuerza bruta.
+    """
+    _check_change_pw_rate_limit(current.id)
+
+    if not current.password_hash or not verify_password(data.old_password, current.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contraseña actual incorrecta")
+
+    ok, motivo = validate_password_strength(data.new_password)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=motivo)
+
+    if verify_password(data.new_password, current.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nueva contraseña debe ser distinta de la actual",
+        )
+
+    current.password_hash = hash_password(data.new_password)
+    current.force_password_reset = False
+    current.password_changed_at = datetime.now(timezone.utc)
+    current.password_hash_version = 1
+    current.password_reset_token = None
+    current.password_reset_expires = None
+    db.commit()
+    # Éxito ⇒ limpiar el contador de rate-limit del usuario.
+    _change_pw_attempts.pop(current.id, None)
     return {"msg": "Contraseña actualizada exitosamente"}
 
 

@@ -10,13 +10,14 @@ Servicios vacíos (None) → no se modifican.
 Uso:
     python scripts/cargar_operativos.py [--dry-run] [--force]
 """
+import os
 import sys
 from datetime import date
 import requests
 
 BASE = "https://backend-production-63d8.up.railway.app"
-USER = "juanjose@unergy.io"
-PASS = "Unergy2025!"
+USER = os.environ.get("ADMIN_USER", "juanjose@unergy.io")
+PASS = os.environ.get("ADMIN_PASS", "")
 
 args = sys.argv[1:]
 FORCE   = "--force"   in args

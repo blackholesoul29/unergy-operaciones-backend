@@ -2,6 +2,7 @@
 Carga la hoja GESCON del archivo GESCON.xlsx en asic_solicitudes via API.
 Uso: python scripts/cargar_gescon.py [--dry-run]
 """
+import os
 import sys, os, unicodedata
 from datetime import datetime
 import requests
@@ -10,8 +11,8 @@ import openpyxl
 # ── Config ──────────────────────────────────────────────────────────────────
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+EMAIL = os.environ.get("ADMIN_USER", "juanjose@unergy.io")
+PASSWORD = os.environ.get("ADMIN_PASS", "")
 DRY_RUN  = "--dry-run" in sys.argv
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

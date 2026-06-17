@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Any
 from datetime import datetime, date, time
 
@@ -92,7 +92,7 @@ class FallaCreate(BaseModel):
     hora_identificacion: Optional[time] = None
     fecha_ocurrencia: Optional[datetime] = None
     fecha_resolucion: Optional[datetime] = None
-    sla_limite_horas: Optional[int] = None
+    sla_limite_horas: Optional[int] = Field(default=None, ge=0)
     codigo_legado: Optional[str] = None
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None
@@ -118,7 +118,7 @@ class FallaUpdate(BaseModel):
     hora_identificacion: Optional[time] = None
     fecha_ocurrencia: Optional[datetime] = None
     fecha_resolucion: Optional[datetime] = None
-    sla_limite_horas: Optional[int] = None
+    sla_limite_horas: Optional[int] = Field(default=None, ge=0)
     sla_cumplido: Optional[bool] = None
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None

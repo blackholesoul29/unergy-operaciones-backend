@@ -73,6 +73,8 @@ class ProyectoInfoTecnicaCreate(BaseModel):
     ip_modem_reconectador: Optional[str] = None
     # Ubicación
     url_ubicacion: Optional[str] = None
+    # RETIE — enlace al documento (Google Drive u otro)
+    retie_url: Optional[str] = None
     # CCTV y seguridad
     cctv_estado: Optional[str] = None
     marca_cctv: Optional[str] = None

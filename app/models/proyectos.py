@@ -203,6 +203,9 @@ class ProyectoInfoTecnica(Base):
     # Ubicación
     url_ubicacion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # RETIE — enlace al documento (Google Drive u otro)
+    retie_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # CCTV y seguridad
     cctv_estado: Mapped[str | None] = mapped_column(Text, nullable=True)
     marca_cctv: Mapped[str | None] = mapped_column(String(255), nullable=True)

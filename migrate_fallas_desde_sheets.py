@@ -13,6 +13,7 @@ Uso:
 Requiere:
     pip install requests
 """
+import os
 import sys
 import json
 import time
@@ -30,8 +31,11 @@ SCRIPT_URL = (
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
 API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+API_EMAIL = os.getenv("API_EMAIL")
+API_PASS  = os.getenv("API_PASS")
+
+if not API_EMAIL or not API_PASS:
+    sys.exit("Error: API_EMAIL and API_PASS environment variables must be set.")
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26

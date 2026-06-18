@@ -38,6 +38,9 @@ from app.models.panel_contable import (
     ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,
     AliasFuenteIngreso,
 )
+from app.models.mandatos import (
+    Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
+)
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -64,4 +67,5 @@ __all__ = [
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
     "AliasFuenteIngreso",
+    "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
 ]

@@ -786,6 +786,55 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_proyecto_columna ON alias_fuente_ingreso (proyecto_id, columna_origen)",
     "CREATE INDEX IF NOT EXISTS ix_alias_proyecto ON alias_fuente_ingreso (proyecto_id)",
+    # ── Mandatos (pestaña Costos) ──────────────────────────────────────────
+    """DO $$ BEGIN
+        CREATE TYPE estado_mandato_costo_enum AS ENUM (
+            'pendiente_envio','enviado_revisoria','con_correcciones','corregido',
+            'firmado','enviado_inversionista','sin_inversionista'
+        );
+    EXCEPTION WHEN duplicate_object THEN null; END $$;""",
+    """CREATE TABLE IF NOT EXISTS mandato_inversionistas (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        correos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        proyectos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS mandatos (
+        id BIGSERIAL PRIMARY KEY,
+        cmu VARCHAR(20) NOT NULL,
+        periodo DATE NOT NULL,
+        proyecto VARCHAR(255),
+        tercero VARCHAR(255),
+        inversionista_id BIGINT REFERENCES mandato_inversionistas(id) ON DELETE SET NULL,
+        estado estado_mandato_costo_enum NOT NULL DEFAULT 'pendiente_envio',
+        observacion TEXT,
+        fecha_envio_revisoria DATE,
+        fecha_firmado DATE,
+        fecha_envio_inversionista DATE,
+        pdf_firmado_ruta VARCHAR(1000),
+        pdf_firmado_nombre VARCHAR(500),
+        correo_ref_revisoria VARCHAR(255),
+        correo_ref_envio VARCHAR(255),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_mandato_cmu_periodo ON mandatos (cmu, periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_mandatos_cmu ON mandatos (cmu)",
+    "CREATE INDEX IF NOT EXISTS ix_mandatos_periodo ON mandatos (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_mandatos_inversionista_id ON mandatos (inversionista_id)",
+    """CREATE TABLE IF NOT EXISTS gmail_credenciales (
+        id BIGSERIAL PRIMARY KEY,
+        cuenta VARCHAR(255) NOT NULL UNIQUE,
+        refresh_token TEXT,
+        token_actualizado_en TIMESTAMPTZ,
+        ultimo_sync_en TIMESTAMPTZ,
+        estado VARCHAR(20) NOT NULL DEFAULT 'desconectado',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
 ]
 
 

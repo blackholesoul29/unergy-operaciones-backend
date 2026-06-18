@@ -39,17 +39,32 @@ _RAZON_SOCIAL = re.compile(r'^(s\.?a\.?s\.?|e\.?s\.?p\.?|s\.?a\.?|ltda\.?|cia\.?
 
 # ── Nombre de proyecto desde el nombre de archivo ───────────────────────────────
 
+# Meses (para limpiar sufijos tipo "_MAYO", "_Abril 2026" en los ER ALL_DATA).
+_MESES_RE = (
+    r'enero|febrero|marzo|abril|mayo|junio|julio|agosto|'
+    r'septiembre|setiembre|octubre|noviembre|diciembre'
+)
+
+
 def extraer_proyecto_de_archivo(nombre: str, proyectos_db: list[dict]) -> dict | None:
     """
-    Los ER se llaman "Estado resultados {INVERSIONISTA} {PROYECTO} N 2026.xlsx".
-    El inversionista tiene longitud variable (1 a 8+ palabras), así que en vez de
-    adivinar dónde termina, probamos match_proyecto() con ventanas deslizantes
-    desde la derecha (el proyecto siempre va al final) y nos quedamos con el match
-    de la ventana más larga que exista en DB. Reusa el match_proyecto compartido
-    (con sus aliases de NAOS, Valencia Oriente, etc.).
+    Soporta dos patrones de nombre de archivo:
+      1. Normal: "Estado resultados {INVERSIONISTA} {PROYECTO} N 2026.xlsx".
+      2. NITRO/NEU ALL_DATA: "{PLANTA}_NITRO_ALL_DATA_{MES}.xlsx" (o NEU/sin tipo),
+         ej. "CACICA_NITRO_ALL_DATA_MAYO.xlsx" → "CACICA".
+    En el normal, el inversionista tiene longitud variable, así que probamos
+    match_proyecto() con ventanas deslizantes desde la derecha (el proyecto va al
+    final). Reusa match_proyecto (con sus aliases de NAOS, Cacica, etc.).
     """
     base = re.sub(r'^Estado\s+resultados\s+', '', nombre or '', flags=re.I)
     base = re.sub(r'\.xlsx?$', '', base, flags=re.I)
+
+    # Patrón ALL_DATA: quitar "_(NITRO|NEU)_ALL_DATA_..." / "_ALL_DATA..." y el mes,
+    # y pasar guiones bajos a espacios → queda solo el nombre de la planta.
+    base = re.sub(r'[_\s]*(nitro|neu)?[_\s]*all[_\s]*data.*$', '', base, flags=re.I)
+    base = re.sub(rf'[_\s]*({_MESES_RE})([_\s]*20\d{{2}})?$', '', base, flags=re.I)
+    base = base.replace('_', ' ').strip()
+
     # Quitar el sufijo " N 2026" (consecutivo + año), conservando números que
     # son parte del nombre del proyecto (ej. "Valencia Oriente 1", "GD NAOS 1").
     base = re.sub(r'\s+\d+\s+20\d{2}$', '', base)

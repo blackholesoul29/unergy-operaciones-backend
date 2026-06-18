@@ -90,6 +90,10 @@ ALIASES_PROYECTO: dict[str, str] = {
     # "MGS Naos 2" / "MGS Naos 3".
     "naos2": "mgs naos 2",
     "naos3": "mgs naos 3",
+    # ER NITRO ALL_DATA traen el nombre de la planta a secas ("CACICA"/"PILONERAS")
+    # y en DB son "Minigranja Solar La Cacica" / "Minigranja Solar Las Piloneras".
+    "cacica": "la cacica",
+    "piloneras": "las piloneras",
 }
 
 ALIASES_INVERSIONISTA: dict[str, str | None] = {

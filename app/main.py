@@ -759,6 +759,22 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_clasif_proyecto_periodo ON clasificacion_liquidacion (proyecto_id, periodo)",
     "CREATE INDEX IF NOT EXISTS ix_clasif_periodo ON clasificacion_liquidacion (periodo)",
+    # migration 024 — mapeo de celdas por concepto (Panel Contable: PROPONER/CORREGIR/RECORDAR)
+    """CREATE TABLE IF NOT EXISTS mapeo_celda_concepto (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        concepto VARCHAR(255) NOT NULL,
+        hoja VARCHAR(120) NOT NULL,
+        celda VARCHAR(20) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_mapeo_proyecto_concepto ON mapeo_celda_concepto (proyecto_id, concepto)",
+    "CREATE INDEX IF NOT EXISTS ix_mapeo_proyecto ON mapeo_celda_concepto (proyecto_id)",
+    # snapshot del ER recalculado por panel (releer celda al cambiar el mapeo)
+    "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS er_snapshot TEXT",
+    # celda de origen de cada línea (hoja!celda del ER)
+    "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS hoja VARCHAR(120)",
+    "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS celda VARCHAR(20)",
 ]
 
 

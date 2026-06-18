@@ -775,6 +775,17 @@ _PENDING_DDLS = [
     # celda de origen de cada línea (hoja!celda del ER)
     "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS hoja VARCHAR(120)",
     "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS celda VARCHAR(20)",
+    # Fase 2 — alias persistente de fuentes de ingreso (celda del ER → etiqueta)
+    """CREATE TABLE IF NOT EXISTS alias_fuente_ingreso (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        columna_origen VARCHAR(40) NOT NULL,
+        etiqueta VARCHAR(255) NOT NULL,
+        orden INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_proyecto_columna ON alias_fuente_ingreso (proyecto_id, columna_origen)",
+    "CREATE INDEX IF NOT EXISTS ix_alias_proyecto ON alias_fuente_ingreso (proyecto_id)",
 ]
 
 

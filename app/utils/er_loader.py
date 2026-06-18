@@ -148,7 +148,8 @@ def _norm(s) -> str:
 
 # ── Parser principal ─────────────────────────────────────────────────────────────
 
-def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None) -> dict:
+def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
+               aliases: dict | None = None) -> dict:
     """
     Extrae del ER (ya recalculado) un dict estructurado. La hoja
     "Estado_de_resultados" es la misma en los 3 tipos; SOLO cambia cómo se lee
@@ -181,6 +182,7 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None) -> d
     if tipo not in ("normal", "neu", "nitro"):
         tipo = "normal"
     mapeos = mapeos or {}
+    aliases = aliases or {}
 
     wb = load_workbook(path, data_only=True)
     primera = wb.sheetnames[0]
@@ -240,16 +242,55 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None) -> d
         if _norm(concepto) not in presentes:
             ingresos_detalle.append({"concepto": concepto, "valor": 0.0})
 
-    # PROPONER: asignar a cada renglón la celda de origen (la del valor propuesto)
-    # buscándola en el snapshot del ER recalculado, sin reusar la misma celda dos
-    # veces (desambigua Representación/CGM, que valen igual).
+    # Las fuentes de ingreso ya traen su celda exacta (columna Venta($) en la fila
+    # TOTAL); fijar su hoja a la principal y registrarla como usada.
     usados: set[str] = set()
+    for ln in ingresos_detalle:
+        if ln.get("celda"):
+            ln["hoja"] = primera
+            usados.add(f"{primera}!{ln['celda']}")
+
+    # PROPONER: para los renglones sin celda, buscarla en el snapshot por el valor
+    # propuesto, sin reusar la misma celda dos veces (desambigua Repr/CGM, iguales).
     for grupo in (ingresos_detalle, comercializacion, costos, facturas):
         for ln in grupo:
+            if ln.get("celda"):
+                continue
             hoja, celda = _localizar_celda(snapshot, ln["valor"], primera, usados)
             ln["hoja"], ln["celda"] = hoja, celda
             if celda:
                 usados.add(f"{hoja}!{celda}")
+
+    # RECORDAR (ingresos): aplicar los alias de fuente guardados (celda → etiqueta).
+    # Relabela las fuentes detectadas y RESUCITA las fuentes manuales que la usuaria
+    # agregó otro mes (cuyo alias apunta a una celda con valor en el ER).
+    if aliases:
+        for ln in ingresos_detalle:
+            if ln.get("hoja") and ln.get("celda"):
+                a = aliases.get(f"{ln['hoja']}!{ln['celda']}".lower())
+                if a:
+                    ln["concepto"] = a["etiqueta"]
+                    ln["orden_alias"] = a.get("orden", 0)
+        presentes_celda = {f"{ln.get('hoja')}!{ln.get('celda')}".lower()
+                           for ln in ingresos_detalle if ln.get("celda")}
+        for col_origen, a in aliases.items():
+            if col_origen in presentes_celda:
+                continue
+            try:
+                hoja_a, celda_a = col_origen.split("!", 1)
+            except ValueError:
+                continue
+            val = leer_celda(snapshot, hoja_a, celda_a)
+            if val is None:
+                continue
+            es_compra = "compra" in _norm(a["etiqueta"]) and "bolsa" in _norm(a["etiqueta"])
+            ingresos_detalle.append({
+                "concepto": a["etiqueta"],
+                "valor": -abs(round(val, 2)) if es_compra else round(val, 2),
+                "hoja": hoja_a, "celda": celda_a.upper(), "orden_alias": a.get("orden", 0),
+            })
+        # Ordenar por el orden de alias cuando esté definido (estable para el resto).
+        ingresos_detalle.sort(key=lambda d: d.get("orden_alias", 1_000_000))
 
     # RECORDAR: si hay una celda guardada para el concepto, leerla y sustituir el
     # valor propuesto (la usuaria ya la confirmó un mes anterior).
@@ -375,12 +416,30 @@ def _aplicar_signo(grupo: str, concepto: str, valor: float) -> float:
     return round(valor, 2)
 
 
+def _col_letter(j: int) -> str:
+    from openpyxl.utils import get_column_letter
+    return get_column_letter(j + 1)  # j es índice 0-based de la columna
+
+
+def _fila_total(grid: list[list], header_row: int) -> int:
+    """
+    Fila de TOTAL de la tabla diaria (la que tiene la etiqueta 'TOTAL' en su
+    columna de texto). Ahí están las celdas que la usuaria mapea (ej. G35). Si no
+    se encuentra, cae a header_row+31 (31 días) como heurística.
+    """
+    for r in range(header_row + 1, min(header_row + 60, len(grid))):
+        if "total" == _norm(_row_label(grid[r])):
+            return r
+    return min(header_row + 31, len(grid) - 1)
+
+
 def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
     """
-    Filas 4-34: tabla de generación diaria + venta por comercializador.
-    Ingreso bruto = suma de la(s) columna(s) "Venta ($)".
-    Si hay bolsa: Venta + Venta bolsa − Compra bolsa.
-    Si hay 2 puntos (Terpel 1+2): suma ambas columnas de venta.
+    Tabla de generación diaria + venta por comercializador. Cada columna "Venta ($)"
+    es una FUENTE de ingreso independiente (Terpel 1, Terpel 2, …); se devuelve una
+    por columna, con su etiqueta propuesta, su celda de la fila TOTAL (ej. G35) y su
+    valor. Si hay bolsa, Venta/Compra en bolsa también son fuentes. La usuaria puede
+    renombrar cada fuente (alias persistente) y el sistema lo recuerda.
     """
     # Localizar fila de encabezado que contenga "venta" en alguna celda.
     header_row = None
@@ -394,12 +453,14 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
     venta_bolsa_cols: list[int] = []
     compra_bolsa_cols: list[int] = []
     comercializador = None
+    headers: dict[int, str] = {}
 
     if header_row is not None:
         for j, c in enumerate(grid[header_row]):
             h = _norm(c)
             if not h:
                 continue
+            headers[j] = _txt(c)
             if "compra" in h and "bolsa" in h:
                 compra_bolsa_cols.append(j)
             elif "venta" in h and "bolsa" in h:
@@ -408,7 +469,6 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
                 venta_cols.append(j)
             elif h == "venta" or h.startswith("venta "):
                 venta_cols.append(j)
-        # Detectar comercializador: nombre en la fila de encabezado o la anterior.
         for r in (header_row - 1, header_row):
             if r < 0:
                 continue
@@ -423,37 +483,65 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
             if comercializador:
                 break
 
-    def _sum_cols(cols: list[int]) -> float:
+    total_row = _fila_total(grid, header_row) if header_row is not None else None
+
+    def _valor_col(j: int) -> float:
+        """Valor TOTAL de la columna j: la celda de la fila TOTAL, o la suma diaria."""
+        if total_row is not None and j < len(grid[total_row]):
+            v = _num(grid[total_row][j])
+            if v is not None:
+                return v
         total = 0.0
-        if header_row is None:
-            return total
         for r in range(header_row + 1, min(header_row + 60, len(grid))):
+            if r == total_row:
+                continue
             row = grid[r]
-            for j in cols:
-                if j < len(row):
-                    v = _num(row[j])
-                    if v is not None:
-                        total += v
+            if j < len(row):
+                v = _num(row[j])
+                if v is not None:
+                    total += v
         return total
 
-    venta = _sum_cols(venta_cols)
-    venta_bolsa = _sum_cols(venta_bolsa_cols)
-    compra_bolsa = _sum_cols(compra_bolsa_cols)
-    tiene_bolsa = bool(venta_bolsa_cols or compra_bolsa_cols) and (venta_bolsa != 0 or compra_bolsa != 0)
+    def _celda(j: int) -> str | None:
+        return f"{_col_letter(j)}{total_row + 1}" if total_row is not None else None
+
+    def _nombre_fuente(j: int) -> str:
+        """Comercializador del encabezado de la columna (ej. 'Terpel'), sin ruido."""
+        h = _norm(headers.get(j, ""))
+        for tok in ("venta", "($)", "$", "(cop)", "cop", "pesos", "(kwh)", "kwh", "_x", "_y"):
+            h = h.replace(tok, " ")
+        nombre = " ".join(w for w in h.split() if w)
+        return nombre.title() if nombre else (comercializador or "")
 
     if header_row is None or not venta_cols:
         warnings.append("No se detectó la columna 'Venta ($)'; ingreso bruto = 0.")
 
-    ingreso_bruto = venta
-    total_ingresos = venta + venta_bolsa - compra_bolsa
+    detalle: list[dict] = []
+    venta_total = 0.0
+    multi = len(venta_cols) > 1
+    for idx, j in enumerate(venta_cols, start=1):
+        val = round(_valor_col(j), 2)
+        venta_total += val
+        nombre = _nombre_fuente(j)
+        if multi:
+            etiqueta = f"Ingreso Bruto {nombre} {idx}".strip()
+        else:
+            etiqueta = f"Ingreso Bruto {nombre}".strip() if nombre else "Ingreso Bruto"
+        detalle.append({"concepto": etiqueta, "valor": val, "celda": _celda(j)})
 
-    # Renglones de ingreso para el panel (mismo formato que neu/nitro).
-    detalle = [{"concepto": "Ingreso Bruto", "valor": round(ingreso_bruto, 2)}]
+    venta_bolsa = sum(round(_valor_col(j), 2) for j in venta_bolsa_cols)
+    compra_bolsa = sum(round(_valor_col(j), 2) for j in compra_bolsa_cols)
+    tiene_bolsa = bool(venta_bolsa_cols or compra_bolsa_cols) and (venta_bolsa != 0 or compra_bolsa != 0)
     if tiene_bolsa:
         if venta_bolsa:
-            detalle.append({"concepto": "Venta en bolsa", "valor": round(venta_bolsa, 2)})
+            detalle.append({"concepto": "Venta en bolsa", "valor": round(venta_bolsa, 2),
+                            "celda": _celda(venta_bolsa_cols[0]) if venta_bolsa_cols else None})
         if compra_bolsa:
-            detalle.append({"concepto": "Compra en bolsa", "valor": -abs(round(compra_bolsa, 2))})
+            detalle.append({"concepto": "Compra en bolsa", "valor": -abs(round(compra_bolsa, 2)),
+                            "celda": _celda(compra_bolsa_cols[0]) if compra_bolsa_cols else None})
+
+    ingreso_bruto = venta_total
+    total_ingresos = venta_total + venta_bolsa - compra_bolsa
 
     return {
         "comercializador": comercializador,

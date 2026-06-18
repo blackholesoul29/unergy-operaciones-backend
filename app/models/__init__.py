@@ -36,6 +36,7 @@ from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
     ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,
+    AliasFuenteIngreso,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
+    "AliasFuenteIngreso",
 ]

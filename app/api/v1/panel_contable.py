@@ -17,6 +17,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
@@ -28,6 +29,7 @@ import json
 
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, ClasificacionLiquidacion, MapeoCeldaConcepto,
+    AliasFuenteIngreso,
 )
 from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
@@ -89,6 +91,32 @@ class MapeoCeldaBody(BaseModel):
     concepto: str
     hoja: str
     celda: str
+
+
+class AliasFuenteBody(BaseModel):
+    proyecto_id: int
+    periodo: str
+    tipo: str = "preliquidacion"
+    columna_origen: str          # "Sheet1!G35" (celda de origen de la fuente)
+    etiqueta: str                # nombre que pone la usuaria, ej "Ingreso Bruto Terpel 1"
+    orden: int | None = None
+
+
+class FuenteIngresoBody(BaseModel):
+    proyecto_id: int
+    periodo: str
+    tipo: str = "preliquidacion"
+    etiqueta: str
+    hoja: str
+    celda: str
+    orden: int | None = None
+
+
+class FuenteIngresoDeleteBody(BaseModel):
+    proyecto_id: int
+    periodo: str
+    tipo: str = "preliquidacion"
+    columna_origen: str          # "Sheet1!G35" — identifica la fuente a quitar
 
 
 # ── Construcción de líneas a partir del ER parseado ────────────────────────────
@@ -260,6 +288,13 @@ async def cargar_er(
             "hoja": m.hoja, "celda": m.celda,
         }
 
+    # Alias de fuentes de ingreso: proyecto_id → {columna_origen.lower(): {etiqueta, orden}}.
+    aliases_por_proyecto: dict[int, dict] = {}
+    for a in db.query(AliasFuenteIngreso).all():
+        aliases_por_proyecto.setdefault(a.proyecto_id, {})[a.columna_origen.lower()] = {
+            "etiqueta": a.etiqueta, "orden": a.orden,
+        }
+
     resultados = {
         "cargados": [], "sin_match": [], "errores": [],
         "warnings": [], "duplicados": [], "rechazados": [],
@@ -311,6 +346,7 @@ async def cargar_er(
             parsed = parsear_er(
                 recalc_path, tipo=tipo_carga,
                 mapeos=mapeos_por_proyecto.get(proy["id"]),
+                aliases=aliases_por_proyecto.get(proy["id"]),
             )
 
             panel = _guardar_panel(
@@ -709,6 +745,187 @@ def guardar_mapeo_celda(
     p = db.query(Proyecto.nombre_comercial).filter(Proyecto.id == panel.proyecto_id).first()
     nombres[panel.proyecto_id] = p.nombre_comercial if p else None
     return _serializar_panel(panel, nombres)
+
+
+# ── Fuentes de ingreso: alias persistente + agregar/quitar (Fase 2) ───────────────
+
+def _split_columna_origen(s: str) -> tuple[str, str]:
+    """'Sheet1!G35' → ('Sheet1', 'G35'). 422 si el formato es inválido."""
+    if not s or "!" not in s:
+        raise HTTPException(422, "columna_origen debe ser 'hoja!celda' (ej. Sheet1!G35)")
+    hoja, celda = s.split("!", 1)
+    hoja = hoja.strip()
+    celda = celda.strip().upper().replace("$", "")
+    if not hoja or not celda:
+        raise HTTPException(422, "columna_origen debe ser 'hoja!celda' (ej. Sheet1!G35)")
+    return hoja, celda
+
+
+def _panel_para(db: Session, proyecto_id: int, periodo: str, tipo: str) -> PanelContable:
+    try:
+        y, m = periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+    panel = (
+        db.query(PanelContable)
+        .filter(PanelContable.proyecto_id == proyecto_id,
+                PanelContable.periodo == periodo_norm,
+                PanelContable.tipo == tipo)
+        .first()
+    )
+    if not panel:
+        raise HTTPException(404, "No hay panel para ese proyecto/período/tipo")
+    return panel
+
+
+def _panel_serializado(db: Session, panel: PanelContable) -> dict:
+    db.refresh(panel)
+    p = db.query(Proyecto.nombre_comercial).filter(Proyecto.id == panel.proyecto_id).first()
+    return _serializar_panel(panel, {panel.proyecto_id: p.nombre_comercial if p else None})
+
+
+@router.post("/alias-fuente")
+def guardar_alias_fuente(
+    body: AliasFuenteBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    La usuaria renombra una fuente de ingreso (etiqueta) anclada a su celda de
+    origen. Guarda el alias (RECORDAR, para el próximo mes), relee el valor de esa
+    celda del snapshot y renombra/actualiza las líneas de ingreso de esa fuente.
+    """
+    hoja, celda = _split_columna_origen(body.columna_origen)
+    col = f"{hoja}!{celda}"
+    panel = _panel_para(db, body.proyecto_id, body.periodo, body.tipo)
+
+    # Upsert del alias (RECORDAR).
+    alias = (
+        db.query(AliasFuenteIngreso)
+        .filter(AliasFuenteIngreso.proyecto_id == body.proyecto_id,
+                AliasFuenteIngreso.columna_origen == col)
+        .first()
+    )
+    if alias is None:
+        alias = AliasFuenteIngreso(
+            proyecto_id=body.proyecto_id, columna_origen=col,
+            etiqueta=body.etiqueta, orden=body.orden or 0,
+        )
+        db.add(alias)
+    else:
+        alias.etiqueta = body.etiqueta
+        if body.orden is not None:
+            alias.orden = body.orden
+
+    # Relabelar (y revalorar) las líneas de ingreso de esa celda.
+    val = leer_celda(json.loads(panel.er_snapshot), hoja, celda) if panel.er_snapshot else None
+    lineas = (
+        db.query(PanelContableLinea)
+        .filter(PanelContableLinea.panel_id == panel.id,
+                PanelContableLinea.grupo == "ingresos",
+                PanelContableLinea.celda == celda)
+        .all()
+    )
+    for ln in lineas:
+        if (ln.hoja or "").lower() != hoja.lower():
+            continue
+        ln.concepto = body.etiqueta
+        if val is not None:
+            base = _aplicar_signo("ingresos", body.etiqueta, val)
+            frac = (float(ln.porcentaje) / 100.0) if ln.porcentaje is not None else 1.0
+            ln.valor_cop = round(base * frac, 2)
+
+    db.commit()
+    return _panel_serializado(db, panel)
+
+
+@router.post("/fuente-ingreso")
+def agregar_fuente_ingreso(
+    body: FuenteIngresoBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    Agrega a mano una fuente de ingreso que el parser no detectó (ej. una celda de
+    PPA). Lee el valor de la celda del snapshot, crea una línea por inversionista y
+    guarda el alias para que reaparezca el próximo mes.
+    """
+    hoja = (body.hoja or "").strip()
+    celda = (body.celda or "").strip().upper().replace("$", "")
+    if not hoja or not celda:
+        raise HTTPException(422, "Debe indicar hoja y celda (ej. Sheet1 / G35)")
+    panel = _panel_para(db, body.proyecto_id, body.periodo, body.tipo)
+    if not panel.er_snapshot:
+        raise HTTPException(409, "El panel no tiene snapshot del ER (recarga el ER)")
+    val = leer_celda(json.loads(panel.er_snapshot), hoja, celda)
+    if val is None:
+        raise HTTPException(422, f"{hoja}!{celda} no tiene un valor numérico en el ER")
+
+    col = f"{hoja}!{celda}"
+    alias = (
+        db.query(AliasFuenteIngreso)
+        .filter(AliasFuenteIngreso.proyecto_id == body.proyecto_id,
+                AliasFuenteIngreso.columna_origen == col)
+        .first()
+    )
+    orden = body.orden if body.orden is not None else 0
+    if alias is None:
+        db.add(AliasFuenteIngreso(proyecto_id=body.proyecto_id, columna_origen=col,
+                                  etiqueta=body.etiqueta, orden=orden))
+    else:
+        alias.etiqueta = body.etiqueta
+        alias.orden = orden
+
+    # Una línea por inversionista, re-dividida por %.
+    base = _aplicar_signo("ingresos", body.etiqueta, val)
+    invs = _inversionistas_de(db, body.proyecto_id, panel.periodo)
+    if not invs:
+        invs = [{"id": None, "nombre": "Sin inversionistas", "fraccion": 1.0, "pct": 100.0}]
+    orden_max = db.query(func.coalesce(func.max(PanelContableLinea.orden), 0)).filter(
+        PanelContableLinea.panel_id == panel.id).scalar() or 0
+    for inv in invs:
+        frac = inv["fraccion"] if inv["fraccion"] is not None else 0.0
+        orden_max += 1
+        db.add(PanelContableLinea(
+            panel_id=panel.id, proyecto_inversionista_id=inv["id"],
+            inversionista_nombre=inv["nombre"], porcentaje=inv["pct"],
+            grupo="ingresos", concepto=body.etiqueta,
+            valor_cop=round(base * frac, 2), hoja=hoja, celda=celda, orden=orden_max,
+        ))
+    db.commit()
+    return _panel_serializado(db, panel)
+
+
+@router.delete("/fuente-ingreso")
+def quitar_fuente_ingreso(
+    body: FuenteIngresoDeleteBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    Quita una fuente de ingreso (todas sus líneas por inversionista) y borra su
+    alias para que no reaparezca el próximo mes.
+    """
+    hoja, celda = _split_columna_origen(body.columna_origen)
+    panel = _panel_para(db, body.proyecto_id, body.periodo, body.tipo)
+
+    borradas = (
+        db.query(PanelContableLinea)
+        .filter(PanelContableLinea.panel_id == panel.id,
+                PanelContableLinea.grupo == "ingresos",
+                PanelContableLinea.celda == celda)
+        .delete(synchronize_session=False)
+    )
+    db.query(AliasFuenteIngreso).filter(
+        AliasFuenteIngreso.proyecto_id == body.proyecto_id,
+        AliasFuenteIngreso.columna_origen == f"{hoja}!{celda}",
+    ).delete(synchronize_session=False)
+    db.commit()
+    panel = _panel_para(db, body.proyecto_id, body.periodo, body.tipo)
+    out = _panel_serializado(db, panel)
+    out["lineas_borradas"] = borradas
+    return out
 
 
 # ── Reasignar consecutivos en cadena ──────────────────────────────────────────────

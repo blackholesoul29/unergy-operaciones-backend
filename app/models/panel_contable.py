@@ -165,3 +165,29 @@ class MapeoCeldaConcepto(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AliasFuenteIngreso(Base):
+    """
+    Nombre que la usuaria le puso a una fuente de ingreso, anclado a la celda del
+    ER de donde sale (columna_origen, ej. "Sheet1!G35"). Un proyecto puede tener
+    varias fuentes (Terpel 1, Terpel 2, Bolsa, PPA…). Como la celda casi no cambia
+    de un mes al otro, al recordar (columna_origen → etiqueta) el parser propone el
+    mismo nombre el mes siguiente y resucita fuentes manuales que la usuaria agregó.
+    """
+    __tablename__ = "alias_fuente_ingreso"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "columna_origen", name="uq_alias_proyecto_columna"),
+        Index("ix_alias_proyecto", "proyecto_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    columna_origen: Mapped[str] = mapped_column(String(40), nullable=False)  # "Sheet1!G35"
+    etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

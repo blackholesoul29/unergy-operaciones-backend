@@ -1,0 +1,179 @@
+"""API de la pestaña Mandatos (Costos).
+
+Endpoints:
+  GET    /mandatos?periodo=2025-05          → lista del período
+  GET    /mandatos/resumen?periodo=2025-05  → conteos de métricas
+  GET    /mandatos/periodos                 → períodos existentes + badges
+  POST   /mandatos                          → crear manual
+  PATCH  /mandatos/{id}                     → editar / cambiar estado / asignar inversionista
+  POST   /mandatos/upload-firmado           → subir PDF firmado (asocia por CMU del nombre)
+  POST   /mandatos/{id}/asociar-pdf         → asociar PDF subido a un CMU manualmente
+  DELETE /mandatos/{id}                     → eliminar
+  GET    /mandato-inversionistas            → tabla maestra
+"""
+from __future__ import annotations
+from datetime import date, datetime
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum
+from app.schemas.mandatos import MandatoCrear, MandatoActualizar, InversionistaOut
+from app.services.mandatos_service import (
+    mandato_to_dict, calcular_resumen, transicion_valida, extraer_cmu_de_nombre,
+)
+
+router = APIRouter(prefix="/mandatos", tags=["Mandatos"])
+maestra_router = APIRouter(prefix="/mandato-inversionistas", tags=["Mandatos"])
+
+_PDF_DIR = Path("uploads/mandatos")
+_PDF_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _periodo_a_date(periodo: str) -> date:
+    """'2025-05' → date(2025,5,1)."""
+    try:
+        anio, mes = periodo.split("-")
+        return date(int(anio), int(mes), 1)
+    except Exception:
+        raise HTTPException(400, "Parámetro 'periodo' inválido, formato esperado YYYY-MM.")
+
+
+@router.get("")
+def listar(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    p = _periodo_a_date(periodo)
+    filas = db.execute(
+        select(Mandato).where(Mandato.periodo == p).order_by(Mandato.cmu)
+    ).scalars().all()
+    return [mandato_to_dict(f) for f in filas]
+
+
+@router.get("/resumen")
+def resumen(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    p = _periodo_a_date(periodo)
+    filas = db.execute(select(Mandato).where(Mandato.periodo == p)).scalars().all()
+    return calcular_resumen(filas)
+
+
+@router.get("/periodos")
+def periodos(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Lista de períodos con datos + badge (ámbar si hay correcciones sin resolver)."""
+    filas = db.execute(select(Mandato.periodo, Mandato.estado)).all()
+    por_periodo: dict[str, list[str]] = {}
+    for periodo_val, estado in filas:
+        clave = periodo_val.strftime("%Y-%m")
+        por_periodo.setdefault(clave, []).append(estado)
+    out = []
+    for clave in sorted(por_periodo.keys(), reverse=True):
+        estados = por_periodo[clave]
+        tiene_correcciones = any(e == "con_correcciones" for e in estados)
+        cerrado = all(e == "enviado_inversionista" for e in estados)
+        out.append({
+            "periodo": clave,
+            "badge": "correcciones" if tiene_correcciones else ("cerrado" if cerrado else "abierto"),
+        })
+    return out
+
+
+@router.post("", status_code=201)
+def crear(payload: MandatoCrear, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    existe = db.execute(
+        select(Mandato).where(Mandato.cmu == payload.cmu, Mandato.periodo == payload.periodo)
+    ).scalar_one_or_none()
+    if existe:
+        raise HTTPException(409, f"Ya existe el mandato {payload.cmu} en ese período.")
+    m = Mandato(**payload.model_dump())
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return mandato_to_dict(m)
+
+
+@router.patch("/{mandato_id}")
+def actualizar(mandato_id: int, payload: MandatoActualizar,
+               db: Session = Depends(get_db), _=Depends(get_current_user)):
+    m = db.get(Mandato, mandato_id)
+    if not m:
+        raise HTTPException(404, "Mandato no encontrado.")
+    datos = payload.model_dump(exclude_unset=True)
+    nuevo_estado = datos.get("estado")
+    if nuevo_estado and nuevo_estado != m.estado and not transicion_valida(m.estado, nuevo_estado):
+        raise HTTPException(422, f"Transición de estado inválida: {m.estado} → {nuevo_estado}.")
+    for campo, valor in datos.items():
+        setattr(m, campo, valor)
+    db.commit()
+    db.refresh(m)
+    return mandato_to_dict(m)
+
+
+@router.post("/upload-firmado")
+async def upload_firmado(periodo: str = Form(...), file: UploadFile = File(...),
+                         db: Session = Depends(get_db), _=Depends(get_current_user)):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "El archivo debe ser un PDF.")
+    contenido = await file.read()
+    if len(contenido) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Archivo demasiado grande (máx. 20 MB).")
+
+    destino = _PDF_DIR / file.filename
+    destino.write_bytes(contenido)
+    ruta = str(destino)
+
+    cmu = extraer_cmu_de_nombre(file.filename)
+    if not cmu:
+        return {"asociado": False, "ruta": ruta, "nombre": file.filename,
+                "mensaje": "No se pudo identificar el CMU del nombre. Asocia el PDF manualmente."}
+
+    p = _periodo_a_date(periodo)
+    m = db.execute(
+        select(Mandato).where(Mandato.cmu == cmu, Mandato.periodo == p)
+    ).scalar_one_or_none()
+    if not m:
+        return {"asociado": False, "ruta": ruta, "nombre": file.filename, "cmu": cmu,
+                "mensaje": f"No existe el mandato {cmu} en {periodo}. Asócialo manualmente."}
+
+    m.pdf_firmado_ruta = ruta
+    m.pdf_firmado_nombre = file.filename
+    m.fecha_firmado = m.fecha_firmado or date.today()
+    if transicion_valida(m.estado, "firmado"):
+        m.estado = "firmado"
+    db.commit()
+    db.refresh(m)
+    return {"asociado": True, "mandato": mandato_to_dict(m)}
+
+
+@router.post("/{mandato_id}/asociar-pdf")
+def asociar_pdf(mandato_id: int, ruta: str = Form(...), nombre: str = Form(...),
+                db: Session = Depends(get_db), _=Depends(get_current_user)):
+    m = db.get(Mandato, mandato_id)
+    if not m:
+        raise HTTPException(404, "Mandato no encontrado.")
+    m.pdf_firmado_ruta = ruta
+    m.pdf_firmado_nombre = nombre
+    m.fecha_firmado = m.fecha_firmado or date.today()
+    if transicion_valida(m.estado, "firmado"):
+        m.estado = "firmado"
+    db.commit()
+    db.refresh(m)
+    return mandato_to_dict(m)
+
+
+@router.delete("/{mandato_id}", status_code=204)
+def eliminar(mandato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    m = db.get(Mandato, mandato_id)
+    if not m:
+        raise HTTPException(404, "Mandato no encontrado.")
+    db.delete(m)
+    db.commit()
+
+
+@maestra_router.get("")
+def listar_maestra(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    filas = db.execute(
+        select(MandatoInversionista).order_by(MandatoInversionista.nombre)
+    ).scalars().all()
+    return [InversionistaOut.model_validate(f).model_dump() for f in filas]

@@ -58,6 +58,9 @@ class PanelContable(Base):
     consecutivo_costos: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     er_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Snapshot del ER recalculado: {hoja: {coord: valor}} en JSON. Permite releer
+    # una celda al cambiar el mapeo sin volver a subir el archivo.
+    er_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     generado_por_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("usuarios.id"), nullable=True
     )
@@ -131,6 +134,34 @@ class PanelContableLinea(Base):
     concepto: Mapped[str] = mapped_column(String(255), nullable=False)
     valor_cop: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     comprobante_contable: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Celda del ER de donde salió el valor base (ej. hoja="Sheet1", celda="H35").
+    # La comparten todas las líneas del mismo concepto (el origen es del 100%).
+    hoja: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    celda: Mapped[str | None] = mapped_column(String(20), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     panel: Mapped["PanelContable"] = relationship("PanelContable", back_populates="lineas")
+
+
+class MapeoCeldaConcepto(Base):
+    """
+    Mapeo persistente por (proyecto, concepto) → celda del ER (hoja!celda) que la
+    usuaria confirmó. Si existe, el parser lee ESA celda directamente en vez de
+    proponer por etiqueta, así el próximo mes ya sale bien solo.
+    """
+    __tablename__ = "mapeo_celda_concepto"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "concepto", name="uq_mapeo_proyecto_concepto"),
+        Index("ix_mapeo_proyecto", "proyecto_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    concepto: Mapped[str] = mapped_column(String(255), nullable=False)
+    hoja: Mapped[str] = mapped_column(String(120), nullable=False)
+    celda: Mapped[str] = mapped_column(String(20), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

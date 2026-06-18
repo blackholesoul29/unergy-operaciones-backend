@@ -35,7 +35,7 @@ from app.models.starlink import StarlinkFactura
 from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
-    ClasificacionLiquidacion, TipoLiquidacionEnum,
+    ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,
 )
 
 __all__ = [
@@ -61,5 +61,5 @@ __all__ = [
     "StarlinkFactura",
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
-    "ClasificacionLiquidacion", "TipoLiquidacionEnum",
+    "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
 ]

@@ -148,12 +148,17 @@ def _norm(s) -> str:
 
 # ── Parser principal ─────────────────────────────────────────────────────────────
 
-def parsear_er(path: str, tipo: str = "normal") -> dict:
+def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None) -> dict:
     """
     Extrae del ER (ya recalculado) un dict estructurado. La hoja
     "Estado_de_resultados" es la misma en los 3 tipos; SOLO cambia cómo se lee
     la sección de ingresos (`tipo` ∈ {'normal','neu','nitro'}). Comercialización
     XM, costos operativos y fee de administración se leen igual en los 3.
+
+    El parser PROPONE: por cada concepto devuelve el valor y la celda exacta de
+    donde lo tomó (`hoja`/`celda`, ej. "Sheet1"/"H35"). Si `mapeos` trae una
+    celda guardada para un concepto (RECORDAR), lee ESA celda directamente en vez
+    de proponer. `mapeos`: {concepto_normalizado: {"hoja": str, "celda": str}}.
 
     {
       "tipo": str,
@@ -161,11 +166,12 @@ def parsear_er(path: str, tipo: str = "normal") -> dict:
       "tiene_bolsa": bool,
       "ingreso_bruto": float,
       "total_ingresos": float,
-      "ingresos_detalle": [ {concepto, valor}, ... ],   # renglones de ingreso
-      "comercializacion": [ {concepto, valor}, ... ],   # XM desglosada (negativos)
-      "costos": [ {concepto, valor, iva} ],             # operativos
-      "facturas": [ {concepto, valor} ],                # representación, CGM, admin
+      "ingresos_detalle": [ {concepto, valor, hoja, celda}, ... ],
+      "comercializacion": [ {concepto, valor, hoja, celda}, ... ],   # XM (negativos)
+      "costos": [ {concepto, valor, iva, hoja, celda} ],             # operativos
+      "facturas": [ {concepto, valor, hoja, celda} ],                # repr, CGM, admin
       "kwh": float | None,
+      "snapshot": {hoja: {coord: valor}},   # celdas numéricas del ER recalculado
       "warnings": [str],
     }
     """
@@ -174,10 +180,13 @@ def parsear_er(path: str, tipo: str = "normal") -> dict:
     tipo = (tipo or "normal").strip().lower()
     if tipo not in ("normal", "neu", "nitro"):
         tipo = "normal"
+    mapeos = mapeos or {}
 
     wb = load_workbook(path, data_only=True)
-    sh = wb[wb.sheetnames[0]]
+    primera = wb.sheetnames[0]
+    sh = wb[primera]
     grid = [[c.value for c in row] for row in sh.iter_rows()]
+    snapshot = _construir_snapshot(wb)
     wb.close()
 
     warnings: list[str] = []
@@ -192,16 +201,82 @@ def parsear_er(path: str, tipo: str = "normal") -> dict:
     total_ingresos = ing["total_ingresos"]
 
     comercializacion = _parse_comercializacion(grid)
+    # NEU/NITRO suelen traer la Comercialización como un único total (celda
+    # Estado_de_resultados!D20 o Sheet1!D52), no como desglose XM. Si no se
+    # detectó desglose, emitir un renglón único mapeable a esa celda.
+    if tipo in ("neu", "nitro") and not comercializacion:
+        comercializacion = [{"concepto": "Comercialización", "valor": 0.0}]
     costos = _parse_costos(grid)
     kwh = _parse_kwh(grid)
 
-    # Facturas de servicio: Representación y CGM = kWh × 5 c/u (si hay kWh);
-    # Administración = Total Ingresos × 3.80%.
-    facturas: list[dict] = []
-    if kwh:
-        facturas.append({"concepto": "Representación", "valor": -round(kwh * 5, 2)})
-        facturas.append({"concepto": "CGM", "valor": -round(kwh * 5, 2)})
-    facturas.append({"concepto": "Administración", "valor": -round(total_ingresos * FEE_ADMIN, 2)})
+    # Facturas de servicio. Representación y CGM se proponen leyendo la fila
+    # "Cobro OPEX: Representación/CGM" del ER (su tarifa por kWh varía por proyecto,
+    # ej. ×5.26 o ×6.00); si no se encuentra la etiqueta, se cae a kWh × 5.
+    # Administración = Total Ingresos × 3.80% (mapeable a una celda si difiere).
+    rep = _buscar_etiqueta_valor(grid, [("representacion",)])
+    cgm = _buscar_etiqueta_valor(grid, [("cgm",)])
+    rep_val = rep if rep is not None else (kwh * 5 if kwh else 0.0)
+    cgm_val = cgm if cgm is not None else (kwh * 5 if kwh else 0.0)
+    facturas: list[dict] = [
+        {"concepto": "Representación", "valor": -round(rep_val, 2)},
+        {"concepto": "CGM", "valor": -round(cgm_val, 2)},
+        {"concepto": "Administración", "valor": -round(total_ingresos * FEE_ADMIN, 2)},
+    ]
+
+    ingresos_detalle = ing.get("ingresos_detalle", [])
+
+    # Garantizar que existan los renglones canónicos del tipo, aunque el parser no
+    # los haya encontrado en la hoja principal (NEU/NITRO traen el desglose en
+    # tabs Mandato!/Summary! que no se autodetectan): así la usuaria puede mapear
+    # cada concepto a su celda y el sistema lo recuerda. Comercialización se maneja
+    # aparte vía la sección XM (su suma = la "Comercialización" del Excel).
+    canonicos = {
+        "neu": ["Despacho de energía", "Venta en bolsa", "Compra en bolsa",
+                "Redistribución de ingresos"],
+        "nitro": ["Ingreso Bruto", "Venta en bolsa", "Compra en bolsa"],
+    }.get(tipo, [])
+    presentes = {_norm(d["concepto"]) for d in ingresos_detalle}
+    for concepto in canonicos:
+        if _norm(concepto) not in presentes:
+            ingresos_detalle.append({"concepto": concepto, "valor": 0.0})
+
+    # PROPONER: asignar a cada renglón la celda de origen (la del valor propuesto)
+    # buscándola en el snapshot del ER recalculado, sin reusar la misma celda dos
+    # veces (desambigua Representación/CGM, que valen igual).
+    usados: set[str] = set()
+    for grupo in (ingresos_detalle, comercializacion, costos, facturas):
+        for ln in grupo:
+            hoja, celda = _localizar_celda(snapshot, ln["valor"], primera, usados)
+            ln["hoja"], ln["celda"] = hoja, celda
+            if celda:
+                usados.add(f"{hoja}!{celda}")
+
+    # RECORDAR: si hay una celda guardada para el concepto, leerla y sustituir el
+    # valor propuesto (la usuaria ya la confirmó un mes anterior).
+    for grupo_nombre, grupo in (
+        ("ingresos", ingresos_detalle), ("comercializacion", comercializacion),
+        ("costos", costos), ("facturas", facturas),
+    ):
+        for ln in grupo:
+            m = mapeos.get(_norm(ln["concepto"]))
+            if not m:
+                continue
+            val = leer_celda(snapshot, m["hoja"], m["celda"])
+            if val is None:
+                warnings.append(
+                    f"Mapeo {ln['concepto']} → {m['hoja']}!{m['celda']} sin valor en el ER."
+                )
+                continue
+            ln["valor"] = _aplicar_signo(grupo_nombre, ln["concepto"], val)
+            ln["hoja"], ln["celda"] = m["hoja"], m["celda"]
+
+    # Si el mapeo cambió ingreso bruto / detalle, recomputar los totales de ingresos.
+    if ingresos_detalle:
+        ib = next((d["valor"] for d in ingresos_detalle
+                   if "bruto" in _norm(d["concepto"]) or "despacho" in _norm(d["concepto"])), None)
+        if ib is not None:
+            ingreso_bruto = ib
+        total_ingresos = sum(d["valor"] for d in ingresos_detalle)
 
     return {
         "tipo": tipo,
@@ -211,13 +286,93 @@ def parsear_er(path: str, tipo: str = "normal") -> dict:
         "total_ingresos": round(total_ingresos, 2),
         "venta_bolsa": round(ing["venta_bolsa"], 2),
         "compra_bolsa": round(ing["compra_bolsa"], 2),
-        "ingresos_detalle": ing.get("ingresos_detalle", []),
+        "ingresos_detalle": ingresos_detalle,
         "comercializacion": comercializacion,
         "costos": costos,
         "facturas": facturas,
         "kwh": kwh,
+        "snapshot": snapshot,
         "warnings": warnings,
     }
+
+
+# ── Snapshot y lectura de celdas por mapeo ──────────────────────────────────────
+
+def _construir_snapshot(wb) -> dict:
+    """
+    {hoja: {coord: valor}} con las celdas NUMÉRICAS de todas las hojas del ER ya
+    recalculado. Permite releer una celda al cambiar el mapeo sin re-subir el
+    archivo, y localizar la celda de origen de un valor propuesto.
+    """
+    snap: dict[str, dict[str, float]] = {}
+    for name in wb.sheetnames:
+        celdas: dict[str, float] = {}
+        for row in wb[name].iter_rows():
+            for c in row:
+                v = c.value
+                if isinstance(v, bool):
+                    continue
+                if isinstance(v, (int, float)):
+                    celdas[c.coordinate] = float(v)
+        snap[name] = celdas
+    return snap
+
+
+def leer_celda(snapshot: dict, hoja: str, celda: str) -> float | None:
+    """Valor numérico de hoja!celda en el snapshot (tolerante a mayúsculas/espacios)."""
+    if not snapshot or not hoja or not celda:
+        return None
+    celda = str(celda).strip().upper().replace("$", "")
+    hoja = str(hoja).strip()
+    hojas = snapshot
+    # Coincidencia exacta o case-insensitive del nombre de hoja.
+    if hoja in hojas:
+        celdas = hojas[hoja]
+    else:
+        match = next((h for h in hojas if h.lower() == hoja.lower()), None)
+        if match is None:
+            return None
+        celdas = hojas[match]
+    if celda in celdas:
+        return celdas[celda]
+    match = next((c for c in celdas if c.upper() == celda), None)
+    return celdas[match] if match else None
+
+
+def _localizar_celda(snapshot: dict, valor, hoja_pref: str, usados: set) -> tuple:
+    """
+    Celda (hoja, coord) cuyo valor coincide con `valor` (en magnitud), priorizando
+    la hoja principal y sin reusar celdas ya asignadas. Devuelve (None, None) si no
+    hay coincidencia (p.ej. Administración, que es un cálculo y no una celda).
+    """
+    if valor is None:
+        return None, None
+    objetivo = abs(round(float(valor), 2))
+    if objetivo == 0:
+        return None, None
+    tol = max(1.0, objetivo * 1e-6)
+    orden = [hoja_pref] + [h for h in snapshot if h != hoja_pref]
+    for hoja in orden:
+        for coord, v in snapshot.get(hoja, {}).items():
+            if f"{hoja}!{coord}" in usados:
+                continue
+            if abs(abs(v) - objetivo) <= tol:
+                return hoja, coord
+    return None, None
+
+
+def _aplicar_signo(grupo: str, concepto: str, valor: float) -> float:
+    """
+    Aplica la convención de signo del panel al valor leído de una celda:
+    comercialización/costos/facturas son negativos; 'compra' en bolsa es negativa;
+    el resto se respeta tal cual.
+    """
+    n = _norm(concepto)
+    if grupo in ("comercializacion", "costos", "facturas"):
+        return -abs(round(valor, 2))
+    if "compra" in n and "bolsa" in n:
+        return -abs(round(valor, 2))
+    return round(valor, 2)
 
 
 def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
@@ -459,6 +614,10 @@ def _xm_concepto(nm: str) -> str | None:
     suf = " (Gen)" if gen else (" (Com)" if com else "")
     if "arranque y parada" in nm:
         return "Arranque y parada"
+    if "cargo" in nm and "confiabilidad" in nm:
+        return "Cargo por confiabilidad"
+    if "fazni" in nm:
+        return "Fazni"
     if "energia en bolsa" in nm:
         return "Energía en Bolsa" + suf
     if "iva" in nm:
@@ -549,6 +708,25 @@ def _parse_costos(grid: list[list]) -> list[dict]:
                 out.append({"concepto": label, "valor": -abs(val), "iva": aplica_iva})
                 break
     return out
+
+
+def _buscar_etiqueta_valor(grid: list[list], variantes: list[tuple]) -> float | None:
+    """
+    Primer valor (columna contigua) de la fila cuya etiqueta normalizada (sin
+    puntos) contenga TODOS los tokens de alguna variante. Igual que
+    _buscar_concepto pero sin acotar a una sección. Para Representación/CGM, que
+    en el ER son filas "Cobro OPEX: Representación/CGM" con la tarifa por kWh.
+    """
+    for row in grid:
+        nm = _norm(_row_label(row)).replace(".", "")
+        if not nm:
+            continue
+        for tokens in variantes:
+            if all(tok in nm for tok in tokens):
+                v = _value_after_label(row)
+                if v is not None and round(v, 2) != 0:
+                    return v
+    return None
 
 
 def _parse_kwh(grid: list[list]) -> float | None:

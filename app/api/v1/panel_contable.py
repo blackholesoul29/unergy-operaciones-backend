@@ -24,12 +24,14 @@ from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.clientes import Cliente
+import json
+
 from app.models.panel_contable import (
-    PanelContable, PanelContableLinea, ClasificacionLiquidacion,
+    PanelContable, PanelContableLinea, ClasificacionLiquidacion, MapeoCeldaConcepto,
 )
 from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
-    normalizar, IVA, FEE_ADMIN,
+    normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,49 +82,71 @@ class ClasificacionBody(BaseModel):
     asignaciones: list[AsignacionClasif]
 
 
+class MapeoCeldaBody(BaseModel):
+    proyecto_id: int
+    periodo: str
+    tipo: str = "preliquidacion"
+    concepto: str
+    hoja: str
+    celda: str
+
+
 # ── Construcción de líneas a partir del ER parseado ────────────────────────────
 
 def _construir_lineas_base(parsed: dict) -> list[dict]:
     """
-    Renglones del ER al 100% (sin dividir). Cada uno: {grupo, concepto, valor}.
-    Los totales y la utilidad los calcula el frontend; aquí solo van renglones base.
+    Renglones del ER al 100% (sin dividir). Cada uno: {grupo, concepto, valor,
+    hoja, celda}. hoja/celda = la celda del ER de donde salió el valor (PROPONER);
+    el frontend la muestra y la usuaria puede corregirla. Los totales y la utilidad
+    los calcula el frontend; aquí solo van renglones base.
     """
     lineas: list[dict] = []
     tipo = (parsed.get("tipo") or "normal").lower()
+
+    def _orig(d: dict) -> dict:
+        return {"hoja": d.get("hoja"), "celda": d.get("celda")}
 
     # INGRESOS. Para NEU/NITRO los conceptos vienen ya desglosados desde el parser
     # (sección "Ingresos y costos"). Para normal se conserva el formato histórico
     # con el comercializador en la etiqueta del ingreso bruto.
     if tipo in ("neu", "nitro"):
         for d in parsed.get("ingresos_detalle", []):
-            lineas.append({"grupo": "ingresos", "concepto": d["concepto"], "valor": d["valor"]})
+            lineas.append({"grupo": "ingresos", "concepto": d["concepto"], "valor": d["valor"], **_orig(d)})
     else:
         com = parsed.get("comercializador") or ""
         etiqueta_ing = f"Ingreso Bruto{(' ' + com) if com else ''}".strip()
-        lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing, "valor": parsed["ingreso_bruto"]})
+        ib = next((d for d in parsed.get("ingresos_detalle", [])
+                   if "bruto" in (d["concepto"].lower())), {})
+        lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing,
+                       "valor": parsed["ingreso_bruto"], **_orig(ib)})
         if parsed.get("tiene_bolsa"):
             if parsed.get("venta_bolsa"):
-                lineas.append({"grupo": "ingresos", "concepto": "Venta en bolsa", "valor": parsed["venta_bolsa"]})
+                vb = next((d for d in parsed.get("ingresos_detalle", [])
+                           if "venta" in d["concepto"].lower() and "bolsa" in d["concepto"].lower()), {})
+                lineas.append({"grupo": "ingresos", "concepto": "Venta en bolsa", "valor": parsed["venta_bolsa"], **_orig(vb)})
             if parsed.get("compra_bolsa"):
-                lineas.append({"grupo": "ingresos", "concepto": "Compra en bolsa", "valor": -abs(parsed["compra_bolsa"])})
+                cb = next((d for d in parsed.get("ingresos_detalle", [])
+                           if "compra" in d["concepto"].lower() and "bolsa" in d["concepto"].lower()), {})
+                lineas.append({"grupo": "ingresos", "concepto": "Compra en bolsa", "valor": -abs(parsed["compra_bolsa"]), **_orig(cb)})
 
     # COMERCIALIZACIÓN XM (desglosada)
     for c in parsed.get("comercializacion", []):
-        lineas.append({"grupo": "comercializacion", "concepto": c["concepto"], "valor": c["valor"]})
+        lineas.append({"grupo": "comercializacion", "concepto": c["concepto"], "valor": c["valor"], **_orig(c)})
 
     # COSTOS OPERATIVOS (IVA 19% como línea aparte sobre mantenimiento e internet)
     for c in parsed.get("costos", []):
-        lineas.append({"grupo": "costos", "concepto": c["concepto"], "valor": c["valor"]})
+        lineas.append({"grupo": "costos", "concepto": c["concepto"], "valor": c["valor"], **_orig(c)})
         if c.get("iva"):
             lineas.append({
                 "grupo": "costos",
                 "concepto": f"IVA {c['concepto']}",
                 "valor": round(c["valor"] * IVA, 2),
+                "hoja": None, "celda": None,  # el IVA es derivado, no es una celda del ER
             })
 
     # FACTURAS DE SERVICIO
     for f in parsed.get("facturas", []):
-        lineas.append({"grupo": "facturas", "concepto": f["concepto"], "valor": f["valor"]})
+        lineas.append({"grupo": "facturas", "concepto": f["concepto"], "valor": f["valor"], **_orig(f)})
 
     return lineas
 
@@ -228,6 +252,14 @@ async def cargar_er(
         .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
     }
 
+    # Mapeos guardados: proyecto_id → {concepto_norm: {hoja, celda}}. Si existe un
+    # mapeo confirmado para (proyecto, concepto), el parser lee ESA celda.
+    mapeos_por_proyecto: dict[int, dict] = {}
+    for m in db.query(MapeoCeldaConcepto).all():
+        mapeos_por_proyecto.setdefault(m.proyecto_id, {})[_norm_concepto(m.concepto)] = {
+            "hoja": m.hoja, "celda": m.celda,
+        }
+
     resultados = {
         "cargados": [], "sin_match": [], "errores": [],
         "warnings": [], "duplicados": [], "rechazados": [],
@@ -276,7 +308,10 @@ async def cargar_er(
             proyectos_vistos.add(proy["id"])
 
             recalc_path = recalcular_er(tmp.name)
-            parsed = parsear_er(recalc_path, tipo=tipo_carga)
+            parsed = parsear_er(
+                recalc_path, tipo=tipo_carga,
+                mapeos=mapeos_por_proyecto.get(proy["id"]),
+            )
 
             panel = _guardar_panel(
                 db, proy["id"], periodo_norm, tipo, parsed,
@@ -344,6 +379,10 @@ def _guardar_panel(
     if not tiene_costos:
         panel.liquidar_costos = False
     panel.er_filename = er_filename
+    # Snapshot del ER recalculado: permite releer una celda al cambiar el mapeo
+    # sin re-subir el archivo. Se guarda como JSON {hoja: {coord: valor}}.
+    snap = parsed.get("snapshot") or {}
+    panel.er_snapshot = json.dumps(snap) if snap else None
     panel.generado_por_id = usuario_id
     db.flush()
 
@@ -363,6 +402,8 @@ def _guardar_panel(
                 grupo=l["grupo"],
                 concepto=l["concepto"],
                 valor_cop=round(l["valor"] * frac, 2),
+                hoja=l.get("hoja"),
+                celda=l.get("celda"),
                 orden=orden,
             ))
             orden += 1
@@ -507,6 +548,10 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
             "concepto": ln.concepto,
             "valor_cop": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
             "comprobante_contable": ln.comprobante_contable,
+            "hoja": ln.hoja,
+            "celda": ln.celda,
+            # "hoja!celda" listo para mostrar/editar en el frontend (None si es derivado).
+            "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
             "orden": ln.orden,
         })
 
@@ -572,6 +617,95 @@ def actualizar(
     db.commit()
     db.refresh(panel)
     nombres = {panel.proyecto_id: None}
+    p = db.query(Proyecto.nombre_comercial).filter(Proyecto.id == panel.proyecto_id).first()
+    nombres[panel.proyecto_id] = p.nombre_comercial if p else None
+    return _serializar_panel(panel, nombres)
+
+
+# ── Mapeo de celda por concepto (PROPONER → CORREGIR → RECORDAR) ──────────────────
+
+@router.post("/mapeo-celda")
+def guardar_mapeo_celda(
+    body: MapeoCeldaBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    La usuaria corrige la celda de origen de un concepto ("hoja!celda"). El backend:
+      1. relee esa celda del snapshot del ER del panel,
+      2. guarda el mapeo por (proyecto, concepto) para los próximos meses (RECORDAR),
+      3. actualiza el valor de las líneas de ese concepto (re-dividido por inversionista).
+    Devuelve el panel actualizado.
+    """
+    try:
+        y, m = body.periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    hoja = (body.hoja or "").strip()
+    celda = (body.celda or "").strip().upper().replace("$", "")
+    if not hoja or not celda:
+        raise HTTPException(422, "Debe indicar hoja y celda (ej. Sheet1 / H35)")
+
+    panel = (
+        db.query(PanelContable)
+        .filter(
+            PanelContable.proyecto_id == body.proyecto_id,
+            PanelContable.periodo == periodo_norm,
+            PanelContable.tipo == body.tipo,
+        )
+        .first()
+    )
+    if not panel:
+        raise HTTPException(404, "No hay panel para ese proyecto/período/tipo")
+    if not panel.er_snapshot:
+        raise HTTPException(
+            409, "El panel no tiene snapshot del ER (vuelve a cargar el ER para poder remapear celdas)"
+        )
+
+    snapshot = json.loads(panel.er_snapshot)
+    val = leer_celda(snapshot, hoja, celda)
+    if val is None:
+        raise HTTPException(422, f"{hoja}!{celda} no tiene un valor numérico en el ER")
+
+    # Upsert del mapeo persistente (RECORDAR).
+    mapeo = (
+        db.query(MapeoCeldaConcepto)
+        .filter(
+            MapeoCeldaConcepto.proyecto_id == body.proyecto_id,
+            MapeoCeldaConcepto.concepto == body.concepto,
+        )
+        .first()
+    )
+    if mapeo is None:
+        mapeo = MapeoCeldaConcepto(
+            proyecto_id=body.proyecto_id, concepto=body.concepto, hoja=hoja, celda=celda,
+        )
+        db.add(mapeo)
+    else:
+        mapeo.hoja = hoja
+        mapeo.celda = celda
+
+    # Actualizar las líneas de ese concepto (re-divididas por % del inversionista).
+    lineas = (
+        db.query(PanelContableLinea)
+        .filter(PanelContableLinea.panel_id == panel.id,
+                PanelContableLinea.concepto == body.concepto)
+        .all()
+    )
+    if not lineas:
+        raise HTTPException(404, f"El panel no tiene el concepto '{body.concepto}'")
+    for ln in lineas:
+        base = _aplicar_signo(ln.grupo, ln.concepto, val)
+        frac = (float(ln.porcentaje) / 100.0) if ln.porcentaje is not None else 1.0
+        ln.valor_cop = round(base * frac, 2)
+        ln.hoja = hoja
+        ln.celda = celda
+
+    db.commit()
+    db.refresh(panel)
+    nombres = {}
     p = db.query(Proyecto.nombre_comercial).filter(Proyecto.id == panel.proyecto_id).first()
     nombres[panel.proyecto_id] = p.nombre_comercial if p else None
     return _serializar_panel(panel, nombres)

@@ -36,6 +36,9 @@ from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
 )
+from app.models.mandatos import (
+    Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
+)
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -60,4 +63,5 @@ __all__ = [
     "StarlinkFactura",
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
+    "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
 ]

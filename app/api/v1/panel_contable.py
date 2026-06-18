@@ -47,6 +47,14 @@ def _require_write(current: Usuario = Depends(get_current_user)):
     return current
 
 
+def _es_minigranja_operativa():
+    """
+    Filtro SQLAlchemy: el Panel Contable es SOLO de minigranjas operativas.
+    Excluye AMC, Acanto, COLxxx, proyectos en desarrollo, etc.
+    """
+    return (Proyecto.tipo_proyecto == "minigranja") & (Proyecto.estado == "en_operacion")
+
+
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class LineaPatch(BaseModel):
@@ -268,9 +276,11 @@ async def cargar_er(
     except Exception:
         raise HTTPException(422, "El período debe tener formato YYYY-MM")
 
+    # Solo minigranjas operativas: un ER de otro tipo de proyecto no debe crear panel.
     proyectos_db = [
         {"id": p.id, "nombre_comercial": p.nombre_comercial}
-        for p in db.query(Proyecto).order_by(Proyecto.id).all()
+        for p in db.query(Proyecto).filter(_es_minigranja_operativa())
+        .order_by(Proyecto.id).all()
     ]
 
     # Clasificación del período: proyecto_id → tipo (default 'normal').
@@ -472,7 +482,14 @@ def listar_clasificacion(
         for c in db.query(ClasificacionLiquidacion)
         .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
     }
-    proyectos = db.query(Proyecto).order_by(Proyecto.nombre_comercial).all()
+    # El Panel Contable es SOLO de minigranjas operativas: filtrar para no listar
+    # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er).
+    proyectos = (
+        db.query(Proyecto)
+        .filter(_es_minigranja_operativa())
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
     return {
         "periodo": periodo_norm,
         "proyectos": [

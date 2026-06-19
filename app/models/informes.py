@@ -11,6 +11,7 @@ class TipoInformeEnum(str, enum.Enum):
     op = "op"
     fmo = "fmo"
     port = "port"
+    ranking = "ranking"
 
 
 class EstadoInformeEnum(str, enum.Enum):

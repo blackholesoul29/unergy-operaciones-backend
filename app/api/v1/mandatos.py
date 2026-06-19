@@ -12,10 +12,13 @@ Endpoints:
   GET    /mandato-inversionistas            → tabla maestra
 """
 from __future__ import annotations
+import io
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +28,7 @@ from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCost
 from app.schemas.mandatos import MandatoCrear, MandatoActualizar, InversionistaOut
 from app.services.mandatos_service import (
     mandato_to_dict, calcular_resumen, transicion_valida, extraer_cmu_de_nombre,
+    parsear_nombre_zip, match_inversionista,
 )
 
 router = APIRouter(prefix="/mandatos", tags=["Mandatos"])
@@ -32,6 +36,9 @@ maestra_router = APIRouter(prefix="/mandato-inversionistas", tags=["Mandatos"])
 
 _PDF_DIR = Path("uploads/mandatos")
 _PDF_DIR.mkdir(parents=True, exist_ok=True)
+
+_ZIP_DIR = Path("uploads/mandatos/zips")
+_ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _periodo_a_date(periodo: str) -> date:
@@ -169,6 +176,89 @@ def eliminar(mandato_id: int, db: Session = Depends(get_db), _=Depends(get_curre
         raise HTTPException(404, "Mandato no encontrado.")
     db.delete(m)
     db.commit()
+
+
+@router.post("/upload-zip")
+async def upload_zip(periodo: str = Form(...), file: UploadFile = File(...),
+                     db: Session = Depends(get_db), _=Depends(get_current_user)):
+    if not file.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "El archivo debe ser un .zip")
+    contenido = await file.read()
+    if len(contenido) > 100 * 1024 * 1024:
+        raise HTTPException(413, "Archivo demasiado grande (máx. 100 MB).")
+    p = _periodo_a_date(periodo)
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(contenido))
+        nombres = [n for n in zf.namelist() if n.lower().endswith(".pdf") and not n.endswith("/")]
+    except zipfile.BadZipFile:
+        raise HTTPException(422, "El archivo no es un ZIP válido.")
+
+    maestra = [{"id": i.id, "nombre": i.nombre}
+               for i in db.execute(select(MandatoInversionista)).scalars().all()]
+
+    detectados = creados = omitidos = identificados_auto = sin_inversionista = 0
+    no_parseables: list[str] = []
+    sugerencias: list[dict] = []
+
+    for nombre in nombres:
+        base = nombre.split("/")[-1]
+        parsed = parsear_nombre_zip(base)
+        if not parsed:
+            no_parseables.append(base)
+            continue
+        detectados += 1
+        existe = db.execute(
+            select(Mandato).where(Mandato.cmu == parsed["cmu"], Mandato.periodo == p)
+        ).scalar_one_or_none()
+        if existe:
+            omitidos += 1
+            continue
+        inv_id, sugerencia, _score = match_inversionista(parsed["inversionista"], maestra)
+        estado = "pendiente_envio" if inv_id else "sin_inversionista"
+        m = Mandato(cmu=parsed["cmu"], periodo=p, proyecto=parsed["proyecto"],
+                    tercero=parsed["inversionista"], inversionista_id=inv_id,
+                    estado=estado, archivo_zip_nombre=base)
+        db.add(m)
+        db.flush()
+        creados += 1
+        if inv_id:
+            identificados_auto += 1
+        else:
+            sin_inversionista += 1
+            if sugerencia:
+                sugerencias.append({"mandato_id": m.id, "cmu": parsed["cmu"],
+                                    "nombre_extraido": parsed["inversionista"], **sugerencia})
+
+    (_ZIP_DIR / f"{periodo}.zip").write_bytes(contenido)
+    db.commit()
+    return {
+        "detectados": detectados, "creados": creados, "omitidos": omitidos,
+        "identificados_auto": identificados_auto, "sin_inversionista": sin_inversionista,
+        "no_parseables": no_parseables, "sugerencias": sugerencias,
+    }
+
+
+@router.get("/{mandato_id}/pdf")
+def descargar_pdf(mandato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    m = db.get(Mandato, mandato_id)
+    if not m:
+        raise HTTPException(404, "Mandato no encontrado.")
+    if not m.archivo_zip_nombre:
+        raise HTTPException(404, "Este mandato no tiene PDF asociado en un ZIP.")
+    periodo = m.periodo.strftime("%Y-%m")
+    zpath = _ZIP_DIR / f"{periodo}.zip"
+    if not zpath.exists():
+        raise HTTPException(404, "No se encontró el ZIP del período.")
+    zf = zipfile.ZipFile(zpath)
+    entry = next((n for n in zf.namelist() if n.split("/")[-1] == m.archivo_zip_nombre), None)
+    if not entry:
+        raise HTTPException(404, "El PDF no está dentro del ZIP del período.")
+    data = zf.read(entry)
+    return StreamingResponse(
+        io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{m.archivo_zip_nombre}"'},
+    )
 
 
 @maestra_router.get("")

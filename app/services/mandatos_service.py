@@ -2,9 +2,11 @@
 from __future__ import annotations
 import re
 import unicodedata
+import difflib
 from datetime import date
 
 CMU_RE = re.compile(r"CMU\d+")
+ZIP_NOMBRE_RE = re.compile(r"^(CMU\d+)-Mandato-Costos-(.+)-(.+)\.pdf$", re.IGNORECASE)
 
 MESES = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
@@ -73,6 +75,8 @@ def mandato_to_dict(row) -> dict:
         "fecha_envio_inversionista": iso(row.fecha_envio_inversionista),
         "pdf_firmado_nombre": row.pdf_firmado_nombre,
         "tiene_pdf": bool(row.pdf_firmado_ruta),
+        "archivo_zip_nombre": getattr(row, "archivo_zip_nombre", None),
+        "tiene_pdf_zip": bool(getattr(row, "archivo_zip_nombre", None)),
     }
 
 
@@ -87,3 +91,59 @@ def calcular_resumen(filas) -> dict:
         "enviados_inversionista": estados.count("enviado_inversionista"),
         "pendientes": pendientes,
     }
+
+
+def parsear_nombre_zip(nombre: str) -> dict | None:
+    """'CMU0988-Mandato-Costos-{Proyecto}-{Inversionista}.pdf' → dict | None.
+
+    Divide en el último guion: un proyecto con guion (ej. 'PSF - Yurbaqua') queda
+    íntegro y el inversionista en el último segmento.
+    """
+    m = ZIP_NOMBRE_RE.match((nombre or "").strip())
+    if not m:
+        return None
+    return {
+        "cmu": m.group(1).upper(),
+        "proyecto": m.group(2).strip(),
+        "inversionista": m.group(3).strip(),
+    }
+
+
+def match_inversionista(nombre: str, maestra: list[dict], umbral: float = 0.6):
+    """Cruza el nombre de inversionista contra la maestra.
+
+    Devuelve (inversionista_id | None, sugerencia | None, score):
+      - match exacto normalizado            → (id, None, 1.0)        auto-vincula
+      - nombre de maestra contenido (substr) → (id, None, 0.9)        auto-vincula
+      - mejor fuzzy >= umbral                → (None, sugerencia, sc)  confirmación manual
+      - sin candidato                        → (None, None, sc)
+    `maestra` es lista de {"id", "nombre"}.
+    """
+    n = _normaliza(nombre)
+    if not n:
+        return None, None, 0.0
+    tokens = n.split()
+    # 1) exacto
+    for inv in maestra:
+        if _normaliza(inv["nombre"]) == n:
+            return inv["id"], None, 1.0
+    # 2) substring (maestra corta dentro del nombre largo) -> auto-vincula
+    for inv in maestra:
+        mn = _normaliza(inv["nombre"])
+        if mn and mn in n:
+            return inv["id"], None, 0.9
+    # 3) fuzzy (mejor ratio contra el nombre completo o cualquier token)
+    mejor, mejor_score = None, 0.0
+    for inv in maestra:
+        mn = _normaliza(inv["nombre"])
+        if not mn:
+            continue
+        ratios = [difflib.SequenceMatcher(None, mn, n).ratio()]
+        ratios += [difflib.SequenceMatcher(None, mn, t).ratio() for t in tokens]
+        score = max(ratios)
+        if score > mejor_score:
+            mejor, mejor_score = inv, score
+    if mejor and mejor_score >= umbral:
+        return None, {"sugerido_id": mejor["id"], "sugerido_nombre": mejor["nombre"],
+                      "score": round(mejor_score, 2)}, mejor_score
+    return None, None, round(mejor_score, 2)

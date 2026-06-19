@@ -105,3 +105,58 @@ def test_calcular_resumen_conteos():
     assert r["firmados"] == 1
     assert r["enviados_inversionista"] == 1
     assert r["pendientes"] == 2   # pendiente_envio + enviado_revisoria
+
+
+# ── parsear_nombre_zip ────────────────────────────────────────────────────────
+from app.services.mandatos_service import parsear_nombre_zip, match_inversionista
+
+def test_parsear_nombre_zip_suno_doble_punto():
+    r = parsear_nombre_zip("CMU0988-Mandato-Costos-Minigranja Solar Uruaco-SUNO ACTIVOS SOSTENIBLES S.A.S..pdf")
+    assert r["cmu"] == "CMU0988"
+    assert r["proyecto"] == "Minigranja Solar Uruaco"
+    assert r["inversionista"].startswith("SUNO ACTIVOS SOSTENIBLES S.A.S")
+
+def test_parsear_nombre_zip_solenium():
+    r = parsear_nombre_zip("CMU1017-Mandato-Costos-Minigranja Solar La Cacica-Solenium S.A.S.pdf")
+    assert r["cmu"] == "CMU1017"
+    assert r["proyecto"] == "Minigranja Solar La Cacica"
+    assert r["inversionista"].startswith("Solenium")
+
+def test_parsear_nombre_zip_proyecto_con_guion():
+    r = parsear_nombre_zip("CMU0001-Mandato-Costos-PSF - Yurbaqua-Enexa S.A.S.pdf")
+    assert r["cmu"] == "CMU0001"
+    assert r["proyecto"] == "PSF - Yurbaqua"
+    assert r["inversionista"].startswith("Enexa")
+
+def test_parsear_nombre_zip_no_valido():
+    assert parsear_nombre_zip("documento_cualquiera.pdf") is None
+
+# ── match_inversionista ───────────────────────────────────────────────────────
+MAESTRA_T = [{"id": 13, "nombre": "Suno"}, {"id": 2, "nombre": "Solenium"}, {"id": 7, "nombre": "Credicorp"}]
+
+def test_match_exacto():
+    inv_id, sug, score = match_inversionista("Suno", MAESTRA_T)
+    assert inv_id == 13 and sug is None and score == 1.0
+
+def test_match_substring_autolink():
+    inv_id, sug, score = match_inversionista("SUNO ACTIVOS SOSTENIBLES S.A.S.", MAESTRA_T)
+    assert inv_id == 13 and sug is None
+
+def test_match_fuzzy_sugerencia():
+    inv_id, sug, score = match_inversionista("Solenum S.A.S", MAESTRA_T)
+    assert inv_id is None
+    assert sug is not None and sug["sugerido_id"] == 2 and score >= 0.6
+
+def test_match_sin_candidato():
+    inv_id, sug, score = match_inversionista("Petrolera Nacional del Sur", MAESTRA_T)
+    assert inv_id is None and sug is None
+
+# ── mandato_to_dict: archivo_zip_nombre ──────────────────────────────────────
+def test_mandato_to_dict_pdf_zip():
+    out = mandato_to_dict(_row(archivo_zip_nombre="CMU0988-Mandato-Costos-X-Y.pdf"))
+    assert out["archivo_zip_nombre"] == "CMU0988-Mandato-Costos-X-Y.pdf"
+    assert out["tiene_pdf_zip"] is True
+
+def test_mandato_to_dict_sin_pdf_zip():
+    out = mandato_to_dict(_row())
+    assert out["tiene_pdf_zip"] is False

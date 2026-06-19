@@ -624,6 +624,24 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
             "orden": ln.orden,
         })
 
+    # Vista 100%: el valor TOTAL del proyecto por concepto (suma de todos los
+    # inversionistas, = antes de dividir). Preserva el orden de aparición.
+    total_100: list[dict] = []
+    idx_100: dict = {}
+    for ln in sorted(p.lineas, key=lambda x: x.orden):
+        k = (ln.grupo, ln.concepto)
+        v = float(ln.valor_cop) if ln.valor_cop is not None else 0.0
+        if k not in idx_100:
+            idx_100[k] = len(total_100)
+            total_100.append({
+                "grupo": ln.grupo, "concepto": ln.concepto, "valor_cop": v,
+                "hoja": ln.hoja, "celda": ln.celda,
+                "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
+                "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
+            })
+        else:
+            total_100[idx_100[k]]["valor_cop"] += v
+
     return {
         "id": p.id,
         "proyecto_id": p.proyecto_id,
@@ -643,6 +661,8 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
         "consecutivo_costos": p.consecutivo_costos,
         "er_filename": p.er_filename,
         "inversionistas": list(inv_map.values()),
+        # Vista 100% (total proyecto sin dividir).
+        "total_100": total_100,
     }
 
 

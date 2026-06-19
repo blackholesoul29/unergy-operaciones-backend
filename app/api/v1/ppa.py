@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import func
 from app.core.database import get_db
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, _require_admin
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto, AsicSolicitud
+from app.models.cliente_audit_log import ClientePpaAuditLog
 from app.models.cumplimiento import CumplimientoMensual
+from app.services.sync_client_ppa import ClientPpaSyncService, TRIGGERED_BY_MANUAL
 
 logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
@@ -256,6 +258,74 @@ def get_resumen_global(
             "sin_datos": sin_datos,
         },
         "contratos": contratos_resumen,
+    }
+
+
+@router.post("/sync-client-data")
+def sync_client_data(
+    full: bool = Query(False, description="Revisar todos los clientes, ignorando el último sync"),
+    db: Session = Depends(get_db),
+    _admin=Depends(_require_admin),
+):
+    """Dispara manualmente la propagación de datos Cliente → PPA (solo admin).
+
+    Recorre los clientes (modificados desde el último sync, o todos si `full`),
+    propaga Nombre/NIT a sus contratos PPA activos, registra cada cambio en la
+    bitácora y alerta los cambios críticos de NIT.
+    """
+    return ClientPpaSyncService(db).run_daily_sync(
+        triggered_by=TRIGGERED_BY_MANUAL,
+        process_all=full,
+    )
+
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    ppa_id: int | None = Query(None),
+    cliente_id: int | None = Query(None),
+    solo_criticos: bool = Query(False),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Historial inmutable de cambios propagados de clientes a contratos PPA.
+
+    Soporta la trazabilidad de la "Adenda Digital": filtra por `ppa_id` o
+    `cliente_id` y opcionalmente solo los cambios críticos (NIT).
+    """
+    q = db.query(ClientePpaAuditLog)
+    if ppa_id is not None:
+        q = q.filter(ClientePpaAuditLog.ppa_id == ppa_id)
+    if cliente_id is not None:
+        q = q.filter(ClientePpaAuditLog.cliente_id == cliente_id)
+    if solo_criticos:
+        q = q.filter(ClientePpaAuditLog.is_critical.is_(True))
+    total = q.count()
+    rows = (
+        q.order_by(ClientePpaAuditLog.synced_at.desc(), ClientePpaAuditLog.id.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "size": size,
+        "items": [
+            {
+                "id": r.id,
+                "cliente_id": r.cliente_id,
+                "ppa_id": r.ppa_id,
+                "field_changed": r.field_changed,
+                "old_value": r.old_value,
+                "new_value": r.new_value,
+                "is_critical": r.is_critical,
+                "triggered_by": r.triggered_by,
+                "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+            }
+            for r in rows
+        ],
     }
 
 

@@ -835,6 +835,30 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
+    # migration — propagación diaria Cliente → PPA (NIT/Nombre) + bitácora inmutable
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS data_version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS last_data_sync TIMESTAMPTZ",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS requires_manual_review BOOLEAN NOT NULL DEFAULT FALSE",
+    """CREATE TABLE IF NOT EXISTS cliente_ppa_audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        cliente_id BIGINT NOT NULL REFERENCES clientes(id),
+        ppa_id BIGINT NOT NULL REFERENCES ppa_contratos(id),
+        field_changed VARCHAR(50) NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        is_critical BOOLEAN NOT NULL DEFAULT FALSE,
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        triggered_by VARCHAR(50) NOT NULL DEFAULT 'system_job'
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_ppa_audit_cliente ON cliente_ppa_audit_log (cliente_id)",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_ppa_audit_ppa ON cliente_ppa_audit_log (ppa_id)",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_ppa_audit_synced ON cliente_ppa_audit_log (synced_at DESC)",
+    # estado del job: marca de tiempo del último sync exitoso (fila única)
+    """CREATE TABLE IF NOT EXISTS cliente_ppa_sync_state (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        last_synced_at TIMESTAMPTZ,
+        CONSTRAINT ck_cliente_ppa_sync_state_singleton CHECK (id = 1)
+    )""",
 ]
 
 
@@ -2123,6 +2147,12 @@ def _deferred_init():
     except Exception as e:
         print(f"[startup] audit init FAILED: {e}")
 
+    try:
+        from app.tasks.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        print(f"[startup] client_ppa_sync scheduler FAILED: {e}")
+
     if settings.MGS_ENABLED:
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
@@ -2218,6 +2248,12 @@ async def lifespan(app: FastAPI):
     if _mgs_scheduler:
         _mgs_scheduler.shutdown(wait=False)
         print("[shutdown] MGS scheduler stopped")
+
+    try:
+        from app.tasks.scheduler import shutdown_scheduler
+        shutdown_scheduler(wait=False)
+    except Exception as e:
+        print(f"[shutdown] client_ppa_sync scheduler stop FAILED: {e}")
 
 
 app = FastAPI(

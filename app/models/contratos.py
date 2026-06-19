@@ -142,6 +142,11 @@ class PPAContrato(Base):
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Versionado de los datos de las partes propagados desde la maestra de clientes
+    data_version: Mapped[int] = mapped_column(sa_Integer, nullable=False, default=1, server_default="1")
+    last_data_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Marca un contrato cuyo NIT cambió: bloquea facturación automática hasta aval legal
+    requires_manual_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

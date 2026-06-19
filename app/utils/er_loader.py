@@ -164,7 +164,7 @@ def _norm(s) -> str:
 # ── Parser principal ─────────────────────────────────────────────────────────────
 
 def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
-               aliases: dict | None = None) -> dict:
+               aliases: dict | None = None, proyecto_nombre: str | None = None) -> dict:
     """
     Extrae del ER (ya recalculado) un dict estructurado. La hoja
     "Estado_de_resultados" es la misma en los 3 tipos; SOLO cambia cómo se lee
@@ -204,6 +204,12 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
     sh = wb[primera]
     grid = [[c.value for c in row] for row in sh.iter_rows()]
     snapshot = _construir_snapshot(wb)
+    # Grid de la hoja Summary (NITRO la usa para el ingreso bruto / bolsa).
+    _summary_name = next((n for n in wb.sheetnames if n.lower() == "summary"), None)
+    summary_grid = (
+        [[c.value for c in row] for row in wb[_summary_name].iter_rows()]
+        if _summary_name else None
+    )
     wb.close()
 
     warnings: list[str] = []
@@ -257,13 +263,31 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
         if _norm(concepto) not in presentes:
             ingresos_detalle.append({"concepto": concepto, "valor": 0.0})
 
+    # NITRO: el Ingreso Bruto / Ventas / Compras en bolsa viven en la hoja Summary
+    # (fila "Total" del proyecto), NO en la sección de Sheet1 (que trae el balance).
+    # Proponerlos desde ahí para que la carga fresca ya salga bien (la usuaria igual
+    # puede remapear). Cacica=fila Total Cacica, Piloneras=fila Total Piloneras.
+    if tipo == "nitro" and summary_grid:
+        sm = _summary_nitro(summary_grid, _summary_name, proyecto_nombre)
+        for d in ingresos_detalle:
+            nd = _norm(d["concepto"])
+            clave = ("ib" if "bruto" in nd else
+                     "venta" if ("venta" in nd and "bolsa" in nd) else
+                     "compra" if ("compra" in nd and "bolsa" in nd) else None)
+            if clave and clave in sm:
+                val, hoja_s, celda_s = sm[clave]
+                d["valor"] = -abs(round(val, 2)) if clave == "compra" else round(val, 2)
+                d["hoja"], d["celda"] = hoja_s, celda_s
+
     # Las fuentes de ingreso ya traen su celda exacta (columna Venta($) en la fila
-    # TOTAL); fijar su hoja a la principal y registrarla como usada.
+    # TOTAL de Sheet1); fijar su hoja a la principal SOLO si no tienen una ya
+    # (las de NITRO/Summary traen hoja="Summary" y no deben sobreescribirse).
     usados: set[str] = set()
     for ln in ingresos_detalle:
         if ln.get("celda"):
-            ln["hoja"] = primera
-            usados.add(f"{primera}!{ln['celda']}")
+            if not ln.get("hoja"):
+                ln["hoja"] = primera
+            usados.add(f"{ln['hoja']}!{ln['celda']}")
 
     # PROPONER: para los renglones sin celda, buscarla en el snapshot por el valor
     # propuesto, sin reusar la misma celda dos veces (desambigua Repr/CGM, iguales).
@@ -567,6 +591,62 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
         "compra_bolsa": compra_bolsa,
         "ingresos_detalle": detalle,
     }
+
+
+# ── NITRO: ingreso bruto / bolsa desde la hoja Summary ──────────────────────────
+
+def _plant_token(nombre: str | None) -> str | None:
+    """Última palabra significativa del nombre del proyecto (ej. 'cacica')."""
+    if not nombre:
+        return None
+    toks = [t for t in _norm(nombre).split()
+            if len(t) >= 4 and t not in ("solar", "minigranja", "granja")]
+    return toks[-1] if toks else None
+
+
+def _summary_nitro(grid: list[list], hoja: str, proyecto_nombre: str | None) -> dict:
+    """
+    De la hoja Summary, fila 'Total' del proyecto: Despacho/Ingreso Bruto, Ventas en
+    bolsa y Compras en bolsa. Columnas localizadas por encabezado (despacho/ventas/
+    compras $). Devuelve {clave: (valor, hoja, 'I6')} para 'ib'/'venta'/'compra'.
+    """
+    from openpyxl.utils import get_column_letter
+    if not grid:
+        return {}
+    col_ib = col_vta = col_cmp = None
+    for row in grid[:6]:
+        for j, c in enumerate(row):
+            h = _norm(c)
+            if not h:
+                continue
+            if "despacho" in h and ("$" in h or "cop" in h) and col_ib is None:
+                col_ib = j
+            elif "venta" in h and ("$" in h or "cop" in h) and col_vta is None:
+                col_vta = j
+            elif "compra" in h and ("$" in h or "cop" in h) and col_cmp is None:
+                col_cmp = j
+        if col_ib is not None:
+            break
+    if col_ib is None:
+        return {}
+    tok = _plant_token(proyecto_nombre)
+    fila = None
+    for i, row in enumerate(grid):
+        txt = " ".join(_norm(x) for x in row if isinstance(x, str))
+        if "total" in txt and (tok is None or tok in txt):
+            fila = i
+            break
+    if fila is None:
+        return {}
+    out: dict = {}
+    for clave, j in (("ib", col_ib), ("venta", col_vta), ("compra", col_cmp)):
+        if j is None or j >= len(grid[fila]):
+            continue
+        v = _num(grid[fila][j])
+        if v is None:
+            continue
+        out[clave] = (v, hoja, f"{get_column_letter(j + 1)}{fila + 1}")
+    return out
 
 
 # ── Ingresos NEU / NITRO (sección "Ingresos y costos", NO la XM) ────────────────

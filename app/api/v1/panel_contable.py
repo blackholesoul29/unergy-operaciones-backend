@@ -222,14 +222,29 @@ def _inversionistas_de(db: Session, proyecto_id: int, periodo: str | None = None
         if activos:
             rows = activos
 
+    # porcentaje_participacion puede venir en 0-1 (0.5 = 50%) o en 0-100 (50 = 50%)
+    # según cómo se cargó cada proyecto (datos inconsistentes). Autodetectar: si TODOS
+    # los porcentajes activos son ≤ 1.5, están en fracción (0-1); si no, en 0-100.
+    # Antes se dividía siempre /100, lo que con datos 0-1 (ej. Cacica 0.5) dejaba las
+    # líneas 100× más pequeñas y mostraba "0.50%" en vez de "50%".
+    pcts = [float(r.porcentaje_participacion) for r in rows if r.porcentaje_participacion is not None]
+    escala_0_1 = bool(pcts) and all(p <= 1.5 for p in pcts)
+
     out = []
     for r in rows:
-        pct = float(r.porcentaje_participacion) if r.porcentaje_participacion is not None else None
+        raw = float(r.porcentaje_participacion) if r.porcentaje_participacion is not None else None
+        # pct = porcentaje en forma 0-100 (lo que se muestra y se guarda en la línea);
+        # fraccion = factor 0-1 para dividir los valores.
+        if raw is None:
+            pct = fraccion = None
+        elif escala_0_1:
+            pct, fraccion = raw * 100.0, raw
+        else:
+            pct, fraccion = raw, raw / 100.0
         out.append({
             "id": r.id,
             "nombre": r.razon_social_nombre or "—",
-            # porcentaje_participacion se guarda en 0-100; lo normalizamos a fracción.
-            "fraccion": (pct / 100.0) if pct is not None else None,
+            "fraccion": fraccion,
             "pct": pct,
         })
     # Si ningún % está definido, repartir en partes iguales como fallback.
@@ -357,6 +372,7 @@ async def cargar_er(
                 recalc_path, tipo=tipo_carga,
                 mapeos=mapeos_por_proyecto.get(proy["id"]),
                 aliases=aliases_por_proyecto.get(proy["id"]),
+                proyecto_nombre=proy["nombre_comercial"],
             )
 
             panel = _guardar_panel(

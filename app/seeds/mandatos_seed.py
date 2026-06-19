@@ -50,14 +50,31 @@ def _inv_id(db, nombre):
     return db.execute(select(MandatoInversionista.id).where(MandatoInversionista.nombre == nombre)).scalar_one_or_none()
 
 
+def seed_maestra(db):
+    """Inserta la tabla maestra (idempotente por nombre). No commitea."""
+    for item in MAESTRA:
+        existe = db.execute(
+            select(MandatoInversionista).where(MandatoInversionista.nombre == item["nombre"])
+        ).scalar_one_or_none()
+        if not existe:
+            db.add(MandatoInversionista(**item))
+
+
+def ensure_maestra():
+    """Asegura que la maestra exista. Seguro de llamar en cada arranque."""
+    db = SessionLocal()
+    try:
+        seed_maestra(db)
+        db.commit()
+    finally:
+        db.close()
+
+
 def run():
     db = SessionLocal()
     try:
-        # ── Maestra (idempotente por nombre) ──
-        for item in MAESTRA:
-            existe = db.execute(select(MandatoInversionista).where(MandatoInversionista.nombre == item["nombre"])).scalar_one_or_none()
-            if not existe:
-                db.add(MandatoInversionista(**item))
+        # ── Maestra ──
+        seed_maestra(db)
         db.commit()
 
         suno_id = _inv_id(db, "Suno")

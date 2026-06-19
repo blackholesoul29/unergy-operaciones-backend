@@ -1055,6 +1055,11 @@ def _run_create_tables() -> None:
         print("[startup] Tables ensured OK")
     except Exception as e:
         print(f"[startup] create_all skipped: {e}")
+    try:
+        from app.seeds.mandatos_seed import ensure_maestra
+        ensure_maestra()
+    except Exception as e:
+        print(f"[startup] ensure_maestra skipped: {e}")
 
 
 # Datos iniciales de contratos CGM/Representación — fuente: Data/contratosCGM.json

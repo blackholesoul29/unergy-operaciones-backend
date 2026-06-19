@@ -61,6 +61,7 @@ class Mandato(Base):
     fecha_envio_inversionista: Mapped[date | None] = mapped_column(Date, nullable=True)
     pdf_firmado_ruta: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     pdf_firmado_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    archivo_zip_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
     correo_ref_revisoria: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_ref_envio: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

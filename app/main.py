@@ -825,6 +825,7 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_mandatos_cmu ON mandatos (cmu)",
     "CREATE INDEX IF NOT EXISTS ix_mandatos_periodo ON mandatos (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_mandatos_inversionista_id ON mandatos (inversionista_id)",
+    "ALTER TABLE mandatos ADD COLUMN IF NOT EXISTS archivo_zip_nombre VARCHAR(500)",
     """CREATE TABLE IF NOT EXISTS gmail_credenciales (
         id BIGSERIAL PRIMARY KEY,
         cuenta VARCHAR(255) NOT NULL UNIQUE,

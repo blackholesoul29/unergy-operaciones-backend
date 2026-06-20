@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
-from app.services.mgs.gaia_client import GaiaClient
+from app.services.mgs.gaia_client import FRONTERA_NODE_MAP, GaiaClient, find_gaia_node_id
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("control_generacion")
@@ -252,13 +252,29 @@ def datos_generacion(
         if not fronteras_gen and sol_id is None:
             return None
 
-        frontera_ppal = next((f for f in fronteras_gen if f.quoia_meter_id), None)
+        # ── Resolver nodo Quoia en tres capas ───────────────────────────────
+        # 1. quoia_meter_id ya guardado en la BD
+        quoia_node_id = next((f.quoia_meter_id for f in fronteras_gen if f.quoia_meter_id), None)
+        frontera_codigo = next((f.codigo_frontera for f in fronteras_gen if f.codigo_frontera), None)
+
+        # 2. Buscar por código de frontera en el mapa hardcodeado
+        if not quoia_node_id and frontera_codigo:
+            pair = FRONTERA_NODE_MAP.get(frontera_codigo.lower())
+            if pair:
+                quoia_node_id = pair[0]
+
+        # 3. Matching por nombre de proyecto
+        if not quoia_node_id:
+            quoia_node_id = find_gaia_node_id(
+                p.nombre_comercial or "",
+                p.nombre_bitacora or "",
+            )
 
         quoia_data    = {"total_kwh": 0.0, "curva": []}
         solenium_data = {"total_kwh": 0.0, "inversores": []}
 
-        if frontera_ppal:
-            quoia_data = _quoia_curve(gaia, frontera_ppal.quoia_meter_id, fecha)
+        if quoia_node_id:
+            quoia_data = _quoia_curve(gaia, quoia_node_id, fecha)
         if sol_id:
             solenium_data = _solenium_inversores(sol, sol_id, fecha)
 
@@ -275,7 +291,8 @@ def datos_generacion(
             "nombre":         p.nombre_comercial,
             "potencia_kwp":   float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
             "solenium_id":    sol_id,
-            "frontera_codigo": frontera_ppal.codigo_frontera if frontera_ppal else None,
+            "quoia_node_id":  quoia_node_id,
+            "frontera_codigo": frontera_codigo,
             "estado":         estado,
             "discrepancia_pct": _discrepancia(q_kwh, s_kwh),
             "quoia":    quoia_data,

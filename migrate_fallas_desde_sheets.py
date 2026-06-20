@@ -24,14 +24,14 @@ from typing import Optional
 
 import requests
 
+from app.core.config import settings
+
 # -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
 API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26
@@ -178,7 +178,7 @@ def parse_datetime(raw: str) -> Optional[str]:
 
 def get_token() -> str:
     r = requests.post(f"{API_BASE}/auth/token",
-                      data={"username": API_EMAIL, "password": API_PASS})
+                      data={"username": settings.api_email, "password": settings.api_password})
     r.raise_for_status()
     return r.json()["access_token"]
 
@@ -431,7 +431,7 @@ def main():
     print("=" * 65)
 
     token = get_token()
-    print(f"Autenticado como {API_EMAIL}\n")
+    print(f"Autenticado como {settings.api_email}\n")
 
     # -- 1. Proyectos ----------------------------------------------
     print("-- Paso 1: Verificando / creando proyectos ------------------")

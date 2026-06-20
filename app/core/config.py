@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     UNERGY_ACCOUNT_ID: str = ""
     UNERGY_LOGIN: str = ""
     UNERGY_PASSWORD: str = ""
+
+    # Unergy Operaciones API — credenciales para scripts de migración
+    api_email: str = Field("", validation_alias="UNERGY_API_EMAIL")
+    api_password: str = Field("", validation_alias="UNERGY_API_PASS")
 
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).

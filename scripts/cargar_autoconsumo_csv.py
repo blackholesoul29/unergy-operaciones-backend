@@ -15,7 +15,7 @@ Uso:
       --hojas Enero Febrero Marzo Abril \
       --api-url https://backend-production-63d8.up.railway.app \
       --usuario jessica@unergy.io \
-      --password Unergy2025! \
+      --password 'TU_PASSWORD' \
       --limpiar
 """
 

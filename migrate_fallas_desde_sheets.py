@@ -13,6 +13,7 @@ Uso:
 Requiere:
     pip install requests
 """
+import os
 import sys
 import json
 import time
@@ -24,14 +25,26 @@ from typing import Optional
 
 import requests
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ModuleNotFoundError:  # python-dotenv es opcional: las vars pueden venir del entorno
+    pass
+
 # -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
 API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
-API_EMAIL = "juanjose@unergy.io"
-API_PASS  = "Unergy2025!"
+API_EMAIL = os.environ.get("UNERGY_API_EMAIL")
+API_PASS  = os.environ.get("UNERGY_API_PASS")
+if not API_EMAIL or not API_PASS:
+    sys.exit(
+        "ERROR: faltan las variables de entorno UNERGY_API_EMAIL / UNERGY_API_PASS.\n"
+        "Defínelas en un archivo .env (ver .env.example) o expórtalas antes de ejecutar."
+    )
 
 # Cliente por defecto para proyectos históricos (UNERGY S.A.S, id=26)
 DEFAULT_CLIENTE_ID = 26

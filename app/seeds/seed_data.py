@@ -1,13 +1,22 @@
 """
 Ejecutar una sola vez después de crear las tablas:
     python -m app.seeds.seed_data
+
+Contraseña inicial de los usuarios sembrados: se toma de la variable de entorno
+SEED_USER_PASSWORD (default "changeme123"). NO se hardcodean secretos de producción
+aquí — los usuarios deben rotar su contraseña tras el primer ingreso.
 """
+import os
+
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import (
     Usuario, FallaCatCategoria, FallaCatTipo, FallaCatEstado,
     FallaCatPrioridad, FallaCatResolucion, PromoterCatalogoRequisito,
 )
+
+# Contraseña inicial para los usuarios sembrados (override vía entorno).
+SEED_USER_PASSWORD = os.environ.get("SEED_USER_PASSWORD", "changeme123")
 
 
 USUARIOS = [
@@ -115,7 +124,7 @@ def seed():
                     email=u["email"],
                     nombre=u["nombre"],
                     rol=u["rol"],
-                    password_hash=hash_password("Unergy2025!"),
+                    password_hash=hash_password(SEED_USER_PASSWORD),
                     activo=True,
                 ))
 

@@ -152,29 +152,24 @@ def _solenium_generation(sol: SoleniumClient, sol_id: int, fecha: str) -> dict:
         logger.warning("solenium gen id=%s fecha=%s: %s", sol_id, fecha, exc)
 
     # Curvas por inversor (potencia kW, 5 min)
+    # Estructura real: {"results": {"unit": "kW", "power": {"InversorName": {"HH:MM": kw, ...}, ...}}}
     inversores: list[dict] = []
     try:
         power_data = sol.get_power(sol_id, date_from=fecha, date_to=fecha)
         if power_data:
-            inv_list = power_data if isinstance(power_data, list) else (
-                power_data.get("results") or power_data.get("inverters") or power_data.get("data") or []
-            )
-            for inv in inv_list:
-                inv_id   = inv.get("id") or inv.get("inverter_id")
-                inv_name = (inv.get("name") or inv.get("inverter_name") or f"Inversor {inv_id}").strip()
-                curve_raw = (
-                    inv.get("power") or inv.get("power_curve") or inv.get("curve") or inv.get("data") or []
-                )
+            power_dict = (power_data.get("results") or {}).get("power") or {}
+            for inv_name, ts_dict in power_dict.items():
+                if not isinstance(ts_dict, dict):
+                    continue
                 inv_curva: list[dict] = []
                 inv_total = 0.0
-                for pt in curve_raw:
-                    t  = pt.get("time") or pt.get("timestamp") or ""
-                    kw = float(pt.get("kw") or pt.get("power") or pt.get("value") or 0.0)
+                for ts, kw_val in sorted(ts_dict.items()):
+                    kw = float(kw_val or 0)
+                    hora = ts[11:16] if len(ts) >= 16 else ts
                     inv_total += kw * (5 / 60)
-                    hora = t[11:16] if len(t) >= 16 else t
                     inv_curva.append({"tiempo": hora, "kw": round(kw, 3)})
                 inversores.append({
-                    "id":        inv_id,
+                    "id":        inv_name,
                     "nombre":    inv_name,
                     "total_kwh": round(inv_total, 3),
                     "curva":     inv_curva,

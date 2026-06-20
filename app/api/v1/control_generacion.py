@@ -136,24 +136,53 @@ def _quoia_curve(gaia: GaiaClient, frt_code: str, fecha: str) -> dict:
 
 
 def _solenium_generation(sol: SoleniumClient, sol_id: int, fecha: str) -> dict:
+    # Total horario (para comparar con Quoia)
+    total = 0.0
+    curva: list[dict] = []
     try:
-        data = sol.get_generation(sol_id, start_date=fecha, end_date=fecha)
+        gen_data = sol.get_generation(sol_id, start_date=fecha, end_date=fecha)
+        if gen_data:
+            total = float(gen_data.get("total_generation_kwh", 0) or 0)
+            gen_dict = gen_data.get("generation_kwh", {}) or {}
+            curva = [
+                {"hora": ts[11:16] if len(ts) >= 16 else ts, "kwh": round(float(v or 0), 3)}
+                for ts, v in sorted(gen_dict.items())
+            ]
     except Exception as exc:
         logger.warning("solenium gen id=%s fecha=%s: %s", sol_id, fecha, exc)
-        data = None
 
-    if not data:
-        return {"total_kwh": 0.0, "curva": []}
+    # Curvas por inversor (potencia kW, 5 min)
+    inversores: list[dict] = []
+    try:
+        power_data = sol.get_power(sol_id, date_from=fecha, date_to=fecha)
+        if power_data:
+            inv_list = power_data if isinstance(power_data, list) else (
+                power_data.get("results") or power_data.get("inverters") or power_data.get("data") or []
+            )
+            for inv in inv_list:
+                inv_id   = inv.get("id") or inv.get("inverter_id")
+                inv_name = (inv.get("name") or inv.get("inverter_name") or f"Inversor {inv_id}").strip()
+                curve_raw = (
+                    inv.get("power") or inv.get("power_curve") or inv.get("curve") or inv.get("data") or []
+                )
+                inv_curva: list[dict] = []
+                inv_total = 0.0
+                for pt in curve_raw:
+                    t  = pt.get("time") or pt.get("timestamp") or ""
+                    kw = float(pt.get("kw") or pt.get("power") or pt.get("value") or 0.0)
+                    inv_total += kw * (5 / 60)
+                    hora = t[11:16] if len(t) >= 16 else t
+                    inv_curva.append({"tiempo": hora, "kw": round(kw, 3)})
+                inversores.append({
+                    "id":        inv_id,
+                    "nombre":    inv_name,
+                    "total_kwh": round(inv_total, 3),
+                    "curva":     inv_curva,
+                })
+    except Exception as exc:
+        logger.warning("solenium power id=%s fecha=%s: %s", sol_id, fecha, exc)
 
-    total = float(data.get("total_generation_kwh", 0) or 0)
-    gen_dict = data.get("generation_kwh", {}) or {}
-
-    curva = [
-        {"hora": ts[11:16] if len(ts) >= 16 else ts, "kwh": round(float(v or 0), 3)}
-        for ts, v in sorted(gen_dict.items())
-    ]
-
-    return {"total_kwh": round(total, 3), "curva": curva}
+    return {"total_kwh": round(total, 3), "curva": curva, "inversores": inversores}
 
 
 def _discrepancia(q_kwh: float, s_kwh: float) -> float | None:

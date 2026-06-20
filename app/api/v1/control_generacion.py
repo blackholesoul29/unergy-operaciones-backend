@@ -10,12 +10,15 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
-from app.models.fronteras import Frontera, TipoFronteraEnum  # noqa: F401 (import for joinedload)
+from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
 from app.services.mgs.gaia_client import GaiaClient
@@ -24,7 +27,7 @@ from app.services.mgs.solenium_client import SoleniumClient
 logger = logging.getLogger("control_generacion")
 router = APIRouter(prefix="/control-generacion", tags=["Control de Generación"])
 
-_TIPOS_GENERACION = {TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo}
+_TIPOS_GENERACION = {"generacion", "generacion_consumo"}
 
 _solenium: SoleniumClient | None = None
 _gaia: GaiaClient | None = None
@@ -148,6 +151,28 @@ def _safe_sol_id(val) -> int | None:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _query_fronteras_gen(db: Session, proyecto_ids: list) -> dict:
+    """Devuelve {proyecto_id: [filas]} solo con las columnas que necesitamos."""
+    if not proyecto_ids:
+        return {}
+    rows = db.execute(
+        select(
+            Frontera.proyecto_id,
+            Frontera.id,
+            Frontera.codigo_frontera,
+            Frontera.tipo_frontera,
+            Frontera.quoia_meter_id,
+        ).where(
+            Frontera.proyecto_id.in_(proyecto_ids),
+            Frontera.tipo_frontera.in_(list(_TIPOS_GENERACION)),
+        )
+    ).fetchall()
+    result: dict = defaultdict(list)
+    for row in rows:
+        result[row.proyecto_id].append(row)
+    return result
+
+
 @router.get("/proyectos")
 def listar_proyectos(
     db: Session = Depends(get_db),
@@ -157,13 +182,14 @@ def listar_proyectos(
     proyectos = (
         db.query(Proyecto)
         .filter(Proyecto.deleted_at.is_(None))
-        .options(joinedload(Proyecto.fronteras))
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
+    frt_by_proj = _query_fronteras_gen(db, [p.id for p in proyectos])
+
     result = []
     for p in proyectos:
-        fronteras_gen = [f for f in p.fronteras if f.tipo_frontera in _TIPOS_GENERACION]
+        fronteras_gen = frt_by_proj.get(p.id, [])
         tiene_solenium = bool(p.project_id_solenium)
         tiene_quoia    = any(f.quoia_meter_id for f in fronteras_gen)
         if not tiene_solenium and not tiene_quoia:
@@ -211,15 +237,16 @@ def datos_generacion(
     q = (
         db.query(Proyecto)
         .filter(Proyecto.deleted_at.is_(None))
-        .options(joinedload(Proyecto.fronteras))
         .order_by(Proyecto.nombre_comercial)
     )
     if proyecto_id:
         q = q.filter(Proyecto.id == proyecto_id)
     proyectos = q.all()
 
+    frt_by_proj = _query_fronteras_gen(db, [p.id for p in proyectos])
+
     def _procesar(p: Proyecto) -> dict | None:
-        fronteras_gen = [f for f in p.fronteras if f.tipo_frontera in _TIPOS_GENERACION]
+        fronteras_gen = frt_by_proj.get(p.id, [])
         sol_id = _safe_sol_id(p.project_id_solenium)
 
         if not fronteras_gen and sol_id is None:

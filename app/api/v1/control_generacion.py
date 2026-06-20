@@ -1,16 +1,14 @@
 """Control de Generación — curvas Quoia + Fusion/Solenium del día anterior.
 
 Endpoints:
-  GET /control-generacion/proyectos  → lista proyectos configurados
-  GET /control-generacion/datos      → curvas Quoia + Solenium por proyecto y fecha
+  GET /control-generacion/proyectos  → lista fronteras de generación desde Quoia (enriquecidas con BD)
+  GET /control-generacion/datos      → curvas Quoia + Solenium por frontera y fecha
 """
 from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
-
-from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -85,7 +83,6 @@ def _solenium_inversores(sol: SoleniumClient, sol_id: int, fecha: str) -> dict:
     if not data:
         return {"total_kwh": 0.0, "inversores": []}
 
-    # La respuesta puede ser lista o dict con distintas claves según el endpoint
     if isinstance(data, list):
         inverters_raw = data
     elif isinstance(data, dict):
@@ -116,7 +113,6 @@ def _solenium_inversores(sol: SoleniumClient, sol_id: int, fecha: str) -> dict:
         for pt in curve_raw:
             t  = pt.get("time") or pt.get("timestamp") or ""
             kw = float(pt.get("kw") or pt.get("power") or pt.get("value") or 0.0)
-            # Integrar 5-min de potencia → energía (kWh)
             inv_total += kw * (5 / 60)
             hora = t[11:16] if len(t) >= 16 else t
             curva.append({"tiempo": hora, "kw": round(kw, 3)})
@@ -147,75 +143,90 @@ def _safe_sol_id(val) -> int | None:
         return None
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── DB lookup ─────────────────────────────────────────────────────────────────
 
-def _query_fronteras_gen(db: Session, proyecto_ids: list) -> dict:
-    """Devuelve {proyecto_id: [filas]} solo con las columnas que necesitamos."""
-    if not proyecto_ids:
-        return {}
+def _build_db_lookup(db: Session) -> dict[str, dict]:
+    """Returns {frt_code_lower → {proyecto_id, nombre, solenium_id, potencia_kwp}} from Railway DB."""
     rows = db.execute(
         select(
-            Frontera.proyecto_id,
-            Frontera.id,
             Frontera.codigo_frontera,
-            Frontera.tipo_frontera,
-        ).where(
-            Frontera.proyecto_id.in_(proyecto_ids),
+            Proyecto.id,
+            Proyecto.nombre_comercial,
+            Proyecto.project_id_solenium,
+            Proyecto.potencia_instalada_kwp,
+        )
+        .join(Proyecto, Frontera.proyecto_id == Proyecto.id)
+        .where(
+            Proyecto.deleted_at.is_(None),
             Frontera.tipo_frontera.in_(list(_TIPOS_GENERACION)),
+            Frontera.codigo_frontera.isnot(None),
         )
     ).fetchall()
-    result: dict = defaultdict(list)
+
+    result: dict[str, dict] = {}
     for row in rows:
-        result[row.proyecto_id].append(row)
+        frt = (row.codigo_frontera or "").strip().lower()
+        if frt:
+            result[frt] = {
+                "proyecto_id":  row.id,
+                "nombre":       row.nombre_comercial,
+                "solenium_id":  _safe_sol_id(row.project_id_solenium),
+                "potencia_kwp": float(row.potencia_instalada_kwp) if row.potencia_instalada_kwp else None,
+            }
     return result
 
+
+def _parse_borders(borders: list[dict], db_lookup: dict) -> list[dict]:
+    """Convert Quoia border list to enriched dicts using DB info where available."""
+    result = []
+    for b in borders:
+        frt_gen = b.get("frt_generation")
+        if not frt_gen:
+            continue
+        frt_code = (frt_gen.get("frt_code") or "").strip().lower()
+        if not frt_code:
+            continue
+
+        db_info = db_lookup.get(frt_code, {})
+        result.append({
+            "frt_code":       frt_code,
+            "nombre":         db_info.get("nombre") or b.get("name") or frt_code,
+            "proyecto_id":    db_info.get("proyecto_id"),
+            "solenium_id":    db_info.get("solenium_id"),
+            "potencia_kwp":   db_info.get("potencia_kwp"),
+            "tiene_solenium": bool(db_info.get("solenium_id")),
+            "en_app":         bool(db_info),
+            "estado_quoia":   frt_gen.get("status", ""),
+        })
+    result.sort(key=lambda x: x["nombre"])
+    return result
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/proyectos")
 def listar_proyectos(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Lista proyectos de generación que tienen Solenium o Quoia configurado."""
-    proyectos = (
-        db.query(Proyecto)
-        .filter(Proyecto.deleted_at.is_(None))
-        .order_by(Proyecto.nombre_comercial)
-        .all()
-    )
-    frt_by_proj = _query_fronteras_gen(db, [p.id for p in proyectos])
-
-    result = []
-    for p in proyectos:
-        fronteras_gen = frt_by_proj.get(p.id, [])
-        tiene_solenium = bool(_safe_sol_id(p.project_id_solenium))
-        tiene_quoia    = any(f.codigo_frontera for f in fronteras_gen)
-        if not tiene_solenium and not tiene_quoia:
-            continue
-        result.append({
-            "id":             p.id,
-            "nombre":         p.nombre_comercial,
-            "potencia_kwp":   float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "solenium_id":    _safe_sol_id(p.project_id_solenium),
-            "tiene_quoia":    tiene_quoia,
-            "tiene_solenium": tiene_solenium,
-            "fronteras": [
-                {"id": f.id, "codigo": f.codigo_frontera}
-                for f in fronteras_gen
-            ],
-        })
-    return {"proyectos": result}
+    """Lista todas las fronteras de generación registradas en Quoia, enriquecidas con datos de la BD."""
+    gaia = _get_gaia()
+    borders = gaia.get_all_borders()
+    db_lookup = _build_db_lookup(db)
+    return {"proyectos": _parse_borders(borders, db_lookup)}
 
 
 @router.get("/datos")
 def datos_generacion(
     fecha: str | None = Query(None, description="YYYY-MM-DD. Por defecto: ayer en hora Colombia"),
-    proyecto_id: int | None = Query(None, description="Filtrar un proyecto específico"),
+    frt_code: str | None = Query(None, description="Filtrar una frontera específica por código SIC"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Retorna curvas Quoia + Solenium/Fusion por proyecto para una fecha.
-    Las llamadas a las APIs externas corren en paralelo (ThreadPoolExecutor).
+    Retorna curvas Quoia + Solenium/Fusion por frontera para una fecha.
+    Fuente de verdad: Quoia (todas las fronteras). BD enriquece con nombre y Solenium.
+    Las llamadas a APIs externas corren en paralelo (ThreadPoolExecutor).
     """
     if not fecha:
         fecha = _col_yesterday()
@@ -227,49 +238,33 @@ def datos_generacion(
     sol  = _get_solenium()
     gaia = _get_gaia()
 
-    q = (
-        db.query(Proyecto)
-        .filter(Proyecto.deleted_at.is_(None))
-        .order_by(Proyecto.nombre_comercial)
-    )
-    if proyecto_id:
-        q = q.filter(Proyecto.id == proyecto_id)
-    proyectos = q.all()
+    borders   = gaia.get_all_borders()
+    db_lookup = _build_db_lookup(db)
+    parsed    = _parse_borders(borders, db_lookup)
 
-    frt_by_proj = _query_fronteras_gen(db, [p.id for p in proyectos])
+    if frt_code:
+        parsed = [p for p in parsed if p["frt_code"] == frt_code.strip().lower()]
 
-    def _procesar(p: Proyecto) -> dict | None:
-        fronteras_gen = frt_by_proj.get(p.id, [])
-        sol_id = _safe_sol_id(p.project_id_solenium)
+    def _procesar(p: dict) -> dict | None:
+        sol_id = p["solenium_id"]
 
-        if not fronteras_gen and sol_id is None:
-            return None
-
-        frontera_codigo = next((f.codigo_frontera for f in fronteras_gen if f.codigo_frontera), None)
-
-        quoia_data    = {"total_kwh": 0.0, "curva": []}
+        quoia_data    = _quoia_curve(gaia, p["frt_code"], fecha)
         solenium_data = {"total_kwh": 0.0, "inversores": []}
-
-        if frontera_codigo:
-            quoia_data = _quoia_curve(gaia, frontera_codigo, fecha)
         if sol_id:
             solenium_data = _solenium_inversores(sol, sol_id, fecha)
 
         q_kwh = quoia_data["total_kwh"]
         s_kwh = solenium_data["total_kwh"]
-
-        if q_kwh == 0 and s_kwh == 0:
-            estado = "sin_medidas"
-        else:
-            estado = "con_datos"
+        estado = "sin_medidas" if q_kwh == 0 and s_kwh == 0 else "con_datos"
 
         return {
-            "proyecto_id":    p.id,
-            "nombre":         p.nombre_comercial,
-            "potencia_kwp":   float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "solenium_id":    sol_id,
-            "frontera_codigo": frontera_codigo,
-            "estado":         estado,
+            "frt_code":        p["frt_code"],
+            "nombre":          p["nombre"],
+            "proyecto_id":     p["proyecto_id"],
+            "potencia_kwp":    p["potencia_kwp"],
+            "solenium_id":     sol_id,
+            "en_app":          p["en_app"],
+            "estado":          estado,
             "discrepancia_pct": _discrepancia(q_kwh, s_kwh),
             "quoia":    quoia_data,
             "solenium": solenium_data,
@@ -277,14 +272,14 @@ def datos_generacion(
 
     resultados: list[dict] = []
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_procesar, p): p for p in proyectos}
+        futures = {ex.submit(_procesar, p): p for p in parsed}
         for fut in as_completed(futures):
             try:
                 res = fut.result()
                 if res:
                     resultados.append(res)
             except Exception as exc:
-                logger.error("error procesando proyecto: %s", exc)
+                logger.error("error procesando frontera: %s", exc)
 
     resultados.sort(key=lambda x: x["nombre"])
 

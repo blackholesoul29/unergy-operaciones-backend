@@ -315,6 +315,25 @@ class GaiaClient:
             return data.get("results") or data.get("measurements") or []
         return []
 
+    def get_all_borders(self) -> list[dict]:
+        """Fetch all borders registered in Quoia (paginated). Returns flat list of project dicts.
+
+        Each dict has: name, frt_generation, frt_consumption
+        where frt_* = {frt_code, status, last_report_date} or None.
+        """
+        results = []
+        url = f"{self._base}/api/cgm/v1/border/"
+        while url:
+            data = self._get(url)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                results.extend(data.get("results", []))
+                url = data.get("next")
+            else:
+                break
+        return results
+
     def get_node_electrical_snapshot(self, node_id: int) -> dict | None:
         """Comprehensive electrical snapshot for a node (today).
 

@@ -190,7 +190,7 @@ def listar_proyectos(
     result = []
     for p in proyectos:
         fronteras_gen = frt_by_proj.get(p.id, [])
-        tiene_solenium = bool(p.project_id_solenium)
+        tiene_solenium = bool(_safe_sol_id(p.project_id_solenium))
         tiene_quoia    = any(f.quoia_meter_id for f in fronteras_gen)
         if not tiene_solenium and not tiene_quoia:
             continue

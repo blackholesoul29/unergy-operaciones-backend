@@ -24,10 +24,35 @@ if db_url:
 from app.models import Base  # noqa: E402 — must import after path setup
 target_metadata = Base.metadata
 
+# Tables that exist in the database but have NO ORM model — they are created by
+# raw SQL in the baseline migration (alembic/versions/000_baseline_initial_schema.py)
+# and managed by hand. Autogenerate compares only against Base.metadata, so without
+# this exclusion it would propose dropping these live tables. Keep this list in sync
+# with the raw CREATE TABLE statements in the baseline migration.
+RAW_SQL_TABLES = {
+    "alarma_estado", "alarmas_monitoreo", "api_keys", "audit_log",
+    "clima_forecasts", "clima_oni_monthly", "clima_precip_monthly",
+    "clima_price_monthly", "correlation_sync_log", "email_envios",
+    "garantias_ajustes", "informes_guardados", "om_factura_mensual",
+    "om_ipc_tasas", "om_seleccion_mensual", "precios_bolsa_diario",
+    "precios_bolsa_horario",
+}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """Exclude raw-SQL-only tables (and their indexes) from autogenerate."""
+    if type_ == "table" and name in RAW_SQL_TABLES:
+        return False
+    if type_ == "index" and getattr(object, "table", None) is not None \
+            and object.table.name in RAW_SQL_TABLES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True, dialect_opts={"paramstyle": "named"})
+    context.configure(url=url, target_metadata=target_metadata, literal_binds=True,
+                      dialect_opts={"paramstyle": "named"}, include_object=include_object)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -35,7 +60,8 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata,
+                          include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()
 

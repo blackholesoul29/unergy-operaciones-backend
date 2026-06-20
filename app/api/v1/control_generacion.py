@@ -220,6 +220,23 @@ def _parse_quoia_borders(borders: list[dict], sol_projects: list[dict]) -> list[
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@router.get("/debug-solenium/{sol_id}")
+def debug_solenium(
+    sol_id: int,
+    fecha: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Diagnóstico: devuelve las respuestas crudas de Solenium para un proyecto."""
+    if not fecha:
+        fecha = _col_yesterday()
+    sol = _get_solenium()
+    return {
+        "inverters":  sol.get_project_inverters(sol_id),
+        "generation": sol.get_generation(sol_id, start_date=fecha, end_date=fecha),
+        "power":      sol.get_power(sol_id, date_from=fecha, date_to=fecha),
+    }
+
 @router.get("/proyectos")
 def listar_proyectos(
     db: Session = Depends(get_db),

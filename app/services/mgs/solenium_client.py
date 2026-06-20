@@ -172,9 +172,14 @@ class SoleniumClient:
             params["date_to"] = date_to
         return self._get(url, params=params)
 
-    def get_power(self, project_id: int) -> dict | None:
+    def get_power(self, project_id: int, date_from: str = "", date_to: str = "") -> dict | None:
         url = f"{self._data_url}/project/{project_id}/power/"
-        return self._get(url)
+        params: dict = {}
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
+        return self._get(url, params=params or None)
 
     def get_project_inverters(self, project_id: int) -> list[dict]:
         url = f"{self._data_url}/project/{project_id}/inverter/"

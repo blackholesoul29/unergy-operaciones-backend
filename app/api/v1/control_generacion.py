@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
-from app.services.mgs.gaia_client import FRONTERA_NODE_MAP, GaiaClient, find_gaia_node_id
+from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("control_generacion")
@@ -54,12 +54,12 @@ def _col_yesterday() -> str:
 
 # ── Helpers de extracción ──────────────────────────────────────────────────────
 
-def _quoia_curve(gaia: GaiaClient, node_id: int, fecha: str) -> dict:
-    """Curva horaria eae (kWh/h) y total para un nodo Quoia/Gaia."""
+def _quoia_curve(gaia: GaiaClient, frt_code: str, fecha: str) -> dict:
+    """Curva horaria eae (kWh) y total para una frontera Quoia por código SIC."""
     try:
-        rows = gaia.get_node_measurements(node_id, fecha, "eae")
+        rows = gaia.get_border_measurements(frt_code, fecha)
     except Exception as exc:
-        logger.warning("gaia node=%s fecha=%s error: %s", node_id, fecha, exc)
+        logger.warning("gaia border=%s fecha=%s error: %s", frt_code, fecha, exc)
         rows = []
 
     curva: list[dict] = []
@@ -67,9 +67,7 @@ def _quoia_curve(gaia: GaiaClient, node_id: int, fecha: str) -> dict:
     for row in rows:
         t = row.get("time", "")
         hora = t[11:16] if len(t) >= 16 else t
-        # eaepd1/2/3 vienen en Wh → convertir a kWh
-        wh = sum(float(row[f]) for f in ("eaepd1", "eaepd2", "eaepd3") if row.get(f) is not None)
-        kwh = wh / 1000
+        kwh = float(row.get("eae", 0) or 0)
         total += kwh
         curva.append({"hora": hora, "kwh": round(kwh, 3)})
 
@@ -161,7 +159,6 @@ def _query_fronteras_gen(db: Session, proyecto_ids: list) -> dict:
             Frontera.id,
             Frontera.codigo_frontera,
             Frontera.tipo_frontera,
-            Frontera.quoia_meter_id,
         ).where(
             Frontera.proyecto_id.in_(proyecto_ids),
             Frontera.tipo_frontera.in_(list(_TIPOS_GENERACION)),
@@ -191,22 +188,18 @@ def listar_proyectos(
     for p in proyectos:
         fronteras_gen = frt_by_proj.get(p.id, [])
         tiene_solenium = bool(_safe_sol_id(p.project_id_solenium))
-        tiene_quoia    = any(f.quoia_meter_id for f in fronteras_gen)
+        tiene_quoia    = any(f.codigo_frontera for f in fronteras_gen)
         if not tiene_solenium and not tiene_quoia:
             continue
         result.append({
-            "id":           p.id,
-            "nombre":       p.nombre_comercial,
-            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "solenium_id":  _safe_sol_id(p.project_id_solenium),
-            "tiene_quoia":  tiene_quoia,
+            "id":             p.id,
+            "nombre":         p.nombre_comercial,
+            "potencia_kwp":   float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "solenium_id":    _safe_sol_id(p.project_id_solenium),
+            "tiene_quoia":    tiene_quoia,
             "tiene_solenium": tiene_solenium,
             "fronteras": [
-                {
-                    "id":            f.id,
-                    "codigo":        f.codigo_frontera,
-                    "quoia_node_id": f.quoia_meter_id,
-                }
+                {"id": f.id, "codigo": f.codigo_frontera}
                 for f in fronteras_gen
             ],
         })
@@ -252,29 +245,13 @@ def datos_generacion(
         if not fronteras_gen and sol_id is None:
             return None
 
-        # ── Resolver nodo Quoia en tres capas ───────────────────────────────
-        # 1. quoia_meter_id ya guardado en la BD
-        quoia_node_id = next((f.quoia_meter_id for f in fronteras_gen if f.quoia_meter_id), None)
         frontera_codigo = next((f.codigo_frontera for f in fronteras_gen if f.codigo_frontera), None)
-
-        # 2. Buscar por código de frontera en el mapa hardcodeado
-        if not quoia_node_id and frontera_codigo:
-            pair = FRONTERA_NODE_MAP.get(frontera_codigo.lower())
-            if pair:
-                quoia_node_id = pair[0]
-
-        # 3. Matching por nombre de proyecto
-        if not quoia_node_id:
-            quoia_node_id = find_gaia_node_id(
-                p.nombre_comercial or "",
-                p.nombre_bitacora or "",
-            )
 
         quoia_data    = {"total_kwh": 0.0, "curva": []}
         solenium_data = {"total_kwh": 0.0, "inversores": []}
 
-        if quoia_node_id:
-            quoia_data = _quoia_curve(gaia, quoia_node_id, fecha)
+        if frontera_codigo:
+            quoia_data = _quoia_curve(gaia, frontera_codigo, fecha)
         if sol_id:
             solenium_data = _solenium_inversores(sol, sol_id, fecha)
 
@@ -291,7 +268,6 @@ def datos_generacion(
             "nombre":         p.nombre_comercial,
             "potencia_kwp":   float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
             "solenium_id":    sol_id,
-            "quoia_node_id":  quoia_node_id,
             "frontera_codigo": frontera_codigo,
             "estado":         estado,
             "discrepancia_pct": _discrepancia(q_kwh, s_kwh),

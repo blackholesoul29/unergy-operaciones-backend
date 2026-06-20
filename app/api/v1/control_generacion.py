@@ -137,6 +137,15 @@ def _discrepancia(q_kwh: float, s_kwh: float) -> float | None:
     return round(abs(q_kwh - s_kwh) / ref * 100, 1)
 
 
+def _safe_sol_id(val) -> int | None:
+    if not val:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/proyectos")
@@ -163,7 +172,7 @@ def listar_proyectos(
             "id":           p.id,
             "nombre":       p.nombre_comercial,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "solenium_id":  int(p.project_id_solenium) if p.project_id_solenium else None,
+            "solenium_id":  _safe_sol_id(p.project_id_solenium),
             "tiene_quoia":  tiene_quoia,
             "tiene_solenium": tiene_solenium,
             "fronteras": [
@@ -211,7 +220,7 @@ def datos_generacion(
 
     def _procesar(p: Proyecto) -> dict | None:
         fronteras_gen = [f for f in p.fronteras if f.tipo_frontera in _TIPOS_GENERACION]
-        sol_id = int(p.project_id_solenium) if p.project_id_solenium else None
+        sol_id = _safe_sol_id(p.project_id_solenium)
 
         if not fronteras_gen and sol_id is None:
             return None

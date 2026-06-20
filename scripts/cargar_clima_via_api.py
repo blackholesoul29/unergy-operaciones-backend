@@ -12,6 +12,8 @@ from pathlib import Path
 
 import httpx
 
+from _creds import api_credentials
+
 BACKEND_URL = "https://backend-production-63d8.up.railway.app"
 CLIMA_DATA = Path("/home/eduardo/Claude/clima/data/raw")
 
@@ -45,8 +47,9 @@ def read_index_csv(path):
 
 
 def get_token():
+    email, password = api_credentials()
     resp = httpx.post(f"{BACKEND_URL}/api/v1/auth/token",
-        data={"username": "eduardo@unergy.io", "password": "Unergy2025!"},
+        data={"username": email, "password": password},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15)
     resp.raise_for_status()

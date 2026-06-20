@@ -10,8 +10,9 @@ from difflib import SequenceMatcher
 import requests
 
 BASE = "https://backend-production-63d8.up.railway.app"
-USER = "juanjose@unergy.io"
-PASS = "Unergy2025!"
+from _creds import api_credentials
+
+USER, PASS = api_credentials()
 
 args = sys.argv[1:]
 FORCE   = "--force"   in args

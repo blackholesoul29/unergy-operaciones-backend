@@ -9,8 +9,9 @@ import openpyxl
 
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+from _creds import api_credentials
+
+EMAIL, PASSWORD = api_credentials()
 DRY_RUN  = "--dry-run" in sys.argv
 
 

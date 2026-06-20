@@ -12,8 +12,9 @@ import argparse
 import requests
 
 BASE_URL = "https://backend-production-63d8.up.railway.app"
-EMAIL    = "juanjose@unergy.io"
-PASSWORD = "Unergy2025!"
+from _creds import api_credentials
+
+EMAIL, PASSWORD = api_credentials()
 
 MESES = {
     "Enero":1,"Febrero":2,"Marzo":3,"Abril":4,"Mayo":5,"Junio":6,

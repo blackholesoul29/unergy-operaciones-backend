@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from app.schemas.clientes import (
     ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
 )
+from app.schemas.client_kpis import ClienteKPIsOut
 from app.schemas.common import PaginatedResponse
 
 UPLOADS_DIR = Path("uploads/clientes")
@@ -19,6 +21,74 @@ ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
+
+
+# ── KPIs del panel de resumen (funciones puras, testeables sin DB) ────────────
+
+# Orden de severidad del semáforo PPA: el peor estado gana al agregar contratos.
+_PPA_STATUS_ORDER = {"Green": 0, "Yellow": 1, "Red": 2}
+
+
+def _previous_complete_month(today: date) -> date:
+    """Primer día del último mes calendario *completo*.
+
+    Si hoy es junio 2026 → date(2026, 5, 1). Se usa porque `liquidaciones.periodo`
+    almacena siempre el primer día del mes.
+    """
+    first_of_this = today.replace(day=1)
+    last_of_prev = first_of_this - timedelta(days=1)
+    return last_of_prev.replace(day=1)
+
+
+def _kwh_to_mwh(total_kwh) -> float:
+    """Convierte kWh→MWh con 3 decimales; None/0 → 0.0."""
+    if not total_kwh:
+        return 0.0
+    return round(float(total_kwh) / 1000.0, 3)
+
+
+def _ppa_status_for_contract(*, fecha_fin, gen_mwh, compromiso_mwh, today: date) -> str:
+    """Semáforo de UN contrato PPA. El peor de dos dimensiones de riesgo gana:
+
+    - Vencimiento (`fecha_fin`): ya vencido o <1 mes → Red; <6 meses → Yellow;
+      en otro caso (o sin fecha) → Green.
+    - Entrega vs compromiso (último `cumplimiento_mensual`): ratio<0.9 → Red;
+      0.9≤ratio<1.0 → Yellow; ≥1.0 → Green.
+
+    Un contrato sin señales de riesgo (sin fecha_fin y sin compromiso medido)
+    se considera 'Green' (existe, pero no hay riesgo conocido).
+    """
+    statuses: list[str] = []
+
+    if fecha_fin is not None:
+        days = (fecha_fin - today).days
+        if days < 30:
+            statuses.append("Red")
+        elif days < 182:
+            statuses.append("Yellow")
+        else:
+            statuses.append("Green")
+
+    if compromiso_mwh and compromiso_mwh > 0 and gen_mwh is not None:
+        ratio = gen_mwh / compromiso_mwh
+        if ratio < 0.9:
+            statuses.append("Red")
+        elif ratio < 1.0:
+            statuses.append("Yellow")
+        else:
+            statuses.append("Green")
+
+    if not statuses:
+        return "Green"
+    return max(statuses, key=lambda s: _PPA_STATUS_ORDER[s])
+
+
+def _aggregate_ppa_status(statuses: list[str]) -> str:
+    """Combina los semáforos por contrato → uno solo. Sin contratos → 'N/A'."""
+    valid = [s for s in statuses if s in _PPA_STATUS_ORDER]
+    if not valid:
+        return "N/A"
+    return max(valid, key=lambda s: _PPA_STATUS_ORDER[s])
 
 
 def _get_cliente_or_404(id: int, db: Session) -> Cliente:
@@ -355,3 +425,86 @@ def list_client_contratos_ppa(id: int, db: Session = Depends(get_db), _=Depends(
         }
         for c in contratos
     ]
+
+
+# ── Panel de resumen (KPIs) ───────────────────────────────────────────────────
+
+@router.get("/{id}/resumen", response_model=ClienteKPIsOut)
+def get_cliente_resumen(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """KPIs operativos y financieros del cliente para el panel de resumen.
+
+    - **MWh netos (mes anterior):** energía entregada (suma de `energia_kwh` de los
+      datos XM de las liquidaciones del último mes completo) de los proyectos del cliente.
+    - **Servicios activos:** proyectos del cliente en operación.
+    - **Cumplimiento PPA:** semáforo derivado del vencimiento de los contratos PPA y de
+      la entrega vs. compromiso del último `cumplimiento_mensual` (peor estado gana).
+    """
+    from sqlalchemy import func, or_
+    from app.models.proyectos import Proyecto
+    from app.models.liquidaciones import Liquidacion, LiquidacionXMDato
+    from app.models.contratos import PPAContrato
+    from app.models.cumplimiento import CumplimientoMensual
+
+    _get_cliente_or_404(id, db)
+
+    today = date.today()
+    periodo_start = _previous_complete_month(today)
+
+    # MWh netos del mes anterior. La constraint uq_liquidacion_proyecto_periodo
+    # garantiza una sola liquidación por (proyecto, periodo), así que sumar los
+    # datos XM no duplica energía entre liquidaciones del mismo periodo.
+    total_kwh = (
+        db.query(func.coalesce(func.sum(LiquidacionXMDato.energia_kwh), 0))
+        .join(Liquidacion, LiquidacionXMDato.liquidacion_id == Liquidacion.id)
+        .join(Proyecto, Liquidacion.proyecto_id == Proyecto.id)
+        .filter(
+            Proyecto.cliente_id == id,
+            Proyecto.deleted_at.is_(None),
+            Liquidacion.deleted_at.is_(None),
+            Liquidacion.periodo == periodo_start,
+        )
+        .scalar()
+    )
+    mwh_net = _kwh_to_mwh(total_kwh)
+
+    # Servicios activos = proyectos en operación
+    active_services = (
+        db.query(func.count(Proyecto.id))
+        .filter(
+            Proyecto.cliente_id == id,
+            Proyecto.deleted_at.is_(None),
+            Proyecto.estado == "en_operacion",
+        )
+        .scalar()
+    ) or 0
+
+    # Cumplimiento PPA (semáforo)
+    contratos = (
+        db.query(PPAContrato)
+        .filter(
+            PPAContrato.deleted_at.is_(None),
+            or_(PPAContrato.comprador_id == id, PPAContrato.vendedor_id == id),
+        )
+        .all()
+    )
+    statuses: list[str] = []
+    for c in contratos:
+        ultimo = (
+            db.query(CumplimientoMensual)
+            .filter(CumplimientoMensual.contrato_ppa_id == c.id)
+            .order_by(CumplimientoMensual.anio.desc(), CumplimientoMensual.mes.desc())
+            .first()
+        )
+        gen = float(ultimo.gen_total_mwh) if ultimo and ultimo.gen_total_mwh is not None else None
+        comp = float(ultimo.compromiso_mwh) if ultimo and ultimo.compromiso_mwh is not None else None
+        statuses.append(_ppa_status_for_contract(
+            fecha_fin=c.fecha_fin, gen_mwh=gen, compromiso_mwh=comp, today=today,
+        ))
+
+    return ClienteKPIsOut(
+        mwh_net_last_month=mwh_net,
+        active_services_count=int(active_services),
+        ppa_compliance_status=_aggregate_ppa_status(statuses),
+        periodo=periodo_start.strftime("%Y-%m"),
+        ppa_contracts_count=len(contratos),
+    )

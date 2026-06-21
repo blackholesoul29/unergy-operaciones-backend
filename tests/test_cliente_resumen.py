@@ -61,82 +61,83 @@ def test_ppa_no_signals_defaults_green():
     # Contrato sin vencimiento y sin compromiso medido → no hay riesgo conocido.
     assert _ppa_status_for_contract(
         fecha_fin=None, gen_mwh=None, compromiso_mwh=None, today=_TODAY
-    ) == "Green"
+    ) == "verde"
 
 
 def test_ppa_expiry_far_is_green():
     assert _ppa_status_for_contract(
         fecha_fin=date(2028, 1, 1), gen_mwh=None, compromiso_mwh=None, today=_TODAY
-    ) == "Green"
+    ) == "verde"
 
 
 def test_ppa_expiry_within_six_months_is_yellow():
     assert _ppa_status_for_contract(
         fecha_fin=date(2026, 9, 1), gen_mwh=None, compromiso_mwh=None, today=_TODAY
-    ) == "Yellow"
+    ) == "amarillo"
 
 
 def test_ppa_expiry_within_one_month_is_red():
     assert _ppa_status_for_contract(
         fecha_fin=date(2026, 7, 5), gen_mwh=None, compromiso_mwh=None, today=_TODAY
-    ) == "Red"
+    ) == "rojo"
 
 
 def test_ppa_already_expired_is_red():
     assert _ppa_status_for_contract(
         fecha_fin=date(2026, 1, 1), gen_mwh=None, compromiso_mwh=None, today=_TODAY
-    ) == "Red"
+    ) == "rojo"
 
 
 def test_ppa_delivery_meets_commitment_is_green():
     assert _ppa_status_for_contract(
         fecha_fin=None, gen_mwh=100.0, compromiso_mwh=90.0, today=_TODAY
-    ) == "Green"
+    ) == "verde"
 
 
 def test_ppa_delivery_slightly_under_is_yellow():
     assert _ppa_status_for_contract(
         fecha_fin=None, gen_mwh=95.0, compromiso_mwh=100.0, today=_TODAY
-    ) == "Yellow"
+    ) == "amarillo"
 
 
 def test_ppa_delivery_far_under_is_red():
     assert _ppa_status_for_contract(
         fecha_fin=None, gen_mwh=50.0, compromiso_mwh=100.0, today=_TODAY
-    ) == "Red"
+    ) == "rojo"
 
 
 def test_ppa_zero_commitment_ignored():
     # compromiso 0 no debe romper ni penalizar (sin compromiso que incumplir).
     assert _ppa_status_for_contract(
         fecha_fin=None, gen_mwh=0.0, compromiso_mwh=0.0, today=_TODAY
-    ) == "Green"
+    ) == "verde"
 
 
 def test_ppa_worst_dimension_wins():
     # Vencimiento lejano (Green) pero entrega muy baja (Red) → Red.
     assert _ppa_status_for_contract(
         fecha_fin=date(2028, 1, 1), gen_mwh=10.0, compromiso_mwh=100.0, today=_TODAY
-    ) == "Red"
+    ) == "rojo"
 
 
 # ── _aggregate_ppa_status ─────────────────────────────────────────────────────
 
-def test_aggregate_empty_is_na():
-    assert _aggregate_ppa_status([]) == "N/A"
+def test_aggregate_empty_is_sin_contratos():
+    # Sin contratos PPA → estado explícito, no un semáforo de color.
+    assert _aggregate_ppa_status([]) == "sin_contratos"
 
 
 def test_aggregate_all_green():
-    assert _aggregate_ppa_status(["Green", "Green"]) == "Green"
+    assert _aggregate_ppa_status(["verde", "verde"]) == "verde"
 
 
 def test_aggregate_worst_wins_red():
-    assert _aggregate_ppa_status(["Green", "Yellow", "Red"]) == "Red"
+    assert _aggregate_ppa_status(["verde", "amarillo", "rojo"]) == "rojo"
 
 
 def test_aggregate_worst_wins_yellow():
-    assert _aggregate_ppa_status(["Green", "Yellow", "Green"]) == "Yellow"
+    assert _aggregate_ppa_status(["verde", "amarillo", "verde"]) == "amarillo"
 
 
 def test_aggregate_ignores_unknown_values():
-    assert _aggregate_ppa_status(["Green", "N/A"]) == "Green"
+    assert _aggregate_ppa_status(["verde", "sin_contratos"]) == "verde"

@@ -26,7 +26,7 @@ router = APIRouter(prefix="/clientes", tags=["Clientes"])
 # ── KPIs del panel de resumen (funciones puras, testeables sin DB) ────────────
 
 # Orden de severidad del semáforo PPA: el peor estado gana al agregar contratos.
-_PPA_STATUS_ORDER = {"Green": 0, "Yellow": 1, "Red": 2}
+_PPA_STATUS_ORDER = {"verde": 0, "amarillo": 1, "rojo": 2}
 
 
 def _previous_complete_month(today: date) -> date:
@@ -50,44 +50,48 @@ def _kwh_to_mwh(total_kwh) -> float:
 def _ppa_status_for_contract(*, fecha_fin, gen_mwh, compromiso_mwh, today: date) -> str:
     """Semáforo de UN contrato PPA. El peor de dos dimensiones de riesgo gana:
 
-    - Vencimiento (`fecha_fin`): ya vencido o <1 mes → Red; <6 meses → Yellow;
-      en otro caso (o sin fecha) → Green.
-    - Entrega vs compromiso (último `cumplimiento_mensual`): ratio<0.9 → Red;
-      0.9≤ratio<1.0 → Yellow; ≥1.0 → Green.
+    - Vencimiento (`fecha_fin`): ya vencido o <1 mes → rojo; <6 meses → amarillo;
+      en otro caso (o sin fecha) → verde.
+    - Entrega vs compromiso (último `cumplimiento_mensual`): ratio<0.9 → rojo;
+      0.9≤ratio<1.0 → amarillo; ≥1.0 → verde.
 
     Un contrato sin señales de riesgo (sin fecha_fin y sin compromiso medido)
-    se considera 'Green' (existe, pero no hay riesgo conocido).
+    se considera 'verde' (existe, pero no hay riesgo conocido).
     """
     statuses: list[str] = []
 
     if fecha_fin is not None:
         days = (fecha_fin - today).days
         if days < 30:
-            statuses.append("Red")
+            statuses.append("rojo")
         elif days < 182:
-            statuses.append("Yellow")
+            statuses.append("amarillo")
         else:
-            statuses.append("Green")
+            statuses.append("verde")
 
     if compromiso_mwh and compromiso_mwh > 0 and gen_mwh is not None:
         ratio = gen_mwh / compromiso_mwh
         if ratio < 0.9:
-            statuses.append("Red")
+            statuses.append("rojo")
         elif ratio < 1.0:
-            statuses.append("Yellow")
+            statuses.append("amarillo")
         else:
-            statuses.append("Green")
+            statuses.append("verde")
 
     if not statuses:
-        return "Green"
+        return "verde"
     return max(statuses, key=lambda s: _PPA_STATUS_ORDER[s])
 
 
 def _aggregate_ppa_status(statuses: list[str]) -> str:
-    """Combina los semáforos por contrato → uno solo. Sin contratos → 'N/A'."""
+    """Combina los semáforos por contrato → uno solo.
+
+    Sin contratos PPA → 'sin_contratos' (estado explícito, distinto de un
+    semáforo verde/amarillo/rojo). El frontend lo distingue para la copy del chip.
+    """
     valid = [s for s in statuses if s in _PPA_STATUS_ORDER]
     if not valid:
-        return "N/A"
+        return "sin_contratos"
     return max(valid, key=lambda s: _PPA_STATUS_ORDER[s])
 
 
@@ -502,9 +506,9 @@ def get_cliente_resumen(id: int, db: Session = Depends(get_db), _=Depends(get_cu
         ))
 
     return ClienteKPIsOut(
-        mwh_net_last_month=mwh_net,
-        active_services_count=int(active_services),
-        ppa_compliance_status=_aggregate_ppa_status(statuses),
+        mwh_netos_mes_anterior=mwh_net,
+        servicios_activos=int(active_services),
+        estado_cumplimiento_ppa=_aggregate_ppa_status(statuses),
         periodo=periodo_start.strftime("%Y-%m"),
-        ppa_contracts_count=len(contratos),
+        num_contratos_ppa=len(contratos),
     )

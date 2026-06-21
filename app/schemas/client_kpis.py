@@ -8,12 +8,14 @@ from pydantic import BaseModel
 
 class ClienteKPIsOut(BaseModel):
     # MWh netos entregados durante el último mes calendario completo.
-    mwh_net_last_month: float
+    mwh_netos_mes_anterior: float
     # Proyectos del cliente en operación (servicios activos).
-    active_services_count: int
-    # Semáforo de cumplimiento PPA: 'Green' | 'Yellow' | 'Red' | 'N/A'.
-    ppa_compliance_status: str
+    servicios_activos: int
+    # Semáforo de cumplimiento PPA:
+    #   'verde' | 'amarillo' | 'rojo'  → hay contratos, peor estado de los contratos.
+    #   'sin_contratos'                → el cliente no tiene contratos PPA.
+    estado_cumplimiento_ppa: str
     # Mes medido en formato 'YYYY-MM' (el último mes completo).
     periodo: str | None = None
     # Número de contratos PPA vigentes considerados para el semáforo.
-    ppa_contracts_count: int = 0
+    num_contratos_ppa: int = 0

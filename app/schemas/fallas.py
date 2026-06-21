@@ -99,6 +99,7 @@ class FallaCreate(BaseModel):
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
     kwh_perdidos_estimado: Optional[float] = None
+    energia_perdida_kwh: Optional[float] = None
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
@@ -124,6 +125,7 @@ class FallaUpdate(BaseModel):
     centinela: Optional[str] = None
     notificacion: Optional[bool] = None
     kwh_perdidos_estimado: Optional[float] = None
+    energia_perdida_kwh: Optional[float] = None
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
@@ -172,6 +174,7 @@ class FallaOut(BaseModel):
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
     kwh_perdidos_estimado: Optional[float] = None
+    energia_perdida_kwh: Optional[float] = None
     impacto_economico_cop: Optional[float] = None
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None

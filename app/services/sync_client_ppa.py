@@ -4,7 +4,9 @@ Detecta cambios en los datos de las partes de un cliente (Nombre y NIT) y los
 propaga a las columnas denormalizadas de los contratos PPA activos donde ese
 cliente figura como comprador o vendedor. Cada campo propagado deja una fila
 inmutable en `cliente_ppa_audit_log`. Un cambio de NIT es crítico: marca el
-contrato para revisión legal (`requires_manual_review`) y genera una alerta.
+contrato para revisión legal (`requires_manual_review`, bandera informativa) y
+genera una alerta para que legal/operaciones lo revise antes de liquidar. La
+bandera todavía NO la consulta el flujo de liquidación (ver follow-up del PR).
 
 El diffing es puro (sin BD) para poder probarse aisladamente; la orquestación
 (`ClientPpaSyncService`) hace las consultas, escribe la bitácora y notifica.
@@ -219,7 +221,7 @@ class ClientPpaSyncService:
         mensaje = (
             f"El NIT del cliente «{cliente.razon_social_nombre}» (#{cliente.id}) cambió y se "
             f"propagó al contrato PPA {contrato_ref} (#{ppa.id}). {detalle}. El contrato quedó "
-            f"marcado para revisión legal antes de habilitar facturación automática."
+            f"marcado para revisión legal/operaciones — revísalo antes de la próxima liquidación."
         )
         link = f"/ppa/{ppa.id}"
         for u in usuarios:

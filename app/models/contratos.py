@@ -145,7 +145,9 @@ class PPAContrato(Base):
     # Versionado de los datos de las partes propagados desde la maestra de clientes
     data_version: Mapped[int] = mapped_column(sa_Integer, nullable=False, default=1, server_default="1")
     last_data_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Marca un contrato cuyo NIT cambió: bloquea facturación automática hasta aval legal
+    # Marca un contrato cuyo NIT cambió y que debe revisar legal/operaciones antes de
+    # la siguiente liquidación. NOTA: bandera informativa — la liquidación NO la consulta
+    # aún (ver follow-up del PR); por sí sola no bloquea la facturación.
     requires_manual_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

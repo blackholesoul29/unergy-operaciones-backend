@@ -144,6 +144,11 @@ class PPAContratoOut(BaseModel):
     estado_cumplimiento: str | None = None  # on_track / at_risk / deficit
     dias_restantes: int | None = None
     cobertura_actual_pct: float | None = None
+    # Propagación Cliente→PPA: bandera de revisión y marca del último sync, para que
+    # el operador vea en el detalle del PPA si el NIT/Nombre cambió y falta revisarlo.
+    requires_manual_review: bool = False
+    last_data_sync: datetime | None = None
+    data_version: int | None = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

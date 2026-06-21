@@ -30,7 +30,7 @@ class ClientePpaAuditLog(Base):
         Boolean, default=False, nullable=False, server_default="false",
     )
     synced_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(),
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
     )
     triggered_by: Mapped[str] = mapped_column(
         String(50), nullable=False, default="system_job", server_default="system_job",

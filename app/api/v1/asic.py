@@ -14,19 +14,28 @@ router = APIRouter(prefix="/asic", tags=["ASIC"])
 
 
 def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
-    """When a terminación is published, mark matching prior registros as 'terminado'."""
+    """
+    Al publicar una terminación, la fecha de terminación (su `fecha_fin`) se estampa
+    como `fecha_fin` del/los registro(s) vigente(s) del mismo código SIC y del contrato
+    PPA asociado. Los registros NO se marcan 'terminado': siguen 'publicado' para que
+    Cumplimiento los cuente prorrateados HASTA la fecha y los excluya DESPUÉS — el
+    histórico anterior a la terminación queda intacto. (Un SIC ⇒ un contrato vigente.)
+    """
     if (
         solicitud.tipo_solicitud != TipoSolicitudAsicEnum.terminacion
         or solicitud.estado_solicitud != EstadoSolicitudAsicEnum.publicado
         or not solicitud.codigo_sic_contrato
+        or solicitud.fecha_fin is None
     ):
         return 0
+
+    fecha_term = solicitud.fecha_fin
+
     targets = (
         db.query(AsicSolicitud)
         .filter(
             AsicSolicitud.id != solicitud.id,
             AsicSolicitud.codigo_sic_contrato == solicitud.codigo_sic_contrato,
-            AsicSolicitud.contrato_interno == solicitud.contrato_interno,
             AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
             AsicSolicitud.tipo_solicitud.in_([
                 TipoSolicitudAsicEnum.registro,
@@ -35,10 +44,28 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
         )
         .all()
     )
+
+    contratos_internos: set[str] = set()
     for t in targets:
-        if solicitud.proyecto_id is not None and t.proyecto_id != solicitud.proyecto_id:
-            continue
-        t.estado_solicitud = EstadoSolicitudAsicEnum.terminado
+        if t.fecha_fin is None or t.fecha_fin > fecha_term:
+            t.fecha_fin = fecha_term
+        if t.contrato_interno:
+            contratos_internos.add(t.contrato_interno)
+
+    # Terminar también el contrato PPA: sale de "vigentes" en Cumplimiento tras la fecha.
+    if contratos_internos:
+        ppas = (
+            db.query(PPAContrato)
+            .filter(
+                PPAContrato.numero_codigo_contrato.in_(contratos_internos),
+                PPAContrato.deleted_at.is_(None),
+            )
+            .all()
+        )
+        for ppa in ppas:
+            if ppa.fecha_fin is None or ppa.fecha_fin > fecha_term:
+                ppa.fecha_fin = fecha_term
+
     return len(targets)
 
 

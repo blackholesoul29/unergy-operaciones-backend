@@ -12,6 +12,8 @@ class AsicSolicitudOut(BaseModel):
     codigo_sic_contrato: str | None = None
     codigo_sic_vendedor: str | None = None
     codigo_sic_comprador: str | None = None
+    cedula_agente_vendedor: str | None = None
+    cedula_agente_comprador: str | None = None
     contrato_interno: str | None = None
     nombre_contacto_solicitante: str | None = None
     fecha_solicitud: date | None = None
@@ -45,6 +47,8 @@ class AsicSolicitudCreate(BaseModel):
     codigo_sic_contrato: str | None = None
     codigo_sic_vendedor: str | None = None
     codigo_sic_comprador: str | None = None
+    cedula_agente_vendedor: str | None = None
+    cedula_agente_comprador: str | None = None
     contrato_interno: str | None = None
     nombre_contacto_solicitante: str | None = None
     fecha_solicitud: date | None = None
@@ -76,6 +80,8 @@ class AsicSolicitudUpdate(BaseModel):
     codigo_sic_contrato: str | None = None
     codigo_sic_vendedor: str | None = None
     codigo_sic_comprador: str | None = None
+    cedula_agente_vendedor: str | None = None
+    cedula_agente_comprador: str | None = None
     contrato_interno: str | None = None
     nombre_contacto_solicitante: str | None = None
     fecha_solicitud: date | None = None

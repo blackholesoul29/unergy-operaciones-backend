@@ -101,6 +101,7 @@ class Falla(Base):
     alarma_monitoreo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     # Feature 4: impact on generation
     kwh_perdidos_estimado: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    energia_perdida_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     impacto_economico_cop: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     # Feature 5: documentation
     causa_raiz: Mapped[str | None] = mapped_column(Text, nullable=True)

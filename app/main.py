@@ -478,6 +478,7 @@ _PENDING_DDLS = [
     # migration — Fallas: MGS alarm link + impact + documentation fields
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS alarma_monitoreo_id BIGINT",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS kwh_perdidos_estimado NUMERIC(14,3)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS energia_perdida_kwh NUMERIC(14,3)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS impacto_economico_cop NUMERIC(16,2)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS causa_raiz TEXT",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS acciones_correctivas TEXT",

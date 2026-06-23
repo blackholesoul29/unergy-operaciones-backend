@@ -32,6 +32,7 @@ class OMSeleccion(Base):
     periodo:     Mapped[str]  = mapped_column(String(7), nullable=False, index=True)
     incluido:    Mapped[bool] = mapped_column(Boolean, default=True,  nullable=False)
     facturado:   Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    valor_manual: Mapped[float | None] = mapped_column(Numeric(14, 0), nullable=True)  # override del valor a facturar; NULL = usar calculado
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

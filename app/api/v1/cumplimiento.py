@@ -602,6 +602,9 @@ def get_simulador(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             # Misma semántica que /plantas-contratos y /energia-transada: no listar
             # plantas cuya representación terminó antes del mes consultado.
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
@@ -795,6 +798,9 @@ def get_plantas_contratos(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             # Excluir plantas cuya representación ya terminó antes del mes consultado:
             # aparece si fecha_fin_representacion >= primer día del mes (o si es NULL).
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
@@ -934,6 +940,9 @@ def get_energia_transada(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             or_(Proyecto.fecha_entrada_operacion.is_(None), Proyecto.fecha_entrada_operacion <= last_day),
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
         )

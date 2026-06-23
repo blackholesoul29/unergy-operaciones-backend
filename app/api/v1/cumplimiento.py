@@ -409,11 +409,13 @@ def get_resumen(
                 gp = gd["mwh"]
                 if gp is not None:
                     mwh_contrato = gp * pct
+                    # El suministro al contrato cuenta para el cumplimiento sin importar
+                    # el origen (real o compra en bolsa). El duplicado además se registra
+                    # en bolsa_dup_c como sub-cifra informativa (cuánto proviene de bolsa).
+                    gen_total_c += mwh_contrato
                     if is_dup:
                         bolsa_dup_c += mwh_contrato
                         n_duplicados += 1
-                    else:
-                        gen_total_c += mwh_contrato
                     if gd.get("ultimo_dia") is not None:
                         dias_datos.append(gd["ultimo_dia"])
                 else:
@@ -1189,10 +1191,11 @@ def get_anual(
 
             gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
             if gen_contrato is not None:
+                # Cuenta para el cumplimiento sin importar el origen; el duplicado
+                # se registra además en bolsa_dup_total como sub-cifra (origen bolsa).
+                gen_total += gen_contrato
                 if is_dup:
                     bolsa_dup_total += gen_contrato
-                else:
-                    gen_total += gen_contrato
             plantas_mes.append({
                 "nombre": nombre,
                 "sub_project": sp,
@@ -1219,9 +1222,8 @@ def get_anual(
                 if not sp:
                     continue
                 pct = float(asic.porcentaje_despacho or 0)
-                is_dup = bool(asic.es_duplicado)
-                if is_dup:
-                    continue
+                # La proyección incluye duplicados: la compra en bolsa también
+                # cubre el contrato de cara a la contraparte.
                 eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
                 eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
                 dias_activos = max(0, (eff_end - eff_start).days + 1)
@@ -1416,8 +1418,10 @@ def get_cumplimiento(
         })
 
     # ── 6. Totales ────────────────────────────────────────────
+    # gen_total cuenta TODO lo suministrado al contrato (real + compra en bolsa);
+    # bolsa_dup es el subconjunto informativo proveniente de duplicados (origen bolsa).
     gen_total = round(
-        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None and not p["es_duplicado"]),
+        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None),
         3,
     )
     bolsa_dup = round(

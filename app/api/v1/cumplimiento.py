@@ -475,6 +475,9 @@ def get_resumen(
             "n_duplicados": n_duplicados,
             "plantas_sin_datos": plantas_sin_datos,
             "dia_min_datos": min(dias_datos) if dias_datos else None,
+            # Indicador de cumplimiento de plantas: registradas (numerador) vs esperadas (denominador).
+            "plantas_registradas": len(assignments),
+            "plantas_esperadas": int(compromiso.cantidad_proyectos) if compromiso and compromiso.cantidad_proyectos is not None else None,
         })
 
     # ── 6. Totales agregados ──────────────────────────────────────────────────
@@ -571,6 +574,7 @@ def get_resumen_anual(
         rows = comp_by_c.get(c.id, [])
         total_min = sum(float(r.energia_minima) for r in rows if r.energia_minima is not None)
         total_max = sum(float(r.energia_maxima) for r in rows if r.energia_maxima is not None)
+        plantas_vals = [int(r.cantidad_proyectos) for r in rows if r.cantidad_proyectos is not None]
         result.append({
             "id": c.id,
             "nombre_interno": c.nombre_interno,
@@ -581,6 +585,8 @@ def get_resumen_anual(
             "total_min_mwh": round(total_min, 1) if rows else None,
             "total_max_mwh": round(total_max, 1) if rows else None,
             "meses_con_compromisos": len(rows),
+            # Plantas esperadas (denominador): valor máximo definido entre los meses del año.
+            "plantas_esperadas": max(plantas_vals) if plantas_vals else None,
         })
     return result
 
@@ -766,6 +772,9 @@ def get_simulador(
             "comprador_nombre": c.comprador_nombre,
             "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
+            # Plantas esperadas para el mes (denominador del indicador de cumplimiento de plantas).
+            # El numerador (plantas registradas) lo calcula el frontend con las plantas asignadas.
+            "plantas_esperadas": int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None,
         })
 
     result = {
@@ -1270,6 +1279,8 @@ def get_anual(
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_total if bolsa_dup_total > 0 else None,
             "plantas": plantas_mes,
             "n_plantas": len(plantas_mes),
+            # Cumplimiento de plantas: registradas (n_plantas) vs esperadas para el mes.
+            "plantas_esperadas": int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None,
         })
 
     return {

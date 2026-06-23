@@ -123,6 +123,7 @@ def calcular_proyecto(
     ipc_tasas: dict[int, float],
     incluido: bool = True,
     facturado: bool = False,
+    valor_manual: float | None = None,
 ) -> dict:
     """
     Calcula todos los campos de la fila O&M para un contrato en un período.
@@ -150,6 +151,8 @@ def calcular_proyecto(
             "valor_mes_completo": None,
             "prorrateo_label": "—",
             "prorrateo_factor": 0.0,
+            "valor_calculado": None,
+            "editado_manual": False,
             "valor_a_facturar": None,
             "historial_indexaciones": "Sin valor base",
         }
@@ -166,7 +169,9 @@ def calcular_proyecto(
     else:
         prorrateo_label, prorrateo_factor = "Completo", 1.0
 
-    valor_a_facturar = _redondear(valor_mes_completo * prorrateo_factor)
+    valor_calculado = _redondear(valor_mes_completo * prorrateo_factor)
+    editado_manual = valor_manual is not None
+    valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
 
     return {
         "contrato_id":          contrato_id,
@@ -183,6 +188,8 @@ def calcular_proyecto(
         "valor_mes_completo":   _redondear(valor_mes_completo),
         "prorrateo_label":      prorrateo_label,
         "prorrateo_factor":     prorrateo_factor,
+        "valor_calculado":      valor_calculado,
+        "editado_manual":       editado_manual,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(año_inicio, año_periodo, ipc_tasas),
     }

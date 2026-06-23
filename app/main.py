@@ -711,6 +711,7 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_om_seleccion_periodo ON om_seleccion_mensual (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_om_seleccion_contrato ON om_seleccion_mensual (contrato_id)",
+    "ALTER TABLE om_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_manual NUMERIC(14,0)",
     # Factura consolidada mensual del proveedor
     """CREATE TABLE IF NOT EXISTS om_factura_mensual (
         id             BIGSERIAL PRIMARY KEY,

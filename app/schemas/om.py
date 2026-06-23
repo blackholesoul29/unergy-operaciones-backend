@@ -55,6 +55,8 @@ class OMCalculoFila(BaseModel):
     prorrateo_label:        str
     prorrateo_factor:       float
     valor_a_facturar:       Optional[int]
+    valor_calculado:        Optional[int]
+    editado_manual:         bool
     historial_indexaciones: str
 
 
@@ -67,8 +69,9 @@ class OMCalculoResponse(BaseModel):
 # ── Selección mensual ────────────────────────────────────────────────────────
 
 class OMSeleccionItem(BaseModel):
-    contrato_id: int
-    incluido:    bool
+    contrato_id:  int
+    incluido:     bool
+    valor_manual: Optional[float] = None
 
 
 class OMSeleccionGuardar(BaseModel):
@@ -80,8 +83,9 @@ class OMSeleccionOut(BaseModel):
     contrato_id: int
     periodo:     str
     incluido:    bool
-    facturado:   bool
-    updated_at:  datetime
+    facturado:    bool
+    valor_manual: Optional[float] = None
+    updated_at:   datetime
     model_config = {"from_attributes": True}
 
 

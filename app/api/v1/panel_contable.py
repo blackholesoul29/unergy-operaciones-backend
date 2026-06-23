@@ -80,6 +80,11 @@ class ReasignarConsecutivos(BaseModel):
     tipo: str = "preliquidacion"
     consecutivo_ingresos_inicial: int
     consecutivo_costos_inicial: int
+    # solo_faltantes=True: NO renumera todo; solo rellena los consecutivos que están
+    # en None (preservando los ya asignados / editados a mano). Se usa al cargar la
+    # vista para que todo panel marcado quede numerado sin pisar ediciones manuales.
+    # solo_faltantes=False (default): renumeración completa desde el valor inicial.
+    solo_faltantes: bool = False
 
 
 class AsignacionClasif(BaseModel):
@@ -223,12 +228,21 @@ def _inversionistas_de(db: Session, proyecto_id: int, periodo: str | None = None
             rows = activos
 
     # porcentaje_participacion puede venir en 0-1 (0.5 = 50%) o en 0-100 (50 = 50%)
-    # según cómo se cargó cada proyecto (datos inconsistentes). Autodetectar: si TODOS
-    # los porcentajes activos son ≤ 1.5, están en fracción (0-1); si no, en 0-100.
-    # Antes se dividía siempre /100, lo que con datos 0-1 (ej. Cacica 0.5) dejaba las
-    # líneas 100× más pequeñas y mostraba "0.50%" en vez de "50%".
+    # según cómo se cargó cada proyecto (datos inconsistentes en proyecto_inversionistas).
+    # Detección ROBUSTA por la SUMA de los porcentajes activos (no por un umbral por
+    # valor, que era frágil): la participación total de un proyecto siempre debe
+    # acercarse a "el 100%". Si la suma está más cerca de 1 que de 100, los datos
+    # están en fracción (0-1); si está más cerca de 100, están en 0-100.
+    #   - normal/NEU/NITRO con datos 0-1 (ej. Cacica 0.5/0.5 → suma 1.0)  → fracción
+    #   - un único inversionista al 100% guardado como 1.0 (suma 1.0)     → fracción → 100%
+    #   - datos 0-100 (ej. 60/40 → suma 100)                              → 0-100
+    # Esto corrige el bug de que single 1.0 mostraba "1%" y El Son 0.21 mostraba "0.21%".
     pcts = [float(r.porcentaje_participacion) for r in rows if r.porcentaje_participacion is not None]
-    escala_0_1 = bool(pcts) and all(p <= 1.5 for p in pcts)
+    suma = sum(pcts)
+    # Si la suma está más cerca de 1 que de 100 ⇒ escala fracción (0-1); si no ⇒ 0-100.
+    # Comparar distancias (no un umbral por valor) tolera sumas parciales cuando no
+    # todos los inversionistas están activos el mes completo (ej. El Son en mayo).
+    escala_0_1 = bool(pcts) and abs(suma - 1.0) <= abs(suma - 100.0)
 
     out = []
     for r in rows:
@@ -993,6 +1007,12 @@ def reasignar_consecutivos(
     Asigna consecutivos en dos cadenas independientes:
       - Ingresos: a cada panel con liquidar_ingresos=true.
       - Costos: a cada panel con liquidar_costos=true y que tenga costos.
+
+    Dos modos (body.solo_faltantes):
+      - False (renumerar): reasigna TODO desde el valor inicial, en orden de id.
+      - True  (rellenar):  preserva los consecutivos ya asignados (incl. ediciones
+        manuales) y solo numera los que están en None, tomando el menor número libre
+        ≥ inicial. Así todo panel marcado queda numerado sin pisar lo editado.
     """
     try:
         y, m = body.periodo.strip().split("-")
@@ -1006,27 +1026,64 @@ def reasignar_consecutivos(
         .order_by(PanelContable.id)
         .all()
     )
-    ci = body.consecutivo_ingresos_inicial
-    cc = body.consecutivo_costos_inicial
-    asignados = []
-    for p in paneles:
-        if p.liquidar_ingresos:
-            p.consecutivo_ingresos = ci
-            ci += 1
-        else:
-            p.consecutivo_ingresos = None
-        if p.liquidar_costos and p.tiene_costos:
-            p.consecutivo_costos = cc
-            cc += 1
-        else:
-            p.consecutivo_costos = None
-        asignados.append({
+    asignados = _asignar_consecutivos(
+        paneles,
+        body.consecutivo_ingresos_inicial,
+        body.consecutivo_costos_inicial,
+        solo_faltantes=body.solo_faltantes,
+    )
+    db.commit()
+    return {"ok": True, "solo_faltantes": body.solo_faltantes, "asignados": asignados}
+
+
+def _asignar_consecutivos(
+    paneles: list[PanelContable], ini_ing: int, ini_cos: int, solo_faltantes: bool,
+) -> list[dict]:
+    """
+    Numera (in-place, sin commit) las dos cadenas de consecutivos. Ver
+    reasignar_consecutivos para la semántica de `solo_faltantes`.
+    """
+    def _cadena(activo, attr, inicio):
+        # Números ya ocupados (solo en modo rellenar, para no chocar con ediciones).
+        ocupados = set()
+        if solo_faltantes:
+            ocupados = {
+                getattr(p, attr) for p in paneles
+                if activo(p) and getattr(p, attr) is not None
+            }
+        siguiente = inicio
+
+        def _libre():
+            nonlocal siguiente
+            while siguiente in ocupados:
+                siguiente += 1
+            n = siguiente
+            ocupados.add(n)
+            siguiente += 1
+            return n
+
+        for p in paneles:
+            if not activo(p):
+                # No liquida esa cadena → siempre se limpia (no debe tener consecutivo).
+                setattr(p, attr, None)
+                continue
+            if solo_faltantes:
+                if getattr(p, attr) is None:
+                    setattr(p, attr, _libre())
+            else:
+                setattr(p, attr, _libre())
+
+    _cadena(lambda p: bool(p.liquidar_ingresos), "consecutivo_ingresos", ini_ing)
+    _cadena(lambda p: bool(p.liquidar_costos and p.tiene_costos), "consecutivo_costos", ini_cos)
+
+    return [
+        {
             "panel_id": p.id,
             "consecutivo_ingresos": p.consecutivo_ingresos,
             "consecutivo_costos": p.consecutivo_costos,
-        })
-    db.commit()
-    return {"ok": True, "asignados": asignados, "siguiente_ingresos": ci, "siguiente_costos": cc}
+        }
+        for p in paneles
+    ]
 
 
 # ── Diferencia preliquidación vs oficial ────────────────────────────────────────

@@ -853,6 +853,8 @@ def _parse_comercializacion(grid: list[list]) -> list[dict]:
 
 
 # Costos operativos buscados por etiqueta. iva=True → aplica IVA 19% como línea aparte.
+# El orden importa: la primera clave que aparezca en la etiqueta gana. "cambio
+# equipos de medida" va antes que cualquier clave genérica para no confundirse.
 _COSTO_CONCEPTOS = [
     ("arrend", "Arrendamiento", False),
     ("arriendo", "Arrendamiento", False),
@@ -863,6 +865,11 @@ _COSTO_CONCEPTOS = [
     ("internet", "Servicio de Internet", True),
     ("servicios publicos", "Servicios públicos", False),
     ("servicio publico", "Servicios públicos", False),
+    # Cambio de equipos de medida: es COSTO OPERATIVO. Antes no se capturaba en
+    # ninguna sección, así que quedaba sin agrupar (Bug 4). Variantes de etiqueta.
+    ("cambio equipos de medida", "Cambio equipos de medida", False),
+    ("cambio de equipos de medida", "Cambio equipos de medida", False),
+    ("cambio equipos medida", "Cambio equipos de medida", False),
 ]
 
 

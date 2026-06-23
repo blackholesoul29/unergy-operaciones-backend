@@ -594,6 +594,7 @@ def get_simulador(
     from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
 
     total_dias = calendar.monthrange(year, month)[1]
+    first_day = date(year, month, 1)
 
     plantas_db = (
         db.query(Proyecto)
@@ -601,6 +602,9 @@ def get_simulador(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Misma semántica que /plantas-contratos y /energia-transada: no listar
+            # plantas cuya representación terminó antes del mes consultado.
+            or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
         )
         .order_by(Proyecto.nombre_comercial)
         .all()
@@ -612,7 +616,6 @@ def get_simulador(
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     from sqlalchemy.orm import selectinload
-    first_day = date(year, month, 1)
     last_day = date(year, month, total_dias)
     compra_proyecto_ids: set[int] = set()
     compra_nombre_map: dict[int, str] = {}
@@ -792,6 +795,9 @@ def get_plantas_contratos(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Excluir plantas cuya representación ya terminó antes del mes consultado:
+            # aparece si fecha_fin_representacion >= primer día del mes (o si es NULL).
+            or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
         )
         .order_by(Proyecto.nombre_comercial)
         .all()

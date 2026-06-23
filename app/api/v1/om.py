@@ -107,6 +107,7 @@ def calcular_periodo(
         sel = selecciones.get(c.id)
         incluido = sel.incluido if sel else True
         facturado = sel.facturado if sel else False
+        valor_manual = float(sel.valor_manual) if sel and sel.valor_manual is not None else None
 
         fila_data = calcular_proyecto(
             contrato_id=c.id,
@@ -117,6 +118,7 @@ def calcular_periodo(
             ipc_tasas=ipc_tasas,
             incluido=incluido,
             facturado=facturado,
+            valor_manual=valor_manual,
         )
         fila = OMCalculoFila(**fila_data)
         filas.append(fila)
@@ -155,12 +157,14 @@ def guardar_seleccion(
 
         if sel:
             sel.incluido = item.incluido
+            sel.valor_manual = item.valor_manual
         else:
             sel = OMSeleccion(
                 contrato_id=item.contrato_id,
                 periodo=periodo,
                 incluido=item.incluido,
                 facturado=False,
+                valor_manual=item.valor_manual,
             )
             db.add(sel)
         resultados.append(sel)

@@ -87,6 +87,14 @@ class ReasignarConsecutivos(BaseModel):
     solo_faltantes: bool = False
 
 
+class RedividirBody(BaseModel):
+    periodo: str
+    tipo: str = "preliquidacion"
+    proyecto_id: int | None = None
+    # forzar=True re-divide aun si los % parecen correctos (pisa ediciones manuales).
+    forzar: bool = False
+
+
 class AsignacionClasif(BaseModel):
     proyecto_id: int
     tipo: str  # 'normal' | 'neu' | 'nitro'
@@ -677,6 +685,165 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
         "inversionistas": list(inv_map.values()),
         # Vista 100% (total proyecto sin dividir).
         "total_100": total_100,
+    }
+
+
+# ── Re-división: refrescar el reparto por inversionista sin re-subir el ER ──────
+#
+# Las líneas de un panel son un SNAPSHOT dividido al momento de cargar el ER. Si el
+# panel se generó con un % mal escalado (ej. una versión vieja que trataba la
+# fracción 1.0 como "1%" → valores 100× menores), `listar` sigue sirviendo ese
+# snapshot: recargar el ER es el único refresco y depende de LibreOffice en Railway.
+# Estas funciones puras reconstruyen la base al 100% desde las propias líneas y
+# vuelven a repartir con los % actuales, sin archivo ni recálculo.
+
+def _linea_dict(ln) -> dict:
+    return {
+        "proyecto_inversionista_id": ln.proyecto_inversionista_id,
+        "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
+        "valor_cop": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
+        "grupo": ln.grupo, "concepto": ln.concepto,
+        "hoja": ln.hoja, "celda": ln.celda,
+        "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
+    }
+
+
+def _reconstruir_base(lineas: list[dict]) -> list[dict]:
+    """
+    Renglones al 100% (sin dividir) a partir de las líneas YA divididas, usando el
+    invariante de generación: valor_cop = base · (porcentaje / 100). Por tanto
+    base = Σ valor_cop / Σ (porcentaje / 100) por (grupo, concepto). El invariante
+    se cumple en ambas ramas de _inversionistas_de (fracción y 0-100), así que la
+    reconstrucción es correcta sin importar con qué escala se generó el snapshot.
+    Conserva orden de aparición, celda de origen y comprobante.
+    """
+    bases: list[dict] = []
+    idx: dict = {}
+    for ln in sorted(lineas, key=lambda x: x["orden"]):
+        k = (ln["grupo"], ln["concepto"])
+        if k not in idx:
+            idx[k] = len(bases)
+            bases.append({
+                "grupo": ln["grupo"], "concepto": ln["concepto"],
+                "hoja": ln.get("hoja"), "celda": ln.get("celda"),
+                "comprobante_contable": ln.get("comprobante_contable"),
+                "_sum_val": 0.0, "_sum_frac": 0.0,
+            })
+        b = bases[idx[k]]
+        pct = ln.get("porcentaje")
+        b["_sum_val"] += ln.get("valor_cop") or 0.0
+        b["_sum_frac"] += (pct / 100.0) if pct else 0.0
+        if not b.get("comprobante_contable") and ln.get("comprobante_contable"):
+            b["comprobante_contable"] = ln["comprobante_contable"]
+    for b in bases:
+        # Σfrac ≈ 0 (todos los % en 0/None) ⇒ no se puede des-dividir; se deja el
+        # valor tal cual para no inventar una base.
+        b["valor"] = (b["_sum_val"] / b["_sum_frac"]) if b["_sum_frac"] else b["_sum_val"]
+    return bases
+
+
+def _redividir_lineas(lineas: list[dict], invs: list[dict]) -> list[dict]:
+    """
+    Reparte de nuevo las líneas por inversionista con los % de `invs` (mismo formato
+    que _inversionistas_de). Replica el orden de _guardar_panel (inversionista
+    externo, concepto interno). Idempotente si los % no cambian.
+    """
+    bases = _reconstruir_base(lineas)
+    out: list[dict] = []
+    orden = 0
+    for inv in invs:
+        frac = inv["fraccion"] if inv["fraccion"] is not None else 0.0
+        for b in bases:
+            out.append({
+                "proyecto_inversionista_id": inv["id"],
+                "inversionista_nombre": inv["nombre"],
+                "porcentaje": inv["pct"],
+                "grupo": b["grupo"], "concepto": b["concepto"],
+                "valor_cop": round(b["valor"] * frac, 2),
+                "hoja": b["hoja"], "celda": b["celda"],
+                "comprobante_contable": b["comprobante_contable"],
+                "orden": orden,
+            })
+            orden += 1
+    return out
+
+
+def _division_desactualizada(lineas: list[dict], invs: list[dict], tol: float = 0.01) -> bool:
+    """
+    True si el % por inversionista guardado en las líneas NO coincide con el correcto
+    (invs). Evita repisar paneles sanos o con ediciones manuales: solo se re-divide
+    cuando el reparto está realmente mal escalado o cambió la composición.
+    """
+    correcto = {i["id"]: i["pct"] for i in invs if i["id"] is not None and i["pct"] is not None}
+    if not correcto:
+        return False
+    guardado: dict = {}
+    for ln in lineas:
+        pid = ln.get("proyecto_inversionista_id")
+        if pid is not None and ln.get("porcentaje") is not None:
+            guardado[pid] = float(ln["porcentaje"])
+    if set(guardado) != set(correcto):
+        return True
+    return any(abs(guardado[k] - correcto[k]) > tol for k in correcto)
+
+
+@router.post("/redividir")
+def redividir(
+    body: RedividirBody,
+    db: Session = Depends(get_db),
+    _=Depends(_require_write),
+):
+    """
+    Refresca el reparto por inversionista de los paneles de un período usando los %
+    actuales de proyecto_inversionistas, SIN re-subir el ER. Repara paneles cuyas
+    líneas quedaron mal escaladas por una generación previa (ej. % en fracción →
+    valores 100× menores). Reconstruye la base al 100% desde las propias líneas, así
+    no depende de LibreOffice ni del archivo. Seguro e idempotente: salta los paneles
+    cuyo % ya coincide (preserva ediciones), salvo forzar=True.
+    """
+    try:
+        y, m = body.periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    q = (
+        db.query(PanelContable)
+        .options(selectinload(PanelContable.lineas))
+        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == body.tipo)
+    )
+    if body.proyecto_id is not None:
+        q = q.filter(PanelContable.proyecto_id == body.proyecto_id)
+    paneles = q.order_by(PanelContable.id).all()
+
+    redivididos, saltados = [], []
+    for panel in paneles:
+        lineas = [_linea_dict(ln) for ln in panel.lineas]
+        if not lineas:
+            saltados.append({"panel_id": panel.id, "proyecto_id": panel.proyecto_id, "motivo": "sin_lineas"})
+            continue
+        invs = _inversionistas_de(db, panel.proyecto_id, periodo_norm)
+        if not invs:
+            invs = [{"id": None, "nombre": "Sin inversionistas", "fraccion": 1.0, "pct": 100.0}]
+        if not body.forzar and not _division_desactualizada(lineas, invs):
+            saltados.append({"panel_id": panel.id, "proyecto_id": panel.proyecto_id, "motivo": "ya_correcto"})
+            continue
+        nuevas = _redividir_lineas(lineas, invs)
+        db.query(PanelContableLinea).filter(
+            PanelContableLinea.panel_id == panel.id
+        ).delete(synchronize_session=False)
+        for nl in nuevas:
+            db.add(PanelContableLinea(panel_id=panel.id, **nl))
+        redivididos.append({
+            "panel_id": panel.id, "proyecto_id": panel.proyecto_id,
+            "lineas": len(nuevas),
+            "porcentajes": sorted({round(i["pct"], 4) for i in invs if i["pct"] is not None}),
+        })
+    db.commit()
+    return {
+        "ok": True, "periodo": periodo_norm, "tipo": body.tipo,
+        "n_redivididos": len(redivididos), "n_saltados": len(saltados),
+        "redivididos": redivididos, "saltados": saltados,
     }
 
 

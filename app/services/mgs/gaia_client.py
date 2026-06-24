@@ -62,6 +62,7 @@ FRONTERA_NODE_MAP: dict[str, tuple[int | None, int | None]] = {
     "frt92219": (1730, 1731),  # MGS 0075 - Chiriguaná Norte 2
     "frt92221": (1739, 1740),  # MGS 0077 - Chiriguaná Norte 4
     "frt_reserva": (1578, 1577),  # La Reserva
+    "frt_paso_norte": (1750, 1751),  # MGS 0032 - El Paso Norte
 }
 
 # minigranja number → frontera code (for numbered projects)
@@ -87,6 +88,7 @@ _NUM_TO_FRT: dict[int, str] = {
     41: "frt87018",
     75: "frt92219",
     77: "frt92221",
+    32: "frt_paso_norte",
 }
 
 # keyword → frontera code
@@ -124,6 +126,7 @@ _KW_TO_FRT: dict[str, str] = {
     "chiriquana norte 4":"frt92221",
     "olimpo":           "frt_olimpo14",
     "la reserva":       "frt_reserva",
+    "paso norte":       "frt_paso_norte",
 }
 
 

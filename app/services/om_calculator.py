@@ -14,8 +14,48 @@ Indexación IPC (regla vigente):
 """
 from __future__ import annotations
 import calendar
+import re
+import unicodedata
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+
+
+# ── Emparejamiento de nombres de proyecto (seed ↔ contrato existente) ─────────
+
+_OM_GENERIC = {"la", "el", "los", "las", "de", "del", "san", "sur", "norte",
+               "solar", "minigranja", "valle"}
+
+
+def om_norm(s: str) -> str:
+    """Minúsculas, sin acentos, sin espacios extremos."""
+    return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower().strip()
+
+
+def om_strip_code(s: str) -> str:
+    """Quita el prefijo de código del proyecto, ej. 'MGS 0021 - ' → ''."""
+    return re.sub(r"^mgs\s*\d+\s*-?\s*", "", om_norm(s)).strip()
+
+
+def om_keys(nombre: str) -> list[str]:
+    """Tokens significativos de un nombre de proyecto del seed (para emparejar)."""
+    n = om_norm(nombre).replace("minigranja solar", " ").replace("minigranja", " ")
+    toks = re.findall(r"[a-z]+|\d+", n)
+    sig = [t for t in toks if t.isdigit() or (len(t) > 3 and t not in _OM_GENERIC)]
+    if sig:
+        return sig
+    return [t for t in toks if t not in _OM_GENERIC] or toks
+
+
+def om_match_seed(nombre_contrato: str, seed_keys):
+    """
+    Empareja el nombre de un contrato existente con UNA entrada del seed.
+    seed_keys: lista de (item, keys). Devuelve item si el match es único, si no None.
+    Exige que TODOS los tokens del seed estén en el nombre (sin el código MGS),
+    evitando colisiones como Valencia Oriente 1/2 o Chiriguana 2/4.
+    """
+    disp_toks = set(re.findall(r"[a-z]+|\d+", om_strip_code(nombre_contrato)))
+    cands = [it for (it, k) in seed_keys if k and all(t in disp_toks for t in k)]
+    return cands[0] if len(cands) == 1 else None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

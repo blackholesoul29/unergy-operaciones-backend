@@ -2062,14 +2062,18 @@ _OM_PROYECTOS_SEED = [
 
 def _run_om_seed() -> None:
     """
-    Siembra datos iniciales de O&M: tasas IPC y contratos de mantenimiento.
-    Idempotente — no duplica si ya existen.
+    Siembra datos O&M: tasas IPC y fechas/base de los contratos de mantenimiento.
+
+    NO crea contratos ni huérfanos: actualiza los contratos de mantenimiento que
+    YA existen, emparejándolos por nombre. Política no destructiva sobre datos del
+    equipo: fecha_firma_contrato y tarifa_base solo se rellenan si están NULL;
+    fecha_inicio_om (campo solo-seed) se fija al valor de la tabla.
     """
-    import re as _re
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.om import IPCTasa
     from app.models.contratos import ContratoServicio
+    from app.services.om_calculator import om_keys, om_match_seed
 
     Session = sessionmaker(bind=engine)
     db = Session()
@@ -2081,84 +2085,43 @@ def _run_om_seed() -> None:
                 db.add(IPCTasa(**item))
         db.commit()
 
-        # ── Contratos mantenimiento seed ──────────────────────────────────────
-        proyectos_db = db.execute(
-            text("SELECT id, nombre_comercial FROM proyectos WHERE deleted_at IS NULL")
-        ).fetchall()
-        por_nombre = {(r[1] or "").lower(): r[0] for r in proyectos_db}
-
-        def _match(nombre: str):
-            n = nombre.lower()
-            if n in por_nombre:
-                return por_nombre[n]
-            for num in _re.findall(r"\d{4}", nombre):
-                for db_n, db_id in por_nombre.items():
-                    if num in db_n:
-                        return db_id
-            partes = [w.lower() for w in _re.sub(r"[-()]", " ", nombre).split() if len(w) > 4]
-            for p in partes:
-                for db_n, db_id in por_nombre.items():
-                    if p in db_n:
-                        return db_id
-            return None
-
+        # ── Actualizar contratos mantenimiento existentes ─────────────────────
         def _fecha(s):
             return date.fromisoformat(s) if s else None
 
-        insertados = 0
+        seed_keys = [(it, om_keys(it["nombre"])) for it in _OM_PROYECTOS_SEED]
+        contratos = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "mantenimiento"
+        ).all()
+
         actualizados = 0
-        for item in _OM_PROYECTOS_SEED:
-            firma = _fecha(item["fecha_firma"])
-            inicio_om = _fecha(item["fecha_inicio_om"])
-            base = item["valor_base_anual"]
-
-            proyecto_id = _match(item["nombre"])
-            ya = None
-            if proyecto_id:
-                ya = db.query(ContratoServicio).filter(
-                    ContratoServicio.proyecto_id == proyecto_id,
-                    ContratoServicio.servicio_aplica == "mantenimiento",
-                ).first()
-            if not ya:
-                ya = db.query(ContratoServicio).filter(
-                    ContratoServicio.servicio_aplica == "mantenimiento",
-                    ContratoServicio.prestador_nombre == item["nombre"],
-                ).first()
-
-            if ya:
-                cambio = False
-                # fecha_firma_contrato y tarifa_base: SOLO si están NULL (no pisar UI).
-                if firma is not None and ya.fecha_firma_contrato is None:
-                    ya.fecha_firma_contrato = firma
-                    cambio = True
-                if base is not None and ya.tarifa_base is None:
-                    ya.tarifa_base = base
-                    cambio = True
-                # fecha_inicio_om: gestionado solo por el seed → se fija al valor tabla.
-                if inicio_om is not None and ya.fecha_inicio_om != inicio_om:
-                    ya.fecha_inicio_om = inicio_om
-                    cambio = True
-                if cambio:
-                    actualizados += 1
+        usados = set()
+        for c in contratos:
+            nombre_disp = (c.proyecto.nombre_comercial if c.proyecto else c.prestador_nombre) or ""
+            it = om_match_seed(nombre_disp, seed_keys)
+            if it is None:
                 continue
+            usados.add(it["nombre"])
+            firma = _fecha(it["fecha_firma"])
+            inicio_om = _fecha(it["fecha_inicio_om"])
+            base = it["valor_base_anual"]
 
-            # Contrato nuevo: lo crea el seed con todos los datos de la tabla.
-            db.add(ContratoServicio(
-                proyecto_id=proyecto_id,
-                servicio_aplica="mantenimiento",
-                estado="vigente",
-                tarifa_base=base,
-                fecha_firma_contrato=firma,
-                fecha_inicio_om=inicio_om,
-                fecha_inicio=inicio_om,   # compat: otros módulos leen fecha_inicio
-                prestador_nombre=item["nombre"],
-                contratante_nombre="Unergy Energía Digital S.A.S. E.S.P.",
-            ))
-            insertados += 1
+            cambio = False
+            if firma is not None and c.fecha_firma_contrato is None:
+                c.fecha_firma_contrato = firma
+                cambio = True
+            if base is not None and c.tarifa_base is None:
+                c.tarifa_base = base
+                cambio = True
+            if inicio_om is not None and c.fecha_inicio_om != inicio_om:
+                c.fecha_inicio_om = inicio_om
+                cambio = True
+            if cambio:
+                actualizados += 1
 
         db.commit()
-        if insertados or actualizados:
-            print(f"[om_seed] {insertados} contratos insertados, {actualizados} actualizados")
+        faltantes = [it["nombre"] for it, _ in seed_keys if it["nombre"] not in usados]
+        print(f"[om_seed] {actualizados} contratos actualizados; sin match: {faltantes}")
 
     except Exception as e:
         db.rollback()

@@ -905,6 +905,8 @@ _PENDING_DDLS = [
     "UPDATE fronteras SET quoia_meter_id = 1730 WHERE LOWER(codigo_frontera) = 'frt92219' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 1739 WHERE LOWER(codigo_frontera) = 'frt92221' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 1578 WHERE LOWER(codigo_frontera) = 'frt_reserva' AND quoia_meter_id IS NULL",
+    # ppa_compromisos_energia: plantas esperadas por mes (denominador del indicador de cumplimiento de plantas)
+    "ALTER TABLE ppa_compromisos_energia ADD COLUMN IF NOT EXISTS cantidad_proyectos INTEGER",
 ]
 
 

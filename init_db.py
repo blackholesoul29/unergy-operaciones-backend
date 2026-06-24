@@ -40,6 +40,8 @@ def add_columns():
         # ppa_contratos: tipo_contrato y carpeta_link (migración 009)
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",
+        # ppa_compromisos_energia: plantas esperadas por mes (denominador del indicador de cumplimiento de plantas)
+        "ALTER TABLE ppa_compromisos_energia ADD COLUMN IF NOT EXISTS cantidad_proyectos INTEGER",
     ]
     for s in stmts:
         try:

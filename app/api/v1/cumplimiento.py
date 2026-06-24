@@ -409,11 +409,13 @@ def get_resumen(
                 gp = gd["mwh"]
                 if gp is not None:
                     mwh_contrato = gp * pct
+                    # El suministro al contrato cuenta para el cumplimiento sin importar
+                    # el origen (real o compra en bolsa). El duplicado además se registra
+                    # en bolsa_dup_c como sub-cifra informativa (cuánto proviene de bolsa).
+                    gen_total_c += mwh_contrato
                     if is_dup:
                         bolsa_dup_c += mwh_contrato
                         n_duplicados += 1
-                    else:
-                        gen_total_c += mwh_contrato
                     if gd.get("ultimo_dia") is not None:
                         dias_datos.append(gd["ultimo_dia"])
                 else:
@@ -473,6 +475,9 @@ def get_resumen(
             "n_duplicados": n_duplicados,
             "plantas_sin_datos": plantas_sin_datos,
             "dia_min_datos": min(dias_datos) if dias_datos else None,
+            # Indicador de cumplimiento de plantas: registradas (numerador) vs esperadas (denominador).
+            "plantas_registradas": len(assignments),
+            "plantas_esperadas": int(compromiso.cantidad_proyectos) if compromiso and compromiso.cantidad_proyectos is not None else None,
         })
 
     # ── 6. Totales agregados ──────────────────────────────────────────────────
@@ -569,6 +574,7 @@ def get_resumen_anual(
         rows = comp_by_c.get(c.id, [])
         total_min = sum(float(r.energia_minima) for r in rows if r.energia_minima is not None)
         total_max = sum(float(r.energia_maxima) for r in rows if r.energia_maxima is not None)
+        plantas_vals = [int(r.cantidad_proyectos) for r in rows if r.cantidad_proyectos is not None]
         result.append({
             "id": c.id,
             "nombre_interno": c.nombre_interno,
@@ -579,6 +585,8 @@ def get_resumen_anual(
             "total_min_mwh": round(total_min, 1) if rows else None,
             "total_max_mwh": round(total_max, 1) if rows else None,
             "meses_con_compromisos": len(rows),
+            # Plantas esperadas (denominador): valor máximo definido entre los meses del año.
+            "plantas_esperadas": max(plantas_vals) if plantas_vals else None,
         })
     return result
 
@@ -602,6 +610,9 @@ def get_simulador(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             # Misma semántica que /plantas-contratos y /energia-transada: no listar
             # plantas cuya representación terminó antes del mes consultado.
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
@@ -761,6 +772,9 @@ def get_simulador(
             "comprador_nombre": c.comprador_nombre,
             "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
+            # Plantas esperadas para el mes (denominador del indicador de cumplimiento de plantas).
+            # El numerador (plantas registradas) lo calcula el frontend con las plantas asignadas.
+            "plantas_esperadas": int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None,
         })
 
     result = {
@@ -795,6 +809,9 @@ def get_plantas_contratos(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             # Excluir plantas cuya representación ya terminó antes del mes consultado:
             # aparece si fecha_fin_representacion >= primer día del mes (o si es NULL).
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
@@ -934,6 +951,9 @@ def get_energia_transada(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.sub_project.isnot(None),
+            # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
+            # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
+            Proyecto.srv_representacion.is_(True),
             or_(Proyecto.fecha_entrada_operacion.is_(None), Proyecto.fecha_entrada_operacion <= last_day),
             or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
         )
@@ -1180,10 +1200,11 @@ def get_anual(
 
             gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
             if gen_contrato is not None:
+                # Cuenta para el cumplimiento sin importar el origen; el duplicado
+                # se registra además en bolsa_dup_total como sub-cifra (origen bolsa).
+                gen_total += gen_contrato
                 if is_dup:
                     bolsa_dup_total += gen_contrato
-                else:
-                    gen_total += gen_contrato
             plantas_mes.append({
                 "nombre": nombre,
                 "sub_project": sp,
@@ -1210,9 +1231,8 @@ def get_anual(
                 if not sp:
                     continue
                 pct = float(asic.porcentaje_despacho or 0)
-                is_dup = bool(asic.es_duplicado)
-                if is_dup:
-                    continue
+                # La proyección incluye duplicados: la compra en bolsa también
+                # cubre el contrato de cara a la contraparte.
                 eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
                 eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
                 dias_activos = max(0, (eff_end - eff_start).days + 1)
@@ -1259,6 +1279,8 @@ def get_anual(
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_total if bolsa_dup_total > 0 else None,
             "plantas": plantas_mes,
             "n_plantas": len(plantas_mes),
+            # Cumplimiento de plantas: registradas (n_plantas) vs esperadas para el mes.
+            "plantas_esperadas": int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None,
         })
 
     return {
@@ -1407,8 +1429,10 @@ def get_cumplimiento(
         })
 
     # ── 6. Totales ────────────────────────────────────────────
+    # gen_total cuenta TODO lo suministrado al contrato (real + compra en bolsa);
+    # bolsa_dup es el subconjunto informativo proveniente de duplicados (origen bolsa).
     gen_total = round(
-        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None and not p["es_duplicado"]),
+        sum(p["gen_contrato_mwh"] for p in plantas_data if p["gen_contrato_mwh"] is not None),
         3,
     )
     bolsa_dup = round(

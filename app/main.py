@@ -2022,34 +2022,36 @@ _OM_IPC_SEED = [
     {"año": 2026, "tasa": 0.0510, "confirmado": True, "fuente": "DANE"},
 ]
 
+# fecha_firma = fecha de suscripción del contrato; fecha_inicio_om = inicio de operación real.
+# La indexación IPC usa max(fecha_firma, fecha_inicio_om) con excepción de primer aniversario.
 _OM_PROYECTOS_SEED = [
-    {"nombre": "Minigranja Solar Uruaco",            "fecha_inicio": "2023-06-17", "valor_base_anual": 25880000},
-    {"nombre": "Minigranja Solar Baraya",             "fecha_inicio": "2024-02-17", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Cañahuate",          "fecha_inicio": "2024-02-19", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Gandalf",            "fecha_inicio": "2024-02-19", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar La Paz Vallenata",   "fecha_inicio": "2024-08-16", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Perijá",             "fecha_inicio": "2024-09-15", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar El Molino",          "fecha_inicio": "2024-09-20", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar La Paz Verso",       "fecha_inicio": "2024-12-05", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Esmeralda",          "fecha_inicio": "2025-02-14", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar El Son",             "fecha_inicio": "2025-02-16", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar La Puya",            "fecha_inicio": "2025-02-19", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Villanueva",         "fecha_inicio": "2025-04-04", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar Merengue",           "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar La Reserva",         "fecha_inicio": "2025-04-25", "valor_base_anual": 48000000},
-    {"nombre": "Nestlé",                              "fecha_inicio": "2025-06-26", "valor_base_anual": 78000000},
-    {"nombre": "Minigranja Solar Ibirico",            "fecha_inicio": "2025-07-08", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar El Olimpo",          "fecha_inicio": "2025-07-20", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar La Mesa",            "fecha_inicio": "2025-09-12", "valor_base_anual": 48000000},
-    {"nombre": "Minigranja Solar San Diego Sur",      "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar Valencia Oriente 1", "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar La Cacica",          "fecha_inicio": "2026-01-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar Las Piloneras",      "fecha_inicio": "2026-01-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar Valencia Oriente 2", "fecha_inicio": "2026-03-18", "valor_base_anual": 54000000},
-    {"nombre": "Minigranja Solar Cumbia",             "fecha_inicio": "2025-01-01", "valor_base_anual": None},
-    {"nombre": "Minigranja Solar Copey",              "fecha_inicio": "2025-01-01", "valor_base_anual": None},
-    {"nombre": "Minigranja Solar Chiriguana 2",       "fecha_inicio": "2026-03-14", "valor_base_anual": None},
-    {"nombre": "Minigranja Solar Chiriguana 4",       "fecha_inicio": "2026-03-17", "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Uruaco",            "fecha_firma": "2022-09-10", "fecha_inicio_om": "2023-11-15", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Baraya",             "fecha_firma": None,         "fecha_inicio_om": None,         "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Cañahuate",          "fecha_firma": "2023-09-19", "fecha_inicio_om": None,         "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Gandalf",            "fecha_firma": "2023-09-19", "fecha_inicio_om": None,         "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Paz Vallenata",   "fecha_firma": "2024-08-23", "fecha_inicio_om": "2023-09-01", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Perijá",             "fecha_firma": "2024-08-23", "fecha_inicio_om": None,         "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Molino",          "fecha_firma": "2024-08-23", "fecha_inicio_om": "2024-02-20", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Paz Verso",       "fecha_firma": "2024-08-23", "fecha_inicio_om": "2024-03-11", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Esmeralda",          "fecha_firma": "2024-08-23", "fecha_inicio_om": "2025-02-26", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Son",             "fecha_firma": None,         "fecha_inicio_om": "2025-02-16", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Puya",            "fecha_firma": "2024-08-23", "fecha_inicio_om": "2025-04-07", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Villanueva",         "fecha_firma": "2024-08-23", "fecha_inicio_om": "2025-07-25", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Merengue",           "fecha_firma": "2026-03-18", "fecha_inicio_om": "2025-04-16", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar La Reserva",         "fecha_firma": "2025-05-10", "fecha_inicio_om": "2025-04-16", "valor_base_anual": 36880000},
+    {"nombre": "Nestlé",                              "fecha_firma": "2025-12-09", "fecha_inicio_om": None,         "valor_base_anual": 78000000},
+    {"nombre": "Minigranja Solar Ibirico",            "fecha_firma": "2024-12-20", "fecha_inicio_om": "2025-07-21", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar El Olimpo",          "fecha_firma": "2024-08-23", "fecha_inicio_om": "2025-07-20", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar La Mesa",            "fecha_firma": "2024-08-23", "fecha_inicio_om": "2025-11-19", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar San Diego Sur",      "fecha_firma": "2025-10-20", "fecha_inicio_om": "2023-10-30", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Valencia Oriente 1", "fecha_firma": "2026-03-18", "fecha_inicio_om": "2026-01-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar La Cacica",          "fecha_firma": "2026-01-19", "fecha_inicio_om": "2026-01-28", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Las Piloneras",      "fecha_firma": "2026-01-19", "fecha_inicio_om": "2026-02-04", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Valencia Oriente 2", "fecha_firma": "2026-03-18", "fecha_inicio_om": "2026-01-18", "valor_base_anual": 54000000},
+    {"nombre": "Minigranja Solar Cumbia",             "fecha_firma": "2025-01-01", "fecha_inicio_om": "2025-02-06", "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Copey",              "fecha_firma": "2025-01-01", "fecha_inicio_om": "2026-03-05", "valor_base_anual": 48000000},
+    {"nombre": "Minigranja Solar Chiriguana 2",       "fecha_firma": None,         "fecha_inicio_om": None,         "valor_base_anual": None},
+    {"nombre": "Minigranja Solar Chiriguana 4",       "fecha_firma": None,         "fecha_inicio_om": None,         "valor_base_anual": None},
 ]
 
 
@@ -2095,8 +2097,16 @@ def _run_om_seed() -> None:
                         return db_id
             return None
 
+        def _fecha(s):
+            return date.fromisoformat(s) if s else None
+
         insertados = 0
+        actualizados = 0
         for item in _OM_PROYECTOS_SEED:
+            firma = _fecha(item["fecha_firma"])
+            inicio_om = _fecha(item["fecha_inicio_om"])
+            base = item["valor_base_anual"]
+
             proyecto_id = _match(item["nombre"])
             ya = None
             if proyecto_id:
@@ -2111,27 +2121,38 @@ def _run_om_seed() -> None:
                 ).first()
 
             if ya:
-                if not ya.tarifa_base and item["valor_base_anual"]:
-                    ya.tarifa_base = item["valor_base_anual"]
-                if not ya.fecha_inicio and item["fecha_inicio"]:
-                    ya.fecha_inicio = date.fromisoformat(item["fecha_inicio"])
+                # El seed es la fuente de verdad de fechas/base de los contratos O&M:
+                # sobreescribe firma y fecha_inicio_om; base solo si el seed la define.
+                cambio = False
+                if ya.fecha_firma_contrato != firma:
+                    ya.fecha_firma_contrato = firma
+                    cambio = True
+                if ya.fecha_inicio_om != inicio_om:
+                    ya.fecha_inicio_om = inicio_om
+                    cambio = True
+                if base is not None and ya.tarifa_base != base:
+                    ya.tarifa_base = base
+                    cambio = True
+                if cambio:
+                    actualizados += 1
                 continue
 
-            fecha = date.fromisoformat(item["fecha_inicio"]) if item["fecha_inicio"] else None
             db.add(ContratoServicio(
                 proyecto_id=proyecto_id,
                 servicio_aplica="mantenimiento",
                 estado="vigente",
-                tarifa_base=item["valor_base_anual"],
-                fecha_inicio=fecha,
+                tarifa_base=base,
+                fecha_firma_contrato=firma,
+                fecha_inicio_om=inicio_om,
+                fecha_inicio=inicio_om,   # compat: otros módulos leen fecha_inicio
                 prestador_nombre=item["nombre"],
                 contratante_nombre="Unergy Energía Digital S.A.S. E.S.P.",
             ))
             insertados += 1
 
         db.commit()
-        if insertados:
-            print(f"[om_seed] {insertados} contratos mantenimiento insertados")
+        if insertados or actualizados:
+            print(f"[om_seed] {insertados} contratos insertados, {actualizados} actualizados")
 
     except Exception as e:
         db.rollback()

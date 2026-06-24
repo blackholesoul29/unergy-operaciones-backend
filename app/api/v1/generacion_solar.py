@@ -1278,3 +1278,64 @@ def project_monitoring_detail(
     return result
 
 
+@router.get("/monitoring/{proyecto_id}/inverters-power")
+def project_inverters_power(
+    proyecto_id: int,
+    date_from: str = Query(None, description="YYYY-MM-DD (default: hoy)"),
+    date_to: str = Query(None, description="YYYY-MM-DD (default: hoy)"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Potencia por inversor (serie temporal) de un proyecto, en un rango de fechas.
+
+    Solenium devuelve `power` como dict llaveado por dev_name del inversor. Aquí lo
+    normalizamos a una lista de series — una por inversor — que el front usa tanto
+    para la gráfica comparativa (todas las líneas) como para la individual (al
+    expandir un inversor; filtra por dev_name).
+
+    Sin fechas → hoy (resolución 5 min). En rangos de varios días se agrupa por hora.
+    """
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    if not p.project_id_solenium:
+        raise HTTPException(422, "Proyecto sin ID Solenium")
+
+    sol_id = int(p.project_id_solenium)
+    today = date.today().isoformat()
+    df = date_from or today
+    dt = date_to or today
+
+    client = _get_client()
+    raw = client.get_power(sol_id, df, dt) or {}
+    power = raw.get("power") or (raw.get("results") or {}).get("power") or {}
+
+    multiday = df != dt
+    inverters: list[dict] = []
+    for dev_name, series in power.items():
+        if not isinstance(series, dict):
+            continue
+        pts = sorted(series.items())
+        if multiday:
+            # Agrupar por hora: promedio de potencia por franja "YYYY-MM-DD HH"
+            buckets: dict[str, list[float]] = {}
+            for ts, v in pts:
+                buckets.setdefault(str(ts)[:13], []).append(float(v or 0))
+            points = [{"time": f"{k}:00", "kw": round(sum(vs) / len(vs), 2)}
+                      for k, vs in sorted(buckets.items())]
+        else:
+            points = [{"time": str(ts), "kw": round(float(v or 0), 2)} for ts, v in pts]
+        peak = max((pt["kw"] for pt in points), default=0.0)
+        inverters.append({"dev_name": dev_name, "points": points, "peak_kw": round(peak, 2)})
+
+    inverters.sort(key=lambda x: x["dev_name"])
+    return {
+        "proyecto_id":  p.id,
+        "sol_id":       sol_id,
+        "date_from":    df,
+        "date_to":      dt,
+        "granularidad": "hour" if multiday else "5min",
+        "inverters":    inverters,
+    }
+
+

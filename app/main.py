@@ -578,15 +578,20 @@ _PENDING_DDLS = [
     # migration — ASIC: cédulas de agentes (requeridas por XM en una terminación)
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS cedula_agente_vendedor VARCHAR(30)",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS cedula_agente_comprador VARCHAR(30)",
-    # migration — Terminaciones: la fecha de terminación es la fuente de verdad del fin.
+    # migration — Terminaciones: la fecha de terminación es la fuente de verdad del fin
+    # de cada PLANTA, no necesariamente del contrato comercial.
     # Antes, una terminación marcaba el registro como 'terminado' y Cumplimiento (que solo
     # cuenta 'publicado') lo borraba de TODOS los meses, incluso los previos. Este backfill
     # corrige las terminaciones existentes y es idempotente (re-ejecutar no cambia nada):
     #  A) restaura a 'publicado' los registros que quedaron en 'terminado',
     #  B) estampa fecha_fin = fecha de terminación en esos registros (si vacío o posterior),
-    #  C) estampa fecha_fin en el contrato PPA correspondiente,
+    #  C) estampa fecha_fin en el PPA SÓLO si TODAS sus plantas están terminadas,
     #  D) normaliza las terminaciones viejas a su forma mínima (sin planta ni fecha_inicio).
-    # Match por código SIC: un SIC ⇒ un contrato vigente.
+    # Un SIC ⇒ una planta; un contrato interno ⇒ varios SIC. Por eso terminar una planta
+    # NO termina el contrato: el PPA sólo termina cuando se cierra su última planta.
+    # La RESTAURACIÓN del fin contractual de PPAs ya colapsados por el bug anterior
+    # (p. ej. Terpel 1) se hace aparte con scripts/restaurar_fin_ppa.py (previsualizable),
+    # no aquí, para no ejecutar mutaciones de datos no triviales en cada arranque.
     """UPDATE asic_solicitudes AS target
        SET estado_solicitud = 'publicado'
        FROM asic_solicitudes AS term
@@ -607,19 +612,25 @@ _PENDING_DDLS = [
          AND target.tipo_solicitud IN ('registro', 'modificacion')
          AND target.estado_solicitud = 'publicado'
          AND (target.fecha_fin IS NULL OR target.fecha_fin > term.fecha_fin)""",
+    # C) Termina el PPA sólo cuando NINGUNA de sus plantas sigue abierta. El fin del
+    #    contrato es la fecha de la última planta en salir.
     """UPDATE ppa_contratos AS ppa
-       SET fecha_fin = term.fecha_fin
-       FROM asic_solicitudes AS target, asic_solicitudes AS term
-       WHERE term.tipo_solicitud = 'terminacion'
-         AND term.estado_solicitud = 'publicado'
-         AND term.fecha_fin IS NOT NULL
-         AND target.id != term.id
-         AND target.codigo_sic_contrato = term.codigo_sic_contrato
-         AND target.tipo_solicitud IN ('registro', 'modificacion')
-         AND target.contrato_interno IS NOT NULL
-         AND ppa.numero_codigo_contrato = target.contrato_interno
+       SET fecha_fin = sub.max_fin
+       FROM (
+           SELECT contrato_interno,
+                  MAX(fecha_fin) AS max_fin,
+                  COUNT(*) FILTER (WHERE fecha_fin IS NULL) AS abiertas
+           FROM asic_solicitudes
+           WHERE tipo_solicitud IN ('registro', 'modificacion')
+             AND estado_solicitud = 'publicado'
+             AND contrato_interno IS NOT NULL
+           GROUP BY contrato_interno
+       ) AS sub
+       WHERE ppa.numero_codigo_contrato = sub.contrato_interno
          AND ppa.deleted_at IS NULL
-         AND (ppa.fecha_fin IS NULL OR ppa.fecha_fin > term.fecha_fin)""",
+         AND sub.abiertas = 0
+         AND sub.max_fin IS NOT NULL
+         AND (ppa.fecha_fin IS NULL OR ppa.fecha_fin <> sub.max_fin)""",
     """UPDATE asic_solicitudes
        SET proyecto_id = NULL, fecha_inicio = NULL
        WHERE tipo_solicitud = 'terminacion'

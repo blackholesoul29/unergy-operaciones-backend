@@ -112,7 +112,8 @@ def calcular_periodo(
         fila_data = calcular_proyecto(
             contrato_id=c.id,
             nombre_proyecto=nombre,
-            fecha_inicio=c.fecha_inicio,
+            fecha_firma_contrato=c.fecha_firma_contrato,
+            fecha_inicio_om=c.fecha_inicio_om,
             valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
             periodo=periodo,
             ipc_tasas=ipc_tasas,

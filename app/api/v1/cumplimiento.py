@@ -1479,6 +1479,96 @@ def get_anual_matriz(
     return {"year": year, "contratos": out}
 
 
+def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
+    """Ensambla la fila de matriz anual de UN contrato (meses + proyectos + rollup).
+
+    Hace los fetches a Unergy solo de las plantas de este contrato → ~2-3s, apto para
+    carga progresiva fila por fila (evita el timeout del endpoint agregado con muchos contratos).
+    """
+    gpm = {
+        m: (_resolve_gescon(db, contrato.numero_codigo_contrato, year, m) if contrato.numero_codigo_contrato else [])
+        for m in range(1, 13)
+    }
+    comp_map = {
+        r.mes: r for r in db.query(PPACompromisoEnergia).filter(
+            PPACompromisoEnergia.contrato_id == contrato.id,
+            PPACompromisoEnergia.año == year,
+        ).all()
+    }
+    need_month, need_avg = _build_fetch_sets({contrato.id: gpm}, year, today)
+    month_cache: dict = {}
+    avg_cache: dict = {}
+    if need_month or need_avg:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in _matriz_un_contrato: %s", exc)
+            token = None
+        if token and need_month:
+            def _ft(task):
+                m, sp = task
+                return task, _fetch_month(token, sp, year, m)
+            with ThreadPoolExecutor(max_workers=min(len(need_month), 12)) as pool:
+                for task, res in pool.map(_ft, list(need_month)):
+                    month_cache[task] = res
+        if token and need_avg:
+            def _fa(sp):
+                return sp, _fetch_recent_avg(token, sp, n_days=30)
+            with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
+                for sp, res in pool.map(_fa, list(need_avg)):
+                    avg_cache[sp] = res.get("avg_daily_mwh")
+    meses, proyectos = _anual_meses_para_contrato(contrato, year, gpm, comp_map, month_cache, avg_cache, today)
+    rollup = _rollup_cumplimiento(meses)
+    n_plantas = max((len(gpm[m]) for m in range(1, 13)), default=0)
+    return {
+        "id": contrato.id,
+        "nombre_interno": contrato.nombre_interno,
+        "numero_codigo_contrato": contrato.numero_codigo_contrato,
+        "comprador_nombre": contrato.comprador_nombre,
+        "meses": meses,
+        "proyectos": proyectos,
+        "n_plantas": n_plantas,
+        **rollup,
+    }
+
+
+@router.get("/anual-matriz/contratos")
+def get_anual_matriz_contratos(
+    year: int = Query(..., ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Lista ligera de contratos de venta para la matriz anual (sin generación → carga instantánea).
+    El frontend pinta las filas y luego pide el detalle de cada una vía /anual-matriz/contrato/{id}."""
+    contratos = _query_contratos_venta(db, year)
+    return {
+        "year": year,
+        "contratos": [
+            {
+                "id": c.id,
+                "nombre_interno": c.nombre_interno,
+                "numero_codigo_contrato": c.numero_codigo_contrato,
+                "comprador_nombre": c.comprador_nombre,
+            }
+            for c in contratos
+        ],
+    }
+
+
+@router.get("/anual-matriz/contrato/{contrato_id}")
+def get_anual_matriz_contrato(
+    contrato_id: int,
+    year: int = Query(..., ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Detalle de matriz anual de un solo contrato (meses + proyectos + rollup). Carga progresiva."""
+    contrato = db.query(PPAContrato).filter(PPAContrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(404, "Contrato PPA no encontrado")
+    return _matriz_un_contrato(db, contrato, year, date.today())
+
+
 @router.get("/ppa/{contrato_id}/anual")
 def get_anual(
     contrato_id: int,

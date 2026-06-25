@@ -1295,6 +1295,37 @@ def get_anual(
     }
 
 
+@router.get("/ppa/{contrato_id}/plantas-inscritas-por-mes")
+def get_plantas_inscritas_por_mes(
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Plantas INSCRITAS por año/mes = plantas registradas y despachando energía al
+    contrato (asignaciones GESCON vigentes ese mes). Es el numerador del indicador de
+    cumplimiento de plantas; la plataforma lo calcula (no se monta).
+
+    Devuelve solo los periodos que tienen compromiso del contrato. Cuenta asignaciones
+    GESCON desde BD (`_resolve_gescon`) sin traer generación de la API → barato.
+    """
+    contrato = db.query(PPAContrato).filter(PPAContrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(404, "Contrato PPA no encontrado")
+
+    periodos = (
+        db.query(PPACompromisoEnergia.año, PPACompromisoEnergia.mes)
+        .filter(PPACompromisoEnergia.contrato_id == contrato_id)
+        .order_by(PPACompromisoEnergia.año, PPACompromisoEnergia.mes)
+        .all()
+    )
+    codigo = contrato.numero_codigo_contrato
+    out = []
+    for año, mes in periodos:
+        n = len(_resolve_gescon(db, codigo, año, mes)) if codigo else 0
+        out.append({"año": año, "mes": mes, "plantas_inscritas": n})
+    return out
+
+
 @router.get("/ppa/{contrato_id}")
 def get_cumplimiento(
     contrato_id: int,

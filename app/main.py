@@ -2204,6 +2204,99 @@ def _scheduled_om_ipc_check():
         db.close()
 
 
+_ARR_IPC_SEED = [
+    {"año": 2023, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
+    {"año": 2024, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
+    {"año": 2025, "tasa": 0.0510, "confirmado": True, "fuente": "DANE"},
+]
+
+_ARR_PROYECTOS_SEED = [
+    {"codigo": "COLATLT14P2_LURUACO_SUR",            "nombre": "Minigranja Solar Uruaco",            "fecha_firma": "2023-11-15", "valor_base": 666666.67,  "canon": 840024},
+    {"codigo": None,                                 "nombre": "Minigranja Solar Cañahuate",          "fecha_firma": None,         "valor_base": None,       "canon": None},
+    {"codigo": None,                                 "nombre": "Minigranja Solar Gandalf",            "fecha_firma": None,         "valor_base": None,       "canon": None},
+    {"codigo": None,                                 "nombre": "Minigranja Solar Perijá",             "fecha_firma": None,         "valor_base": None,       "canon": None},
+    {"codigo": "COLCEST9P1_LA-PAZ_OCCIDENTE",        "nombre": "Minigranja Solar La Paz Vallenata",   "fecha_firma": "2023-09-01", "valor_base": 4300000.02, "canon": 4691746.88},
+    {"codigo": "COLLAGT19P2_EL-MOLINO_NORTE",        "nombre": "Minigranja Solar El Molino",          "fecha_firma": "2024-02-20", "valor_base": 750000,     "canon": 829239},
+    {"codigo": "COLCEST2P3_LA-PAZ_OCCIDENTE",        "nombre": "Minigranja Solar La Paz Verso",       "fecha_firma": "2024-03-11", "valor_base": 1100000,    "canon": 1326782.4},
+    {"codigo": "COLCEST45P5_VALLEDUPAR_SUR",         "nombre": "Minigranja Solar La Puya",            "fecha_firma": "2025-03-04", "valor_base": 1566199.7,  "canon": 1646075},
+    {"codigo": "COLCEST17P1_LA-PAZ_NORTE",           "nombre": "Minigranja Solar Esmeralda",          "fecha_firma": "2024-08-05", "valor_base": 1000000,    "canon": 1105652},
+    {"codigo": "COLLAGT27P2_VILLANUEVA_NORTE",       "nombre": "Minigranja Solar Villanueva",         "fecha_firma": "2024-02-16", "valor_base": 1000000,    "canon": 1094720},
+    {"codigo": "COLSANT4P2_LOS-SANTOS_OCCIDENTE",    "nombre": "Minigranja Solar El Olimpo",          "fecha_firma": "2024-05-14", "valor_base": 875000,     "canon": 967446},
+    {"codigo": "COLSANT10P1_LOS-SANTOS_NORTE",       "nombre": "Minigranja Solar La Mesa",            "fecha_firma": "2025-02-07", "valor_base": 1440000,    "canon": 1592139},
+    {"codigo": "COLCEST53P1_LA-PAZ_OCCIDENTE",       "nombre": "Minigranja Solar La Paz Leyenda",     "fecha_firma": None,         "valor_base": None,       "canon": None},
+    {"codigo": "COLSUCT17P2_GALERAS_SUR",            "nombre": "Minigranja Solar Baraya",             "fecha_firma": None,         "valor_base": None,       "canon": None},
+    {"codigo": "COLCEST45P1_VALLEDUPAR_SUR",         "nombre": "Minigranja Solar El Son",             "fecha_firma": "2025-03-20", "valor_base": 1566199.7,  "canon": 1645763},
+    {"codigo": "COLCEST49P2_LA-JAGUA-DE-IBIRICO_NORTE", "nombre": "Minigranja Solar Ibirico",         "fecha_firma": None,         "valor_base": 1024604.167, "canon": 1024604.167},
+    {"codigo": "COLCEST45P7_VALLEDUPAR_SUR",         "nombre": "Minigranja Solar Merengue",           "fecha_firma": "2025-03-04", "valor_base": 1566199.7,  "canon": 1646075.85},
+    {"codigo": "COLSANT9P1_SABANA-DE-TORRES_OCCIDENTE", "nombre": "Minigranja Solar La Reserva",      "fecha_firma": "2024-12-19", "valor_base": 2437499.99, "canon": 1347513.38},
+    {"codigo": "COLCEST38P1_SAN-DIEGO_SUR",          "nombre": "Minigranja Solar San Diego Sur",      "fecha_firma": "2024-04-16", "valor_base": 833333.34,  "canon": 833333.25},
+    {"codigo": "COLCEST74P1_VALLEDUPAR_SUR",         "nombre": "Minigranja Solar Valencia Oriente 1", "fecha_firma": "2025-03-06", "valor_base": 1621500,    "canon": 1704196.5},
+    {"codigo": "COLCEST74P2_VALLEDUPAR_SUR",         "nombre": "Minigranja Solar Valencia Oriente 2", "fecha_firma": "2025-06-03", "valor_base": 1621500,    "canon": 1704196.5},
+    {"codigo": "COLCEST55P1_VALLEDUPAR_NORTE",       "nombre": "Minigranja Solar La Cacica",          "fecha_firma": "2025-02-27", "valor_base": 1145833,    "canon": 1204270.83},
+    {"codigo": "COLCEST55P2_VALLEDUPAR_NORTE",       "nombre": "Minigranja Solar Las Piloneras",      "fecha_firma": "2025-02-27", "valor_base": 1145833,    "canon": 1204270.83},
+    {"codigo": "COLCEST45P4",                        "nombre": "Minigranja Solar Cumbia",             "fecha_firma": "2025-03-04", "valor_base": 1488500,    "canon": 1646075.85},
+    {"codigo": "COLCEST39P1",                        "nombre": "Minigranja Solar Copey",              "fecha_firma": "2024-05-24", "valor_base": 1000000,    "canon": 1105651},
+    {"codigo": "COLCEST60P4",                        "nombre": "Minigranja Solar Chiriguana 2",       "fecha_firma": "2025-06-17", "valor_base": 1181000,    "canon": 1241231},
+    {"codigo": "COLCEST60P2",                        "nombre": "Minigranja Solar Chiriguana 4",       "fecha_firma": "2025-06-17", "valor_base": 1311000,    "canon": 1377861},
+]
+
+
+def _run_arr_seed() -> None:
+    """Siembra IPC y proyectos de Arriendos. Idempotente y no destructivo (fill-if-null)."""
+    from datetime import date
+    from sqlalchemy.orm import sessionmaker
+    from app.models.arriendos import ArrIPCTasa, ArrProyecto
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        for item in _ARR_IPC_SEED:
+            if not db.query(ArrIPCTasa).filter(ArrIPCTasa.año == item["año"]).first():
+                db.add(ArrIPCTasa(**item))
+        db.commit()
+
+        def _fecha(s):
+            return date.fromisoformat(s) if s else None
+
+        insertados = actualizados = 0
+        for it in _ARR_PROYECTOS_SEED:
+            ya = None
+            if it["codigo"]:
+                ya = db.query(ArrProyecto).filter(ArrProyecto.codigo == it["codigo"]).first()
+            if not ya:
+                ya = db.query(ArrProyecto).filter(ArrProyecto.nombre == it["nombre"]).first()
+
+            firma = _fecha(it["fecha_firma"])
+            if ya:
+                cambio = False
+                if ya.codigo is None and it["codigo"]:
+                    ya.codigo = it["codigo"]; cambio = True
+                if ya.fecha_firma_contrato is None and firma is not None:
+                    ya.fecha_firma_contrato = firma; cambio = True
+                if ya.valor_base is None and it["valor_base"] is not None:
+                    ya.valor_base = it["valor_base"]; cambio = True
+                if ya.canon_archivo is None and it["canon"] is not None:
+                    ya.canon_archivo = it["canon"]; cambio = True
+                if cambio:
+                    actualizados += 1
+                continue
+
+            db.add(ArrProyecto(
+                codigo=it["codigo"], nombre=it["nombre"],
+                fecha_firma_contrato=firma, valor_base=it["valor_base"],
+                canon_archivo=it["canon"], activo=True,
+            ))
+            insertados += 1
+        db.commit()
+        if insertados or actualizados:
+            print(f"[arr_seed] {insertados} proyectos insertados, {actualizados} actualizados")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2218,6 +2311,7 @@ def _deferred_init():
         ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
+        ("arr_seed", _run_arr_seed),
     ]:
         try:
             fn()

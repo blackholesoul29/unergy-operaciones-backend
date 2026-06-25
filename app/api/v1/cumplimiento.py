@@ -623,7 +623,7 @@ def get_simulador(
 
     contratos_db = _contratos_vigentes(db, year, month)
 
-    contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    contratos_venta = _query_contratos_venta(db, year, month)
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     from sqlalchemy.orm import selectinload
@@ -823,7 +823,7 @@ def get_plantas_contratos(
 
     contratos_db = _contratos_vigentes(db, year, month)
 
-    contratos_venta = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    contratos_venta = _query_contratos_venta(db, year, month)
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     # --- VENTA: use GESCON to resolve plant assignments ---
@@ -1295,6 +1295,126 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
         })
 
     return meses, proyectos
+
+
+def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None):
+    """Retorna contratos PPA de venta (tipo_contrato != 'compra').
+
+    Replica EXACTAMENTE el filtro que usa get_simulador para construir contratos_venta:
+    primero obtiene todos los vigentes del año/mes dado, luego excluye compras.
+    Si year es None usa el año en curso (para el endpoint anual-matriz).
+    """
+    if year is None:
+        year = date.today().year
+    contratos_db = _contratos_vigentes(db, year, month)
+    return [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+
+
+def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
+    """Construye sets deduplicados de fetches a Unergy para todos los contratos.
+
+    Replica la lógica de detección need_month/need_avg de get_anual pero sobre TODOS los
+    contratos, devolviendo sets deduplicados:
+      - need_month: set de (month, sub_project) para meses pasados/actuales
+      - need_avg: set de sub_project para mes actual/futuros (proyección rolling avg)
+
+    Clave: tuple order es (m, sp) igual que get_anual y month_cache[(m, sp)].
+    """
+    need_month: set = set()
+    need_avg: set = set()
+    for gpm in gpm_por_contrato.values():
+        for m in range(1, 13):
+            is_current = (year == today.year and m == today.month)
+            is_future = (year > today.year) or (year == today.year and m > today.month)
+            for asic in gpm[m]:
+                sp = asic.proyecto.sub_project if asic.proyecto else None
+                if not sp:
+                    continue
+                if is_future:
+                    need_avg.add(sp)
+                elif is_current:
+                    need_month.add((m, sp))
+                    need_avg.add(sp)
+                else:
+                    need_month.add((m, sp))
+    return need_month, need_avg
+
+
+@router.get("/anual-matriz")
+def get_anual_matriz(
+    year: int = Query(..., ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Matriz anual contrato->proyectos x 12 meses (solo venta). Deduplica fetches a Unergy."""
+    today = date.today()
+
+    # 1. Contratos de venta (mismo universo que el simulador, sin restricción de mes)
+    contratos = _query_contratos_venta(db, year)
+
+    # 2. GESCON por contrato/mes + compromisos por contrato
+    gpm_por_contrato: dict = {}
+    comp_por_contrato: dict = {}
+    for c in contratos:
+        gpm_por_contrato[c.id] = {
+            m: (_resolve_gescon(db, c.numero_codigo_contrato, year, m) if c.numero_codigo_contrato else [])
+            for m in range(1, 13)
+        }
+        comp_por_contrato[c.id] = {
+            r.mes: r for r in db.query(PPACompromisoEnergia).filter(
+                PPACompromisoEnergia.contrato_id == c.id,
+                PPACompromisoEnergia.año == year,
+            ).all()
+        }
+
+    # 3. Set global de fetches deduplicado
+    need_month, need_avg = _build_fetch_sets(gpm_por_contrato, year, today)
+
+    # 4. Fetch único en paralelo (mismo patrón que get_anual)
+    month_cache: dict = {}
+    avg_cache: dict = {}
+    if need_month or need_avg:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in get_anual_matriz: %s", exc)
+            token = None
+
+        if token and need_month:
+            def _ft(task):
+                m, sp = task
+                return task, _fetch_month(token, sp, year, m)
+            with ThreadPoolExecutor(max_workers=min(len(need_month), 12)) as pool:
+                for task, res in pool.map(_ft, list(need_month)):
+                    month_cache[task] = res  # key = (m, sp) — misma orientación que get_anual
+
+        if token and need_avg:
+            def _fa(sp):
+                return sp, _fetch_recent_avg(token, sp, n_days=30)
+            with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
+                for sp, res in pool.map(_fa, list(need_avg)):
+                    avg_cache[sp] = res.get("avg_daily_mwh")
+
+    # 5. Ensamblar por contrato
+    out = []
+    for c in contratos:
+        meses, proyectos = _anual_meses_para_contrato(
+            c, year, gpm_por_contrato[c.id], comp_por_contrato[c.id],
+            month_cache, avg_cache, today,
+        )
+        rollup = _rollup_cumplimiento(meses)
+        n_plantas = max((len(gpm_por_contrato[c.id][m]) for m in range(1, 13)), default=0)
+        out.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "meses": meses,
+            "proyectos": proyectos,
+            "n_plantas": n_plantas,
+            **rollup,
+        })
+    return {"year": year, "contratos": out}
 
 
 @router.get("/ppa/{contrato_id}/anual")

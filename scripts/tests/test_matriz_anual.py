@@ -97,6 +97,32 @@ def test_invariante_mes_actual():
     )
 
 
+def test_dedup_fetch_set():
+    """Verifica que _build_fetch_sets deduplica fetches cuando 2 contratos comparten sub_project."""
+    from app.api.v1.cumplimiento import _build_fetch_sets
+    from datetime import date
+    today = date(2026, 6, 15)
+    # Dos contratos comparten "spA" en meses pasados → debe deduplicar.
+    # need_month usa orden (m, sp) igual que get_anual / month_cache[(m, sp)].
+    gpm_por_contrato = {
+        1: {m: [_Asic("A", "spA", 10, 1.0)] for m in range(1, 13)},
+        2: {m: [_Asic("A", "spA", 10, 1.0), _Asic("B", "spB", 20, 1.0)] for m in range(1, 13)},
+    }
+    need_month, need_avg = _build_fetch_sets(gpm_por_contrato, 2026, today)
+    # spA en meses pasados (1..5) una sola vez aunque esté en 2 contratos
+    assert (1, "spA") in need_month, f"(1, 'spA') no encontrado en need_month={need_month}"
+    assert len([x for x in need_month if x == (1, "spA")]) == 1, "deduplicación fallida"
+    assert "spA" in need_avg, f"'spA' no encontrado en need_avg={need_avg}"
+    # spB también debe estar en need_month para meses pasados
+    assert (1, "spB") in need_month, f"(1, 'spB') no encontrado en need_month={need_month}"
+    # Mes actual (6) debe estar en need_month Y need_avg
+    assert (6, "spA") in need_month, f"(6, 'spA') no en need_month (mes actual)"
+    assert (6, "spB") in need_month, f"(6, 'spB') no en need_month (mes actual)"
+    # Meses futuros (7..12) NO en need_month, solo en need_avg
+    assert (7, "spA") not in need_month, f"(7, 'spA') no debería estar en need_month"
+    assert "spB" in need_avg, f"'spB' no en need_avg"
+
+
 if __name__ == "__main__":
     test_invariante_contrato_igual_suma_proyectos()
     print("OK test_matriz_anual (Task 1)")
@@ -104,3 +130,5 @@ if __name__ == "__main__":
     print("OK test_rollup_cumplimiento (Task 2)")
     test_invariante_mes_actual()
     print("OK test_invariante_mes_actual (Task 2)")
+    test_dedup_fetch_set()
+    print("OK test_dedup_fetch_set (Task 3)")

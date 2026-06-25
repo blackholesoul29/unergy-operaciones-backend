@@ -724,6 +724,38 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_om_seleccion_contrato ON om_seleccion_mensual (contrato_id)",
     "ALTER TABLE om_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_manual NUMERIC(14,0)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_inicio_om DATE",
+    """CREATE TABLE IF NOT EXISTS arr_proyectos (
+        id          BIGSERIAL PRIMARY KEY,
+        codigo      VARCHAR(120) UNIQUE,
+        nombre      VARCHAR(255) NOT NULL,
+        fecha_firma_contrato DATE,
+        valor_base    NUMERIC(14,2),
+        canon_archivo NUMERIC(14,2),
+        activo      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS arr_ipc_tasas (
+        id          BIGSERIAL PRIMARY KEY,
+        año         INTEGER NOT NULL UNIQUE,
+        tasa        NUMERIC(8,6) NOT NULL,
+        confirmado  BOOLEAN NOT NULL DEFAULT FALSE,
+        fuente      VARCHAR(100),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS arr_seleccion_mensual (
+        id              BIGSERIAL PRIMARY KEY,
+        arr_proyecto_id BIGINT NOT NULL REFERENCES arr_proyectos(id) ON DELETE CASCADE,
+        periodo         VARCHAR(7) NOT NULL,
+        incluido        BOOLEAN NOT NULL DEFAULT TRUE,
+        facturado       BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_arr_seleccion_proyecto_periodo UNIQUE (arr_proyecto_id, periodo)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_periodo ON arr_seleccion_mensual (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_proyecto ON arr_seleccion_mensual (arr_proyecto_id)",
     # Factura consolidada mensual del proveedor
     """CREATE TABLE IF NOT EXISTS om_factura_mensual (
         id             BIGSERIAL PRIMARY KEY,

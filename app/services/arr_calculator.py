@@ -39,7 +39,8 @@ def calcular_arriendo(
             "habilitado": False, "incluido": False, "facturado": facturado,
             "valor_base": valor_base, "n_indexaciones": 0, "factor_acumulado": 1.0,
             "valor_anual_indexado": None, "canon_calculado": None,
-            "canon_archivo": canon_archivo, "canon_a_facturar": None,
+            "canon_archivo": _redondear(float(canon_archivo)) if canon_archivo is not None else None,
+            "canon_a_facturar": None,
             "difiere_archivo": False,
             "historial_texto": historial, "historial_detalle": historial,
         }

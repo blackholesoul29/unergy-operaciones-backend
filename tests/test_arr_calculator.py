@@ -49,3 +49,12 @@ def test_sin_firma_deshabilitada():
     f = _c(fecha_firma_contrato=None)
     assert f["habilitado"] is False
     assert f["historial_texto"] == "Sin fecha de firma"
+
+
+def test_deshabilitada_redondea_canon_archivo():
+    # Ibirico: sin firma pero con canon_archivo fraccional → debe redondear a int
+    # (si no, Pydantic Optional[int] revienta el endpoint /calculo).
+    f = _c(fecha_firma_contrato=None, canon_archivo=1024604.167)
+    assert f["habilitado"] is False
+    assert f["canon_archivo"] == 1024604
+    assert isinstance(f["canon_archivo"], int)

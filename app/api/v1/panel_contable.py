@@ -1173,7 +1173,8 @@ def reasignar_consecutivos(
     """
     Asigna consecutivos en dos cadenas independientes:
       - Ingresos: a cada panel con liquidar_ingresos=true.
-      - Costos: a cada panel con liquidar_costos=true y que tenga costos.
+      - Costos: a cada panel con liquidar_costos=true (decisión del usuario; no se
+        exige que el ER haya traído líneas de costos).
 
     Dos modos (body.solo_faltantes):
       - False (renumerar): reasigna TODO desde el valor inicial, en orden de id.
@@ -1241,7 +1242,12 @@ def _asignar_consecutivos(
                 setattr(p, attr, _libre())
 
     _cadena(lambda p: bool(p.liquidar_ingresos), "consecutivo_ingresos", ini_ing)
-    _cadena(lambda p: bool(p.liquidar_costos and p.tiene_costos), "consecutivo_costos", ini_cos)
+    # Costos: se respeta la decisión del usuario (liquidar_costos), sin atarla a si
+    # el ER trajo líneas de costos: un proyecto puede tener costos que este mes no
+    # llegaron en el ER o que vendrán de la vista de costos. El default de paneles
+    # sin costos sigue siendo liquidar_costos=False, así que solo se numeran los
+    # que el usuario marca explícitamente.
+    _cadena(lambda p: bool(p.liquidar_costos), "consecutivo_costos", ini_cos)
 
     return [
         {

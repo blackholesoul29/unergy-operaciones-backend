@@ -290,6 +290,45 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
     ]
 
 
+# Código SIC de Unergy actuando como comercializador. Confirmado contra datos
+# de producción (catálogo de codigo_sic_comprador): el literal es "UNGC".
+UNGC_COMERCIALIZADOR = "UNGC"
+
+
+def _clasificar_remanente_bolsa(db: Session, proyecto_id: int, first_day: date, last_day: date):
+    """Clasifica una planta del remanente (sin contrato PPA) en su piscina de bolsa.
+
+    Paso POSTERIOR a la lógica de contratos: solo se aplica a plantas que ya
+    quedaron SIN contrato PPA asignado vía GESCON. Mira asic_solicitudes el
+    registro vigente en el período (publicado, fecha_inicio <= last_day AND
+    (fecha_fin IS NULL OR fecha_fin >= first_day), excluye terminación):
+      - Tiene código SIC vigente con codigo_sic_comprador == 'UNGC'
+        → 'comercializador' (bolsa con comercializador Unergy).
+      - No tiene código SIC vigente con comprador UNGC en esas fechas
+        → 'libre' (libre en bolsa, generador).
+
+    Retorna (piscina, asic_vigente|None). El asic se devuelve para diagnóstico/validación.
+    """
+    asic = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.proyecto_id == proyecto_id,
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.terminacion,
+            AsicSolicitud.codigo_sic_contrato.isnot(None),
+            AsicSolicitud.codigo_sic_comprador == UNGC_COMERCIALIZADOR,
+            or_(AsicSolicitud.fecha_inicio.is_(None), AsicSolicitud.fecha_inicio <= last_day),
+            or_(AsicSolicitud.fecha_fin.is_(None), AsicSolicitud.fecha_fin >= first_day),
+        )
+        .order_by(AsicSolicitud.fecha_inicio.desc().nullslast())
+        .first()
+    )
+    if asic is not None:
+        return "comercializador", asic
+    return "libre", None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/ppa")
@@ -736,6 +775,11 @@ def get_simulador(
             "es_duplicado": False,
             "comprado_por_unergy": p.id in compra_proyecto_ids,
             "contrato_compra_nombre": compra_nombre_map.get(p.id),
+            # Subdivisión del remanente (mismo criterio que /plantas-contratos): solo para
+            # plantas sin contrato PPA de venta. "comercializador" (UNGC) | "libre" | None.
+            "piscina_bolsa": (
+                None if asn else _clasificar_remanente_bolsa(db, p.id, first_day, last_day)[0]
+            ),
         })
 
     for dup in proyecto_dups:
@@ -759,6 +803,7 @@ def get_simulador(
             "es_duplicado": True,
             "comprado_por_unergy": False,
             "contrato_compra_nombre": None,
+            "piscina_bolsa": None,  # los duplicados pertenecen a un contrato, no al remanente
         })
 
     contratos_out = []
@@ -880,21 +925,38 @@ def get_plantas_contratos(
             "plantas": plantas_list,
         })
 
-    # --- BOLSA: plants that exist but have no GESCON assignment this month ---
+    # --- BOLSA: remanente sin contrato PPA, subdividido en comercializador (UNGC) / libre ---
+    # Paso POSTERIOR que NO altera la lógica de contratos: solo subdivide el remanente.
     bolsa_plantas = []
+    bolsa_comercializador = []
+    bolsa_libre = []
     for p in plantas_db:
-        if p.id not in assigned_plant_ids:
-            bolsa_plantas.append({
-                "id": p.id,
-                "nombre": p.nombre_comercial,
-            })
+        if p.id in assigned_plant_ids:
+            continue
+        piscina, asic = _clasificar_remanente_bolsa(db, p.id, first_day, last_day)
+        entry = {
+            "id": p.id,
+            "nombre": p.nombre_comercial,
+            # "comercializador" (registro SIC vigente con comprador UNGC) | "libre" (sin SIC vigente)
+            "piscina": piscina,
+            "codigo_sic": asic.codigo_sic_contrato if asic else None,
+            "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
+        }
+        bolsa_plantas.append(entry)
+        (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
     return {
         "year": year,
         "month": month,
         "venta": venta_out,
         "compra": compra_out,
+        # Compatibilidad con el frontend: "bolsa" sigue siendo la lista COMPLETA del remanente,
+        # con el mismo shape de antes (id, nombre) + un campo nuevo "piscina". Se añaden además
+        # dos sub-listas ("bolsa_comercializador" UNGC / "bolsa_libre") que apuntan a los mismos
+        # objetos, para el front que quiera consumirlas directamente. Nada existente se rompe.
         "bolsa": bolsa_plantas,
+        "bolsa_comercializador": bolsa_comercializador,
+        "bolsa_libre": bolsa_libre,
     }
 
 
@@ -2315,103 +2377,6 @@ def diagnostico_enlaces(
     ]
 
     return {"contratos": result, "proyectos_con_sub_project": projects_info}
-
-
-@router.get("/diagnostico-bolsa")
-def diagnostico_bolsa(
-    year: int = Query(..., ge=2020, le=2050),
-    month: int = Query(..., ge=1, le=12),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """TEMP: dump remanente-bolsa plants + sus asic_solicitudes en el período.
-
-    Para cada planta que hoy cae en "bolsa" (sin contrato PPA asignado vía
-    GESCON), lista TODOS sus registros en asic_solicitudes y marca cuál está
-    vigente en el período (fecha_inicio <= last_day AND (fecha_fin IS NULL OR
-    fecha_fin >= first_day), estado publicado). Sirve para confirmar el valor
-    real de codigo_sic_comprador para UNGC antes de hardcodear.
-    """
-    from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
-
-    total_dias = calendar.monthrange(year, month)[1]
-    first_day = date(year, month, 1)
-    last_day = date(year, month, total_dias)
-
-    plantas_db = (
-        db.query(Proyecto)
-        .filter(
-            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
-            Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.sub_project.isnot(None),
-            Proyecto.srv_representacion.is_(True),
-            or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
-        )
-        .order_by(Proyecto.nombre_comercial)
-        .all()
-    )
-    plantas_map = {p.id: p for p in plantas_db}
-
-    contratos_venta = _query_contratos_venta(db, year, month)
-    assigned_plant_ids: set[int] = set()
-    for c in contratos_venta:
-        if c.numero_codigo_contrato:
-            for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
-                if asic.proyecto_id and asic.proyecto_id in plantas_map:
-                    assigned_plant_ids.add(asic.proyecto_id)
-
-    out = []
-    for p in plantas_db:
-        if p.id in assigned_plant_ids:
-            continue
-        asics = (
-            db.query(AsicSolicitud)
-            .filter(AsicSolicitud.proyecto_id == p.id)
-            .order_by(AsicSolicitud.fecha_solicitud.asc().nullsfirst())
-            .all()
-        )
-        asic_rows = []
-        for a in asics:
-            vigente = (
-                a.estado_solicitud == EstadoSolicitudAsicEnum.publicado
-                and (a.fecha_inicio is None or a.fecha_inicio <= last_day)
-                and (a.fecha_fin is None or a.fecha_fin >= first_day)
-            )
-            asic_rows.append({
-                "id": a.id,
-                "tipo": a.tipo_solicitud.value if a.tipo_solicitud else None,
-                "estado": a.estado_solicitud.value if a.estado_solicitud else None,
-                "codigo_sic_contrato": a.codigo_sic_contrato,
-                "codigo_sic_comprador": a.codigo_sic_comprador,
-                "codigo_sic_vendedor": a.codigo_sic_vendedor,
-                "contrato_interno": a.contrato_interno,
-                "fecha_inicio": a.fecha_inicio.isoformat() if a.fecha_inicio else None,
-                "fecha_fin": a.fecha_fin.isoformat() if a.fecha_fin else None,
-                "vigente_en_periodo": vigente,
-            })
-        out.append({
-            "id": p.id,
-            "nombre": p.nombre_comercial,
-            "sub_project": p.sub_project,
-            "n_asic": len(asic_rows),
-            "asic_solicitudes": asic_rows,
-        })
-
-    # Catálogo de valores distintos de codigo_sic_comprador en toda la tabla
-    compradores = (
-        db.query(AsicSolicitud.codigo_sic_comprador)
-        .filter(AsicSolicitud.codigo_sic_comprador.isnot(None))
-        .distinct()
-        .all()
-    )
-
-    return {
-        "year": year,
-        "month": month,
-        "n_bolsa": len(out),
-        "compradores_distintos": sorted([c[0] for c in compradores]),
-        "plantas_bolsa": out,
-    }
 
 
 @router.post("/fix-enlaces")

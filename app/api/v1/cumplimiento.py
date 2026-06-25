@@ -2317,6 +2317,103 @@ def diagnostico_enlaces(
     return {"contratos": result, "proyectos_con_sub_project": projects_info}
 
 
+@router.get("/diagnostico-bolsa")
+def diagnostico_bolsa(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """TEMP: dump remanente-bolsa plants + sus asic_solicitudes en el período.
+
+    Para cada planta que hoy cae en "bolsa" (sin contrato PPA asignado vía
+    GESCON), lista TODOS sus registros en asic_solicitudes y marca cuál está
+    vigente en el período (fecha_inicio <= last_day AND (fecha_fin IS NULL OR
+    fecha_fin >= first_day), estado publicado). Sirve para confirmar el valor
+    real de codigo_sic_comprador para UNGC antes de hardcodear.
+    """
+    from app.models.proyectos import Proyecto, TipoProyectoEnum, EstadoProyectoEnum
+
+    total_dias = calendar.monthrange(year, month)[1]
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
+
+    plantas_db = (
+        db.query(Proyecto)
+        .filter(
+            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
+            Proyecto.estado == EstadoProyectoEnum.en_operacion,
+            Proyecto.sub_project.isnot(None),
+            Proyecto.srv_representacion.is_(True),
+            or_(Proyecto.fecha_fin_representacion.is_(None), Proyecto.fecha_fin_representacion >= first_day),
+        )
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    plantas_map = {p.id: p for p in plantas_db}
+
+    contratos_venta = _query_contratos_venta(db, year, month)
+    assigned_plant_ids: set[int] = set()
+    for c in contratos_venta:
+        if c.numero_codigo_contrato:
+            for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
+                if asic.proyecto_id and asic.proyecto_id in plantas_map:
+                    assigned_plant_ids.add(asic.proyecto_id)
+
+    out = []
+    for p in plantas_db:
+        if p.id in assigned_plant_ids:
+            continue
+        asics = (
+            db.query(AsicSolicitud)
+            .filter(AsicSolicitud.proyecto_id == p.id)
+            .order_by(AsicSolicitud.fecha_solicitud.asc().nullsfirst())
+            .all()
+        )
+        asic_rows = []
+        for a in asics:
+            vigente = (
+                a.estado_solicitud == EstadoSolicitudAsicEnum.publicado
+                and (a.fecha_inicio is None or a.fecha_inicio <= last_day)
+                and (a.fecha_fin is None or a.fecha_fin >= first_day)
+            )
+            asic_rows.append({
+                "id": a.id,
+                "tipo": a.tipo_solicitud.value if a.tipo_solicitud else None,
+                "estado": a.estado_solicitud.value if a.estado_solicitud else None,
+                "codigo_sic_contrato": a.codigo_sic_contrato,
+                "codigo_sic_comprador": a.codigo_sic_comprador,
+                "codigo_sic_vendedor": a.codigo_sic_vendedor,
+                "contrato_interno": a.contrato_interno,
+                "fecha_inicio": a.fecha_inicio.isoformat() if a.fecha_inicio else None,
+                "fecha_fin": a.fecha_fin.isoformat() if a.fecha_fin else None,
+                "vigente_en_periodo": vigente,
+            })
+        out.append({
+            "id": p.id,
+            "nombre": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "n_asic": len(asic_rows),
+            "asic_solicitudes": asic_rows,
+        })
+
+    # Catálogo de valores distintos de codigo_sic_comprador en toda la tabla
+    compradores = (
+        db.query(AsicSolicitud.codigo_sic_comprador)
+        .filter(AsicSolicitud.codigo_sic_comprador.isnot(None))
+        .distinct()
+        .all()
+    )
+
+    return {
+        "year": year,
+        "month": month,
+        "n_bolsa": len(out),
+        "compradores_distintos": sorted([c[0] for c in compradores]),
+        "plantas_bolsa": out,
+    }
+
+
 @router.post("/fix-enlaces")
 def fix_enlaces(
     db: Session = Depends(get_db),

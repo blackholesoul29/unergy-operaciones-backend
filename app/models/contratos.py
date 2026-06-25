@@ -180,7 +180,9 @@ class PPACompromisoEnergia(Base):
     mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
     energia_minima: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     energia_maxima: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
-    cantidad_proyectos: Mapped[int | None] = mapped_column(sa_Integer, nullable=True)
+    # Plantas inscritas exigidas por el contrato ese mes (condición a cumplir; denominador del
+    # indicador de cumplimiento de plantas). Default 0: toda fila arranca en 0 y se completa luego.
+    cantidad_proyectos: Mapped[int | None] = mapped_column(sa_Integer, nullable=True, default=0, server_default="0")
 
     contrato: Mapped["PPAContrato"] = relationship("PPAContrato", back_populates="compromisos_energia")
 

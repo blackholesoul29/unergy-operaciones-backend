@@ -1091,6 +1091,27 @@ def get_energia_transada(
     return result
 
 
+def _rollup_cumplimiento(meses: list[dict]) -> dict:
+    """Deriva el rollup anual de cumplimiento a partir de los 12 meses de un contrato.
+
+    Consume la lista producida por `_anual_meses_para_contrato` y devuelve un resumen
+    con las métricas clave de cumplimiento anual.
+    """
+    deficit = sum(1 for m in meses if m.get("estado") == "deficit")
+    bolsa = sum(
+        (m.get("compras_bolsa_mwh") or 0) + (m.get("exposicion_bolsa_duplicados_mwh") or 0)
+        for m in meses
+    )
+    return {
+        "estado_cumplimiento": "no_cumple" if deficit > 0 else "cumple",
+        "meses_en_deficit": deficit,
+        "requiere_bolsa": bolsa > 0,
+        "total_anual_mwh": round(sum(m.get("valor_mwh") or 0 for m in meses), 3),
+        "total_min_anual_mwh": round(sum(m.get("min_mwh") or 0 for m in meses), 3),
+        "bolsa_anual_mwh": round(bolsa, 3),
+    }
+
+
 def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month_cache, avg_cache, today):
     """Construye los 12 meses + desglose por proyecto para un contrato.
 

@@ -92,7 +92,7 @@ def test_parse_rows_valid_and_corrupt_split():
     valid, errors = _svc().parse_rows(rows, lookup)
     assert len(valid) == 1
     assert valid[0]["proyecto_id"] == 7
-    assert valid[0]["generation_mwh"] == Decimal("10")
+    assert valid[0]["generation_kwh"] == Decimal("10")
     # cinco filas corruptas → cinco errores, cada uno con su número de fila
     assert len(errors) == 5
     assert any("fecha" in e for e in errors)
@@ -118,4 +118,29 @@ def test_parse_rows_dedupes_keeping_last():
     ]
     valid, errors = _svc().parse_rows(rows, lookup)
     assert len(valid) == 1
-    assert valid[0]["generation_mwh"] == Decimal("99")
+    assert valid[0]["generation_kwh"] == Decimal("99")
+
+
+# ── unidad de generación: detección + normalización a kWh ─────────────────────
+def test_detect_gen_unit_from_header():
+    assert XMIngestionService._detect_gen_unit("Generación MWh") == ("mwh", "explicit")
+    assert XMIngestionService._detect_gen_unit("Generación kWh") == ("kwh", "explicit")
+    # sin unidad rotulada → asume kWh pero lo marca como 'assumed'
+    assert XMIngestionService._detect_gen_unit("Energía") == ("kwh", "assumed")
+    assert XMIngestionService._detect_gen_unit("") == ("kwh", "assumed")
+
+
+def test_parse_rows_kwh_is_default_passthrough():
+    """Sin rótulo MWh, los valores se almacenan tal cual (kWh, convención del repo)."""
+    lookup = {"el copey": 7}
+    rows = [{"proyecto": "El Copey", "meter_id": "M1", "fecha": "01/06/2026", "generacion": 1500}]
+    valid, _ = _svc().parse_rows(rows, lookup)  # gen_unit="kwh" por defecto
+    assert valid[0]["generation_kwh"] == Decimal("1500")
+
+
+def test_parse_rows_converts_mwh_to_kwh():
+    """Un Excel rotulado en MWh se normaliza a kWh (×1000) — evita inflación 1000×."""
+    lookup = {"el copey": 7}
+    rows = [{"proyecto": "El Copey", "meter_id": "M1", "fecha": "01/06/2026", "generacion": 12.5}]
+    valid, _ = _svc().parse_rows(rows, lookup, gen_unit="mwh")
+    assert valid[0]["generation_kwh"] == Decimal("12500.0")

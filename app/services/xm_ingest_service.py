@@ -42,8 +42,17 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "proyecto":     ("proyecto", "planta", "nombre", "frontera comercial", "project"),
     "meter_id":     ("medidor", "meter", "codigo sic", "frontera", "sic"),
     "fecha":        ("fecha", "date", "dia", "periodo"),
-    "generacion":   ("generacion mwh", "generacion", "mwh", "energia", "kwh", "generation"),
+    "generacion":   ("generacion mwh", "generacion kwh", "generacion", "mwh", "kwh",
+                     "energia", "generation"),
 }
+
+# Unidad canónica de almacenamiento: kWh — es la convención del repo para datos
+# crudos de generación (ver app/schemas/generacion.py → kwh_real/kwh_p90 y
+# app/api/v1/fronteras.py → energia_activa_*_kwh). El Excel de XM puede venir rotulado
+# en kWh o en MWh; almacenamos SIEMPRE en kWh y convertimos (×1000) solo cuando el
+# encabezado dice explícitamente MWh. Sin esto, un archivo en kWh quedaría inflado
+# 1000× al guardarse como MWh (error que contamina liquidación/PPA).
+_KWH_PER_MWH = Decimal("1000")
 
 
 class XMIngestionService:
@@ -113,6 +122,22 @@ class XMIngestionService:
                     lookup.setdefault(norm, p.id)
         return lookup
 
+    # ── detección de unidad de generación ───────────────────────────────────────
+    @staticmethod
+    def _detect_gen_unit(header: str) -> tuple[str, str]:
+        """Devuelve (unidad, fuente) a partir del encabezado de generación.
+
+        unidad ∈ {'kwh','mwh'} · fuente ∈ {'explicit','assumed'}. kWh es la convención
+        del repo, así que un encabezado SIN unidad rotulada → ('kwh', 'assumed'): se
+        almacena tal cual pero se avisa, para que el usuario pueda detectar un archivo
+        en MWh sin rótulo (que de otro modo quedaría 1000× bajo)."""
+        h = _norm(header)
+        if "mwh" in h:
+            return "mwh", "explicit"
+        if "kwh" in h:
+            return "kwh", "explicit"
+        return "kwh", "assumed"
+
     # ── parsing + validación (puro: no toca la BD) ───────────────────────────────
     @staticmethod
     def _parse_fecha(value: Any) -> datetime | None:
@@ -153,12 +178,14 @@ class XMIngestionService:
 
     def parse_rows(
         self, raw_rows: list[dict], proyecto_lookup: dict[str, int],
+        gen_unit: str = "kwh",
     ) -> tuple[list[dict], list[str]]:
         """Valida y normaliza filas. Devuelve (registros_validos, errores).
 
-        Cada registro válido: {proyecto_id, meter_id, measurement_date, generation_mwh}.
-        Idempotente entre llamadas: dedup interno por (proyecto_id, fecha, meter_id),
-        conservando la última aparición.
+        Cada registro válido: {proyecto_id, meter_id, measurement_date, generation_kwh}.
+        La generación se almacena SIEMPRE en kWh; si `gen_unit == 'mwh'` los valores
+        del Excel se convierten (×1000). Idempotente entre llamadas: dedup interno por
+        (proyecto_id, fecha, meter_id), conservando la última aparición.
         """
         valid: dict[tuple, dict] = {}
         errors: list[str] = []
@@ -193,6 +220,8 @@ class XMIngestionService:
             if gen < 0:
                 errors.append(f"Fila {i}: generación negativa ({gen})")
                 continue
+            # Normalizar a kWh (unidad canónica del repo).
+            gen_kwh = gen * _KWH_PER_MWH if gen_unit == "mwh" else gen
 
             meter_raw = row.get("meter_id")
             meter_id = str(meter_raw).strip() if meter_raw not in (None, "") else ""
@@ -205,7 +234,7 @@ class XMIngestionService:
                 "proyecto_id": proyecto_id,
                 "meter_id": meter_id,
                 "measurement_date": fecha,
-                "generation_mwh": gen,
+                "generation_kwh": gen_kwh,
             }
 
         return list(valid.values()), errors
@@ -219,7 +248,7 @@ class XMIngestionService:
         stmt = stmt.on_conflict_do_update(
             constraint="uq_xm_gen_hist_proj_date_meter",
             set_={
-                "generation_mwh": stmt.excluded.generation_mwh,
+                "generation_kwh": stmt.excluded.generation_kwh,
                 "source_file": stmt.excluded.source_file,
             },
         )
@@ -231,16 +260,24 @@ class XMIngestionService:
     def ingest(self, file: str | BinaryIO, source_file: str | None = None) -> dict:
         """Ingesta completa: lee, valida, hace upsert y devuelve un resumen."""
         raw_rows, col_map = self._read_rows(file)
+        gen_unit, gen_unit_source = self._detect_gen_unit(col_map.get("generacion", ""))
         lookup = self.build_proyecto_lookup()
-        records, errors = self.parse_rows(raw_rows, lookup)
+        records, errors = self.parse_rows(raw_rows, lookup, gen_unit=gen_unit)
         uploaded = self._upsert(records, source_file)
+
+        warnings: list[str] = []
+        if gen_unit_source == "assumed":
+            warnings.append(
+                "El encabezado de generación no trae unidad rotulada (kWh/MWh); "
+                "se asumió kWh. Verifica la muestra: si los valores son MWh, "
+                "renombra la columna a 'Generación MWh' y vuelve a cargar.")
 
         sample = [
             {
                 "proyecto_id": r["proyecto_id"],
                 "meter_id": r["meter_id"],
                 "measurement_date": r["measurement_date"].isoformat(),
-                "generation_mwh": float(r["generation_mwh"]),
+                "generation_kwh": float(r["generation_kwh"]),
             }
             for r in records[:5]
         ]
@@ -248,6 +285,9 @@ class XMIngestionService:
             "uploaded_count": uploaded,
             "skipped_count": len(errors),
             "errors": errors,
+            "warnings": warnings,
+            "gen_unit_detected": gen_unit,
+            "gen_unit_source": gen_unit_source,
             "sample_data": sample,
             "columns_detected": col_map,
         }

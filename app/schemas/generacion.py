@@ -90,6 +90,9 @@ class XMGenerationUploadResponse(BaseModel):
     uploaded_count: int
     skipped_count: int
     errors: list[str] = []
+    warnings: list[str] = []  # avisos no fatales (p.ej. unidad asumida)
+    gen_unit_detected: str = "kwh"   # unidad del Excel; se almacena siempre en kWh
+    gen_unit_source: str = "assumed"  # 'explicit' (rótulo en encabezado) | 'assumed'
     sample_data: list[dict] = []
     columns_detected: dict[str, str] = {}
 
@@ -99,7 +102,7 @@ class XMGenerationHistoryItem(BaseModel):
     proyecto_id: int
     meter_id: str
     measurement_date: datetime
-    generation_mwh: Decimal
+    generation_kwh: Decimal
     source_file: Optional[str] = None
     created_at: datetime
     model_config = {"from_attributes": True}

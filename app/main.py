@@ -2435,21 +2435,20 @@ app = FastAPI(
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # El monitoreo se sirve desde Railway pero se embebe como iframe en la plataforma
-# (Vercel u otro dominio). El origen puede ser *.vercel.app, *.unergy.io, un
-# dominio custom o localhost. Usamos allow_origin_regex=r"https://.*" para
-# aceptar cualquier origen HTTPS sin hardcodear dominios.
-# Seguridad: la API usa JWT en el header Authorization (no cookies), por lo que
-# ampliar CORS no introduce vulnerabilidades CSRF.
+# (Vercel u otro dominio). Los orígenes autorizados se definen explícitamente en
+# settings.FRONTEND_ORIGINS (variable de entorno FRONTEND_ORIGINS, separada por
+# comas) en lugar de un comodín permisivo: así sólo los frontends de confianza
+# pueden hacer peticiones cross-origin con credenciales.
 _ALLOWED_ORIGINS = [
     settings.FRONTEND_URL,
     "http://localhost:5173",
     "http://localhost:3000",
+    *settings.FRONTEND_ORIGINS,
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_origin_regex=r"https://.*",   # cualquier origen HTTPS (seguro con JWT)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

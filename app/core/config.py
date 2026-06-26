@@ -1,5 +1,7 @@
+from typing import Annotated, List
+
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -9,6 +11,24 @@ class Settings(BaseSettings):
     APP_NAME: str = "Plataforma Operaciones Unergy"
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:5173"
+
+    # Orígenes (frontends) de confianza para CORS. Lista explícita de URLs
+    # autorizadas a hacer peticiones cross-origin con credenciales. Se carga
+    # desde la variable de entorno FRONTEND_ORIGINS como cadena separada por
+    # comas (p. ej. "https://app.unergy.io,https://operaciones.vercel.app").
+    # Por seguridad el default es vacío: ningún origen se permite implícitamente.
+    # NoDecode evita que pydantic-settings intente parsear el valor como JSON;
+    # el validador de abajo se encarga de dividir la cadena separada por comas.
+    FRONTEND_ORIGINS: Annotated[List[str], NoDecode] = []
+
+    @field_validator("FRONTEND_ORIGINS", mode="before")
+    @classmethod
+    def split_frontend_origins(cls, v):
+        # Acepta una cadena separada por comas desde el entorno y la convierte
+        # en lista, descartando espacios y entradas vacías.
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 

@@ -52,17 +52,45 @@ def test_compute_basic_payload_and_deviation():
         horas_con_datos=24,
         ingreso_estimado_cop=250000.0,
         horas_valorizadas=24,
+        generacion_valorizada_kwh=1000.0,
         precio_ponderado_cop_kwh=250.0,
         generacion_esperada_kwh=800.0,
     )
     assert datos["generacion_real_kwh"] == 1000.0
     assert datos["ingreso_estimado_cop"] == 250000.0
-    assert datos["precio_bolsa_promedio_cop_kwh"] == 250.0
+    assert datos["precio_bolsa_ponderado_cop_kwh"] == 250.0
+    assert datos["generacion_valorizada_kwh"] == 1000.0
     assert datos["horas_valorizadas"] == 24
+    assert datos["cobertura_precio_pct"] == 100.0
     assert datos["desviacion_pct"] == 25.0  # (1000-800)/800*100
     assert datos["horas_con_datos"] == 24
     assert datos["fuente"] == "MEM/ASIC"
     assert datos["cumplimiento"] is None
+
+
+def test_payload_identity_closes_under_partial_price_coverage():
+    """
+    Con cobertura parcial de precios, el payload debe reconciliar exacto:
+    ingreso = precio_ponderado × generacion_valorizada, y la generación NO
+    valorizada (real − valorizada) debe ser derivable por el revisor.
+    """
+    datos = compute_datos_calculados(
+        generacion_real_kwh=1000.0,   # generó 1000 kWh...
+        horas_con_datos=24,
+        ingreso_estimado_cop=150000.0,
+        horas_valorizadas=18,
+        generacion_valorizada_kwh=600.0,  # ...pero solo 600 cayeron en horas con precio
+        precio_ponderado_cop_kwh=250.0,
+        generacion_esperada_kwh=None,
+    )
+    # Identidad: ingreso == precio_ponderado × generacion_valorizada
+    assert (
+        round(datos["precio_bolsa_ponderado_cop_kwh"] * datos["generacion_valorizada_kwh"], 2)
+        == datos["ingreso_estimado_cop"]
+    )
+    # El revisor puede ver el faltante sin valorizar y la cobertura de precios.
+    assert datos["generacion_real_kwh"] - datos["generacion_valorizada_kwh"] == 400.0
+    assert datos["cobertura_precio_pct"] == 75.0  # 18/24
 
 
 def test_compute_without_price_yields_no_revenue():
@@ -71,12 +99,15 @@ def test_compute_without_price_yields_no_revenue():
         horas_con_datos=12,
         ingreso_estimado_cop=None,
         horas_valorizadas=0,
+        generacion_valorizada_kwh=0.0,
         precio_ponderado_cop_kwh=None,
         generacion_esperada_kwh=None,
     )
     assert datos["ingreso_estimado_cop"] is None
-    assert datos["precio_bolsa_promedio_cop_kwh"] is None
+    assert datos["precio_bolsa_ponderado_cop_kwh"] is None
+    assert datos["generacion_valorizada_kwh"] == 0.0
     assert datos["horas_valorizadas"] == 0
+    assert datos["cobertura_precio_pct"] == 0.0
     assert datos["desviacion_pct"] is None
     assert datos["generacion_esperada_kwh"] is None
 
@@ -87,6 +118,7 @@ def test_compute_zero_expected_does_not_divide():
         horas_con_datos=4,
         ingreso_estimado_cop=10000.0,
         horas_valorizadas=4,
+        generacion_valorizada_kwh=100.0,
         precio_ponderado_cop_kwh=100.0,
         generacion_esperada_kwh=0.0,
     )
@@ -101,6 +133,7 @@ def test_compute_carries_cumplimiento_payload():
         horas_con_datos=1,
         ingreso_estimado_cop=1.0,
         horas_valorizadas=1,
+        generacion_valorizada_kwh=1.0,
         precio_ponderado_cop_kwh=1.0,
         generacion_esperada_kwh=None,
         cumplimiento=cumplimiento,

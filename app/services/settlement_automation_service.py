@@ -56,6 +56,7 @@ def compute_datos_calculados(
     horas_con_datos: int,
     ingreso_estimado_cop: float | None,
     horas_valorizadas: int,
+    generacion_valorizada_kwh: float,
     precio_ponderado_cop_kwh: float | None,
     generacion_esperada_kwh: float | None,
     cumplimiento: dict | None = None,
@@ -64,15 +65,26 @@ def compute_datos_calculados(
     Lógica de negocio pura de la pre-liquidación. Sin dependencia de la BD para
     poder testearla de forma aislada.
 
-    `ingreso_estimado_cop` y `precio_ponderado_cop_kwh` se calculan hora a hora
-    (ver `compute_ingreso_horario`); aquí solo se ensamblan y se computa la
-    desviación frente a la generación esperada.
+    `ingreso_estimado_cop`, `generacion_valorizada_kwh` y `precio_ponderado_cop_kwh`
+    se calculan hora a hora (ver `compute_ingreso_horario`); aquí solo se ensamblan
+    y se computa la desviación frente a la generación esperada.
+
+    La identidad del payload cierra exacto:
+        `ingreso_estimado_cop = precio_bolsa_ponderado_cop_kwh × generacion_valorizada_kwh`
+    `generacion_valorizada_kwh ≤ generacion_real_kwh`; la diferencia es la
+    generación en horas SIN precio de bolsa publicado (no valorizada). Se expone
+    `cobertura_precio_pct` para que el revisor vea de un vistazo qué fracción de las
+    horas con datos llegó a tener precio.
     """
     desviacion_pct = None
     if generacion_esperada_kwh:
         desviacion_pct = round(
             (generacion_real_kwh - generacion_esperada_kwh) / generacion_esperada_kwh * 100, 2
         )
+
+    cobertura_precio_pct = (
+        round(horas_valorizadas / horas_con_datos * 100, 1) if horas_con_datos else None
+    )
 
     return {
         "fuente": "MEM/ASIC",
@@ -83,9 +95,13 @@ def compute_datos_calculados(
         "desviacion_pct": desviacion_pct,
         "horas_con_datos": horas_con_datos,
         "horas_valorizadas": horas_valorizadas,
+        "cobertura_precio_pct": cobertura_precio_pct,
+        # Generación efectivamente valorizada (solo horas con precio de bolsa). El
+        # ingreso solo cubre esta porción; el resto quedó sin precio publicado.
+        "generacion_valorizada_kwh": round(generacion_valorizada_kwh, 3),
         # Precio ponderado por generación sobre las horas valorizadas
         # (ingreso / generación_valorizada) — consistente con el ingreso horario.
-        "precio_bolsa_promedio_cop_kwh": (
+        "precio_bolsa_ponderado_cop_kwh": (
             round(precio_ponderado_cop_kwh, 4) if precio_ponderado_cop_kwh is not None else None
         ),
         "ingreso_estimado_cop": (
@@ -201,6 +217,7 @@ class SettlementAutomationService:
                     horas_con_datos=horas_con_datos,
                     ingreso_estimado_cop=ingreso_estimado,
                     horas_valorizadas=horas_valorizadas,
+                    generacion_valorizada_kwh=gen_valorizada,
                     precio_ponderado_cop_kwh=precio_ponderado,
                     generacion_esperada_kwh=self._expected_kwh(proyecto, month),
                     cumplimiento=cumplimiento,

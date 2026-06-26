@@ -10,6 +10,41 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # ── CORS ─────────────────────────────────────────────────────────────────
+    # Orígenes adicionales de confianza, además del regex de sufijos y de
+    # FRONTEND_URL/localhost. Cadena separada por comas (no JSON) para evitar el
+    # decodificado de tipos complejos de pydantic-settings, p. ej.
+    # "https://app.cliente.com,https://otro.io". Default vacío.
+    FRONTEND_ORIGINS: str = ""
+    # Regex de orígenes de confianza para CORS. Acepta subdominios de unergy.io
+    # (dominios propios) y de vercel.app (previews/producción), sólo HTTPS — en
+    # lugar del comodín `https://.*` que aceptaba CUALQUIER origen HTTPS.
+    # Configurable por entorno si se añaden nuevos dominios propios.
+    CORS_ALLOWED_ORIGIN_REGEX: str = r"https://([a-z0-9-]+\.)*(unergy\.io|vercel\.app)"
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        """Lista explícita de orígenes CORS: FRONTEND_URL + localhost + extras.
+
+        Dedup preservando orden y descartando vacíos. Los frontends de
+        producción que casen el regex de sufijos NO necesitan estar aquí; esta
+        lista es para dominios custom puntuales.
+        """
+        extra = [o.strip() for o in self.FRONTEND_ORIGINS.split(",") if o.strip()]
+        candidates = [
+            self.FRONTEND_URL,
+            "http://localhost:5173",
+            "http://localhost:3000",
+            *extra,
+        ]
+        seen: set[str] = set()
+        out: list[str] = []
+        for o in candidates:
+            if o and o not in seen:
+                seen.add(o)
+                out.append(o)
+        return out
+
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 
     SECRET_KEY: str = ""

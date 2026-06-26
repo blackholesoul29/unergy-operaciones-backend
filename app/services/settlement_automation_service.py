@@ -10,8 +10,9 @@ from __future__ import annotations
 import calendar
 import logging
 from datetime import date
+from typing import Iterable
 
-from sqlalchemy import func
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.proyectos import Proyecto
@@ -21,21 +22,52 @@ from app.models.cumplimiento import CumplimientoMensual
 logger = logging.getLogger(__name__)
 
 
+def compute_ingreso_horario(
+    horas: Iterable[tuple[float, float | None]],
+) -> tuple[float | None, int, float]:
+    """
+    Ingreso de bolsa correcto: Σ (generación_h × precio_h) hora a hora.
+
+    La liquidación de bolsa NO es `generación_total × precio_promedio`: el precio
+    de bolsa varía hora a hora y la generación solar se concentra en el día, así
+    que el promedio simple ignora la covarianza generación/precio y sesga el
+    ingreso. Esta función pura recibe pares `(generacion_kwh, precio_cop_kwh)` por
+    hora (precio `None` = hora sin precio publicado, se omite) y devuelve
+    `(ingreso_cop | None, horas_valorizadas, generacion_valorizada_kwh)`.
+    `ingreso` es `None` cuando ninguna hora tiene precio (ingreso desconocido,
+    no cero).
+    """
+    ingreso = 0.0
+    horas_valorizadas = 0
+    generacion_valorizada = 0.0
+    for generacion_kwh, precio_cop_kwh in horas:
+        if precio_cop_kwh is None:
+            continue
+        ingreso += generacion_kwh * precio_cop_kwh
+        generacion_valorizada += generacion_kwh
+        horas_valorizadas += 1
+    if horas_valorizadas == 0:
+        return None, 0, 0.0
+    return round(ingreso, 2), horas_valorizadas, generacion_valorizada
+
+
 def compute_datos_calculados(
     generacion_real_kwh: float,
     horas_con_datos: int,
-    precio_promedio_cop_kwh: float | None,
+    ingreso_estimado_cop: float | None,
+    horas_valorizadas: int,
+    precio_ponderado_cop_kwh: float | None,
     generacion_esperada_kwh: float | None,
     cumplimiento: dict | None = None,
 ) -> dict:
     """
     Lógica de negocio pura de la pre-liquidación. Sin dependencia de la BD para
     poder testearla de forma aislada.
-    """
-    ingreso_estimado_cop = None
-    if precio_promedio_cop_kwh is not None:
-        ingreso_estimado_cop = round(generacion_real_kwh * precio_promedio_cop_kwh, 2)
 
+    `ingreso_estimado_cop` y `precio_ponderado_cop_kwh` se calculan hora a hora
+    (ver `compute_ingreso_horario`); aquí solo se ensamblan y se computa la
+    desviación frente a la generación esperada.
+    """
     desviacion_pct = None
     if generacion_esperada_kwh:
         desviacion_pct = round(
@@ -50,10 +82,15 @@ def compute_datos_calculados(
         ),
         "desviacion_pct": desviacion_pct,
         "horas_con_datos": horas_con_datos,
+        "horas_valorizadas": horas_valorizadas,
+        # Precio ponderado por generación sobre las horas valorizadas
+        # (ingreso / generación_valorizada) — consistente con el ingreso horario.
         "precio_bolsa_promedio_cop_kwh": (
-            round(precio_promedio_cop_kwh, 4) if precio_promedio_cop_kwh is not None else None
+            round(precio_ponderado_cop_kwh, 4) if precio_ponderado_cop_kwh is not None else None
         ),
-        "ingreso_estimado_cop": ingreso_estimado_cop,
+        "ingreso_estimado_cop": (
+            round(ingreso_estimado_cop, 2) if ingreso_estimado_cop is not None else None
+        ),
         "cumplimiento": cumplimiento,
     }
 
@@ -83,14 +120,6 @@ class SettlementAutomationService:
         """
         periodo_inicio, periodo_fin = self._periodo_bounds(year, month)
 
-        # Precio de bolsa promedio del período (compartido entre proyectos).
-        precio_promedio = (
-            self.db.query(func.avg(MEMPrecioBolsa.precio_cop_kwh))
-            .filter(MEMPrecioBolsa.fecha >= periodo_inicio, MEMPrecioBolsa.fecha <= periodo_fin)
-            .scalar()
-        )
-        precio_promedio = float(precio_promedio) if precio_promedio is not None else None
-
         proyectos = (
             self.db.query(Proyecto)
             .filter(Proyecto.estado == "en_operacion", Proyecto.deleted_at.is_(None))
@@ -102,24 +131,45 @@ class SettlementAutomationService:
 
         for proyecto in proyectos:
             try:
-                agg = (
+                # Generación horaria del proyecto cruzada con el precio de bolsa
+                # de esa misma hora (LEFT JOIN: las horas sin precio publicado
+                # quedan con precio NULL y no se valorizan, pero sí cuentan como
+                # generación). El UNIQUE(proyecto,fecha,hora) y UNIQUE(fecha,hora)
+                # garantizan que el join no multiplica filas.
+                filas = (
                     self.db.query(
-                        func.coalesce(func.sum(MEMDatosASIC.generacion_kwh), 0.0),
-                        func.count(MEMDatosASIC.id),
+                        MEMDatosASIC.generacion_kwh,
+                        MEMPrecioBolsa.precio_cop_kwh,
+                    )
+                    .outerjoin(
+                        MEMPrecioBolsa,
+                        and_(
+                            MEMPrecioBolsa.fecha == MEMDatosASIC.fecha,
+                            MEMPrecioBolsa.hora == MEMDatosASIC.hora,
+                        ),
                     )
                     .filter(
                         MEMDatosASIC.proyecto_id == proyecto.id,
                         MEMDatosASIC.fecha >= periodo_inicio,
                         MEMDatosASIC.fecha <= periodo_fin,
                     )
-                    .one()
+                    .all()
                 )
-                generacion_real = float(agg[0] or 0.0)
-                horas_con_datos = int(agg[1] or 0)
 
+                horas_con_datos = len(filas)
                 if horas_con_datos == 0:
                     sin_datos += 1
                     continue
+
+                generacion_real = sum(float(g or 0.0) for g, _ in filas)
+                ingreso_estimado, horas_valorizadas, gen_valorizada = compute_ingreso_horario(
+                    (float(g or 0.0), (float(p) if p is not None else None)) for g, p in filas
+                )
+                precio_ponderado = (
+                    ingreso_estimado / gen_valorizada
+                    if (ingreso_estimado is not None and gen_valorizada)
+                    else None
+                )
 
                 cumplimiento_row = (
                     self.db.query(CumplimientoMensual)
@@ -149,7 +199,9 @@ class SettlementAutomationService:
                 datos = compute_datos_calculados(
                     generacion_real_kwh=generacion_real,
                     horas_con_datos=horas_con_datos,
-                    precio_promedio_cop_kwh=precio_promedio,
+                    ingreso_estimado_cop=ingreso_estimado,
+                    horas_valorizadas=horas_valorizadas,
+                    precio_ponderado_cop_kwh=precio_ponderado,
                     generacion_esperada_kwh=self._expected_kwh(proyecto, month),
                     cumplimiento=cumplimiento,
                 )

@@ -16,6 +16,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Idempotente: create_all (init_db) puede haber creado ya la tabla/índices.
+    insp = sa.inspect(op.get_bind())
+    if not insp.has_table("arr_documento"):
+        _create_table()
+    existing_idx = {ix["name"] for ix in insp.get_indexes("arr_documento")}
+    if "ix_arr_documento_periodo" not in existing_idx:
+        op.create_index("ix_arr_documento_periodo", "arr_documento", ["periodo"])
+    if "ix_arr_documento_arr_proyecto_id" not in existing_idx:
+        op.create_index("ix_arr_documento_arr_proyecto_id", "arr_documento", ["arr_proyecto_id"])
+
+
+def _create_table() -> None:
     op.create_table(
         "arr_documento",
         sa.Column("id",                sa.BigInteger(),  nullable=False),
@@ -33,8 +45,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("arr_proyecto_id", "periodo", "pago_id", name="uq_arr_doc_proyecto_periodo_pago"),
     )
-    op.create_index("ix_arr_documento_periodo",         "arr_documento", ["periodo"])
-    op.create_index("ix_arr_documento_arr_proyecto_id", "arr_documento", ["arr_proyecto_id"])
 
 
 def downgrade() -> None:

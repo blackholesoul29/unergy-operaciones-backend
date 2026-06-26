@@ -3,6 +3,11 @@
 Revision ID: 026
 Revises: 025
 Create Date: 2026-06-26
+
+Idempotente: ``init_db.py`` corre ``Base.metadata.create_all`` ANTES de
+``alembic upgrade head`` (ver start.sh), así que la tabla puede ya existir.
+Crearla "a secas" reventaría con "already exists" y mataría el canal de
+migraciones; por eso verificamos antes de crear.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -14,6 +19,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if sa.inspect(op.get_bind()).has_table("om_documento_proyecto"):
+        return
     op.create_table(
         "om_documento_proyecto",
         sa.Column("id", sa.BigInteger, primary_key=True),

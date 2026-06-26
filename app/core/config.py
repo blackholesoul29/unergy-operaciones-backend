@@ -84,6 +84,35 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "operaciones@unergy.io"
 
+    # ── Resiliencia de APIs externas ───────────────────────────────────────────
+    # Parámetros por defecto para reintentos (tenacity), circuit breakers
+    # (pybreaker) y health checks. Cada servicio puede sobreescribirlos con su
+    # variable específica (p. ej. EVO_API_RETRY_ATTEMPTS). Ver app/services/resilience.py.
+    EXTERNAL_API_TIMEOUT_SECONDS: int = 30
+
+    # Reintentos con backoff exponencial
+    DEFAULT_API_RETRY_ATTEMPTS: int = 3
+    DEFAULT_API_RETRY_BACKOFF_FACTOR: float = 0.5  # base del wait_exponential (segundos)
+
+    # Circuit breaker
+    DEFAULT_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
+    DEFAULT_API_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS: int = 60
+    DEFAULT_API_CIRCUIT_BREAKER_MIN_REQUESTS: int = 3
+
+    # Health checks (monitoreo de dependencias externas)
+    HEALTH_CHECK_INTERVAL_SECONDS: int = 60
+    HEALTH_CHECK_TIMEOUT_SECONDS: int = 10
+
+    # Overrides por servicio (None ⇒ usa el default de arriba)
+    EVO_API_RETRY_ATTEMPTS: int | None = None
+    EVO_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int | None = None
+    EVO_API_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS: int | None = None
+
+    UNERGY_API_BASE_URL: str | None = None  # None ⇒ usa UNERGY_API_URL
+    UNERGY_API_RETRY_ATTEMPTS: int | None = None
+    UNERGY_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD: int | None = None
+    UNERGY_API_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS: int | None = None
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:

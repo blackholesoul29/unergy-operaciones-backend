@@ -4,37 +4,47 @@ import logging
 import threading
 
 import httpx
+import pybreaker
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
 from app.api.v1.auth import get_current_user, _require_admin
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.services.resilience import get_resilient_client
 
 logger = logging.getLogger("evo_proxy")
 router = APIRouter(prefix="/evo", tags=["EVO Proxy"])
 
-_TIMEOUT = httpx.Timeout(10.0, read=30.0)
-
 
 def _evo_get(path: str, params: dict | None = None) -> dict:
+    """GET resiliente contra EVO: reintentos con backoff + circuit breaker.
+
+    Si el circuito está abierto (EVO viene fallando) responde 503 de inmediato
+    sin tocar la red, evitando fallos en cascada.
+    """
     if not settings.EVO_API_URL:
         raise HTTPException(503, "EVO_API_URL not configured")
-    url = f"{settings.EVO_API_URL.rstrip('/')}/{path.lstrip('/')}"
     headers = {}
     if settings.EVO_API_TOKEN:
         headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+    client = get_resilient_client("evo")
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = client.request("GET", path, headers=headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except pybreaker.CircuitBreakerError:
+        logger.warning("EVO circuit breaker abierto para %s", path)
+        raise HTTPException(503, "EVO unavailable (circuit open)")
     except httpx.ConnectError:
         raise HTTPException(503, "EVO unreachable")
     except httpx.TimeoutException:
         raise HTTPException(504, "EVO timeout")
     except httpx.HTTPStatusError as exc:
         raise HTTPException(exc.response.status_code, exc.response.text)
+    except httpx.RequestError as exc:
+        logger.warning("EVO request error en %s: %s", path, exc)
+        raise HTTPException(503, "EVO unreachable")
 
 
 def _persist_dailyspot(data: dict):

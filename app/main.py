@@ -2418,7 +2418,22 @@ async def lifespan(app: FastAPI):
     init_thread.start()
     print("[startup] server ready — DB init running in background")
 
+    # Monitoreo de salud de dependencias externas (AsyncIOScheduler — necesita el
+    # event loop que ya está corriendo aquí, por eso va en lifespan y no en el
+    # hilo de _deferred_init).
+    try:
+        from app.services.health_monitor import health_monitor
+        health_monitor.start_monitoring()
+    except Exception as e:
+        print(f"[startup] health monitor FAILED: {e}")
+
     yield
+
+    try:
+        from app.services.health_monitor import health_monitor
+        health_monitor.stop_monitoring()
+    except Exception:
+        pass
 
     if _mgs_scheduler:
         _mgs_scheduler.shutdown(wait=False)

@@ -84,6 +84,9 @@ class Proyecto(Base):
     cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
     produccion_especifica_kwh_kwp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     codigo_cnd: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Identificadores XM/MEM — código ASIC (cruce de generación horaria) y código CNO.
+    codigo_asic: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
+    codigo_cno: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)

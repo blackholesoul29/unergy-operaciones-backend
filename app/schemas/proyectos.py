@@ -203,6 +203,8 @@ class ProyectoCreate(BaseModel):
     cantidad_total_paneles: Optional[int] = None
     produccion_especifica_kwh_kwp: Optional[float] = None
     codigo_cnd: Optional[str] = None
+    codigo_asic: Optional[str] = None
+    codigo_cno: Optional[str] = None
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
     fecha_fin_representacion: Optional[date] = None
@@ -274,6 +276,8 @@ class ProyectoOut(BaseModel):
     cantidad_total_paneles: Optional[int]
     produccion_especifica_kwh_kwp: Optional[float]
     codigo_cnd: Optional[str]
+    codigo_asic: Optional[str] = None
+    codigo_cno: Optional[str] = None
     estado: str
     fecha_entrada_operacion: Optional[date]
     fecha_fin_representacion: Optional[date]

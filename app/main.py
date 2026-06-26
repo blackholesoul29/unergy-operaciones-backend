@@ -953,6 +953,13 @@ _PENDING_DDLS = [
     # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.
     "ALTER TABLE ppa_compromisos_energia ALTER COLUMN cantidad_proyectos SET DEFAULT 0",
     "UPDATE ppa_compromisos_energia SET cantidad_proyectos = 0 WHERE cantidad_proyectos IS NULL",
+    # migration MEM — identificadores XM (ASIC/CNO) en proyectos. Las tablas del
+    # módulo MEM (mem_datos_asic, mem_precios_bolsa, mem_gescon_estados,
+    # liquidaciones_preliminares) las crea create_all desde los modelos.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_asic VARCHAR(50)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_cno VARCHAR(50)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_codigo_asic ON proyectos (codigo_asic)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_codigo_cno ON proyectos (codigo_cno)",
 ]
 
 
@@ -2401,6 +2408,21 @@ def _deferred_init():
                     id="tsf_sync",
                     name="Sync pipeline TSF -> proyectos",
                 )
+
+            # MEM — ingesta diaria de datos de XM (ASIC + precios de bolsa) a las 3 AM.
+            from app.jobs.mem_jobs import fetch_daily_asic_data, fetch_daily_prices
+            _mgs_scheduler.add_job(
+                fetch_daily_asic_data,
+                CronTrigger(hour=3, minute=0, timezone=settings.TIMEZONE),
+                id="mem_asic_fetch",
+                name="Daily MEM ASIC generation fetch",
+            )
+            _mgs_scheduler.add_job(
+                fetch_daily_prices,
+                CronTrigger(hour=3, minute=15, timezone=settings.TIMEZONE),
+                id="mem_precios_fetch",
+                name="Daily MEM bolsa price fetch",
+            )
 
             _mgs_scheduler.start()
             poll_once_async()

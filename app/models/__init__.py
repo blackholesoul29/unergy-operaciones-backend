@@ -41,6 +41,10 @@ from app.models.panel_contable import (
 from app.models.mandatos import (
     Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
 )
+from app.models.mem import (
+    MEMDatosASIC, MEMPrecioBolsa, MEMGesconEstado, LiquidacionPreliminar,
+    EstadoLiquidacionPreliminarEnum,
+)
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -68,4 +72,6 @@ __all__ = [
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
     "AliasFuenteIngreso",
     "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
+    "MEMDatosASIC", "MEMPrecioBolsa", "MEMGesconEstado", "LiquidacionPreliminar",
+    "EstadoLiquidacionPreliminarEnum",
 ]

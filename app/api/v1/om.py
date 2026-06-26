@@ -88,6 +88,15 @@ def calcular_periodo(
         for s in db.query(OMSeleccion).filter(OMSeleccion.periodo == periodo).all()
     }
 
+    # Documentos por proyecto para este período
+    from app.models.om import OMDocumentoProyecto
+    documentos_ids = {
+        d.contrato_id
+        for d in db.query(OMDocumentoProyecto)
+            .filter(OMDocumentoProyecto.periodo == periodo)
+            .all()
+    }
+
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")
@@ -121,6 +130,7 @@ def calcular_periodo(
             facturado=facturado,
             valor_manual=valor_manual,
         )
+        fila_data["documento_disponible"] = c.id in documentos_ids
         fila = OMCalculoFila(**fila_data)
         filas.append(fila)
 

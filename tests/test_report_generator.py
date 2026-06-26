@@ -314,3 +314,44 @@ def test_generator_uses_p90_mensual_fallback():
     # KPI "Esperado (P90)" debe reflejar 3.400
     esperado = {k["label"]: k["value"] for k in out["kpis"]}["Esperado (P90)"]
     assert "3,400" in esperado
+
+
+def _gen_rows_partial_p90(n_days, kwh, p90, n_with_p90):
+    """31 días con kwh_real, pero P90 diario sólo en los primeros ``n_with_p90``."""
+    rows = []
+    for i in range(n_days):
+        rows.append(SimpleNamespace(
+            fecha=date(2026, 5, i + 1),
+            kwh_real=kwh,
+            kwh_p90=p90 if i < n_with_p90 else None,
+            kwh_autoconsumo=None,
+        ))
+    return rows
+
+
+def test_partial_daily_p90_does_not_inflate_performance_index():
+    # Datos reales completos (31 días) pero P90 diario sólo en 10 días.
+    # Sumar el P90 diario PARCIAL (10·110=1.100) subestima el esperado del mes
+    # e infla el índice de desempeño (3.100/1.100 ≈ 282%). Con P90 mensual
+    # disponible (3.400) el esperado debe ser el del MES completo → PI ≈ 91%.
+    p90_arr = [0] * 12
+    p90_arr[4] = 3400.0
+    rows = _gen_rows_partial_p90(31, kwh=100.0, p90=110.0, n_with_p90=10)
+    db = _FakeSession(_proyecto(p90_mensual_kwh=p90_arr), rows)
+    out = ReportGenerator(db).generate_op_report("PMOCK", date(2026, 5, 1), date(2026, 5, 31))
+    kpis = {k["label"]: k["value"] for k in out["kpis"]}
+    assert "3,400" in kpis["Esperado (P90)"], kpis["Esperado (P90)"]
+    # 3.100 / 3.400 ≈ 91,2% (no el 281,8% que daría el P90 parcial)
+    pi = float(kpis["Índice desempeño"].replace(",", ""))
+    assert 85.0 <= pi <= 95.0, pi
+
+
+def test_partial_daily_p90_without_monthly_yields_no_expected():
+    # P90 diario parcial y sin P90 mensual → no hay esperado fiable del período;
+    # el KPI debe ser "—" en lugar de un índice de desempeño inflado.
+    rows = _gen_rows_partial_p90(31, kwh=100.0, p90=110.0, n_with_p90=10)
+    db = _FakeSession(_proyecto(p90_mensual_kwh=None), rows)
+    out = ReportGenerator(db).generate_op_report("PMOCK", date(2026, 5, 1), date(2026, 5, 31))
+    kpis = {k["label"]: k["value"] for k in out["kpis"]}
+    assert kpis["Esperado (P90)"] == "—", kpis["Esperado (P90)"]
+    assert kpis["Índice desempeño"] == "—", kpis["Índice desempeño"]

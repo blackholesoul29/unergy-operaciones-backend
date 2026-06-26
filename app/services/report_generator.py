@@ -397,12 +397,23 @@ class ReportGenerator:
             for r in gen_rows
         ]
         total_kwh = sum(d.kwh_real for d in daily if d.kwh_real is not None) or None
-        expected = sum(d.kwh_p90 for d in daily if d.kwh_p90 is not None) or None
-        expected = expected or self._expected_from_p90_mensual(proyecto, start, end)
+        days_with_data = sum(1 for d in daily if d.kwh_real is not None)
+        # Esperado del período (P90). El P90 diario sólo es fiable cuando cubre al
+        # menos los mismos días que tienen generación real: si está más escaso
+        # (filas con kwh_real pero kwh_p90 NULL — frecuente en import_generacion_
+        # sheets/bulk upsert) su suma SUBESTIMA el esperado del mes e infla el
+        # índice de desempeño. En ese caso preferimos el P90 mensual (cubre el mes
+        # completo); si tampoco hay, dejamos el esperado en None (KPI "—") en vez
+        # de publicar un índice de desempeño inflado.
+        days_with_p90 = sum(1 for d in daily if d.kwh_p90 is not None)
+        monthly_p90 = self._expected_from_p90_mensual(proyecto, start, end)
+        if days_with_p90 and days_with_p90 >= days_with_data:
+            expected = sum(d.kwh_p90 for d in daily if d.kwh_p90 is not None) or monthly_p90
+        else:
+            expected = monthly_p90
         autoconsumo = sum(
             float(r.kwh_autoconsumo) for r in gen_rows if r.kwh_autoconsumo is not None
         ) or None
-        days_with_data = sum(1 for d in daily if d.kwh_real is not None)
 
         agg = ProjectAggregate(
             proyecto_nombre=proyecto.nombre_comercial,

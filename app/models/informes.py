@@ -18,6 +18,7 @@ class EstadoInformeEnum(str, enum.Enum):
     borrador = "borrador"
     revisado = "revisado"
     aprobado = "aprobado"
+    fallido = "fallido"   # generación automática falló (datos insuficientes / error)
 
 
 class InformeGuardado(Base):

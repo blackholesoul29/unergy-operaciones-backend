@@ -2207,6 +2207,67 @@ def _scheduled_om_ipc_check():
         db.close()
 
 
+def _scheduled_monthly_reports():
+    """
+    Corre el 1 de cada mes a las 00:00 (zona settings.TIMEZONE).
+
+    Genera borradores de informes ('op' y 'fmo' por proyecto en operación, 'port'
+    por portafolio activo) para el MES ANTERIOR completo y los guarda en
+    informes_guardados con estado 'borrador' (entran al flujo editorial normal).
+
+    Cada informe se intenta de forma aislada: si faltan datos (>5% del período) o
+    ya existe un informe revisado/aprobado, se omite y se registra; un error no
+    detiene la generación del resto.
+    """
+    from datetime import date, timedelta
+    from sqlalchemy.orm import sessionmaker
+    from app.api.v1.informes import generar_borrador_informe, ReportConflictError
+    from app.services.report_generator import DataGapError
+
+    today = date.today()
+    period_end = today.replace(day=1) - timedelta(days=1)   # último día del mes anterior
+    period_start = period_end.replace(day=1)                # primer día del mes anterior
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    ok = skip = fail = 0
+    try:
+        proyectos = db.execute(text(
+            "SELECT COALESCE(sub_project, nombre_comercial) AS sp FROM proyectos "
+            "WHERE estado = 'en_operacion' AND deleted_at IS NULL"
+        )).fetchall()
+        portafolios = db.execute(text(
+            "SELECT nombre FROM portafolios WHERE activo = TRUE"
+        )).fetchall()
+
+        targets: list[tuple[str, str]] = []
+        for p in proyectos:
+            if p.sp:
+                targets.append(("op", p.sp))
+                targets.append(("fmo", p.sp))
+        for pf in portafolios:
+            if pf.nombre:
+                targets.append(("port", pf.nombre))
+
+        for tipo, sp in targets:
+            try:
+                generar_borrador_informe(db, tipo, sp, period_start, period_end)
+                ok += 1
+            except (DataGapError, ReportConflictError):
+                skip += 1
+            except Exception as e:  # noqa: BLE001
+                fail += 1
+                db.rollback()
+                print(f"[monthly_reports] {tipo}/{sp} ERROR: {e}")
+
+        print(f"[monthly_reports] periodo {period_start}..{period_end}: "
+              f"{ok} generados, {skip} omitidos, {fail} fallidos")
+    except Exception as e:  # noqa: BLE001
+        print(f"[monthly_reports] ERROR: {e}")
+    finally:
+        db.close()
+
+
 _ARR_IPC_SEED = [
     {"año": 2023, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
     {"año": 2024, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
@@ -2392,6 +2453,13 @@ def _deferred_init():
                 CronTrigger(month=1, day=1, hour=9, minute=0, timezone=settings.TIMEZONE),
                 id="om_ipc_check",
                 name="Check IPC anual O&M",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_monthly_reports,
+                CronTrigger(day=1, hour=0, minute=0, timezone=settings.TIMEZONE),
+                id="monthly_reports",
+                name="Generación mensual de borradores de informes",
             )
 
             if settings.ORIGINA_DATABASE_URL:

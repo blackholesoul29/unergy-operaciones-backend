@@ -11,7 +11,8 @@ Endpoints:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import logging
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +25,10 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.informes import InformeGuardado
 from app.models.usuarios import Usuario
+from app.schemas.informes import ReportCreate, ReportResponse
+from app.services.report_generator import DataGapError, ReportGenerator
+
+logger = logging.getLogger("informes")
 
 router = APIRouter(prefix="/informes", tags=["informes"])
 
@@ -209,7 +214,199 @@ def _componer_portafolio(db: Session, inf: InformeGuardado) -> str:
     return _PAGE_SEP.join(p for p in partes if p)
 
 
+# ── Generación automática de borradores ─────────────────────────────────────
+
+class ReportConflictError(Exception):
+    """Ya existe un informe revisado/aprobado para ese período; no se sobrescribe."""
+
+    def __init__(self, estado: str, informe_id: int):
+        self.estado = estado
+        self.informe_id = informe_id
+        super().__init__(f"Informe en estado '{estado}' ya existe (id={informe_id})")
+
+
+def _persist_informe_fallido(
+    db: Session, tipo: str, sub_project: str, pd: str, ph: str,
+    mensaje: str, usuario_id: int | None, usuario_nombre: str | None,
+) -> None:
+    """Marca/crea un informe en estado 'fallido' cuando la generación no fue posible.
+    Nunca pisa un informe ya 'revisado' o 'aprobado' (trabajo humano)."""
+    try:
+        existing = (
+            db.query(InformeGuardado)
+            .filter_by(tipo=tipo, sub_project=sub_project, periodo_desde=pd, periodo_hasta=ph)
+            .first()
+        )
+        if existing and existing.estado in ("revisado", "aprobado"):
+            return
+        nota = (
+            '<div class="rpt-page"><header class="rpt-header"><h1>Generación fallida</h1>'
+            f'</header><p>{mensaje}</p></div>'
+        )
+        now = datetime.now(timezone.utc)
+        if existing:
+            existing.estado = "fallido"
+            existing.html_content = nota
+            existing.editado_por_id = usuario_id
+            existing.editado_por_nombre = usuario_nombre
+            existing.editado_en = now
+        else:
+            db.add(InformeGuardado(
+                tipo=tipo, sub_project=sub_project, periodo_desde=pd, periodo_hasta=ph,
+                html_content=nota, estado="fallido",
+                creado_por_id=usuario_id, creado_por_nombre=usuario_nombre,
+                editado_por_id=usuario_id, editado_por_nombre=usuario_nombre, editado_en=now,
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("No se pudo persistir el informe fallido (%s/%s)", tipo, sub_project)
+
+
+def generar_borrador_informe(
+    db: Session, tipo: str, sub_project: str,
+    periodo_desde: date, periodo_hasta: date,
+    usuario_id: int | None = None, usuario_nombre: str | None = None,
+) -> InformeGuardado:
+    """Genera el informe con :class:`ReportGenerator` y lo guarda como borrador
+    (upsert por tipo+sub_project+período). Reutilizable desde el endpoint y el
+    scheduler mensual.
+
+    Levanta:
+      - :class:`DataGapError` si faltan demasiados datos (>5% del período).
+      - :class:`ReportConflictError` si ya hay un informe revisado/aprobado.
+      - :class:`ValueError` si el proyecto/portafolio no existe.
+    En los dos primeros casos de error de datos/excepción inesperada deja un
+    registro en estado 'fallido' para trazabilidad.
+    """
+    gen = ReportGenerator(db)
+    method = {
+        "op": gen.generate_op_report,
+        "fmo": gen.generate_fmo_report,
+        "port": gen.generate_port_report,
+    }.get(tipo)
+    if method is None:
+        raise ValueError(f"tipo de informe inválido: '{tipo}'")
+
+    pd, ph = periodo_desde.isoformat(), periodo_hasta.isoformat()
+
+    try:
+        result = method(sub_project, periodo_desde, periodo_hasta)
+    except DataGapError as exc:
+        logger.warning("Informe %s/%s %s→%s: %s", tipo, sub_project, pd, ph, exc)
+        _persist_informe_fallido(db, tipo, sub_project, pd, ph, str(exc), usuario_id, usuario_nombre)
+        raise
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — registramos y re-lanzamos
+        logger.exception("Error generando informe %s/%s", tipo, sub_project)
+        _persist_informe_fallido(
+            db, tipo, sub_project, pd, ph, f"Error inesperado: {exc}",
+            usuario_id, usuario_nombre,
+        )
+        raise
+
+    canonical_sp = result["sub_project"]
+    existing = (
+        db.query(InformeGuardado)
+        .filter_by(tipo=tipo, sub_project=canonical_sp, periodo_desde=pd, periodo_hasta=ph)
+        .first()
+    )
+    if existing and existing.estado in ("revisado", "aprobado"):
+        raise ReportConflictError(existing.estado, existing.id)
+
+    now = datetime.now(timezone.utc)
+    if existing:
+        existing.html_content = result["html_content"]
+        existing.charts_data = result["charts_data"]
+        existing.periodo_display = result.get("periodo_display")
+        existing.proyecto_nombre = result.get("proyecto_nombre")
+        existing.estado = "borrador"
+        if tipo == "port" and result.get("miembros") is not None:
+            existing.miembros = result["miembros"]
+            flag_modified(existing, "miembros")
+        existing.editado_por_id = usuario_id
+        existing.editado_por_nombre = usuario_nombre
+        existing.editado_en = now
+        inf = existing
+    else:
+        inf = InformeGuardado(
+            tipo=tipo,
+            sub_project=canonical_sp,
+            periodo_desde=pd,
+            periodo_hasta=ph,
+            periodo_display=result.get("periodo_display"),
+            proyecto_nombre=result.get("proyecto_nombre"),
+            html_content=result["html_content"],
+            charts_data=result["charts_data"],
+            miembros=result.get("miembros"),
+            estado="borrador",
+            creado_por_id=usuario_id,
+            creado_por_nombre=usuario_nombre,
+            editado_por_id=usuario_id,
+            editado_por_nombre=usuario_nombre,
+            editado_en=now,
+        )
+        db.add(inf)
+
+    db.commit()
+    db.refresh(inf)
+    return inf
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.post("/generar", response_model=ReportResponse,
+             summary="Generar automáticamente un borrador de informe (op/fmo/port)")
+def generar_informe(
+    payload: ReportCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Agrega datos de generación + cumplimiento y guarda un borrador editable.
+
+    Errores:
+      - 422 ``DATA_GAP`` si faltan >5% de los días de generación del período.
+      - 409 si ya existe un informe revisado/aprobado para ese período.
+      - 404 si el proyecto/portafolio no existe.
+    """
+    try:
+        inf = generar_borrador_informe(
+            db, payload.tipo, payload.sub_project,
+            payload.periodo_desde, payload.periodo_hasta,
+            current_user.id, current_user.nombre,
+        )
+    except DataGapError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "message": str(exc),
+            "gap_pct": round(exc.gap_pct, 2),
+            "days_with_data": exc.days_with_data,
+            "days_expected": exc.days_expected,
+        }) from exc
+    except ReportConflictError as exc:
+        raise HTTPException(
+            409,
+            f"Ya existe un informe en estado '{exc.estado}' para ese período; "
+            "no se sobrescribe automáticamente.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Error generando informe: {exc}") from exc
+
+    return ReportResponse(
+        id=inf.id,
+        tipo=inf.tipo,
+        sub_project=inf.sub_project,
+        estado=inf.estado,
+        periodo_desde=inf.periodo_desde,
+        periodo_hasta=inf.periodo_hasta,
+        periodo_display=inf.periodo_display,
+        proyecto_nombre=inf.proyecto_nombre,
+        created_at=inf.creado_en,
+    )
+
 
 @router.post("/", response_model=InformeDetailOut, summary="Crear o actualizar informe guardado")
 def upsert_informe(

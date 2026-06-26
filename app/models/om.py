@@ -50,3 +50,18 @@ class OMFacturaMensual(Base):
     ruta_local:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # path en el servidor
     subido_en:      Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:     Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OMDocumentoProyecto(Base):
+    """PDF individual por proyecto extraído del consolidado mensual."""
+    __tablename__ = "om_documento_proyecto"
+    __table_args__ = (
+        UniqueConstraint("contrato_id", "periodo", name="uq_om_doc_contrato_periodo"),
+    )
+
+    id:             Mapped[int]      = mapped_column(BigInteger, primary_key=True)
+    contrato_id:    Mapped[int]      = mapped_column(BigInteger, ForeignKey("contratos_servicio.id", ondelete="CASCADE"), nullable=False, index=True)
+    periodo:        Mapped[str]      = mapped_column(String(7), nullable=False, index=True)
+    nombre_archivo: Mapped[str]      = mapped_column(String(500), nullable=False)
+    ruta_local:     Mapped[str]      = mapped_column(String(1000), nullable=False)
+    procesado_en:   Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

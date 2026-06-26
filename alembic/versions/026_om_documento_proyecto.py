@@ -1,14 +1,18 @@
 """add om_documento_proyecto table
 
 Revision ID: 026
-Revises: 5650ccf73b5c
+Revises: 025
 Create Date: 2026-06-26
+
+Relinealización (nightwatch 2026-06-26): down_revision 5650ccf73b5c→025 para que
+la rama OM/arriendos (026→027→028→029) encadene detrás del head contable (025)
+en vez de bifurcar desde starlink. Cuerpo intacto.
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "026"
-down_revision = "5650ccf73b5c"
+down_revision = "025"
 branch_labels = None
 depends_on = None
 

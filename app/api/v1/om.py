@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
-from app.models.om import IPCTasa, OMSeleccion
+from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
     OMContratoOut, OMCalculoFila, OMCalculoResponse,
@@ -89,7 +89,6 @@ def calcular_periodo(
     }
 
     # Documentos por proyecto para este período
-    from app.models.om import OMDocumentoProyecto
     documentos_ids = {
         d.contrato_id
         for d in db.query(OMDocumentoProyecto)
@@ -254,7 +253,6 @@ def ipc_pendiente(_=Depends(get_current_user)):
 from pathlib import Path as _Path
 from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
-from app.models.om import OMFacturaMensual
 
 _UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "om"
 

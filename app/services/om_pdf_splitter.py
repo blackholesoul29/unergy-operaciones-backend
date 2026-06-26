@@ -57,8 +57,7 @@ def _safe_filename(nombre: str) -> str:
     return nombre.replace("/", "-").replace("\\", "-")
 
 
-def _guardar_pagina(ruta_pdf: Path, indice: int, ruta_salida: Path) -> None:
-    reader = PdfReader(str(ruta_pdf))
+def _escribir_pagina(reader: PdfReader, indice: int, ruta_salida: Path) -> None:
     writer = PdfWriter()
     writer.add_page(reader.pages[indice])
     with open(ruta_salida, "wb") as f:
@@ -87,6 +86,7 @@ def dividir_pdf(
     procesados: list[dict] = []
     sin_match: list[dict] = []
 
+    reader = PdfReader(str(ruta_pdf))
     with pdfplumber.open(ruta_pdf) as pdf:
         for i, pagina in enumerate(pdf.pages):
             texto = pagina.extract_text() or ""
@@ -105,7 +105,7 @@ def dividir_pdf(
             nombre_archivo = f"SOFV_{safe_nombre}_{periodo}_mantenimiento.pdf"
             ruta_salida = directorio_salida / nombre_archivo
 
-            _guardar_pagina(ruta_pdf, i, ruta_salida)
+            _escribir_pagina(reader, i, ruta_salida)
 
             procesados.append({
                 "contrato_id": contrato_id,

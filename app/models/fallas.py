@@ -107,6 +107,12 @@ class Falla(Base):
     acciones_correctivas: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Feature 6: programado state — scheduled date for intervention
     fecha_programada: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    # MGS critical events: origen distingue fallas manuales de las generadas por el
+    # detector de eventos críticos del monitoreo; tipo_alerta_mgs guarda el subtipo.
+    origen: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="MANUAL", server_default="MANUAL", index=True,
+    )
+    tipo_alerta_mgs: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

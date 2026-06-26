@@ -1,6 +1,19 @@
+import enum
 from pydantic import BaseModel, field_validator
 from typing import Optional, Any
 from datetime import datetime, date, time
+
+
+class OrigenFalla(str, enum.Enum):
+    """Origen de una falla: registro manual u originada por el monitoreo MGS."""
+    MANUAL = "MANUAL"
+    MGS_CRITICA = "MGS_CRITICA"
+
+
+class TipoAlertaMGS(str, enum.Enum):
+    """Subtipo de una falla originada por un evento crítico del MGS."""
+    CAIDA_PRODUCCION = "CAIDA_PRODUCCION"
+    DESCONEXION_TOTAL = "DESCONEXION_TOTAL"
 
 
 class FallaCatEstadoOut(BaseModel):
@@ -104,6 +117,9 @@ class FallaCreate(BaseModel):
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
     intervalos: Optional[list[FallaIntervaloIn]] = None
+    # Origen de la falla. Por defecto MANUAL; el detector MGS la marca MGS_CRITICA.
+    origen: OrigenFalla = OrigenFalla.MANUAL
+    tipo_alerta_mgs: Optional[TipoAlertaMGS] = None
 
 
 class FallaUpdate(BaseModel):
@@ -176,6 +192,8 @@ class FallaOut(BaseModel):
     causa_raiz: Optional[str] = None
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
+    origen: OrigenFalla = OrigenFalla.MANUAL
+    tipo_alerta_mgs: Optional[TipoAlertaMGS] = None
     dias_abierta: Optional[int] = None
     tiempo_afectacion_horas: Optional[float] = None
     sla_limite_dias: Optional[int] = None

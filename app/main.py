@@ -28,6 +28,10 @@ _PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls JSONB",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
+    # MGS critical events — origen + subtipo de la alerta que generó la falla
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS origen VARCHAR(50) NOT NULL DEFAULT 'MANUAL'",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS tipo_alerta_mgs VARCHAR(50)",
+    "CREATE INDEX IF NOT EXISTS ix_fallas_origen ON fallas (origen)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
     """CREATE TABLE IF NOT EXISTS generacion_diaria (
         id BIGSERIAL PRIMARY KEY,
@@ -2343,6 +2347,16 @@ def _deferred_init():
                 id="mgs_poll",
                 name="MGS alarm poll",
             )
+
+            # Eventos críticos MGS → fallas (origen MGS_CRITICA) + notificaciones
+            from app.api.v1.mgs import run_mgs_critical_events_check
+            _mgs_scheduler.add_job(
+                run_mgs_critical_events_check,
+                IntervalTrigger(minutes=settings.MGS_ALERT_CHECK_INTERVAL_MINUTES),
+                id="mgs_critical_events",
+                name="MGS critical events (caída producción / desconexión)",
+            )
+
             from apscheduler.triggers.cron import CronTrigger
 
             if settings.SOLENIUM_USER:

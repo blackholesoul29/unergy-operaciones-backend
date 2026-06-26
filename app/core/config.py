@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     MGS_POLL_INTERVAL_MINUTES: int = 15
     TIMEZONE: str = "America/Bogota"
 
+    # MGS critical events → fallas + notificaciones in-app a operaciones.
+    # Umbral de caída de producción: si la generación actual cae por debajo de
+    # expected * (1 - umbral) se considera caída crítica (0.20 = 20%).
+    MGS_PRODUCTION_DROP_THRESHOLD: float = 0.20
+    # Minutos sostenidos en cero para declarar desconexión total.
+    MGS_DISCONNECTION_DURATION_MINUTES: int = 15
+    # Cada cuántos minutos corre el chequeo de eventos críticos.
+    MGS_ALERT_CHECK_INTERVAL_MINUTES: int = 10
+    # Roles de usuario que reciben las notificaciones de eventos críticos.
+    MGS_OPERATIONS_USER_ROLES: list[str] = ["operaciones", "admin", "monitoreo"]
+
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""

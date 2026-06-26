@@ -1,11 +1,16 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path as _Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
-from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion
+from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+
+_UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "arriendos"
 from app.schemas.arriendos import (
     ArrIPCOut, ArrIPCUpsert, ArrProyectoIn, ArrProyectoOut,
     ArrCalculoFila, ArrCalculoResponse,
@@ -129,3 +134,143 @@ def upsert_ipc(año: int, payload: ArrIPCUpsert, db: Session = Depends(get_db), 
         db.add(t)
     db.commit(); db.refresh(t)
     return t
+
+
+# ── Documentos de arriendo ────────────────────────────────────────────────────
+
+@router.get("/documentos/{periodo}")
+def listar_documentos_periodo(
+    periodo: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Devuelve todos los documentos de arriendo guardados para un período."""
+    docs = (
+        db.query(ArrDocumento)
+        .filter(ArrDocumento.periodo == periodo)
+        .order_by(ArrDocumento.arr_proyecto_id, ArrDocumento.pago_id)
+        .all()
+    )
+    return [
+        {
+            "id":               d.id,
+            "arr_proyecto_id":  d.arr_proyecto_id,
+            "periodo":          d.periodo,
+            "pago_id":          d.pago_id,
+            "codigo_contrato":  d.codigo_contrato,
+            "tipo_documento":   d.tipo_documento,
+            "nombre_archivo":   d.nombre_archivo,
+            "nombre_secundario":d.nombre_secundario,
+            "fecha_subida":     d.fecha_subida,
+        }
+        for d in docs
+    ]
+
+
+@router.post("/documentos/upload")
+async def upload_documento(
+    arr_proyecto_id:  int = Form(...),
+    periodo:          str = Form(...),
+    pago_id:          int = Form(...),
+    codigo_contrato:  str = Form(...),
+    tipo_documento:   str = Form(...),
+    nombre_resultante:str = Form(...),
+    file:             UploadFile = File(...),
+    file_secundario:  UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
+    _validar_periodo(periodo)
+
+    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio.mkdir(parents=True, exist_ok=True)
+
+    # Guardar archivo principal
+    ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
+    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante
+    ruta_principal = directorio / nombre_archivo
+    ruta_principal.write_bytes(await file.read())
+
+    # Guardar archivo secundario si existe
+    nombre_sec = None
+    ruta_sec   = None
+    if file_secundario and file_secundario.filename:
+        ext_sec   = _Path(file_secundario.filename).suffix or ".pdf"
+        nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
+        ruta_obj   = directorio / nombre_sec
+        ruta_obj.write_bytes(await file_secundario.read())
+        ruta_sec = str(ruta_obj)
+
+    # Upsert en BD (misma clave: proyecto + período + pago_id)
+    doc = db.query(ArrDocumento).filter(
+        ArrDocumento.arr_proyecto_id == arr_proyecto_id,
+        ArrDocumento.periodo         == periodo,
+        ArrDocumento.pago_id         == pago_id,
+    ).first()
+
+    if doc:
+        doc.codigo_contrato   = codigo_contrato
+        doc.tipo_documento    = tipo_documento
+        doc.nombre_archivo    = nombre_archivo
+        doc.ruta_local        = str(ruta_principal)
+        doc.nombre_secundario = nombre_sec
+        doc.ruta_secundario   = ruta_sec
+    else:
+        doc = ArrDocumento(
+            arr_proyecto_id=arr_proyecto_id,
+            periodo=periodo,
+            pago_id=pago_id,
+            codigo_contrato=codigo_contrato,
+            tipo_documento=tipo_documento,
+            nombre_archivo=nombre_archivo,
+            ruta_local=str(ruta_principal),
+            nombre_secundario=nombre_sec,
+            ruta_secundario=ruta_sec,
+        )
+        db.add(doc)
+
+    db.commit()
+    db.refresh(doc)
+    return {"ok": True, "id": doc.id, "nombre_archivo": doc.nombre_archivo}
+
+
+@router.get("/documentos/file/{doc_id}", response_class=FileResponse)
+def download_documento(
+    doc_id: int,
+    secundario: bool = False,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Descarga el PDF de un documento de arriendo."""
+    doc = db.query(ArrDocumento).filter(ArrDocumento.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Documento no encontrado")
+
+    ruta_raw = doc.ruta_secundario if secundario else doc.ruta_local
+    if not ruta_raw:
+        raise HTTPException(404, "Archivo no disponible")
+
+    file_path = _Path(ruta_raw).resolve()
+    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
+        raise HTTPException(403, "Acceso denegado")
+    if not file_path.exists():
+        raise HTTPException(404, "Archivo no encontrado en el servidor")
+
+    filename = doc.nombre_secundario if secundario else doc.nombre_archivo
+    return FileResponse(path=str(file_path), filename=filename, media_type="application/pdf")
+
+
+@router.delete("/documentos/{doc_id}")
+def eliminar_documento(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Elimina un documento de arriendo (registro BD; el archivo en disco permanece)."""
+    doc = db.query(ArrDocumento).filter(ArrDocumento.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Documento no encontrado")
+    db.delete(doc)
+    db.commit()
+    return {"ok": True}

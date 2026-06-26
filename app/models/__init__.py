@@ -42,6 +42,7 @@ from app.models.mandatos import (
     Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
 )
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
+from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -70,4 +71,5 @@ __all__ = [
     "AliasFuenteIngreso",
     "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
+    "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
 ]

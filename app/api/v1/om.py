@@ -26,6 +26,7 @@ from app.schemas.om import (
     OMSeleccionGuardar, OMSeleccionOut,
 )
 from app.services.om_calculator import calcular_proyecto
+from app.services.om_pdf_splitter import dividir_pdf
 
 router = APIRouter(prefix="/om", tags=["OM Mensual"])
 
@@ -287,13 +288,12 @@ async def upload_factura_mensual(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Recibe el PDF consolidado del proveedor y lo guarda en el servidor."""
+    """Recibe el PDF consolidado, lo guarda y lo divide por proyecto."""
     _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Nombre seguro: periodo + nombre original
     ext = _Path(file.filename or "factura.pdf").suffix or ".pdf"
     safe_name = f"{periodo}{ext}"
-    file_path  = _UPLOADS_DIR / safe_name
+    file_path = _UPLOADS_DIR / safe_name
 
     content = await file.read()
     file_path.write_bytes(content)
@@ -302,7 +302,7 @@ async def upload_factura_mensual(
     if factura:
         factura.nombre_archivo = file.filename
         factura.ruta_local     = str(file_path)
-        factura.enlace_pdf     = None   # archivo prevalece sobre link
+        factura.enlace_pdf     = None
     else:
         factura = OMFacturaMensual(
             periodo=periodo,
@@ -311,7 +311,55 @@ async def upload_factura_mensual(
         )
         db.add(factura)
     db.commit()
-    return {"ok": True, "nombre_archivo": file.filename, "periodo": periodo}
+
+    # ── División por proyecto ────────────────────────────────────────────────
+    contratos = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .all()
+    )
+    contratos_lista = [
+        {
+            "contrato_id": c.id,
+            "nombre_proyecto": (
+                c.proyecto.nombre_comercial if c.proyecto
+                else c.prestador_nombre or f"Contrato #{c.id}"
+            ),
+        }
+        for c in contratos
+    ]
+
+    directorio_docs = _UPLOADS_DIR / "documentos" / periodo
+    splitting_result = dividir_pdf(file_path, periodo, contratos_lista, directorio_docs)
+
+    for item in splitting_result["procesados"]:
+        doc = db.query(OMDocumentoProyecto).filter(
+            OMDocumentoProyecto.contrato_id == item["contrato_id"],
+            OMDocumentoProyecto.periodo == periodo,
+        ).first()
+        if doc:
+            doc.nombre_archivo = item["archivo"]
+            doc.ruta_local     = item["ruta_local"]
+        else:
+            doc = OMDocumentoProyecto(
+                contrato_id=item["contrato_id"],
+                periodo=periodo,
+                nombre_archivo=item["archivo"],
+                ruta_local=item["ruta_local"],
+            )
+            db.add(doc)
+    db.commit()
+
+    return {
+        "ok": True,
+        "nombre_archivo": file.filename,
+        "periodo": periodo,
+        "splitting_result": {
+            "procesados": len(splitting_result["procesados"]),
+            "sin_match": splitting_result["sin_match"],
+            "detalle": splitting_result["procesados"],
+        },
+    }
 
 
 @router.put("/factura/{periodo}/enlace")
@@ -336,6 +384,30 @@ def set_enlace_factura(
         db.add(factura)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/documento/{periodo}/{contrato_id}")
+def download_documento_proyecto(
+    periodo: str,
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Descarga el PDF individual de un proyecto para el período dado."""
+    doc = db.query(OMDocumentoProyecto).filter(
+        OMDocumentoProyecto.periodo == periodo,
+        OMDocumentoProyecto.contrato_id == contrato_id,
+    ).first()
+    if not doc:
+        raise HTTPException(404, "No hay documento para este proyecto y período")
+    file_path = _Path(doc.ruta_local)
+    if not file_path.exists():
+        raise HTTPException(404, "Archivo no encontrado en el servidor")
+    return FileResponse(
+        path=str(file_path),
+        filename=doc.nombre_archivo,
+        media_type="application/pdf",
+    )
 
 
 @router.get("/factura/{periodo}/file")

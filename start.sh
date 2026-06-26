@@ -22,7 +22,10 @@ HEAD_COUNT=$(alembic heads 2>/dev/null | grep -c '(head)')
 if [ "$HEAD_COUNT" != "1" ]; then
     echo "ERROR: Alembic tiene $HEAD_COUNT head(s); se requiere exactamente 1." >&2
     echo "Varios heads → 'alembic upgrade head' falla y NINGUNA migración se aplica." >&2
-    echo "Relinealiza la cadena (ver tests/test_alembic_chain_integrity.py) antes de desplegar:" >&2
+    echo "Para arreglarlo: inspecciona los heads abajo y relinealiza la cadena a UNO solo" >&2
+    echo "  (re-apunta el 'down_revision' de las ramas divergentes para encadenarlas)," >&2
+    echo "  luego valida con: pytest tests/test_alembic_chain_integrity.py" >&2
+    echo "Heads actuales:" >&2
     alembic heads >&2
     exit 1
 fi

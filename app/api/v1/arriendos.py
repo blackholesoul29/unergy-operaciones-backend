@@ -300,11 +300,25 @@ async def upload_cuenta_cobro(
     for p in lista_predios:
         codigo_predio = p.get("codigo_predio")
         valor         = p.get("valor_individual")
-        nombre_arch   = _sanit(str(p.get("nombre_resultante") or f"{codigo_predio or 'predio'}.pdf"))
         try:
             arr_proyecto_id = int(p["arr_proyecto_id"]) if p.get("arr_proyecto_id") is not None else None
         except (TypeError, ValueError):
             arr_proyecto_id = None
+
+        # Nombre de archivo: usar el que envía el front; si falta, construirlo completo
+        # ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) desde BD como respaldo.
+        nombre_resultante = p.get("nombre_resultante")
+        if not nombre_resultante:
+            proy_nombre = None
+            if arr_proyecto_id is not None:
+                ap = db.query(ArrProyecto).filter(ArrProyecto.id == arr_proyecto_id).first()
+                proy_nombre = ap.nombre if ap else None
+            partes = [codigo_predio or "predio", periodo]
+            if nombre_arrendatario:
+                partes.append(nombre_arrendatario)
+            partes.append(proy_nombre or "SIN-MATCH")
+            nombre_resultante = "_".join(partes) + ".pdf"
+        nombre_arch = _sanit(str(nombre_resultante))
 
         # Escribir la copia renombrada de este predio
         ruta_copia = directorio / nombre_arch

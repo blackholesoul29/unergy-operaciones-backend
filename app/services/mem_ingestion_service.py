@@ -65,7 +65,35 @@ def _parse_date(value: object) -> date:
 
 
 def _parse_float(value: object) -> float:
-    s = str(value).strip().replace(",", "")
+    """
+    Parsea un número tolerando formato colombiano/XM (coma = separador DECIMAL,
+    punto = separador de miles) y formato US (punto decimal, coma de miles).
+
+    Los archivos de XM/ASIC vienen en formato colombiano: `230,5` = 230.5 kWh y
+    `1.234,75` = 1234.75. Tratar la coma como separador de miles (el bug original)
+    inflaba/deformaba la magnitud — la misma clase de error de unidad que ya costó
+    dos incidentes (kWh↔MWh 1000×). El separador decimal es SIEMPRE el que aparece
+    más a la derecha cuando ambos símbolos están presentes.
+    """
+    if isinstance(value, bool):
+        raise ValueError("valor booleano no es numérico")
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s:
+        raise ValueError("valor numérico vacío")
+    has_dot, has_comma = "." in s, "," in s
+    if has_dot and has_comma:
+        if s.rfind(",") > s.rfind("."):
+            # 1.234,75 → coma decimal: el punto es de miles.
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # 1,234.75 → punto decimal: la coma es de miles.
+            s = s.replace(",", "")
+    elif has_comma:
+        # Solo coma. Una sola coma = separador decimal colombiano (230,5).
+        # Varias comas = separador de miles estilo US (1,234,567).
+        s = s.replace(",", ".") if s.count(",") == 1 else s.replace(",", "")
     return float(s)
 
 

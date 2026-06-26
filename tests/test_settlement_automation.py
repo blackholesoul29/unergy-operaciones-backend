@@ -139,3 +139,39 @@ def test_compute_carries_cumplimiento_payload():
         cumplimiento=cumplimiento,
     )
     assert datos["cumplimiento"] == cumplimiento
+
+
+# --- Señal humana de cobertura (evita confundir parcial con completa) ---
+
+def test_estado_cobertura_completa():
+    datos = compute_datos_calculados(
+        generacion_real_kwh=1000.0, horas_con_datos=24, ingreso_estimado_cop=250000.0,
+        horas_valorizadas=24, generacion_valorizada_kwh=1000.0,
+        precio_ponderado_cop_kwh=250.0, generacion_esperada_kwh=900.0,
+    )
+    assert datos["estado_cobertura"] == "completa"
+    assert datos["avisos"] == []
+
+
+def test_estado_cobertura_parcial_emite_aviso():
+    datos = compute_datos_calculados(
+        generacion_real_kwh=1000.0, horas_con_datos=24, ingreso_estimado_cop=150000.0,
+        horas_valorizadas=18, generacion_valorizada_kwh=600.0,
+        precio_ponderado_cop_kwh=250.0, generacion_esperada_kwh=900.0,
+    )
+    assert datos["estado_cobertura"] == "parcial"
+    assert datos["cobertura_precio_pct"] == 75.0
+    assert any("PARCIAL" in a for a in datos["avisos"])
+    assert any("400.0 kWh" in a for a in datos["avisos"])  # 1000 - 600 sin valorizar
+
+
+def test_estado_cobertura_sin_precio_marca_desconocido():
+    datos = compute_datos_calculados(
+        generacion_real_kwh=500.0, horas_con_datos=12, ingreso_estimado_cop=None,
+        horas_valorizadas=0, generacion_valorizada_kwh=0.0,
+        precio_ponderado_cop_kwh=None, generacion_esperada_kwh=None,
+    )
+    assert datos["estado_cobertura"] == "sin_precio"
+    assert datos["ingreso_estimado_cop"] is None
+    assert any("DESCONOCIDO" in a for a in datos["avisos"])
+    assert any("línea base P50" in a for a in datos["avisos"])

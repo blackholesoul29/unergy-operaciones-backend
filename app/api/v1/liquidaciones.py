@@ -1299,6 +1299,18 @@ def approve_preliminar(
             db.commit()
             return {"preliminar_id": prelim.id, "liquidacion_id": liq.id, "msg": "Ya estaba vinculada"}
 
+    # El ingreso es lo que el revisor está aprobando: si la estimación es DESCONOCIDA
+    # (ninguna hora con precio de bolsa), aprobar liquidaría un período con ingreso 0
+    # silencioso. Se bloquea — primero hay que cargar precios y regenerar.
+    datos = prelim.datos_calculados or {}
+    ingreso = datos.get("ingreso_estimado_cop")
+    if ingreso is None:
+        raise HTTPException(
+            409,
+            "La pre-liquidación no tiene ingreso estimado (sin precio de bolsa en las "
+            "horas con generación). Cargue los precios y regenere antes de aprobar.",
+        )
+
     # Reutiliza una liquidación existente del mismo proyecto/período si la hay.
     liq = (
         db.query(Liquidacion)
@@ -1306,14 +1318,25 @@ def approve_preliminar(
                 Liquidacion.deleted_at.is_(None))
         .first()
     )
+    creada = False
     if liq is None:
+        creada = True
+        gen_valorizada = datos.get("generacion_valorizada_kwh") or 0.0
+        tarifa = datos.get("precio_bolsa_ponderado_cop_kwh") or 0.0
+        cobertura = datos.get("estado_cobertura")
+        obs = "Generada automáticamente desde pre-liquidación MEM (bolsa, hora a hora)"
+        if cobertura == "parcial":
+            obs += f" — ⚠️ cobertura de precios PARCIAL ({datos.get('cobertura_precio_pct')}%)"
         liq = Liquidacion(
             proyecto_id=prelim.proyecto_id,
             generado_por_id=usuario.id,
             periodo=prelim.periodo,
             tipo_venta="bolsa",
             estado="iniciada",
-            observaciones_resultados="Generada automáticamente desde pre-liquidación MEM",
+            # El número que el revisor aprobó SE PERSISTE en la liquidación final —
+            # antes quedaba NULL y había que re-digitarlo a mano (handoff roto).
+            ingresos_energia_cop=ingreso,
+            observaciones_resultados=obs,
         )
         db.add(liq)
         try:
@@ -1322,12 +1345,23 @@ def approve_preliminar(
             db.rollback()
             raise HTTPException(409, "Conflicto creando la liquidación final")
 
+        # Detalle XM: la generación valorizada y el precio ponderado que sustentan
+        # el ingreso, para que la liquidación sea auditable sin volver al MEM.
+        db.add(LiquidacionXMDato(
+            liquidacion_id=liq.id,
+            tipo_venta="bolsa",
+            energia_kwh=gen_valorizada,
+            tarifa_aplicada_kwh=tarifa,
+            valor_bruto_cop=ingreso,
+        ))
+
     prelim.estado = "aprobada"
     prelim.liquidacion_id = liq.id
     prelim.invoice_generated = True
     db.commit()
     db.refresh(liq)
-    return {"preliminar_id": prelim.id, "liquidacion_id": liq.id, "msg": "Pre-liquidación aprobada"}
+    msg = "Pre-liquidación aprobada" if creada else "Pre-liquidación aprobada (vinculada a liquidación existente)"
+    return {"preliminar_id": prelim.id, "liquidacion_id": liq.id, "msg": msg}
 
 
 @router.post("/preliminares/{preliminar_id}/reject")

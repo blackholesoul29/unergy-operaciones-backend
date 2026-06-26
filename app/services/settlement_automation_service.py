@@ -69,12 +69,21 @@ def compute_datos_calculados(
     se calculan hora a hora (ver `compute_ingreso_horario`); aquí solo se ensamblan
     y se computa la desviación frente a la generación esperada.
 
-    La identidad del payload cierra exacto:
-        `ingreso_estimado_cop = precio_bolsa_ponderado_cop_kwh × generacion_valorizada_kwh`
+    La identidad del payload reconcilia (salvo redondeo de presentación):
+        `ingreso_estimado_cop ≈ precio_bolsa_ponderado_cop_kwh × generacion_valorizada_kwh`
+    El `ingreso_estimado_cop` autoritativo se calcula a plena precisión hora a hora;
+    `precio_bolsa_ponderado_cop_kwh` (4 dp) y `generacion_valorizada_kwh` (3 dp) son
+    de presentación, así que re-multiplicarlos a mano puede diferir por centavos.
     `generacion_valorizada_kwh ≤ generacion_real_kwh`; la diferencia es la
-    generación en horas SIN precio de bolsa publicado (no valorizada). Se expone
-    `cobertura_precio_pct` para que el revisor vea de un vistazo qué fracción de las
-    horas con datos llegó a tener precio.
+    generación en horas SIN precio de bolsa publicado (no valorizada).
+
+    `estado_cobertura` + `avisos` traducen la cobertura a una señal humana para que
+    el revisor NO confunda una estimación parcial con una completa (clase de error
+    documentada: cómputo parcial presentado como autoritativo):
+      - "completa": todas las horas con datos tuvieron precio.
+      - "parcial":  faltó precio en algunas horas → el ingreso subestima.
+      - "sin_precio": ninguna hora tuvo precio → `ingreso_estimado_cop = None`
+        (ingreso DESCONOCIDO, no cero).
     """
     desviacion_pct = None
     if generacion_esperada_kwh:
@@ -86,6 +95,27 @@ def compute_datos_calculados(
         round(horas_valorizadas / horas_con_datos * 100, 1) if horas_con_datos else None
     )
 
+    avisos: list[str] = []
+    if ingreso_estimado_cop is None:
+        estado_cobertura = "sin_precio"
+        avisos.append(
+            "Sin precio de bolsa publicado en ninguna hora con generación — "
+            "ingreso DESCONOCIDO (no cero). No aprobar hasta cargar precios."
+        )
+    elif cobertura_precio_pct is not None and cobertura_precio_pct < 100:
+        estado_cobertura = "parcial"
+        gen_sin_valorizar = round(generacion_real_kwh - generacion_valorizada_kwh, 1)
+        avisos.append(
+            f"Estimación PARCIAL: {horas_valorizadas} de {horas_con_datos} horas con "
+            f"precio ({cobertura_precio_pct}% cobertura); faltan {gen_sin_valorizar} kWh "
+            "por valorizar. El ingreso estimado subestima el real."
+        )
+    else:
+        estado_cobertura = "completa"
+
+    if desviacion_pct is None and generacion_esperada_kwh is None:
+        avisos.append("Sin línea base P50 — no se calculó desviación.")
+
     return {
         "fuente": "MEM/ASIC",
         "generacion_real_kwh": round(generacion_real_kwh, 3),
@@ -96,6 +126,8 @@ def compute_datos_calculados(
         "horas_con_datos": horas_con_datos,
         "horas_valorizadas": horas_valorizadas,
         "cobertura_precio_pct": cobertura_precio_pct,
+        "estado_cobertura": estado_cobertura,
+        "avisos": avisos,
         # Generación efectivamente valorizada (solo horas con precio de bolsa). El
         # ingreso solo cubre esta porción; el resto quedó sin precio publicado.
         "generacion_valorizada_kwh": round(generacion_valorizada_kwh, 3),

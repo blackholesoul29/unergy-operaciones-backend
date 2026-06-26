@@ -66,9 +66,30 @@ def test_parse_date_formats():
     assert _parse_date(date(2026, 6, 1)) == date(2026, 6, 1)
 
 
-def test_parse_float_strips_thousands():
+def test_parse_float_us_format():
+    # Formato US: punto decimal, coma de miles.
     assert _parse_float("1,234.5") == 1234.5
+    assert _parse_float("1,234,567") == 1234567.0
     assert _parse_float("10") == 10.0
+    assert _parse_float("250.75") == 250.75
+
+
+def test_parse_float_colombian_decimal_comma():
+    # Formato colombiano/XM: coma = separador DECIMAL (no de miles). Tratarla como
+    # miles inflaba la magnitud (230,5 → 2305 = 10×) — misma clase del bug kWh/MWh.
+    assert _parse_float("230,5") == 230.5
+    assert _parse_float("1.234,75") == 1234.75
+    assert _parse_float("0,001") == 0.001
+    # Numérico nativo (xlsx data_only) pasa sin tocar.
+    assert _parse_float(123.5) == 123.5
+    assert _parse_float(10) == 10.0
+
+
+def test_parse_float_rejects_empty():
+    with pytest.raises(ValueError):
+        _parse_float("")
+    with pytest.raises(ValueError):
+        _parse_float("   ")
 
 
 def test_norm_header_and_canonical():

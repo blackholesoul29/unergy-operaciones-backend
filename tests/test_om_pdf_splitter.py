@@ -1,118 +1,143 @@
 """Tests unitarios para el servicio de división de PDF O&M."""
-import pytest
+from decimal import Decimal
 from app.services.om_pdf_splitter import (
-    extraer_nombre_pagina,
+    extraer_datos_pagina,
     match_proyecto,
-    _filtrar_ruido,
+    _nombre_distintivo,
+    _normalizar,
+    _parse_monto,
 )
 
 
-# ── _filtrar_ruido ────────────────────────────────────────────────────────────
+# ── _nombre_distintivo ────────────────────────────────────────────────────────
 
-def test_filtrar_ruido_elimina_solenium():
-    texto = "SOLENIUM SAS NIT: 901097244\nNombre del Proyecto: Uruaco\nOtra línea"
-    limpio = _filtrar_ruido(texto)
-    assert "SOLENIUM" not in limpio
-    assert "Uruaco" in limpio
+def test_distintivo_quita_minigranja_solar():
+    assert _nombre_distintivo("Minigranja Solar Uruaco") == "Uruaco"
 
+def test_distintivo_quita_mini_granja_con_espacio():
+    assert _nombre_distintivo("Mini granja Solar La Paz") == "La Paz"
 
-def test_filtrar_ruido_elimina_dian():
-    texto = "Resolución DIAN 0001\nNombre del Proyecto: Merengue"
-    limpio = _filtrar_ruido(texto)
-    assert "DIAN" not in limpio
-    assert "Merengue" in limpio
+def test_distintivo_quita_mgs_codigo():
+    assert _nombre_distintivo("MGS 0005 Cañahuate") == "Cañahuate"
 
-
-# ── extraer_nombre_pagina ─────────────────────────────────────────────────────
-
-def test_extraer_etiqueta_nombre_del_proyecto():
-    texto = "SOLENIUM SAS NIT: 901097244-1\nNombre del Proyecto: Minigranja Solar Uruaco\nOtro texto"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert nombre == "Minigranja Solar Uruaco"
-    assert estrategia == "etiqueta_nombre"
+def test_distintivo_sin_prefijo_queda_igual():
+    assert _nombre_distintivo("Nestlé") == "Nestlé"
 
 
-def test_extraer_etiqueta_proyecto_corta():
-    texto = "Proyecto: Minigranja Solar Merengue\nFecha: 2026-06-01"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert nombre == "Minigranja Solar Merengue"
-    assert estrategia == "etiqueta_proyecto"
+# ── _parse_monto ──────────────────────────────────────────────────────────────
+
+def test_parse_monto_con_puntos_miles():
+    # "4.500.000,00" → 4500000.00
+    assert _parse_monto("4.500.000,00") == Decimal("4500000.00")
+
+def test_parse_monto_sin_decimales():
+    assert _parse_monto("855000") == Decimal("855000")
+
+def test_parse_monto_none():
+    assert _parse_monto(None) is None
 
 
-def test_extraer_descripcion_mantenimiento_una_linea():
-    texto = "Mantenimiento Preventivo - Minigranja Solar Uruaco - Junio"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert nombre == "Minigranja Solar Uruaco"
-    assert estrategia == "descripcion_mantenimiento"
+# ── extraer_datos_pagina ──────────────────────────────────────────────────────
 
+_PAGINA_EJEMPLO = """
+Factura Electrónica de Venta No. SOFV993
+Fecha de facturación: 24-06-2026
+CUFE: abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12
 
-def test_extraer_descripcion_mantenimiento_multilinea():
-    texto = "Mantenimiento\nPreventivo - Minigranja\nSolar Uruaco - Junio"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert nombre == "Minigranja Solar Uruaco"
-    assert estrategia == "descripcion_mantenimiento"
+Descripción: Mantenimiento Preventivo - Minigranja Solar Cañahuate - Junio
 
+Total sin impuestos $4.500.000,00
+IVA $855.000,00
+Total a pagar $5.355.000,00
+"""
 
-def test_extraer_minigranja_solar():
-    texto = "SOLENIUM SAS\nTel: 3001234567\nMini granja Solar Villanueva\nOtros datos"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert "Villanueva" in nombre
-    assert estrategia == "minigranja"
+def test_extraer_nombre_desde_mantenimiento_preventivo():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["nombre_proyecto"] == "Minigranja Solar Cañahuate"
+    assert datos["estrategia"] == "mantenimiento_preventivo"
 
+def test_extraer_numero_factura():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["numero_factura"] == "SOFV993"
 
-def test_extraer_no_encontrado():
-    texto = "SOLENIUM SAS NIT: 901097244-1\nResolución DIAN\nSin descripción útil aquí"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    assert nombre is None
-    assert estrategia is None
+def test_extraer_total_sin_impuestos():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["total_sin_impuestos"] == Decimal("4500000.00")
 
+def test_extraer_iva():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["iva"] == Decimal("855000.00")
 
-def test_extraer_no_captura_solo_numeros():
-    # La estrategia no debe retornar capturas que sean solo números o símbolos
-    texto = "Proyecto: 12345\nNombre del Proyecto: Uruaco"
-    nombre, estrategia = extraer_nombre_pagina(texto)
-    # Debe saltar "12345" (solo números) y llegar a "Uruaco"
-    assert nombre is not None
-    assert len(nombre) >= 4
+def test_extraer_total_pagar():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["total_pagar"] == Decimal("5355000.00")
+
+def test_extraer_fecha_iso():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["fecha_facturacion"] == "2026-06-24"
+
+def test_extraer_cufe():
+    datos = extraer_datos_pagina(_PAGINA_EJEMPLO)
+    assert datos["cufe"] is not None
+    assert len(datos["cufe"]) >= 40
+
+def test_extraer_nombre_la_paz_verso():
+    texto = "Mantenimiento Preventivo - Minigranja Solar La Paz Verso - Junio"
+    datos = extraer_datos_pagina(texto)
+    assert datos["nombre_proyecto"] == "Minigranja Solar La Paz Verso"
+
+def test_extraer_nombre_nestle():
+    texto = "Mantenimiento Preventivo - Nestlé - Junio"
+    datos = extraer_datos_pagina(texto)
+    assert datos["nombre_proyecto"] == "Nestlé"
+
+def test_extraer_fallback_autorretenedores():
+    texto = "Sin descripción mantenimiento\nAUTORRETENEDORES ICA MEDELLIN - Minigranja Solar Merengue - Junio"
+    datos = extraer_datos_pagina(texto)
+    assert datos["nombre_proyecto"] == "Minigranja Solar Merengue"
+    assert datos["estrategia"] == "autorretenedores"
+
+def test_extraer_pagina_sin_match():
+    texto = "Solo encabezado sin descripción útil SOLENIUM SAS"
+    datos = extraer_datos_pagina(texto)
+    assert datos["nombre_proyecto"] is None
 
 
 # ── match_proyecto ────────────────────────────────────────────────────────────
 
-def test_match_exacto():
-    contratos = [
-        {"contrato_id": 1, "nombre_proyecto": "Minigranja Solar Uruaco"},
-        {"contrato_id": 2, "nombre_proyecto": "Minigranja Solar Cañahuate"},
-    ]
-    cid, ratio = match_proyecto("Minigranja Solar Uruaco", contratos)
+_CONTRATOS = [
+    {"contrato_id": 1, "nombre_proyecto": "MGS 0001 Uruaco"},
+    {"contrato_id": 2, "nombre_proyecto": "MGS 0005 Cañahuate"},
+    {"contrato_id": 3, "nombre_proyecto": "MGS 0007 La Paz Vallenata"},
+    {"contrato_id": 4, "nombre_proyecto": "MGS 0004 Valle de Gandalf"},
+    {"contrato_id": 5, "nombre_proyecto": "Nestlé Colombia"},
+]
+
+def test_match_minigranja_solar_uruaco():
+    cid, ratio = match_proyecto("Minigranja Solar Uruaco", _CONTRATOS)
     assert cid == 1
-    assert ratio >= 0.80
 
-
-def test_match_con_tilde():
-    contratos = [
-        {"contrato_id": 1, "nombre_proyecto": "Minigranja Solar Uruaco"},
-        {"contrato_id": 2, "nombre_proyecto": "Minigranja Solar Cañahuate"},
-    ]
-    cid, ratio = match_proyecto("Minigranja Solar Canahuate", contratos)
+def test_match_minigranja_solar_canahuate_sin_tilde():
+    # PDF puede no tener tilde
+    cid, ratio = match_proyecto("Minigranja Solar Canahuate", _CONTRATOS)
     assert cid == 2
 
+def test_match_gandalf_como_substring():
+    # "Gandalf" aparece en "MGS 0004 Valle de Gandalf"
+    cid, ratio = match_proyecto("Minigranja Solar Gandalf", _CONTRATOS)
+    assert cid == 4
 
-def test_match_nombre_del_proyecto_label_extraido():
-    # Simula lo que extraer_nombre_pagina entrega después de filtrar el label
-    contratos = [
-        {"contrato_id": 5, "nombre_proyecto": "Minigranja Solar Villanueva"},
-    ]
-    cid, ratio = match_proyecto("Minigranja Solar Villanueva", contratos)
+def test_match_la_paz_vallenata():
+    cid, ratio = match_proyecto("Minigranja Solar La Paz Vallenata", _CONTRATOS)
+    assert cid == 3
+
+def test_match_nestle():
+    cid, ratio = match_proyecto("Nestlé", _CONTRATOS)
     assert cid == 5
 
-
 def test_match_sin_resultado():
-    contratos = [
-        {"contrato_id": 1, "nombre_proyecto": "Minigranja Solar Uruaco"},
-    ]
-    cid, ratio = match_proyecto("Proyecto Completamente Diferente XYZ", contratos)
+    cid, ratio = match_proyecto("Proyecto Completamente Diferente XYZ", _CONTRATOS)
     assert cid is None
-
 
 def test_match_lista_vacia():
     cid, ratio = match_proyecto("Minigranja Solar Uruaco", [])

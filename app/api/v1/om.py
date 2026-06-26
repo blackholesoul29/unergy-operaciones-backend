@@ -353,14 +353,26 @@ async def upload_factura_mensual(
             OMDocumentoProyecto.periodo == periodo,
         ).first()
         if doc:
-            doc.nombre_archivo = item["archivo"]
-            doc.ruta_local     = item["ruta_local"]
+            doc.nombre_archivo      = item["archivo"]
+            doc.ruta_local          = item["ruta_local"]
+            doc.numero_factura      = item.get("numero_factura")
+            doc.total_sin_impuestos = item.get("total_sin_impuestos")
+            doc.iva                 = item.get("iva")
+            doc.total_pagar         = item.get("total_pagar")
+            doc.fecha_facturacion   = item.get("fecha_facturacion")
+            doc.cufe                = item.get("cufe")
         else:
             doc = OMDocumentoProyecto(
                 contrato_id=item["contrato_id"],
                 periodo=periodo,
                 nombre_archivo=item["archivo"],
                 ruta_local=item["ruta_local"],
+                numero_factura=item.get("numero_factura"),
+                total_sin_impuestos=item.get("total_sin_impuestos"),
+                iva=item.get("iva"),
+                total_pagar=item.get("total_pagar"),
+                fecha_facturacion=item.get("fecha_facturacion"),
+                cufe=item.get("cufe"),
             )
             db.add(doc)
     db.commit()  # commit único para factura + documentos

@@ -57,13 +57,6 @@ def _safe_filename(nombre: str) -> str:
     return nombre.replace("/", "-").replace("\\", "-")
 
 
-def _escribir_pagina(reader: PdfReader, indice: int, ruta_salida: Path) -> None:
-    writer = PdfWriter()
-    writer.add_page(reader.pages[indice])
-    with open(ruta_salida, "wb") as f:
-        writer.write(f)
-
-
 def dividir_pdf(
     ruta_pdf: Path,
     periodo: str,
@@ -72,6 +65,7 @@ def dividir_pdf(
 ) -> dict:
     """
     Divide el PDF consolidado en PDFs individuales por proyecto.
+    Si un proyecto tiene varias páginas, se combinan en un solo PDF.
 
     Args:
         ruta_pdf: Path al PDF consolidado ya guardado.
@@ -83,8 +77,9 @@ def dividir_pdf(
         {'procesados': [...], 'sin_match': [...]}
     """
     directorio_salida.mkdir(parents=True, exist_ok=True)
-    procesados: list[dict] = []
     sin_match: list[dict] = []
+    # Acumular índices de página por contrato_id
+    paginas_por_contrato: dict[int, list[int]] = {}
 
     reader = PdfReader(str(ruta_pdf))
     with pdfplumber.open(ruta_pdf) as pdf:
@@ -100,18 +95,27 @@ def dividir_pdf(
                 sin_match.append({"pagina": i + 1, "texto_extraido": nombre})
                 continue
 
-            contrato = next(c for c in contratos if c["contrato_id"] == contrato_id)
-            safe_nombre = _safe_filename(contrato["nombre_proyecto"])
-            nombre_archivo = f"SOFV_{safe_nombre}_{periodo}_mantenimiento.pdf"
-            ruta_salida = directorio_salida / nombre_archivo
+            paginas_por_contrato.setdefault(contrato_id, []).append(i)
 
-            _escribir_pagina(reader, i, ruta_salida)
+    # Escribir un PDF por contrato con todas sus páginas
+    procesados: list[dict] = []
+    for contrato_id, indices in paginas_por_contrato.items():
+        contrato = next(c for c in contratos if c["contrato_id"] == contrato_id)
+        safe_nombre = _safe_filename(contrato["nombre_proyecto"])
+        nombre_archivo = f"SOFV_{safe_nombre}_{periodo}_mantenimiento.pdf"
+        ruta_salida = directorio_salida / nombre_archivo
 
-            procesados.append({
-                "contrato_id": contrato_id,
-                "nombre": contrato["nombre_proyecto"],
-                "archivo": nombre_archivo,
-                "ruta_local": str(ruta_salida),
-            })
+        writer = PdfWriter()
+        for idx in indices:
+            writer.add_page(reader.pages[idx])
+        with open(ruta_salida, "wb") as f:
+            writer.write(f)
+
+        procesados.append({
+            "contrato_id": contrato_id,
+            "nombre": contrato["nombre_proyecto"],
+            "archivo": nombre_archivo,
+            "ruta_local": str(ruta_salida),
+        })
 
     return {"procesados": procesados, "sin_match": sin_match}

@@ -415,7 +415,9 @@ def download_documento_proyecto(
     ).first()
     if not doc:
         raise HTTPException(404, "No hay documento para este proyecto y período")
-    file_path = _Path(doc.ruta_local)
+    file_path = _Path(doc.ruta_local).resolve()
+    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
+        raise HTTPException(403, "Acceso denegado")
     if not file_path.exists():
         raise HTTPException(404, "Archivo no encontrado en el servidor")
     return FileResponse(

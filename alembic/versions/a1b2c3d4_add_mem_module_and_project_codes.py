@@ -9,13 +9,13 @@ arrancar (app/main.py). Esta migración replica esos cambios para entornos que
 usen Alembic. Todo el DDL es idempotente.
 
 Revision ID: a1b2c3d4
-Revises: 025
+Revises: 030
 Create Date: 2026-06-25
 """
 from alembic import op
 
 revision = "a1b2c3d4"
-down_revision = "025"
+down_revision = "030"
 branch_labels = None
 depends_on = None
 

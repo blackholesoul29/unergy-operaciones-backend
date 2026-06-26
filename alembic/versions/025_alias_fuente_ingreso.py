@@ -3,17 +3,14 @@
 Nombre que la usuaria le pone a cada fuente de ingreso, anclado a la celda del ER
 (columna_origen, ej. "Sheet1!G35"). Idempotente.
 
-NOTA: el esquema de producción se provisiona vía _PENDING_DDLS en app/main.py
-(Alembic está roto: heads múltiples). Esta migración es solo de registro.
-
 Revision ID: 025
-Revises: 024
+Revises: 024b
 Create Date: 2026-06-18
 """
 from alembic import op
 
 revision = "025"
-down_revision = "024"
+down_revision = "024b"
 branch_labels = None
 depends_on = None
 

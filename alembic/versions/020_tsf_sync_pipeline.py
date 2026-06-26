@@ -1,13 +1,16 @@
 """Pipeline TSF / próximos a energizarse — campos de sincronización en proyectos
 
 Revision ID: 020
-Revises: 019
+Revises: 020a
 Create Date: 2026-06-15
+
+Nota: down_revision re-encadenado de "019" a "020a" al linealizar la cadena de
+Alembic (antes "019" tenía dos hijos, lo que producía una bifurcación).
 """
 from alembic import op
 
 revision = "020"
-down_revision = "019"
+down_revision = "020a"
 branch_labels = None
 depends_on = None
 

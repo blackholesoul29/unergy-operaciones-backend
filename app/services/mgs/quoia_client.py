@@ -16,7 +16,7 @@ TIMEOUT = 30.0
 class QuoiaClient:
     def __init__(self):
         self._base_url = settings.QUOIA_BASE_URL.rstrip("/")
-        self._token = settings.QUOIA_API_TOKEN
+        self._token = settings.QUOIA_API_TOKEN.get_secret_value()
         self._http = httpx.Client(timeout=TIMEOUT)
 
     @property

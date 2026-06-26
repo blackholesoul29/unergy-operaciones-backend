@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,15 +12,16 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
 
-    SECRET_KEY: str = ""
+    SECRET_KEY: SecretStr = SecretStr("")
     JWT_EXPIRE_MINUTES: int = 480
     # Token de larga duración para la app móvil (PWA) — default 30 días
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod
-    def secret_key_warn_if_weak(cls, v: str) -> str:
-        if not v or len(v) < 16:
+    def secret_key_warn_if_weak(cls, v: SecretStr) -> SecretStr:
+        raw = v.get_secret_value()
+        if not raw or len(raw) < 16:
             import warnings
             warnings.warn(
                 "[SEGURIDAD] SECRET_KEY no está configurado o es muy corto. "
@@ -33,35 +34,35 @@ class Settings(BaseSettings):
     STORAGE_LOCAL_PATH: str = "./uploads"
     S3_BUCKET: str = ""
     S3_ENDPOINT: str = ""
-    S3_ACCESS_KEY: str = ""
-    S3_SECRET_KEY: str = ""
+    S3_ACCESS_KEY: SecretStr = SecretStr("")
+    S3_SECRET_KEY: SecretStr = SecretStr("")
 
     # Unergy API credentials (used by _legacy bridge)
     UNERGY_API_URL: str = "https://api.unergy.io"
     UNERGY_ACCOUNT_ID: str = ""
     UNERGY_LOGIN: str = ""
-    UNERGY_PASSWORD: str = ""
+    UNERGY_PASSWORD: SecretStr = SecretStr("")
 
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
     SUNFACTORY_API_URL: str = "https://sunfactory.solenium.co/api"
     SUNFACTORY_AUTH_URL: str = "https://auth.solenium.co/api/token/"
     SUNFACTORY_USERNAME: str = ""
-    SUNFACTORY_PASSWORD: str = ""
+    SUNFACTORY_PASSWORD: SecretStr = SecretStr("")
 
     # Solenium API (FMO inverter data) — OAuth2 username/password
     SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api"
     SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
     SOLENIUM_USER: str = ""
-    SOLENIUM_PASS: str = ""
+    SOLENIUM_PASS: SecretStr = SecretStr("")
 
     # Quoia CGM API (fronteras / medidores) — legacy token auth
-    QUOIA_API_TOKEN: str = ""
+    QUOIA_API_TOKEN: SecretStr = SecretStr("")
     QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"
 
     # Gaia JWT auth (for /api/cgm/v1/border + /api/node measurements)
     GAIA_USER: str = ""
-    GAIA_PASS: str = ""
+    GAIA_PASS: SecretStr = SecretStr("")
     GAIA_BASE_URL: str = "https://gaia.quoia.energy"
 
     # MGS Alarms polling
@@ -71,7 +72,7 @@ class Settings(BaseSettings):
 
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""
-    EVO_API_TOKEN: str = ""
+    EVO_API_TOKEN: SecretStr = SecretStr("")
 
     # External databases (read-only correlation)
     ORIGINA_DATABASE_URL: str = ""
@@ -81,7 +82,7 @@ class Settings(BaseSettings):
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
+    SMTP_PASSWORD: SecretStr = SecretStr("")
     SMTP_FROM: str = "operaciones@unergy.io"
 
     @field_validator("DATABASE_URL", mode="before")

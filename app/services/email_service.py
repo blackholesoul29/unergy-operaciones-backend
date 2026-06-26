@@ -57,7 +57,7 @@ def _smtp_send(msg: MIMEMultipart, recipients: list[str]) -> None:
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
         server.ehlo()
         server.starttls(context=context)
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD.get_secret_value())
         server.sendmail(settings.SMTP_FROM, recipients, msg.as_string())
 
 

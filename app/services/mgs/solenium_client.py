@@ -26,7 +26,7 @@ class SoleniumClient:
         self._auth_url = auth
         self._data_url = settings.SOLENIUM_DATA_URL.rstrip("/")
         self._username = settings.SOLENIUM_USER
-        self._password = settings.SOLENIUM_PASS
+        self._password = settings.SOLENIUM_PASS.get_secret_value()
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0

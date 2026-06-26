@@ -1724,7 +1724,7 @@ _mgs_scheduler = None
 def _scheduled_generation_sync():
     """Sync daily generation from Solenium into generacion_diaria."""
     from datetime import date, timedelta
-    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS:
+    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS.get_secret_value():
         return
     try:
         from app.services.mgs.solenium_client import SoleniumClient
@@ -1823,8 +1823,8 @@ def _scheduled_bolsa_ingest():
         return
     try:
         headers = {}
-        if settings.EVO_API_TOKEN:
-            headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+        if settings.EVO_API_TOKEN.get_secret_value():
+            headers["X-EVO-Token"] = settings.EVO_API_TOKEN.get_secret_value()
         import httpx
         with httpx.Client(timeout=httpx.Timeout(10.0, read=30.0)) as client:
             resp = client.get(
@@ -1897,8 +1897,8 @@ def _scheduled_evo_forecast_ingest():
         return
     try:
         headers = {}
-        if settings.EVO_API_TOKEN:
-            headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+        if settings.EVO_API_TOKEN.get_secret_value():
+            headers["X-EVO-Token"] = settings.EVO_API_TOKEN.get_secret_value()
         import httpx
         with httpx.Client(timeout=httpx.Timeout(10.0, read=30.0)) as client:
             resp = client.get(
@@ -2035,7 +2035,7 @@ def _scheduled_representacion_alertas():
                     with smtplib.SMTP(_s.SMTP_HOST, _s.SMTP_PORT) as server:
                         server.ehlo()
                         server.starttls(context=context)
-                        server.login(_s.SMTP_USER, _s.SMTP_PASSWORD)
+                        server.login(_s.SMTP_USER, _s.SMTP_PASSWORD.get_secret_value())
                         server.sendmail(_s.SMTP_FROM, _ALERTA_EMAILS, msg.as_string())
                     _log_send(
                         to_email=_ALERTA_EMAILS[0],

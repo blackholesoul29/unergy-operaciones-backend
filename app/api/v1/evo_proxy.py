@@ -22,8 +22,8 @@ def _evo_get(path: str, params: dict | None = None) -> dict:
         raise HTTPException(503, "EVO_API_URL not configured")
     url = f"{settings.EVO_API_URL.rstrip('/')}/{path.lstrip('/')}"
     headers = {}
-    if settings.EVO_API_TOKEN:
-        headers["X-EVO-Token"] = settings.EVO_API_TOKEN
+    if settings.EVO_API_TOKEN.get_secret_value():
+        headers["X-EVO-Token"] = settings.EVO_API_TOKEN.get_secret_value()
     try:
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.get(url, headers=headers, params=params)

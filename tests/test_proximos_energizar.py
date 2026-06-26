@@ -7,6 +7,7 @@ BD. Por eso estos tests apuntan al servicio.
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+from pydantic import SecretStr
 
 from app.services import tsf_sync as pe
 
@@ -218,9 +219,9 @@ def _set(monkeypatch, **vals):
 
 def test_sunfactory_token_falls_back_to_solenium_creds(monkeypatch):
     # Sin credenciales SUNFACTORY_* dedicadas → debe reusar SOLENIUM_USER/PASS.
-    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
+    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD=SecretStr(""),
          SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
-         SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
+         SOLENIUM_USER="sol-user", SOLENIUM_PASS=SecretStr("sol-pass"))
     monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
     assert pe._sunfactory_token() == "tok-123"
     assert _FakeClient.last_json == {"username": "sol-user", "password": "sol-pass"}
@@ -228,17 +229,17 @@ def test_sunfactory_token_falls_back_to_solenium_creds(monkeypatch):
 
 def test_sunfactory_token_prefers_dedicated_creds(monkeypatch):
     # Si SUNFACTORY_* están seteadas, ganan sobre las de Solenium.
-    _set(monkeypatch, SUNFACTORY_USERNAME="sf-user", SUNFACTORY_PASSWORD="sf-pass",
+    _set(monkeypatch, SUNFACTORY_USERNAME="sf-user", SUNFACTORY_PASSWORD=SecretStr("sf-pass"),
          SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
-         SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
+         SOLENIUM_USER="sol-user", SOLENIUM_PASS=SecretStr("sol-pass"))
     monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
     assert pe._sunfactory_token() == "tok-123"
     assert _FakeClient.last_json["username"] == "sf-user"
 
 
 def test_sunfactory_token_none_without_any_creds(monkeypatch):
-    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
-         SOLENIUM_USER="", SOLENIUM_PASS="")
+    _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD=SecretStr(""),
+         SOLENIUM_USER="", SOLENIUM_PASS=SecretStr(""))
     assert pe._sunfactory_token() is None
 
 

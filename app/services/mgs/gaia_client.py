@@ -199,7 +199,7 @@ class GaiaClient:
     def __init__(self):
         self._base = settings.GAIA_BASE_URL.rstrip("/")
         self._username = settings.GAIA_USER
-        self._password = settings.GAIA_PASS
+        self._password = settings.GAIA_PASS.get_secret_value()
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0

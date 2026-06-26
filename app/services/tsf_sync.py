@@ -170,7 +170,7 @@ def _location_columns(conn) -> dict[str, str]:
 
 def _sunfactory_token() -> str | None:
     user = settings.SUNFACTORY_USERNAME or settings.SOLENIUM_USER
-    password = settings.SUNFACTORY_PASSWORD or settings.SOLENIUM_PASS
+    password = settings.SUNFACTORY_PASSWORD.get_secret_value() or settings.SOLENIUM_PASS.get_secret_value()
     if not (user and password and settings.SUNFACTORY_AUTH_URL):
         return None
     with httpx.Client(timeout=30) as client:
@@ -268,12 +268,12 @@ def _build_sunfactory_map(token: str, base_names: list[str]) -> dict[str, dict]:
 # ── Cruce con la API de generación de Unergy (api.unergy.io) ────────────────────
 
 def _unergy_token() -> str | None:
-    if not (settings.UNERGY_ACCOUNT_ID and settings.UNERGY_LOGIN and settings.UNERGY_PASSWORD):
+    if not (settings.UNERGY_ACCOUNT_ID and settings.UNERGY_LOGIN and settings.UNERGY_PASSWORD.get_secret_value()):
         return None
     with httpx.Client(timeout=30) as client:
         resp = client.post(
             f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
-            json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD},
+            json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD.get_secret_value()},
             headers={"User-Agent": "PostmanRuntime/7.50.0"},
         )
         resp.raise_for_status()

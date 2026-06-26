@@ -666,7 +666,7 @@ async def _unergy_token() -> str:
         return _token_cache["token"]
     auth_url = f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/"
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(auth_url, json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD})
+        r = await c.post(auth_url, json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD.get_secret_value()})
         r.raise_for_status()
         data = r.json()
         tok = data.get("token") or data.get("access") or data.get("key") or ""
@@ -881,13 +881,13 @@ async def _solenium_token() -> str | None:
     import time
     if _sol_cache["token"] and time.time() < _sol_cache["expires_at"]:
         return _sol_cache["token"]
-    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS:
+    if not settings.SOLENIUM_USER or not settings.SOLENIUM_PASS.get_secret_value():
         return None
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
                 settings.SOLENIUM_AUTH_URL,
-                json={"username": settings.SOLENIUM_USER, "password": settings.SOLENIUM_PASS},
+                json={"username": settings.SOLENIUM_USER, "password": settings.SOLENIUM_PASS.get_secret_value()},
             )
             if r.status_code != 200:
                 return None

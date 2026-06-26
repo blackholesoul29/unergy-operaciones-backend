@@ -1,12 +1,12 @@
 """Crear tabla proyecto_inicio_operacion
 
-Revision ID: 020
+Revision ID: 020a
 Revises: 5650ccf73b5c
 Create Date: 2026-06-11
 """
 from alembic import op
 
-revision = "020"
+revision = "020a"
 down_revision = "5650ccf73b5c"
 branch_labels = None
 depends_on = None

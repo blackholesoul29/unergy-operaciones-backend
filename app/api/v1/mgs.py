@@ -92,6 +92,18 @@ class MGSCriticalDetector:
         self._active[proyecto_id] = raw
         return raw
 
+    def rollback(self, proyecto_id: int) -> None:
+        """Revierte el debounce de una transición que NO se pudo notificar.
+
+        ``evaluate`` marca la incidencia como activa de forma optimista al
+        detectar la transición; si la creación de la falla o la notificación
+        fallan (catálogos/usuario ausentes, error transitorio de BD), esa marca
+        silenciaría la alerta para siempre hasta una recuperación. Llamar a
+        ``rollback`` reabre la ventana para que el próximo ciclo del scheduler
+        reintente — así un fallo transitorio no descarta una alerta crítica.
+        No toca ``_zero_since`` (la condición de cero sostenido sigue vigente)."""
+        self._active.pop(proyecto_id, None)
+
 
 # Instancia compartida usada por el job programado.
 _detector = MGSCriticalDetector(
@@ -349,6 +361,10 @@ def check_mgs_critical_events(
                 continue
             falla = _create_falla_for_event(db, r, tipo, now)
             if falla is None:
+                # No se pudo crear (catálogos/usuario ausentes): reabre el
+                # debounce para reintentar en el próximo ciclo en vez de
+                # silenciar la alerta de forma permanente.
+                _detector.rollback(pid)
                 continue
             url = f"/app/fallas/{falla.id}"
             _notify_ops_users(db, r, tipo, url, falla)
@@ -357,6 +373,10 @@ def check_mgs_critical_events(
                         falla.codigo_interno, pid, tipo.value)
         except Exception:
             db.rollback()
+            # Error transitorio: reabre el debounce para reintentar. La falla la
+            # crea ``_create_falla_internal`` en su propia transacción, así que
+            # ``_has_open_mgs_falla`` evita duplicarla si llegó a persistirse.
+            _detector.rollback(pid)
             logger.exception("check_mgs_critical_events: error procesando proyecto %s", pid)
 
     return creadas

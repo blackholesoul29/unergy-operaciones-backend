@@ -953,6 +953,11 @@ _PENDING_DDLS = [
     # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.
     "ALTER TABLE ppa_compromisos_energia ALTER COLUMN cantidad_proyectos SET DEFAULT 0",
     "UPDATE ppa_compromisos_energia SET cantidad_proyectos = 0 WHERE cantidad_proyectos IS NULL",
+    # arr_documento: metadata de cuenta de cobro (matching por predio)
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS codigo_predio VARCHAR(120)",
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS numero_cuenta_cobro VARCHAR(60)",
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS nombre_arrendatario VARCHAR(255)",
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS valor_individual NUMERIC(15,2)",
 ]
 
 

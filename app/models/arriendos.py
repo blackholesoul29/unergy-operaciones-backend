@@ -50,6 +50,11 @@ class ArrDocumento(Base):
     ruta_local:        Mapped[str]        = mapped_column(String(1000), nullable=False)
     nombre_secundario: Mapped[str | None] = mapped_column(String(500), nullable=True)   # enviada PDF
     ruta_secundario:   Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Datos extraídos de la cuenta de cobro (matching por predio)
+    codigo_predio:        Mapped[str | None]   = mapped_column(String(120), nullable=True)   # ej. COLCEST45P8
+    numero_cuenta_cobro:  Mapped[str | None]   = mapped_column(String(60),  nullable=True)   # ej. UNERGY-309-84
+    nombre_arrendatario:  Mapped[str | None]   = mapped_column(String(255), nullable=True)
+    valor_individual:     Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
     fecha_subida:      Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

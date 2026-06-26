@@ -1,5 +1,6 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
+import json
 from pathlib import Path as _Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -153,15 +154,19 @@ def listar_documentos_periodo(
     )
     return [
         {
-            "id":               d.id,
-            "arr_proyecto_id":  d.arr_proyecto_id,
-            "periodo":          d.periodo,
-            "pago_id":          d.pago_id,
-            "codigo_contrato":  d.codigo_contrato,
-            "tipo_documento":   d.tipo_documento,
-            "nombre_archivo":   d.nombre_archivo,
-            "nombre_secundario":d.nombre_secundario,
-            "fecha_subida":     d.fecha_subida,
+            "id":                 d.id,
+            "arr_proyecto_id":    d.arr_proyecto_id,
+            "periodo":            d.periodo,
+            "pago_id":            d.pago_id,
+            "codigo_contrato":    d.codigo_contrato,
+            "tipo_documento":     d.tipo_documento,
+            "nombre_archivo":     d.nombre_archivo,
+            "nombre_secundario":  d.nombre_secundario,
+            "codigo_predio":       d.codigo_predio,
+            "numero_cuenta_cobro": d.numero_cuenta_cobro,
+            "nombre_arrendatario": d.nombre_arrendatario,
+            "valor_individual":    float(d.valor_individual) if d.valor_individual is not None else None,
+            "fecha_subida":       d.fecha_subida,
         }
         for d in docs
     ]
@@ -233,6 +238,89 @@ async def upload_documento(
     db.commit()
     db.refresh(doc)
     return {"ok": True, "id": doc.id, "nombre_archivo": doc.nombre_archivo}
+
+
+@router.post("/documentos/upload-cuenta-cobro")
+async def upload_cuenta_cobro(
+    periodo:             str = Form(...),
+    pago_id:             int = Form(...),
+    codigo_contrato:     str = Form(...),
+    tipo_documento:      str = Form(...),
+    nombre_resultante:   str = Form(...),
+    predios:             str = Form(...),   # JSON: [{arr_proyecto_id, codigo_predio, valor_individual}]
+    numero_cuenta_cobro: str | None = Form(None),
+    nombre_arrendatario: str | None = Form(None),
+    file:                UploadFile = File(...),
+    file_secundario:     UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Sube UN documento (cuenta de cobro) y lo asocia a MÚLTIPLES predios.
+
+    El archivo se guarda una sola vez; se crea/actualiza una fila ArrDocumento por
+    cada predio recibido (cada predio = una fila distinta en la tabla de Arriendos).
+    """
+    _validar_periodo(periodo)
+
+    try:
+        lista_predios = json.loads(predios)
+        assert isinstance(lista_predios, list) and lista_predios
+    except Exception:
+        raise HTTPException(400, "predios debe ser un JSON array no vacío")
+
+    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio.mkdir(parents=True, exist_ok=True)
+
+    # Guardar archivo principal una sola vez
+    nombre_archivo = nombre_resultante
+    ruta_principal = directorio / nombre_archivo
+    ruta_principal.write_bytes(await file.read())
+
+    # Guardar secundario (enviada) si existe
+    nombre_sec = None
+    ruta_sec   = None
+    if file_secundario and file_secundario.filename:
+        ext_sec    = _Path(file_secundario.filename).suffix or ".pdf"
+        nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
+        ruta_obj   = directorio / nombre_sec
+        ruta_obj.write_bytes(await file_secundario.read())
+        ruta_sec   = str(ruta_obj)
+
+    creados = 0
+    for p in lista_predios:
+        try:
+            arr_proyecto_id = int(p["arr_proyecto_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        codigo_predio = p.get("codigo_predio")
+        valor         = p.get("valor_individual")
+
+        doc = db.query(ArrDocumento).filter(
+            ArrDocumento.arr_proyecto_id == arr_proyecto_id,
+            ArrDocumento.periodo         == periodo,
+            ArrDocumento.pago_id         == pago_id,
+        ).first()
+
+        if not doc:
+            doc = ArrDocumento(
+                arr_proyecto_id=arr_proyecto_id, periodo=periodo, pago_id=pago_id,
+            )
+            db.add(doc)
+
+        doc.codigo_contrato     = codigo_contrato
+        doc.tipo_documento      = tipo_documento
+        doc.nombre_archivo      = nombre_archivo
+        doc.ruta_local          = str(ruta_principal)
+        doc.nombre_secundario   = nombre_sec
+        doc.ruta_secundario     = ruta_sec
+        doc.codigo_predio       = codigo_predio
+        doc.numero_cuenta_cobro = numero_cuenta_cobro
+        doc.nombre_arrendatario = nombre_arrendatario
+        doc.valor_individual    = valor
+        creados += 1
+
+    db.commit()
+    return {"ok": True, "predios_asociados": creados, "nombre_archivo": nombre_archivo}
 
 
 @router.get("/documentos/file/{doc_id}", response_class=FileResponse)

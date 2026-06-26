@@ -5,14 +5,17 @@ El parser PROPONE la celda de cada concepto del ER; la usuaria CORRIGE la celda
 esa misma celda los próximos meses. Además se guarda un snapshot de las celdas
 del ER recalculado por panel, para poder releer una celda sin re-subir el archivo.
 
-Revision ID: 024
-Revises: 023
+Revision ID: 024b
+Revises: 024
 Create Date: 2026-06-18
+
+Relinealización (nightwatch 2026-06-26): id 024→024b para deshacer la colisión
+con 024_informe_tipo_ranking; encadena detrás de 024 (ranking). Cuerpo intacto.
 """
 from alembic import op
 
-revision = "024"
-down_revision = "023"
+revision = "024b"
+down_revision = "024"
 branch_labels = None
 depends_on = None
 

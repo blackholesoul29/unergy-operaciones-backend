@@ -298,6 +298,7 @@ async def upload_factura_mensual(
     content = await file.read()
     file_path.write_bytes(content)
 
+    # Guardar/actualizar registro de factura consolidada
     factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
     if factura:
         factura.nombre_archivo = file.filename
@@ -310,7 +311,7 @@ async def upload_factura_mensual(
             ruta_local=str(file_path),
         )
         db.add(factura)
-    db.commit()
+    db.flush()  # persiste en transacción sin commit aún
 
     # ── División por proyecto ────────────────────────────────────────────────
     contratos = (
@@ -330,7 +331,21 @@ async def upload_factura_mensual(
     ]
 
     directorio_docs = _UPLOADS_DIR / "documentos" / periodo
-    splitting_result = dividir_pdf(file_path, periodo, contratos_lista, directorio_docs)
+    try:
+        splitting_result = dividir_pdf(file_path, periodo, contratos_lista, directorio_docs)
+    except Exception as exc:
+        db.commit()  # guardar la factura aunque el split falle
+        return {
+            "ok": True,
+            "nombre_archivo": file.filename,
+            "periodo": periodo,
+            "splitting_result": {
+                "procesados": 0,
+                "sin_match": [],
+                "detalle": [],
+                "error": str(exc),
+            },
+        }
 
     for item in splitting_result["procesados"]:
         doc = db.query(OMDocumentoProyecto).filter(
@@ -348,7 +363,7 @@ async def upload_factura_mensual(
                 ruta_local=item["ruta_local"],
             )
             db.add(doc)
-    db.commit()
+    db.commit()  # commit único para factura + documentos
 
     return {
         "ok": True,
@@ -386,7 +401,7 @@ def set_enlace_factura(
     return {"ok": True}
 
 
-@router.get("/documento/{periodo}/{contrato_id}")
+@router.get("/documento/{periodo}/{contrato_id}", response_class=FileResponse)
 def download_documento_proyecto(
     periodo: str,
     contrato_id: int,

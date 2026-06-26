@@ -19,6 +19,7 @@ from app.schemas.fallas import (
     FallaSeguimientoCreate, FallaSeguimientoOut,
     FallaCatalogos, FallaCatEstadoOut, FallaCatPrioridadOut, FallaCatTipoOut, FallaCatResolucionOut,
     FallaSLADashboard, FallaImpacto,
+    OrigenFalla, TipoAlertaMGS,
 )
 from app.schemas.common import PaginatedResponse
 
@@ -510,19 +511,28 @@ def _enviar_notificacion(
     return resultado
 
 
-@router.post("", response_model=FallaOut, status_code=201)
-def create_falla(
-    data: FallaCreate,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
-):
-    dump = data.model_dump()
+def _create_falla_internal(
+    db: Session, falla_data: FallaCreate, registrado_por_id: int,
+) -> Falla:
+    """Crea y persiste una falla a partir de un ``FallaCreate``.
+
+    Núcleo reutilizable de la creación de fallas (genera ``codigo_interno``,
+    normaliza fotos e intervalos y hace commit). Lo usan tanto el endpoint
+    público ``create_falla`` como el detector de eventos críticos MGS, para que
+    todas las fallas se construyan de forma consistente. Devuelve la falla con
+    su ``id`` asignado; NO envía notificaciones (eso lo decide cada llamador)."""
+    dump = falla_data.model_dump()
+    # Pydantic devuelve los enums como instancias; persistimos su valor str.
+    origen = dump.pop("origen", OrigenFalla.MANUAL)
+    dump["origen"] = origen.value if isinstance(origen, OrigenFalla) else (origen or "MANUAL")
+    tipo_mgs = dump.pop("tipo_alerta_mgs", None)
+    dump["tipo_alerta_mgs"] = tipo_mgs.value if isinstance(tipo_mgs, TipoAlertaMGS) else tipo_mgs
     fotos = dump.pop("fotos_urls", None)
     intervalos = dump.pop("intervalos", None)
     falla = Falla(
         **dump,
         codigo_interno=f"TMP-{uuid.uuid4().hex[:12]}",
-        registrado_por_id=current_user.id,
+        registrado_por_id=registrado_por_id,
         fotos_urls=fotos if fotos else None,
     )
     db.add(falla)
@@ -530,6 +540,16 @@ def create_falla(
     falla.codigo_interno = f"FAL-{datetime.now(timezone.utc).year}-{falla.id:05d}"
     _sync_intervalos(falla, intervalos, db)
     db.commit()
+    return falla
+
+
+@router.post("", response_model=FallaOut, status_code=201)
+def create_falla(
+    data: FallaCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    falla = _create_falla_internal(db, data, current_user.id)
 
     # Notificar a todos los coordinadores
     from app.api.v1.notificaciones import crear_notificacion

@@ -17,6 +17,9 @@ depends_on = None
 
 def upgrade() -> None:
     # Idempotente: create_all (init_db) puede haber agregado ya estas columnas.
+    # NOTA: el guard sólo compara por NOMBRE, no por tipo/longitud. Es seguro
+    # porque el único productor del esquema pre-existente es create_all sobre los
+    # mismos modelos; no es un guard genérico de drift de esquema.
     table = "om_documento_proyecto"
     insp = sa.inspect(op.get_bind())
     existing = {c["name"] for c in insp.get_columns(table)}

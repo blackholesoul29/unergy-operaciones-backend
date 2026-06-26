@@ -26,6 +26,7 @@ from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
 from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
+from app.models.generacion_xm import XMGeneracionHistorico
 from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
@@ -57,6 +58,7 @@ __all__ = [
     "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Documento", "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
+    "XMGeneracionHistorico",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",

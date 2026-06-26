@@ -7,6 +7,33 @@ on:
     branches: [master]
 
 jobs:
+  # Guard dedicado de integridad de la cadena Alembic. Corre AISLADO del resto
+  # de la suite y SIN dependencias de la app (solo pytest) para que sea una
+  # señal inequívoca e imposible de enmascarar: la cadena de migraciones se
+  # bifurcaba una y otra vez (ids duplicados / múltiples heads) porque ramas de
+  # feature se forkeaban de un master pre-relinealización, y el deploy saltaba
+  # TODAS las migraciones en silencio. Embebido en `pytest -q` el guard quedaba
+  # ahogado por fallos no relacionados (p.ej. una dep faltante rompía la
+  # colección y el rojo se atribuía a otra cosa). Aislado no puede ahogarse.
+  alembic-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # SOLO pytest a propósito: sin requirements.txt no hay dep de la app que
+      # pueda romper la colección y enmascarar este guard. Las pruebas estáticas
+      # parsean los archivos de migración (stdlib puro); la prueba LIVE de
+      # Alembic se auto-salta al no estar instalado (la cubre el job `pytest`).
+      - name: Install pytest only (no app deps)
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Alembic migration chain integrity (single head, unique ids)
+        run: pytest -q tests/test_alembic_chain_integrity.py
+
   pytest:
     runs-on: ubuntu-latest
     steps:

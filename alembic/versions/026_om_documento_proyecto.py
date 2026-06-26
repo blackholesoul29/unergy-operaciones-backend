@@ -1,14 +1,14 @@
 """add om_documento_proyecto table
 
 Revision ID: 026
-Revises: 5650ccf73b5c
+Revises: 025
 Create Date: 2026-06-26
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "026"
-down_revision = "5650ccf73b5c"
+down_revision = "025"
 branch_labels = None
 depends_on = None
 

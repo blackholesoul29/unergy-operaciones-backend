@@ -43,6 +43,10 @@ from app.models.mandatos import (
 )
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+from app.models.mem import (
+    MEMDatosASIC, MEMPrecioBolsa, MEMGesconEstado, LiquidacionPreliminar,
+    EstadoLiquidacionPreliminarEnum,
+)
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -72,4 +76,6 @@ __all__ = [
     "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
+    "MEMDatosASIC", "MEMPrecioBolsa", "MEMGesconEstado", "LiquidacionPreliminar",
+    "EstadoLiquidacionPreliminarEnum",
 ]

@@ -29,7 +29,10 @@ from app.models.liquidaciones import (
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_table
 from app.models.clientes import Cliente
+from app.models.mem import LiquidacionPreliminar
+from app.services.settlement_automation_service import SettlementAutomationService
 from app.schemas.common import PaginatedResponse
+from app.schemas.mem import PreSettlementSummary, LiquidacionPreliminarOut
 
 router = APIRouter(prefix="/liquidaciones", tags=["Liquidaciones"])
 
@@ -1227,3 +1230,118 @@ async def cargar_excel(
             pass
 
     return resultado
+
+
+# ── Pre-liquidaciones automáticas (módulo MEM) ──────────────────────────────────
+
+class GeneratePreliminaresRequest(BaseModel):
+    year: int
+    month: int
+
+
+@router.post("/generate-preliminares", response_model=PreSettlementSummary)
+def generate_preliminares(
+    body: GeneratePreliminaresRequest,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(_require_liquidaciones_write),
+):
+    """Genera pre-liquidaciones a partir de los datos del MEM para un período."""
+    if not (1 <= body.month <= 12):
+        raise HTTPException(422, "month debe estar entre 1 y 12")
+    return SettlementAutomationService(db).generate_pre_settlements_for_period(body.year, body.month)
+
+
+@router.get("/preliminares", response_model=PaginatedResponse[LiquidacionPreliminarOut])
+def list_preliminares(
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=500),
+    proyecto_id: int | None = None,
+    estado: str | None = None,
+    periodo: date | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    q = db.query(LiquidacionPreliminar)
+    if proyecto_id:
+        q = q.filter(LiquidacionPreliminar.proyecto_id == proyecto_id)
+    if estado:
+        q = q.filter(LiquidacionPreliminar.estado == estado)
+    if periodo:
+        q = q.filter(LiquidacionPreliminar.periodo == periodo)
+    total = q.count()
+    items = (
+        q.order_by(LiquidacionPreliminar.periodo.desc(), LiquidacionPreliminar.proyecto_id)
+        .offset((page - 1) * size).limit(size).all()
+    )
+    return {"items": items, "total": total, "page": page, "size": size, "pages": (total + size - 1) // size}
+
+
+@router.post("/preliminares/{preliminar_id}/approve")
+def approve_preliminar(
+    preliminar_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(_require_liquidaciones_write),
+):
+    """
+    Aprueba una pre-liquidación: crea la `Liquidacion` final (si no existe) y la
+    vincula. Es idempotente — reaprobar devuelve la liquidación ya creada.
+    """
+    prelim = db.query(LiquidacionPreliminar).filter(LiquidacionPreliminar.id == preliminar_id).first()
+    if not prelim:
+        raise HTTPException(404, "Pre-liquidación no encontrada")
+    if prelim.estado == "rechazada":
+        raise HTTPException(409, "La pre-liquidación está rechazada")
+
+    if prelim.liquidacion_id:
+        liq = db.query(Liquidacion).filter(Liquidacion.id == prelim.liquidacion_id).first()
+        if liq:
+            prelim.estado = "aprobada"
+            db.commit()
+            return {"preliminar_id": prelim.id, "liquidacion_id": liq.id, "msg": "Ya estaba vinculada"}
+
+    # Reutiliza una liquidación existente del mismo proyecto/período si la hay.
+    liq = (
+        db.query(Liquidacion)
+        .filter(Liquidacion.proyecto_id == prelim.proyecto_id, Liquidacion.periodo == prelim.periodo,
+                Liquidacion.deleted_at.is_(None))
+        .first()
+    )
+    if liq is None:
+        liq = Liquidacion(
+            proyecto_id=prelim.proyecto_id,
+            generado_por_id=usuario.id,
+            periodo=prelim.periodo,
+            tipo_venta="bolsa",
+            estado="iniciada",
+            observaciones_resultados="Generada automáticamente desde pre-liquidación MEM",
+        )
+        db.add(liq)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Conflicto creando la liquidación final")
+
+    prelim.estado = "aprobada"
+    prelim.liquidacion_id = liq.id
+    prelim.invoice_generated = True
+    db.commit()
+    db.refresh(liq)
+    return {"preliminar_id": prelim.id, "liquidacion_id": liq.id, "msg": "Pre-liquidación aprobada"}
+
+
+@router.post("/preliminares/{preliminar_id}/reject")
+def reject_preliminar(
+    preliminar_id: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(_require_liquidaciones_write),
+):
+    """Rechaza una pre-liquidación."""
+    prelim = db.query(LiquidacionPreliminar).filter(LiquidacionPreliminar.id == preliminar_id).first()
+    if not prelim:
+        raise HTTPException(404, "Pre-liquidación no encontrada")
+    if prelim.liquidacion_id:
+        raise HTTPException(409, "No se puede rechazar: ya tiene liquidación vinculada")
+    prelim.estado = "rechazada"
+    db.commit()
+    return {"preliminar_id": prelim.id, "msg": "Pre-liquidación rechazada"}

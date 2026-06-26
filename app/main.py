@@ -958,6 +958,9 @@ _PENDING_DDLS = [
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS numero_cuenta_cobro VARCHAR(60)",
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS nombre_arrendatario VARCHAR(255)",
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS valor_individual NUMERIC(15,2)",
+    # arr_documento: una copia por predio (predios sin match se guardan igual) + original
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS ruta_original VARCHAR(1000)",
+    "ALTER TABLE arr_documento ALTER COLUMN arr_proyecto_id DROP NOT NULL",
 ]
 
 

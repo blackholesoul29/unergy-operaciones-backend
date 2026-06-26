@@ -246,8 +246,7 @@ async def upload_cuenta_cobro(
     pago_id:             int = Form(...),
     codigo_contrato:     str = Form(...),
     tipo_documento:      str = Form(...),
-    nombre_resultante:   str = Form(...),
-    predios:             str = Form(...),   # JSON: [{arr_proyecto_id, codigo_predio, valor_individual}]
+    predios:             str = Form(...),   # JSON: [{arr_proyecto_id|null, codigo_predio, valor_individual, nombre_resultante}]
     numero_cuenta_cobro: str | None = Form(None),
     nombre_arrendatario: str | None = Form(None),
     file:                UploadFile = File(...),
@@ -255,10 +254,12 @@ async def upload_cuenta_cobro(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Sube UN documento (cuenta de cobro) y lo asocia a MÚLTIPLES predios.
+    """Sube UN documento (cuenta de cobro/factura) y genera UNA COPIA RENOMBRADA por predio.
 
-    El archivo se guarda una sola vez; se crea/actualiza una fila ArrDocumento por
-    cada predio recibido (cada predio = una fila distinta en la tabla de Arriendos).
+    Por cada predio recibido se escribe una copia del archivo con su nombre_resultante
+    propio ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) y se crea/actualiza una
+    fila ArrDocumento. Los predios sin match (arr_proyecto_id null) también se guardan
+    para revisión manual. El archivo original se conserva una sola vez como referencia.
     """
     _validar_periodo(periodo)
 
@@ -271,56 +272,75 @@ async def upload_cuenta_cobro(
     directorio = _UPLOADS_DIR / periodo / codigo_contrato
     directorio.mkdir(parents=True, exist_ok=True)
 
-    # Guardar archivo principal una sola vez
-    nombre_archivo = nombre_resultante
-    ruta_principal = directorio / nombre_archivo
-    ruta_principal.write_bytes(await file.read())
+    # Leer el archivo principal una sola vez (se copia por cada predio)
+    contenido = await file.read()
 
-    # Guardar secundario (enviada) si existe
+    # Conservar el original sin renombrar (una sola copia de referencia)
+    ext_orig      = _Path(file.filename or "documento.pdf").suffix or ".pdf"
+    nombre_orig   = f"_original_pago{pago_id}{ext_orig}"
+    ruta_original = directorio / nombre_orig
+    ruta_original.write_bytes(contenido)
+
+    # Guardar secundario (enviada) una sola vez
     nombre_sec = None
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
         ext_sec    = _Path(file_secundario.filename).suffix or ".pdf"
-        nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
+        nombre_sec = f"_enviada_pago{pago_id}{ext_sec}"
         ruta_obj   = directorio / nombre_sec
         ruta_obj.write_bytes(await file_secundario.read())
         ruta_sec   = str(ruta_obj)
 
-    creados = 0
+    def _sanit(nombre: str) -> str:
+        limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
+        return limpio or f"documento_pago{pago_id}.pdf"
+
+    asociados = 0
+    sin_match = 0
     for p in lista_predios:
-        try:
-            arr_proyecto_id = int(p["arr_proyecto_id"])
-        except (KeyError, TypeError, ValueError):
-            continue
         codigo_predio = p.get("codigo_predio")
         valor         = p.get("valor_individual")
+        nombre_arch   = _sanit(str(p.get("nombre_resultante") or f"{codigo_predio or 'predio'}.pdf"))
+        try:
+            arr_proyecto_id = int(p["arr_proyecto_id"]) if p.get("arr_proyecto_id") is not None else None
+        except (TypeError, ValueError):
+            arr_proyecto_id = None
 
-        doc = db.query(ArrDocumento).filter(
-            ArrDocumento.arr_proyecto_id == arr_proyecto_id,
-            ArrDocumento.periodo         == periodo,
-            ArrDocumento.pago_id         == pago_id,
-        ).first()
+        # Escribir la copia renombrada de este predio
+        ruta_copia = directorio / nombre_arch
+        ruta_copia.write_bytes(contenido)
 
+        # Predios con match: upsert por (proyecto, período, pago). Sin match: siempre insert.
+        doc = None
+        if arr_proyecto_id is not None:
+            doc = db.query(ArrDocumento).filter(
+                ArrDocumento.arr_proyecto_id == arr_proyecto_id,
+                ArrDocumento.periodo         == periodo,
+                ArrDocumento.pago_id         == pago_id,
+            ).first()
         if not doc:
-            doc = ArrDocumento(
-                arr_proyecto_id=arr_proyecto_id, periodo=periodo, pago_id=pago_id,
-            )
+            doc = ArrDocumento(arr_proyecto_id=arr_proyecto_id, periodo=periodo, pago_id=pago_id)
             db.add(doc)
 
         doc.codigo_contrato     = codigo_contrato
         doc.tipo_documento      = tipo_documento
-        doc.nombre_archivo      = nombre_archivo
-        doc.ruta_local          = str(ruta_principal)
+        doc.nombre_archivo      = nombre_arch
+        doc.ruta_local          = str(ruta_copia)
+        doc.ruta_original       = str(ruta_original)
         doc.nombre_secundario   = nombre_sec
         doc.ruta_secundario     = ruta_sec
         doc.codigo_predio       = codigo_predio
         doc.numero_cuenta_cobro = numero_cuenta_cobro
         doc.nombre_arrendatario = nombre_arrendatario
         doc.valor_individual    = valor
-        creados += 1
+        if arr_proyecto_id is not None:
+            asociados += 1
+        else:
+            sin_match += 1
 
     db.commit()
-    return {"ok": True, "predios_asociados": creados, "nombre_archivo": nombre_archivo}
+    return {"ok": True, "predios_asociados": asociados, "predios_sin_match": sin_match,
+            "copias_generadas": asociados + sin_match}
 
 
 @router.get("/documentos/file/{doc_id}", response_class=FileResponse)

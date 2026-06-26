@@ -41,13 +41,15 @@ class ArrDocumento(Base):
     )
 
     id:                Mapped[int]        = mapped_column(BigInteger, primary_key=True)
-    arr_proyecto_id:   Mapped[int]        = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=False, index=True)
+    # nullable: los predios SIN match en BD se guardan igual (para revisión manual)
+    arr_proyecto_id:   Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
     periodo:           Mapped[str]        = mapped_column(String(7), nullable=False, index=True)
     pago_id:           Mapped[int]        = mapped_column(Integer, nullable=False)
     codigo_contrato:   Mapped[str]        = mapped_column(String(120), nullable=False)
     tipo_documento:    Mapped[str]        = mapped_column(String(30), nullable=False)   # cuenta_cobro | factura_electronica
-    nombre_archivo:    Mapped[str]        = mapped_column(String(500), nullable=False)
-    ruta_local:        Mapped[str]        = mapped_column(String(1000), nullable=False)
+    nombre_archivo:    Mapped[str]        = mapped_column(String(500), nullable=False)   # copia renombrada por predio
+    ruta_local:        Mapped[str]        = mapped_column(String(1000), nullable=False)  # copia renombrada
+    ruta_original:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # archivo original sin renombrar
     nombre_secundario: Mapped[str | None] = mapped_column(String(500), nullable=True)   # enviada PDF
     ruta_secundario:   Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Datos extraídos de la cuenta de cobro (matching por predio)

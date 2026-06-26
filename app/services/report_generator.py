@@ -246,13 +246,22 @@ def build_project_report(report_type: str, agg: ProjectAggregate,
         })
 
     pdisp = periodo_display(agg.period_start, agg.period_end)
+    # Avisos al analista. Si falta línea base P90 fiable, el índice de desempeño
+    # sale en "—": hay que decirlo explícitamente, porque con datos reales
+    # completos (gap=0) el informe se vería "completo" pese al KPI central vacío.
+    avisos = []
+    if gap > 0:
+        avisos.append(f"Faltan {gap:.1f}% de los días de generación; "
+                      "los indicadores pueden no ser representativos.")
+    if agg.expected_kwh is None:
+        avisos.append("Sin línea base P90 para el período; el índice de "
+                      "desempeño no se puede calcular.")
     html = render_report(report_type, {
         "titulo": agg.proyecto_nombre,
         "periodo_display": pdisp,
         "kpis": kpis,
         "secciones": secciones,
-        "alerta": (f"Faltan {gap:.1f}% de los días de generación; "
-                   "los indicadores pueden no ser representativos.") if gap > 0 else None,
+        "alerta": " ".join(avisos) if avisos else None,
     })
 
     labels = [d.fecha for d in agg.daily]

@@ -355,3 +355,6 @@ def test_partial_daily_p90_without_monthly_yields_no_expected():
     kpis = {k["label"]: k["value"] for k in out["kpis"]}
     assert kpis["Esperado (P90)"] == "—", kpis["Esperado (P90)"]
     assert kpis["Índice desempeño"] == "—", kpis["Índice desempeño"]
+    # Datos reales completos (gap=0) → el informe se vería "completo"; debe avisar
+    # explícitamente que falta la línea base P90 para que el "—" no parezca un bug.
+    assert "línea base P90" in out["html_content"]

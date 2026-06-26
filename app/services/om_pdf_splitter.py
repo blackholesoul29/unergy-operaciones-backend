@@ -14,11 +14,49 @@ _MESES = (
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 )
 _MESES_PAT = "|".join(_MESES)
-_DESC_RE = re.compile(
-    rf"Mantenimiento\s+\w+\s*-\s*(.+?)\s*-\s*(?:{_MESES_PAT})",
-    re.IGNORECASE | re.DOTALL,
+
+# Líneas de encabezado/footer que deben ignorarse para el matching
+_LINEAS_RUIDO = re.compile(
+    r"SOLENIUM|NIT\s*:|Resoluci[oó]n\s+DIAN|facturaci[oó]n\s+electr[oó]nica"
+    r"|Tel[eé]fono\s*:|solenium\.com|@\w+\.\w+|p[aá]gina\s+\d",
+    re.IGNORECASE,
 )
-_UMBRAL = 0.85
+
+# Estrategias de extracción, en orden de preferencia
+# Patrones aplicados sobre texto con saltos de línea preservados (capturan hasta \n)
+_ESTRATEGIAS_MULTILINEA: list[tuple[str, re.Pattern]] = [
+    # 1. Etiqueta explícita "Nombre del Proyecto: ..."
+    ("etiqueta_nombre", re.compile(
+        r"Nombre\s+del\s+Proyecto\s*[:\-]\s*(.+?)(?:\r?\n|$)",
+        re.IGNORECASE,
+    )),
+    # 2. "Proyecto: ..." (variante corta)
+    ("etiqueta_proyecto", re.compile(
+        r"(?<!\w)Proyecto\s*[:\-]\s*(.+?)(?:\r?\n|$)",
+        re.IGNORECASE,
+    )),
+]
+
+# Patrones aplicados sobre texto aplanado (sin saltos de línea)
+_ESTRATEGIAS_FLAT: list[tuple[str, re.Pattern]] = [
+    # 3. Descripción clásica Solenium: "Mantenimiento Preventivo - Nombre - Mes"
+    ("descripcion_mantenimiento", re.compile(
+        rf"Mantenimiento\s+\w+\s*-\s*(.+?)\s*-\s*(?:{_MESES_PAT})",
+        re.IGNORECASE | re.DOTALL,
+    )),
+    # 4. "Mini granja Solar ..." o "Minigranja Solar ..."
+    ("minigranja", re.compile(
+        r"Mini\s*granja\s+Solar\s+([\w][\w\s]+?)(?:\s*[-,\d]|$)",
+        re.IGNORECASE,
+    )),
+    # 5. "SOFV... Nombre" — código de factura seguido del nombre
+    ("sofv", re.compile(
+        r"SOFV\s*\d+\s+([\w][\w\s]+?)(?:\s*[-,]|$)",
+        re.IGNORECASE,
+    )),
+]
+
+_UMBRAL = 0.80  # reducido de 0.85 para tolerar variaciones de formato
 
 
 def _normalizar(texto: str) -> str:
@@ -26,22 +64,48 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def extraer_nombre_pagina(texto_pagina: str) -> str | None:
-    """Extrae el nombre del proyecto del texto de una página de factura Solenium."""
-    texto = re.sub(r"\s+", " ", texto_pagina)
-    m = _DESC_RE.search(texto)
-    if not m:
-        return None
-    return m.group(1).strip()
+def _filtrar_ruido(texto: str) -> str:
+    """Elimina líneas de encabezado/footer para quedarse solo con el cuerpo."""
+    lineas = texto.splitlines()
+    return "\n".join(l for l in lineas if not _LINEAS_RUIDO.search(l))
 
 
-def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> int | None:
+def extraer_nombre_pagina(texto_pagina: str) -> tuple[str | None, str | None]:
     """
-    Devuelve el contrato_id del contrato con mayor similitud al nombre extraído.
-    Retorna None si ninguno supera el umbral de 0.85.
+    Extrae el nombre del proyecto del texto de una página de factura Solenium.
+
+    Retorna: (nombre_extraido, estrategia_usada)
+    Si no encuentra nada: (None, None)
+    """
+    texto_limpio = _filtrar_ruido(texto_pagina)
+
+    # Primero: patrones sobre texto con saltos de línea (etiquetas "Nombre del Proyecto:")
+    for estrategia, patron in _ESTRATEGIAS_MULTILINEA:
+        m = patron.search(texto_limpio)
+        if m:
+            nombre = m.group(1).strip()
+            if len(nombre) >= 4 and not re.fullmatch(r"[\d\W]+", nombre):
+                return nombre, estrategia
+
+    # Segundo: patrones sobre texto aplanado (descripciones de línea larga)
+    texto_flat = re.sub(r"\s+", " ", texto_limpio)
+    for estrategia, patron in _ESTRATEGIAS_FLAT:
+        m = patron.search(texto_flat)
+        if m:
+            nombre = m.group(1).strip()
+            if len(nombre) >= 4 and not re.fullmatch(r"[\d\W]+", nombre):
+                return nombre, estrategia
+
+    return None, None
+
+
+def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> tuple[int | None, float]:
+    """
+    Devuelve (contrato_id, ratio) del contrato con mayor similitud.
+    Retorna (None, ratio) si ninguno supera el umbral.
     """
     if not contratos:
-        return None
+        return None, 0.0
     norm = _normalizar(nombre_extraido)
     mejor_ratio = 0.0
     mejor_id = None
@@ -50,7 +114,9 @@ def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> int | None:
         if ratio > mejor_ratio:
             mejor_ratio = ratio
             mejor_id = c["contrato_id"]
-    return mejor_id if mejor_ratio >= _UMBRAL else None
+    if mejor_ratio >= _UMBRAL:
+        return mejor_id, mejor_ratio
+    return None, mejor_ratio
 
 
 def _safe_filename(nombre: str) -> str:
@@ -65,34 +131,42 @@ def dividir_pdf(
 ) -> dict:
     """
     Divide el PDF consolidado en PDFs individuales por proyecto.
-    Si un proyecto tiene varias páginas, se combinan en un solo PDF.
-
-    Args:
-        ruta_pdf: Path al PDF consolidado ya guardado.
-        periodo: Período en formato YYYY-MM.
-        contratos: Lista de dicts con keys 'contrato_id' y 'nombre_proyecto'.
-        directorio_salida: Directorio donde guardar los PDFs individuales.
 
     Returns:
-        {'procesados': [...], 'sin_match': [...]}
+        {
+          'procesados': [{'contrato_id', 'nombre', 'archivo', 'ruta_local'}],
+          'sin_match':  [{'pagina', 'texto_identificado', 'estrategia', 'razon'}],
+        }
     """
     directorio_salida.mkdir(parents=True, exist_ok=True)
     sin_match: list[dict] = []
-    # Acumular índices de página por contrato_id
     paginas_por_contrato: dict[int, list[int]] = {}
 
     reader = PdfReader(str(ruta_pdf))
     with pdfplumber.open(ruta_pdf) as pdf:
         for i, pagina in enumerate(pdf.pages):
             texto = pagina.extract_text() or ""
-            nombre = extraer_nombre_pagina(texto)
+            nombre, estrategia = extraer_nombre_pagina(texto)
+
             if not nombre:
-                sin_match.append({"pagina": i + 1, "texto_extraido": texto[:200]})
+                sin_match.append({
+                    "pagina": i + 1,
+                    "texto_identificado": None,
+                    "estrategia": None,
+                    "razon": "no_se_extrajo_nombre",
+                    "muestra_texto": texto[:300].strip(),
+                })
                 continue
 
-            contrato_id = match_proyecto(nombre, contratos)
+            contrato_id, ratio = match_proyecto(nombre, contratos)
             if contrato_id is None:
-                sin_match.append({"pagina": i + 1, "texto_extraido": nombre})
+                sin_match.append({
+                    "pagina": i + 1,
+                    "texto_identificado": nombre,
+                    "estrategia": estrategia,
+                    "razon": f"sin_match_fuzzy (mejor ratio: {ratio:.2f})",
+                    "muestra_texto": nombre,
+                })
                 continue
 
             paginas_por_contrato.setdefault(contrato_id, []).append(i)

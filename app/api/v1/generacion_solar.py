@@ -8,15 +8,19 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
+from app.models.generacion_xm import XMGeneracionHistorico
 from app.models.proyectos import Proyecto, TipoProyectoEnum
+from app.schemas.generacion import (XMGenerationHistoryItem,
+                                    XMGenerationUploadResponse)
 from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_id, find_gaia_node_pair
 from app.services.mgs.solenium_client import SoleniumClient
+from app.services.xm_ingest_service import XMIngestionService
 
 logger = logging.getLogger("generacion_solar")
 router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar (Solenium)"])
@@ -1337,5 +1341,56 @@ def project_inverters_power(
         "granularidad": "hour" if multiday else "5min",
         "inverters":    inverters,
     }
+
+
+# ── Ingesta histórica de generación XM (SinergoX) desde Excel ───────────────────
+@router.post("/xm-ingest", response_model=XMGenerationUploadResponse)
+async def xm_ingest(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Ingesta un Excel de generación XM (SinergoX) a `xm_generation_history`.
+
+    Detecta columnas de forma flexible (proyecto, medidor, fecha, generación),
+    valida fila por fila y hace upsert idempotente (reprocesar no duplica).
+    Devuelve conteos de cargados/omitidos, errores por fila y una muestra.
+    """
+    if not (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(422, "Se espera un archivo Excel (.xlsx)")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(422, "El archivo está vacío")
+
+    import io
+    try:
+        result = XMIngestionService(db).ingest(io.BytesIO(content), source_file=file.filename)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+    return result
+
+
+@router.get("/xm-history", response_model=list[XMGenerationHistoryItem])
+def xm_history(
+    proyecto_id: int = Query(None, description="Filtrar por proyecto interno"),
+    fecha_inicio: str = Query(None, description="YYYY-MM-DD (inclusive)"),
+    fecha_fin: str = Query(None, description="YYYY-MM-DD (inclusive)"),
+    limit: int = Query(1000, ge=1, le=10000),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Consulta el histórico de generación XM con filtros opcionales."""
+    q = db.query(XMGeneracionHistorico)
+    if proyecto_id is not None:
+        q = q.filter(XMGeneracionHistorico.proyecto_id == proyecto_id)
+    if fecha_inicio:
+        q = q.filter(XMGeneracionHistorico.measurement_date >= fecha_inicio)
+    if fecha_fin:
+        # fin inclusivo: hasta el final del día indicado
+        q = q.filter(XMGeneracionHistorico.measurement_date < f"{fecha_fin} 23:59:59.999999")
+    return (q.order_by(XMGeneracionHistorico.measurement_date.desc())
+             .limit(limit).all())
 
 

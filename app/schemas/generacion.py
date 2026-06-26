@@ -82,3 +82,25 @@ class GeneracionResumenProyecto(BaseModel):
     dias_con_dato: int
     fecha_inicio: Optional[date]
     fecha_fin: Optional[date]
+
+
+# ── Generación XM (SinergoX) — ingesta desde Excel ──────────────────────────────
+class XMGenerationUploadResponse(BaseModel):
+    """Resumen de una ingesta de generación XM desde Excel."""
+    uploaded_count: int
+    skipped_count: int
+    errors: list[str] = []
+    sample_data: list[dict] = []
+    columns_detected: dict[str, str] = {}
+    source_unit: str | None = None  # unidad detectada en el archivo (kwh/mwh/gwh)
+
+
+class XMGenerationHistoryItem(BaseModel):
+    id: int
+    proyecto_id: int
+    meter_id: str
+    measurement_date: datetime
+    generation_mwh: Decimal
+    source_file: Optional[str] = None
+    created_at: datetime
+    model_config = {"from_attributes": True}

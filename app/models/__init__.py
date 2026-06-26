@@ -26,6 +26,7 @@ from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
 from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
+from app.models.generacion_xm import XMGeneracionHistorico
 from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
@@ -41,8 +42,6 @@ from app.models.panel_contable import (
 from app.models.mandatos import (
     Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
 )
-from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
-from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -59,6 +58,7 @@ __all__ = [
     "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Documento", "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
+    "XMGeneracionHistorico",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",
@@ -70,6 +70,4 @@ __all__ = [
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
     "AliasFuenteIngreso",
     "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
-    "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
-    "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
 ]

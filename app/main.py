@@ -2454,6 +2454,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Visibilidad operativa: un preflight CORS rechazado es invisible en el navegador
+# (la petición simplemente falla, sin error de servidor). Registrar en el log de
+# arranque qué orígenes/regex quedaron activos permite diagnosticar desde los
+# logs de Railway por qué un frontend nuevo no logra conectarse.
+print(
+    f"[startup cors] allow_origins={_ALLOWED_ORIGINS} "
+    f"allow_origin_regex={settings.CORS_ALLOWED_ORIGIN_REGEX!r}"
+)
 
 app.include_router(api_router)
 

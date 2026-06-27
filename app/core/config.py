@@ -1,5 +1,35 @@
+import ipaddress
+from urllib.parse import urlparse
+
 from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Rango CGNAT (100.64.0.0/10) usado por Tailscale: tráfico cifrado por WireGuard
+# sobre la VPN privada, no expuesto a Internet → http es aceptable.
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_internal_host(host: str) -> bool:
+    """True si el host es loopback, red privada (RFC1918), link-local o Tailscale.
+
+    El tráfico a estos destinos no transita la Internet pública (Tailscale lo
+    cifra con WireGuard), así que http:// es seguro y no debe abortar el arranque.
+    Un hostname público (p. ej. api.unergy.io) NO es interno → exige https.
+    """
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False  # hostname público
+    return (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip in _TAILSCALE_CGNAT
+    )
 
 
 class Settings(BaseSettings):
@@ -98,13 +128,23 @@ class Settings(BaseSettings):
     @classmethod
     def external_url_must_be_https(cls, v: str, info: ValidationInfo) -> str:
         # Las URLs de servicios externos críticos (Unergy, SunFactory, Solenium,
-        # Quoia, Gaia, EVO) deben usar HTTPS. Una cadena vacía indica un servicio
-        # no configurado y se permite; cualquier valor presente debe ser https://.
-        if v and not str(v).startswith("https://"):
-            raise ValueError(
-                f"URL for {info.field_name} must use HTTPS for security"
-            )
-        return v
+        # Quoia, Gaia, EVO) deben usar HTTPS en Internet pública. Una cadena vacía
+        # indica un servicio no configurado y se permite.
+        #
+        # Excepción: http:// a hosts internos (loopback, red privada o Tailscale)
+        # es aceptable — ese tráfico no transita la Internet pública. P. ej. el
+        # EVO se alcanza vía Tailscale (http://100.x.x.x), cifrado por WireGuard.
+        if not v:
+            return v
+        scheme = urlparse(v).scheme.lower()
+        if scheme == "https":
+            return v
+        if scheme == "http" and _is_internal_host(urlparse(v).hostname or ""):
+            return v
+        raise ValueError(
+            f"URL for {info.field_name} must use HTTPS for security "
+            f"(http only allowed for internal/private/Tailscale hosts)"
+        )
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

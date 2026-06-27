@@ -28,9 +28,10 @@ def test_http_url_is_rejected(field):
     # Una URL http:// en cualquier campo crítico debe abortar el arranque.
     with pytest.raises(ValidationError) as exc:
         Settings(**{field: "http://api.unergy.io"})
-    # El mensaje nombra el campo ofensor para un diagnóstico accionable.
+    # El mensaje (en español) nombra el campo ofensor para un diagnóstico accionable.
     assert field in str(exc.value)
     assert "HTTPS" in str(exc.value)
+    assert "interno" in str(exc.value).lower()
 
 
 @pytest.mark.parametrize("field", PROTECTED_FIELDS)
@@ -70,6 +71,10 @@ def test_https_scheme_is_case_insensitive():
         "http://10.0.0.5:9000",         # RFC1918
         "http://192.168.1.50",          # RFC1918
         "http://172.16.4.4:8080",       # RFC1918
+        "http://evo:18800",             # etiqueta única (servicio docker/k8s)
+        "http://evo.internal:18800",    # sufijo DNS interno
+        "http://evo.local",             # mDNS
+        "http://evo-x2.tail1234.ts.net",  # Tailscale MagicDNS
     ],
 )
 def test_http_internal_host_is_allowed(url):

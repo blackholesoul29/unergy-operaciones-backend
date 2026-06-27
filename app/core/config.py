@@ -9,6 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
+# Sufijos DNS que denotan un host interno (no enrutable en Internet pública):
+# Tailscale MagicDNS (.ts.net), dominios privados convencionales y docker/k8s.
+_INTERNAL_DNS_SUFFIXES = (".ts.net", ".internal", ".local", ".lan")
+
+
 def _is_internal_host(host: str) -> bool:
     """True si el host es loopback, red privada (RFC1918), link-local o Tailscale.
 
@@ -18,12 +23,15 @@ def _is_internal_host(host: str) -> bool:
     """
     if not host:
         return False
-    if host == "localhost":
-        return True
+    host = host.rstrip(".").lower()  # normaliza FQDN con punto final
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return False  # hostname público
+        # No es IP literal → clasifica por nombre. Etiqueta única sin punto
+        # (p. ej. servicio docker `evo`), localhost, o sufijo DNS interno.
+        if host == "localhost" or "." not in host:
+            return True
+        return host.endswith(_INTERNAL_DNS_SUFFIXES)
     return (
         ip.is_loopback
         or ip.is_private
@@ -136,14 +144,15 @@ class Settings(BaseSettings):
         # EVO se alcanza vía Tailscale (http://100.x.x.x), cifrado por WireGuard.
         if not v:
             return v
-        scheme = urlparse(v).scheme.lower()
+        parsed = urlparse(v)
+        scheme = parsed.scheme.lower()
         if scheme == "https":
             return v
-        if scheme == "http" and _is_internal_host(urlparse(v).hostname or ""):
+        if scheme == "http" and _is_internal_host(parsed.hostname or ""):
             return v
         raise ValueError(
-            f"URL for {info.field_name} must use HTTPS for security "
-            f"(http only allowed for internal/private/Tailscale hosts)"
+            f"La URL de {info.field_name} debe usar HTTPS (http solo se permite "
+            f"a hosts internos/privados/Tailscale)"
         )
 
     @field_validator("DATABASE_URL", mode="before")

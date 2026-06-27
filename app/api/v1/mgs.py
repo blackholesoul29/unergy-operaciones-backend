@@ -366,7 +366,7 @@ def check_mgs_critical_events(
                 # silenciar la alerta de forma permanente.
                 _detector.rollback(pid)
                 continue
-            url = f"/app/fallas/{falla.id}"
+            url = f"/fallas/{falla.id}"
             _notify_ops_users(db, r, tipo, url, falla)
             creadas.append(falla.id)
             logger.info("Evento crítico MGS: falla %s creada (proyecto %s, %s)",

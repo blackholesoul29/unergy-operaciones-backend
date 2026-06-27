@@ -224,3 +224,27 @@ def test_check_does_not_rerun_after_success(monkeypatch):
     assert mgs_mod.check_mgs_critical_events(
         db=_StubDB(), readings=[_READING], now=T0 + timedelta(minutes=1)) == []
     assert calls["n"] == 1  # no reintenta una incidencia ya notificada
+
+
+def test_notification_link_uses_frontend_route(monkeypatch):
+    # El enlace de la notificación debe apuntar a la ruta real del frontend
+    # (/fallas/:id), no a un prefijo /app inexistente que daría 404 al operador.
+    mgs_mod = _fresh_detector(monkeypatch)
+    captured = {}
+
+    class _Falla:
+        id = 42
+        codigo_interno = "MGS-0001"
+
+    monkeypatch.setattr(mgs_mod, "_create_falla_for_event",
+                        lambda db, reading, tipo, now: _Falla())
+
+    def _capture_notify(db, reading, tipo, url, falla):
+        captured["url"] = url
+        return 1
+
+    monkeypatch.setattr(mgs_mod, "_notify_ops_users", _capture_notify)
+
+    mgs_mod.check_mgs_critical_events(db=_StubDB(), readings=[_READING], now=T0)
+    assert captured["url"] == "/fallas/42"
+    assert not captured["url"].startswith("/app/")

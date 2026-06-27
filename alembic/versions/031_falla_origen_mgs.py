@@ -4,21 +4,20 @@ Marca el origen de cada falla (MANUAL vs MGS_CRITICA) y el subtipo de alerta del
 monitoreo (CAIDA_PRODUCCION / DESCONEXION_TOTAL) para las fallas generadas
 automáticamente por el detector de eventos críticos del MGS. Idempotente.
 
-NOTA: el esquema de producción se provisiona vía _PENDING_DDLS en app/main.py
-(Alembic está roto: heads múltiples). Esta migración es solo de registro.
+Encadena sobre la cabeza única actual (030); las DDL usan IF NOT EXISTS, de modo
+que es segura aun si el esquema ya fue provisionado en runtime vía _PENDING_DDLS
+en app/main.py (que se conserva como respaldo de arranque). El enlace al proyecto
+afectado (proyecto_id) ya existe en la tabla fallas y la URL de detalle de la
+notificación reutiliza notificaciones.link, por lo que no se agregan más columnas.
 
-El enlace al proyecto afectado (proyecto_id) ya existe en la tabla fallas y la
-URL de detalle de la notificación reutiliza la columna existente
-notificaciones.link, por lo que no se agregan columnas adicionales.
-
-Revision ID: 026
-Revises: 025
-Create Date: 2026-06-25
+Revision ID: 031
+Revises: 030
+Create Date: 2026-06-26
 """
 from alembic import op
 
-revision = "026"
-down_revision = "025"
+revision = "031"
+down_revision = "030"
 branch_labels = None
 depends_on = None
 

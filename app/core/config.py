@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,6 +83,28 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "operaciones@unergy.io"
+
+    @field_validator(
+        "UNERGY_API_URL",
+        "SUNFACTORY_API_URL",
+        "SUNFACTORY_AUTH_URL",
+        "SOLENIUM_AUTH_URL",
+        "SOLENIUM_DATA_URL",
+        "QUOIA_BASE_URL",
+        "GAIA_BASE_URL",
+        "EVO_API_URL",
+        mode="after",
+    )
+    @classmethod
+    def external_url_must_be_https(cls, v: str, info: ValidationInfo) -> str:
+        # Las URLs de servicios externos críticos (Unergy, SunFactory, Solenium,
+        # Quoia, Gaia, EVO) deben usar HTTPS. Una cadena vacía indica un servicio
+        # no configurado y se permite; cualquier valor presente debe ser https://.
+        if v and not str(v).startswith("https://"):
+            raise ValueError(
+                f"URL for {info.field_name} must use HTTPS for security"
+            )
+        return v
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

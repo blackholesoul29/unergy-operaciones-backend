@@ -47,7 +47,8 @@ class ArrDocumento(Base):
     pago_id:           Mapped[int]        = mapped_column(Integer, nullable=False)
     codigo_contrato:   Mapped[str]        = mapped_column(String(120), nullable=False)
     tipo_documento:    Mapped[str]        = mapped_column(String(30), nullable=False)   # cuenta_cobro | factura_electronica
-    nombre_archivo:    Mapped[str]        = mapped_column(String(500), nullable=False)   # copia renombrada por predio
+    nombre_archivo:    Mapped[str]        = mapped_column(String(500), nullable=False)   # copia renombrada por predio (mostrada al usuario)
+    nombre_original:   Mapped[str]        = mapped_column(String(500), nullable=False, server_default="")  # nombre original subido por el usuario
     ruta_local:        Mapped[str]        = mapped_column(String(1000), nullable=False)  # copia renombrada
     ruta_original:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # archivo original sin renombrar
     nombre_secundario: Mapped[str | None] = mapped_column(String(500), nullable=True)   # enviada PDF

@@ -31,6 +31,16 @@ class Settings(BaseSettings):
 
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_PATH: str = "./uploads"
+
+    # Subida segura de archivos (app/utils/file_handling.py)
+    UPLOAD_DIRECTORY: str = "./datos/uploads"
+    MAX_FILE_SIZE_MB: int = 10
+    ALLOWED_MIME_TYPES: list[str] = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]
     S3_BUCKET: str = ""
     S3_ENDPOINT: str = ""
     S3_ACCESS_KEY: str = ""

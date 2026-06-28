@@ -8,10 +8,25 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+from app.utils.file_handling import get_secure_path, validate_and_save_file
 
-_UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "arriendos"
+# Base segura para los archivos de arriendos (configurable vía settings.UPLOAD_DIRECTORY).
+_ARR_BASE = _Path(settings.UPLOAD_DIRECTORY) / "arriendos"
+_MAX_FILE_BYTES = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+def _nombre_seguro(nombre: str | None, fallback: str) -> str:
+    """Reduce ``nombre`` a un nombre de archivo plano (sin componentes de ruta).
+
+    Elimina cualquier separador de directorio y caracteres peligrosos, evitando
+    path traversal a través del nombre que arma el front (p.ej. ``../../x.pdf``).
+    """
+    base = _Path(nombre or "").name  # descarta '../', subdirectorios, etc.
+    limpio = "".join(c for c in base if c not in '/\\:*?"<>|').strip()
+    return limpio or fallback
 from app.schemas.arriendos import (
     ArrIPCOut, ArrIPCUpsert, ArrProyectoIn, ArrProyectoOut,
     ArrCalculoFila, ArrCalculoResponse,
@@ -161,6 +176,7 @@ def listar_documentos_periodo(
             "codigo_contrato":    d.codigo_contrato,
             "tipo_documento":     d.tipo_documento,
             "nombre_archivo":     d.nombre_archivo,
+            "nombre_original":    d.nombre_original,
             "nombre_secundario":  d.nombre_secundario,
             "codigo_predio":       d.codigo_predio,
             "numero_cuenta_cobro": d.numero_cuenta_cobro,
@@ -188,24 +204,25 @@ async def upload_documento(
     """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
     _validar_periodo(periodo)
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
-    directorio.mkdir(parents=True, exist_ok=True)
+    directorio = _ARR_BASE / periodo / codigo_contrato
 
-    # Guardar archivo principal
-    ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
-    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante
+    # Guardar archivo principal con validación de MIME y tamaño (anti path traversal en el nombre).
+    nombre_archivo = _nombre_seguro(nombre_resultante, "documento.pdf")
+    await validate_and_save_file(
+        file, directorio, nombre_archivo, _MAX_FILE_BYTES, settings.ALLOWED_MIME_TYPES
+    )
     ruta_principal = directorio / nombre_archivo
-    ruta_principal.write_bytes(await file.read())
 
     # Guardar archivo secundario si existe
     nombre_sec = None
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
         ext_sec   = _Path(file_secundario.filename).suffix or ".pdf"
-        nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
-        ruta_obj   = directorio / nombre_sec
-        ruta_obj.write_bytes(await file_secundario.read())
-        ruta_sec = str(ruta_obj)
+        nombre_sec = _nombre_seguro(f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}", "enviada.pdf")
+        await validate_and_save_file(
+            file_secundario, directorio, nombre_sec, _MAX_FILE_BYTES, settings.ALLOWED_MIME_TYPES
+        )
+        ruta_sec = str(directorio / nombre_sec)
 
     # Upsert en BD (misma clave: proyecto + período + pago_id)
     doc = db.query(ArrDocumento).filter(
@@ -218,6 +235,7 @@ async def upload_documento(
         doc.codigo_contrato   = codigo_contrato
         doc.tipo_documento    = tipo_documento
         doc.nombre_archivo    = nombre_archivo
+        doc.nombre_original   = file.filename or nombre_archivo
         doc.ruta_local        = str(ruta_principal)
         doc.nombre_secundario = nombre_sec
         doc.ruta_secundario   = ruta_sec
@@ -229,6 +247,7 @@ async def upload_documento(
             codigo_contrato=codigo_contrato,
             tipo_documento=tipo_documento,
             nombre_archivo=nombre_archivo,
+            nombre_original=file.filename or nombre_archivo,
             ruta_local=str(ruta_principal),
             nombre_secundario=nombre_sec,
             ruta_secundario=ruta_sec,
@@ -269,11 +288,18 @@ async def upload_cuenta_cobro(
     except Exception:
         raise HTTPException(400, "predios debe ser un JSON array no vacío")
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _ARR_BASE / periodo / codigo_contrato
     directorio.mkdir(parents=True, exist_ok=True)
 
-    # Leer el archivo principal una sola vez (se copia por cada predio)
+    # Validar tipo MIME antes de leer/escribir nada.
+    if file.content_type not in settings.ALLOWED_MIME_TYPES:
+        raise HTTPException(400, "Invalid file type")
+
+    # Leer el archivo principal una sola vez (se copia por cada predio) y validar tamaño.
     contenido = await file.read()
+    if len(contenido) > _MAX_FILE_BYTES:
+        raise HTTPException(413, "File size exceeds limit")
+    nombre_original = file.filename or "documento.pdf"
 
     # Conservar el original sin renombrar (una sola copia de referencia)
     ext_orig      = _Path(file.filename or "documento.pdf").suffix or ".pdf"
@@ -285,15 +311,19 @@ async def upload_cuenta_cobro(
     nombre_sec = None
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
+        if file_secundario.content_type not in settings.ALLOWED_MIME_TYPES:
+            raise HTTPException(400, "Invalid file type")
+        contenido_sec = await file_secundario.read()
+        if len(contenido_sec) > _MAX_FILE_BYTES:
+            raise HTTPException(413, "File size exceeds limit")
         ext_sec    = _Path(file_secundario.filename).suffix or ".pdf"
         nombre_sec = f"_enviada_pago{pago_id}{ext_sec}"
         ruta_obj   = directorio / nombre_sec
-        ruta_obj.write_bytes(await file_secundario.read())
+        ruta_obj.write_bytes(contenido_sec)
         ruta_sec   = str(ruta_obj)
 
     def _sanit(nombre: str) -> str:
-        limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
-        return limpio or f"documento_pago{pago_id}.pdf"
+        return _nombre_seguro(nombre, f"documento_pago{pago_id}.pdf")
 
     asociados = 0
     sin_match = 0
@@ -339,6 +369,7 @@ async def upload_cuenta_cobro(
         doc.codigo_contrato     = codigo_contrato
         doc.tipo_documento      = tipo_documento
         doc.nombre_archivo      = nombre_arch
+        doc.nombre_original     = nombre_original
         doc.ruta_local          = str(ruta_copia)
         doc.ruta_original       = str(ruta_original)
         doc.nombre_secundario   = nombre_sec
@@ -373,9 +404,9 @@ def download_documento(
     if not ruta_raw:
         raise HTTPException(404, "Archivo no disponible")
 
-    file_path = _Path(ruta_raw).resolve()
-    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
-        raise HTTPException(403, "Acceso denegado")
+    # Reconstruir la ruta de forma segura desde el nombre en disco (anti path traversal).
+    sub_dir = f"{doc.periodo}/{doc.codigo_contrato}"
+    file_path = get_secure_path(_ARR_BASE, sub_dir, _Path(ruta_raw).name)
     if not file_path.exists():
         raise HTTPException(404, "Archivo no encontrado en el servidor")
 

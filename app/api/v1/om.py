@@ -17,7 +17,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
+from app.utils.file_handling import (
+    generate_secure_filename,
+    get_secure_path,
+    validate_and_save_file,
+)
 from app.models.contratos import ContratoServicio
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.schemas.om import (
@@ -256,7 +262,8 @@ from pathlib import Path as _Path
 from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
 
-_UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "om"
+# Base segura para los archivos O&M (configurable vía settings.UPLOAD_DIRECTORY).
+_OM_BASE = _Path(settings.UPLOAD_DIRECTORY) / "om_uploads"
 
 
 @router.get("/factura/{periodo}")
@@ -290,14 +297,17 @@ async def upload_factura_mensual(
     _=Depends(get_current_user),
 ):
     """Recibe el PDF consolidado, lo guarda y lo divide por proyecto."""
-    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-    ext = _Path(file.filename or "factura.pdf").suffix or ".pdf"
-    safe_name = f"{periodo}{ext}"
-    file_path = _UPLOADS_DIR / safe_name
-
-    content = await file.read()
-    file_path.write_bytes(content)
+    # Guardado seguro: nombre en disco UUID, validación de MIME y tamaño.
+    secure_name = generate_secure_filename(file.filename)
+    destino = _OM_BASE / "original"
+    await validate_and_save_file(
+        file,
+        destino,
+        secure_name,
+        settings.MAX_FILE_SIZE_MB * 1024 * 1024,
+        settings.ALLOWED_MIME_TYPES,
+    )
+    file_path = destino / secure_name
 
     # Guardar/actualizar registro de factura consolidada
     factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
@@ -331,7 +341,7 @@ async def upload_factura_mensual(
         for c in contratos
     ]
 
-    directorio_docs = _UPLOADS_DIR / "documentos" / periodo
+    directorio_docs = _OM_BASE / "documentos" / periodo
     try:
         splitting_result = dividir_pdf(file_path, periodo, contratos_lista, directorio_docs)
     except Exception as exc:
@@ -428,9 +438,8 @@ def download_documento_proyecto(
     ).first()
     if not doc:
         raise HTTPException(404, "No hay documento para este proyecto y período")
-    file_path = _Path(doc.ruta_local).resolve()
-    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
-        raise HTTPException(403, "Acceso denegado")
+    # Reconstruir la ruta de forma segura desde el nombre guardado (anti path traversal).
+    file_path = get_secure_path(_OM_BASE, f"documentos/{doc.periodo}", _Path(doc.nombre_archivo).name)
     if not file_path.exists():
         raise HTTPException(404, "Archivo no encontrado en el servidor")
     return FileResponse(
@@ -450,7 +459,8 @@ def download_factura_mensual(
     factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
     if not factura or not factura.ruta_local:
         raise HTTPException(404, "No hay archivo subido para este período")
-    file_path = _Path(factura.ruta_local)
+    # Reconstruir la ruta de forma segura desde el nombre en disco (anti path traversal).
+    file_path = get_secure_path(_OM_BASE, "original", _Path(factura.ruta_local).name)
     if not file_path.exists():
         raise HTTPException(404, "Archivo no encontrado en el servidor")
     return FileResponse(

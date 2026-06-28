@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     # y con STORAGE_LOCAL_PATH; cambiarlo deja inaccesibles los documentos históricos
     # porque las descargas reconstruyen la ruta desde esta base.
     UPLOAD_DIRECTORY: str = "./uploads"
-    MAX_FILE_SIZE_MB: int = 10
+    # 20 MB para coincidir con clientes.py y no bloquear facturas/cuentas escaneadas.
+    MAX_FILE_SIZE_MB: int = 20
     ALLOWED_MIME_TYPES: list[str] = [
         "application/pdf",
         "image/jpeg",

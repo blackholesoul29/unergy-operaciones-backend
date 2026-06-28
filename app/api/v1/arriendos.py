@@ -293,12 +293,12 @@ async def upload_cuenta_cobro(
 
     # Validar tipo MIME antes de leer/escribir nada.
     if file.content_type not in settings.ALLOWED_MIME_TYPES:
-        raise HTTPException(400, "Invalid file type")
+        raise HTTPException(400, "Tipo de archivo no permitido. Use PDF, JPG, PNG o XLSX.")
 
     # Leer el archivo principal una sola vez (se copia por cada predio) y validar tamaño.
     contenido = await file.read()
     if len(contenido) > _MAX_FILE_BYTES:
-        raise HTTPException(413, "File size exceeds limit")
+        raise HTTPException(413, f"El archivo supera el límite de {settings.MAX_FILE_SIZE_MB} MB")
     nombre_original = file.filename or "documento.pdf"
 
     # Conservar el original sin renombrar (una sola copia de referencia)
@@ -312,10 +312,10 @@ async def upload_cuenta_cobro(
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
         if file_secundario.content_type not in settings.ALLOWED_MIME_TYPES:
-            raise HTTPException(400, "Invalid file type")
+            raise HTTPException(400, "Tipo de archivo no permitido. Use PDF, JPG, PNG o XLSX.")
         contenido_sec = await file_secundario.read()
         if len(contenido_sec) > _MAX_FILE_BYTES:
-            raise HTTPException(413, "File size exceeds limit")
+            raise HTTPException(413, f"El archivo supera el límite de {settings.MAX_FILE_SIZE_MB} MB")
         ext_sec    = _Path(file_secundario.filename).suffix or ".pdf"
         nombre_sec = f"_enviada_pago{pago_id}{ext_sec}"
         ruta_obj   = directorio / nombre_sec

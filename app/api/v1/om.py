@@ -461,9 +461,16 @@ def download_factura_mensual(
     if not factura or not factura.ruta_local:
         raise HTTPException(404, "No hay archivo subido para este período")
     # Reconstruir la ruta de forma segura desde el nombre en disco (anti path traversal).
-    file_path = get_secure_path(_OM_BASE, "original", _Path(factura.ruta_local).name)
+    # Las facturas nuevas viven en uploads/om/original/<uuid>.pdf; las históricas se
+    # guardaban planas en uploads/om/<periodo>.pdf — probar ambas para no orfanarlas.
+    nombre_disco = _Path(factura.ruta_local).name
+    file_path = get_secure_path(_OM_BASE, "original", nombre_disco)
     if not file_path.exists():
-        raise HTTPException(404, "Archivo no encontrado en el servidor")
+        legacy_path = get_secure_path(_OM_BASE, "", nombre_disco)
+        if legacy_path.exists():
+            file_path = legacy_path
+        else:
+            raise HTTPException(404, "Archivo no encontrado en el servidor")
     return FileResponse(
         path=str(file_path),
         filename=factura.nombre_archivo or f"factura-{periodo}.pdf",

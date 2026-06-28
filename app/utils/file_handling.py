@@ -45,11 +45,11 @@ async def validate_and_save_file(
     tamaño. Si el archivo excede ``max_size_bytes`` se elimina la escritura
     parcial y se lanza ``HTTPException(413)``.
     """
-    if file.content_type not in allowed_mime_types:
-        raise HTTPException(400, "Invalid file type")
-
     if not file.filename:
-        raise HTTPException(400, "No file name provided")
+        raise HTTPException(400, "No se recibió ningún archivo")
+
+    if file.content_type not in allowed_mime_types:
+        raise HTTPException(400, "Tipo de archivo no permitido. Use PDF, JPG, PNG o XLSX.")
 
     destination_folder.mkdir(parents=True, exist_ok=True)
     destination_path = destination_folder / secure_filename
@@ -63,12 +63,13 @@ async def validate_and_save_file(
                     break
                 total += len(chunk)
                 if total > max_size_bytes:
-                    raise HTTPException(413, "File size exceeds limit")
+                    raise HTTPException(
+                        413,
+                        f"El archivo supera el límite de {max_size_bytes // (1024 * 1024)} MB",
+                    )
                 buffer.write(chunk)
-    except HTTPException:
-        destination_path.unlink(missing_ok=True)
-        raise
-    except Exception:
+    except BaseException:
+        # Limpia la escritura parcial ante cualquier fallo (límite, IO, cancelación).
         destination_path.unlink(missing_ok=True)
         raise
 
@@ -81,5 +82,5 @@ def get_secure_path(base_dir: pathlib.Path, sub_dir: str, filename: str) -> path
     """
     candidate = base_dir.joinpath(sub_dir, filename)
     if not candidate.resolve().is_relative_to(base_dir.resolve()):
-        raise HTTPException(400, "Invalid path")
+        raise HTTPException(400, "Ruta de archivo inválida")
     return candidate

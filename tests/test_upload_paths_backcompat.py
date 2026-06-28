@@ -39,3 +39,15 @@ def test_om_base_lives_under_uploads():
     base = pathlib.Path(settings.UPLOAD_DIRECTORY) / "om"
     assert _OM_BASE == base
     assert _OM_BASE.parts[-2:] == ("uploads", "om")
+
+
+def test_legacy_factura_flat_path_is_resolvable():
+    # Las facturas O&M históricas se guardaban planas en uploads/om/<periodo>.pdf
+    # (antes del subdir original/). download_factura_mensual debe poder localizarlas;
+    # get_secure_path(.., "", name) reconstruye esa ruta plana sin path-traversal.
+    from app.api.v1.om import _OM_BASE
+    from app.utils.file_handling import get_secure_path
+
+    legacy = get_secure_path(_OM_BASE, "", "2026-05.pdf")
+    assert legacy == _OM_BASE / "2026-05.pdf"
+    assert legacy.parts[-3:] == ("uploads", "om", "2026-05.pdf")

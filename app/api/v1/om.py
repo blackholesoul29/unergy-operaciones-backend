@@ -263,7 +263,8 @@ from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
 
 # Base segura para los archivos O&M (configurable vía settings.UPLOAD_DIRECTORY).
-_OM_BASE = _Path(settings.UPLOAD_DIRECTORY) / "om_uploads"
+# Mantener el subdir "om" (layout histórico) para no orfanar los archivos ya subidos.
+_OM_BASE = _Path(settings.UPLOAD_DIRECTORY) / "om"
 
 
 @router.get("/factura/{periodo}")

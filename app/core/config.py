@@ -32,8 +32,11 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_PATH: str = "./uploads"
 
-    # Subida segura de archivos (app/utils/file_handling.py)
-    UPLOAD_DIRECTORY: str = "./datos/uploads"
+    # Subida segura de archivos (app/utils/file_handling.py).
+    # Debe coincidir con el layout en disco ya existente (./uploads/{arriendos,om,...})
+    # y con STORAGE_LOCAL_PATH; cambiarlo deja inaccesibles los documentos históricos
+    # porque las descargas reconstruyen la ruta desde esta base.
+    UPLOAD_DIRECTORY: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10
     ALLOWED_MIME_TYPES: list[str] = [
         "application/pdf",

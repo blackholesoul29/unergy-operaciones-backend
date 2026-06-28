@@ -5,14 +5,21 @@ Schema DDLs used to run idempotently on every application boot:
                     Base.metadata.create_all() in _run_create_tables()
   * init_db.py   -> Base.metadata.create_all() and add_columns()
 
-This migration consolidates all of those statements so that schema management is
-explicit and version-controlled by Alembic instead of happening at startup.
+This migration consolidates the *incremental* column/index/enum/data DDLs so that
+schema management is explicit and version-controlled by Alembic instead of running
+inside the application lifespan on every boot.
 
-Every statement is idempotent (CREATE ... IF NOT EXISTS, ADD COLUMN IF NOT EXISTS,
-ALTER TYPE ... ADD VALUE IF NOT EXISTS, guarded UPDATEs) or tolerated-on-failure,
-mirroring the original startup behaviour. It is therefore safe to run against a
-fresh database (where migrations 001..030 already built the base schema) as well
-as databases previously kept in sync by the boot-time mechanism.
+NOTE on bootstrap order: the *base* tables are NOT created by the Alembic chain —
+they come from ``Base.metadata.create_all`` in ``init_db.py`` (the one-shot
+bootstrap, invoked by ``start.sh`` before the migrations run). Migrations 001..030
+only *alter/extend* those base tables; they assume the tables already exist. The
+deploy order is therefore: ``init_db.py`` (base tables + seed) → ``alembic upgrade
+head`` (this migration and the rest).
+
+Every statement here is idempotent (CREATE ... IF NOT EXISTS, ADD COLUMN IF NOT
+EXISTS, ALTER TYPE ... ADD VALUE IF NOT EXISTS, guarded UPDATEs) or
+tolerated-on-failure, mirroring the original startup behaviour, so it is safe to
+re-run against a database previously kept in sync by the boot-time mechanism.
 
 Work is executed through the application engine with per-statement commits/autocommit
 (exactly as at startup) so that a duplicate CREATE TYPE / ADD CONSTRAINT never
@@ -1073,6 +1080,11 @@ def _run_regular(stmts):
 def upgrade() -> None:
     # 1) Ensure every model-defined table exists (formerly Base.metadata.create_all
     #    at boot). Idempotent: create_all skips tables that already exist.
+    #    NOTE: init_db.py ALSO runs create_all (the canonical bootstrap path run by
+    #    start.sh before the migrations). This overlap is INTENTIONAL — it lets a
+    #    migrate-only run (`alembic upgrade head` without init_db.py) still find the
+    #    base tables. Do NOT "dedupe" it away: removing create_all from init_db.py
+    #    breaks fresh-DB bootstrap (no other migration creates the base tables).
     try:
         from app.core.database import engine
         from app.models import Base

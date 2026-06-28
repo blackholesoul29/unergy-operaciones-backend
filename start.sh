@@ -1,7 +1,7 @@
 #!/bin/sh
-echo "Running DB init + seed..."
+echo "Creating base tables + seed..."
 if ! python init_db.py; then
-    echo "WARNING: DB init failed — lifespan will retry DDL"
+    echo "WARNING: DB init/seed failed — schema may be incomplete (the app lifespan no longer runs DDL); check logs above"
 fi
 echo "Running Alembic migrations..."
 if ! alembic upgrade head; then

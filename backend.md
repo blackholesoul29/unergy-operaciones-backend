@@ -15,7 +15,7 @@ garantías, alertas, fronteras (CGM) y el módulo MEM. Integra varias APIs exter
 - **httpx** (cliente HTTP hacia APIs externas)
 - **openpyxl** (Excel: informes/liquidaciones), **matplotlib** + **numpy** (gráficas en informes)
 - **google-api-python-client** / **google-auth** (integración Google)
-- **Alembic** presente, pero las migraciones reales se hacen con DDL idempotente (ver abajo)
+- **Alembic** — migraciones de esquema incrementales (ver "Migraciones de BD" abajo)
 - **PostgreSQL 15** (Railway en producción, local en desarrollo)
 
 ## Estructura de carpetas
@@ -63,22 +63,35 @@ app/
 └── seeds/
     └── seed_data.py     # usuarios iniciales + catálogos (fallas, etc.)
 
-alembic/                 # presente (env.py, versions/) — no es el flujo habitual
-init_db.py               # crea tablas + add_columns() (ALTER idempotente) + seed
+alembic/                 # migraciones de esquema (env.py, versions/) — flujo oficial
+init_db.py               # crea tablas base (create_all) + seed — bootstrap one-shot
 ```
 
 ## Migraciones de BD (importante)
-El proyecto **no usa Alembic en la práctica**. El esquema evoluciona con DDL idempotente:
+El esquema se gestiona en **dos capas complementarias**, que `start.sh` ejecuta en orden
+en cada arranque (ambas idempotentes):
 
-- **Columna nueva en tabla existente** → agregar un `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
-  en `init_db.py` → `add_columns()`. (Para columnas críticas en producción también se
-  añaden a la lista `_PENDING_DDLS` de `app/main.py`, que se ejecuta en cada arranque.)
-- **Tabla nueva** → definir el modelo en `app/models/` y dejar que
-  `Base.metadata.create_all()` la cree (corre en `init_db.py` y al arranque).
-- Los `ALTER ... IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` son seguros de re-ejecutar.
+1. **Tablas base** → las crea `Base.metadata.create_all()` en `init_db.py` a partir de
+   los modelos de `app/models/`. Es el ÚNICO lugar que crea las tablas base; ninguna
+   migración Alembic las crea (001..031 solo *alteran/extienden* tablas ya existentes).
+   `create_all` ya NO corre dentro del lifespan de FastAPI, así que las réplicas de la
+   app no ejecutan DDL al bootear.
+2. **Cambios incrementales** (columnas/índices/enums/datos) → migraciones Alembic en
+   `alembic/versions/`. `start.sh` corre `alembic upgrade head` después de `init_db.py`.
 
-> Evitar `alembic revision --autogenerate` salvo que se decida migrar el flujo completo:
-> mezclarlo con el DDL idempotente puede dejar el historial inconsistente.
+Orden de despliegue: `python init_db.py` (tablas base + seed) → `alembic upgrade head`.
+
+### Cómo agregar un cambio de esquema
+- **Columna/índice/enum nuevo en tabla existente** → crear una nueva migración Alembic
+  `alembic/versions/NNN_descripcion.py` (con `down_revision` apuntando al head actual y un
+  id de `revision` único — ver `tests/test_alembic_chain_integrity.py`). Usar
+  `ALTER ... IF NOT EXISTS` / `ADD VALUE IF NOT EXISTS` para que sea re-ejecutable.
+  **NO** agregar DDL a `app/main.py` ni a `init_db.py` (el viejo mecanismo de DDL en cada
+  arranque — `_PENDING_DDLS` / `add_columns()` — se consolidó en
+  `alembic/versions/031_baseline_all_ddls.py` y se eliminó).
+- **Tabla nueva** → definir el modelo en `app/models/` (lo crea `create_all` en bootstrap)
+  y, si necesitas aplicarla a una BD ya existente en producción, añadir también la migración
+  Alembic correspondiente (`CREATE TABLE IF NOT EXISTS`).
 
 ## Cómo agregar un nuevo endpoint
 
@@ -141,8 +154,10 @@ api_router.include_router(mi_modulo.router)
 ```
 
 ### 5. Migración (si agregaste tabla/columna)
-Ver sección **Migraciones de BD** arriba. Tabla nueva → `create_all` la crea sola.
-Columna nueva → `ALTER ... IF NOT EXISTS` en `init_db.py` (y `_PENDING_DDLS` si es prod).
+Ver sección **Migraciones de BD** arriba. Tabla nueva → el modelo + `create_all` la crean
+en bootstrap (y migración Alembic si hay que aplicarla a una BD de prod existente).
+Columna/índice/enum nuevo → nueva migración Alembic en `alembic/versions/` (NO en
+`init_db.py` ni en `app/main.py`).
 
 ## Autenticación
 - Login: `POST /api/v1/auth/token` (form-urlencoded: `username`, `password`) → `access_token` JWT.
@@ -222,7 +237,8 @@ TIMEZONE=America/Bogota
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python init_db.py      # crea tablas, aplica add_columns() y seed inicial
+python init_db.py      # crea tablas base (create_all) + seed inicial
+alembic upgrade head   # aplica migraciones incrementales
 uvicorn app.main:app --reload
 # API en http://localhost:8000  ·  Docs en http://localhost:8000/docs  ·  Health: /health
 ```
@@ -239,6 +255,7 @@ uvicorn app.main:app --reload
 - **IDs `BigInteger` autoincrement** (BIGSERIAL) — no UUID.
 - Siempre usar `response_model` en los endpoints.
 - Todo endpoint protegido lleva `Depends(get_current_user)`.
-- Migraciones por DDL idempotente (`init_db.py` / `_PENDING_DDLS`), no autogenerate de Alembic.
+- Tablas base por `create_all` (modelos) en `init_db.py`; cambios incrementales por
+  migración Alembic en `alembic/versions/` (DDL idempotente, NO en `app/main.py`/`init_db.py`).
 - No usar `print()` para logs de aplicación — usar el logger de uvicorn (los `print` de
   `[startup]`/`[shutdown]` en `main.py` son trazas de arranque intencionales).

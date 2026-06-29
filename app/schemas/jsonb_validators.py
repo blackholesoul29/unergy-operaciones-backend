@@ -46,7 +46,8 @@ def _validar_url_http(valor: str, *, campo: str = "url") -> str:
     url = valor.strip()
     if not url:
         raise ValueError(f"{campo} no puede estar vacío")
-    if not (url.startswith("http://") or url.startswith("https://")):
+    # El esquema de una URI es case-insensitive (RFC 3986 §3.1): HTTPS:// es válido.
+    if not url.lower().startswith(("http://", "https://")):
         raise ValueError(f"URL inválida en {campo}: '{valor}' (se espera http:// o https://)")
     # Debe tener algo después del esquema
     resto = url.split("://", 1)[1].strip()

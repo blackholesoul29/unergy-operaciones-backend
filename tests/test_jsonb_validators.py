@@ -68,6 +68,14 @@ def test_foto_url_schema_acepta_campos_extra():
     assert m.url == "https://x.com/a"
 
 
+def test_fotos_urls_esquema_mayusculas_ok():
+    # El esquema de una URI es case-insensitive (RFC 3986): HTTPS:// es válido.
+    data = ["HTTPS://drive.google.com/file/d/XYZ/view"]
+    assert validate_fotos_urls(data) == data
+    obj = [{"url": "HTTP://x.com/a"}]
+    assert validate_fotos_urls(obj) == obj
+
+
 # ── archivos_json ────────────────────────────────────────────────────────────
 
 def test_archivos_json_none_ok():

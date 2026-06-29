@@ -2,6 +2,8 @@ from pydantic import BaseModel, field_validator
 from typing import Optional, Any
 from datetime import datetime, date, time
 
+from app.schemas.jsonb_validators import validate_fotos_urls
+
 
 class FallaCatEstadoOut(BaseModel):
     id: int
@@ -94,7 +96,10 @@ class FallaCreate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     codigo_legado: Optional[str] = None
-    fotos_urls: Optional[list[str]] = None
+    # Polimórfico: lista de adjuntos en formato objeto o cadenas de URL legadas.
+    # La estructura/URLs se validan estrictamente en el endpoint (→ 400) mediante
+    # app.schemas.jsonb_validators.validate_fotos_urls.
+    fotos_urls: Optional[list[Any]] = None
     centinela: Optional[str] = None
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
@@ -120,7 +125,8 @@ class FallaUpdate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     sla_cumplido: Optional[bool] = None
-    fotos_urls: Optional[list[str]] = None
+    # Polimórfico: ver nota en FallaCreate.fotos_urls. Validado en el endpoint.
+    fotos_urls: Optional[list[Any]] = None
     centinela: Optional[str] = None
     notificacion: Optional[bool] = None
     kwh_perdidos_estimado: Optional[float] = None

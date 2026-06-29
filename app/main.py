@@ -961,6 +961,24 @@ _PENDING_DDLS = [
     # arr_documento: una copia por predio (predios sin match se guardan igual) + original
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS ruta_original VARCHAR(1000)",
     "ALTER TABLE arr_documento ALTER COLUMN arr_proyecto_id DROP NOT NULL",
+    # CHECK constraints de estructura JSONB — red de seguridad a nivel de BD por si
+    # se omite la validación Pydantic. Se añaden como NOT VALID para no fallar sobre
+    # filas legadas; PostgreSQL las aplica a todo INSERT/UPDATE futuro. El bloque DO
+    # las hace idempotentes (no error si ya existen).
+    """DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_fallas_fotos_urls_array') THEN
+            ALTER TABLE fallas ADD CONSTRAINT ck_fallas_fotos_urls_array
+                CHECK (fotos_urls IS NULL OR jsonb_typeof(fotos_urls) = 'array') NOT VALID;
+        END IF;
+    END $$;""",
+    """DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_gestion_archivos_json_array') THEN
+            ALTER TABLE gestion_registros ADD CONSTRAINT ck_gestion_archivos_json_array
+                CHECK (archivos_json IS NULL OR jsonb_typeof(archivos_json) = 'array') NOT VALID;
+        END IF;
+    END $$;""",
 ]
 
 

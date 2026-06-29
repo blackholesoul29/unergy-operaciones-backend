@@ -21,6 +21,7 @@ from app.schemas.fallas import (
     FallaSLADashboard, FallaImpacto,
 )
 from app.schemas.common import PaginatedResponse
+from app.schemas.jsonb_validators import validate_fotos_urls
 
 router = APIRouter(prefix="/fallas", tags=["Fallas"])
 
@@ -518,6 +519,11 @@ def create_falla(
 ):
     dump = data.model_dump()
     fotos = dump.pop("fotos_urls", None)
+    # Validación estricta del JSONB antes de tocar la BD (→ 400 con mensaje claro).
+    try:
+        validate_fotos_urls(fotos)
+    except ValueError as e:
+        raise HTTPException(400, f"fotos_urls inválido: {e}")
     intervalos = dump.pop("intervalos", None)
     falla = Falla(
         **dump,
@@ -570,6 +576,13 @@ def update_falla(
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     dump = data.model_dump(exclude_unset=True)
+
+    # Validación estricta del JSONB antes de tocar la BD (→ 400 con mensaje claro).
+    if "fotos_urls" in dump:
+        try:
+            validate_fotos_urls(dump["fotos_urls"])
+        except ValueError as e:
+            raise HTTPException(400, f"fotos_urls inválido: {e}")
 
     # Los intervalos de disparo se sincronizan aparte (no son una columna).
     sync_ints = "intervalos" in dump

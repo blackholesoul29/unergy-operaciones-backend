@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
@@ -100,14 +101,54 @@ def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
     return _get_proyecto_or_404(id, db)
 
 
+# Columnas con restricción UNIQUE en el modelo Proyecto. Si se intenta asignar a un
+# proyecto un valor ya usado por otro, Postgres lanza IntegrityError; sin manejo, eso
+# sube como 500 sin detalle y el frontend solo muestra "Error" (ver bug API ID Unergy).
+_UNIQUE_COLS = {
+    "sub_project": "API ID Unergy",
+    "topic_slug": "topic slug",
+}
+
+
 @router.patch("/{id}", response_model=ProyectoOut)
 def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+
+    payload = data.model_dump(exclude_unset=True)
+
+    # Chequeo proactivo de campos únicos: da un mensaje accionable que nombra el
+    # proyecto en conflicto, en vez de un IntegrityError opaco.
+    for col, etiqueta in _UNIQUE_COLS.items():
+        nuevo = payload.get(col)
+        if nuevo in (None, ""):
+            continue
+        conflicto = (
+            db.query(Proyecto)
+            .filter(getattr(Proyecto, col) == nuevo, Proyecto.id != id)
+            .first()
+        )
+        if conflicto:
+            raise HTTPException(
+                409,
+                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
+                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
+                f"Cada {etiqueta} debe ser único.",
+            )
+
+    for k, v in payload.items():
         setattr(p, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Backstop ante carreras o cualquier otra restricción única no cubierta arriba.
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
+            "ya está en uso por otro proyecto.",
+        )
     return _get_proyecto_or_404(id, db)
 
 

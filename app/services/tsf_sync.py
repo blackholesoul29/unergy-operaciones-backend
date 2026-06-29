@@ -272,7 +272,7 @@ def _unergy_token() -> str | None:
         return None
     with httpx.Client(timeout=30) as client:
         resp = client.post(
-            f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
+            f"{settings.UNERGY_LEGACY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
             json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD},
             headers={"User-Agent": "PostmanRuntime/7.50.0"},
         )
@@ -288,7 +288,7 @@ def _recent_avg_daily_mwh(token: str, sub_project: str, n_days_window: int = 30)
     try:
         with httpx.Client(timeout=60, follow_redirects=True) as client:
             resp = client.get(
-                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
+                f"{settings.UNERGY_LEGACY_API_URL}/api/admin/operations/project_generation/",
                 params={
                     "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),

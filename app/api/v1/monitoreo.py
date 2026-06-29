@@ -664,7 +664,7 @@ async def _unergy_token() -> str:
     now = _time.monotonic()
     if _token_cache["token"] and now < _token_cache["expires_at"]:
         return _token_cache["token"]
-    auth_url = f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/"
+    auth_url = f"{settings.UNERGY_LEGACY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(auth_url, json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD})
         r.raise_for_status()
@@ -685,7 +685,7 @@ async def _fetch_unergy_raw(token: str, sub_project: str, from_iso: str, to_iso:
     }
     if verified_only:
         params["verified_by_operator"] = "True"
-    data_url = f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/"
+    data_url = f"{settings.UNERGY_LEGACY_API_URL}/api/admin/operations/project_generation/"
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
         r = await c.get(data_url, params=params, headers={"Authorization": f"Bearer {token}"})
         if r.status_code == 401:

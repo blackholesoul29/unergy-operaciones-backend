@@ -36,8 +36,12 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str = ""
     S3_SECRET_KEY: str = ""
 
-    # Unergy API credentials (used by _legacy bridge)
-    UNERGY_API_URL: str = "https://api.unergy.io"
+    # URL base de la API de ESTA aplicación (endpoints propios /api/v1).
+    # Usada por scripts de migración/carga que se autentican contra el backend propio.
+    APP_BASE_URL: str = "https://backend-production-63d8.up.railway.app/api/v1"
+
+    # Credenciales de la API externa de Unergy (puente legacy hacia api.unergy.io).
+    UNERGY_LEGACY_API_URL: str = "https://api.unergy.io"
     UNERGY_ACCOUNT_ID: str = ""
     UNERGY_LOGIN: str = ""
     UNERGY_PASSWORD: str = ""

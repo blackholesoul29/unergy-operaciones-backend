@@ -32,12 +32,20 @@ try:
 except ModuleNotFoundError:  # python-dotenv es opcional: las vars pueden venir del entorno
     pass
 
+from app.core.config import settings
+
 # -- Configuración --------------------------------------------------------------
 SCRIPT_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbyJCkBZuLJxsJrMNnu1vsGUw3SX1Npqws1t3B2BN612GV0Nfn67TkT-Nl77wg11w1ST/exec"
 )
-API_BASE  = "https://backend-production-63d8.up.railway.app/api/v1"
+API_BASE  = settings.APP_BASE_URL
+if not API_BASE:
+    sys.exit(
+        "ERROR: APP_BASE_URL no está configurado.\n"
+        "Define la variable de entorno APP_BASE_URL (URL base de la API propia, "
+        "p.ej. https://backend-production-63d8.up.railway.app/api/v1)."
+    )
 API_EMAIL = os.environ.get("UNERGY_API_EMAIL")
 API_PASS  = os.environ.get("UNERGY_API_PASS")
 if not API_EMAIL or not API_PASS:

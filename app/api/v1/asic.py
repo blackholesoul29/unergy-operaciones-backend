@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_, and_, func
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -254,6 +255,95 @@ def delete_solicitud(
 
     db.delete(s)
     db.commit()
+
+
+def _resolver_ppa_para(s: AsicSolicitud, db: Session) -> PPAContrato | None:
+    """Contrato PPA canónico de un registro GESCON: por FK contrato_ppa_id, o si no,
+    casando el código `contrato_interno` con `numero_codigo_contrato` (no borrado)."""
+    if s.contrato_ppa_id:
+        return (
+            db.query(PPAContrato)
+            .filter(PPAContrato.id == s.contrato_ppa_id, PPAContrato.deleted_at.is_(None))
+            .first()
+        )
+    if s.contrato_interno and s.contrato_interno.strip():
+        return (
+            db.query(PPAContrato)
+            .filter(
+                PPAContrato.numero_codigo_contrato == s.contrato_interno,
+                PPAContrato.deleted_at.is_(None),
+            )
+            .first()
+        )
+    return None
+
+
+@router.post("/backfill-nombre-interno")
+def backfill_nombre_interno(
+    dry_run: bool = Query(True, description="true (default): solo reporta, no modifica."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Completa `nombre_interno` en registros GESCON que lo tienen vacío, copiándolo del
+    contrato PPA al que pertenecen (nombre real, "alusivo al contrato específico"). De paso
+    vincula `contrato_ppa_id` si faltaba. No inventa nombres: los que no tienen PPA con
+    nombre se reportan sin tocar. Idempotente. `dry_run=false` aplica en una transacción."""
+    faltantes = (
+        db.query(AsicSolicitud)
+        .filter(
+            or_(AsicSolicitud.nombre_interno.is_(None), func.trim(AsicSolicitud.nombre_interno) == ""),
+            or_(
+                AsicSolicitud.contrato_ppa_id.isnot(None),
+                and_(AsicSolicitud.contrato_interno.isnot(None), func.trim(AsicSolicitud.contrato_interno) != ""),
+            ),
+        )
+        .all()
+    )
+
+    resueltos, no_resueltos = [], []
+    for s in faltantes:
+        ppa = _resolver_ppa_para(s, db)
+        nombre = (ppa.nombre_interno or "").strip() if ppa else ""
+        if ppa and nombre:
+            resueltos.append({
+                "id": s.id,
+                "contrato_interno": s.contrato_interno,
+                "nombre_propuesto": nombre,
+                "vincula_ppa_id": (ppa.id if not s.contrato_ppa_id else None),
+            })
+        else:
+            no_resueltos.append({
+                "id": s.id,
+                "contrato_interno": s.contrato_interno,
+                "motivo": "sin PPA que casar" if not ppa else "el PPA no tiene nombre_interno",
+            })
+
+    reporte = {
+        "dry_run": dry_run,
+        "total_sin_nombre": len(faltantes),
+        "a_actualizar": len(resueltos),
+        "sin_resolver": len(no_resueltos),
+        "resueltos": resueltos,
+        "no_resueltos": no_resueltos,
+    }
+    if dry_run:
+        return reporte
+
+    try:
+        for r in resueltos:
+            s = db.query(AsicSolicitud).filter(AsicSolicitud.id == r["id"]).first()
+            if not s:
+                continue
+            s.nombre_interno = r["nombre_propuesto"]
+            if r["vincula_ppa_id"] and not s.contrato_ppa_id:
+                s.contrato_ppa_id = r["vincula_ppa_id"]
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"El backfill falló y se revirtió: {type(e).__name__}: {e}")
+
+    reporte["ejecutado"] = True
+    return reporte
 
 
 @router.post("/cambios", response_model=AsicCambioOut, status_code=201)

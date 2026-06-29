@@ -200,7 +200,8 @@ STORAGE_BACKEND=local
 STORAGE_LOCAL_PATH=./uploads
 
 # Integraciones (opcionales en local; requeridas en prod según el módulo)
-UNERGY_API_URL=https://api.unergy.io
+APP_BASE_URL=https://backend-production-63d8.up.railway.app/api/v1
+UNERGY_LEGACY_API_URL=https://api.unergy.io
 UNERGY_ACCOUNT_ID=  UNERGY_LOGIN=  UNERGY_PASSWORD=
 SUNFACTORY_USERNAME=  SUNFACTORY_PASSWORD=
 SOLENIUM_USER=  SOLENIUM_PASS=

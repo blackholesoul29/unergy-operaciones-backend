@@ -65,7 +65,7 @@ def _get_bolsa_avg(db: Session, year: int, month: int) -> dict:
 def _unergy_token() -> str:
     with httpx.Client(timeout=30) as client:
         resp = client.post(
-            f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
+            f"{settings.UNERGY_LEGACY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
             json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD},
             headers={"User-Agent": "PostmanRuntime/7.50.0"},
         )
@@ -87,7 +87,7 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     try:
         with httpx.Client(timeout=90, follow_redirects=True) as client:
             resp = client.get(
-                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
+                f"{settings.UNERGY_LEGACY_API_URL}/api/admin/operations/project_generation/",
                 params={
                     "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -148,7 +148,7 @@ def _fetch_recent_avg(token: str, sub_project: str, n_days: int = 15) -> dict:
     try:
         with httpx.Client(timeout=90, follow_redirects=True) as client:
             resp = client.get(
-                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
+                f"{settings.UNERGY_LEGACY_API_URL}/api/admin/operations/project_generation/",
                 params={
                     "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),

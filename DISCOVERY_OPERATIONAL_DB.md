@@ -957,7 +957,8 @@ All endpoints are under `/api/v1/` and require JWT authentication (`Depends(get_
 | `APP_NAME` | str | "Plataforma Operaciones Unergy" | App display name |
 | `FRONTEND_URL` | str | "http://localhost:5173" | CORS origin |
 | `TIMEZONE` | str | "America/Bogota" | Default timezone |
-| `UNERGY_API_URL` | str | "https://api.unergy.io" | Unergy platform API |
+| `APP_BASE_URL` | str | "https://backend-production-63d8.up.railway.app/api/v1" | This app's own API base URL (scripts) |
+| `UNERGY_LEGACY_API_URL` | str | "https://api.unergy.io" | Unergy external legacy platform API |
 | `UNERGY_ACCOUNT_ID` | str | "" | Unergy account ID |
 | `UNERGY_LOGIN` | str | "" | Unergy login |
 | `UNERGY_PASSWORD` | str | "" | Unergy password |

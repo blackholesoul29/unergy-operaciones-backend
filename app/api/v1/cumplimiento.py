@@ -747,7 +747,12 @@ def get_simulador(
                 "es_duplicado": bool(asic.es_duplicado),
                 "proyecto_id": asic.proyecto_id,
             }
-            if asic.es_duplicado:
+            if asic.es_duplicado or asic.proyecto_id in proyecto_primary:
+                # Duplicado, O una asignación primaria ADICIONAL de una planta que ya
+                # tiene primaria en otro contrato (despacho partido, p.ej. 50% Terpel 1
+                # + 50% Terpel 2). Antes el dict proyecto_primary sobrescribía y solo
+                # sobrevivía el último contrato → el 50% del primero desaparecía de la
+                # vista. Ahora cada asignación extra se emite como fila propia.
                 proyecto_dups.append(entry)
             else:
                 proyecto_primary[asic.proyecto_id] = entry
@@ -852,7 +857,9 @@ def get_simulador(
             ),
             "contrato_id": dup["contrato_id"],
             "pct_despacho": dup["pct_despacho"],
-            "es_duplicado": True,
+            # es_duplicado real del registro: True para duplicado (compra en bolsa),
+            # False para una segunda asignación primaria (despacho partido entre contratos).
+            "es_duplicado": dup["es_duplicado"],
             # Misma lógica que la fila primaria: si Unergy compra la planta vía un
             # contrato de compra, la etiqueta es "comprado por Unergy" aunque la fila
             # sea duplicado de un contrato de venta (ej. GD Astrolumen La Garita en

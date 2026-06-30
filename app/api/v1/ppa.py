@@ -1,8 +1,7 @@
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy.sql import func
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, PPACompromisoEnergia, Proyecto, AsicSolicitud
@@ -324,7 +323,10 @@ def delete_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_curren
     if razones:
         raise HTTPException(409, f"No se puede eliminar: {'; '.join(razones)}.")
 
-    contrato.deleted_at = func.now()
+    # Python datetime (no func.now()): asignar un ClauseElement SQL a la columna hace
+    # que el hook de auditoría (_diff_attrs: `old != new`) reviente con
+    # "Boolean value of this clause is not defined" → 500 en cualquier borrado de PPA.
+    contrato.deleted_at = datetime.now(timezone.utc)
     db.commit()
 
 

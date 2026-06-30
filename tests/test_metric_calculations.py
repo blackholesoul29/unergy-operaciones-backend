@@ -175,8 +175,8 @@ def test_prorrateo_periodo_anterior_al_inicio_no_factura():
 
 def test_calcular_proyecto_sin_valor_base_queda_deshabilitado():
     out = calcular_proyecto(
-        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2025, 1, 1),
-        valor_base_anual=None, periodo="2026-06", ipc_tasas=IPC,
+        contrato_id=1, nombre_proyecto="X", fecha_firma_contrato=date(2025, 1, 1),
+        fecha_inicio_om=None, valor_base_anual=None, periodo="2026-06", ipc_tasas=IPC,
     )
     assert out["habilitado"] is False
     assert out["valor_a_facturar"] is None
@@ -185,8 +185,8 @@ def test_calcular_proyecto_sin_valor_base_queda_deshabilitado():
 def test_calcular_proyecto_mes_completo_oracle_entero():
     # IPC 0 ⇒ factor 1.0; base 12.000.000 / 12 = 1.000.000 exacto, mes completo
     out = calcular_proyecto(
-        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2024, 1, 1),
-        valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
+        contrato_id=1, nombre_proyecto="X", fecha_firma_contrato=date(2024, 1, 1),
+        fecha_inicio_om=None, valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
     )
     assert out["habilitado"] is True
     assert out["factor_acumulado"] == 1.0
@@ -198,8 +198,8 @@ def test_calcular_proyecto_mes_completo_oracle_entero():
 def test_calcular_proyecto_prorrateo_aplica_al_valor():
     # mes de inicio, 21/30 días ⇒ 1.000.000 * 0.7 = 700.000
     out = calcular_proyecto(
-        contrato_id=1, nombre_proyecto="X", fecha_inicio=date(2026, 6, 10),
-        valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
+        contrato_id=1, nombre_proyecto="X", fecha_firma_contrato=date(2026, 6, 10),
+        fecha_inicio_om=None, valor_base_anual=12_000_000, periodo="2026-06", ipc_tasas={},
     )
     assert out["prorrateo_factor"] == 0.7
     assert out["valor_a_facturar"] == 700_000

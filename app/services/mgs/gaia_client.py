@@ -127,6 +127,7 @@ _KW_TO_FRT: dict[str, str] = {
     "olimpo":           "frt_olimpo14",
     "la reserva":       "frt_reserva",
     "paso norte":       "frt_paso_norte",
+    "la mesa":          "frt78765",
 }
 
 # ── Dynamic node map (built from live Quoia API, cached 1 h) ─────────────────

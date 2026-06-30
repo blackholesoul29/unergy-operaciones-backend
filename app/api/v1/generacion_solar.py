@@ -1,12 +1,13 @@
 """Real-time solar generation from Solenium inverter API."""
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -20,6 +21,20 @@ from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
 router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar (Solenium)"])
+
+# Colombia opera en America/Bogota = UTC-5 (sin horario de verano). El servidor
+# de producción (Railway) corre en UTC, por lo que `_hoy_col()` devuelve la
+# fecha UTC y "hoy" se adelanta 5h: entre las 19:00 y medianoche de Bogotá el
+# servidor ya está en el día siguiente y la "generación de hoy" salía casi en
+# cero. Las claves de franja horaria de Solenium están en hora local de la
+# planta (Bogotá), así que el día con el que se filtran/cachean debe ser el de
+# Bogotá. Ver _COL_TZ usado igual en fallas.py / cumplimiento.py / desconexion.py.
+_COL_TZ = timezone(timedelta(hours=-5))
+
+
+def _hoy_col() -> date:
+    """Fecha actual en hora de Colombia (Bogotá, UTC-5), independiente del TZ del servidor."""
+    return datetime.now(_COL_TZ).date()
 
 _client: SoleniumClient | None = None
 _gaia_client: GaiaClient | None = None
@@ -356,7 +371,7 @@ def generacion_hoy(
     Empareja proyectos por project_id_solenium (explícito) o por nombre (fuzzy).
     Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
     """
-    _GENHOY_KEY = f"genhoy:{date.today().isoformat()}"
+    _GENHOY_KEY = f"genhoy:{_hoy_col().isoformat()}"
     cached = _cache_get(_GENHOY_KEY)
     if cached:
         return cached
@@ -403,7 +418,7 @@ def generacion_hoy(
     #    - "inversor"  → /project/{id}/generation/ → total_generation_kwh (kWh, datos de inversores)
     #    - "medidor"   → /project_detail/{id}/ → generation.value en MWh (medidor de frontera)
     #    - "sin_dato"  → ninguna fuente disponible
-    today_str = date.today().isoformat()
+    today_str = _hoy_col().isoformat()
 
     def _fetch_kwh(item: tuple) -> tuple:
         p, sol_id, s = item
@@ -416,7 +431,7 @@ def generacion_hoy(
         # devuelve valores incrementales por franja horaria y filtramos las de hoy.
         try:
             from datetime import timedelta
-            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+            yesterday_str = (_hoy_col() - timedelta(days=1)).isoformat()
             gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
             if "results" in gen:
                 gen = gen["results"]
@@ -438,9 +453,12 @@ def generacion_hoy(
                     detail = detail["results"]
                 gen_detail = detail.get("generation") or {}
                 if gen_detail and gen_detail.get("value"):
-                    unit = gen_detail.get("unit", "kWh")
+                    # Normalizar la unidad: Solenium puede devolver "MWh"/"Mwh"/"mwh".
+                    # Comparar con == "MWh" exacto dejaba un valor en MWh sin escalar
+                    # (1000× menos) si la etiqueta variaba de mayúsculas.
+                    unit = (gen_detail.get("unit") or "kWh").strip().lower()
                     val = float(gen_detail["value"])
-                    kwh = val * 1000 if unit == "MWh" else val
+                    kwh = val * 1000 if unit == "mwh" else val
                     if kwh > 0:
                         fuente = "medidor"
             except Exception as exc:
@@ -462,7 +480,7 @@ def generacion_hoy(
 
     result.sort(key=lambda x: x["kwh_real"], reverse=True)
     data = {
-        "fecha":    date.today().isoformat(),
+        "fecha":    _hoy_col().isoformat(),
         "total":    round(sum(r["kwh_real"] for r in result), 1),
         "proyectos": result,
     }
@@ -481,14 +499,14 @@ def resumen_dia(
     - Inversor: `get_generation(ayer, hoy)` por proyecto, sumando las entradas de hoy
       (paralelo). Ambas listas ordenadas desc. Cacheado en memoria (TTL corto).
     """
-    _KEY = f"resumendia:{date.today().isoformat()}"
+    _KEY = f"resumendia:{_hoy_col().isoformat()}"
     cached = _cache_get(_KEY)
     if cached:
         return cached
 
     client = _get_client()
-    today_str = date.today().isoformat()
-    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    today_str = _hoy_col().isoformat()
+    yesterday_str = (_hoy_col() - timedelta(days=1)).isoformat()
 
     # Matching proyectos ↔ Solenium (mismo criterio que generacion-hoy)
     sol_projects = client.get_projects()
@@ -556,8 +574,8 @@ def debug_energy(sol_id: int, _=Depends(get_current_user)):
     """Temporal: ver respuesta cruda de get_generation ayer→hoy para un sol_id."""
     from datetime import date, timedelta
     client = _get_client()
-    today     = date.today().isoformat()
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today     = _hoy_col().isoformat()
+    yesterday = (_hoy_col() - timedelta(days=1)).isoformat()
 
     gen     = client.get_generation(sol_id, yesterday, today) or {}
     gen_kwh = (gen.get("results") or gen if "results" in gen else gen).get("generation_kwh") or {}
@@ -645,7 +663,11 @@ def fleet_summary(_=Depends(get_current_user)):
     projects = client.get_projects()
     summary = client.get_project_summary()
 
-    summary_map = {s["project_id"]: s for s in summary}
+    # El campo puede venir como "project_id" o "id" según la versión de la API
+    # de Solenium (mismo patrón defensivo que el resto del módulo). Con la clave
+    # rígida s["project_id"], si la API devuelve "id" esto lanzaba KeyError o
+    # dejaba el mapa vacío → todos los proyectos en power_kw=0 / online=0.
+    summary_map = {(s.get("project_id") or s.get("id")): s for s in summary if (s.get("project_id") or s.get("id")) is not None}
 
     result = []
     total_power_kw = 0.0
@@ -693,7 +715,11 @@ def fleet_minifarms(_=Depends(get_current_user)):
     client = _get_client()
     projects = client.get_projects()
     summary = client.get_project_summary()
-    summary_map = {s["project_id"]: s for s in summary}
+    # El campo puede venir como "project_id" o "id" según la versión de la API
+    # de Solenium (mismo patrón defensivo que el resto del módulo). Con la clave
+    # rígida s["project_id"], si la API devuelve "id" esto lanzaba KeyError o
+    # dejaba el mapa vacío → todos los proyectos en power_kw=0 / online=0.
+    summary_map = {(s.get("project_id") or s.get("id")): s for s in summary if (s.get("project_id") or s.get("id")) is not None}
 
     result = []
     for p in projects:
@@ -742,7 +768,7 @@ def project_generation(
 ):
     """Daily generation history for a project."""
     client = _get_client()
-    end = date.today()
+    end = _hoy_col()
     start = end - timedelta(days=days)
     data = client.get_energy(
         project_id,
@@ -884,10 +910,10 @@ def data_completeness(
     _=Depends(get_current_user),
 ):
     """Show which projects have/lack generation data for a given month."""
-    today = date.today()
+    today = _hoy_col()
     year = year or today.year
     month = month or today.month
-    days_in_month = (date(year + (month // 12), (month % 12) + 1, 1) - date(year, month, 1)).days if month < 12 else 31
+    days_in_month = calendar.monthrange(year, month)[1]
 
     db = SessionLocal()
     try:
@@ -1013,7 +1039,7 @@ def fleet_monitoring(
         }
 
     # Caché de flota (evita 2 llamadas Solenium por cada refresh)
-    _FLEET_CACHE_KEY = f"fleet:{date.today().isoformat()}"
+    _FLEET_CACHE_KEY = f"fleet:{_hoy_col().isoformat()}"
     cached = _cache_get(_FLEET_CACHE_KEY)
     if cached:
         return cached
@@ -1031,7 +1057,7 @@ def fleet_monitoring(
         if pid is not None:
             summary_map[int(pid)] = s
 
-    today_str = date.today().isoformat()
+    today_str = _hoy_col().isoformat()
     today_rows = db.execute(
         text("SELECT proyecto_id, kwh_real FROM generacion_diaria "
              "WHERE fecha = :today AND kwh_real IS NOT NULL"),
@@ -1119,7 +1145,7 @@ def project_monitoring_detail(
         raise HTTPException(422, "Proyecto sin ID Solenium")
 
     # Caché de detalle por proyecto (evita 21-30 llamadas externas por cada tarjeta)
-    _detail_key = f"detail:{proyecto_id}:{date.today().isoformat()}"
+    _detail_key = f"detail:{proyecto_id}:{_hoy_col().isoformat()}"
     cached = _cache_get(_detail_key)
     if cached:
         return cached
@@ -1127,7 +1153,7 @@ def project_monitoring_detail(
     sol_id = int(p.project_id_solenium)
     client = _get_client()
 
-    today   = date.today()
+    today   = _hoy_col()
     start30 = (today - timedelta(days=29)).isoformat()
 
     # Resolve Gaia node IDs for this project (non-fatal if not found)

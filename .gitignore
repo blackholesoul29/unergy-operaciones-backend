@@ -8,3 +8,16 @@ venv/
 uploads/
 *.egg-info/
 .pytest_cache/
+
+# Copias/artefactos locales que NO pertenecen al repo backend (el código real
+# vive en app/). Evita commitearlos por accidente con `git add -A`:
+#   backend/  → copia anidada duplicada del propio backend
+#   frontend/ → copia local del frontend (incluye node_modules pesado)
+#   fallas-unergy/ → app vanilla-JS antigua
+#   main → archivo vacío basura
+#   scripts/_tmp_* → scripts temporales de exploración
+backend/
+frontend/
+fallas-unergy/
+/main
+scripts/_tmp_*

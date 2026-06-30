@@ -244,11 +244,14 @@ class ProyectoInversor(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
     marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
     modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     potencia_nominal_kw: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
     numero_serie: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo: Mapped[str | None] = mapped_column(SAEnum(TipoInversorEnum, name="tipo_inversor_enum"), nullable=True)
+    orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

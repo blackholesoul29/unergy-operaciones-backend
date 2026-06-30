@@ -58,6 +58,8 @@ class OMCalculoFila(BaseModel):
     valor_calculado:        Optional[int]
     editado_manual:         bool
     historial_indexaciones: str
+    documento_disponible:   bool = False   # PDF individual disponible para este proyecto
+    documento_nombre:       Optional[str] = None   # nombre del archivo renombrado
 
 
 class OMCalculoResponse(BaseModel):

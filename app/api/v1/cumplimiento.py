@@ -73,6 +73,53 @@ def _unergy_token() -> str:
         return resp.json()["access"]
 
 
+_COL_TZ = timezone(timedelta(hours=-5))
+
+
+def _monthly_mwh_from_records(records: list) -> dict:
+    """Calcula los MWh del mes a partir de registros de un contador acumulado.
+
+    Reglas (función pura, testeable):
+    - Ignora lecturas con ``generacion`` None: una lectura faltante NO es 0; antes
+      ``or 0`` la forzaba a 0 y podía hacer que el mes reportara 0 MWh en vez de
+      "sin dato" cuando la lectura de borde venía nula.
+    - Suma los deltas positivos entre lecturas consecutivas. Esto es robusto ante
+      reinicios de contador (un paso negativo aporta 0 en vez de corromper el
+      total) y es EXACTAMENTE igual a (último − primero) cuando el contador es
+      monótono creciente, que es el caso normal. Así el cálculo no cambia para los
+      meses sanos y solo se corrige el caso anómalo (reinicio / lectura nula).
+
+    Devuelve ``mwh`` (float redondeado a 3) o None si no hay lecturas válidas, y
+    el datetime tz-aware (Colombia) de la última lectura válida en ``last_dt``.
+    """
+    rows = []
+    for r in sorted(records, key=lambda r: r.get("time_stamp", "")):
+        g = r.get("generacion")
+        if g is None:
+            continue
+        rows.append((r.get("time_stamp", ""), float(g)))
+
+    if not rows:
+        return {"mwh": None, "n_used": 0, "last_dt": None}
+
+    total_kwh = 0.0
+    for (_, prev), (_, cur) in zip(rows, rows[1:]):
+        if cur > prev:
+            total_kwh += cur - prev
+
+    last_dt = None
+    try:
+        last_aware = datetime.fromisoformat(rows[-1][0].replace("Z", "+00:00"))
+        # Normalizar a hora Colombia antes de leer el día: si la API entrega el
+        # timestamp en UTC ("...Z"), el .day crudo podía rodar al mes siguiente
+        # en lecturas cercanas a medianoche (fin de mes).
+        last_dt = last_aware.astimezone(_COL_TZ)
+    except Exception:
+        last_dt = None
+
+    return {"mwh": round(total_kwh / 1000, 3), "n_used": len(rows), "last_dt": last_dt}
+
+
 def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     """
     Consulta la generación acumulada de un mes para un sub_project.
@@ -109,25 +156,11 @@ def _fetch_month(token: str, sub_project: str, year: int, month: int) -> dict:
     if not records:
         return {"mwh": None, "n_records": 0, "ultimo_dia": None}
 
-    records_sorted = sorted(records, key=lambda r: r.get("time_stamp", ""))
-    gen_first = records_sorted[0].get("generacion") or 0
-    gen_last = records_sorted[-1].get("generacion") or 0
-    diff_kwh = gen_last - gen_first
-    if diff_kwh < 0:
-        diff_kwh = gen_last  # contador reiniciado — usar solo el último
-
-    ultimo_dia = None
-    try:
-        last_ts = records_sorted[-1].get("time_stamp", "")
-        # La API devuelve timestamps con offset Colombia (-05:00) o Z.
-        # fromisoformat los parsea correctamente — el .day es ya hora Colombia.
-        last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-        ultimo_dia = last_dt.day
-    except Exception:
-        pass
+    calc = _monthly_mwh_from_records(records)
+    ultimo_dia = calc["last_dt"].day if calc["last_dt"] is not None else None
 
     return {
-        "mwh": round(diff_kwh / 1000, 3),
+        "mwh": calc["mwh"],
         "n_records": len(records),
         "ultimo_dia": ultimo_dia,
     }
@@ -224,6 +257,21 @@ def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> lis
         )
         .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
         .all()
+    )
+
+
+def _contrato_vigente_en_mes(contrato, year: int, month: int) -> bool:
+    """True si el contrato está vigente en (year, month) según fecha_inicio/fecha_fin.
+
+    Un compromiso del mes M solo cuenta si:
+      (fecha_inicio IS NULL OR fecha_inicio <= último día de M) AND
+      (fecha_fin    IS NULL OR fecha_fin    >= primer día de M).
+    """
+    first_day = date(year, month, 1)
+    last_day = date(year, month, calendar.monthrange(year, month)[1])
+    return (
+        (contrato.fecha_inicio is None or contrato.fecha_inicio <= last_day)
+        and (contrato.fecha_fin is None or contrato.fecha_fin >= first_day)
     )
 
 
@@ -610,7 +658,11 @@ def get_resumen_anual(
 
     result = []
     for c in contratos:
-        rows = comp_by_c.get(c.id, [])
+        # Solo contar compromisos de meses en los que el contrato estuvo vigente:
+        # excluye meses posteriores a fecha_fin (contrato terminado) y anteriores a
+        # fecha_inicio. Antes sumaba los 12 meses sin filtrar (p.ej. Naos 2/3 mostraban
+        # compromiso may-dic pese a terminar el 30-abr-2026).
+        rows = [r for r in comp_by_c.get(c.id, []) if _contrato_vigente_en_mes(c, year, r.mes)]
         total_min = sum(float(r.energia_minima) for r in rows if r.energia_minima is not None)
         total_max = sum(float(r.energia_maxima) for r in rows if r.energia_maxima is not None)
         plantas_vals = [int(r.cantidad_proyectos) for r in rows if r.cantidad_proyectos is not None]
@@ -1193,9 +1245,21 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
         is_future = (year > today.year) or (year == today.year and m > today.month)
         dia_actual = today.day if is_current else total_dias
 
+        # Vigencia del contrato en el mes: un compromiso del mes M solo cuenta si el
+        # contrato está vigente en M. Respeta fecha_inicio y fecha_fin del PPAContrato.
+        # Caso real: Naos 2/3 terminaron el 30-abr-2026 (se acabó la representación de
+        # las plantas); sus compromisos de may-dic NO deben contar ni marcar déficit.
+        c_ini = getattr(contrato, "fecha_inicio", None)
+        c_fin = getattr(contrato, "fecha_fin", None)
+        vigente_m = (
+            (c_ini is None or c_ini <= last_day_m)
+            and (c_fin is None or c_fin >= first_day_m)
+        )
+
         comp = comp_map.get(m)
         min_mwh: Optional[float] = float(comp.energia_minima) if comp and comp.energia_minima is not None else None
         max_mwh: Optional[float] = float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None
+        plantas_esp: Optional[int] = int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None
 
         plantas_mes = []
         gen_total = 0.0
@@ -1303,15 +1367,31 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
             valor_mwh_contrato = gen_total
 
         val = gen_cierre if is_current and gen_cierre is not None else (gen_proy if is_future else gen_total)
-        if min_mwh is not None or max_mwh is not None:
-            effective_min = min_mwh if min_mwh is not None else 0.0
-            effective_max = max_mwh if max_mwh is not None else float('inf')
-            if val < effective_min:
-                estado, compras, excedentes = "deficit", round(max(0., effective_min - val), 3), 0.
-            elif val > effective_max:
-                estado, compras, excedentes = "excedente", 0., round(max(0., val - effective_max), 3)
+        if not vigente_m:
+            # Contrato no vigente este mes: terminó (posterior a fecha_fin) o aún no
+            # inicia (anterior a fecha_inicio). No hay compromiso que cumplir → no contar
+            # ni marcar déficit. Se anula min/max/plantas y se marca el estado para que
+            # el front muestre "finalizado"/"no_iniciado" en vez de 0 plantas / déficit.
+            min_mwh = None
+            max_mwh = None
+            plantas_esp = None
+            valor_mwh_contrato = None
+            estado = "finalizado" if (c_fin and c_fin < first_day_m) else "no_iniciado"
+            compras, excedentes = None, None
+        elif min_mwh is not None or max_mwh is not None:
+            if val is None:
+                # Hay compromiso pero aún no hay generación/proyección (p.ej. mes futuro
+                # sin plantas asignadas todavía): no se puede evaluar cumplimiento.
+                estado, compras, excedentes = "sin_datos", None, None
             else:
-                estado, compras, excedentes = "ok", 0., 0.
+                effective_min = min_mwh if min_mwh is not None else 0.0
+                effective_max = max_mwh if max_mwh is not None else float('inf')
+                if val < effective_min:
+                    estado, compras, excedentes = "deficit", round(max(0., effective_min - val), 3), 0.
+                elif val > effective_max:
+                    estado, compras, excedentes = "excedente", 0., round(max(0., val - effective_max), 3)
+                else:
+                    estado, compras, excedentes = "ok", 0., 0.
         else:
             estado, compras, excedentes = "sin_compromisos", None, None
 
@@ -1333,7 +1413,8 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
             "plantas": plantas_mes,
             "n_plantas": len(plantas_mes),
             # Cumplimiento de plantas: registradas (n_plantas) vs esperadas para el mes.
-            "plantas_esperadas": int(comp.cantidad_proyectos) if comp and comp.cantidad_proyectos is not None else None,
+            # plantas_esp se anula en meses no vigentes (finalizado/no_iniciado).
+            "plantas_esperadas": plantas_esp,
             "valor_mwh": valor_mwh_contrato,
         })
 

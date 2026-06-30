@@ -19,13 +19,14 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
-from app.models.om import IPCTasa, OMSeleccion
+from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
     OMContratoOut, OMCalculoFila, OMCalculoResponse,
     OMSeleccionGuardar, OMSeleccionOut,
 )
 from app.services.om_calculator import calcular_proyecto
+from app.services.om_pdf_splitter import dividir_pdf
 
 router = APIRouter(prefix="/om", tags=["OM Mensual"])
 
@@ -88,6 +89,14 @@ def calcular_periodo(
         for s in db.query(OMSeleccion).filter(OMSeleccion.periodo == periodo).all()
     }
 
+    # Documentos por proyecto para este período: contrato_id → nombre_archivo
+    documentos_nombre = {
+        d.contrato_id: d.nombre_archivo
+        for d in db.query(OMDocumentoProyecto)
+            .filter(OMDocumentoProyecto.periodo == periodo)
+            .all()
+    }
+
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")
@@ -121,6 +130,8 @@ def calcular_periodo(
             facturado=facturado,
             valor_manual=valor_manual,
         )
+        fila_data["documento_disponible"] = c.id in documentos_nombre
+        fila_data["documento_nombre"]     = documentos_nombre.get(c.id)
         fila = OMCalculoFila(**fila_data)
         filas.append(fila)
 
@@ -244,7 +255,6 @@ def ipc_pendiente(_=Depends(get_current_user)):
 from pathlib import Path as _Path
 from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
-from app.models.om import OMFacturaMensual
 
 _UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "om"
 
@@ -279,22 +289,22 @@ async def upload_factura_mensual(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Recibe el PDF consolidado del proveedor y lo guarda en el servidor."""
+    """Recibe el PDF consolidado, lo guarda y lo divide por proyecto."""
     _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Nombre seguro: periodo + nombre original
     ext = _Path(file.filename or "factura.pdf").suffix or ".pdf"
     safe_name = f"{periodo}{ext}"
-    file_path  = _UPLOADS_DIR / safe_name
+    file_path = _UPLOADS_DIR / safe_name
 
     content = await file.read()
     file_path.write_bytes(content)
 
+    # Guardar/actualizar registro de factura consolidada
     factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
     if factura:
         factura.nombre_archivo = file.filename
         factura.ruta_local     = str(file_path)
-        factura.enlace_pdf     = None   # archivo prevalece sobre link
+        factura.enlace_pdf     = None
     else:
         factura = OMFacturaMensual(
             periodo=periodo,
@@ -302,8 +312,82 @@ async def upload_factura_mensual(
             ruta_local=str(file_path),
         )
         db.add(factura)
-    db.commit()
-    return {"ok": True, "nombre_archivo": file.filename, "periodo": periodo}
+    db.flush()  # persiste en transacción sin commit aún
+
+    # ── División por proyecto ────────────────────────────────────────────────
+    contratos = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .all()
+    )
+    contratos_lista = [
+        {
+            "contrato_id": c.id,
+            "nombre_proyecto": (
+                c.proyecto.nombre_comercial if c.proyecto
+                else c.prestador_nombre or f"Contrato #{c.id}"
+            ),
+        }
+        for c in contratos
+    ]
+
+    directorio_docs = _UPLOADS_DIR / "documentos" / periodo
+    try:
+        splitting_result = dividir_pdf(file_path, periodo, contratos_lista, directorio_docs)
+    except Exception as exc:
+        db.commit()  # guardar la factura aunque el split falle
+        return {
+            "ok": True,
+            "nombre_archivo": file.filename,
+            "periodo": periodo,
+            "splitting_result": {
+                "procesados": 0,
+                "sin_match": [],
+                "detalle": [],
+                "error": str(exc),
+            },
+        }
+
+    for item in splitting_result["procesados"]:
+        doc = db.query(OMDocumentoProyecto).filter(
+            OMDocumentoProyecto.contrato_id == item["contrato_id"],
+            OMDocumentoProyecto.periodo == periodo,
+        ).first()
+        if doc:
+            doc.nombre_archivo      = item["archivo"]
+            doc.ruta_local          = item["ruta_local"]
+            doc.numero_factura      = item.get("numero_factura")
+            doc.total_sin_impuestos = item.get("total_sin_impuestos")
+            doc.iva                 = item.get("iva")
+            doc.total_pagar         = item.get("total_pagar")
+            doc.fecha_facturacion   = item.get("fecha_facturacion")
+            doc.cufe                = item.get("cufe")
+        else:
+            doc = OMDocumentoProyecto(
+                contrato_id=item["contrato_id"],
+                periodo=periodo,
+                nombre_archivo=item["archivo"],
+                ruta_local=item["ruta_local"],
+                numero_factura=item.get("numero_factura"),
+                total_sin_impuestos=item.get("total_sin_impuestos"),
+                iva=item.get("iva"),
+                total_pagar=item.get("total_pagar"),
+                fecha_facturacion=item.get("fecha_facturacion"),
+                cufe=item.get("cufe"),
+            )
+            db.add(doc)
+    db.commit()  # commit único para factura + documentos
+
+    return {
+        "ok": True,
+        "nombre_archivo": file.filename,
+        "periodo": periodo,
+        "splitting_result": {
+            "procesados": len(splitting_result["procesados"]),
+            "sin_match": splitting_result["sin_match"],
+            "detalle": splitting_result["procesados"],
+        },
+    }
 
 
 @router.put("/factura/{periodo}/enlace")
@@ -328,6 +412,32 @@ def set_enlace_factura(
         db.add(factura)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/documento/{periodo}/{contrato_id}", response_class=FileResponse)
+def download_documento_proyecto(
+    periodo: str,
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Descarga el PDF individual de un proyecto para el período dado."""
+    doc = db.query(OMDocumentoProyecto).filter(
+        OMDocumentoProyecto.periodo == periodo,
+        OMDocumentoProyecto.contrato_id == contrato_id,
+    ).first()
+    if not doc:
+        raise HTTPException(404, "No hay documento para este proyecto y período")
+    file_path = _Path(doc.ruta_local).resolve()
+    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
+        raise HTTPException(403, "Acceso denegado")
+    if not file_path.exists():
+        raise HTTPException(404, "Archivo no encontrado en el servidor")
+    return FileResponse(
+        path=str(file_path),
+        filename=doc.nombre_archivo,
+        media_type="application/pdf",
+    )
 
 
 @router.get("/factura/{periodo}/file")

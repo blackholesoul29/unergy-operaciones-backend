@@ -11,7 +11,8 @@ Convención de estados:
 """
 import calendar
 import json
-import random
+import logging
+import secrets
 import string
 from datetime import datetime, date, time as time_type, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,6 +32,7 @@ from app.models.usuarios import Usuario
 from app.models.proyectos import Proyecto
 from app.utils.proyecto_matching import find_proyecto_by_name
 
+logger = logging.getLogger("monitoreo")
 router = APIRouter(prefix="/monitoreo", tags=["Monitoreo"])
 
 # ── mapeos de estado ──────────────────────────────────────────────────────────
@@ -577,7 +579,8 @@ def send_code(payload: dict, db: Session = Depends(get_db)):
     if not email:
         raise HTTPException(400, "Email requerido")
 
-    codigo = "".join(random.choices(string.digits, k=6))
+    # OTP de login: usar RNG criptográfico (secrets), no random (PRNG predecible).
+    codigo = "".join(secrets.choice(string.digits) for _ in range(6))
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
     # invalidar códigos anteriores del mismo email
@@ -793,7 +796,9 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
                 "p90_daily": round(p90m / days_in_month, 1) if p90m else None,
             }
         except Exception:
-            pass
+            # No silenciar: si el P50/P90 está corrupto, el dashboard muestra
+            # generación real sin línea base y sin señal del fallo. Logear.
+            logger.exception("Fallo al parsear simulación P90/P50 proyecto_id=%s", getattr(proyecto, "id", "?"))
 
     return {"ok": True, "data": filtered, "simulation": simulation}
 
@@ -947,6 +952,12 @@ async def _solenium_inverters(proyecto: Proyecto) -> tuple[list, str | None]:
                 f"{settings.SOLENIUM_DATA_URL}/project/{sol_id}/inverter/",
                 headers={"Authorization": f"Bearer {token}"},
             )
+            if r2.status_code == 401:
+                # Limpiar token también aquí: si solo se limpiaba en la 1ª llamada,
+                # un 401 en /inverter/ dejaba el token vencido cacheado hasta 20h y
+                # todos los sondeos seguían fallando.
+                _sol_cache["token"] = None
+                return [], "Solenium: sesión expirada"
             if r2.status_code != 200:
                 return [], f"Solenium inversores HTTP {r2.status_code}"
             body = r2.json()

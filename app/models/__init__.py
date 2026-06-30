@@ -15,6 +15,7 @@ from app.models.equipos import Equipo, EquipoSello
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
     FallaCatPrioridad, FallaCatResolucion, Falla, FallaSeguimiento, FallaIntervalo,
+    FallaInversor,
 )
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
@@ -41,6 +42,8 @@ from app.models.panel_contable import (
 from app.models.mandatos import (
     Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
 )
+from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
+from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -50,7 +53,7 @@ __all__ = [
     "ContratoServicio", "PPAContrato", "ContratoArriendo", "PPATarifa", "PPACompromisoEnergia",
     "Frontera", "FronteraLectura", "Equipo", "EquipoSello",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
-    "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo",
+    "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
     "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",
@@ -68,4 +71,6 @@ __all__ = [
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
     "AliasFuenteIngreso",
     "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
+    "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
+    "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
 ]

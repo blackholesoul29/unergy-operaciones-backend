@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
@@ -100,14 +102,54 @@ def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
     return _get_proyecto_or_404(id, db)
 
 
+# Columnas con restricción UNIQUE en el modelo Proyecto. Si se intenta asignar a un
+# proyecto un valor ya usado por otro, Postgres lanza IntegrityError; sin manejo, eso
+# sube como 500 sin detalle y el frontend solo muestra "Error" (ver bug API ID Unergy).
+_UNIQUE_COLS = {
+    "sub_project": "API ID Unergy",
+    "topic_slug": "topic slug",
+}
+
+
 @router.patch("/{id}", response_model=ProyectoOut)
 def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+
+    payload = data.model_dump(exclude_unset=True)
+
+    # Chequeo proactivo de campos únicos: da un mensaje accionable que nombra el
+    # proyecto en conflicto, en vez de un IntegrityError opaco.
+    for col, etiqueta in _UNIQUE_COLS.items():
+        nuevo = payload.get(col)
+        if nuevo in (None, ""):
+            continue
+        conflicto = (
+            db.query(Proyecto)
+            .filter(getattr(Proyecto, col) == nuevo, Proyecto.id != id)
+            .first()
+        )
+        if conflicto:
+            raise HTTPException(
+                409,
+                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
+                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
+                f"Cada {etiqueta} debe ser único.",
+            )
+
+    for k, v in payload.items():
         setattr(p, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Backstop ante carreras o cualquier otra restricción única no cubierta arriba.
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
+            "ya está en uso por otro proyecto.",
+        )
     return _get_proyecto_or_404(id, db)
 
 
@@ -142,6 +184,181 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
     db.delete(p)
     db.commit()
+
+
+# ── Fusión de proyectos duplicados ────────────────────────────────────────────
+# Mueve TODOS los registros hijos del proyecto "perdedor" al "ganador" y borra el
+# perdedor, sin violar constraints únicos. Las tres categorías reflejan el esquema:
+#   _MERGE_SIMPLE       : 1-a-muchos sin constraint -> repunte directo de proyecto_id.
+#   _MERGE_COMPOSITE    : 1-a-muchos / M-M con UNIQUE compuesto -> si el ganador ya
+#                         tiene esa clave, se descarta la fila del perdedor (política
+#                         "conservar la del ganador"); el resto se repunta.
+#   _MERGE_ONE_TO_ONE   : 1-a-1 (proyecto_id UNIQUE) -> si el ganador ya tiene fila,
+#                         se descarta la del perdedor; si no, se mueve.
+# Campos escalares únicos del propio proyecto (sub_project=API ID Unergy, topic_slug,
+# project_id_solenium) se copian del perdedor al ganador solo si el ganador los tiene
+# vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
+_MERGE_SIMPLE = [
+    "proyecto_grupos_panel", "proyecto_inversores", "proyecto_contactos",
+    "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
+    "contratos_servicio", "contratos_arriendo", "asic_solicitudes",
+    "rec_procesos", "costos_variables", "garantias", "operacion_kpis",
+    "representacion_gescon", "gestion_registros", "cumplimiento_mensual",
+]
+_MERGE_COMPOSITE = [
+    ("generacion_diaria", ["fecha"]),
+    ("liquidaciones", ["periodo"]),
+    ("promotor_seguimientos", ["requisito_id"]),
+    ("panel_contable", ["periodo", "tipo"]),
+    ("clasificacion_liquidacion", ["periodo"]),
+    ("mapeo_celda_concepto", ["concepto"]),
+    ("alias_fuente_ingreso", ["columna_origen"]),
+    ("ppa_contrato_proyectos", ["contrato_id"]),
+]
+_MERGE_ONE_TO_ONE = [
+    "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
+    "servicio_cgm", "proyecto_inicio_operacion",
+]
+_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium"]
+
+
+def _scalar(db, sql, params):
+    return db.execute(text(sql), params).scalar()
+
+
+@router.post("/{ganador_id}/merge/{perdedor_id}")
+def merge_proyectos(
+    ganador_id: int,
+    perdedor_id: int,
+    dry_run: bool = Query(True, description="true (default): solo reporta, no modifica nada."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Fusiona el proyecto `perdedor_id` dentro de `ganador_id`.
+
+    Con `dry_run=true` (por defecto) solo devuelve un reporte de lo que pasaría.
+    Con `dry_run=false` ejecuta la fusión completa en una sola transacción y borra
+    el perdedor. Política de colisión: se conserva la fila del ganador.
+    """
+    if ganador_id == perdedor_id:
+        raise HTTPException(400, "El ganador y el perdedor no pueden ser el mismo proyecto.")
+    ganador = db.query(Proyecto).filter(Proyecto.id == ganador_id).first()
+    perdedor = db.query(Proyecto).filter(Proyecto.id == perdedor_id).first()
+    if not ganador:
+        raise HTTPException(404, f"Proyecto ganador {ganador_id} no encontrado.")
+    if not perdedor:
+        raise HTTPException(404, f"Proyecto perdedor {perdedor_id} no encontrado.")
+
+    p = {"keeper": ganador_id, "loser": perdedor_id}
+    movimientos = []  # filas por tabla: {tabla, a_mover, descartadas_por_colision}
+
+    # ── Conteo (dry-run y reporte) ──
+    for t in _MERGE_SIMPLE:
+        n = _scalar(db, f"SELECT count(*) FROM {t} WHERE proyecto_id=:loser", p)
+        if n:
+            movimientos.append({"tabla": t, "a_mover": n, "descartadas_por_colision": 0})
+
+    for t, keys in _MERGE_COMPOSITE:
+        n = _scalar(db, f"SELECT count(*) FROM {t} WHERE proyecto_id=:loser", p)
+        if not n:
+            continue
+        cond = " AND ".join(f"k.{c} = {t}.{c}" for c in keys)
+        coli = _scalar(
+            db,
+            f"SELECT count(*) FROM {t} WHERE proyecto_id=:loser AND EXISTS "
+            f"(SELECT 1 FROM {t} k WHERE k.proyecto_id=:keeper AND {cond})",
+            p,
+        )
+        movimientos.append({"tabla": t, "a_mover": n - coli, "descartadas_por_colision": coli})
+
+    for t in _MERGE_ONE_TO_ONE:
+        n_loser = _scalar(db, f"SELECT count(*) FROM {t} WHERE proyecto_id=:loser", p)
+        if not n_loser:
+            continue
+        n_keeper = _scalar(db, f"SELECT count(*) FROM {t} WHERE proyecto_id=:keeper", p)
+        coli = n_loser if n_keeper else 0
+        movimientos.append({"tabla": t, "a_mover": n_loser - coli, "descartadas_por_colision": coli})
+
+    # asic_cambios_contratos (doble FK, sin unique)
+    asic_orig = _scalar(db, "SELECT count(*) FROM asic_cambios_contratos WHERE proyecto_original_id=:loser", p)
+    asic_nuevo = _scalar(db, "SELECT count(*) FROM asic_cambios_contratos WHERE proyecto_nuevo_id=:loser", p)
+    if asic_orig or asic_nuevo:
+        movimientos.append({"tabla": "asic_cambios_contratos", "a_mover": asic_orig + asic_nuevo, "descartadas_por_colision": 0})
+
+    # subproyectos (self-ref proyecto_padre_id)
+    n_subp = _scalar(db, "SELECT count(*) FROM proyectos WHERE proyecto_padre_id=:loser AND id<>:keeper", p)
+    if n_subp:
+        movimientos.append({"tabla": "proyectos (subproyectos)", "a_mover": n_subp, "descartadas_por_colision": 0})
+
+    # Campos escalares únicos: qué se copiaría al ganador
+    campos_copiados = []
+    for f in _MERGE_SCALAR_UNIQUE:
+        val_keeper = getattr(ganador, f, None)
+        val_loser = getattr(perdedor, f, None)
+        if (val_keeper in (None, "")) and (val_loser not in (None, "")):
+            campos_copiados.append({"campo": f, "valor": val_loser})
+
+    reporte = {
+        "dry_run": dry_run,
+        "ganador": {"id": ganador.id, "nombre": ganador.nombre_comercial},
+        "perdedor": {"id": perdedor.id, "nombre": perdedor.nombre_comercial},
+        "movimientos": movimientos,
+        "campos_copiados_al_ganador": campos_copiados,
+        "total_filas_a_mover": sum(m["a_mover"] for m in movimientos),
+        "total_filas_descartadas": sum(m["descartadas_por_colision"] for m in movimientos),
+    }
+
+    if dry_run:
+        return reporte
+
+    # ── Ejecución real (transacción única) ──
+    try:
+        # 1) Doble FK ASIC
+        db.execute(text("UPDATE asic_cambios_contratos SET proyecto_original_id=:keeper WHERE proyecto_original_id=:loser"), p)
+        db.execute(text("UPDATE asic_cambios_contratos SET proyecto_nuevo_id=:keeper WHERE proyecto_nuevo_id=:loser"), p)
+
+        # 2) Subproyectos (self-ref). Evita dejar al ganador como su propio padre.
+        db.execute(text("UPDATE proyectos SET proyecto_padre_id=:keeper WHERE proyecto_padre_id=:loser AND id<>:keeper"), p)
+        db.execute(text("UPDATE proyectos SET proyecto_padre_id=NULL WHERE id=:keeper AND proyecto_padre_id=:loser"), p)
+
+        # 3) Tablas con unique compuesto: descartar colisiones, repuntar el resto
+        for t, keys in _MERGE_COMPOSITE:
+            cond = " AND ".join(f"k.{c} = {t}.{c}" for c in keys)
+            db.execute(text(
+                f"DELETE FROM {t} WHERE proyecto_id=:loser AND EXISTS "
+                f"(SELECT 1 FROM {t} k WHERE k.proyecto_id=:keeper AND {cond})"), p)
+            db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
+
+        # 4) Tablas 1-a-1: si el ganador ya tiene, descartar la del perdedor; mover el resto
+        for t in _MERGE_ONE_TO_ONE:
+            db.execute(text(
+                f"DELETE FROM {t} WHERE proyecto_id=:loser AND EXISTS "
+                f"(SELECT 1 FROM {t} k WHERE k.proyecto_id=:keeper)"), p)
+            db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
+
+        # 5) Tablas simples
+        for t in _MERGE_SIMPLE:
+            db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
+
+        # 6) Campos escalares únicos: liberar del perdedor y copiar al ganador si está vacío
+        for f in _MERGE_SCALAR_UNIQUE:
+            db.execute(text(f"UPDATE proyectos SET {f}=NULL WHERE id=:loser"), p)
+        for c in campos_copiados:
+            db.execute(
+                text(f"UPDATE proyectos SET {c['campo']}=:val WHERE id=:keeper"),
+                {**p, "val": c["valor"]},
+            )
+
+        # 7) Borrar el perdedor (ya sin hijos colgando)
+        db.execute(text("DELETE FROM proyectos WHERE id=:loser"), p)
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"La fusión falló y se revirtió por completo: {type(e).__name__}: {e}")
+
+    reporte["ejecutado"] = True
+    return reporte
 
 
 @router.patch("/{id}/servicios", response_model=ProyectoOut)
@@ -224,16 +441,49 @@ def delete_grupo_panel(id: int, gp_id: int, db: Session = Depends(get_db), _=Dep
 
 # ── Inversores ────────────────────────────────────────────────────────────────
 
+def _validar_suma_inversores(id: int, db: Session, nuevo_kw, excluir_id: int | None = None) -> None:
+    """La suma de potencias nominales de los inversores no puede superar la
+    potencia AC nominal del proyecto (proyecto_info_tecnica.potencia_ac_kw).
+    Si no hay potencia AC configurada, no se valida (no se puede comparar)."""
+    if nuevo_kw is None:
+        return
+    # SQL crudo: robusto aunque el resto de columnas de info_tecnica difieran por entorno.
+    row = db.execute(
+        text("SELECT potencia_ac_kw FROM proyecto_info_tecnica WHERE proyecto_id = :p"),
+        {"p": id},
+    ).fetchone()
+    ac = float(row[0]) if row and row[0] is not None else None
+    if ac is None or ac <= 0:
+        return
+    q = db.query(ProyectoInversor).filter_by(proyecto_id=id)
+    if excluir_id is not None:
+        q = q.filter(ProyectoInversor.id != excluir_id)
+    suma = sum(float(i.potencia_nominal_kw or 0) for i in q.all()) + float(nuevo_kw)
+    # tolerancia pequeña por redondeos
+    if suma > ac + 0.001:
+        raise HTTPException(
+            400,
+            f"La suma de potencias de inversores ({suma:.1f} kW) supera la potencia AC "
+            f"nominal del proyecto ({ac:.1f} kW).",
+        )
+
+
 @router.get("/{id}/inversores", response_model=list[ProyectoInversorOut])
 def list_inversores(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    return db.query(ProyectoInversor).filter_by(proyecto_id=id).all()
+    return (
+        db.query(ProyectoInversor)
+        .filter_by(proyecto_id=id)
+        .order_by(ProyectoInversor.orden, ProyectoInversor.id)
+        .all()
+    )
 
 
 @router.post("/{id}/inversores", response_model=ProyectoInversorOut, status_code=201)
 def add_inversor(id: int, data: ProyectoInversorCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    inv = ProyectoInversor(proyecto_id=id, **data.model_dump())
+    _validar_suma_inversores(id, db, data.potencia_nominal_kw)
+    inv = ProyectoInversor(proyecto_id=id, **data.model_dump(exclude_none=True))
     db.add(inv)
     db.commit()
     db.refresh(inv)
@@ -245,7 +495,10 @@ def update_inversor(id: int, inv_id: int, data: ProyectoInversorUpdate, db: Sess
     inv = db.query(ProyectoInversor).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversor no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    cambios = data.model_dump(exclude_unset=True)
+    if "potencia_nominal_kw" in cambios:
+        _validar_suma_inversores(id, db, cambios["potencia_nominal_kw"], excluir_id=inv_id)
+    for k, v in cambios.items():
         setattr(inv, k, v)
     db.commit()
     db.refresh(inv)

@@ -19,12 +19,30 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod
-    def secret_key_warn_if_weak(cls, v: str) -> str:
-        if not v or len(v) < 16:
+    def secret_key_must_be_set(cls, v: str, info) -> str:
+        # Los JWT se firman con SECRET_KEY. Con una clave vacía, jose firma con ""
+        # y cualquiera puede forjar un token válido para cualquier sub/rol (toma
+        # total de cuenta admin). En producción esto debe FALLAR el arranque, no
+        # solo advertir. En desarrollo se mantiene la advertencia para no estorbar.
+        env = (info.data.get("ENVIRONMENT") or "development").lower()
+        if not v:
+            if env != "development":
+                raise ValueError(
+                    "[SEGURIDAD] SECRET_KEY no está configurado en producción. "
+                    "Define la variable de entorno SECRET_KEY en Railway con una "
+                    "clave aleatoria de 32+ caracteres."
+                )
             import warnings
             warnings.warn(
-                "[SEGURIDAD] SECRET_KEY no está configurado o es muy corto. "
-                "Define la variable de entorno SECRET_KEY en Railway con una clave segura.",
+                "[SEGURIDAD] SECRET_KEY no está configurado; usando vacío en "
+                "desarrollo. NO desplegar así a producción.",
+                stacklevel=2,
+            )
+        elif len(v) < 32:
+            import warnings
+            warnings.warn(
+                "[SEGURIDAD] SECRET_KEY es más corto que 32 caracteres; usa una "
+                "clave aleatoria más larga para firmar JWT de forma segura.",
                 stacklevel=2,
             )
         return v

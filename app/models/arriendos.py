@@ -33,6 +33,33 @@ class ArrIPCTasa(Base):
     updated_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ArrDocumento(Base):
+    """Documento de pago de arriendo (cuenta_cobro, factura) por proyecto, período y pago_id."""
+    __tablename__ = "arr_documento"
+    __table_args__ = (
+        UniqueConstraint("arr_proyecto_id", "periodo", "pago_id", name="uq_arr_doc_proyecto_periodo_pago"),
+    )
+
+    id:                Mapped[int]        = mapped_column(BigInteger, primary_key=True)
+    # nullable: los predios SIN match en BD se guardan igual (para revisión manual)
+    arr_proyecto_id:   Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
+    periodo:           Mapped[str]        = mapped_column(String(7), nullable=False, index=True)
+    pago_id:           Mapped[int]        = mapped_column(Integer, nullable=False)
+    codigo_contrato:   Mapped[str]        = mapped_column(String(120), nullable=False)
+    tipo_documento:    Mapped[str]        = mapped_column(String(30), nullable=False)   # cuenta_cobro | factura_electronica
+    nombre_archivo:    Mapped[str]        = mapped_column(String(500), nullable=False)   # copia renombrada por predio
+    ruta_local:        Mapped[str]        = mapped_column(String(1000), nullable=False)  # copia renombrada
+    ruta_original:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # archivo original sin renombrar
+    nombre_secundario: Mapped[str | None] = mapped_column(String(500), nullable=True)   # enviada PDF
+    ruta_secundario:   Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Datos extraídos de la cuenta de cobro (matching por predio)
+    codigo_predio:        Mapped[str | None]   = mapped_column(String(120), nullable=True)   # ej. COLCEST45P8
+    numero_cuenta_cobro:  Mapped[str | None]   = mapped_column(String(60),  nullable=True)   # ej. UNERGY-309-84
+    nombre_arrendatario:  Mapped[str | None]   = mapped_column(String(255), nullable=True)
+    valor_individual:     Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
+    fecha_subida:      Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ArrSeleccion(Base):
     __tablename__ = "arr_seleccion_mensual"
     __table_args__ = (

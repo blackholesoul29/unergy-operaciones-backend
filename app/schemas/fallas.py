@@ -79,6 +79,28 @@ class FallaIntervaloOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FallaInversorIn(BaseModel):
+    """Inversor afectado dentro de un reporte estructurado de categoría 'inversores'."""
+    proyecto_inversor_id: Optional[int] = None
+    nombre: Optional[str] = None
+    potencia_kw: Optional[float] = None
+    tipos: list[str] = []
+
+
+class FallaInversorOut(BaseModel):
+    id: int
+    proyecto_inversor_id: Optional[int] = None
+    nombre: Optional[str] = None
+    potencia_kw: Optional[float] = None
+    tipos: list[str] = []
+    model_config = {"from_attributes": True}
+
+    @field_validator("tipos", mode="before")
+    @classmethod
+    def none_to_list(cls, v):
+        return v if v is not None else []
+
+
 class FallaCreate(BaseModel):
     proyecto_id: int
     tipo_id: Optional[int] = None
@@ -104,6 +126,13 @@ class FallaCreate(BaseModel):
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
     intervalos: Optional[list[FallaIntervaloIn]] = None
+    # ── Reporte estructurado (jerárquico por activo) ─────────────────────────
+    categoria_codigo: Optional[str] = None
+    subtipo_codigo: Optional[str] = None
+    subtipo_detalle: Optional[str] = None
+    frontera_afecta_medicion: Optional[bool] = None
+    frontera_perdida_comunicacion: Optional[bool] = None
+    inversores: Optional[list[FallaInversorIn]] = None
 
 
 class FallaUpdate(BaseModel):
@@ -129,6 +158,14 @@ class FallaUpdate(BaseModel):
     acciones_correctivas: Optional[str] = None
     fecha_programada: Optional[date] = None
     intervalos: Optional[list[FallaIntervaloIn]] = None
+    # ── Reporte estructurado / reclasificación ───────────────────────────────
+    categoria_codigo: Optional[str] = None
+    subtipo_codigo: Optional[str] = None
+    subtipo_detalle: Optional[str] = None
+    frontera_afecta_medicion: Optional[bool] = None
+    frontera_perdida_comunicacion: Optional[bool] = None
+    pendiente_reclasificar: Optional[bool] = None
+    inversores: Optional[list[FallaInversorIn]] = None
 
 
 class FallaSeguimientoCreate(BaseModel):
@@ -179,6 +216,16 @@ class FallaOut(BaseModel):
     dias_abierta: Optional[int] = None
     tiempo_afectacion_horas: Optional[float] = None
     sla_limite_dias: Optional[int] = None
+    # ── Reporte estructurado ──────────────────────────────────────────────────
+    categoria_codigo: Optional[str] = None
+    subtipo_codigo: Optional[str] = None
+    subtipo_detalle: Optional[str] = None
+    clasificacion: Optional[Any] = None
+    pendiente_reclasificar: bool = False
+    frontera_afecta_medicion: Optional[bool] = None
+    frontera_perdida_comunicacion: Optional[bool] = None
+    inversores_perdida_comunicacion: Optional[bool] = None
+    inversores_afectados: list[FallaInversorOut] = []
     seguimientos: list[FallaSeguimientoOut] = []
     intervalos: list[FallaIntervaloOut] = []
     created_at: datetime
@@ -200,7 +247,7 @@ class FallaOut(BaseModel):
                 return []
         return []
 
-    @field_validator("seguimientos", "intervalos", mode="before")
+    @field_validator("seguimientos", "intervalos", "inversores_afectados", mode="before")
     @classmethod
     def none_to_list(cls, v):
         return v if v is not None else []

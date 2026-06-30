@@ -235,6 +235,7 @@ def _find_frt(*names: str) -> str | None:
 def _resolve_frt_and_pair(
     *names: str,
     gaia: "GaiaClient | None" = None,
+    db_name_map: "dict[str, str] | None" = None,
 ) -> tuple[str | None, tuple[int | None, int | None]]:
     """Core lookup: (frt_code, (node_principal, node_respaldo)).
 
@@ -245,6 +246,8 @@ def _resolve_frt_and_pair(
          would otherwise match La Paz Vallenata via number 5).
       2. Dynamic num_map from live Quoia API (numbered projects: MGS 0028, etc.)
       3. Static _find_frt() (static _NUM_TO_FRT fallback for non-dynamic numbers)
+      3.5. DB name_map — substring match against fronteras.nombre_frontera (same DB,
+           more reliable than Quoia API names since both sides come from the same system)
       4. Dynamic name_map — normalized substring match against Quoia border names
          (covers projects without number and not in hardcoded keywords, e.g. MGS La Mesa)
       5. Node pair from dynamic frt_map
@@ -282,7 +285,27 @@ def _resolve_frt_and_pair(
     if frt is None:
         frt = _find_frt(*names)
 
-    # 3. Dynamic name matching: check if any input name is a substring of a
+    # 3.5. DB name_map — substring match against fronteras.nombre_frontera.
+    #      More reliable than Quoia API names since both project and frontera
+    #      names live in the same DB.
+    if frt is None and db_name_map:
+        sorted_db = sorted(db_name_map.items(), key=lambda x: -len(x[0]))
+        for input_name in names:
+            if not input_name:
+                continue
+            n = _norm(input_name)
+            if len(n) < 4:
+                continue
+            for border_norm, border_frt in sorted_db:
+                if len(border_norm) < 4:
+                    continue
+                if n in border_norm or border_norm in n:
+                    frt = border_frt
+                    break
+            if frt:
+                break
+
+    # 4. Dynamic name matching: check if any input name is a substring of a
     #    Quoia border name or vice versa. Sorted longest-first to prefer specific
     #    matches. Minimum 4 chars to avoid false positives on short tokens.
     if frt is None and maps and maps.get("names"):
@@ -316,21 +339,45 @@ def _resolve_frt_and_pair(
     return (frt, pair if pair else (None, None))
 
 
+def build_db_name_map(fronteras: list[tuple[str, str]]) -> dict[str, str]:
+    """Build a normalized nombre→frt_code map from DB fronteras (nombre_frontera, codigo_frontera) pairs.
+
+    Call this once per request with the result of querying the fronteras table,
+    then pass the result to find_gaia_node_pair as db_name_map.
+    """
+    result: dict[str, str] = {}
+    for nombre, codigo in fronteras:
+        if nombre and codigo:
+            key = _norm(nombre)
+            if key and key not in result:
+                result[key] = codigo
+    return result
+
+
 def find_gaia_node_id(*names: str, gaia: "GaiaClient | None" = None) -> int | None:
     """Find the principal Gaia node_id for a project. Returns None if not found."""
     _, (node_p, _) = _resolve_frt_and_pair(*names, gaia=gaia)
     return node_p
 
 
-def find_gaia_node_pair(*names: str, gaia: "GaiaClient | None" = None) -> tuple[int | None, int | None]:
+def find_gaia_node_pair(
+    *names: str,
+    gaia: "GaiaClient | None" = None,
+    db_name_map: "dict[str, str] | None" = None,
+) -> tuple[int | None, int | None]:
     """Find both (principal, respaldo) Gaia node IDs for a project.
+
+    If db_name_map is provided (built from fronteras.nombre_frontera via
+    build_db_name_map), it is used for name matching before falling back to
+    the live Quoia API maps — giving a more reliable resolution since both
+    project names and frontera names come from the same DB.
 
     If gaia client is provided, resolves node IDs from the live Quoia API
     (cached 1 hour) — covers all registered borders including new projects
     not in the hardcoded map. Falls back to FRONTERA_NODE_MAP if needed.
     Returns (None, None) if no mapping is found.
     """
-    _, pair = _resolve_frt_and_pair(*names, gaia=gaia)
+    _, pair = _resolve_frt_and_pair(*names, gaia=gaia, db_name_map=db_name_map)
     return pair
 
 

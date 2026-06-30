@@ -167,6 +167,7 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
 
     frt_map: dict[str, tuple[int | None, int | None]] = {}
     num_map: dict[int, str] = {}
+    name_map: dict[str, str] = {}  # normalized_border_name → frt_code
 
     for border in borders:
         name = border.get("name") or ""
@@ -186,11 +187,15 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         if num is not None and num not in num_map:
             num_map[num] = frt_code
 
-    _dynamic_cache = {"frt": frt_map, "num": num_map}
+        norm = _norm(name)
+        if norm and norm not in name_map:
+            name_map[norm] = frt_code
+
+    _dynamic_cache = {"frt": frt_map, "num": num_map, "names": name_map}
     _dynamic_cache_ts = now
     logger.info(
-        "Dynamic node maps built: %d borders, %d nodes, %d numbered",
-        len(frt_map), len(meter_to_node), len(num_map),
+        "Dynamic node maps built: %d borders, %d nodes, %d numbered, %d named",
+        len(frt_map), len(meter_to_node), len(num_map), len(name_map),
     )
     return _dynamic_cache
 
@@ -232,10 +237,12 @@ def _resolve_frt_and_pair(
     """Core lookup: (frt_code, (node_principal, node_respaldo)).
 
     Resolution order:
-      1. Dynamic num_map from live Quoia API (catches new/unnumbered projects)
-      2. Static _find_frt() (covers keyword projects like Baraya, Gandalf, etc.)
-      3. Node pair from dynamic frt_map if frt_code found in live API
-      4. Node pair from hardcoded FRONTERA_NODE_MAP as final fallback
+      1. Dynamic num_map from live Quoia API (numbered projects: MGS 0028, etc.)
+      2. Static _find_frt() (hardcoded keywords: Baraya, Gandalf, paso norte, etc.)
+      3. Dynamic name_map — normalized substring match against Quoia border names
+         (covers projects without number and not in hardcoded keywords, e.g. MGS La Mesa)
+      4. Node pair from dynamic frt_map
+      5. Hardcoded FRONTERA_NODE_MAP as final fallback
     """
     maps = _get_dynamic_maps(gaia) if gaia is not None else None
 
@@ -252,18 +259,40 @@ def _resolve_frt_and_pair(
                 if frt:
                     break
 
-    # 2. Static _find_frt (handles keywords + static _NUM_TO_FRT for anything missed above)
+    # 2. Static _find_frt (keywords + static _NUM_TO_FRT)
     if frt is None:
         frt = _find_frt(*names)
+
+    # 3. Dynamic name matching: check if any input name is a substring of a
+    #    Quoia border name or vice versa. Sorted longest-first to prefer specific
+    #    matches. Minimum 4 chars to avoid false positives on short tokens.
+    if frt is None and maps and maps.get("names"):
+        name_map = maps["names"]
+        # Sort longest border name first (more specific match wins)
+        sorted_names = sorted(name_map.items(), key=lambda x: -len(x[0]))
+        for input_name in names:
+            if not input_name:
+                continue
+            n = _norm(input_name)
+            if len(n) < 4:
+                continue
+            for border_norm, border_frt in sorted_names:
+                if len(border_norm) < 4:
+                    continue
+                if n in border_norm or border_norm in n:
+                    frt = border_frt
+                    break
+            if frt:
+                break
 
     if frt is None:
         return (None, (None, None))
 
-    # 3. Node pair from dynamic map
+    # 4. Node pair from dynamic map
     if maps and frt in maps["frt"]:
         return (frt, maps["frt"][frt])
 
-    # 4. Hardcoded fallback
+    # 5. Hardcoded fallback
     pair = FRONTERA_NODE_MAP.get(frt)
     return (frt, pair if pair else (None, None))
 

@@ -853,8 +853,12 @@ def get_simulador(
             "contrato_id": dup["contrato_id"],
             "pct_despacho": dup["pct_despacho"],
             "es_duplicado": True,
-            "comprado_por_unergy": False,
-            "contrato_compra_nombre": None,
+            # Misma lógica que la fila primaria: si Unergy compra la planta vía un
+            # contrato de compra, la etiqueta es "comprado por Unergy" aunque la fila
+            # sea duplicado de un contrato de venta (ej. GD Astrolumen La Garita en
+            # Terpel 4). Antes estaba hardcodeado a False/None y salía como compra en bolsa.
+            "comprado_por_unergy": p.id in compra_proyecto_ids,
+            "contrato_compra_nombre": compra_nombre_map.get(p.id),
             "piscina_bolsa": None,  # los duplicados pertenecen a un contrato, no al remanente
         })
 

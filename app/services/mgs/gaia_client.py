@@ -129,6 +129,71 @@ _KW_TO_FRT: dict[str, str] = {
     "paso norte":       "frt_paso_norte",
 }
 
+# ── Dynamic node map (built from live Quoia API, cached 1 h) ─────────────────
+_dynamic_cache: dict | None = None
+_dynamic_cache_ts: float = 0.0
+_DYNAMIC_CACHE_TTL = 3600  # seconds
+
+
+def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
+    """Return {frt, num} maps built from live Quoia API, cached for 1 hour.
+
+    frt: frt_code → (node_principal, node_respaldo)
+    num: minigranja_number → frt_code  (from Quoia border names)
+
+    Returns stale cache on fetch failure rather than None so callers can
+    still serve the last known data while the API is temporarily down.
+    """
+    global _dynamic_cache, _dynamic_cache_ts
+    now = time.monotonic()
+    if _dynamic_cache is not None and (now - _dynamic_cache_ts) < _DYNAMIC_CACHE_TTL:
+        return _dynamic_cache
+    try:
+        borders = gaia.get_all_borders()
+        nodes = gaia.get_all_nodes()
+    except Exception as exc:
+        logger.warning("Dynamic node map fetch failed, using stale cache: %s", exc)
+        return _dynamic_cache
+
+    # meter_id → node_id
+    meter_to_node: dict[int, int] = {}
+    for node in nodes:
+        meter = node.get("meter") or {}
+        if isinstance(meter, dict):
+            mid = meter.get("id")
+            nid = node.get("id")
+            if mid is not None and nid is not None:
+                meter_to_node[int(mid)] = int(nid)
+
+    frt_map: dict[str, tuple[int | None, int | None]] = {}
+    num_map: dict[int, str] = {}
+
+    for border in borders:
+        name = border.get("name") or ""
+        frt_gen = border.get("frt_generation") or {}
+        if not frt_gen:
+            continue
+        frt_code = (frt_gen.get("frt_code") or "").lower()
+        if not frt_code:
+            continue
+        main_m = frt_gen.get("main_meter")
+        back_m = frt_gen.get("backup_meter")
+        node_p = meter_to_node.get(int(main_m)) if main_m else None
+        node_r = meter_to_node.get(int(back_m)) if back_m else None
+        frt_map[frt_code] = (node_p, node_r)
+
+        num = _mgs_number(name)
+        if num is not None and num not in num_map:
+            num_map[num] = frt_code
+
+    _dynamic_cache = {"frt": frt_map, "num": num_map}
+    _dynamic_cache_ts = now
+    logger.info(
+        "Dynamic node maps built: %d borders, %d nodes, %d numbered",
+        len(frt_map), len(meter_to_node), len(num_map),
+    )
+    return _dynamic_cache
+
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
@@ -160,27 +225,65 @@ def _find_frt(*names: str) -> str | None:
     return None
 
 
-def find_gaia_node_id(*names: str) -> int | None:
+def _resolve_frt_and_pair(
+    *names: str,
+    gaia: "GaiaClient | None" = None,
+) -> tuple[str | None, tuple[int | None, int | None]]:
+    """Core lookup: (frt_code, (node_principal, node_respaldo)).
+
+    Resolution order:
+      1. Dynamic num_map from live Quoia API (catches new/unnumbered projects)
+      2. Static _find_frt() (covers keyword projects like Baraya, Gandalf, etc.)
+      3. Node pair from dynamic frt_map if frt_code found in live API
+      4. Node pair from hardcoded FRONTERA_NODE_MAP as final fallback
+    """
+    maps = _get_dynamic_maps(gaia) if gaia is not None else None
+
+    frt: str | None = None
+
+    # 1. Number-based lookup against dynamic map
+    if maps:
+        for name in names:
+            if not name:
+                continue
+            num = _mgs_number(name)
+            if num is not None:
+                frt = maps["num"].get(num)
+                if frt:
+                    break
+
+    # 2. Static _find_frt (handles keywords + static _NUM_TO_FRT for anything missed above)
+    if frt is None:
+        frt = _find_frt(*names)
+
+    if frt is None:
+        return (None, (None, None))
+
+    # 3. Node pair from dynamic map
+    if maps and frt in maps["frt"]:
+        return (frt, maps["frt"][frt])
+
+    # 4. Hardcoded fallback
+    pair = FRONTERA_NODE_MAP.get(frt)
+    return (frt, pair if pair else (None, None))
+
+
+def find_gaia_node_id(*names: str, gaia: "GaiaClient | None" = None) -> int | None:
     """Find the principal Gaia node_id for a project. Returns None if not found."""
-    frt = _find_frt(*names)
-    if frt:
-        pair = FRONTERA_NODE_MAP.get(frt)
-        if pair:
-            return pair[0]
-    return None
+    _, (node_p, _) = _resolve_frt_and_pair(*names, gaia=gaia)
+    return node_p
 
 
-def find_gaia_node_pair(*names: str) -> tuple[int | None, int | None]:
+def find_gaia_node_pair(*names: str, gaia: "GaiaClient | None" = None) -> tuple[int | None, int | None]:
     """Find both (principal, respaldo) Gaia node IDs for a project.
 
+    If gaia client is provided, resolves node IDs from the live Quoia API
+    (cached 1 hour) — covers all registered borders including new projects
+    not in the hardcoded map. Falls back to FRONTERA_NODE_MAP if needed.
     Returns (None, None) if no mapping is found.
     """
-    frt = _find_frt(*names)
-    if frt:
-        pair = FRONTERA_NODE_MAP.get(frt)
-        if pair:
-            return pair
-    return (None, None)
+    _, pair = _resolve_frt_and_pair(*names, gaia=gaia)
+    return pair
 
 
 def _col_today() -> str:
@@ -326,6 +429,25 @@ class GaiaClient:
         """
         results = []
         url = f"{self._base}/api/cgm/v1/border/"
+        while url:
+            data = self._get(url)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                results.extend(data.get("results", []))
+                url = data.get("next")
+            else:
+                break
+        return results
+
+    def get_all_nodes(self) -> list[dict]:
+        """Fetch all monitoring nodes from /api/node/retailer/ (paginated).
+
+        Each dict has: id, name, category, meter {id, serial}, eae, iae, status.
+        Used to build the meter_id → node_id mapping for dynamic border resolution.
+        """
+        results = []
+        url = f"{self._base}/api/node/retailer/"
         while url:
             data = self._get(url)
             if isinstance(data, list):

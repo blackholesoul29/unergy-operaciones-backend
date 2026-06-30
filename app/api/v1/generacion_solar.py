@@ -1136,6 +1136,7 @@ def project_monitoring_detail(
         p.nombre_comercial or "",
         p.alias_monitoreo or "",
         p.nombre_bitacora or "",
+        gaia=gaia,
     )
 
     with ThreadPoolExecutor(max_workers=5) as ex:

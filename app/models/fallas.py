@@ -107,6 +107,16 @@ class Falla(Base):
     acciones_correctivas: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Feature 6: programado state — scheduled date for intervention
     fecha_programada: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    # ── Reporte estructurado (jerárquico por activo) — solo fallas nuevas ─────
+    # Las fallas viejas dejan estos campos en NULL y siguen usando tipo_id/tipo_libre.
+    categoria_codigo: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    subtipo_codigo: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    subtipo_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clasificacion: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    pendiente_reclasificar: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    frontera_afecta_medicion: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    frontera_perdida_comunicacion: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    inversores_perdida_comunicacion: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -122,6 +132,10 @@ class Falla(Base):
     intervalos: Mapped[list["FallaIntervalo"]] = relationship(
         "FallaIntervalo", back_populates="falla",
         cascade="all, delete-orphan", order_by="FallaIntervalo.inicio",
+    )
+    inversores_afectados: Mapped[list["FallaInversor"]] = relationship(
+        "FallaInversor", back_populates="falla",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -255,3 +269,26 @@ class FallaIntervalo(Base):
         else:
             fin = datetime.now(col_tz)
         return round(max(0.0, (fin - ini).total_seconds() / 3600), 2)
+
+
+class FallaInversor(Base):
+    """Inversor afectado en una falla estructurada de categoría 'inversores'.
+
+    Un renglón por (falla, inversor). `tipos` guarda la lista de códigos de tipo de
+    falla de ese inversor (no_generacion, perdida_comunicacion, etc.). Habilita
+    indicadores: inversor con más fallas, tipos de falla más frecuentes por inversor.
+    `proyecto_inversor_id` puede quedar NULL si el inversor se borra del catálogo;
+    `nombre`/`potencia_kw` son un snapshot para conservar el reporte histórico.
+    """
+    __tablename__ = "falla_inversores"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    falla_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas.id"), nullable=False, index=True)
+    proyecto_inversor_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("proyecto_inversores.id"), nullable=True, index=True)
+    nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    potencia_kw: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
+    tipos: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    falla: Mapped["Falla"] = relationship("Falla", back_populates="inversores_afectados")

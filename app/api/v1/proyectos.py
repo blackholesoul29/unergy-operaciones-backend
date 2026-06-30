@@ -441,16 +441,49 @@ def delete_grupo_panel(id: int, gp_id: int, db: Session = Depends(get_db), _=Dep
 
 # ── Inversores ────────────────────────────────────────────────────────────────
 
+def _validar_suma_inversores(id: int, db: Session, nuevo_kw, excluir_id: int | None = None) -> None:
+    """La suma de potencias nominales de los inversores no puede superar la
+    potencia AC nominal del proyecto (proyecto_info_tecnica.potencia_ac_kw).
+    Si no hay potencia AC configurada, no se valida (no se puede comparar)."""
+    if nuevo_kw is None:
+        return
+    # SQL crudo: robusto aunque el resto de columnas de info_tecnica difieran por entorno.
+    row = db.execute(
+        text("SELECT potencia_ac_kw FROM proyecto_info_tecnica WHERE proyecto_id = :p"),
+        {"p": id},
+    ).fetchone()
+    ac = float(row[0]) if row and row[0] is not None else None
+    if ac is None or ac <= 0:
+        return
+    q = db.query(ProyectoInversor).filter_by(proyecto_id=id)
+    if excluir_id is not None:
+        q = q.filter(ProyectoInversor.id != excluir_id)
+    suma = sum(float(i.potencia_nominal_kw or 0) for i in q.all()) + float(nuevo_kw)
+    # tolerancia pequeña por redondeos
+    if suma > ac + 0.001:
+        raise HTTPException(
+            400,
+            f"La suma de potencias de inversores ({suma:.1f} kW) supera la potencia AC "
+            f"nominal del proyecto ({ac:.1f} kW).",
+        )
+
+
 @router.get("/{id}/inversores", response_model=list[ProyectoInversorOut])
 def list_inversores(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    return db.query(ProyectoInversor).filter_by(proyecto_id=id).all()
+    return (
+        db.query(ProyectoInversor)
+        .filter_by(proyecto_id=id)
+        .order_by(ProyectoInversor.orden, ProyectoInversor.id)
+        .all()
+    )
 
 
 @router.post("/{id}/inversores", response_model=ProyectoInversorOut, status_code=201)
 def add_inversor(id: int, data: ProyectoInversorCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    inv = ProyectoInversor(proyecto_id=id, **data.model_dump())
+    _validar_suma_inversores(id, db, data.potencia_nominal_kw)
+    inv = ProyectoInversor(proyecto_id=id, **data.model_dump(exclude_none=True))
     db.add(inv)
     db.commit()
     db.refresh(inv)
@@ -462,7 +495,10 @@ def update_inversor(id: int, inv_id: int, data: ProyectoInversorUpdate, db: Sess
     inv = db.query(ProyectoInversor).filter_by(id=inv_id, proyecto_id=id).first()
     if not inv:
         raise HTTPException(404, "Inversor no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    cambios = data.model_dump(exclude_unset=True)
+    if "potencia_nominal_kw" in cambios:
+        _validar_suma_inversores(id, db, cambios["potencia_nominal_kw"], excluir_id=inv_id)
+    for k, v in cambios.items():
         setattr(inv, k, v)
     db.commit()
     db.refresh(inv)

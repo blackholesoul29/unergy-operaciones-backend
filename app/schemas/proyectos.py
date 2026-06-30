@@ -122,19 +122,25 @@ class ProyectoGrupoPanelOut(ProyectoGrupoPanelCreate):
 # ── Inversores ────────────────────────────────────────────────────────────────
 
 class ProyectoInversorCreate(BaseModel):
+    nombre: Optional[str] = None
     marca: Optional[str] = None
     modelo: Optional[str] = None
     potencia_nominal_kw: Optional[float] = None
     numero_serie: Optional[str] = None
     tipo: Optional[str] = None
+    orden: Optional[int] = None
+    activo: Optional[bool] = None
 
 
 class ProyectoInversorUpdate(BaseModel):
+    nombre: Optional[str] = None
     marca: Optional[str] = None
     modelo: Optional[str] = None
     potencia_nominal_kw: Optional[float] = None
     numero_serie: Optional[str] = None
     tipo: Optional[str] = None
+    orden: Optional[int] = None
+    activo: Optional[bool] = None
 
 
 class ProyectoInversorOut(ProyectoInversorCreate):

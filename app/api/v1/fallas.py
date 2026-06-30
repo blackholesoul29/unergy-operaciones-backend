@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import (
-    Falla, FallaSeguimiento, FallaIntervalo,
+    Falla, FallaSeguimiento, FallaIntervalo, FallaInversor,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
 from app.models.proyectos import Proyecto
@@ -19,6 +19,10 @@ from app.schemas.fallas import (
     FallaSeguimientoCreate, FallaSeguimientoOut,
     FallaCatalogos, FallaCatEstadoOut, FallaCatPrioridadOut, FallaCatTipoOut, FallaCatResolucionOut,
     FallaSLADashboard, FallaImpacto,
+)
+from app.services.fallas.estructura import (
+    ESTRUCTURA_FALLAS, get_categoria, validar_clasificacion, tipo_codigo,
+    etiqueta_subtipo, es_subtipo_pendiente,
 )
 from app.schemas.common import PaginatedResponse
 
@@ -38,8 +42,142 @@ _FALLA_LOAD = [
     selectinload(Falla.registrado_por),
     selectinload(Falla.asignado_a),
     selectinload(Falla.intervalos),
+    selectinload(Falla.inversores_afectados),
     _SEGS_LOAD,
 ]
+
+
+def _validar_clasificacion_payload(categoria_codigo, subtipo_codigo, inversores) -> None:
+    """Valida el payload estructurado contra la estructura canónica; 422 si inválido."""
+    inv_tipos = sorted({t for inv in (inversores or []) for t in (_inv_tipos(inv))})
+    ok, err = validar_clasificacion(categoria_codigo, subtipo_codigo, inv_tipos)
+    if not ok:
+        raise HTTPException(422, f"Clasificación inválida: {err}")
+
+
+def _inv_tipos(inv) -> list:
+    """tipos de un inversor venga como dict (model_dump) o como objeto pydantic."""
+    if isinstance(inv, dict):
+        return inv.get("tipos") or []
+    return getattr(inv, "tipos", None) or []
+
+
+def _inv_get(inv, key):
+    if isinstance(inv, dict):
+        return inv.get(key)
+    return getattr(inv, key, None)
+
+
+def _sync_falla_inversores(falla: Falla, inversores: list | None, db: Session) -> None:
+    """Reemplaza los inversores afectados de la falla (replace-all)."""
+    if inversores is None:
+        return
+    db.query(FallaInversor).filter(FallaInversor.falla_id == falla.id).delete(synchronize_session=False)
+    for inv in inversores:
+        tipos = _inv_tipos(inv)
+        db.add(FallaInversor(
+            falla_id=falla.id,
+            proyecto_inversor_id=_inv_get(inv, "proyecto_inversor_id"),
+            nombre=_inv_get(inv, "nombre"),
+            potencia_kw=_inv_get(inv, "potencia_kw"),
+            tipos=tipos or [],
+        ))
+
+
+def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -> None:
+    """Deriva tipo_id/pendiente/flags/clasificacion a partir de las columnas ya
+    asignadas en `falla` y la lista de inversores. Sincroniza falla_inversores.
+
+    Asume que la clasificación ya fue validada. Para `inversores=None` (PATCH que no
+    toca inversores) recalcula a partir de las filas existentes en BD.
+    """
+    categoria = falla.categoria_codigo
+    cat = get_categoria(categoria) if categoria else None
+    if not cat:
+        return
+
+    # Fuente de inversores para derivar: input nuevo o filas existentes.
+    if inversores is None and categoria == "inversores":
+        existentes = db.query(FallaInversor).filter(FallaInversor.falla_id == falla.id).all()
+        inv_source = [
+            {"proyecto_inversor_id": e.proyecto_inversor_id, "nombre": e.nombre,
+             "potencia_kw": float(e.potencia_kw) if e.potencia_kw is not None else None,
+             "tipos": e.tipos or []}
+            for e in existentes
+        ]
+    else:
+        inv_source = inversores or []
+
+    inv_tipos_all = sorted({t for inv in inv_source for t in _inv_tipos(inv)})
+
+    # pendiente_reclasificar deriva del subtipo (p.ej. desconexión sin identificar)
+    falla.pendiente_reclasificar = es_subtipo_pendiente(categoria, falla.subtipo_codigo)
+    # flag de comunicación de inversores (solo aplica a categoría inversores)
+    falla.inversores_perdida_comunicacion = (
+        ("perdida_comunicacion" in inv_tipos_all) if categoria == "inversores" else None
+    )
+    # frontera flags solo aplican a frontera
+    if categoria != "frontera":
+        falla.frontera_afecta_medicion = None
+        falla.frontera_perdida_comunicacion = None
+
+    # Mapeo a tipo de catálogo (para que vistas/analytics legacy muestren etiqueta)
+    nuevo_tipo_id = None
+    if categoria in ("red", "frontera", "eventos_adversos") and falla.subtipo_codigo:
+        t = db.query(FallaCatTipo).filter_by(codigo=tipo_codigo(categoria, falla.subtipo_codigo)).first()
+        if t:
+            nuevo_tipo_id = t.id
+    elif categoria == "inversores" and inv_tipos_all:
+        t = db.query(FallaCatTipo).filter_by(codigo=tipo_codigo("inversores", inv_tipos_all[0])).first()
+        if t:
+            nuevo_tipo_id = t.id
+    if nuevo_tipo_id:
+        falla.tipo_id = nuevo_tipo_id
+
+    # Snapshot estructurado (fuente para mostrar/auditar)
+    clasif = {"categoria": categoria, "categoria_etiqueta": cat["etiqueta"]}
+    if falla.subtipo_codigo:
+        clasif["subtipo"] = falla.subtipo_codigo
+        clasif["subtipo_etiqueta"] = etiqueta_subtipo(categoria, falla.subtipo_codigo)
+    if falla.subtipo_detalle:
+        clasif["detalle"] = falla.subtipo_detalle
+    if categoria == "frontera":
+        clasif["afecta_medicion"] = bool(falla.frontera_afecta_medicion)
+        clasif["perdida_comunicacion"] = bool(falla.frontera_perdida_comunicacion)
+    if categoria == "inversores":
+        clasif["inversores"] = [
+            {
+                "proyecto_inversor_id": _inv_get(inv, "proyecto_inversor_id"),
+                "nombre": _inv_get(inv, "nombre"),
+                "potencia_kw": _inv_get(inv, "potencia_kw"),
+                "tipos": _inv_tipos(inv),
+                "tipos_etiquetas": [etiqueta_subtipo("inversores", t) or t for t in _inv_tipos(inv)],
+            }
+            for inv in inv_source
+        ]
+        # tipo_libre legible para las listas/tablas legacy
+        nombres = ", ".join(
+            [(_inv_get(inv, "nombre") or f"Inv {_inv_get(inv, 'proyecto_inversor_id')}") for inv in inv_source]
+        ) or "Inversores"
+        tlabels = ", ".join([etiqueta_subtipo("inversores", t) or t for t in inv_tipos_all])
+        falla.tipo_libre = (f"Inversores: {nombres} — {tlabels}")[:255]
+    falla.clasificacion = clasif
+
+    # Reemplaza filas de inversores afectados solo si vino input nuevo.
+    _sync_falla_inversores(falla, inversores, db)
+
+
+def _alarmas_post_guardado(falla_id: int, db: Session) -> None:
+    """Hook de alarmas de comunicación tras crear/actualizar. Nunca rompe el flujo."""
+    try:
+        from app.services.fallas.alarmas import evaluar_alarmas_falla
+        falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == falla_id).first()
+        if falla and falla.categoria_codigo:
+            evaluar_alarmas_falla(db, falla)
+            db.commit()
+    except Exception:
+        db.rollback()
+        logging.getLogger("fallas").exception("evaluar_alarmas_falla falló (no bloqueante)")
 
 
 def _sync_intervalos(falla: Falla, intervalos: list | None, db: Session) -> None:
@@ -223,6 +361,13 @@ def get_catalogos(db: Session = Depends(get_db), _=Depends(get_current_user)):
     )
     resoluciones = db.query(FallaCatResolucion).order_by(FallaCatResolucion.etiqueta).all()
     return {"estados": estados, "prioridades": prioridades, "tipos": tipos, "resoluciones": resoluciones}
+
+
+@router.get("/estructura")
+def get_estructura(_=Depends(get_current_user)):
+    """Estructura canónica del reporte jerárquico (sistema → opciones/equipos/tipos).
+    Fuente única que consumen el form web y la app móvil."""
+    return {"categorias": ESTRUCTURA_FALLAS}
 
 
 
@@ -519,6 +664,13 @@ def create_falla(
     dump = data.model_dump()
     fotos = dump.pop("fotos_urls", None)
     intervalos = dump.pop("intervalos", None)
+    inversores = dump.pop("inversores", None)  # no es columna → se procesa aparte
+
+    # Camino estructurado: validar antes de crear nada.
+    categoria_codigo = dump.get("categoria_codigo")
+    if categoria_codigo:
+        _validar_clasificacion_payload(categoria_codigo, dump.get("subtipo_codigo"), inversores)
+
     falla = Falla(
         **dump,
         codigo_interno=f"TMP-{uuid.uuid4().hex[:12]}",
@@ -529,6 +681,8 @@ def create_falla(
     db.flush()  # asigna falla.id por autoincremento (evita colisiones de código)
     falla.codigo_interno = f"FAL-{datetime.now(timezone.utc).year}-{falla.id:05d}"
     _sync_intervalos(falla, intervalos, db)
+    if categoria_codigo:
+        _aplicar_clasificacion(falla, inversores or [], db)
     db.commit()
 
     # Notificar a todos los coordinadores
@@ -550,6 +704,9 @@ def create_falla(
         )
     if coordinadores:
         db.commit()
+
+    # Alarmas de comunicación (frontera / inversores / total) — no bloqueante
+    _alarmas_post_guardado(falla.id, db)
 
     return _get_or_404(falla.id, db)
 
@@ -574,6 +731,9 @@ def update_falla(
     # Los intervalos de disparo se sincronizan aparte (no son una columna).
     sync_ints = "intervalos" in dump
     intervalos = dump.pop("intervalos", None)
+    # Inversores afectados tampoco son columna.
+    inversores_touched = "inversores" in dump
+    inversores = dump.pop("inversores", None)
 
     nuevo_asignado_id = dump.get("asignado_a_id")
     notificar_asignacion = (
@@ -587,6 +747,26 @@ def update_falla(
 
     if sync_ints:
         _sync_intervalos(falla, intervalos or [], db)
+
+    # Reclasificación / edición estructurada: si se tocó la categoría o los
+    # inversores, revalidar y recalcular tipo_id/flags/clasificación.
+    estructura_touched = (
+        inversores_touched
+        or any(k in dump for k in (
+            "categoria_codigo", "subtipo_codigo", "subtipo_detalle",
+            "frontera_afecta_medicion", "frontera_perdida_comunicacion",
+        ))
+    )
+    if estructura_touched and falla.categoria_codigo:
+        db.flush()  # asegura falla.id para sincronizar inversores
+        # Validar: para inversores solo si llegó lista nueva (si no, los datos
+        # existentes ya eran válidos). Para red/frontera/eventos validar subtipo.
+        if falla.categoria_codigo == "inversores":
+            if inversores_touched:
+                _validar_clasificacion_payload(falla.categoria_codigo, falla.subtipo_codigo, inversores)
+        else:
+            _validar_clasificacion_payload(falla.categoria_codigo, falla.subtipo_codigo, None)
+        _aplicar_clasificacion(falla, inversores if inversores_touched else None, db)
 
     # Sellar fecha+hora de solución automáticamente al cerrar la falla (estado
     # final) si el usuario no la indicó explícitamente; al reabrir se limpia.
@@ -613,6 +793,9 @@ def update_falla(
             link="/m/tecnico",
         )
         db.commit()
+
+    # Reevaluar alarmas de comunicación tras el cambio — no bloqueante
+    _alarmas_post_guardado(id, db)
 
     return _get_or_404(id, db)
 

@@ -961,6 +961,37 @@ _PENDING_DDLS = [
     # arr_documento: una copia por predio (predios sin match se guardan igual) + original
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS ruta_original VARCHAR(1000)",
     "ALTER TABLE arr_documento ALTER COLUMN arr_proyecto_id DROP NOT NULL",
+    # ── Reporte de fallas estructurado (jerárquico por activo) ───────────────
+    # Categorías de alarma de comunicación superan VARCHAR(20) → ampliar columna.
+    "ALTER TABLE alarma_estado ALTER COLUMN categoria TYPE VARCHAR(40)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS categoria_codigo VARCHAR(50)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS subtipo_codigo VARCHAR(80)",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS subtipo_detalle TEXT",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS clasificacion JSONB",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS pendiente_reclasificar BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS frontera_afecta_medicion BOOLEAN",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS frontera_perdida_comunicacion BOOLEAN",
+    "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS inversores_perdida_comunicacion BOOLEAN",
+    "CREATE INDEX IF NOT EXISTS ix_fallas_categoria_codigo ON fallas (categoria_codigo)",
+    "CREATE INDEX IF NOT EXISTS ix_fallas_pendiente_reclasificar ON fallas (pendiente_reclasificar) WHERE pendiente_reclasificar = true",
+    # potencia AC nominal del proyecto (regla: suma de inversores ≤ esta potencia)
+    "ALTER TABLE proyecto_info_tecnica ADD COLUMN IF NOT EXISTS potencia_ac_kw NUMERIC(12,3)",
+    # proyecto_inversores: parametrización (nombre, orden, activo)
+    "ALTER TABLE proyecto_inversores ADD COLUMN IF NOT EXISTS nombre VARCHAR(120)",
+    "ALTER TABLE proyecto_inversores ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE proyecto_inversores ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE",
+    # falla_inversores: inversores afectados por una falla (1 fila por inversor)
+    """CREATE TABLE IF NOT EXISTS falla_inversores (
+        id BIGSERIAL PRIMARY KEY,
+        falla_id BIGINT NOT NULL REFERENCES fallas(id),
+        proyecto_inversor_id BIGINT REFERENCES proyecto_inversores(id),
+        nombre VARCHAR(120),
+        potencia_kw NUMERIC(10,3),
+        tipos JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_falla_inversores_falla ON falla_inversores (falla_id)",
+    "CREATE INDEX IF NOT EXISTS ix_falla_inversores_inversor ON falla_inversores (proyecto_inversor_id)",
 ]
 
 
@@ -1067,6 +1098,61 @@ def _run_catalog_seed() -> None:
             db.close()
     except Exception as e:
         print(f"[catalog seed] skipped: {e}")
+
+
+def _run_estructura_fallas_seed() -> None:
+    """Siembra (idempotente) las categorías/tipos del reporte estructurado a partir
+    de ESTRUCTURA_FALLAS. Permite que las vistas/analytics legacy (que muestran
+    falla.tipo.etiqueta) sigan funcionando con las fallas nuevas. tipo.codigo =
+    "{categoria}.{subtipo}". No borra ni toca el catálogo legacy."""
+    from sqlalchemy.orm import sessionmaker
+    from app.models.fallas import FallaCatCategoria, FallaCatTipo
+    from app.services.fallas.estructura import ESTRUCTURA_FALLAS, tipo_codigo
+
+    try:
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            for idx, cat in enumerate(ESTRUCTURA_FALLAS):
+                cat_obj = db.query(FallaCatCategoria).filter_by(codigo=cat["codigo"]).first()
+                if cat_obj:
+                    cat_obj.etiqueta = cat["etiqueta"]
+                    cat_obj.icono = cat.get("icono")
+                    cat_obj.color_hex = cat.get("color_hex")
+                    cat_obj.orden = 100 + idx  # detrás del catálogo legacy
+                    cat_obj.activa = True
+                else:
+                    cat_obj = FallaCatCategoria(
+                        codigo=cat["codigo"], etiqueta=cat["etiqueta"],
+                        icono=cat.get("icono"), color_hex=cat.get("color_hex"),
+                        orden=100 + idx, activa=True,
+                    )
+                    db.add(cat_obj)
+                    db.flush()
+                # opciones (red/frontera/eventos) y tipos_falla (inversores)
+                subitems = list(cat.get("opciones", [])) + list(cat.get("tipos_falla", []))
+                for sub in subitems:
+                    code = tipo_codigo(cat["codigo"], sub["codigo"])
+                    tipo_obj = db.query(FallaCatTipo).filter_by(codigo=code).first()
+                    if tipo_obj:
+                        tipo_obj.etiqueta = sub["etiqueta"]
+                        tipo_obj.categoria_id = cat_obj.id
+                        tipo_obj.activa = True
+                    else:
+                        db.add(FallaCatTipo(
+                            categoria_id=cat_obj.id, codigo=code,
+                            etiqueta=sub["etiqueta"], descripcion=sub.get("descripcion"),
+                            activa=True,
+                        ))
+            db.commit()
+            print("[estructura fallas seed] OK")
+        except Exception as e:
+            db.rollback()
+            print(f"[estructura fallas seed] ERROR: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[estructura fallas seed] skipped: {e}")
 
 
 # old categoria codigo → best new tipo code (most representative)
@@ -2318,6 +2404,7 @@ def _deferred_init():
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
         ("catalog_seed", _run_catalog_seed),
+        ("estructura_fallas_seed", _run_estructura_fallas_seed),
         ("tipo_migration", _run_tipo_migration),
         ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),

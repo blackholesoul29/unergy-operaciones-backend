@@ -15,6 +15,7 @@ from app.models.equipos import Equipo, EquipoSello
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
     FallaCatPrioridad, FallaCatResolucion, Falla, FallaSeguimiento, FallaIntervalo,
+    FallaInversor,
 )
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
@@ -52,7 +53,7 @@ __all__ = [
     "ContratoServicio", "PPAContrato", "ContratoArriendo", "PPATarifa", "PPACompromisoEnergia",
     "Frontera", "FronteraLectura", "Equipo", "EquipoSello",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
-    "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo",
+    "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
     "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",

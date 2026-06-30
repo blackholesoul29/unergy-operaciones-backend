@@ -1,0 +1,201 @@
+"""Estructura canónica del reporte de fallas (jerárquico por activo).
+
+Fuente ÚNICA de la jerarquía Sistema → opciones. La consumen:
+- El endpoint ``GET /fallas/estructura`` (form web + móvil).
+- El sembrado idempotente de ``fallas_cat_categorias`` / ``fallas_cat_tipos``
+  (para que las vistas/analytics legacy sigan mostrando ``falla.tipo.etiqueta``).
+- La validación del camino estructurado en ``POST /fallas``.
+
+Las fallas viejas (planas) NO dependen de esto; la estructura es aditiva.
+"""
+from __future__ import annotations
+
+# Categorías de sistema. `tipo` describe qué inputs adicionales pide cada categoría:
+#   - "opcion":   una sola opción de `opciones` (red, eventos_adversos)
+#   - "equipo":   una sola opción de `opciones` + flags de frontera
+#   - "inversores": multiselect de inversores del proyecto + multiselect de `tipos_falla`
+ESTRUCTURA_FALLAS: list[dict] = [
+    {
+        "codigo": "red",
+        "etiqueta": "Red",
+        "icono": "pi pi-bolt",
+        "color_hex": "#F59E0B",
+        "tipo": "opcion",
+        "descripcion": "Eventos del suministro eléctrico externo al proyecto.",
+        "opciones": [
+            {"codigo": "baja_tension", "etiqueta": "Baja tensión"},
+            {"codigo": "alta_tension", "etiqueta": "Alta tensión"},
+            {"codigo": "variacion_frecuencia", "etiqueta": "Variación de frecuencia"},
+            {
+                "codigo": "mantenimiento_red",
+                "etiqueta": "Mantenimiento de red",
+                "requiere_detalle": True,
+                "detalle_label": "Motivo (árbol sobre la línea, fusible disparado, mant. programado, cambio de poste…)",
+            },
+            {"codigo": "acometida_mt", "etiqueta": "Acometida en media tensión"},
+            {"codigo": "transformador", "etiqueta": "Transformador"},
+            {
+                "codigo": "desconexion_sin_identificar",
+                "etiqueta": "Desconexión sin identificar",
+                "pendiente_reclasificar": True,
+                "descripcion": "Estado temporal: queda pendiente hasta reclasificar con la causa definitiva.",
+            },
+        ],
+    },
+    {
+        "codigo": "frontera",
+        "etiqueta": "Frontera",
+        "icono": "pi pi-gauge",
+        "color_hex": "#0EA5E9",
+        "tipo": "equipo",
+        "descripcion": "Equipos asociados a la medición comercial.",
+        "opciones": [
+            {"codigo": "medidor_principal", "etiqueta": "Medidor principal"},
+            {"codigo": "medidor_respaldo", "etiqueta": "Medidor de respaldo"},
+            {"codigo": "ct", "etiqueta": "CT (Transformadores de corriente)"},
+            {"codigo": "pt", "etiqueta": "PT (Transformadores de potencial)"},
+            {"codigo": "caja_pruebas", "etiqueta": "Caja de pruebas / Hornera"},
+            {"codigo": "modem_comunicaciones", "etiqueta": "Módem de comunicaciones"},
+        ],
+        "flags": [
+            {"codigo": "afecta_medicion", "etiqueta": "Afecta la medición de la frontera"},
+            {
+                "codigo": "perdida_comunicacion",
+                "etiqueta": "Pérdida de comunicación (datos) de la frontera",
+                "alarma": "comunicacion_frontera",
+            },
+        ],
+    },
+    {
+        "codigo": "inversores",
+        "etiqueta": "Inversores",
+        "icono": "pi pi-server",
+        "color_hex": "#915BD8",
+        "tipo": "inversores",
+        "descripcion": "Inversores del proyecto (lista parametrizable por proyecto).",
+        "requiere_proyecto_unico": True,
+        "tipos_falla": [
+            {"codigo": "no_generacion", "etiqueta": "No generación"},
+            {"codigo": "generacion_anomala", "etiqueta": "Generación anómala"},
+            {"codigo": "limitacion_potencia", "etiqueta": "Limitación de potencia"},
+            {"codigo": "strings_mal_conectados", "etiqueta": "Strings mal conectados"},
+            {
+                "codigo": "perdida_comunicacion",
+                "etiqueta": "Pérdida de comunicación (internet)",
+                "alarma": "comunicacion_inversores",
+            },
+        ],
+    },
+    {
+        "codigo": "eventos_adversos",
+        "etiqueta": "Eventos adversos",
+        "icono": "pi pi-exclamation-triangle",
+        "color_hex": "#EF4444",
+        "tipo": "opcion",
+        "descripcion": "Eventos externos que afectan la operación del proyecto.",
+        "opciones": [
+            {"codigo": "incendio", "etiqueta": "Incendio"},
+            {"codigo": "inundacion", "etiqueta": "Inundación"},
+            {"codigo": "huracan", "etiqueta": "Huracán"},
+            {"codigo": "otro", "etiqueta": "Otro", "requiere_detalle": True, "detalle_label": "Describe el evento"},
+        ],
+    },
+]
+
+CATEGORIA_CODIGOS = {c["codigo"] for c in ESTRUCTURA_FALLAS}
+
+INVERSOR_TIPO_FALLA_CODIGOS = {
+    t["codigo"]
+    for c in ESTRUCTURA_FALLAS
+    if c["codigo"] == "inversores"
+    for t in c["tipos_falla"]
+}
+
+
+def get_categoria(codigo: str) -> dict | None:
+    """Devuelve el dict de la categoría por código (o None)."""
+    for c in ESTRUCTURA_FALLAS:
+        if c["codigo"] == codigo:
+            return c
+    return None
+
+
+def get_opcion(categoria_codigo: str, subtipo_codigo: str) -> dict | None:
+    """Devuelve el dict de la opción/equipo dentro de una categoría (o None)."""
+    cat = get_categoria(categoria_codigo)
+    if not cat:
+        return None
+    for op in cat.get("opciones", []):
+        if op["codigo"] == subtipo_codigo:
+            return op
+    return None
+
+
+def tipo_codigo(categoria_codigo: str, subtipo_codigo: str) -> str:
+    """Código global y único para sembrar/buscar el FallaCatTipo correspondiente."""
+    return f"{categoria_codigo}.{subtipo_codigo}"
+
+
+def etiqueta_subtipo(categoria_codigo: str, subtipo_codigo: str) -> str | None:
+    """Etiqueta legible de una opción/equipo/tipo de falla de inversor."""
+    cat = get_categoria(categoria_codigo)
+    if not cat:
+        return None
+    pool = list(cat.get("opciones", [])) + list(cat.get("tipos_falla", []))
+    for op in pool:
+        if op["codigo"] == subtipo_codigo:
+            return op["etiqueta"]
+    return None
+
+
+def validar_clasificacion(
+    categoria_codigo: str | None,
+    subtipo_codigo: str | None,
+    inversores_tipos: list[str] | None = None,
+) -> tuple[bool, str | None]:
+    """Valida una clasificación estructurada contra ``ESTRUCTURA_FALLAS``.
+
+    Función pura (sin DB) → testeable. Retorna ``(ok, error)``.
+    - ``categoria_codigo`` debe existir.
+    - Para categorías de opción/equipo, ``subtipo_codigo`` debe pertenecer a sus opciones.
+    - Para inversores, los códigos de tipo de falla deben ser válidos (≥1).
+    """
+    if not categoria_codigo:
+        return False, "categoria_codigo requerido"
+    cat = get_categoria(categoria_codigo)
+    if not cat:
+        return False, f"categoría desconocida: {categoria_codigo}"
+
+    if cat["tipo"] in ("opcion", "equipo"):
+        if not subtipo_codigo:
+            return False, "subtipo_codigo requerido"
+        if get_opcion(categoria_codigo, subtipo_codigo) is None:
+            return False, f"opción inválida '{subtipo_codigo}' para '{categoria_codigo}'"
+        return True, None
+
+    if cat["tipo"] == "inversores":
+        tipos = inversores_tipos or []
+        if not tipos:
+            return False, "debe indicar al menos un tipo de falla de inversor"
+        invalidos = [t for t in tipos if t not in INVERSOR_TIPO_FALLA_CODIGOS]
+        if invalidos:
+            return False, f"tipos de falla de inversor inválidos: {invalidos}"
+        return True, None
+
+    return True, None
+
+
+def es_subtipo_pendiente(categoria_codigo: str | None, subtipo_codigo: str | None) -> bool:
+    """True si la opción marca ``pendiente_reclasificar`` (p.ej. desconexión sin identificar)."""
+    if not categoria_codigo or not subtipo_codigo:
+        return False
+    op = get_opcion(categoria_codigo, subtipo_codigo)
+    return bool(op and op.get("pendiente_reclasificar"))
+
+
+def requiere_detalle(categoria_codigo: str | None, subtipo_codigo: str | None) -> bool:
+    """True si la opción exige texto libre (mantenimiento de red, evento 'otro')."""
+    if not categoria_codigo or not subtipo_codigo:
+        return False
+    op = get_opcion(categoria_codigo, subtipo_codigo)
+    return bool(op and op.get("requiere_detalle"))

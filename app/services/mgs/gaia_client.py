@@ -27,7 +27,7 @@ TOKEN_REFRESH_SEC = 4 * 60   # refresh access token every 4 min (they typically 
 
 # Nodos cuyo firmware reporta eaepd en Wh en lugar de kWh.
 # Para todos los demás se asume kWh directamente.
-_EAE_WH_NODES: frozenset[int] = frozenset({860})  # MGS 0014 El Olimpo
+_EAE_WH_NODES: frozenset[int] = frozenset()  # no hay nodos con quirk Wh conocidos actualmente
 
 # ── Hardcoded node map: frt_code → (principal_node_id, respaldo_node_id) ──────
 # Source: nodos.json from the Plataforma Central de Monitoreo.
@@ -41,7 +41,7 @@ FRONTERA_NODE_MAP: dict[str, tuple[int | None, int | None]] = {
     "frt63879": (1022, 1020),  # Minigranja 0009 La Paz Verso
     "frt65205": (1283, 1282),  # Minigranja 0018 - La Paz Leyenda
     "frt66597": (1459, 1460),  # Minigranja 0017 - La Paz Esmeralda
-    "frt_olimpo14": (860, None), # MGS 0014 - El Olimpo (solo principal registrado)
+    "frt_olimpo14": (1579, 1580), # MGS 0014 - El Olimpo
     "frt67475": (1481, 1482),  # MGS 0015 - El Son
     "frt67496": (1489, 1490),  # MGS 0019 - El Merengue
     "frt68269": (1514, 1515),  # MGS 0016 - La Puya

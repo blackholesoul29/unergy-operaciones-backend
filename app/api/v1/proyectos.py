@@ -1,6 +1,3 @@
-import re
-import unicodedata
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
@@ -8,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
+from app.services.tsf_sync import _core
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoGrupoPanel, ProyectoInversor, ProyectoContacto,
@@ -91,28 +89,26 @@ def list_proyectos(
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
 
 
-def _norm_nombre(s: str | None) -> str:
-    s = unicodedata.normalize("NFD", s or "")
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return re.sub(r"\s+", " ", s.lower()).strip()
-
-
 def _buscar_duplicado_por_nombre(db: Session, nombre_comercial: str | None) -> Proyecto | None:
-    """Match EXACTO por nombre normalizado (sin tildes/mayúsculas/espacios extra)
-    contra proyectos no borrados.
+    """Busca un proyecto existente cuyo "nombre de lugar" (sin tildes/mayúsculas,
+    sin prefijos MGS/Minigranja/GD ni números) esté contenido en el nuevo nombre
+    o viceversa -- p. ej. "monterrubio" SÍ coincide con
+    "Minigranja 0029 - Monterrubio".
 
-    Deliberadamente NO se quitan números ni prefijos (MGS/Minigranja/GD) del
-    nombre antes de comparar: eso genera falsos positivos entre fases distintas
-    de un mismo desarrollo (p. ej. "Minigranja 0058 - Tamalameque Oriente" vs
-    "Minigranja 0058 - La Unión Oriente" son proyectos reales distintos que solo
-    comparten número). El match exacto es más conservador: no atrapa variantes
-    tipo "MGS 0032" vs "Minigranja 0032", pero no genera falsas alarmas.
+    Esto es deliberadamente permisivo (puede marcar como "parecidos" dos fases
+    reales distintas de un mismo desarrollo, p. ej. "Chinú Sur" y "Chinú Sur 2"):
+    es aceptable porque el aviso no bloquea -- la persona puede confirmar
+    "crear de todos modos" con un clic si de verdad es un proyecto distinto. Un
+    match exacto (sin este margen) dejaba pasar duplicados obvios sin avisar.
     """
-    objetivo = _norm_nombre(nombre_comercial)
-    if not objetivo:
+    objetivo = _core(nombre_comercial)
+    if len(objetivo) < 4:
         return None
     for c in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all():
-        if _norm_nombre(c.nombre_comercial) == objetivo:
+        n = _core(c.nombre_comercial)
+        if len(n) < 4:
+            continue
+        if objetivo in n or n in objetivo:
             return c
     return None
 

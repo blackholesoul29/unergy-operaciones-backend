@@ -91,13 +91,32 @@ def test_crear_con_nombre_identico_se_permite_forzando(db):
     assert db.query(Proyecto).count() == 2
 
 
-def test_crear_con_nombres_de_fases_distintas_no_se_marca_duplicado(db):
+def test_crear_solo_con_el_nombre_de_lugar_se_marca_duplicado(db):
+    # Caso real encontrado en produccion: alguien crea "monterrubio" a secas
+    # cuando ya existe "Minigranja 0029 - Monterrubio". Un match exacto no lo
+    # atrapa; el match por "nombre de lugar" (sin prefijo ni numero) si.
+    p = _proyecto(db, nombre_comercial="Minigranja 0029 - Monterrubio")
+    data = ProyectoCreate(nombre_comercial="monterrubio")
+
+    with pytest.raises(HTTPException) as exc:
+        proyectos_api.create_proyecto(data=data, forzar=False, db=db, _=None)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["candidato_id"] == p.id
+
+
+def test_crear_con_nombres_de_fases_distintas_se_marca_como_posible_duplicado(db):
     # "Chinu Sur" y "Chinu Sur 2" son proyectos reales distintos (ver memoria de
-    # duplicados) -- el match exacto no debe confundirlos.
+    # duplicados), pero comparten "nombre de lugar" una vez se quita el numero.
+    # El match permisivo los marca como sugerencia -- no bloquea, se confirma
+    # con forzar=true si de verdad es un proyecto distinto (barato de descartar).
     _proyecto(db, nombre_comercial="Minigranja 0059 - Chinu Sur")
     data = ProyectoCreate(nombre_comercial="Minigranja 0060 - Chinu Sur 2")
 
-    out = proyectos_api.create_proyecto(data=data, forzar=False, db=db, _=None)
+    with pytest.raises(HTTPException) as exc:
+        proyectos_api.create_proyecto(data=data, forzar=False, db=db, _=None)
+    assert exc.value.status_code == 409
+
+    out = proyectos_api.create_proyecto(data=data, forzar=True, db=db, _=None)
     assert out.nombre_comercial == "Minigranja 0060 - Chinu Sur 2"
 
 

@@ -69,13 +69,17 @@ def _proyecto(db, **kw):
 # ── Alerta de nombre parecido ────────────────────────────────────────────────
 
 def test_crear_con_nombre_identico_se_rechaza_sin_forzar(db):
-    _proyecto(db, nombre_comercial="Minigranja 0029 - Monterrubio")
+    p = _proyecto(db, nombre_comercial="Minigranja 0029 - Monterrubio")
     data = ProyectoCreate(nombre_comercial="minigranja 0029 - monterrubio")  # mayus/acentos distintos
 
     with pytest.raises(HTTPException) as exc:
         proyectos_api.create_proyecto(data=data, forzar=False, db=db, _=None)
     assert exc.value.status_code == 409
-    assert "Monterrubio" in exc.value.detail
+    # detail estructurado (no un string plano): el frontend lo usa para ofrecer
+    # "crear de todos modos" en vez de solo mostrar un toast.
+    assert exc.value.detail["duplicado_nombre"] is True
+    assert exc.value.detail["candidato_id"] == p.id
+    assert "Monterrubio" in exc.value.detail["mensaje"]
 
 
 def test_crear_con_nombre_identico_se_permite_forzando(db):

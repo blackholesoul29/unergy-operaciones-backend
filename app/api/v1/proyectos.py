@@ -130,11 +130,22 @@ def create_proyecto(
     if not forzar:
         duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"))
         if duplicado:
+            # detail estructurado (no un string plano como los demás 409 de este
+            # archivo): el frontend lo usa para ofrecer "crear de todos modos"
+            # (reintenta con forzar=true) en vez de solo mostrar un toast, ya que
+            # a diferencia de un choque de columna UNIQUE, este es un aviso, no
+            # un error real de datos.
             raise HTTPException(
                 409,
-                f"Ya existe un proyecto con un nombre muy parecido: "
-                f"'{duplicado.nombre_comercial}' (ID {duplicado.id}). "
-                f"Si de verdad es un proyecto distinto, confirma la creación."
+                {
+                    "mensaje": (
+                        f"Ya existe un proyecto con un nombre muy parecido: "
+                        f"'{duplicado.nombre_comercial}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_comercial,
+                },
             )
 
     proyecto = Proyecto(**payload)

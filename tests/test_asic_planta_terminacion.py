@@ -95,7 +95,7 @@ def test_sic_con_varias_plantas_las_une(db):
     assert term.planta_nombre in ("Planta A · Planta B", "Planta B · Planta A")
 
 
-# ── Terminación a nivel contrato PPA (bug Terpel 1) ────────────────────────────
+# ── El fecha_fin del contrato PPA macro es manual, nunca lo mueve ASIC ─────────
 def _ppa(db, numero, fecha_fin):
     c = PPAContrato(id=next(_ids), numero_codigo_contrato=numero, nombre_interno=numero,
                     fecha_fin=fecha_fin)
@@ -106,8 +106,7 @@ def _ppa(db, numero, fecha_fin):
 
 def test_terminar_una_planta_no_termina_el_contrato_multiplanta(db):
     """Terpel 1: PPA con 12 plantas hasta 2039. Terminar UNA planta (un SIC) NO debe
-    mover el fin contractual del PPA. Antes el código colapsaba todo el contrato a la
-    fecha de terminación de esa única planta."""
+    mover el fin contractual del PPA."""
     ppa = _ppa(db, "UNERGY 001-2023", date(2039, 12, 31))
     # dos plantas abiertas (fecha_fin NULL) del mismo contrato interno, distinto SIC
     _sol(db, codigo_sic_contrato="111", contrato_interno="UNERGY 001-2023",
@@ -134,9 +133,11 @@ def test_terminar_una_planta_no_termina_el_contrato_multiplanta(db):
     )
 
 
-def test_terminar_la_ultima_planta_si_termina_el_contrato(db):
-    """Cuando TODAS las plantas del contrato están terminadas, el PPA sí termina,
-    en la fecha de la última planta en salir."""
+def test_terminar_la_ultima_planta_tampoco_mueve_el_fecha_fin_del_ppa(db):
+    """El fecha_fin del PPA es manual (fuente de verdad del contrato firmado):
+    ni siquiera terminar TODAS las plantas de un contrato lo cambia automáticamente.
+    Antes esto colapsaba el contrato a la fecha de la última planta en salir, lo que
+    resultó frágil (ver test_asic_fecha_fin_random_repro.py)."""
     ppa = _ppa(db, "UNERGY 999-2023", date(2039, 12, 31))
     # una planta ya terminada antes, otra que terminamos ahora
     _sol(db, codigo_sic_contrato="333", contrato_interno="UNERGY 999-2023",
@@ -156,7 +157,29 @@ def test_terminar_la_ultima_planta_si_termina_el_contrato(db):
     db.commit()
     db.refresh(ppa)
 
-    assert ppa.fecha_fin == date(2024, 8, 30), (
-        f"con todas las plantas terminadas el contrato termina en la última fecha, "
-        f"quedó en {ppa.fecha_fin}"
+    assert ppa.fecha_fin == date(2039, 12, 31), (
+        f"el fecha_fin del PPA es manual, no debía moverse; quedó en {ppa.fecha_fin}"
     )
+
+
+def test_terminar_planta_si_estampa_fecha_fin_en_registros_hermanos_del_mismo_sic(db):
+    """El nivel planta se conserva: al terminar un SIC, sus propios registros/
+    modificaciones (mismo SIC) sí reciben la fecha de terminación."""
+    _sol(db, codigo_sic_contrato="555", contrato_interno="UNERGY 111-2023",
+         tipo_solicitud=TipoSolicitudAsicEnum.registro,
+         estado_solicitud=EstadoSolicitudAsicEnum.publicado, fecha_fin=None)
+    term = AsicSolicitud(id=next(_ids), codigo_sic_contrato="555",
+                         tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+                         estado_solicitud=EstadoSolicitudAsicEnum.publicado,
+                         fecha_fin=date(2024, 8, 30))
+    db.add(term)
+    db.commit()
+
+    asic_api._auto_terminate(db, term)
+    db.commit()
+
+    hermano = db.query(AsicSolicitud).filter(
+        AsicSolicitud.codigo_sic_contrato == "555",
+        AsicSolicitud.tipo_solicitud == TipoSolicitudAsicEnum.registro,
+    ).first()
+    assert hermano.fecha_fin == date(2024, 8, 30)

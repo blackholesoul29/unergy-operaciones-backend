@@ -277,6 +277,27 @@ def _contrato_vigente_en_mes(contrato, year: int, month: int) -> bool:
 
 # ── GESCON ────────────────────────────────────────────────────────────────────
 
+class _AsicVigenciaRecortada:
+    """Envoltura de solo lectura sobre un AsicSolicitud que acota su `fecha_fin`
+    efectiva sin tocar el registro real.
+
+    Necesaria porque el objeto ORM está en el identity map de la sesión: la
+    misma instancia se reutiliza en las 12 llamadas por mes de
+    `_anual_meses_para_contrato` (una por mes), así que mutar `.fecha_fin`
+    directamente contaminaría el cálculo de los demás meses. Reenvía cualquier
+    otro atributo (proyecto, porcentaje_despacho, fecha_inicio, etc.) al
+    original vía __getattr__.
+    """
+    __slots__ = ("_r", "fecha_fin")
+
+    def __init__(self, r: AsicSolicitud, fecha_fin: date):
+        self._r = r
+        self.fecha_fin = fecha_fin
+
+    def __getattr__(self, name):
+        return getattr(self._r, name)
+
+
 def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -> list:
     """
     Devuelve los registros ASIC vigentes para el contrato en el mes dado,
@@ -299,11 +320,24 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
     ninguna versión.
 
     Por cada codigo_sic_contrato, entre los eventos ya vigentes:
-    - Si un registro introduce una planta nueva y reemplaza_anterior=True,
-      reemplaza todas las plantas previas en ese SIC (comportamiento normal).
+    - Si un registro introduce una PLANTA DISTINTA (proyecto_id nuevo) y
+      reemplaza_anterior=True, reemplaza a la(s) planta(s) previas en ese SIC.
+      Si el relevo ocurre A MITAD DE MES, la planta saliente NO desaparece:
+      se devuelve también, con una fecha_fin EFECTIVA recortada al día
+      anterior al del relevo (aunque su fecha_fin real diga otra cosa, por no
+      haber una terminación explícita que la estampe) — así el prorrateo por
+      días de `_anual_meses_para_contrato` cuenta a cada una solo sus días
+      reales, sin solaparse ni sobrecontar. Caso real: SIC 89115 (Terpel 2,
+      feb-2026): Baraya (registro, desde 5-feb) es reemplazada por Yurbaqua
+      (desde 26-feb) → Baraya debe contar del 5 al 25 (21 días), Yurbaqua del
+      26 al 28 (3 días); antes Baraya desaparecía por completo.
     - Si reemplaza_anterior=False, la nueva planta coexiste con las existentes.
-    - Terminaciones eliminan la planta indicada.
-    - Modificaciones a una planta ya activa solo actualizan sus datos.
+    - Terminaciones eliminan la planta indicada (en la práctica siempre con
+      proyecto_id=NULL; su fecha_fin real ya viene estampada en el registro/
+      modificación del mismo SIC por `_auto_terminate`, así que el filtro
+      final de fechas ya la excluye — no requiere recorte aquí).
+    - Modificaciones a una MISMA planta ya activa (mismo proyecto_id) solo
+      actualizan sus datos (no se considera relevo, no se recorta nada).
     """
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
@@ -333,6 +367,7 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
     result = []
     for sic_records in by_sic.values():
         active: dict[int | str, AsicSolicitud] = {}
+        salientes: list = []
         for r in sic_records:
             # fecha_inicio NULL = vigente desde siempre (mismo criterio que el
             # filtro final más abajo). Si el evento aún no tomaba efecto para
@@ -353,9 +388,14 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
                 active[pid] = r
             else:
                 if r.reemplaza_anterior:
+                    corte = vigente_desde - timedelta(days=1)
+                    for saliente in active.values():
+                        fin_efectivo = min(saliente.fecha_fin or date.max, corte)
+                        salientes.append(_AsicVigenciaRecortada(saliente, fin_efectivo))
                     active.clear()
                 active[pid] = r
         result.extend(active.values())
+        result.extend(salientes)
 
     return [
         r for r in result

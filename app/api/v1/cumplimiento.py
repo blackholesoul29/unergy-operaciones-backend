@@ -323,6 +323,48 @@ def _fetch_range(token: str, sub_project: str, start: date, end: date) -> dict:
     return {"mwh": mwh, "n_records": len(records)}
 
 
+# ── Energía de un registro por su vigencia (fuente única) ─────────────────────
+
+def _vigencia_window(fecha_inicio, fecha_fin, first_day: date, last_day: date):
+    """Ventana efectiva [eff_start, eff_end] (ambos inclusive) de un registro
+    dentro del período [first_day, last_day], recortada a esos límites."""
+    eff_start = max(first_day, fecha_inicio) if fecha_inicio else first_day
+    eff_end = min(last_day, fecha_fin) if fecha_fin else last_day
+    return eff_start, eff_end
+
+
+def _gen_vigencia_mwh(
+    eff_start: date,
+    eff_end: date,
+    dias_periodo: int,
+    gen_periodo_completo: Optional[float],
+    gen_rango: Optional[float],
+) -> Optional[float]:
+    """Generación REAL atribuible a un registro vigente [eff_start, eff_end] dentro
+    de un período de `dias_periodo` días (típicamente el mes, o el mes hasta el
+    corte para el mes en curso).
+
+    - Vigencia que cubre TODO el período → `gen_periodo_completo` (ya es la
+      generación real de esos días; no hace falta pedir el rango aparte).
+    - Vigencia PARCIAL → `gen_rango` (suma real de esos días exactos, vía
+      `_fetch_range`/`_sumar_deltas_en_rango`) — NUNCA el total del período
+      prorrateado por fracción de días: la generación diaria no es pareja
+      (clima, etc.), así que `total × dias/dias_mes` (regla de tres) ≠ suma real.
+
+    Devuelve None si no hay días activos o falta el dato correspondiente.
+
+    Fuente ÚNICA de verdad de energía para las tres vistas — Estrategia
+    (/simulador), Matriz (/anual-matriz) y Energía transada (/energia-transada):
+    todas deben dar el mismo número para la misma planta/mes.
+    """
+    dias_activos = max(0, (eff_end - eff_start).days + 1)
+    if dias_activos <= 0:
+        return None
+    if dias_activos >= dias_periodo:
+        return gen_periodo_completo
+    return gen_rango
+
+
 # ── Contratos vigentes ────────────────────────────────────────────────────────
 
 def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> list:
@@ -900,6 +942,8 @@ def get_simulador(
                 "pct_despacho": float(asic.porcentaje_despacho or 0),
                 "es_duplicado": bool(asic.es_duplicado),
                 "proyecto_id": asic.proyecto_id,
+                "fecha_inicio": asic.fecha_inicio,
+                "fecha_fin": asic.fecha_fin,
             }
             if asic.es_duplicado or asic.proyecto_id in proyecto_primary:
                 # Duplicado, O una asignación primaria ADICIONAL de una planta que ya
@@ -966,21 +1010,95 @@ def get_simulador(
                         gen_cache[sp] = mwh
 
     plantas_by_id = {p.id: p for p in plantas_db}
+
+    # Rangos reales para asignaciones con vigencia PARCIAL del período (relevo/
+    # arranque/terminación intra-mes). Misma fuente que Matriz y Generación solar:
+    # se suma la generación real de esos días, no se prorratea el total del mes.
+    # (Solo meses pasado/actual; el futuro se proyecta con avg × días.)
+    dias_periodo_real = dia_actual  # = total_dias para mes pasado; = hoy para mes actual
+    period_end_real = date(year, month, dia_actual)
+
+    range_cache_sim: dict = {}
+    if not es_mes_futuro:
+        _sp_by_pid = {pid: (plantas_by_id[pid].sub_project if pid in plantas_by_id else None)
+                      for pid in set(proyecto_primary) | {d["proyecto_id"] for d in proyecto_dups}}
+        need_range_sim: set = set()
+        for entry in list(proyecto_primary.values()) + proyecto_dups:
+            sp_e = _sp_by_pid.get(entry["proyecto_id"])
+            if not sp_e:
+                continue
+            eff_start, eff_end = _vigencia_window(entry["fecha_inicio"], entry["fecha_fin"], first_day, period_end_real)
+            dias_act = max(0, (eff_end - eff_start).days + 1)
+            if 0 < dias_act < dias_periodo_real:
+                need_range_sim.add((sp_e, eff_start, eff_end))
+        if need_range_sim:
+            try:
+                tok = token  # reutiliza el token ya obtenido arriba
+            except NameError:
+                tok = None
+            if tok:
+                def _fr(task: tuple) -> tuple:
+                    sp, s, e = task
+                    return task, _fetch_range(tok, sp, s, e)
+                with ThreadPoolExecutor(max_workers=min(len(need_range_sim), 12)) as pool:
+                    for task, res in pool.map(_fr, list(need_range_sim)):
+                        range_cache_sim[task] = res
+
+    def _scoped_gen(sp, fecha_inicio, fecha_fin):
+        """(month_mwh, month_mwh_proyectado) de una asignación escalada a SU
+        vigencia dentro del mes — energía real de la vigencia, no el total del
+        mes. Misma lógica que la Matriz para que Estrategia coincida."""
+        if not sp:
+            return None, None
+        full = gen_cache.get(sp)
+        if es_mes_futuro:
+            # Proyección plana: avg_daily × días vigentes (= total_proyectado × proración).
+            eff_start, eff_end = _vigencia_window(fecha_inicio, fecha_fin, first_day, last_day)
+            dias_act = max(0, (eff_end - eff_start).days + 1)
+            if full is None or dias_act <= 0:
+                return (None, None) if full is None else (0.0, 0.0)
+            val = round(full * dias_act / total_dias, 3)
+            return val, val
+        # Mes pasado/actual: parte REAL de la vigencia hasta el corte.
+        eff_start, eff_end = _vigencia_window(fecha_inicio, fecha_fin, first_day, period_end_real)
+        range_gen = range_cache_sim.get((sp, eff_start, eff_end), {}).get("mwh")
+        real = _gen_vigencia_mwh(eff_start, eff_end, dias_periodo_real, full, range_gen)
+        if not es_mes_actual:
+            return real, real
+        # Mes actual: proyecta los días de vigencia que aún faltan (después de hoy).
+        avg = avg_cache_sim.get(sp)
+        eff_end_full = _vigencia_window(fecha_inicio, fecha_fin, first_day, last_day)[1]
+        dias_proj = max(0, (eff_end_full - period_end_real).days)
+        if real is None:
+            return None, None
+        proy = round(real + (avg or 0) * dias_proj, 3) if avg is not None else real
+        return real, proy
+
     plantas_out = []
     for p in plantas_db:
         asn = proyecto_primary.get(p.id)
+        if asn:
+            # Energía escalada a la vigencia de ESTA asignación (clave del fix:
+            # una planta que solo estuvo parte del mes en el contrato refleja la
+            # generación real de esos días, no el total del mes).
+            row_mwh, row_proy = _scoped_gen(p.sub_project, asn["fecha_inicio"], asn["fecha_fin"])
+        else:
+            # Planta sin contrato PPA de venta (remanente/bolsa): generación del
+            # mes completo, sin escalar.
+            row_mwh = gen_cache.get(p.sub_project)
+            row_proy = (
+                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
+                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
+                else gen_cache.get(p.sub_project)
+            )
         plantas_out.append({
             "id": p.id,
             "nombre": p.nombre_comercial,
             "sub_project": p.sub_project,
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "month_mwh": gen_cache.get(p.sub_project),
-            "month_mwh_proyectado": (
-                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
-                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
-                else gen_cache.get(p.sub_project)
-            ),
+            "month_mwh": row_mwh,
+            "month_mwh_proyectado": row_proy,
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
             "es_duplicado": False,
@@ -997,18 +1115,16 @@ def get_simulador(
         p = plantas_by_id.get(dup["proyecto_id"])
         if not p:
             continue
+        # Escalada a la vigencia de esta asignación (igual que la fila primaria).
+        dup_mwh, dup_proy = _scoped_gen(p.sub_project, dup["fecha_inicio"], dup["fecha_fin"])
         plantas_out.append({
             "id": f"{p.id}_dup_{dup['contrato_id']}",
             "nombre": p.nombre_comercial,
             "sub_project": p.sub_project,
             "tipo_proyecto": p.tipo_proyecto,
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
-            "month_mwh": gen_cache.get(p.sub_project),
-            "month_mwh_proyectado": (
-                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
-                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
-                else gen_cache.get(p.sub_project)
-            ),
+            "month_mwh": dup_mwh,
+            "month_mwh_proyectado": dup_proy,
             "contrato_id": dup["contrato_id"],
             "pct_despacho": dup["pct_despacho"],
             # es_duplicado real del registro: True para duplicado (compra en bolsa),
@@ -1254,9 +1370,8 @@ def get_energia_transada(
         for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
             if not asic.proyecto_id:
                 continue
-            # Prorrateo sobre los días transcurridos del período (corte)
-            eff_start = max(first_day, asic.fecha_inicio) if asic.fecha_inicio else first_day
-            eff_end = min(corte, asic.fecha_fin) if asic.fecha_fin else corte
+            # Ventana efectiva dentro del período [primer día .. corte]
+            eff_start, eff_end = _vigencia_window(asic.fecha_inicio, asic.fecha_fin, first_day, corte)
             dias_activos = max(0, (eff_end - eff_start).days + 1)
             if dias_activos == 0:
                 continue
@@ -1265,7 +1380,8 @@ def get_energia_transada(
                 "contrato": nombre_c,
                 "pct": float(asic.porcentaje_despacho or 0),
                 "dias_activos": dias_activos,
-                "proration": dias_activos / dia_corte,
+                "eff_start": eff_start,
+                "eff_end": eff_end,
                 "es_duplicado": bool(asic.es_duplicado),
             })
 
@@ -1278,8 +1394,21 @@ def get_energia_transada(
         plantas_db = sorted(plantas_by_id.values(), key=lambda p: p.nombre_comercial or "")
 
     # ── 3. Generación en paralelo (un fetch por sub_project único) ────────────
+    # need_range: registros con vigencia PARCIAL del período (relevo/arranque/
+    # terminación intra-mes) — su energía se suma día a día (misma fuente que la
+    # Matriz y Generación solar), no se prorratea el total del período.
+    need_range: set = set()
+    for pid, asigs in asignaciones.items():
+        sp_p = plantas_by_id[pid].sub_project if pid in plantas_by_id else None
+        if not sp_p:
+            continue
+        for a in asigs:
+            if 0 < a["dias_activos"] < dia_corte:
+                need_range.add((sp_p, a["eff_start"], a["eff_end"]))
+
     sp_set = {p.sub_project for p in plantas_db if p.sub_project}
     gen_cache: dict[str, dict] = {}
+    range_cache: dict = {}
     warning = None
     if sp_set:
         try:
@@ -1297,6 +1426,15 @@ def get_energia_transada(
             with ThreadPoolExecutor(max_workers=min(len(sp_list), 12)) as pool:
                 for sp, res in pool.map(_fetch_sp, sp_list):
                     gen_cache[sp] = res
+
+            if need_range:
+                def _fetch_rg(task: tuple) -> tuple:
+                    sp, start, end = task
+                    return task, _fetch_range(token, sp, start, end)
+
+                with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                    for task, res in pool.map(_fetch_rg, list(need_range)):
+                        range_cache[task] = res
 
     # ── 4. Cálculo por planta ─────────────────────────────────────────────────
     plantas_out = []
@@ -1326,7 +1464,18 @@ def get_energia_transada(
             })
             continue
 
-        ppa = sum(gen * a["pct"] * a["proration"] for a in asigs if not a["es_duplicado"])
+        # Energía PPA = Σ (generación REAL de la vigencia de cada asignación ×
+        # % despacho). Vigencia mes completo → gen del período; parcial → suma
+        # real de esos días (helper compartido con Estrategia/Matriz), nunca
+        # regla de tres sobre el total del período.
+        ppa = 0.0
+        for a in asigs:
+            if a["es_duplicado"]:
+                continue
+            range_gen = range_cache.get((p.sub_project, a["eff_start"], a["eff_end"]), {}).get("mwh")
+            gv = _gen_vigencia_mwh(a["eff_start"], a["eff_end"], dia_corte, gen, range_gen)
+            if gv is not None:
+                ppa += gv * a["pct"]
         ppa = round(min(ppa, gen), 3)
         bolsa = round(max(0.0, gen - ppa), 3)
         if not any(not a["es_duplicado"] for a in asigs) or ppa <= 0:
@@ -1444,35 +1593,26 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
             pct = float(asic.porcentaje_despacho or 0)
             is_dup = bool(asic.es_duplicado)
 
-            eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
-            eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
+            eff_start, eff_end = _vigencia_window(asic.fecha_inicio, asic.fecha_fin, first_day_m, last_day_m)
             dias_activos = max(0, (eff_end - eff_start).days + 1)
             proration = dias_activos / total_dias
 
             if sp:
                 if is_future:
                     # Mes futuro sin datos reales: se sigue proyectando con el
-                    # promedio diario reciente × días vigentes (sin cambios).
+                    # promedio diario reciente × días vigentes (avg × dias_activos).
                     avg = avg_cache.get(sp)
                     gp: Optional[float] = round(avg * total_dias, 3) if avg is not None else None
                     gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
-                elif 0 < dias_activos < total_dias:
-                    # Vigencia PARCIAL del mes (relevo, arranque o terminación a
-                    # mitad de mes): sumar la generación REAL de esos días
-                    # exactos (misma fuente/método que la vista Generación
-                    # solar), no repartir el total del mes por fracción de días
-                    # — la generación diaria varía (clima), así que prorratear
-                    # el total ≠ sumar los días reales.
-                    rd = range_cache.get((sp, eff_start, eff_end), {"mwh": None})
-                    gp = rd.get("mwh")
-                    gen_contrato = round(gp * pct, 3) if gp is not None else None
                 else:
-                    # Registro vigente el mes completo: el total mensual ya
-                    # calculado (month_cache) es exactamente la generación real
-                    # de esos días — no hace falta un fetch adicional.
-                    gd = month_cache.get((m, sp), {"mwh": None})
-                    gp = gd.get("mwh")
-                    gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
+                    # Mes pasado/actual: generación REAL de la vigencia — total del
+                    # mes si cubre el mes completo, o suma real de los días exactos
+                    # si la vigencia fue parcial (helper compartido con Estrategia y
+                    # Energía transada; nunca regla de tres sobre el total).
+                    month_gen = month_cache.get((m, sp), {}).get("mwh")
+                    range_gen = range_cache.get((sp, eff_start, eff_end), {}).get("mwh")
+                    gp = _gen_vigencia_mwh(eff_start, eff_end, total_dias, month_gen, range_gen)
+                    gen_contrato = round(gp * pct, 3) if gp is not None else None
             else:
                 gp = None
                 gen_contrato = None

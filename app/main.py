@@ -2394,6 +2394,26 @@ def _run_arr_seed() -> None:
         db.close()
 
 
+def _run_inversores_minigranja_seed() -> None:
+    """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
+    tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
+    5 de 40 kW). Solo toca proyectos con CERO inversores → nunca duplica. Así ya
+    existen al reportar fallas por inversor. Las excepciones (Baraya/San Pedro) se
+    ajustan a mano después."""
+    from sqlalchemy.orm import sessionmaker
+    from app.api.v1.proyectos import backfill_inversores_minigranjas
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        rep = backfill_inversores_minigranjas(db, solo_minigranja=True, dry_run=False)
+        print(f"[startup] inversores_minigranja_seed: {rep['a_sembrar']} sembradas "
+              f"de {rep['total_candidatos']} minigranjas "
+              f"({rep['ya_tienen_inversores']} ya tenían inversores)")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2410,6 +2430,7 @@ def _deferred_init():
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
+        ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
     ]:
         try:
             fn()

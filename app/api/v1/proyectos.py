@@ -514,6 +514,86 @@ def delete_inversor(id: int, inv_id: int, db: Session = Depends(get_db), _=Depen
     db.commit()
 
 
+# ── Config típica de minigranja (por defecto) ───────────────────────────────────
+# Nomenclatura estándar de una minigranja: los inversores 1,2,3 son de 300 kW,
+# el 4 de 50 kW y el 5 de 40 kW. El NÚMERO (orden/nombre) es lo que identifica
+# a cada inversor cuando se reporta una falla. Baraya/San Pedro son excepciones
+# que se ajustan a mano después.
+INVERSORES_TIPICOS_MINIGRANJA = [
+    {"nombre": "Inversor 1", "potencia_nominal_kw": 300, "orden": 0},
+    {"nombre": "Inversor 2", "potencia_nominal_kw": 300, "orden": 1},
+    {"nombre": "Inversor 3", "potencia_nominal_kw": 300, "orden": 2},
+    {"nombre": "Inversor 4", "potencia_nominal_kw": 50,  "orden": 3},
+    {"nombre": "Inversor 5", "potencia_nominal_kw": 40,  "orden": 4},
+]
+
+
+def _sembrar_inversores_tipicos(proyecto_id: int, db: Session) -> None:
+    """Inserta los 5 inversores típicos en el proyecto (insert directo, sin la
+    validación de suma de potencias: es una config estándar conocida)."""
+    for cfg in INVERSORES_TIPICOS_MINIGRANJA:
+        db.add(ProyectoInversor(proyecto_id=proyecto_id, tipo="central", activo=True, **cfg))
+
+
+def backfill_inversores_minigranjas(db: Session, solo_minigranja: bool = True,
+                                    dry_run: bool = False) -> dict:
+    """Siembra (idempotente) la config típica de inversores en cada proyecto que
+    NO tiene ningún inversor todavía. Nunca duplica: solo toca proyectos con cero
+    inversores. Reutilizado por el seed de arranque y por el endpoint admin."""
+    from sqlalchemy import func as _sf
+
+    q = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
+    if solo_minigranja:
+        q = q.filter(Proyecto.tipo_proyecto == "minigranja")
+    proyectos = q.order_by(Proyecto.nombre_comercial).all()
+
+    counts = dict(
+        db.query(ProyectoInversor.proyecto_id, _sf.count(ProyectoInversor.id))
+        .group_by(ProyectoInversor.proyecto_id)
+        .all()
+    )
+
+    sembrados, saltados = [], []
+    for p in proyectos:
+        if counts.get(p.id, 0) == 0:
+            sembrados.append({"id": p.id, "nombre": p.nombre_comercial})
+            if not dry_run:
+                _sembrar_inversores_tipicos(p.id, db)
+        else:
+            saltados.append({"id": p.id, "nombre": p.nombre_comercial,
+                             "inversores": counts.get(p.id, 0)})
+
+    if not dry_run and sembrados:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "solo_minigranja": solo_minigranja,
+        "total_candidatos": len(proyectos),
+        "a_sembrar": len(sembrados),
+        "sembrados": sembrados,
+        "ya_tienen_inversores": len(saltados),
+        "saltados": saltados,
+        "config_tipica": [
+            {"nombre": c["nombre"], "potencia_nominal_kw": c["potencia_nominal_kw"]}
+            for c in INVERSORES_TIPICOS_MINIGRANJA
+        ],
+    }
+
+
+@router.post("/inversores/backfill-minigranja")
+def backfill_minigranja_inversores(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    solo_minigranja: bool = Query(True, description="Limitar a tipo_proyecto='minigranja'"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Siembra los 5 inversores típicos (3×300 + 50 + 40 kW) en los proyectos que
+    aún no tienen inversores, para que ya existan al reportar fallas por inversor.
+    Idempotente: nunca duplica. Con dry_run=true solo devuelve el reporte."""
+    return backfill_inversores_minigranjas(db, solo_minigranja=solo_minigranja, dry_run=dry_run)
+
+
 # ── Contactos ─────────────────────────────────────────────────────────────────
 
 @router.get("/{id}/contactos", response_model=list[ProyectoContactoOut])

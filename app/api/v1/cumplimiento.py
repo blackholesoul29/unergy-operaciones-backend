@@ -235,6 +235,94 @@ def _fetch_recent_avg(token: str, sub_project: str, n_days: int = 15) -> dict:
     }
 
 
+def _sumar_deltas_en_rango(records: list, d_from_utc: datetime, d_to_utc: datetime) -> Optional[float]:
+    """Suma la generación REAL entre lecturas consecutivas cuyo timestamp cae en
+    [d_from_utc, d_to_utc] (ambos naive-UTC, igual que `time_stamp` de la API).
+
+    Usa la última lectura ANTERIOR al rango como base del primer delta, para no
+    perder la generación de las primeras horas del día de inicio (si no hubiera
+    "antes", ese primer intervalo no tendría con qué compararse). Ignora deltas
+    negativos (reinicio de contador), mismo criterio que `_monthly_mwh_from_records`.
+
+    Es el mismo método que usa la vista "Generación solar" al filtrar por rango
+    (`_compute_deltas` en monitoreo.py) — sumar días reales, no repartir el
+    total del mes por fracción de días.
+    """
+    rows = []
+    for r in records:
+        ts_raw = r.get("time_stamp", "")
+        gen = r.get("generacion")
+        if not ts_raw or gen is None:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            continue
+        rows.append((ts, float(gen)))
+    rows.sort(key=lambda x: x[0])
+
+    before = [x for x in rows if x[0] < d_from_utc]
+    period = [x for x in rows if d_from_utc <= x[0] <= d_to_utc]
+    if not period:
+        return None
+
+    working = ([before[-1]] if before else []) + period
+    total_kwh = 0.0
+    for (_, prev), (_, cur) in zip(working, working[1:]):
+        if cur > prev:
+            total_kwh += cur - prev
+    return round(total_kwh / 1000, 3)
+
+
+def _fetch_range(token: str, sub_project: str, start: date, end: date) -> dict:
+    """
+    Generación REAL de un sub_project entre `start` y `end` (ambos inclusive),
+    sumando los deltas de cada lectura — NO reparte el total del mes por
+    fracción de días. Se usa cuando un registro GESCON solo estuvo vigente
+    PARTE del mes (relevo, arranque o terminación a mitad de mes): el total
+    mensual prorrateado por días no coincide con la generación real de esos
+    días específicos porque la generación diaria no es pareja (clima, etc.).
+
+    Colchón de 2 días antes de `start` para poder calcular el delta del primer
+    punto dentro del rango (sin una lectura "antes" no hay con qué comparar el
+    primer dato del día de inicio).
+    """
+    tz_offset = timedelta(hours=5)  # Colombia = UTC-5
+    d_from = datetime(start.year, start.month, start.day, 0, 0, 0)
+    d_to = datetime(end.year, end.month, end.day, 23, 59, 59)
+    fetch_from_utc = (d_from - timedelta(days=2)) + tz_offset
+    d_from_utc = d_from + tz_offset
+    d_to_utc = d_to + tz_offset
+
+    try:
+        with httpx.Client(timeout=90, follow_redirects=True) as client:
+            resp = client.get(
+                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
+                params={
+                    "time_stamp__gte": fetch_from_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "time_stamp__lte": d_to_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "sub_project": sub_project,
+                    "limit": "10000",
+                },
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "PostmanRuntime/7.50.0",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            records = data if isinstance(data, list) else data.get("results", [])
+    except Exception as exc:
+        logger.warning("API error rango sub_project=%s %s..%s: %s", sub_project, start, end, exc)
+        return {"mwh": None, "n_records": 0}
+
+    if not records:
+        return {"mwh": None, "n_records": 0}
+
+    mwh = _sumar_deltas_en_rango(records, d_from_utc, d_to_utc)
+    return {"mwh": mwh, "n_records": len(records)}
+
+
 # ── Contratos vigentes ────────────────────────────────────────────────────────
 
 def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> list:
@@ -1303,13 +1391,20 @@ def _rollup_cumplimiento(meses: list[dict]) -> dict:
     }
 
 
-def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month_cache, avg_cache, today):
+def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month_cache, avg_cache, today, range_cache=None):
     """Construye los 12 meses + desglose por proyecto para un contrato.
 
-    Caches (month_cache/avg_cache), gescon_per_month y comp_map vienen ya poblados
-    (sin I/O aquí). Retorna (meses, proyectos) con `valor_mwh` por mes tanto a nivel
-    de contrato como por proyecto, manteniendo: contrato.valor_mwh == Σ proyectos.valor_mwh.
+    Caches (month_cache/avg_cache/range_cache), gescon_per_month y comp_map vienen
+    ya poblados (sin I/O aquí). Retorna (meses, proyectos) con `valor_mwh` por mes
+    tanto a nivel de contrato como por proyecto, manteniendo:
+    contrato.valor_mwh == Σ proyectos.valor_mwh.
+
+    range_cache: dict[(sub_project, eff_start, eff_end)] -> {"mwh": ...} con la
+    generación REAL sumada día a día para un registro que estuvo vigente solo
+    PARTE de un mes (relevo, arranque o terminación a mitad de mes). Cuando el
+    registro cubre el mes completo se sigue usando month_cache (sin cambios).
     """
+    range_cache = range_cache or {}
     # proyectos_acc: (pid, sp, nombre) -> {"pct": last_pct, "meses": [valor_mwh x 12]}
     proyectos_acc: dict = {}
 
@@ -1356,15 +1451,31 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
 
             if sp:
                 if is_future:
+                    # Mes futuro sin datos reales: se sigue proyectando con el
+                    # promedio diario reciente × días vigentes (sin cambios).
                     avg = avg_cache.get(sp)
                     gp: Optional[float] = round(avg * total_dias, 3) if avg is not None else None
+                    gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
+                elif 0 < dias_activos < total_dias:
+                    # Vigencia PARCIAL del mes (relevo, arranque o terminación a
+                    # mitad de mes): sumar la generación REAL de esos días
+                    # exactos (misma fuente/método que la vista Generación
+                    # solar), no repartir el total del mes por fracción de días
+                    # — la generación diaria varía (clima), así que prorratear
+                    # el total ≠ sumar los días reales.
+                    rd = range_cache.get((sp, eff_start, eff_end), {"mwh": None})
+                    gp = rd.get("mwh")
+                    gen_contrato = round(gp * pct, 3) if gp is not None else None
                 else:
+                    # Registro vigente el mes completo: el total mensual ya
+                    # calculado (month_cache) es exactamente la generación real
+                    # de esos días — no hace falta un fetch adicional.
                     gd = month_cache.get((m, sp), {"mwh": None})
                     gp = gd.get("mwh")
+                    gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
             else:
                 gp = None
-
-            gen_contrato = round(gp * pct * proration, 3) if gp is not None else None
+                gen_contrato = None
             if gen_contrato is not None:
                 # Cuenta para el cumplimiento sin importar el origen; el duplicado
                 # se registra además en bolsa_dup_total como sub-cifra (origen bolsa).
@@ -1537,13 +1648,20 @@ def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
     contratos, devolviendo sets deduplicados:
       - need_month: set de (month, sub_project) para meses pasados/actuales
       - need_avg: set de sub_project para mes actual/futuros (proyección rolling avg)
+      - need_range: set de (sub_project, eff_start, eff_end) para registros que
+        estuvieron vigentes solo PARTE de un mes (pasado/actual) — su energía se
+        calcula sumando los días reales, no prorrateando el total del mes.
 
     Clave: tuple order es (m, sp) igual que get_anual y month_cache[(m, sp)].
     """
     need_month: set = set()
     need_avg: set = set()
+    need_range: set = set()
     for gpm in gpm_por_contrato.values():
         for m in range(1, 13):
+            total_dias = calendar.monthrange(year, m)[1]
+            first_day_m = date(year, m, 1)
+            last_day_m = date(year, m, total_dias)
             is_current = (year == today.year and m == today.month)
             is_future = (year > today.year) or (year == today.year and m > today.month)
             for asic in gpm[m]:
@@ -1552,12 +1670,17 @@ def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
                     continue
                 if is_future:
                     need_avg.add(sp)
-                elif is_current:
-                    need_month.add((m, sp))
+                    continue
+                if is_current:
                     need_avg.add(sp)
+                eff_start = max(first_day_m, asic.fecha_inicio) if asic.fecha_inicio else first_day_m
+                eff_end = min(last_day_m, asic.fecha_fin) if asic.fecha_fin else last_day_m
+                dias_activos = max(0, (eff_end - eff_start).days + 1)
+                if 0 < dias_activos < total_dias:
+                    need_range.add((sp, eff_start, eff_end))
                 else:
                     need_month.add((m, sp))
-    return need_month, need_avg
+    return need_month, need_avg, need_range
 
 
 @router.get("/anual-matriz")
@@ -1588,12 +1711,13 @@ def get_anual_matriz(
         }
 
     # 3. Set global de fetches deduplicado
-    need_month, need_avg = _build_fetch_sets(gpm_por_contrato, year, today)
+    need_month, need_avg, need_range = _build_fetch_sets(gpm_por_contrato, year, today)
 
     # 4. Fetch único en paralelo (mismo patrón que get_anual)
     month_cache: dict = {}
     avg_cache: dict = {}
-    if need_month or need_avg:
+    range_cache: dict = {}
+    if need_month or need_avg or need_range:
         try:
             token = _unergy_token()
         except Exception as exc:
@@ -1615,12 +1739,20 @@ def get_anual_matriz(
                 for sp, res in pool.map(_fa, list(need_avg)):
                     avg_cache[sp] = res.get("avg_daily_mwh")
 
+        if token and need_range:
+            def _fr(task):
+                sp, start, end = task
+                return task, _fetch_range(token, sp, start, end)
+            with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                for task, res in pool.map(_fr, list(need_range)):
+                    range_cache[task] = res
+
     # 5. Ensamblar por contrato
     out = []
     for c in contratos:
         meses, proyectos = _anual_meses_para_contrato(
             c, year, gpm_por_contrato[c.id], comp_por_contrato[c.id],
-            month_cache, avg_cache, today,
+            month_cache, avg_cache, today, range_cache,
         )
         rollup = _rollup_cumplimiento(meses)
         n_plantas = max((len(gpm_por_contrato[c.id][m]) for m in range(1, 13)), default=0)
@@ -1653,10 +1785,11 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
             PPACompromisoEnergia.año == year,
         ).all()
     }
-    need_month, need_avg = _build_fetch_sets({contrato.id: gpm}, year, today)
+    need_month, need_avg, need_range = _build_fetch_sets({contrato.id: gpm}, year, today)
     month_cache: dict = {}
     avg_cache: dict = {}
-    if need_month or need_avg:
+    range_cache: dict = {}
+    if need_month or need_avg or need_range:
         try:
             token = _unergy_token()
         except Exception as exc:
@@ -1675,7 +1808,14 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
             with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
                 for sp, res in pool.map(_fa, list(need_avg)):
                     avg_cache[sp] = res.get("avg_daily_mwh")
-    meses, proyectos = _anual_meses_para_contrato(contrato, year, gpm, comp_map, month_cache, avg_cache, today)
+        if token and need_range:
+            def _fr(task):
+                sp, start, end = task
+                return task, _fetch_range(token, sp, start, end)
+            with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                for task, res in pool.map(_fr, list(need_range)):
+                    range_cache[task] = res
+    meses, proyectos = _anual_meses_para_contrato(contrato, year, gpm, comp_map, month_cache, avg_cache, today, range_cache)
     rollup = _rollup_cumplimiento(meses)
     n_plantas = max((len(gpm[m]) for m in range(1, 13)), default=0)
     return {
@@ -1756,25 +1896,13 @@ def get_anual(
             if contrato.numero_codigo_contrato else []
         )
 
-    need_month: set = set()
-    need_avg: set = set()
-    for m in range(1, 13):
-        is_current = (year == today.year and m == today.month)
-        is_future = (year > today.year) or (year == today.year and m > today.month)
-        for asic in gescon_per_month[m]:
-            if asic.proyecto and asic.proyecto.sub_project:
-                if is_future:
-                    need_avg.add(asic.proyecto.sub_project)
-                elif is_current:
-                    need_month.add((m, asic.proyecto.sub_project))
-                    need_avg.add(asic.proyecto.sub_project)
-                else:
-                    need_month.add((m, asic.proyecto.sub_project))
+    need_month, need_avg, need_range = _build_fetch_sets({contrato.id: gescon_per_month}, year, today)
 
     month_cache: dict = {}
     avg_cache: dict = {}
+    range_cache: dict = {}
 
-    if need_month or need_avg:
+    if need_month or need_avg or need_range:
         try:
             token = _unergy_token()
         except Exception as exc:
@@ -1796,8 +1924,16 @@ def get_anual(
                 for sp, res in pool.map(_fa, list(need_avg)):
                     avg_cache[sp] = res.get("avg_daily_mwh")
 
+        if token and need_range:
+            def _fr(task):
+                sp, start, end = task
+                return task, _fetch_range(token, sp, start, end)
+            with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                for task, res in pool.map(_fr, list(need_range)):
+                    range_cache[task] = res
+
     meses, _proyectos = _anual_meses_para_contrato(
-        contrato, year, gescon_per_month, comp_map, month_cache, avg_cache, today
+        contrato, year, gescon_per_month, comp_map, month_cache, avg_cache, today, range_cache
     )
 
     return {

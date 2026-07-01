@@ -108,7 +108,10 @@ def test_dedup_fetch_set():
         1: {m: [_Asic("A", "spA", 10, 1.0)] for m in range(1, 13)},
         2: {m: [_Asic("A", "spA", 10, 1.0), _Asic("B", "spB", 20, 1.0)] for m in range(1, 13)},
     }
-    need_month, need_avg = _build_fetch_sets(gpm_por_contrato, 2026, today)
+    need_month, need_avg, need_range = _build_fetch_sets(gpm_por_contrato, 2026, today)
+    # Ningún _Asic de este test tiene fecha_inicio/fecha_fin (vigencia parcial) →
+    # todos van a need_month, need_range queda vacío.
+    assert not need_range, f"no debería haber vigencias parciales aquí: {need_range}"
     # spA en meses pasados (1..5) una sola vez aunque esté en 2 contratos
     assert (1, "spA") in need_month, f"(1, 'spA') no encontrado en need_month={need_month}"
     assert len([x for x in need_month if x == (1, "spA")]) == 1, "deduplicación fallida"

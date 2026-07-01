@@ -279,9 +279,26 @@ def _contrato_vigente_en_mes(contrato, year: int, month: int) -> bool:
 
 def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -> list:
     """
-    Devuelve los registros ASIC activos para el contrato en el mes dado.
+    Devuelve los registros ASIC vigentes para el contrato en el mes dado,
+    reconstruyendo la vigencia HISTÓRICA (no la versión más reciente global).
 
-    Procesa cronológicamente (antiguo → reciente) por cada codigo_sic_contrato:
+    Procesa cronológicamente por `fecha_inicio` (cuándo tomó efecto cada
+    registro, no cuándo se radicó) y, para el mes consultado, solo reproduce
+    los eventos que ya habían tomado efecto (fecha_inicio <= último día del
+    mes). Así un mes anterior a una modificación ve la versión que estaba
+    vigente en ese momento, no la que la reemplazó después.
+
+    Ej.: Vallenata en Terpel 1 tiene un registro al 100% vigente desde
+    2024-07-04 y una modificación al 50% vigente desde 2026-02-12 (radicada
+    2026-01-30). Para enero-2026 solo el registro del 100% ya había tomado
+    efecto → se usa ese. Para febrero en adelante, ya tomó efecto también la
+    modificación → se usa el 50%. Antes se ordenaba/filtraba por
+    fecha_solicitud, así que la modificación (radicada en enero, antes de
+    tomar efecto) desplazaba al registro viejo también en enero, y luego el
+    filtro final de fechas la descartaba a ella igual → el mes quedaba sin
+    ninguna versión.
+
+    Por cada codigo_sic_contrato, entre los eventos ya vigentes:
     - Si un registro introduce una planta nueva y reemplaza_anterior=True,
       reemplaza todas las plantas previas en ese SIC (comportamiento normal).
     - Si reemplaza_anterior=False, la nueva planta coexiste con las existentes.
@@ -291,6 +308,8 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
 
+    # Traemos TODAS las versiones del contrato (pasadas y futuras): la vigencia
+    # de cada mes se resuelve abajo en memoria, no en este filtro.
     records = (
         db.query(AsicSolicitud)
         .options(joinedload(AsicSolicitud.proyecto))
@@ -298,12 +317,12 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
             AsicSolicitud.contrato_interno == contrato_interno,
             AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
             AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
-            or_(
-                AsicSolicitud.fecha_solicitud <= last_day,
-                AsicSolicitud.fecha_solicitud.is_(None),
-            ),
         )
-        .order_by(AsicSolicitud.fecha_solicitud.asc().nullsfirst())
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        )
         .all()
     )
 
@@ -315,6 +334,13 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
     for sic_records in by_sic.values():
         active: dict[int | str, AsicSolicitud] = {}
         for r in sic_records:
+            # fecha_inicio NULL = vigente desde siempre (mismo criterio que el
+            # filtro final más abajo). Si el evento aún no tomaba efecto para
+            # el mes consultado, no debe desplazar la versión vigente de ese mes.
+            vigente_desde = r.fecha_inicio or date.min
+            if vigente_desde > last_day:
+                continue
+
             pid = r.proyecto_id
             if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
                 if pid is not None:

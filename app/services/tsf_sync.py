@@ -603,6 +603,13 @@ def _buscar_candidato_similar(db: Session, nombre: str | None, municipio: str | 
     en el mismo lugar (p. ej. "Chinú Sur" y "Chinú Sur 2", que son plantas reales
     distintas) también se sugerirán como posible match -- se descartan con un
     clic si no aplican, no se pierde nada.
+
+    NO se exige que `municipio` coincida (solo se usa para mostrarlo en la
+    sugerencia): un `municipio` mal cargado en el proyecto existente (p. ej. el
+    departamento en vez del municipio real -- pasó con "El Paso Norte", que
+    tenía guardado "Cesar") descartaba en silencio un match de nombre correcto
+    y terminaba creando el duplicado que se quería evitar. Mejor sugerir de más
+    que duplicar en silencio.
     """
     if not nombre:
         return None
@@ -619,8 +626,7 @@ def _buscar_candidato_similar(db: Session, nombre: str | None, municipio: str | 
         if len(n) < 4:
             continue
         if objetivo in n or n in objetivo:
-            if not municipio or not r.municipio or _norm(municipio) == _norm(r.municipio):
-                return r
+            return r
     return None
 
 

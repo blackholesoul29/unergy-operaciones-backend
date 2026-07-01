@@ -513,16 +513,20 @@ def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):
     assert stats["sugerencias_vinculo"] == []
 
 
-def test_buscar_candidato_similar_respeta_municipio_distinto():
+def test_buscar_candidato_similar_ignora_municipio_mal_cargado(monkeypatch):
+    # Bug real: "El Paso Norte" (id=92) tenia guardado el DEPARTAMENTO ("Cesar")
+    # en vez del municipio real ("El Paso"). Exigir que coincidiera descartaba el
+    # match de nombre correcto y terminaba creando un duplicado en silencio.
+    # El municipio ya NO se usa como filtro, solo el nombre.
     import types
 
     class _DB:
         def execute(self, stmt, params=None):
-            rows = [types.SimpleNamespace(id=1, nombre_comercial="Minigranja Morroa Sur", municipio="Sincelejo")]
+            rows = [types.SimpleNamespace(id=92, nombre_comercial="MGS 0032 - EL Paso Norte", municipio="Cesar")]
             return types.SimpleNamespace(fetchall=lambda: rows)
 
-    resultado = pe._buscar_candidato_similar(_DB(), "Morroa Sur", "Morroa")
-    assert resultado is None  # mismo nombre, pero municipio distinto -> no sugiere
+    resultado = pe._buscar_candidato_similar(_DB(), "Minigranja 0032 - El Paso Norte", "El Paso")
+    assert resultado is not None and resultado.id == 92
 
 
 def test_buscar_candidato_similar_encuentra_por_substring():

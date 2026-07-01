@@ -1,3 +1,6 @@
+import re
+import unicodedata
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
@@ -88,11 +91,63 @@ def list_proyectos(
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
 
 
+def _norm_nombre(s: str | None) -> str:
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", s.lower()).strip()
+
+
+def _buscar_duplicado_por_nombre(db: Session, nombre_comercial: str | None) -> Proyecto | None:
+    """Match EXACTO por nombre normalizado (sin tildes/mayúsculas/espacios extra)
+    contra proyectos no borrados.
+
+    Deliberadamente NO se quitan números ni prefijos (MGS/Minigranja/GD) del
+    nombre antes de comparar: eso genera falsos positivos entre fases distintas
+    de un mismo desarrollo (p. ej. "Minigranja 0058 - Tamalameque Oriente" vs
+    "Minigranja 0058 - La Unión Oriente" son proyectos reales distintos que solo
+    comparten número). El match exacto es más conservador: no atrapa variantes
+    tipo "MGS 0032" vs "Minigranja 0032", pero no genera falsas alarmas.
+    """
+    objetivo = _norm_nombre(nombre_comercial)
+    if not objetivo:
+        return None
+    for c in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all():
+        if _norm_nombre(c.nombre_comercial) == objetivo:
+            return c
+    return None
+
+
 @router.post("", response_model=ProyectoOut, status_code=201)
-def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    proyecto = Proyecto(**data.model_dump())
+def create_proyecto(
+    data: ProyectoCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un proyecto con nombre muy parecido"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    payload = data.model_dump()
+    _verificar_unicos(db, payload)
+
+    if not forzar:
+        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"))
+        if duplicado:
+            raise HTTPException(
+                409,
+                f"Ya existe un proyecto con un nombre muy parecido: "
+                f"'{duplicado.nombre_comercial}' (ID {duplicado.id}). "
+                f"Si de verdad es un proyecto distinto, confirma la creación."
+            )
+
+    proyecto = Proyecto(**payload)
     db.add(proyecto)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se pudo guardar: algún valor único (p. ej. API ID Unergy, topic slug, "
+            "ID de Solenium o de Sun Factory) ya está en uso por otro proyecto.",
+        )
     db.refresh(proyecto)
     return _get_proyecto_or_404(proyecto.id, db)
 
@@ -108,7 +163,29 @@ def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
 _UNIQUE_COLS = {
     "sub_project": "API ID Unergy",
     "topic_slug": "topic slug",
+    "project_id_solenium": "ID de Solenium (generación)",
+    "sunfactory_project_id": "ID de Sun Factory",
 }
+
+
+def _verificar_unicos(db: Session, payload: dict, excluir_id: int | None = None) -> None:
+    """Chequeo proactivo de columnas UNIQUE: da un mensaje accionable que nombra el
+    proyecto en conflicto, en vez de un IntegrityError opaco (usado en create y update)."""
+    for col, etiqueta in _UNIQUE_COLS.items():
+        nuevo = payload.get(col)
+        if nuevo in (None, ""):
+            continue
+        query = db.query(Proyecto).filter(getattr(Proyecto, col) == nuevo)
+        if excluir_id is not None:
+            query = query.filter(Proyecto.id != excluir_id)
+        conflicto = query.first()
+        if conflicto:
+            raise HTTPException(
+                409,
+                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
+                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
+                f"Cada {etiqueta} debe ser único.",
+            )
 
 
 @router.patch("/{id}", response_model=ProyectoOut)
@@ -118,25 +195,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
         raise HTTPException(404, "Proyecto no encontrado")
 
     payload = data.model_dump(exclude_unset=True)
-
-    # Chequeo proactivo de campos únicos: da un mensaje accionable que nombra el
-    # proyecto en conflicto, en vez de un IntegrityError opaco.
-    for col, etiqueta in _UNIQUE_COLS.items():
-        nuevo = payload.get(col)
-        if nuevo in (None, ""):
-            continue
-        conflicto = (
-            db.query(Proyecto)
-            .filter(getattr(Proyecto, col) == nuevo, Proyecto.id != id)
-            .first()
-        )
-        if conflicto:
-            raise HTTPException(
-                409,
-                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
-                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
-                f"Cada {etiqueta} debe ser único.",
-            )
+    _verificar_unicos(db, payload, excluir_id=id)
 
     for k, v in payload.items():
         setattr(p, k, v)
@@ -150,6 +209,29 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
             "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
             "ya está en uso por otro proyecto.",
         )
+    return _get_proyecto_or_404(id, db)
+
+
+@router.post("/{id}/vincular-sunfactory/{sunfactory_project_id}", response_model=ProyectoOut)
+def vincular_sunfactory(
+    id: int,
+    sunfactory_project_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Confirma que un proyecto ya existente (creado a mano, o por una corrida
+    vieja del sync sin este campo) corresponde a este proyecto de Sun Factory.
+
+    Se usa para resolver las `sugerencias_vinculo` que devuelve `sync_tsf_projects`
+    cuando no encuentra un match exacto por id/código. Una vez confirmado, el
+    sync ya reconoce este proyecto por su id estable de Sun Factory y no lo
+    vuelve a duplicar, aunque le cambien el nombre después."""
+    p = db.query(Proyecto).filter(Proyecto.id == id, Proyecto.deleted_at.is_(None)).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    _verificar_unicos(db, {"sunfactory_project_id": sunfactory_project_id}, excluir_id=id)
+    p.sunfactory_project_id = sunfactory_project_id
+    db.commit()
     return _get_proyecto_or_404(id, db)
 
 

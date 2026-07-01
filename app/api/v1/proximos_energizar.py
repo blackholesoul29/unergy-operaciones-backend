@@ -40,7 +40,10 @@ _TSF_COLUMNS_DDL = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_sunfactory_project_id "
+    "ON proyectos (sunfactory_project_id) WHERE sunfactory_project_id IS NOT NULL",
 ]
 _columns_ensured = False
 

@@ -262,6 +262,9 @@ class _FakeResult:
         self._row = row
     def first(self):
         return self._row
+    def fetchall(self):
+        # Usado por _buscar_candidato_similar (busqueda de posibles vinculos).
+        return [] if self._row is None else [self._row]
 
 
 class _ExistingRow:
@@ -358,6 +361,72 @@ def test_sync_update_links_codigo_tsf_and_origina_code():
     assert "codigo_tsf = COALESCE(codigo_tsf, :tsf)" in upd_sql
 
 
+def test_sync_creates_with_sunfactory_project_id(monkeypatch):
+    proj = _one_project()
+    proj[0]["solenium_id"] = 106
+    _patch_fetch(monkeypatch, proj)
+    db = _FakeDB(existing=None)
+    stats = pe.sync_tsf_projects(db, force=False)
+    assert stats["creados"] == 1
+    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
+    assert params["sol_id"] == 106
+
+
+def test_sync_update_backfills_sunfactory_project_id():
+    proj = _one_project()
+    proj[0]["solenium_id"] = 106
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False))
+    orig = pe.fetch_sunfactory_projects
+    pe.fetch_sunfactory_projects = lambda **k: (proj, [])
+    try:
+        stats = pe.sync_tsf_projects(db, force=False)
+    finally:
+        pe.fetch_sunfactory_projects = orig
+    assert stats["actualizados"] == 1
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "sunfactory_project_id = COALESCE(sunfactory_project_id" in upd_sql
+    assert upd_params["sol_id"] == 106
+
+
+class _FakeDBMatchByIdOnly:
+    """Simula que el codigo/base_name YA CAMBIO en Sun Factory (ya no matchea por
+    texto), pero el sunfactory_project_id sigue siendo el mismo. Reproduce el bug
+    de Monterrubio (id 210 vs 252, jul-2026) y confirma que el fix (match por id
+    estable) evita crear un duplicado."""
+    def __init__(self, existing_id, existing_sol_id):
+        self.existing_id = existing_id
+        self.existing_sol_id = existing_sol_id
+        self.statements = []
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        params = params or {}
+        self.statements.append((sql, params))
+        if sql.strip().upper().startswith("SELECT"):
+            if params.get("sol_id") == self.existing_sol_id:
+                return _FakeResult(_ExistingRow(id=self.existing_id, manual=False))
+            return _FakeResult(None)
+        return _FakeResult(None)
+
+    def commit(self): pass
+    def rollback(self): pass
+
+
+def test_sync_no_duplica_cuando_sun_factory_cambia_el_codigo(monkeypatch):
+    proj = _one_project()
+    proj[0]["origina_code"] = "SF-106"   # codigo NUEVO, distinto del que ya estaba guardado
+    proj[0]["base_name"] = None          # Sun Factory ya no manda base_name para este proyecto
+    proj[0]["tsf_code"] = None
+    proj[0]["solenium_id"] = 106
+    _patch_fetch(monkeypatch, proj)
+
+    db = _FakeDBMatchByIdOnly(existing_id=210, existing_sol_id=106)
+    stats = pe.sync_tsf_projects(db, force=False)
+
+    assert stats["creados"] == 0, "no debio crear un duplicado: el sunfactory_project_id ya existia"
+    assert stats["actualizados"] == 1
+
+
 def test_sync_updates_date_when_not_manual(monkeypatch):
     _patch_fetch(monkeypatch, _one_project())
     db = _FakeDB(existing=_ExistingRow(id=42, manual=False))
@@ -384,3 +453,85 @@ def test_sync_force_overwrites_manual_date(monkeypatch):
     assert "fecha_estimada_energizacion" in upd_sql      # force sí la sobrescribe
     assert "fecha_estimada_editada_manual = FALSE" in upd_sql  # y resetea la marca
     assert upd_params["energ"] == date(2026, 9, 1)
+
+
+# ── Sugerencia de vínculo cuando no hay match exacto (fix 2) ────────────────────
+
+class _FakeDBConCandidato:
+    """Simula: ningun match exacto por id/codigo (proyecto nunca sincronizado),
+    pero SI hay un proyecto ya existente con nombre parecido -- típicamente creado
+    a mano, sin ningún código de Sun Factory nunca registrado."""
+    def __init__(self, candidato_row=None):
+        self.candidato_row = candidato_row
+        self.statements = []
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        params = params or {}
+        self.statements.append((sql, params))
+        if "fecha_estimada_editada_manual" in sql:
+            return _FakeResult(None)  # ningun match exacto
+        if "nombre_comercial, municipio" in sql:
+            return _FakeResult(self.candidato_row)
+        return _FakeResult(None)
+
+    def commit(self): pass
+    def rollback(self): pass
+
+
+def test_sync_sugiere_vinculo_en_vez_de_duplicar(monkeypatch):
+    import types
+    proj = _one_project()
+    proj[0]["commercial_name"] = "Morroa Sur"
+    proj[0]["municipio"] = "Morroa"
+    proj[0]["solenium_id"] = 999
+    _patch_fetch(monkeypatch, proj)
+
+    candidato = types.SimpleNamespace(id=55, nombre_comercial="Minigranja Morroa Sur (manual)", municipio="Morroa")
+    db = _FakeDBConCandidato(candidato_row=candidato)
+    stats = pe.sync_tsf_projects(db, force=False)
+
+    assert stats["creados"] == 0, "no debio crear un proyecto nuevo habiendo un candidato parecido"
+    assert stats["actualizados"] == 0
+    assert len(stats["sugerencias_vinculo"]) == 1
+    sug = stats["sugerencias_vinculo"][0]
+    assert sug["candidato_id"] == 55
+    assert sug["sunfactory_project_id"] == 999
+    inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
+    assert not inserts
+
+
+def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):
+    proj = _one_project()
+    proj[0]["solenium_id"] = 999
+    _patch_fetch(monkeypatch, proj)
+
+    db = _FakeDBConCandidato(candidato_row=None)
+    stats = pe.sync_tsf_projects(db, force=False)
+
+    assert stats["creados"] == 1
+    assert stats["sugerencias_vinculo"] == []
+
+
+def test_buscar_candidato_similar_respeta_municipio_distinto():
+    import types
+
+    class _DB:
+        def execute(self, stmt, params=None):
+            rows = [types.SimpleNamespace(id=1, nombre_comercial="Minigranja Morroa Sur", municipio="Sincelejo")]
+            return types.SimpleNamespace(fetchall=lambda: rows)
+
+    resultado = pe._buscar_candidato_similar(_DB(), "Morroa Sur", "Morroa")
+    assert resultado is None  # mismo nombre, pero municipio distinto -> no sugiere
+
+
+def test_buscar_candidato_similar_encuentra_por_substring():
+    import types
+
+    class _DB:
+        def execute(self, stmt, params=None):
+            rows = [types.SimpleNamespace(id=7, nombre_comercial="Minigranja - Monterrubio", municipio="La Paz")]
+            return types.SimpleNamespace(fetchall=lambda: rows)
+
+    resultado = pe._buscar_candidato_similar(_DB(), "Minigranja 0029 - Monterrubio", "La Paz")
+    assert resultado is not None and resultado.id == 7

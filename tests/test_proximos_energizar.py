@@ -487,7 +487,8 @@ def test_sync_sugiere_vinculo_en_vez_de_duplicar(monkeypatch):
     proj[0]["solenium_id"] = 999
     _patch_fetch(monkeypatch, proj)
 
-    candidato = types.SimpleNamespace(id=55, nombre_comercial="Minigranja Morroa Sur (manual)", municipio="Morroa")
+    candidato = types.SimpleNamespace(id=55, nombre_comercial="Minigranja Morroa Sur (manual)",
+                                       municipio="Morroa", sunfactory_project_id=None)
     db = _FakeDBConCandidato(candidato_row=candidato)
     stats = pe.sync_tsf_projects(db, force=False)
 
@@ -497,8 +498,33 @@ def test_sync_sugiere_vinculo_en_vez_de_duplicar(monkeypatch):
     sug = stats["sugerencias_vinculo"][0]
     assert sug["candidato_id"] == 55
     assert sug["sunfactory_project_id"] == 999
+    assert sug["candidato_sunfactory_id_previo"] is None
     inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
     assert not inserts
+
+
+def test_sync_sugiere_vinculo_aunque_el_candidato_ya_tenga_otro_id(monkeypatch):
+    # Caso real "Monterrubio": Sun Factory reporta el mismo proyecto bajo dos ids
+    # propios (106 y 111). El candidato ya quedo vinculado al 111 en una corrida
+    # anterior -- antes esto lo excluia de la busqueda y el sync volvia a crear
+    # un duplicado en silencio. Ahora debe seguir sugiriendolo (no duplicar).
+    import types
+    proj = _one_project()
+    proj[0]["commercial_name"] = "Minigranja - Monterrubio"
+    proj[0]["municipio"] = "La Paz"
+    proj[0]["solenium_id"] = 106
+    _patch_fetch(monkeypatch, proj)
+
+    candidato = types.SimpleNamespace(id=210, nombre_comercial="Minigranja 0029 - Monterrubio",
+                                       municipio="La Paz", sunfactory_project_id=111)
+    db = _FakeDBConCandidato(candidato_row=candidato)
+    stats = pe.sync_tsf_projects(db, force=False)
+
+    assert stats["creados"] == 0, "no debio duplicar: el candidato ya vinculado a otro id sigue siendo sugerido"
+    assert len(stats["sugerencias_vinculo"]) == 1
+    sug = stats["sugerencias_vinculo"][0]
+    assert sug["candidato_id"] == 210
+    assert sug["candidato_sunfactory_id_previo"] == 111
 
 
 def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):

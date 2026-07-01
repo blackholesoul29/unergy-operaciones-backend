@@ -610,6 +610,14 @@ def _buscar_candidato_similar(db: Session, nombre: str | None, municipio: str | 
     tenía guardado "Cesar") descartaba en silencio un match de nombre correcto
     y terminaba creando el duplicado que se quería evitar. Mejor sugerir de más
     que duplicar en silencio.
+
+    Tampoco se excluyen los proyectos que YA tienen un `sunfactory_project_id`
+    distinto (antes sí se excluían). Caso real "Monterrubio": Sun Factory
+    reporta el mismo proyecto bajo dos ids propios (106 y 111) -- uno se vincula
+    primero, y si el otro quedara excluido de la búsqueda, la próxima
+    sincronización lo vuelve a crear como duplicado en silencio. Al no excluirlo,
+    se sigue sugiriendo cada vez (puede repetirse hasta que alguien lo confirme o
+    Sun Factory deje de mandarlo) -- más repetitivo, pero nunca duplica solo.
     """
     if not nombre:
         return None
@@ -617,9 +625,9 @@ def _buscar_candidato_similar(db: Session, nombre: str | None, municipio: str | 
     if len(objetivo) < 4:
         return None
     rows = db.execute(text("""
-        SELECT id, nombre_comercial, municipio
+        SELECT id, nombre_comercial, municipio, sunfactory_project_id
         FROM proyectos
-        WHERE deleted_at IS NULL AND sunfactory_project_id IS NULL
+        WHERE deleted_at IS NULL
     """)).fetchall()
     for r in rows:
         n = _core(r.nombre_comercial)
@@ -716,6 +724,11 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                         "candidato_id": candidato.id,
                         "candidato_nombre": candidato.nombre_comercial,
                         "candidato_municipio": candidato.municipio,
+                        # Si no es None, el candidato ya esta vinculado a OTRO id de
+                        # Sun Factory -- confirmar la sugerencia reemplazaria ese
+                        # vinculo (posible caso "mismo proyecto, dos ids en Sun
+                        # Factory", como Monterrubio 106/111).
+                        "candidato_sunfactory_id_previo": candidato.sunfactory_project_id,
                     })
                     continue
 

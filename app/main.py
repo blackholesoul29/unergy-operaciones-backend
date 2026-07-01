@@ -992,6 +992,12 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_falla ON falla_inversores (falla_id)",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_inversor ON falla_inversores (proyecto_inversor_id)",
+    # migration 031 — ID estable de Sun Factory en proyectos (Alembic roto: la
+    # columna del modelo Proyecto se provisiona aquí, no vía alembic upgrade).
+    # Sin esta DDL, cualquier query que cargue columnas de Proyecto (proyectos,
+    # fallas→ProyectoResumen, liquidaciones→proyecto) rompe con 500.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_sunfactory_project_id ON proyectos (sunfactory_project_id) WHERE sunfactory_project_id IS NOT NULL",
 ]
 
 

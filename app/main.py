@@ -2394,6 +2394,24 @@ def _run_arr_seed() -> None:
         db.close()
 
 
+def _run_fallas_tipo_backfill() -> None:
+    """Corrige el tipo/título de las fallas estructuradas cuyo tipo_id había quedado
+    apuntando a un tipo legacy contradictorio (p.ej. 'Fusible de string quemado' en
+    fallas de red). Corre después del seed de estructura para que los tipos ya
+    existan. Idempotente. Ver [[project_reporte_fallas_estructurado]]."""
+    from sqlalchemy.orm import sessionmaker
+    from app.api.v1.fallas import backfill_tipos_estructurados
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        rep = backfill_tipos_estructurados(db, dry_run=False)
+        print(f"[startup] fallas_tipo_backfill: {rep['corregidas']} corregidas "
+              f"de {rep['total_estructuradas']} fallas estructuradas")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -2431,6 +2449,7 @@ def _deferred_init():
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
+        ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:
             fn()

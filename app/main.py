@@ -1150,6 +1150,23 @@ def _run_estructura_fallas_seed() -> None:
                             etiqueta=sub["etiqueta"], descripcion=sub.get("descripcion"),
                             activa=True,
                         ))
+            # Desactivar tipos de inversores retirados de la estructura: dejan de
+            # ofrecerse, pero se conserva la fila (no se borra) para no romper
+            # fallas históricas que aún referencian ese tipo_id.
+            inv_cat = next((c for c in ESTRUCTURA_FALLAS if c["codigo"] == "inversores"), None)
+            if inv_cat:
+                vigentes = {tipo_codigo("inversores", t["codigo"]) for t in inv_cat.get("tipos_falla", [])}
+                obsoletos = (
+                    db.query(FallaCatTipo)
+                    .filter(FallaCatTipo.codigo.like("inversores.%"),
+                            FallaCatTipo.codigo.notin_(vigentes),
+                            FallaCatTipo.activa == True)
+                    .all()
+                )
+                for t in obsoletos:
+                    t.activa = False
+                if obsoletos:
+                    print(f"[estructura fallas seed] {len(obsoletos)} tipo(s) de inversores desactivados")
             db.commit()
             print("[estructura fallas seed] OK")
         except Exception as e:

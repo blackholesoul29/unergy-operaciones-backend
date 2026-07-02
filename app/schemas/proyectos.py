@@ -291,6 +291,7 @@ class ProyectoOut(BaseModel):
     longitud: Optional[float]
     tipo_conexion: Optional[str]
     operador_red: Optional[str]
+    operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
     estado_resultados_url: Optional[str]

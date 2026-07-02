@@ -150,24 +150,35 @@ class Proyecto(Base):
     # Relaciones
     cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="proyectos")
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
-    subproyectos: Mapped[list] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
+    subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
-    grupos_panel: Mapped[list] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
-    inversores: Mapped[list] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
-    contactos: Mapped[list] = relationship("ProyectoContacto", back_populates="proyecto", uselist=True)
-    inversionistas: Mapped[list] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
-    fronteras: Mapped[list] = relationship("Frontera", back_populates="proyecto", uselist=True)
-    fallas: Mapped[list] = relationship("Falla", back_populates="proyecto", uselist=True)
-    generaciones: Mapped[list] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
-    mantenimientos: Mapped[list] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
-    liquidaciones: Mapped[list] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
-    asic_solicitudes: Mapped[list] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
-    rec_procesos: Mapped[list] = relationship("RecProceso", back_populates="proyecto", uselist=True)
-    promotor_seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
-    contratos_servicio: Mapped[list] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
-    ppa_contratos: Mapped[list] = relationship("PPAContrato", secondary="ppa_contrato_proyectos", uselist=True, viewonly=True)
+    grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
+    inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
+    contactos: Mapped[list["ProyectoContacto"]] = relationship("ProyectoContacto", back_populates="proyecto", uselist=True)
+    inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
+    fronteras: Mapped[list["Frontera"]] = relationship("Frontera", back_populates="proyecto", uselist=True)
+    fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="proyecto", uselist=True)
+    generaciones: Mapped[list["GeneracionDiaria"]] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
+    mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
+    liquidaciones: Mapped[list["Liquidacion"]] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
+    asic_solicitudes: Mapped[list["AsicSolicitud"]] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
+    rec_procesos: Mapped[list["RecProceso"]] = relationship("RecProceso", back_populates="proyecto", uselist=True)
+    promotor_seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
+    contratos_servicio: Mapped[list["ContratoServicio"]] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
+    ppa_contratos: Mapped[list["PPAContrato"]] = relationship("PPAContrato", secondary="ppa_contrato_proyectos", uselist=True, viewonly=True)
     servicio_operacion: Mapped["ServicioOperacion | None"] = relationship("ServicioOperacion", back_populates="proyecto", uselist=False)
     servicio_representacion: Mapped["ServicioRepresentacion | None"] = relationship("ServicioRepresentacion", back_populates="proyecto", uselist=False)
+
+    @property
+    def operador_red_legal(self) -> str | None:
+        """Nombre legal del operador de red (catálogo operadores_red), tomado de
+        la primera frontera con el vínculo poblado. Requiere precargar
+        `fronteras` + `fronteras.operador` (selectinload) para no golpear la BD
+        por cada proyecto."""
+        for f in self.fronteras:
+            if f.operador:
+                return f.operador.nombre_legal
+        return None
 
 
 class ProyectoInfoTecnica(Base):

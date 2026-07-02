@@ -240,6 +240,7 @@ class FronteraOut(FronteraBase):
     updated_at: datetime
 
     proyecto_nombre: Optional[str] = None
+    operador_comercial: Optional[str] = None
 
 
 class FronteraLecturaCreate(BaseModel):

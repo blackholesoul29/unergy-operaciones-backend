@@ -17,7 +17,7 @@ class OperadorRed(Base):
     contactos: Mapped[list["OperadorRedContacto"]] = relationship(
         "OperadorRedContacto", back_populates="operador", cascade="all, delete-orphan"
     )
-    fronteras: Mapped[list] = relationship("Frontera", back_populates="operador")
+    fronteras: Mapped[list["Frontera"]] = relationship("Frontera", back_populates="operador")
 
 
 class OperadorRedContacto(Base):

@@ -33,6 +33,8 @@ def _to_out(f: Frontera) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
+    if f.operador:
+        d.operador_comercial = f.operador.nombre_comercial
     return d
 
 
@@ -119,7 +121,7 @@ def list_fronteras(
 ):
     q = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto))
+        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
         .filter(Frontera.deleted_at.is_(None))
     )
     if proyecto_id:
@@ -148,12 +150,12 @@ def create_frontera(
                 setattr(existing, k, v)
             db.commit()
             db.refresh(existing)
-            return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto)).filter(Frontera.id == existing.id).first())
+            return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto), joinedload(Frontera.operador)).filter(Frontera.id == existing.id).first())
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
     db.refresh(obj)
-    return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto)).filter(Frontera.id == obj.id).first())
+    return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto), joinedload(Frontera.operador)).filter(Frontera.id == obj.id).first())
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -166,7 +168,7 @@ def get_frontera(
 ):
     f = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto))
+        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
         .filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None))
         .first()
     )
@@ -186,7 +188,7 @@ def update_frontera(
 ):
     f = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto))
+        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
         .filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None))
         .first()
     )
@@ -198,7 +200,7 @@ def update_frontera(
     db.refresh(f)
     return _to_out(
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto))
+        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
         .filter(Frontera.id == f.id)
         .first()
     )

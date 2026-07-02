@@ -10,6 +10,7 @@ from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoGrupoPanel, ProyectoInversor, ProyectoContacto,
 )
+from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut,
     ProyectoInversionistaCreate, ProyectoInversionistaUpdate, ProyectoInversionistaOut,
@@ -33,6 +34,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.contactos),
             selectinload(Proyecto.servicio_representacion),
+            selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         )
         .filter(Proyecto.id == id)
         .first()
@@ -73,6 +75,7 @@ def list_proyectos(
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.contactos),
         selectinload(Proyecto.servicio_representacion),
+        selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
     )
     if q:
         query = query.filter(Proyecto.nombre_comercial.ilike(f"%{q}%"))

@@ -601,13 +601,30 @@ class GaiaClient:
         _ap_divisor = 1000.0 if _max_ap > 5000 else 1.0
 
         # ── Time series for power chart → always kW ───────────────────────────
-        ap_series = [
-            {"time": r["time"], "kw": round(
-                sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor, 3
-            )}
-            for r in results["ap"]
-            if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
-        ]
+        # abs(): algunos medidores reportan AP en negativo todo el día (polaridad
+        # del CT invertida en sitio) mientras eae sigue acumulando bien -- ver
+        # caso MGS 0032 El Paso Norte, 2026-07-02. Esta función solo se usa para
+        # monitorear generación (nunca consumo puro), así que una potencia
+        # negativa nunca es un dato real a preservar, siempre es el defecto del
+        # medidor. Se deja un warning para poder rastrear qué medidores lo
+        # tienen y mandarlos a revisar físicamente -- no se corrige solo en
+        # silencio para siempre.
+        _ap_negative_count = 0
+        ap_series = []
+        for r in results["ap"]:
+            if not (any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")):
+                continue
+            raw_kw = sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor
+            if raw_kw < 0:
+                _ap_negative_count += 1
+            ap_series.append({"time": r["time"], "kw": round(abs(raw_kw), 3)})
+
+        if _ap_negative_count:
+            logger.warning(
+                "Medidor %s reportó AP negativo en %d de %d lecturas hoy -- "
+                "probable polaridad de CT invertida en sitio; se corrigió el signo para mostrar.",
+                node_id, _ap_negative_count, len(ap_series),
+            )
 
         # Potencia derivada de los deltas de eae -- se calcula siempre (no solo
         # cuando AP está vacío del todo) para poder rellenar los huecos de
@@ -617,6 +634,9 @@ class GaiaClient:
         # medidor reportaba AP solo hasta cierta hora (ej. se cortó a media
         # tarde) la curva quedaba truncada ahí aunque el total de energía sí
         # incluyera esas horas -- ver caso Perijá, 2026-07-02.
+        def _parse_t(s: str):
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
         eae_derived_series = []
         _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
         _prev_t: str | None = None
@@ -629,10 +649,13 @@ class GaiaClient:
                 _prev_t = t
                 continue
             try:
-                def _parse(s: str):
-                    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-                dt_h = (_parse(t) - _parse(_prev_t)).total_seconds() / 3600.0
-                if dt_h > 0:
+                dt_h = (_parse_t(t) - _parse_t(_prev_t)).total_seconds() / 3600.0
+                # Piso mínimo de 6 min: si dos lecturas de eae caen casi pegadas
+                # (a veces pasa, un registro extra a un segundo del anterior),
+                # dividir por un intervalo casi nulo dispara una potencia
+                # absurda (ej. 500,000 kW) -- mejor descartar ese punto que
+                # inventar un pico sin sentido.
+                if dt_h >= 0.1:
                     eae_derived_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
             except Exception:
                 pass
@@ -642,10 +665,26 @@ class GaiaClient:
         # eae rellena cualquier hueco de tiempo sin AP -- al inicio, en medio
         # (ej. se cae la conexión y se recupera más tarde) o al final. No basta
         # con rellenar solo la cola: si AP se cae y luego se recupera, el hueco
-        # queda en medio del día, no al final.
-        _ap_times = {pt["time"] for pt in ap_series}
+        # queda en medio del día, no al final. La comparación es por cercanía
+        # en el tiempo (±10 min), no por texto exacto: ap y eae no siempre
+        # comparten el mismo segundo exacto de lectura aunque sean del mismo
+        # intervalo (ej. 16:00:00 vs 16:00:01), y comparar el string tal cual
+        # dejaba pasar "huecos" falsos que no eran huecos reales.
+        _GAP_TOLERANCE_SEC = 600  # 10 min
+        try:
+            _ap_dt = sorted(_parse_t(pt["time"]) for pt in ap_series)
+        except Exception:
+            _ap_dt = []
+
+        def _tiene_ap_cerca(t_str: str) -> bool:
+            try:
+                t = _parse_t(t_str)
+            except Exception:
+                return True  # si no se puede parsear, no lo agregamos (más cauto)
+            return any(abs((t - apt).total_seconds()) <= _GAP_TOLERANCE_SEC for apt in _ap_dt)
+
         power_series = sorted(
-            ap_series + [pt for pt in eae_derived_series if pt["time"] not in _ap_times],
+            ap_series + [pt for pt in eae_derived_series if not _tiene_ap_cerca(pt["time"])],
             key=lambda pt: pt["time"],
         )
 

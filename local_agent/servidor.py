@@ -111,8 +111,29 @@ def descargar_archivo(job_id: str, formato: str = "xlsx"):
     )
 
 
+def _silenciar_connection_reset_windows(loop, contexto):
+    """El ProactorEventLoop de Windows imprime un ConnectionResetError
+    inofensivo cuando el navegador cierra la conexión justo después de
+    recibir un archivo — la respuesta ya se entregó completa antes de
+    eso. Se silencia solo ese caso puntual; cualquier otro error se
+    reporta normal."""
+    excepcion = contexto.get("exception")
+    if isinstance(excepcion, ConnectionResetError):
+        return
+    loop.default_exception_handler(contexto)
+
+
 if __name__ == "__main__":
+    import asyncio
+
     import uvicorn
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.set_exception_handler(_silenciar_connection_reset_windows)
+
     print("Agente local de Descarga de XM — escuchando en http://127.0.0.1:8420")
     print("Deja esta ventana abierta mientras usas la pestaña 'Descarga de XM'.")
-    uvicorn.run(app, host="127.0.0.1", port=8420)
+    config = uvicorn.Config(app, host="127.0.0.1", port=8420)
+    server = uvicorn.Server(config)
+    loop.run_until_complete(server.serve())

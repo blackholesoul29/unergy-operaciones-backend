@@ -5,8 +5,8 @@ documentos, servicio_cgm, representacion_gescon, operacion_kpis, contratos_arrie
 Los modelos SQLAlchemy correspondientes ya se quitaron del código (app/models/*),
 así que Base.metadata.create_all() ya no las recrea al arrancar la app.
 
-Revision ID: 031
-Revises: 030
+Revision ID: 032
+Revises: 031
 Create Date: 2026-07-02
 """
 from __future__ import annotations
@@ -14,8 +14,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "031"
-down_revision = "030"
+revision = "032"
+down_revision = "031"
 branch_labels = None
 depends_on = None
 

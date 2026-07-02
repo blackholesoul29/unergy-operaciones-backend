@@ -21,12 +21,14 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
     marcan 'terminado': siguen 'publicado' para que Cumplimiento los prorratee HASTA la
     fecha y los excluya DESPUÉS — el histórico previo a la terminación queda intacto.
 
-    El contrato PPA comercial NO se da por terminado por una sola planta: su `fecha_fin`
-    (fin contractual, fuente de verdad del contrato firmado) sólo se mueve cuando TODAS
-    las plantas del contrato interno están terminadas — es decir, cuando ya no queda
-    ningún registro/modificación 'publicado' con `fecha_fin` vacía. Así un PPA
-    multi-planta (p. ej. Terpel 1, 12 plantas hasta 2039) conserva su fin aunque una de
-    sus plantas/SIC se termine antes. (Un SIC ⇒ una planta; un contrato ⇒ varios SIC.)
+    El `fecha_fin` del contrato PPA comercial es un campo manual (fuente de verdad del
+    contrato firmado): esta función NO lo toca. Inferirlo automáticamente a partir de
+    fechas sueltas en registros/modificaciones de ASIC resultó frágil — cualquier
+    `fecha_fin` cargada en una planta por un motivo ajeno a una terminación real (p.ej.
+    vigencia de registro GESCON) contaminaba el cierre del contrato completo. Si el
+    contrato macro debe cerrarse, se edita directamente en la pestaña PPA. Ver
+    `_validar_fecha_fin_vs_ppa` para la regla inversa: ninguna planta puede tener una
+    fecha_fin posterior a la del contrato macro.
     """
     if (
         solicitud.tipo_solicitud != TipoSolicitudAsicEnum.terminacion
@@ -38,7 +40,7 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
 
     fecha_term = solicitud.fecha_fin
 
-    # 1) Nivel planta: estampar fecha_fin en los registros del mismo SIC.
+    # Nivel planta: estampar fecha_fin en los registros del mismo SIC.
     targets = (
         db.query(AsicSolicitud)
         .filter(
@@ -53,46 +55,31 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
         .all()
     )
 
-    contratos_internos: set[str] = set()
     for t in targets:
         if t.fecha_fin is None or t.fecha_fin > fecha_term:
             t.fecha_fin = fecha_term
-        if t.contrato_interno:
-            contratos_internos.add(t.contrato_interno)
-    db.flush()  # que el paso 2 vea las fechas recién estampadas
-
-    # 2) Nivel contrato: terminar el PPA SÓLO si ya no queda ninguna planta abierta.
-    for contrato_interno in contratos_internos:
-        registros = (
-            db.query(AsicSolicitud)
-            .filter(
-                AsicSolicitud.contrato_interno == contrato_interno,
-                AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
-                AsicSolicitud.tipo_solicitud.in_([
-                    TipoSolicitudAsicEnum.registro,
-                    TipoSolicitudAsicEnum.modificacion,
-                ]),
-            )
-            .all()
-        )
-        if not registros or any(r.fecha_fin is None for r in registros):
-            # queda al menos una planta abierta → el contrato sigue vigente
-            continue
-
-        fin_contrato = max(r.fecha_fin for r in registros)
-        ppas = (
-            db.query(PPAContrato)
-            .filter(
-                PPAContrato.numero_codigo_contrato == contrato_interno,
-                PPAContrato.deleted_at.is_(None),
-            )
-            .all()
-        )
-        for ppa in ppas:
-            if ppa.fecha_fin != fin_contrato:
-                ppa.fecha_fin = fin_contrato
 
     return len(targets)
+
+
+def _validar_fecha_fin_vs_ppa(db: Session, solicitud: AsicSolicitud) -> None:
+    """Ninguna fecha_fin de un registro GESCON puede ser posterior a la fecha_fin
+    (manual) de su contrato PPA macro. Evita que una planta quede "vigente" mas alla
+    de lo que el contrato comercial permite."""
+    if solicitud.fecha_fin is None:
+        return
+    ppa = _resolver_ppa_para(solicitud, db)
+    if ppa is None or ppa.fecha_fin is None:
+        return
+    if solicitud.fecha_fin > ppa.fecha_fin:
+        nombre_ppa = ppa.nombre_interno or ppa.numero_codigo_contrato or f"ID {ppa.id}"
+        raise HTTPException(
+            422,
+            f"La fecha de fin ({solicitud.fecha_fin.isoformat()}) no puede ser "
+            f"posterior a la del contrato PPA \"{nombre_ppa}\" "
+            f"({ppa.fecha_fin.isoformat()}). Corrige la fecha o actualiza primero "
+            f"el contrato macro.",
+        )
 
 
 def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
@@ -178,6 +165,7 @@ def patch_solicitud(
         raise HTTPException(404, "No encontrado")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
+    _validar_fecha_fin_vs_ppa(db, s)
     _auto_terminate(db, s)
     db.commit()
     db.refresh(s)
@@ -194,6 +182,7 @@ def create_solicitud(
     s = AsicSolicitud(**data.model_dump())
     db.add(s)
     db.flush()
+    _validar_fecha_fin_vs_ppa(db, s)
     _auto_terminate(db, s)
     db.commit()
     db.refresh(s)

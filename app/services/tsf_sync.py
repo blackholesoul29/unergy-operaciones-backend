@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -563,6 +564,80 @@ def fetch_pipeline_projects(
     return projects, warnings
 
 
+def _norm(s: str | None) -> str:
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
+
+
+_PREFIJOS_PLANTA_RE = re.compile(r"\b(mgs|mgr|minigranja|granja|solar|gd)\b")
+_NUMERO_SUELTO_RE = re.compile(r"\b0*\d+\b")
+
+
+def _core(s: str | None) -> str:
+    """Nombre normalizado sin prefijos de tipo de planta (MGS/Minigranja/GD/...)
+    ni números sueltos -- para comparar el "nombre de lugar" real detrás de
+    convenciones de nomenclatura distintas (p. ej. "MGS 0032 - El Paso Norte" vs
+    "Minigranja 0032 - El Paso Norte")."""
+    n = _norm(s)
+    n = _PREFIJOS_PLANTA_RE.sub(" ", n)
+    n = _NUMERO_SUELTO_RE.sub(" ", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+def _buscar_candidato_similar(db: Session, nombre: str | None, municipio: str | None):
+    """Busca un proyecto YA existente (sin sunfactory_project_id todavía) que
+    podría ser el mismo que este proyecto de Sun Factory, cuando no hubo match
+    exacto por id/código.
+
+    Deliberadamente MÁS permisivo que el chequeo de create_proyecto: compara por
+    "nombre de lugar" (sin prefijos MGS/Minigranja/GD ni números) en vez de
+    nombre completo exacto, porque el caso que hay que atrapar aquí es justo ese
+    (mismo lugar, prefijo o número escritos distinto -- Mapalé/El Paso Norte).
+    Aquí nadie se crea automáticamente con este match: solo se guarda como
+    sugerencia para que un humano la confirme o descarte con
+    `POST /proyectos/{id}/vincular-sunfactory/{sunfactory_project_id}`. Un falso
+    positivo aquí es barato (se descarta y, si de verdad es un proyecto distinto,
+    se crea a mano); uno en create_proyecto no lo es (bloquearía una creación
+    legítima al vuelo). El costo de ser permisivo: desarrollos con varias fases
+    en el mismo lugar (p. ej. "Chinú Sur" y "Chinú Sur 2", que son plantas reales
+    distintas) también se sugerirán como posible match -- se descartan con un
+    clic si no aplican, no se pierde nada.
+
+    NO se exige que `municipio` coincida (solo se usa para mostrarlo en la
+    sugerencia): un `municipio` mal cargado en el proyecto existente (p. ej. el
+    departamento en vez del municipio real -- pasó con "El Paso Norte", que
+    tenía guardado "Cesar") descartaba en silencio un match de nombre correcto
+    y terminaba creando el duplicado que se quería evitar. Mejor sugerir de más
+    que duplicar en silencio.
+
+    Tampoco se excluyen los proyectos que YA tienen un `sunfactory_project_id`
+    distinto (antes sí se excluían). Caso real "Monterrubio": Sun Factory
+    reporta el mismo proyecto bajo dos ids propios (106 y 111) -- uno se vincula
+    primero, y si el otro quedara excluido de la búsqueda, la próxima
+    sincronización lo vuelve a crear como duplicado en silencio. Al no excluirlo,
+    se sigue sugiriendo cada vez (puede repetirse hasta que alguien lo confirme o
+    Sun Factory deje de mandarlo) -- más repetitivo, pero nunca duplica solo.
+    """
+    if not nombre:
+        return None
+    objetivo = _core(nombre)
+    if len(objetivo) < 4:
+        return None
+    rows = db.execute(text("""
+        SELECT id, nombre_comercial, municipio, sunfactory_project_id
+        FROM proyectos
+        WHERE deleted_at IS NULL
+    """)).fetchall()
+    for r in rows:
+        n = _core(r.nombre_comercial)
+        if len(n) < 4:
+            continue
+        if objetivo in n or n in objetivo:
+            return r
+    return None
+
+
 # ── Upsert en `proyectos` ───────────────────────────────────────────────────────
 
 # Fase de construcción persistida (slug) ↔ etiqueta del pipeline.
@@ -591,7 +666,8 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
     No depende de originabotdb (que solo es alcanzable desde la red interna)."""
     projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
     stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
-             "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory"}
+             "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory",
+             "sugerencias_vinculo": []}
 
     for p in projects:
         code = p["origina_code"]
@@ -602,30 +678,65 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             # al crear un proyecto a mano. Cruzamos por codigo_tsf (prefijo o
             # base_name completo) ADEMÁS de origina_code para no duplicar lo que
             # ya existe en la BD.
+            #
+            # `sunfactory_project_id` tiene prioridad sobre todo lo demás: es el
+            # único identificador que Sun Factory garantiza que no cambia, aunque
+            # le rebautice el proyecto (base_name/origina_code) entre una
+            # sincronización y otra -- eso fue justo lo que causó el duplicado de
+            # Monterrubio (id 210 vs 252, jul-2026): el `base_name` cambió y el
+            # match por texto dejó de reconocer el proyecto ya existente.
             tsf_code = p.get("tsf_code")
             base_name = p.get("base_name")
+            solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
                     SELECT id, fecha_estimada_editada_manual FROM proyectos
                     WHERE deleted_at IS NULL AND (
-                        origina_code = :code
+                        (CAST(:sol_id AS integer) IS NOT NULL
+                             AND sunfactory_project_id = CAST(:sol_id AS integer))
+                        OR origina_code = :code
                         OR (CAST(:tsf AS text) <> '' AND codigo_tsf = CAST(:tsf AS text))
                         OR (CAST(:bn  AS text) <> '' AND codigo_tsf = CAST(:bn  AS text))
                     )
-                    ORDER BY id
+                    ORDER BY (sunfactory_project_id = CAST(:sol_id AS integer)) DESC NULLS LAST, id
                     LIMIT 1
                 """),
-                {"code": code, "tsf": tsf_code or "", "bn": base_name or ""},
+                {"sol_id": solenium_pipeline_id, "code": code, "tsf": tsf_code or "", "bn": base_name or ""},
             ).first()
 
             fase = _STATUS_TO_FASE.get(p["status"], "en_construccion")
             energ = p["energization_date"]
 
             if existing is None:
+                # Ningun match exacto por id/codigo. Antes de crear una fila nueva,
+                # ver si hay un proyecto ya existente (tipicamente creado a mano,
+                # sin ningun codigo de Sun Factory nunca registrado) que podria ser
+                # el mismo -- para no duplicarlo, se sugiere el vinculo en vez de
+                # crear automaticamente. Ver POST /proyectos/{id}/vincular-sunfactory.
+                candidato = _buscar_candidato_similar(
+                    db, p.get("commercial_name") or code, p.get("municipio"),
+                )
+                if candidato is not None:
+                    stats["sugerencias_vinculo"].append({
+                        "sunfactory_project_id": solenium_pipeline_id,
+                        "sunfactory_nombre": p.get("commercial_name") or code,
+                        "sunfactory_municipio": p.get("municipio"),
+                        "candidato_id": candidato.id,
+                        "candidato_nombre": candidato.nombre_comercial,
+                        "candidato_municipio": candidato.municipio,
+                        # Si no es None, el candidato ya esta vinculado a OTRO id de
+                        # Sun Factory -- confirmar la sugerencia reemplazaria ese
+                        # vinculo (posible caso "mismo proyecto, dos ids en Sun
+                        # Factory", como Monterrubio 106/111).
+                        "candidato_sunfactory_id_previo": candidato.sunfactory_project_id,
+                    })
+                    continue
+
                 db.execute(
                     text("""
                         INSERT INTO proyectos (
-                            nombre_comercial, origina_code, codigo_tsf, fase_construccion,
+                            nombre_comercial, origina_code, codigo_tsf, sunfactory_project_id,
+                            fase_construccion,
                             fecha_estimada_energizacion, fecha_estimada_editada_manual,
                             avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
                             municipio, departamento, latitud, longitud,
@@ -634,7 +745,8 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                             srv_ppa, srv_promotor, srv_rec, generar_liquidacion,
                             created_at, updated_at
                         ) VALUES (
-                            :nombre, :code, :tsf, :fase,
+                            :nombre, :code, :tsf, :sol_id,
+                            :fase,
                             :energ, FALSE,
                             :avance, :mwh, :potencia,
                             :municipio, :departamento, :latitud, :longitud,
@@ -648,6 +760,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                         "nombre": p["commercial_name"] or code,
                         "code": code,
                         "tsf": tsf_code,
+                        "sol_id": solenium_pipeline_id,
                         "fase": fase,
                         "energ": energ,
                         "avance": p.get("avance_pct"),
@@ -671,6 +784,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     "potencia": p.get("installed_power_kwp"),
                     "code": code,
                     "tsf": tsf_code,
+                    "sol_id": solenium_pipeline_id,
                     "municipio": p["municipio"],
                     "departamento": p["departamento"],
                     "latitud": p["latitud"],
@@ -683,6 +797,9 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     params["energ"] = energ
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
+                # sunfactory_project_id se respalda aqui la PRIMERA vez que se
+                # encuentra un match (por texto o por id) -- de ahi en adelante
+                # el match ya no depende de que el texto siga siendo el mismo.
                 db.execute(
                     text(f"""
                         UPDATE proyectos SET
@@ -691,6 +808,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                             potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp),
                             origina_code = COALESCE(origina_code, :code),
                             codigo_tsf = COALESCE(codigo_tsf, :tsf),
+                            sunfactory_project_id = COALESCE(sunfactory_project_id, CAST(:sol_id AS integer)),
                             municipio = COALESCE(municipio, :municipio),
                             departamento = COALESCE(departamento, :departamento),
                             latitud = COALESCE(latitud, :latitud),

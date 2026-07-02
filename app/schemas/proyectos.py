@@ -236,6 +236,7 @@ class ProyectoCreate(BaseModel):
     srv_rec: Optional[bool] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
+    sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     fecha_estimada_editada_manual: Optional[bool] = None
@@ -307,6 +308,7 @@ class ProyectoOut(BaseModel):
     srv_rec: bool
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
+    sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     fecha_estimada_editada_manual: Optional[bool] = None

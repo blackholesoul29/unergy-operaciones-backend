@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
+from app.services.tsf_sync import _core
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoGrupoPanel, ProyectoInversor, ProyectoContacto,
@@ -88,11 +89,72 @@ def list_proyectos(
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
 
 
+def _buscar_duplicado_por_nombre(db: Session, nombre_comercial: str | None) -> Proyecto | None:
+    """Busca un proyecto existente cuyo "nombre de lugar" (sin tildes/mayúsculas,
+    sin prefijos MGS/Minigranja/GD ni números) esté contenido en el nuevo nombre
+    o viceversa -- p. ej. "monterrubio" SÍ coincide con
+    "Minigranja 0029 - Monterrubio".
+
+    Esto es deliberadamente permisivo (puede marcar como "parecidos" dos fases
+    reales distintas de un mismo desarrollo, p. ej. "Chinú Sur" y "Chinú Sur 2"):
+    es aceptable porque el aviso no bloquea -- la persona puede confirmar
+    "crear de todos modos" con un clic si de verdad es un proyecto distinto. Un
+    match exacto (sin este margen) dejaba pasar duplicados obvios sin avisar.
+    """
+    objetivo = _core(nombre_comercial)
+    if len(objetivo) < 4:
+        return None
+    for c in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all():
+        n = _core(c.nombre_comercial)
+        if len(n) < 4:
+            continue
+        if objetivo in n or n in objetivo:
+            return c
+    return None
+
+
 @router.post("", response_model=ProyectoOut, status_code=201)
-def create_proyecto(data: ProyectoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    proyecto = Proyecto(**data.model_dump())
+def create_proyecto(
+    data: ProyectoCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un proyecto con nombre muy parecido"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    payload = data.model_dump()
+    _verificar_unicos(db, payload)
+
+    if not forzar:
+        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"))
+        if duplicado:
+            # detail estructurado (no un string plano como los demás 409 de este
+            # archivo): el frontend lo usa para ofrecer "crear de todos modos"
+            # (reintenta con forzar=true) en vez de solo mostrar un toast, ya que
+            # a diferencia de un choque de columna UNIQUE, este es un aviso, no
+            # un error real de datos.
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un proyecto con un nombre muy parecido: "
+                        f"'{duplicado.nombre_comercial}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_comercial,
+                },
+            )
+
+    proyecto = Proyecto(**payload)
     db.add(proyecto)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se pudo guardar: algún valor único (p. ej. API ID Unergy, topic slug, "
+            "ID de Solenium o de Sun Factory) ya está en uso por otro proyecto.",
+        )
     db.refresh(proyecto)
     return _get_proyecto_or_404(proyecto.id, db)
 
@@ -108,7 +170,29 @@ def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_u
 _UNIQUE_COLS = {
     "sub_project": "API ID Unergy",
     "topic_slug": "topic slug",
+    "project_id_solenium": "ID de Solenium (generación)",
+    "sunfactory_project_id": "ID de Sun Factory",
 }
+
+
+def _verificar_unicos(db: Session, payload: dict, excluir_id: int | None = None) -> None:
+    """Chequeo proactivo de columnas UNIQUE: da un mensaje accionable que nombra el
+    proyecto en conflicto, en vez de un IntegrityError opaco (usado en create y update)."""
+    for col, etiqueta in _UNIQUE_COLS.items():
+        nuevo = payload.get(col)
+        if nuevo in (None, ""):
+            continue
+        query = db.query(Proyecto).filter(getattr(Proyecto, col) == nuevo)
+        if excluir_id is not None:
+            query = query.filter(Proyecto.id != excluir_id)
+        conflicto = query.first()
+        if conflicto:
+            raise HTTPException(
+                409,
+                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
+                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
+                f"Cada {etiqueta} debe ser único.",
+            )
 
 
 @router.patch("/{id}", response_model=ProyectoOut)
@@ -118,25 +202,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
         raise HTTPException(404, "Proyecto no encontrado")
 
     payload = data.model_dump(exclude_unset=True)
-
-    # Chequeo proactivo de campos únicos: da un mensaje accionable que nombra el
-    # proyecto en conflicto, en vez de un IntegrityError opaco.
-    for col, etiqueta in _UNIQUE_COLS.items():
-        nuevo = payload.get(col)
-        if nuevo in (None, ""):
-            continue
-        conflicto = (
-            db.query(Proyecto)
-            .filter(getattr(Proyecto, col) == nuevo, Proyecto.id != id)
-            .first()
-        )
-        if conflicto:
-            raise HTTPException(
-                409,
-                f"El {etiqueta} '{nuevo}' ya está asignado al proyecto "
-                f"'{conflicto.nombre_comercial}' (ID {conflicto.id}). "
-                f"Cada {etiqueta} debe ser único.",
-            )
+    _verificar_unicos(db, payload, excluir_id=id)
 
     for k, v in payload.items():
         setattr(p, k, v)
@@ -150,6 +216,29 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
             "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
             "ya está en uso por otro proyecto.",
         )
+    return _get_proyecto_or_404(id, db)
+
+
+@router.post("/{id}/vincular-sunfactory/{sunfactory_project_id}", response_model=ProyectoOut)
+def vincular_sunfactory(
+    id: int,
+    sunfactory_project_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Confirma que un proyecto ya existente (creado a mano, o por una corrida
+    vieja del sync sin este campo) corresponde a este proyecto de Sun Factory.
+
+    Se usa para resolver las `sugerencias_vinculo` que devuelve `sync_tsf_projects`
+    cuando no encuentra un match exacto por id/código. Una vez confirmado, el
+    sync ya reconoce este proyecto por su id estable de Sun Factory y no lo
+    vuelve a duplicar, aunque le cambien el nombre después."""
+    p = db.query(Proyecto).filter(Proyecto.id == id, Proyecto.deleted_at.is_(None)).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    _verificar_unicos(db, {"sunfactory_project_id": sunfactory_project_id}, excluir_id=id)
+    p.sunfactory_project_id = sunfactory_project_id
+    db.commit()
     return _get_proyecto_or_404(id, db)
 
 
@@ -512,6 +601,86 @@ def delete_inversor(id: int, inv_id: int, db: Session = Depends(get_db), _=Depen
         raise HTTPException(404, "Inversor no encontrado")
     db.delete(inv)
     db.commit()
+
+
+# ── Config típica de minigranja (por defecto) ───────────────────────────────────
+# Nomenclatura estándar de una minigranja: los inversores 1,2,3 son de 300 kW,
+# el 4 de 50 kW y el 5 de 40 kW. El NÚMERO (orden/nombre) es lo que identifica
+# a cada inversor cuando se reporta una falla. Baraya/San Pedro son excepciones
+# que se ajustan a mano después.
+INVERSORES_TIPICOS_MINIGRANJA = [
+    {"nombre": "Inversor 1", "potencia_nominal_kw": 300, "orden": 0},
+    {"nombre": "Inversor 2", "potencia_nominal_kw": 300, "orden": 1},
+    {"nombre": "Inversor 3", "potencia_nominal_kw": 300, "orden": 2},
+    {"nombre": "Inversor 4", "potencia_nominal_kw": 50,  "orden": 3},
+    {"nombre": "Inversor 5", "potencia_nominal_kw": 40,  "orden": 4},
+]
+
+
+def _sembrar_inversores_tipicos(proyecto_id: int, db: Session) -> None:
+    """Inserta los 5 inversores típicos en el proyecto (insert directo, sin la
+    validación de suma de potencias: es una config estándar conocida)."""
+    for cfg in INVERSORES_TIPICOS_MINIGRANJA:
+        db.add(ProyectoInversor(proyecto_id=proyecto_id, tipo="central", activo=True, **cfg))
+
+
+def backfill_inversores_minigranjas(db: Session, solo_minigranja: bool = True,
+                                    dry_run: bool = False) -> dict:
+    """Siembra (idempotente) la config típica de inversores en cada proyecto que
+    NO tiene ningún inversor todavía. Nunca duplica: solo toca proyectos con cero
+    inversores. Reutilizado por el seed de arranque y por el endpoint admin."""
+    from sqlalchemy import func as _sf
+
+    q = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
+    if solo_minigranja:
+        q = q.filter(Proyecto.tipo_proyecto == "minigranja")
+    proyectos = q.order_by(Proyecto.nombre_comercial).all()
+
+    counts = dict(
+        db.query(ProyectoInversor.proyecto_id, _sf.count(ProyectoInversor.id))
+        .group_by(ProyectoInversor.proyecto_id)
+        .all()
+    )
+
+    sembrados, saltados = [], []
+    for p in proyectos:
+        if counts.get(p.id, 0) == 0:
+            sembrados.append({"id": p.id, "nombre": p.nombre_comercial})
+            if not dry_run:
+                _sembrar_inversores_tipicos(p.id, db)
+        else:
+            saltados.append({"id": p.id, "nombre": p.nombre_comercial,
+                             "inversores": counts.get(p.id, 0)})
+
+    if not dry_run and sembrados:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "solo_minigranja": solo_minigranja,
+        "total_candidatos": len(proyectos),
+        "a_sembrar": len(sembrados),
+        "sembrados": sembrados,
+        "ya_tienen_inversores": len(saltados),
+        "saltados": saltados,
+        "config_tipica": [
+            {"nombre": c["nombre"], "potencia_nominal_kw": c["potencia_nominal_kw"]}
+            for c in INVERSORES_TIPICOS_MINIGRANJA
+        ],
+    }
+
+
+@router.post("/inversores/backfill-minigranja")
+def backfill_minigranja_inversores(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    solo_minigranja: bool = Query(True, description="Limitar a tipo_proyecto='minigranja'"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Siembra los 5 inversores típicos (3×300 + 50 + 40 kW) en los proyectos que
+    aún no tienen inversores, para que ya existan al reportar fallas por inversor.
+    Idempotente: nunca duplica. Con dry_run=true solo devuelve el reporte."""
+    return backfill_inversores_minigranjas(db, solo_minigranja=solo_minigranja, dry_run=dry_run)
 
 
 # ── Contactos ─────────────────────────────────────────────────────────────────

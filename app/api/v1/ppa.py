@@ -1,6 +1,7 @@
 import logging
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -60,6 +61,32 @@ def _set_proyectos(contrato: PPAContrato, proyecto_ids: list[int], db: Session):
     contrato.proyectos = proyectos
 
 
+def _validar_fecha_fin_vs_asic(contrato: PPAContrato, db: Session) -> None:
+    """El fecha_fin del contrato PPA macro es manual, pero no puede quedar por
+    delante de una fecha_fin ya registrada en sus plantas GESCON (asic_solicitudes) —
+    ver `_validar_fecha_fin_vs_ppa` en asic.py para la regla inversa."""
+    if contrato.fecha_fin is None:
+        return
+    filtros = [AsicSolicitud.contrato_ppa_id == contrato.id]
+    if contrato.numero_codigo_contrato:
+        filtros.append(AsicSolicitud.contrato_interno == contrato.numero_codigo_contrato)
+    peor = (
+        db.query(AsicSolicitud)
+        .filter(AsicSolicitud.fecha_fin > contrato.fecha_fin)
+        .filter(or_(*filtros))
+        .order_by(AsicSolicitud.fecha_fin.desc())
+        .first()
+    )
+    if peor:
+        raise HTTPException(
+            422,
+            f"No se puede fijar la fecha de fin en {contrato.fecha_fin.isoformat()}: "
+            f"el registro GESCON \"{peor.codigo_sic_contrato or peor.id}\" ya tiene "
+            f"fecha_fin {peor.fecha_fin.isoformat()}, posterior. Corrige ese registro "
+            f"primero o usa una fecha de fin mayor.",
+        )
+
+
 @router.get("", response_model=list[PPAContratoOut])
 def list_contratos(
     proyecto_id: int | None = Query(None),
@@ -111,6 +138,7 @@ def create_contrato(
     contrato = PPAContrato(**payload)
     db.add(contrato)
     db.flush()
+    _validar_fecha_fin_vs_asic(contrato, db)
     _set_proyectos(contrato, data.proyecto_ids, db)
     _sync_partes_from_clientes(contrato, db)
     db.commit()
@@ -283,6 +311,7 @@ def update_contrato(
     if data.proyecto_ids is not None:
         _set_proyectos(contrato, data.proyecto_ids, db)
     _sync_partes_from_clientes(contrato, db)
+    _validar_fecha_fin_vs_asic(contrato, db)
     try:
         db.commit()
     except Exception as e:

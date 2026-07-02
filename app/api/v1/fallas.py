@@ -131,8 +131,12 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
         t = db.query(FallaCatTipo).filter_by(codigo=tipo_codigo("inversores", inv_tipos_all[0])).first()
         if t:
             nuevo_tipo_id = t.id
-    if nuevo_tipo_id:
-        falla.tipo_id = nuevo_tipo_id
+    # SIEMPRE asignar (incluye None): en el camino estructurado el tipo_id nunca
+    # debe quedar apuntando a un tipo legacy que contradiga la clasificación. Dejar
+    # el valor previo era la causa de títulos como "Fusible de string quemado" en
+    # fallas de red. Si el tipo estructurado no existe en el catálogo, tipo_id=None
+    # y el título se toma de tipo_libre / clasificacion.
+    falla.tipo_id = nuevo_tipo_id
 
     # Snapshot estructurado (fuente para mostrar/auditar)
     clasif = {"categoria": categoria, "categoria_etiqueta": cat["etiqueta"]}
@@ -141,6 +145,11 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
         clasif["subtipo_etiqueta"] = etiqueta_subtipo(categoria, falla.subtipo_codigo)
     if falla.subtipo_detalle:
         clasif["detalle"] = falla.subtipo_detalle
+    # tipo_libre legible (respaldo para listados/emails/analytics legacy) en las
+    # categorías de opción/equipo; para inversores se arma más abajo.
+    if categoria in ("red", "frontera", "eventos_adversos"):
+        _et = clasif.get("subtipo_etiqueta") or cat["etiqueta"]
+        falla.tipo_libre = (f"{_et}: {falla.subtipo_detalle}" if falla.subtipo_detalle else _et)[:255]
     if categoria == "frontera":
         clasif["afecta_medicion"] = bool(falla.frontera_afecta_medicion)
         clasif["perdida_comunicacion"] = bool(falla.frontera_perdida_comunicacion)
@@ -574,23 +583,66 @@ def list_fallas(
     return {"items": items, "total": total, "page": page, "size": effective_size, "pages": -(-total // effective_size)}
 
 
-def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
-    """Retorna la lista de correos operacionales del cliente del proyecto."""
-    from app.models.proyectos import Proyecto
-    from app.models.clientes import Cliente
-    proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
-    if not proy or not proy.cliente_id:
-        return []
-    cliente = db.query(Cliente).filter(Cliente.id == proy.cliente_id).first()
+def _correos_de_cliente(cliente) -> list[str]:
+    """Correos operacionales de un cliente. Prefiere el array
+    `correos_operacionales`; si está vacío cae al campo legado `correo_operacional`."""
     if not cliente:
         return []
-    # Preferir array; fallback al campo string si el array está vacío
     arr = cliente.correos_operacionales or []
     if isinstance(arr, list) and arr:
         return [str(e) for e in arr if e]
     if cliente.correo_operacional:
         return [cliente.correo_operacional]
     return []
+
+
+def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
+    """Correos operacionales a notificar para un proyecto.
+
+    Reúne los correos del cliente dueño (`cliente_id`, si está definido) y de
+    todos los inversionistas vigentes del proyecto (fecha_fin nula = "Vigente",
+    o futura). Cada cliente/inversionista aporta sus propios correos; se
+    devuelven sin duplicados preservando el orden de aparición. Así los
+    proyectos multi-inversionista (p.ej. minigranjas sin `cliente_id` único)
+    notifican a todos los participantes que tengan correos configurados.
+    """
+    from app.models.proyectos import Proyecto, ProyectoInversionista
+    from app.models.clientes import Cliente
+    proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not proy:
+        return []
+
+    correos: list[str] = []
+
+    # 1) Cliente dueño del proyecto (si existe)
+    if proy.cliente_id:
+        cliente_dueno = db.query(Cliente).filter(Cliente.id == proy.cliente_id).first()
+        correos.extend(_correos_de_cliente(cliente_dueno))
+
+    # 2) Inversionistas vigentes del proyecto
+    hoy = date.today()
+    inversionistas = (
+        db.query(ProyectoInversionista)
+        .filter(
+            ProyectoInversionista.proyecto_id == proyecto_id,
+            (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
+        )
+        .all()
+    )
+    inv_cliente_ids = [inv.cliente_id for inv in inversionistas if inv.cliente_id]
+    if inv_cliente_ids:
+        clientes_inv = db.query(Cliente).filter(Cliente.id.in_(inv_cliente_ids)).all()
+        for c in clientes_inv:
+            correos.extend(_correos_de_cliente(c))
+
+    # Deduplicar preservando el orden
+    vistos: set[str] = set()
+    unicos: list[str] = []
+    for e in correos:
+        if e and e not in vistos:
+            vistos.add(e)
+            unicos.append(e)
+    return unicos
 
 
 _notif_logger = logging.getLogger("fallas.notificacion")
@@ -709,6 +761,56 @@ def create_falla(
     _alarmas_post_guardado(falla.id, db)
 
     return _get_or_404(falla.id, db)
+
+
+def backfill_tipos_estructurados(db: Session, dry_run: bool = False) -> dict:
+    """Recalcula tipo_id/tipo_libre/clasificacion de las fallas con clasificación
+    estructurada (categoria_codigo no nulo). Corrige las fallas cuyo tipo_id quedó
+    apuntando a un tipo legacy que contradice la clasificación (mostraban p.ej.
+    'Fusible de string quemado' en fallas de red). Idempotente: solo cuenta como
+    corregida si algo cambia. NO toca los inversores afectados (inversores=None)."""
+    fallas = (
+        db.query(Falla)
+        .filter(Falla.deleted_at.is_(None), Falla.categoria_codigo.isnot(None))
+        .all()
+    )
+    cambiadas = []
+    for f in fallas:
+        old_tipo, old_libre = f.tipo_id, f.tipo_libre
+        try:
+            _aplicar_clasificacion(f, None, db)
+        except Exception:
+            continue
+        if f.tipo_id != old_tipo or f.tipo_libre != old_libre:
+            cambiadas.append({
+                "codigo": f.codigo_interno,
+                "categoria": f.categoria_codigo,
+                "subtipo": f.subtipo_codigo,
+                "tipo_id_anterior": old_tipo,
+                "tipo_id_nuevo": f.tipo_id,
+                "tipo_libre_nuevo": f.tipo_libre,
+            })
+    if dry_run:
+        db.rollback()
+    elif cambiadas:
+        db.commit()
+    return {
+        "dry_run": dry_run,
+        "total_estructuradas": len(fallas),
+        "corregidas": len(cambiadas),
+        "detalle": cambiadas[:200],
+    }
+
+
+@router.post("/backfill-tipos")
+def backfill_tipos_endpoint(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Corrige el tipo/título de las fallas estructuradas cuyo tipo_id quedó legacy
+    (p.ej. 'Fusible de string quemado' en fallas de red). Con dry_run=true solo reporta."""
+    return backfill_tipos_estructurados(db, dry_run=dry_run)
 
 
 @router.get("/{id}", response_model=FallaOut)

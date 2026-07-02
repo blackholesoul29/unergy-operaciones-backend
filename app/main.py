@@ -992,6 +992,12 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_falla ON falla_inversores (falla_id)",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_inversor ON falla_inversores (proyecto_inversor_id)",
+    # migration 031 — ID estable de Sun Factory en proyectos (Alembic roto: la
+    # columna del modelo Proyecto se provisiona aquí, no vía alembic upgrade).
+    # Sin esta DDL, cualquier query que cargue columnas de Proyecto (proyectos,
+    # fallas→ProyectoResumen, liquidaciones→proyecto) rompe con 500.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_sunfactory_project_id ON proyectos (sunfactory_project_id) WHERE sunfactory_project_id IS NOT NULL",
 ]
 
 
@@ -1144,6 +1150,23 @@ def _run_estructura_fallas_seed() -> None:
                             etiqueta=sub["etiqueta"], descripcion=sub.get("descripcion"),
                             activa=True,
                         ))
+            # Desactivar tipos de inversores retirados de la estructura: dejan de
+            # ofrecerse, pero se conserva la fila (no se borra) para no romper
+            # fallas históricas que aún referencian ese tipo_id.
+            inv_cat = next((c for c in ESTRUCTURA_FALLAS if c["codigo"] == "inversores"), None)
+            if inv_cat:
+                vigentes = {tipo_codigo("inversores", t["codigo"]) for t in inv_cat.get("tipos_falla", [])}
+                obsoletos = (
+                    db.query(FallaCatTipo)
+                    .filter(FallaCatTipo.codigo.like("inversores.%"),
+                            FallaCatTipo.codigo.notin_(vigentes),
+                            FallaCatTipo.activa == True)
+                    .all()
+                )
+                for t in obsoletos:
+                    t.activa = False
+                if obsoletos:
+                    print(f"[estructura fallas seed] {len(obsoletos)} tipo(s) de inversores desactivados")
             db.commit()
             print("[estructura fallas seed] OK")
         except Exception as e:
@@ -2394,6 +2417,44 @@ def _run_arr_seed() -> None:
         db.close()
 
 
+def _run_fallas_tipo_backfill() -> None:
+    """Corrige el tipo/título de las fallas estructuradas cuyo tipo_id había quedado
+    apuntando a un tipo legacy contradictorio (p.ej. 'Fusible de string quemado' en
+    fallas de red). Corre después del seed de estructura para que los tipos ya
+    existan. Idempotente. Ver [[project_reporte_fallas_estructurado]]."""
+    from sqlalchemy.orm import sessionmaker
+    from app.api.v1.fallas import backfill_tipos_estructurados
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        rep = backfill_tipos_estructurados(db, dry_run=False)
+        print(f"[startup] fallas_tipo_backfill: {rep['corregidas']} corregidas "
+              f"de {rep['total_estructuradas']} fallas estructuradas")
+    finally:
+        db.close()
+
+
+def _run_inversores_minigranja_seed() -> None:
+    """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
+    tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
+    5 de 40 kW). Solo toca proyectos con CERO inversores → nunca duplica. Así ya
+    existen al reportar fallas por inversor. Las excepciones (Baraya/San Pedro) se
+    ajustan a mano después."""
+    from sqlalchemy.orm import sessionmaker
+    from app.api.v1.proyectos import backfill_inversores_minigranjas
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        rep = backfill_inversores_minigranjas(db, solo_minigranja=True, dry_run=False)
+        print(f"[startup] inversores_minigranja_seed: {rep['a_sembrar']} sembradas "
+              f"de {rep['total_candidatos']} minigranjas "
+              f"({rep['ya_tienen_inversores']} ya tenían inversores)")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2410,6 +2471,8 @@ def _deferred_init():
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
+        ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
+        ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:
             fn()

@@ -17,6 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 args = sys.argv[1:]
 DRY_RUN  = "--dry-run" in args
+# --only=<fragmento>: aplica solo las claves cuyo nombre normalizado contiene el
+# fragmento (p.ej. --only="El Mapalé"), sin tocar el resto de proyectos.
+ONLY = next((a.split("=", 1)[1] for a in args if a.startswith("--only=")), None)
 url_args = [a for a in args if not a.startswith("--")]
 
 DATABASE_URL = (url_args[0] if url_args else None) or os.environ.get("DATABASE_URL")
@@ -192,6 +195,11 @@ SIMULACIONES = {
         "p90": [215827.7849, 173151.9404, 204017.7524, 193877.2758, 198278.2641, 223999.774, 233744.947, 204859.2228, 183360.2344, 180933.9799, 181433.6866, 211516.0299],
         "p99": [194603.792, 156124.589, 183955.1302, 174811.844, 178780.0495, 201972.1672, 210759.0229, 184713.8524, 165329.0236, 163141.3612, 163591.9279, 190716.0448],
     },
+    "El Mapalé": {
+        "p50": [252800, 246100, 229100, 209100, 252300, 246300, 270900, 250900, 217200, 198300, 181500, 238100],
+        "p90": [234376.8515, 228165.1232, 212404.0216, 193861.5492, 233913.2896, 228350.5479, 250972.3643, 232615.3166, 201371.2505, 183848.6141, 168272.9373, 220748.1342],
+        "p99": [219375.7914, 213561.6387, 198809.311, 181453.6313, 218941.8994, 213735.1955, 234909.1248, 217727.0019, 188482.6816, 172081.5642, 157502.7933, 206619.3669],
+    },
 }
 
 
@@ -216,7 +224,12 @@ def run(dry_run: bool = False):
         all_projects = db.query(Proyecto).all()
         updated, not_found = [], []
 
-        for key, vals in SIMULACIONES.items():
+        items = SIMULACIONES.items()
+        if ONLY:
+            items = [(k, v) for k, v in items if norm(ONLY) in norm(k)]
+            print(f"[--only={ONLY!r}] {len(items)} proyecto(s) seleccionado(s)\n")
+
+        for key, vals in items:
             # Buscar mejor match por nombre_comercial
             best, best_score = None, 0.0
             for p in all_projects:
@@ -245,7 +258,7 @@ def run(dry_run: bool = False):
 
     print()
     if dry_run:
-        print(f"[dry-run] Se actualizarían {len(SIMULACIONES) - len(not_found)} proyectos.")
+        print(f"[dry-run] Se actualizarían {len(items) - len(not_found)} proyectos.")
     else:
         print(f"✅ Actualizados: {len(updated)}")
     if not_found:

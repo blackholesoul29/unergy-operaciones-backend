@@ -95,34 +95,50 @@ Visible/aplicable solo para `grip`, `arrpas`, `tgrl`, `cxcsb` (los tipos
 cuyo archivo trae código SIC de planta en columna `PLANTA` o
 `SUBMERCADO`).
 
-Cuando está marcado:
-- `SELECT codigo_sic_submercado_exportador, nombre_frontera, capacidad_efectiva_mw FROM fronteras`
-  — **no** `codigo_frontera` (ese guarda el identificador interno tipo
-  `"Frt39007"`, no el código XM de 4 caracteres). El campo correcto es
-  `codigo_sic_submercado_exportador`, que sí guarda valores tipo `"3A44"`
-  — verificado contra la columna "Código SIC Submercado Exportador" (BN)
-  del Excel `UNGG_FronterasComerciales_31-12-2025.xlsx` y confirmado en
-  vivo contra `GET /api/v1/fronteras` en producción.
-- Merge por ese código contra la columna `PLANTA`/`SUBMERCADO` del archivo
-  XM (grip/arrpas/tgrl/cxcsb).
-- Agrega columnas `Nombre de la Frontera`, `Tipo de Frontera`,
-  `Capacidad efectiva [MW]` (mismo nombre de columnas que el notebook).
-- No se descarta ninguna fila que sí tenga match. Si un código del archivo
-  no encuentra frontera correspondiente, se deja sin enriquecer y se
-  reporta en el resultado del job (`codigos_sin_match: [...]`) — no falla
-  silenciosamente ni aborta el proceso.
+**Fuente: el archivo diario de fronteras del FTP de XM, del mismo
+mes/año del dato — no la tabla `fronteras` de la BD.** La BD no guarda
+histórico por período (solo el estado actual), y el archivo de fronteras
+sí es diario en el FTP, así que respeta el histórico real de cada mes.
 
-**Verificado en producción (2026-07-02, `GET /api/v1/fronteras`, 94
-fronteras totales):** las 50 fronteras con `tipo_frontera=generacion`
-tienen `codigo_sic_submercado_exportador` poblado (0 faltantes). Ejemplos
-confirmados: `3A44`→PLANTA SOLAR BAYUNCA I (3.0 MW), `4Z8L`→MGS 0024 - San
-Diego Sur (0.99 MW), `4Z8N`→MGS 0023 - El Joropo (0.99 MW). La BD ya tiene
-2 plantas (`4T9M` GD Naos 2, `4WP2` GD Naos 3) que no estaban en el
-diccionario del notebook — confirma que consultar la BD en vivo es mejor
-que un diccionario fijo. A cambio, 6 códigos del notebook (Taurus
-VIII/IX/X, Agustín 2/3, Elektra) no aparecieron en esta consulta; si
-algún archivo XM los trae, quedarán en `codigos_sin_match` en vez de
-romper el enriquecimiento.
+- Ruta: `/INFORMACION_XM/USUARIOSK/UNGG/sic/Fronteras/{año}-{mes:02d}/`
+  (confirmado en `configuracion.json` de `aenc_reporte.py` — carpeta
+  separada de la de `aenc`/`dspcttos`, que usa `.../sic/comercia/{año}-{mes}`).
+- Nombre de archivo: `UNGG_FronterasComerciales_{DD-MM-YYYY}.xlsx` — un
+  archivo por día (confirmado con 10 muestras locales reales: dic-2025,
+  ene a jun-2026).
+- Para el mes que se está consultando: `ftp.nlst()` sobre esa carpeta,
+  filtrar `UNGG_FronterasComerciales_*.xlsx`, ordenar alfabéticamente y
+  tomar el último — como el nombre empieza por `DD` dentro de una carpeta
+  de mes fijo, esto da el día más reciente disponible ese mes (mismo
+  truco que ya usa `aenc_reporte.py::obtener_fronteras_desde_ftp`).
+- Si la carpeta del mes exacto no tiene archivos (mes muy reciente, aún
+  sin publicar), retroceder mes a mes hasta encontrar el más cercano
+  anterior con datos — igual que hace `aenc_reporte.py` — y **reportar en
+  el resultado del job qué mes de fronteras se usó realmente** para cada
+  tramo de datos, para que quede trazable.
+- **Rango multi-mes**: cada fila se enriquece con el archivo de fronteras
+  del mismo mes que su `FechaDocumento` — no un solo archivo para todo el
+  rango. Si el rango cubre abril y mayo, se descargan y usan dos
+  snapshots de fronteras (último de abril, último de mayo), cada uno
+  aplicado solo a las filas de su mes.
+- Del Excel se leen por **nombre de columna** (no por índice fijo, para no
+  romper si XM reordena columnas): `Código SIC Submercado Exportador`,
+  `Nombre de la Frontera`, `Capacidad efectiva [MW]`. Se agregan esas tres
+  columnas al resultado; **no** `codigo_frontera`/`Código SIC` (col. A del
+  Excel) — ese es el identificador interno tipo `"Frt39007"`, no el código
+  de 4 caracteres (`"3A44"`) que traen `PLANTA`/`SUBMERCADO` en
+  grip/arrpas/tgrl/cxcsb.
+- Merge por ese código contra la columna `PLANTA`/`SUBMERCADO` del archivo
+  XM. Códigos sin match se dejan sin enriquecer y se listan en
+  `codigos_sin_match: [...]` — no rompen ni abortan el proceso.
+
+**Verificado con datos reales** (`UNGG_FronterasComerciales_31-12-2025.xlsx`,
+columna BN = "Código SIC Submercado Exportador"): `3A44`→PLANTA SOLAR
+BAYUNCA I, `4Z8L`→MGS 0024 - San Diego Sur, `4Z8N`→MGS 0023 - El Joropo,
+todos con su `Capacidad efectiva [MW]` en la misma fila. Antes de dar el
+enriquecimiento por bueno, se repite esta misma verificación pero
+descargando el archivo directamente del FTP (no la copia local) para el
+mes de la prueba end-to-end.
 
 ## 5. Backend — endpoints async
 
@@ -174,8 +190,9 @@ archivos, unificación y export end-to-end.
 
 - Reporte HTML/envío por correo de AENC (`aenc_reporte.py`) — es un
   proceso distinto y ya existe.
-- Descarga del Excel de fronteras del FTP de XM — no aporta nada que
-  `fronteras.codigo_sic_submercado_exportador` en BD no tenga ya.
+- Consultar la tabla `fronteras` de la BD para el enriquecimiento — se
+  usa el archivo de fronteras del FTP del mes correspondiente en su
+  lugar (ver sección 4), porque respeta el histórico por período.
 - Persistir credenciales de XM en BD o `.env` del backend.
 - Tipos de archivo fuera de los 8 listados arriba (se agregan en una
   segunda iteración, junto con su ruta pública/privada confirmada).

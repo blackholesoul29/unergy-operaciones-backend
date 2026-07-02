@@ -57,27 +57,28 @@ def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_cod
     Cada fila se enriquece con el snapshot de fronteras de SU PROPIO mes
     (columna FechaDocumento), no uno solo para todo el rango.
     Devuelve (df_enriquecido, codigos_sin_match: set).
-    """
-    nombres, tipos_frontera, mws = [], [], []
-    sin_match = set()
 
-    for _, fila in df.iterrows():
-        mes_dato = str(fila["FechaDocumento"])[:7]
-        tabla = fronteras_por_mes.get(mes_dato, {})
-        codigo = str(fila[columna_codigo]).strip()
-        info = tabla.get(codigo)
-        if info:
-            nombres.append(info["nombre"])
-            tipos_frontera.append(info["tipo"])
-            mws.append(info["mw"])
-        else:
-            nombres.append(None)
-            tipos_frontera.append(None)
-            mws.append(None)
-            sin_match.add(codigo)
+    Vectorizado con Series.map en vez de df.iterrows(): con archivos de
+    cientos de miles de filas (ej. grip de un mes completo), iterrows()
+    tarda decenas de segundos y bloquea el proceso — con un solo hilo
+    (el que también atiende las peticiones HTTP de polling), eso hace
+    que la pestaña web vea timeouts aunque la descarga siga viva.
+    """
+    meses_dato = df["FechaDocumento"].astype(str).str.slice(0, 7)
+    codigos = df[columna_codigo].astype(str).str.strip()
+    claves = meses_dato + "|" + codigos
+
+    tabla_combinada = {
+        f"{mes}|{codigo}": info
+        for mes, tabla in fronteras_por_mes.items()
+        for codigo, info in tabla.items()
+    }
+    info_por_fila = claves.map(tabla_combinada)
 
     df = df.copy()
-    df["Nombre de la Frontera"] = nombres
-    df["Tipo de Frontera"] = tipos_frontera
-    df["Capacidad efectiva [MW]"] = mws
+    df["Nombre de la Frontera"] = info_por_fila.map(lambda x: x["nombre"] if isinstance(x, dict) else None)
+    df["Tipo de Frontera"] = info_por_fila.map(lambda x: x["tipo"] if isinstance(x, dict) else None)
+    df["Capacidad efectiva [MW]"] = info_por_fila.map(lambda x: x["mw"] if isinstance(x, dict) else None)
+
+    sin_match = set(codigos[info_por_fila.isna()])
     return df, sin_match

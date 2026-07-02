@@ -14,6 +14,7 @@ Uso: doble clic en iniciar_descarga_xm.bat, dejar la ventana abierta
 mientras se usa la pestaña, cerrar cuando se termine.
 """
 import io
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -127,6 +128,15 @@ if __name__ == "__main__":
     import asyncio
 
     import uvicorn
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    # Los logs de acceso HTTP de uvicorn (una línea por cada GET de polling)
+    # ahogarían los logs útiles de la descarga — se bajan a WARNING.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

@@ -6,6 +6,9 @@ UNGG_FronterasComerciales_DD-MM-YYYY.xlsx disponible en el mes del dato
 Ver docs/superpowers/specs/2026-07-02-descarga-xm-design.md sección 4.
 """
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 FRONTERAS_DIR = "/INFORMACION_XM/USUARIOSK/UNGG/sic/Fronteras/{anio}-{mes:02d}"
 FRONTERAS_PREFIJO = "UNGG_FronterasComerciales_"
@@ -83,12 +86,16 @@ def obtener_fronteras_mes(listar_fn, descargar_fn, anio: int, mes: int, max_retr
     a, m = anio, mes
     for _ in range(max_retroceso + 1):
         directorio = carpeta_fronteras(a, m)
+        logger.info("Buscando snapshot de fronteras en %s", directorio)
         nombres = listar_fn(directorio)
         archivo = elegir_ultimo_archivo(nombres)
         if archivo:
+            logger.info("Usando snapshot de fronteras: %s", archivo)
             contenido = descargar_fn(directorio, archivo)
             return parsear_fronteras_xlsx(contenido), f"{a:04d}-{m:02d}", archivo
+        logger.info("Sin snapshot de fronteras en %s, retrocediendo un mes", directorio)
         m -= 1
         if m == 0:
             m, a = 12, a - 1
+    logger.warning("No se encontró ningún snapshot de fronteras tras %d meses de retroceso", max_retroceso)
     return {}, None, None

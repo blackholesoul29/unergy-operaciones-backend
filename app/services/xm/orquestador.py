@@ -2,6 +2,7 @@
 (opcional) enriquece -> exporta. Corre dentro de un hilo en background
 (ver api/v1/xm_descargas.py) porque ftplib es bloqueante."""
 import logging
+from concurrent.futures import ProcessPoolExecutor
 
 from app.services.xm import jobs, tipos
 from app.services.xm.downloader import ejecutar_descarga
@@ -25,6 +26,23 @@ CODIGO_ERROR = {
     "FTPFileNotFoundError": "FTP_FILE_NOT_FOUND",
     "FTPTimeoutError": "FTP_TIMEOUT",
 }
+
+
+_pool_exportar = None
+
+
+def _pool():
+    """Escribir un .xlsx grande (openpyxl/xlsxwriter) es lento — ~100s para
+    ~250k filas, sin importar el motor, porque cada celda se serializa a
+    XML. Ese trabajo es puro CPU en Python y acapara el GIL: si corre en
+    un hilo del mismo proceso que atiende el servidor HTTP, el sondeo de
+    estado del frontend deja de recibir respuesta a tiempo aunque el job
+    siga avanzando bien. Se delega a un proceso aparte para que el
+    servidor HTTP no se congele mientras tanto."""
+    global _pool_exportar
+    if _pool_exportar is None:
+        _pool_exportar = ProcessPoolExecutor(max_workers=1)
+    return _pool_exportar
 
 
 def _listar_fn(ftp_params, directorio):
@@ -84,7 +102,9 @@ def ejecutar_job(job_id: str, ftp_params: dict, tipo: str, extension: str,
             logger.info("Job %s: enriquecimiento listo, %d códigos sin match", job_id, len(codigos_sin_match))
 
         nombre_xlsx, nombre_txt = nombre_salida(tipo, extension, fecha_inicio, fecha_fin)
-        bytes_xlsx, bytes_txt = exportar(df)
+        logger.info("Job %s: exportando %d filas a Excel/TXT (puede tardar con archivos grandes)", job_id, len(df))
+        jobs.actualizar_job(job_id, estado="exportando")
+        bytes_xlsx, bytes_txt = _pool().submit(exportar, df).result()
         logger.info("Job %s: listo (%s, %d bytes)", job_id, nombre_xlsx, len(bytes_xlsx))
 
         jobs.actualizar_job(

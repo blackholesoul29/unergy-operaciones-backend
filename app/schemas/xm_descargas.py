@@ -23,7 +23,7 @@ class XMJobStatus(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     job_id: str
-    estado: Literal["descargando", "unificando", "listo", "error"]
+    estado: Literal["descargando", "unificando", "exportando", "listo", "error"]
     archivos_procesados: int
     archivos_totales: int
     archivos_faltantes: list[str]

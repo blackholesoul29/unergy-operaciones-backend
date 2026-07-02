@@ -601,7 +601,7 @@ class GaiaClient:
         _ap_divisor = 1000.0 if _max_ap > 5000 else 1.0
 
         # ── Time series for power chart → always kW ───────────────────────────
-        power_series = [
+        ap_series = [
             {"time": r["time"], "kw": round(
                 sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor, 3
             )}
@@ -609,28 +609,42 @@ class GaiaClient:
             if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
         ]
 
-        # Fallback: si no hay datos de AP, derivar potencia de los deltas de eae
-        if not power_series and eae:
-            _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
-            _prev_t: str | None = None
-            for r in eae:
-                t = r.get("time")
-                if not t:
-                    continue
-                delta_kwh = sum(float(r.get(k) or 0) for k in ("eaepd1", "eaepd2", "eaepd3")) / _eae_factor
-                if delta_kwh <= 0 or _prev_t is None:
-                    _prev_t = t
-                    continue
-                try:
-                    from datetime import datetime, timezone
-                    def _parse(s: str):
-                        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-                    dt_h = (_parse(t) - _parse(_prev_t)).total_seconds() / 3600.0
-                    if dt_h > 0:
-                        power_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
-                except Exception:
-                    pass
+        # Potencia derivada de los deltas de eae -- se calcula siempre (no solo
+        # cuando AP está vacío del todo) para poder rellenar los huecos de
+        # tiempo donde el medidor dejó de reportar potencia instantánea (AP)
+        # pero siguió acumulando energía exportada (eae). Antes el fallback
+        # solo se activaba si AP no tenía NINGÚN dato en todo el día; si el
+        # medidor reportaba AP solo hasta cierta hora (ej. se cortó a media
+        # tarde) la curva quedaba truncada ahí aunque el total de energía sí
+        # incluyera esas horas -- ver caso Perijá, 2026-07-02.
+        eae_derived_series = []
+        _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
+        _prev_t: str | None = None
+        for r in eae:
+            t = r.get("time")
+            if not t:
+                continue
+            delta_kwh = sum(float(r.get(k) or 0) for k in ("eaepd1", "eaepd2", "eaepd3")) / _eae_factor
+            if delta_kwh <= 0 or _prev_t is None:
                 _prev_t = t
+                continue
+            try:
+                def _parse(s: str):
+                    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+                dt_h = (_parse(t) - _parse(_prev_t)).total_seconds() / 3600.0
+                if dt_h > 0:
+                    eae_derived_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
+            except Exception:
+                pass
+            _prev_t = t
+
+        # AP tiene prioridad (es la medición real de potencia instantánea);
+        # eae solo rellena el tramo posterior al último dato de AP.
+        _last_ap_time = ap_series[-1]["time"] if ap_series else None
+        power_series = ap_series + [
+            pt for pt in eae_derived_series
+            if _last_ap_time is None or pt["time"] > _last_ap_time
+        ]
 
         # ── eae unit: nodos en _EAE_WH_NODES retornan Wh; el resto ya es kWh ──
         _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)

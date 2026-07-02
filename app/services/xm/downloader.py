@@ -7,6 +7,7 @@ ftp_client.conectar_ftp / ftp_client.descargar_bytes / time.sleep.
 import logging
 import time
 
+from app.services.xm import cache_local
 from app.services.xm.ftp_client import conectar_ftp, descargar_bytes
 from app.services.xm.plan_descarga import construir_plan_descarga
 
@@ -15,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 def ejecutar_descarga(ftp_params: dict, tipo: str, extension: str, fecha_inicio, fecha_fin,
                        on_progreso=None, max_reintentos: int = 3, espera_reintento: int = 10,
-                       conectar_fn=conectar_ftp, descargar_fn=descargar_bytes, sleep_fn=time.sleep):
+                       conectar_fn=conectar_ftp, descargar_fn=descargar_bytes, sleep_fn=time.sleep,
+                       usar_cache: bool = True,
+                       cache_leer_fn=cache_local.leer_si_existe, cache_guardar_fn=cache_local.guardar):
     plan = construir_plan_descarga(tipo, extension, fecha_inicio, fecha_fin)
     logger.info("Plan de descarga: %d archivo(s) para %s (%s a %s)", len(plan), tipo, fecha_inicio, fecha_fin)
     archivos = []
@@ -24,6 +27,14 @@ def ejecutar_descarga(ftp_params: dict, tipo: str, extension: str, fecha_inicio,
     directorio_actual = None
 
     for i, item in enumerate(plan):
+        contenido = usar_cache and cache_leer_fn(item["anio"], item["nombre_archivo"])
+        if contenido:
+            logger.info("Usando copia en caché local: %s", item["nombre_archivo"])
+            archivos.append((item["fecha_documento"], contenido))
+            if on_progreso:
+                on_progreso(i + 1, len(plan))
+            continue
+
         if ftp is None or directorio_actual != item["directorio"]:
             ftp = conectar_fn(ftp_params["host"], ftp_params["usuario"], ftp_params["clave"], item["directorio"])
             directorio_actual = item["directorio"]
@@ -49,6 +60,8 @@ def ejecutar_descarga(ftp_params: dict, tipo: str, extension: str, fecha_inicio,
             faltantes.append(item["nombre_archivo"])
         else:
             archivos.append((item["fecha_documento"], contenido))
+            if usar_cache:
+                cache_guardar_fn(item["anio"], item["nombre_archivo"], contenido)
 
         if on_progreso:
             on_progreso(i + 1, len(plan))

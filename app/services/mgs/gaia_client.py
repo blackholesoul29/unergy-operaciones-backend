@@ -639,12 +639,15 @@ class GaiaClient:
             _prev_t = t
 
         # AP tiene prioridad (es la medición real de potencia instantánea);
-        # eae solo rellena el tramo posterior al último dato de AP.
-        _last_ap_time = ap_series[-1]["time"] if ap_series else None
-        power_series = ap_series + [
-            pt for pt in eae_derived_series
-            if _last_ap_time is None or pt["time"] > _last_ap_time
-        ]
+        # eae rellena cualquier hueco de tiempo sin AP -- al inicio, en medio
+        # (ej. se cae la conexión y se recupera más tarde) o al final. No basta
+        # con rellenar solo la cola: si AP se cae y luego se recupera, el hueco
+        # queda en medio del día, no al final.
+        _ap_times = {pt["time"] for pt in ap_series}
+        power_series = sorted(
+            ap_series + [pt for pt in eae_derived_series if pt["time"] not in _ap_times],
+            key=lambda pt: pt["time"],
+        )
 
         # ── eae unit: nodos en _EAE_WH_NODES retornan Wh; el resto ya es kWh ──
         _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)

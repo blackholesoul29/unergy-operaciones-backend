@@ -5,13 +5,9 @@ from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
     ProyectoInversor, ProyectoContacto, ProyectoInversionista, Portafolio,
 )
-from app.models.servicios import (
-    ServicioOperacion, OperacionKPI, ServicioRepresentacion,
-    RepresentacionGescon, ServicioCGM,
-)
-from app.models.contratos import ContratoServicio, PPAContrato, ContratoArriendo, PPATarifa, PPACompromisoEnergia
+from app.models.servicios import ServicioOperacion, ServicioRepresentacion
+from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
 from app.models.fronteras import Frontera, FronteraLectura
-from app.models.equipos import Equipo, EquipoSello
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
     FallaCatPrioridad, FallaCatResolucion, Falla, FallaSeguimiento, FallaIntervalo,
@@ -19,12 +15,11 @@ from app.models.fallas import (
 )
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
-    LiquidacionMandato, LiquidacionMandatoLinea, LiquidacionFactura, ReglaContable,
+    LiquidacionMandato, LiquidacionMandatoLinea, LiquidacionFactura,
 )
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
-from app.models.rec import RecProceso, RecCertificado
+from app.models.rec import RecProceso
 from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
-from app.models.documentos import Documento
 from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
 from app.models.gestion import GestionRegistro
@@ -40,7 +35,7 @@ from app.models.panel_contable import (
     AliasFuenteIngreso,
 )
 from app.models.mandatos import (
-    Mandato, MandatoInversionista, GmailCredencial, EstadoMandatoCostoEnum,
+    Mandato, MandatoInversionista, EstadoMandatoCostoEnum,
 )
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
@@ -48,17 +43,17 @@ from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocum
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
     "ProyectoGrupoPanel", "ProyectoInversor", "ProyectoContacto",
-    "ProyectoInversionista", "Portafolio", "ServicioOperacion", "OperacionKPI",
-    "ServicioRepresentacion", "RepresentacionGescon", "ServicioCGM",
-    "ContratoServicio", "PPAContrato", "ContratoArriendo", "PPATarifa", "PPACompromisoEnergia",
-    "Frontera", "FronteraLectura", "Equipo", "EquipoSello",
+    "ProyectoInversionista", "Portafolio", "ServicioOperacion",
+    "ServicioRepresentacion",
+    "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
+    "Frontera", "FronteraLectura",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
-    "ReglaContable", "PromoterCatalogoRequisito", "PromoterSeguimiento",
-    "RecProceso", "RecCertificado", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
-    "Documento", "Mantenimiento",
+    "PromoterCatalogoRequisito", "PromoterSeguimiento",
+    "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
+    "Mantenimiento",
     "GeneracionDiaria", "MonitoreoVerificacion",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
@@ -70,7 +65,7 @@ __all__ = [
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
     "AliasFuenteIngreso",
-    "Mandato", "MandatoInversionista", "GmailCredencial", "EstadoMandatoCostoEnum",
+    "Mandato", "MandatoInversionista", "EstadoMandatoCostoEnum",
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
 ]

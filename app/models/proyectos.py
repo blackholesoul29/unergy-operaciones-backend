@@ -155,16 +155,13 @@ class Proyecto(Base):
     generaciones: Mapped[list] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
     mantenimientos: Mapped[list] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
     liquidaciones: Mapped[list] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
-    contratos_arriendo: Mapped[list] = relationship("ContratoArriendo", back_populates="proyecto", uselist=True)
     asic_solicitudes: Mapped[list] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
     rec_procesos: Mapped[list] = relationship("RecProceso", back_populates="proyecto", uselist=True)
     promotor_seguimientos: Mapped[list] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
     contratos_servicio: Mapped[list] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
     ppa_contratos: Mapped[list] = relationship("PPAContrato", secondary="ppa_contrato_proyectos", uselist=True, viewonly=True)
-    kpis: Mapped[list] = relationship("OperacionKPI", back_populates="proyecto", uselist=True)
     servicio_operacion: Mapped["ServicioOperacion | None"] = relationship("ServicioOperacion", back_populates="proyecto", uselist=False)
     servicio_representacion: Mapped["ServicioRepresentacion | None"] = relationship("ServicioRepresentacion", back_populates="proyecto", uselist=False)
-    servicio_cgm: Mapped["ServicioCGM | None"] = relationship("ServicioCGM", back_populates="proyecto", uselist=False)
 
 
 class ProyectoInfoTecnica(Base):

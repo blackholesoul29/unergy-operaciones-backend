@@ -68,17 +68,3 @@ class Mandato(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     inversionista: Mapped["MandatoInversionista | None"] = relationship("MandatoInversionista", back_populates="mandatos")
-
-
-class GmailCredencial(Base):
-    """Persistencia del refresh token OAuth2 (se usa en Fase B)."""
-    __tablename__ = "gmail_credenciales"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cuenta: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
-    token_actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    ultimo_sync_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    estado: Mapped[str] = mapped_column(String(20), nullable=False, default="desconectado")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

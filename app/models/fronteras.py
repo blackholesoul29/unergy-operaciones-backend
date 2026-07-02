@@ -164,7 +164,6 @@ class Frontera(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fronteras")
-    equipos: Mapped[list] = relationship("Equipo", back_populates="frontera")
     lecturas: Mapped[list] = relationship("FronteraLectura", back_populates="frontera")
     xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="frontera")
 

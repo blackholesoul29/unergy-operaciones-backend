@@ -246,19 +246,3 @@ class LiquidacionFactura(Base):
     inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
 
 
-class ReglaContable(Base):
-    __tablename__ = "reglas_contables"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    nombre_proceso: Mapped[str] = mapped_column(String(255), nullable=False)
-    tipo: Mapped[str] = mapped_column(String(10), nullable=False)  # DEBITO, CREDITO, AMBOS
-    cuenta_debito: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    cuenta_credito: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    estrategia_etiquetas: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    filtro_inversionista: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    filtro_documento_contable: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    filtro_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    filtro_concepto: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

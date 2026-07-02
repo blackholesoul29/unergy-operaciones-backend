@@ -161,10 +161,10 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
     # Verificar si hay registros de negocio que impiden la eliminación
     business_records = (
-        p.fallas or p.mantenimientos or p.liquidaciones or p.contratos_arriendo
+        p.fallas or p.mantenimientos or p.liquidaciones
         or p.asic_solicitudes or p.rec_procesos or p.promotor_seguimientos
-        or p.contratos_servicio or p.ppa_contratos or p.kpis
-        or p.servicio_operacion or p.servicio_representacion or p.servicio_cgm
+        or p.contratos_servicio or p.ppa_contratos
+        or p.servicio_operacion or p.servicio_representacion
         or p.fronteras or p.subproyectos
     )
     if business_records:
@@ -201,9 +201,9 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 _MERGE_SIMPLE = [
     "proyecto_grupos_panel", "proyecto_inversores", "proyecto_contactos",
     "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
-    "contratos_servicio", "contratos_arriendo", "asic_solicitudes",
-    "rec_procesos", "costos_variables", "garantias", "operacion_kpis",
-    "representacion_gescon", "gestion_registros", "cumplimiento_mensual",
+    "contratos_servicio", "asic_solicitudes",
+    "rec_procesos", "costos_variables", "garantias",
+    "gestion_registros", "cumplimiento_mensual",
 ]
 _MERGE_COMPOSITE = [
     ("generacion_diaria", ["fecha"]),
@@ -217,7 +217,7 @@ _MERGE_COMPOSITE = [
 ]
 _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
-    "servicio_cgm", "proyecto_inicio_operacion",
+    "proyecto_inicio_operacion",
 ]
 _MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium"]
 

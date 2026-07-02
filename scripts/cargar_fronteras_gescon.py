@@ -3,11 +3,13 @@ Carga las Fronteras comerciales de GESCON.xlsx en la tabla fronteras.
 Hace upsert por codigo_frontera. Intenta asociar proyecto_id por nombre.
 Uso: python scripts/cargar_fronteras_gescon.py [--dry-run]
 """
-import sys, unicodedata, re
+import sys, os, unicodedata, re
 from datetime import datetime
-import difflib
 import requests
 import openpyxl
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.utils.nombre_matching import mejor_candidato
 
 XLSX = r"C:\Users\juan_\OneDrive\Documentos\Dev\cumplimiento\GESCON\GESCON.xlsx"
 BASE_URL = "https://backend-production-63d8.up.railway.app/api/v1"
@@ -95,54 +97,14 @@ def cargar_proyectos(token):
 
 
 # ── Matching frontera -> proyecto ──────────────────────────────────────────────
-# Misma cadena que se usó en scripts/etl_fronteras_proyectos.py (2026-07-02) para
-# reconciliar fronteras.proyecto_id contra producción -- se fusionó aquí para no
-# mantener dos implementaciones distintas del mismo problema. La versión anterior
+# El algoritmo real vive en app/utils/nombre_matching.py, compartido con
+# app/utils/proyecto_matching.py (find_proyecto_by_name, usada en producción)
+# para no mantener dos implementaciones del mismo problema. La versión anterior
 # de match_proyecto() comparaba el nombre completo con SequenceMatcher (sin quitar
 # prefijos como "GD"/"Minigranja Solar"/"MGS") y tomaba el score más alto sin
 # verificar si había un segundo candidato casi igual de bueno -- eso fue la causa
-# de varios de los mismatches que corrigió el ETL (Cañahuate, El Molino, Gandalf,
-# Perijá, El Son, Naos 2/3).
-_MATCH_STOPWORDS = {
-    "de", "del", "la", "el", "los", "las", "y", "en",
-    "minigranja", "minigranjas", "mgs", "mgr", "gd", "planta", "granja",
-    "solar", "sol", "cielo", "frontera", "proyecto",
-    "consumo", "auxiliar", "aux", "propio", "serv", "ser", "generacion",
-}
-_MATCH_UMBRAL = 0.55
-_MATCH_MARGEN_AMBIGUO = 0.05
-
-
-def _core_tokens(nombre):
-    """Tokens significativos de un nombre (sin stopwords de ruido tipo
-    'Minigranja Solar' / 'GD' / 'Consumo Aux')."""
-    tokens = norm(nombre).split()
-    return {t for t in tokens if t and t not in _MATCH_STOPWORDS}
-
-
-def _score_nombre(nombre_a, nombres_b):
-    """Mejor score entre nombre_a y cualquiera de nombres_b: combina solapamiento
-    de tokens (orden-independiente) con similitud de texto (tolera typos)."""
-    tokens_a = _core_tokens(nombre_a)
-    if not tokens_a:
-        return 0.0
-    mejor = 0.0
-    for nb in nombres_b:
-        if not nb:
-            continue
-        tokens_b = _core_tokens(nb)
-        if not tokens_b:
-            continue
-        inter = tokens_a & tokens_b
-        jaccard = len(inter) / len(tokens_a | tokens_b) if (tokens_a | tokens_b) else 0.0
-        overlap = len(inter) / min(len(tokens_a), len(tokens_b))
-        ratio = difflib.SequenceMatcher(
-            None, " ".join(sorted(tokens_a)), " ".join(sorted(tokens_b))
-        ).ratio()
-        mejor = max(mejor, jaccard, overlap * 0.85, ratio)
-    return round(mejor, 3)
-
-
+# de varios mismatches contra producción (Cañahuate, El Molino, Gandalf, Perijá,
+# El Son, Naos 2/3), corregidos en 2026-07-02.
 def match_proyecto(nombre_frontera, codigo_propio, proyectos):
     """Encuentra el proyecto correcto para una frontera. Returns (proyecto_id, match_reason) or (None, None)."""
     candidatos = [(p["id"], [p.get("nombre_comercial"), p.get("nombre_bitacora")]) for p in proyectos]
@@ -162,21 +124,10 @@ def match_proyecto(nombre_frontera, codigo_propio, proyectos):
                 if n and norm(n) == n_codigo:
                     return pid, "codigo_propio exacto"
 
-    # 3. Scoring por tokens + similitud, con desambiguación explícita: si el
-    #    segundo mejor candidato queda muy cerca del primero, no se adivina.
-    puntajes = sorted(
-        ((pid, _score_nombre(nombre_frontera, nombres)) for pid, nombres in candidatos),
-        key=lambda x: -x[1],
-    )
-    if not puntajes:
+    # 3. Scoring por tokens + similitud, con desambiguación (ver nombre_matching.py)
+    mejor_id, mejor_score = mejor_candidato(nombre_frontera, candidatos)
+    if mejor_id is None:
         return None, None
-    mejor_id, mejor_score = puntajes[0]
-    segundo_score = puntajes[1][1] if len(puntajes) > 1 else 0.0
-
-    if mejor_score < _MATCH_UMBRAL:
-        return None, None
-    if (mejor_score - segundo_score) < _MATCH_MARGEN_AMBIGUO and segundo_score >= _MATCH_UMBRAL:
-        return None, f"ambiguo (mejor={mejor_score:.2f}, segundo={segundo_score:.2f})"
     return mejor_id, f"fuzzy {mejor_score:.2f}"
 
 

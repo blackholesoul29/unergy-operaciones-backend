@@ -50,7 +50,7 @@ Módulo `app/services/xm/tipos.py`, tabla estática:
 | arrpas     | pública                                  | diario `{tipo}MMDD.ext` |
 | tgrl       | pública                                  | diario `{tipo}MMDD.ext` |
 | trsd       | pública                                  | diario `{tipo}MMDD.ext` |
-| cxcsb      | auto-detectar (pública primero, si falla con 403/404 reintenta privada; se registra cuál funcionó) | mensual `{tipo}MM.ext` |
+| cxcsb      | pública                                  | mensual `{tipo}MM.ext`  |
 
 Rutas base (confirmadas en `xm.py` del GitLab de referencia y en
 `aenc_reporte.py`):
@@ -96,21 +96,33 @@ cuyo archivo trae código SIC de planta en columna `PLANTA` o
 `SUBMERCADO`).
 
 Cuando está marcado:
-- `SELECT codigo_frontera, nombre_frontera, capacidad_efectiva_mw FROM fronteras`
-- Merge por código SIC contra la columna `PLANTA`/`SUBMERCADO` del archivo.
+- `SELECT codigo_sic_submercado_exportador, nombre_frontera, capacidad_efectiva_mw FROM fronteras`
+  — **no** `codigo_frontera` (ese guarda el identificador interno tipo
+  `"Frt39007"`, no el código XM de 4 caracteres). El campo correcto es
+  `codigo_sic_submercado_exportador`, que sí guarda valores tipo `"3A44"`
+  — verificado contra la columna "Código SIC Submercado Exportador" (BN)
+  del Excel `UNGG_FronterasComerciales_31-12-2025.xlsx` y confirmado en
+  vivo contra `GET /api/v1/fronteras` en producción.
+- Merge por ese código contra la columna `PLANTA`/`SUBMERCADO` del archivo
+  XM (grip/arrpas/tgrl/cxcsb).
 - Agrega columnas `Nombre de la Frontera`, `Tipo de Frontera`,
   `Capacidad efectiva [MW]` (mismo nombre de columnas que el notebook).
-- No se descarta ninguna fila — todas las fronteras del universo XM de
-  Unergy interesan siempre (confirmado por la usuaria).
+- No se descarta ninguna fila que sí tenga match. Si un código del archivo
+  no encuentra frontera correspondiente, se deja sin enriquecer y se
+  reporta en el resultado del job (`codigos_sin_match: [...]`) — no falla
+  silenciosamente ni aborta el proceso.
 
-**Pre-requisito de implementación**: antes de codear este merge, correr un
-`SELECT` real contra `fronteras.codigo_frontera` y confirmar que los
-códigos SIC de planta (tipo `4Z8L`, `3A44`, etc.) están efectivamente
-poblados ahí — la tabla existe y se llena vía
-`scripts/cargar_fronteras_gescon.py`, pero no se ha verificado cobertura
-completa de los ~52 códigos del notebook. Si faltan códigos, reportarlo
-antes de dar la funcionalidad por lista (no rellenar con el diccionario
-del notebook por debajo sin avisar).
+**Verificado en producción (2026-07-02, `GET /api/v1/fronteras`, 94
+fronteras totales):** las 50 fronteras con `tipo_frontera=generacion`
+tienen `codigo_sic_submercado_exportador` poblado (0 faltantes). Ejemplos
+confirmados: `3A44`→PLANTA SOLAR BAYUNCA I (3.0 MW), `4Z8L`→MGS 0024 - San
+Diego Sur (0.99 MW), `4Z8N`→MGS 0023 - El Joropo (0.99 MW). La BD ya tiene
+2 plantas (`4T9M` GD Naos 2, `4WP2` GD Naos 3) que no estaban en el
+diccionario del notebook — confirma que consultar la BD en vivo es mejor
+que un diccionario fijo. A cambio, 6 códigos del notebook (Taurus
+VIII/IX/X, Agustín 2/3, Elektra) no aparecieron en esta consulta; si
+algún archivo XM los trae, quedarán en `codigos_sin_match` en vez de
+romper el enriquecimiento.
 
 ## 5. Backend — endpoints async
 
@@ -163,7 +175,7 @@ archivos, unificación y export end-to-end.
 - Reporte HTML/envío por correo de AENC (`aenc_reporte.py`) — es un
   proceso distinto y ya existe.
 - Descarga del Excel de fronteras del FTP de XM — no aporta nada que
-  `fronteras.codigo_frontera` en BD no tenga ya.
+  `fronteras.codigo_sic_submercado_exportador` en BD no tenga ya.
 - Persistir credenciales de XM en BD o `.env` del backend.
 - Tipos de archivo fuera de los 8 listados arriba (se agregan en una
   segunda iteración, junto con su ruta pública/privada confirmada).

@@ -94,52 +94,90 @@ def cargar_proyectos(token):
     return items
 
 
+# ── Matching frontera -> proyecto ──────────────────────────────────────────────
+# Misma cadena que se usó en scripts/etl_fronteras_proyectos.py (2026-07-02) para
+# reconciliar fronteras.proyecto_id contra producción -- se fusionó aquí para no
+# mantener dos implementaciones distintas del mismo problema. La versión anterior
+# de match_proyecto() comparaba el nombre completo con SequenceMatcher (sin quitar
+# prefijos como "GD"/"Minigranja Solar"/"MGS") y tomaba el score más alto sin
+# verificar si había un segundo candidato casi igual de bueno -- eso fue la causa
+# de varios de los mismatches que corrigió el ETL (Cañahuate, El Molino, Gandalf,
+# Perijá, El Son, Naos 2/3).
+_MATCH_STOPWORDS = {
+    "de", "del", "la", "el", "los", "las", "y", "en",
+    "minigranja", "minigranjas", "mgs", "mgr", "gd", "planta", "granja",
+    "solar", "sol", "cielo", "frontera", "proyecto",
+    "consumo", "auxiliar", "aux", "propio", "serv", "ser", "generacion",
+}
+_MATCH_UMBRAL = 0.55
+_MATCH_MARGEN_AMBIGUO = 0.05
+
+
+def _core_tokens(nombre):
+    """Tokens significativos de un nombre (sin stopwords de ruido tipo
+    'Minigranja Solar' / 'GD' / 'Consumo Aux')."""
+    tokens = norm(nombre).split()
+    return {t for t in tokens if t and t not in _MATCH_STOPWORDS}
+
+
+def _score_nombre(nombre_a, nombres_b):
+    """Mejor score entre nombre_a y cualquiera de nombres_b: combina solapamiento
+    de tokens (orden-independiente) con similitud de texto (tolera typos)."""
+    tokens_a = _core_tokens(nombre_a)
+    if not tokens_a:
+        return 0.0
+    mejor = 0.0
+    for nb in nombres_b:
+        if not nb:
+            continue
+        tokens_b = _core_tokens(nb)
+        if not tokens_b:
+            continue
+        inter = tokens_a & tokens_b
+        jaccard = len(inter) / len(tokens_a | tokens_b) if (tokens_a | tokens_b) else 0.0
+        overlap = len(inter) / min(len(tokens_a), len(tokens_b))
+        ratio = difflib.SequenceMatcher(
+            None, " ".join(sorted(tokens_a)), " ".join(sorted(tokens_b))
+        ).ratio()
+        mejor = max(mejor, jaccard, overlap * 0.85, ratio)
+    return round(mejor, 3)
+
+
 def match_proyecto(nombre_frontera, codigo_propio, proyectos):
-    """Finds the best matching project. Returns (proyecto_id, match_reason) or (None, None)."""
-    candidates_norm = {norm(p["nombre_comercial"]): p["id"] for p in proyectos}
-    keys = list(candidates_norm.keys())
+    """Encuentra el proyecto correcto para una frontera. Returns (proyecto_id, match_reason) or (None, None)."""
+    candidatos = [(p["id"], [p.get("nombre_comercial"), p.get("nombre_bitacora")]) for p in proyectos]
 
-    # Remove "consumo" / "generacion" / "planta solar" prefix for better matching
-    def clean(s):
-        s = norm(s)
-        for prefix in ("consumo ", "consumo aux ", "planta solar ", "granja solar ", "parque solar "):
-            if s.startswith(prefix):
-                s = s[len(prefix):]
-        return s
+    # 1. Nombre exacto (normalizado)
+    n_frontera = norm(nombre_frontera)
+    for pid, nombres in candidatos:
+        for n in nombres:
+            if n and norm(n) == n_frontera:
+                return pid, "nombre exacto"
 
-    nombre_clean = clean(nombre_frontera)
-    codigo_clean = clean(codigo_propio or "")
-
-    # 1. Direct match by nombre
-    direct = candidates_norm.get(norm(nombre_frontera))
-    if direct:
-        return direct, "nombre exacto"
-
-    # 2. Direct match by codigo_propio
+    # 2. codigo_propio exacto contra el nombre del proyecto
     if codigo_propio:
-        direct = candidates_norm.get(norm(codigo_propio))
-        if direct:
-            return direct, "codigo_propio exacto"
+        n_codigo = norm(codigo_propio)
+        for pid, nombres in candidatos:
+            for n in nombres:
+                if n and norm(n) == n_codigo:
+                    return pid, "codigo_propio exacto"
 
-    # 3. Fuzzy match
-    best_score = 0.0
-    best_id = None
-    for k, pid in candidates_norm.items():
-        k_clean = clean(k)
-        score = difflib.SequenceMatcher(None, nombre_clean, k_clean).ratio()
-        if score > best_score:
-            best_score = score
-            best_id = pid
-        # Also try codigo_propio vs project name
-        if codigo_clean:
-            score2 = difflib.SequenceMatcher(None, codigo_clean, k_clean).ratio()
-            if score2 > best_score:
-                best_score = score2
-                best_id = pid
+    # 3. Scoring por tokens + similitud, con desambiguación explícita: si el
+    #    segundo mejor candidato queda muy cerca del primero, no se adivina.
+    puntajes = sorted(
+        ((pid, _score_nombre(nombre_frontera, nombres)) for pid, nombres in candidatos),
+        key=lambda x: -x[1],
+    )
+    if not puntajes:
+        return None, None
+    mejor_id, mejor_score = puntajes[0]
+    segundo_score = puntajes[1][1] if len(puntajes) > 1 else 0.0
 
-    if best_score >= 0.75:
-        return best_id, f"fuzzy {best_score:.2f}"
-    return None, None
+    if mejor_score < _MATCH_UMBRAL:
+        return None, None
+    if (mejor_score - segundo_score) < _MATCH_MARGEN_AMBIGUO and segundo_score >= _MATCH_UMBRAL:
+        return None, f"ambiguo (mejor={mejor_score:.2f}, segundo={segundo_score:.2f})"
+    return mejor_id, f"fuzzy {mejor_score:.2f}"
 
 
 def main():

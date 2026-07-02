@@ -60,7 +60,7 @@ class AsicSolicitud(Base):
 
     proyecto: Mapped["Proyecto | None"] = relationship("Proyecto", back_populates="asic_solicitudes")
     contrato_ppa: Mapped["PPAContrato | None"] = relationship("PPAContrato", foreign_keys=[contrato_ppa_id])
-    cambios: Mapped[list] = relationship("AsicCambioContrato", back_populates="solicitud")
+    cambios: Mapped[list["AsicCambioContrato"]] = relationship("AsicCambioContrato", back_populates="solicitud")
 
 
 class AsicCambioContrato(Base):

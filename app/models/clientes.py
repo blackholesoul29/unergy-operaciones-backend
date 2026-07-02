@@ -67,10 +67,10 @@ class Cliente(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     origina_investment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
-    proyectos: Mapped[list] = relationship("Proyecto", back_populates="cliente", uselist=True)
-    participaciones: Mapped[list] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
-    servicios: Mapped[list] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
-    documentos_comerciales: Mapped[list] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
+    proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", back_populates="cliente", uselist=True)
+    participaciones: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
+    servicios: Mapped[list["ClienteServicio"]] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
+    documentos_comerciales: Mapped[list["ClienteDocumentoComercial"]] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
 
 
 class ClienteServicio(Base):

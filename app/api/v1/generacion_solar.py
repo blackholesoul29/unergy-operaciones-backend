@@ -17,7 +17,10 @@ from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
 from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.proyectos import Proyecto, TipoProyectoEnum
-from app.services.mgs.gaia_client import GaiaClient, build_db_name_map, find_gaia_node_id, find_gaia_node_pair
+from app.services.mgs.gaia_client import (
+    GaiaClient, build_db_proyecto_frt_map,
+    find_gaia_node_id, find_gaia_node_pair,
+)
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("generacion_solar")
@@ -1159,18 +1162,18 @@ def project_monitoring_detail(
 
     # Resolve Gaia node IDs for this project (non-fatal if not found)
     gaia = _get_gaia()
-    _db_fronteras = db.query(Frontera.nombre_frontera, Frontera.codigo_frontera).filter(
+    _db_fronteras = db.query(Frontera.proyecto_id, Frontera.codigo_frontera).filter(
         Frontera.tipo_frontera.in_([TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo]),
         Frontera.codigo_frontera.isnot(None),
-        Frontera.nombre_frontera.isnot(None),
     ).all()
-    _db_name_map = build_db_name_map([(r.nombre_frontera, r.codigo_frontera) for r in _db_fronteras])
+    _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
     node_principal, node_respaldo = find_gaia_node_pair(
         p.nombre_comercial or "",
         p.alias_monitoreo or "",
         p.nombre_bitacora or "",
         gaia=gaia,
-        db_name_map=_db_name_map,
+        proyecto_id=p.id,
+        db_proyecto_frt_map=_db_proyecto_frt_map,
     )
 
     with ThreadPoolExecutor(max_workers=5) as ex:

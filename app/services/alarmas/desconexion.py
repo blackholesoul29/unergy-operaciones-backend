@@ -21,10 +21,11 @@ from sqlalchemy import text
 
 from app.core.database import SessionLocal
 from app.models.proyectos import Proyecto, TipoProyectoEnum
+from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.usuarios import Usuario, RolEnum
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.services.mgs.solenium_client import SoleniumClient
-from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_pair
+from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_pair, build_db_proyecto_frt_map
 
 logger = logging.getLogger("alarmas.desconexion")
 
@@ -156,11 +157,22 @@ def evaluar_desconexiones():
         gaia = GaiaClient()
         daylight = _is_daylight()
 
+        # Vínculo directo fronteras.proyecto_id -> codigo_frontera (fuente de verdad
+        # reconciliada, ver scripts/etl_fronteras_proyectos.py). Evita adivinar por
+        # nombre para la gran mayoría de los proyectos.
+        _db_fronteras = db.query(Frontera.proyecto_id, Frontera.codigo_frontera).filter(
+            Frontera.tipo_frontera.in_([TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo]),
+            Frontera.codigo_frontera.isnot(None),
+        ).all()
+        _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
+
         # Resolver medidor (match por nombre, sin red) y traer snapshots en paralelo
         node_pairs = {}
         for p in proyectos:
             node_pairs[p.id] = find_gaia_node_pair(
-                p.nombre_comercial or "", p.alias_monitoreo or "", p.nombre_bitacora or "")
+                p.nombre_comercial or "", p.alias_monitoreo or "", p.nombre_bitacora or "",
+                proyecto_id=p.id, db_proyecto_frt_map=_db_proyecto_frt_map,
+            )
 
         snap_map: dict[int, dict | None] = {}
         if gaia and gaia.enabled:

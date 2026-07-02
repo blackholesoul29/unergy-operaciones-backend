@@ -82,6 +82,10 @@ class Frontera(Base):
     fecha_inicio_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     operador_red: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operador_red_zona: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Vínculo estructurado hacia el catálogo de operadores (operador_red arriba
+    # sigue siendo el texto de GESCON; este FK es para la integración del
+    # reporte CGM -- ver operadores_red_contactos para los correos).
+    operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
     predio_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     nombre_predio: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -166,6 +170,7 @@ class Frontera(Base):
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fronteras")
     lecturas: Mapped[list] = relationship("FronteraLectura", back_populates="frontera")
     xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="frontera")
+    operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="fronteras")
 
 
 class FronteraLectura(Base):

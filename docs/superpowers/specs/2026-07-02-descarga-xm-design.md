@@ -186,6 +186,52 @@ Correr `dspcttos txf mayo 2026` contra el FTP real de XM con las
 credenciales de la usuaria: conexión, ruta privada, descarga de ~31
 archivos, unificación y export end-to-end.
 
+## Adenda 2026-07-02 (tarde) — pivote a agente local
+
+**Problema descubierto en producción**: Railway no puede conectarse al FTP
+de XM (`xmftps.xm.com.co:210`) — el `POST /descargas` original (corriendo
+la conexión en un hilo dentro del backend de Railway) fallaba siempre con
+`FTP_TIMEOUT` en el paso de `ftp.connect()`, incluso con credenciales
+correctas. Se validó que:
+- El código de conexión es funcionalmente idéntico al de `aenc_reporte.py`
+  (mismo host/puerto/contexto TLS/secuencia auth-login-prot_p-cwd), que sí
+  conecta en <1 segundo corriendo en el computador de la usuaria.
+- El `docker-compose.yml`/`resolve_route.sh`/README del proyecto de
+  referencia (`ftp-xm-main`) confirman que ese conector estaba pensado
+  para correr en un host con salida de red específica a XM (VPN/IP
+  conocida), no en un servidor cloud genérico.
+- La usuaria no tiene forma de gestionar un whitelist de IP con XM.
+
+**Solución**: la conexión real a XM se mueve a un **agente local** que la
+usuaria corre en su propio computador (`local_agent/`, mismo repo). La
+pestaña "Descarga de XM" (servida desde Vercel) llama directo a
+`http://127.0.0.1:8420` desde el navegador — los navegadores permiten
+llamadas a `localhost` aunque la página esté en HTTPS. Railway deja de
+participar en el flujo de descarga por completo.
+
+Cambios respecto al diseño original:
+- **Eliminado**: `app/api/v1/xm_descargas.py` (endpoints en Railway) y su
+  registro en `router.py` — no pueden funcionar nunca desde ahí.
+- **Sin cambios**: todo `app/services/xm/*` (tipos, plan de descarga,
+  fronteras, unificador, ftp_client, downloader, orquestador, jobs) — se
+  reutiliza tal cual, solo que ahora se importa desde `local_agent/` en
+  vez de desde el backend de Railway.
+- **Nuevo**: `local_agent/servidor.py` — mismos 3 endpoints
+  (`POST /descargas`, `GET /descargas/{id}`, `GET /descargas/{id}/archivo`),
+  sin autenticación (protegido por escuchar solo en `127.0.0.1`), con CORS
+  restringido a la URL de producción del frontend
+  (`frontend-taupe-six-252g9aw47x.vercel.app`) y a los puertos de dev de
+  Vite. Se activa con doble clic en `local_agent/iniciar_descarga_xm.bat`.
+- **Frontend**: `src/api/xm.js` ahora apunta a `http://127.0.0.1:8420` en
+  vez de al backend de Railway; la vista muestra un aviso de que hace
+  falta el agente local corriendo y un mensaje claro si no logra conectar
+  con él.
+
+**Validado end-to-end por la ruta real** (navegador → agente local →
+FTP de XM): `dspcttos` mayo 2026 (3 días de prueba) — job pasa por
+`descargando → unificando → listo`, archivo Excel de 38,640 bytes
+descargado correctamente vía `GET /descargas/{id}/archivo`.
+
 ## Fuera de alcance (explícitamente)
 
 - Reporte HTML/envío por correo de AENC (`aenc_reporte.py`) — es un

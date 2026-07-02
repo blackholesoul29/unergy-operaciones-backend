@@ -1,21 +1,64 @@
-import io
-import threading
+"""Agente local de Descarga de XM.
 
-from fastapi import APIRouter, Depends, HTTPException
+Corre en el computador de la usuaria (no en Railway) porque el FTP de XM
+solo acepta conexiones desde IPs conocidas — Railway no puede llegar ahí
+directo (ver docs/superpowers/specs/2026-07-02-descarga-xm-design.md,
+adenda de pivote a agente local).
+
+La pestaña "Descarga de XM" del frontend (servido desde Vercel/Railway)
+llama a este servicio en http://127.0.0.1:8420 directamente desde el
+navegador de la usuaria — el navegador SÍ puede llamar a localhost aunque
+la página esté en HTTPS. Este proceso hace la conexión real a XM.
+
+Uso: doble clic en iniciar_descarga_xm.bat, dejar la ventana abierta
+mientras se usa la pestaña, cerrar cuando se termine.
+"""
+import io
+import sys
+import threading
+from pathlib import Path
+
+# Permite correr este archivo directamente (python local_agent/app.py)
+# reutilizando app.services.xm.* del backend en el mismo repo.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.api.v1.auth import get_current_user
 from app.schemas.xm_descargas import XMDescargaRequest, XMJobResponse, XMJobStatus
 from app.services.xm import jobs, tipos
 from app.services.xm.orquestador import ejecutar_job
 
-router = APIRouter(prefix="/xm", tags=["Descarga XM"])
+app = FastAPI(title="Agente local — Descarga de XM")
+
+# Solo estos orígenes pueden llamar al agente — restringe qué páginas web
+# pueden hacerle pedir a tu computador que se conecte a XM.
+ORIGENES_PERMITIDOS = [
+    "https://frontend-taupe-six-252g9aw47x.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ORIGENES_PERMITIDOS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 EXTENSIONES_VALIDAS = {"txf", "txr", "tx1", "tx2", "tx3", "tx4", "tx5", "tx6", "tx7", "tx8"}
 
 
-@router.post("/descargas", response_model=XMJobResponse)
-def iniciar_descarga(body: XMDescargaRequest, _=Depends(get_current_user)):
+@app.get("/salud")
+def salud():
+    return {"status": "ok"}
+
+
+@app.post("/descargas", response_model=XMJobResponse)
+def iniciar_descarga(body: XMDescargaRequest):
     if body.tipo not in tipos.TIPOS_CONFIG:
         raise HTTPException(400, f"Tipo de archivo no soportado: {body.tipo}")
     if body.extension.lower() not in EXTENSIONES_VALIDAS:
@@ -35,8 +78,8 @@ def iniciar_descarga(body: XMDescargaRequest, _=Depends(get_current_user)):
     return XMJobResponse(job_id=job_id)
 
 
-@router.get("/descargas/{job_id}", response_model=XMJobStatus)
-def estado_descarga(job_id: str, _=Depends(get_current_user)):
+@app.get("/descargas/{job_id}", response_model=XMJobStatus)
+def estado_descarga(job_id: str):
     job = jobs.obtener_job(job_id)
     if job is None:
         raise HTTPException(404, "Job no encontrado o expirado")
@@ -44,8 +87,8 @@ def estado_descarga(job_id: str, _=Depends(get_current_user)):
     return XMJobStatus(job_id=job_id, **campos)
 
 
-@router.get("/descargas/{job_id}/archivo")
-def descargar_archivo(job_id: str, formato: str = "xlsx", _=Depends(get_current_user)):
+@app.get("/descargas/{job_id}/archivo")
+def descargar_archivo(job_id: str, formato: str = "xlsx"):
     job = jobs.obtener_job(job_id)
     if job is None:
         raise HTTPException(404, "Job no encontrado o expirado")
@@ -66,3 +109,10 @@ def descargar_archivo(job_id: str, formato: str = "xlsx", _=Depends(get_current_
         io.BytesIO(contenido), media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Agente local de Descarga de XM — escuchando en http://127.0.0.1:8420")
+    print("Deja esta ventana abierta mientras usas la pestaña 'Descarga de XM'.")
+    uvicorn.run(app, host="127.0.0.1", port=8420)

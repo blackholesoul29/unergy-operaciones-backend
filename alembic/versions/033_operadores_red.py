@@ -23,33 +23,45 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "operadores_red",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
-        sa.Column("nombre_legal", sa.String(255), nullable=False, unique=True),
-        sa.Column("nombre_comercial", sa.String(100), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
+    # IF NOT EXISTS en cada paso: esta migración se cortó a medias en un deploy
+    # (quedaron las tablas creadas pero no la columna/seed/backfill, y
+    # alembic_version no se actualizó) -- probablemente por un restart/redeploy
+    # concurrente durante el arranque. Con estos guards, reintentarla desde
+    # cero es seguro sin importar en qué paso se haya quedado la vez anterior.
+    conn = op.get_bind()
 
-    op.create_table(
-        "operadores_red_contactos",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
-        sa.Column("operador_red_id", sa.BigInteger(),
-                  sa.ForeignKey("operadores_red.id", ondelete="CASCADE"),
-                  nullable=False, index=True),
-        sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("nombre", sa.String(255), nullable=True),
-        sa.Column("activo", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS operadores_red (
+            id BIGSERIAL PRIMARY KEY,
+            nombre_legal VARCHAR(255) NOT NULL UNIQUE,
+            nombre_comercial VARCHAR(100),
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
+        )
+    """))
 
-    op.add_column(
-        "fronteras",
-        sa.Column("operador_red_id", sa.BigInteger(),
-                  sa.ForeignKey("operadores_red.id"), nullable=True),
-    )
-    op.create_index("ix_fronteras_operador_red_id", "fronteras", ["operador_red_id"])
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS operadores_red_contactos (
+            id BIGSERIAL PRIMARY KEY,
+            operador_red_id BIGINT NOT NULL REFERENCES operadores_red(id) ON DELETE CASCADE,
+            email VARCHAR(255) NOT NULL,
+            nombre VARCHAR(255),
+            activo BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+    """))
+    conn.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_operadores_red_contactos_operador_red_id "
+        "ON operadores_red_contactos (operador_red_id)"
+    ))
+
+    conn.execute(sa.text(
+        "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS operador_red_id "
+        "BIGINT REFERENCES operadores_red(id)"
+    ))
+    conn.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_fronteras_operador_red_id ON fronteras (operador_red_id)"
+    ))
 
     # Seed: los operadores reales que ya aparecen en fronteras.operador_red
     # (texto de GESCON). nombre_comercial solo se pone cuando ya se veía usado
@@ -64,26 +76,23 @@ def upgrade() -> None:
         ("EMPRESA DE ENERGIA DE CASANARE S.A. E.S.P. - DISTRIBUIDOR", None),
         ("EMPRESAS PUBLICAS DE MEDELLIN E.S.P. - DISTRIBUIDOR", None),
     ]
-    conn = op.get_bind()
-    op_table = sa.table(
-        "operadores_red",
-        sa.column("id", sa.BigInteger),
-        sa.column("nombre_legal", sa.String),
-        sa.column("nombre_comercial", sa.String),
-    )
     for nombre_legal, nombre_comercial in operadores:
-        conn.execute(
-            op_table.insert().values(nombre_legal=nombre_legal, nombre_comercial=nombre_comercial)
-        )
+        conn.execute(sa.text("""
+            INSERT INTO operadores_red (nombre_legal, nombre_comercial)
+            VALUES (:legal, :comercial)
+            ON CONFLICT (nombre_legal) DO NOTHING
+        """), {"legal": nombre_legal, "comercial": nombre_comercial})
 
     # Backfill: fronteras.operador_red_id a partir del texto ya existente
     # (match exacto -- ambos valores vienen literalmente de GESCON, sin
-    # necesidad de fuzzy matching).
+    # necesidad de fuzzy matching). Re-ejecutar esto no hace daño: solo
+    # actualiza filas cuyo texto coincide con el catálogo.
     conn.execute(sa.text("""
         UPDATE fronteras f
         SET operador_red_id = o.id
         FROM operadores_red o
         WHERE f.operador_red = o.nombre_legal
+          AND (f.operador_red_id IS NULL OR f.operador_red_id <> o.id)
     """))
 
 

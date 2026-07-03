@@ -20,3 +20,4 @@ numpy>=1.26.0
 pdfplumber>=0.11.0
 pypdf>=4.0.0
 python-dotenv>=1.0.0
+thefuzz[speedup]>=0.22.0

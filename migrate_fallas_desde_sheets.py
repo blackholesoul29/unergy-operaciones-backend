@@ -25,6 +25,8 @@ from typing import Optional
 
 import requests
 
+from app.utils.falla_resolution_matcher import FallaResolutionMatcher
+
 try:
     from dotenv import load_dotenv
 
@@ -134,16 +136,33 @@ PRIO_MAP = {
     "grave":   "grave",
 }
 
-# Mapeo resolución (texto libre -> código catálogo)
-RESOLUCION_KEYWORDS = [
-    (["reinicio", "reset", "inversor"],          "reinicio_inversor"),
-    (["visita", "técnica", "tecnica"],           "visita_tecnica"),
-    (["cambio", "componente", "reemplazo"],      "cambio_componente"),
-    (["firmware", "actualización", "software"],  "actualizacion_fw"),
-    (["operador", "red", "empresa", "intervenc"],"intervencion_red"),
-    (["remota", "telegestión", "telemando"],     "resolucion_remota"),
-    (["sin acción", "no aplica", "sin accion"],  "sin_accion"),
+# Mapeo resolución (texto libre -> código catálogo): antes era un match por substring
+# de palabras clave (frágil); ahora usa similitud difusa con umbral de confianza.
+# Los códigos canónicos deben coincidir con el catálogo fallas_cat_resoluciones
+# (ver app/seeds/seed_data.py -> RESOLUCIONES).
+RESOLUTION_CODES = [
+    "reinicio_inversor",
+    "visita_tecnica",
+    "cambio_componente",
+    "actualizacion_fw",
+    "intervencion_red",
+    "resolucion_remota",
+    "sin_accion",
+    "otro",
 ]
+
+# Instancia única del emparejador semántico para toda la migración.
+RESOLUCION_MATCHER = FallaResolutionMatcher(RESOLUTION_CODES)
+
+# Archivo donde se vuelca la cola de revisión humana (matches de baja confianza).
+# Como esta migración escribe vía API REST (no toca la BD directamente), el
+# "human-in-the-loop" no puede vivir en columnas de la tabla: se registra aquí y,
+# además, se anota en el seguimiento de la falla. Revisar con:
+#     python scripts/review_fallas_pending.py
+REVIEW_OUTPUT = os.environ.get("FALLAS_REVIEW_OUTPUT", "fallas_pending_review.json")
+
+# Cola en memoria de resoluciones que requieren revisión manual (< umbral de confianza).
+PENDING_REVIEW_ITEMS: list[dict] = []
 
 # Mapeo tipo de falla: prefijo del código antiguo -> código de categoría nueva
 CATEGORIA_PREFIJO = {
@@ -285,20 +304,42 @@ def map_prioridad(raw: str, prioridades: list) -> int:
     return next(p["id"] for p in sorted(prioridades, key=lambda x: x["nivel"]) if p["nivel"] == 3)
 
 
-def map_resolucion(raw: str, resoluciones: list) -> Optional[int]:
-    if not raw or not raw.strip():
-        return None
-    r_norm = norm(raw)
-    for keywords, codigo in RESOLUCION_KEYWORDS:
-        if any(k in r_norm for k in keywords):
-            for res in resoluciones:
-                if res["codigo"] == codigo:
-                    return res["id"]
-    # fallback: "otro"
-    for res in resoluciones:
-        if res["codigo"] == "otro":
-            return res["id"]
+def _resolucion_id_por_codigo(codigo: Optional[str], resoluciones: list) -> Optional[int]:
+    if codigo:
+        for res in resoluciones:
+            if res["codigo"] == codigo:
+                return res["id"]
     return None
+
+
+def resolver_resolucion(raw: str, resoluciones: list,
+                        codigo_legado: str = "") -> tuple[Optional[int], Optional[dict]]:
+    """Empareja el texto libre de resolución contra el catálogo con similitud difusa.
+
+    Devuelve (resolucion_id, match_info). ``match_info`` es None cuando no hay texto.
+    - MATCHED (confianza >= umbral): usa el código sugerido.
+    - PENDING_REVIEW (confianza < umbral): cae a 'otro', encola el item para revisión
+      humana y deja constancia para que el emparejamiento se corrija después.
+    """
+    if not raw or not raw.strip():
+        return None, None
+
+    info = RESOLUCION_MATCHER.match(raw)
+
+    if info["status"] == "MATCHED":
+        codigo = info["code"]
+    else:
+        codigo = "otro"  # no forzamos un código dudoso; se marca para revisión
+        PENDING_REVIEW_ITEMS.append({
+            "codigo_legado": codigo_legado,
+            "texto_original": info["description"],
+            "codigo_sugerido": info["code"],
+            "confianza": info["confidence"],
+        })
+
+    res_id = (_resolucion_id_por_codigo(codigo, resoluciones)
+              or _resolucion_id_por_codigo("otro", resoluciones))
+    return res_id, info
 
 
 def map_tipo(fault_code: str, tipos: list) -> int:
@@ -376,7 +417,8 @@ def migrar_falla(raw: dict, proyecto_id: int, catalogos: dict,
         "codigo_legado":       codigo_legado,
     }
 
-    resolucion_id = map_resolucion(str(raw.get("Tipo Resolución", "")), resoluciones)
+    resolucion_id, resolucion_info = resolver_resolucion(
+        str(raw.get("Tipo Resolución", "")), resoluciones, codigo_legado)
     if resolucion_id:
         payload["resolucion_id"] = resolucion_id
 
@@ -417,6 +459,13 @@ def migrar_falla(raw: dict, proyecto_id: int, catalogos: dict,
     fotos = str(raw.get("Fotos (Enlace Drive)", "")).strip()
     if fotos:
         partes.append(f"Fotos: {fotos}")
+    if resolucion_info and resolucion_info["status"] == "PENDING_REVIEW":
+        partes.append(
+            "[REVISIÓN MANUAL] Resolución mapeada a 'otro' por baja confianza "
+            f"({resolucion_info['confidence']}%). Texto original: "
+            f"'{resolucion_info['description']}' — sugerencia: "
+            f"{resolucion_info['code'] or 'sin sugerencia'}."
+        )
 
     requests.post(
         f"{API_BASE}/fallas/{nueva_id}/seguimientos",
@@ -503,6 +552,16 @@ def main():
         for p in sorted(proyectos_sin_match):
             print(f"    * {p}")
     print("=" * 65)
+
+    # -- Cola de revisión humana (resoluciones de baja confianza) --------------
+    if PENDING_REVIEW_ITEMS:
+        with open(REVIEW_OUTPUT, "w", encoding="utf-8") as fh:
+            json.dump(PENDING_REVIEW_ITEMS, fh, ensure_ascii=False, indent=2)
+        print(f"\n  Resoluciones para REVISIÓN MANUAL: {len(PENDING_REVIEW_ITEMS)}")
+        print(f"  Volcado en: {REVIEW_OUTPUT}")
+        print(f"  Revísalas con:  python scripts/review_fallas_pending.py")
+    else:
+        print("\n  Todas las resoluciones se emparejaron con confianza suficiente.")
 
 
 if __name__ == "__main__":

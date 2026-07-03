@@ -1,4 +1,6 @@
-from pydantic import field_validator
+from typing import Optional
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,10 +51,31 @@ class Settings(BaseSettings):
 
     STORAGE_BACKEND: str = "local"
     STORAGE_LOCAL_PATH: str = "./uploads"
-    S3_BUCKET: str = ""
-    S3_ENDPOINT: str = ""
-    S3_ACCESS_KEY: str = ""
-    S3_SECRET_KEY: str = ""
+    S3_BUCKET: Optional[str] = None
+    S3_ENDPOINT: Optional[str] = None
+    S3_ACCESS_KEY: Optional[str] = None
+    S3_SECRET_KEY: Optional[str] = None
+
+    @model_validator(mode="after")
+    def s3_config_must_be_complete(self) -> "Settings":
+        # Con STORAGE_BACKEND='s3' el almacenamiento de archivos depende por
+        # completo de estas credenciales. Si alguna falta, las subidas fallarían
+        # en tiempo de ejecución (posiblemente perdiendo archivos) en lugar de
+        # avisar al arrancar. Fallamos rápido para no desplegar mal configurado.
+        if self.STORAGE_BACKEND == "s3":
+            required = {
+                "S3_BUCKET": self.S3_BUCKET,
+                "S3_ENDPOINT": self.S3_ENDPOINT,
+                "S3_ACCESS_KEY": self.S3_ACCESS_KEY,
+                "S3_SECRET_KEY": self.S3_SECRET_KEY,
+            }
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise ValueError(
+                    "STORAGE_BACKEND='s3' requiere estas variables y están "
+                    f"vacías o sin definir: {', '.join(missing)}."
+                )
+        return self
 
     # Unergy API credentials (used by _legacy bridge)
     UNERGY_API_URL: str = "https://api.unergy.io"

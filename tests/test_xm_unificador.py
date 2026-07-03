@@ -53,16 +53,31 @@ def test_exportar_devuelve_bytes_no_vacios():
     assert b"a;b" in bytes_txt
 
 
-def test_enriquecer_agrega_columnas_y_reporta_sin_match():
+def test_enriquecer_filtra_a_solo_plantas_unergy_y_agrega_columnas():
     df = pd.DataFrame({
-        "FechaDocumento": ["2026-05-01", "2026-05-01"],
-        "PLANTA": ["3A44", "9999"],
+        "FechaDocumento": ["2026-05-01", "2026-05-01", "2026-05-01"],
+        "PLANTA": ["3A44", "9999", "4Z8L"],
     })
     fronteras_por_mes = {
-        "2026-05": {"3A44": {"nombre": "Bayunca I", "tipo": "Generacion", "mw": 3.0}},
+        "2026-05": {
+            "3A44": {"nombre": "Bayunca I", "tipo": "Generacion", "mw": 3.0},
+            "4Z8L": {"nombre": "San Diego Sur", "tipo": "Generacion", "mw": 0.99},
+        },
     }
     df2, sin_match = enriquecer(df, "grip", fronteras_por_mes, "PLANTA")
-    assert df2.loc[0, "Nombre de la Frontera"] == "Bayunca I"
-    assert df2.loc[0, "Capacidad efectiva [MW]"] == 3.0
+    # Solo quedan las filas que hicieron match — "9999" (de otro agente
+    # del mercado) se descarta, no se deja en blanco.
+    assert list(df2["PLANTA"]) == ["3A44", "4Z8L"]
+    assert list(df2["Nombre de la Frontera"]) == ["Bayunca I", "San Diego Sur"]
+    assert list(df2["Capacidad efectiva [MW]"]) == [3.0, 0.99]
     assert sin_match == {"9999"}
-    assert pd.isna(df2.loc[1, "Nombre de la Frontera"])
+
+
+def test_enriquecer_sin_ningun_match_devuelve_vacio():
+    df = pd.DataFrame({
+        "FechaDocumento": ["2026-05-01"],
+        "PLANTA": ["9999"],
+    })
+    df2, sin_match = enriquecer(df, "grip", {"2026-05": {}}, "PLANTA")
+    assert df2.empty
+    assert sin_match == {"9999"}

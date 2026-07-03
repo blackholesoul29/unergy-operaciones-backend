@@ -54,9 +54,12 @@ def exportar(df: pd.DataFrame) -> tuple[bytes, bytes]:
 def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_codigo: str):
     """fronteras_por_mes: {'YYYY-MM': {codigo: {nombre, tipo, mw}}, ...}.
 
-    Cada fila se enriquece con el snapshot de fronteras de SU PROPIO mes
-    (columna FechaDocumento), no uno solo para todo el rango.
-    Devuelve (df_enriquecido, codigos_sin_match: set).
+    Filtra el archivo a solo las plantas de Unergy (las que hacen match
+    contra el snapshot de fronteras de SU PROPIO mes, por columna
+    FechaDocumento) y les agrega nombre/tipo/MW. Los códigos de otros
+    agentes del mercado se descartan, no se dejan en blanco — igual que
+    hacía el notebook original.
+    Devuelve (df_filtrado_y_enriquecido, codigos_sin_match: set).
 
     Vectorizado con Series.map en vez de df.iterrows(): con archivos de
     cientos de miles de filas (ej. grip de un mes completo), iterrows()
@@ -74,11 +77,14 @@ def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_cod
         for codigo, info in tabla.items()
     }
     info_por_fila = claves.map(tabla_combinada)
+    coincide = info_por_fila.notna()
 
-    df = df.copy()
-    df["Nombre de la Frontera"] = info_por_fila.map(lambda x: x["nombre"] if isinstance(x, dict) else None)
-    df["Tipo de Frontera"] = info_por_fila.map(lambda x: x["tipo"] if isinstance(x, dict) else None)
-    df["Capacidad efectiva [MW]"] = info_por_fila.map(lambda x: x["mw"] if isinstance(x, dict) else None)
+    sin_match = set(codigos[~coincide])
 
-    sin_match = set(codigos[info_por_fila.isna()])
+    df = df[coincide].copy()
+    info_coincidente = info_por_fila[coincide]
+    df["Nombre de la Frontera"] = info_coincidente.map(lambda x: x["nombre"])
+    df["Tipo de Frontera"] = info_coincidente.map(lambda x: x["tipo"])
+    df["Capacidad efectiva [MW]"] = info_coincidente.map(lambda x: x["mw"])
+
     return df, sin_match

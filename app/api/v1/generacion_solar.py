@@ -755,7 +755,8 @@ def project_detail(project_id: int, _=Depends(get_current_user)):
         raise HTTPException(404, "Proyecto no encontrado en Solenium")
 
     inverters = client.get_project_inverters(project_id)
-    power = client.get_power(project_id)
+    hoy = _hoy_col().isoformat()
+    power = client.get_power(project_id, hoy, hoy)
 
     return {
         "project": detail,
@@ -807,7 +808,8 @@ def project_generation(
 def project_power(project_id: int, _=Depends(get_current_user)):
     """Today's power curve (5-min intervals) for a project."""
     client = _get_client()
-    data = client.get_power(project_id)
+    hoy = _hoy_col().isoformat()
+    data = client.get_power(project_id, hoy, hoy)
     if not data:
         return {"project_id": project_id, "unit": "kW", "power": {}}
     return data
@@ -1176,9 +1178,10 @@ def project_monitoring_detail(
         db_proyecto_frt_map=_db_proyecto_frt_map,
     )
 
+    hoy = today.isoformat()
     with ThreadPoolExecutor(max_workers=5) as ex:
         inv_f    = ex.submit(client.get_project_inverters, sol_id)
-        pow_f    = ex.submit(client.get_power, sol_id)
+        pow_f    = ex.submit(client.get_power, sol_id, hoy, hoy)
         gen_f    = ex.submit(client.get_energy, sol_id,
                              granularity="day", date_from=start30, date_to=today.isoformat())
         snap_p_f = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \

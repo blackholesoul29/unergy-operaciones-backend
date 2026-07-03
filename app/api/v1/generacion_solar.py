@@ -786,15 +786,20 @@ def project_generation(
 
     days_data = []
     if isinstance(data, dict):
-        raw = data.get("results") or data.get("data") or data
-        if isinstance(raw, dict):
-            for k, v in raw.items():
-                if isinstance(v, (int, float)):
-                    days_data.append({"date": k, "kwh": round(v, 2)})
-                elif isinstance(v, dict) and "value" in v:
-                    days_data.append({"date": k, "kwh": round(v["value"], 2)})
-        elif isinstance(raw, list):
-            days_data = raw
+        results = data.get("results") or {}
+        points = results.get("points") if isinstance(results, dict) else None
+        unit = (results.get("unit") or "kWh").strip().lower() if isinstance(results, dict) else "kwh"
+        factor = 1000.0 if unit == "mwh" else 1.0
+        if isinstance(points, list):
+            for item in points:
+                if not isinstance(item, dict):
+                    continue
+                d = item.get("time") or item.get("date") or item.get("day")
+                val = item.get("kwh")
+                if val is None:
+                    val = item.get("value") or item.get("energy")
+                if d and val is not None:
+                    days_data.append({"date": str(d)[:10], "kwh": round(float(val) * factor, 2)})
 
     total = sum(d.get("kwh", 0) for d in days_data)
     return {

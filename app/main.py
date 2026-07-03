@@ -1884,24 +1884,24 @@ def _scheduled_generation_sync():
             if not data:
                 continue
 
-            raw = data.get("results") or data.get("data") or data if isinstance(data, dict) else data
+            results = data.get("results") if isinstance(data, dict) else None
+            points = results.get("points") if isinstance(results, dict) else None
+            unit = (results.get("unit") or "kWh").strip().lower() if isinstance(results, dict) else "kwh"
+            factor = 1000.0 if unit == "mwh" else 1.0
+
             day_rows = []
-            if isinstance(raw, dict):
-                for k, v in raw.items():
-                    kwh = None
-                    if isinstance(v, (int, float)):
-                        kwh = v
-                    elif isinstance(v, dict) and "value" in v:
-                        kwh = v["value"]
-                    if kwh is not None and kwh > 0:
-                        day_rows.append((k, round(kwh, 3)))
-            elif isinstance(raw, list):
-                for item in raw:
-                    if isinstance(item, dict):
-                        d = item.get("date") or item.get("day")
-                        kwh = item.get("kwh") or item.get("value") or item.get("energy")
-                        if d and kwh and float(kwh) > 0:
-                            day_rows.append((str(d), round(float(kwh), 3)))
+            if isinstance(points, list):
+                for item in points:
+                    if not isinstance(item, dict):
+                        continue
+                    d = item.get("time") or item.get("date") or item.get("day")
+                    val = item.get("kwh")
+                    if val is None:
+                        val = item.get("value") or item.get("energy")
+                    if d and val is not None:
+                        kwh = float(val) * factor
+                        if kwh > 0:
+                            day_rows.append((str(d)[:10], round(kwh, 3)))
 
             if not day_rows:
                 continue

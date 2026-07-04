@@ -23,6 +23,7 @@ from app.api.v1.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
+from app.utils.gescon_vigencia import resolver_vigencias
 from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
@@ -490,42 +491,26 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
         .all()
     )
 
-    by_sic: dict[str, list] = defaultdict(list)
-    for r in records:
-        by_sic[r.codigo_sic_contrato or f"_id_{r.id}"].append(r)
+    # Núcleo compartido con GET /asic y /alertas (app/utils/gescon_vigencia.py):
+    # el walk por SIC vive allá; aquí solo se interpreta el resultado para la
+    # vista mensual. hasta=last_day reproduce la vista histórica: eventos que
+    # aún no tomaban efecto no desplazan la versión vigente del mes.
+    vigencias = resolver_vigencias(records, hasta=last_day)
 
     result = []
-    for sic_records in by_sic.values():
-        active: dict[int | str, AsicSolicitud] = {}
-        salientes: list = []
-        for r in sic_records:
-            # fecha_inicio NULL = vigente desde siempre (mismo criterio que el
-            # filtro final más abajo). Si el evento aún no tomaba efecto para
-            # el mes consultado, no debe desplazar la versión vigente de ese mes.
-            vigente_desde = r.fecha_inicio or date.min
-            if vigente_desde > last_day:
-                continue
-
-            pid = r.proyecto_id
-            if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
-                if pid is not None:
-                    active.pop(pid, None)
-                continue
-            if pid is None:
-                active[f"_nopid_{r.id}"] = r
-                continue
-            if pid in active:
-                active[pid] = r
-            else:
-                if r.reemplaza_anterior:
-                    corte = vigente_desde - timedelta(days=1)
-                    for saliente in active.values():
-                        fin_efectivo = min(saliente.fecha_fin or date.max, corte)
-                        salientes.append(_AsicVigenciaRecortada(saliente, fin_efectivo))
-                    active.clear()
-                active[pid] = r
-        result.extend(active.values())
-        result.extend(salientes)
+    for r in records:
+        v = vigencias[r.id]
+        if not v.procesado:
+            continue
+        if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
+            continue
+        if v.vigente:
+            result.append(r)
+        elif v.saliente_por_relevo:
+            # Planta relevada a mitad de mes: se conserva con su fecha_fin
+            # EFECTIVA recortada para el prorrateo por días (ver docstring).
+            result.append(_AsicVigenciaRecortada(r, v.fecha_fin_efectiva))
+        # Superseded en sitio (misma planta): la versión nueva la representa.
 
     return [
         r for r in result

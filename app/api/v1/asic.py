@@ -10,6 +10,7 @@ from app.models.asic import (
 )
 from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
+from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
 
@@ -89,6 +90,40 @@ def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
     return d
 
 
+def _aplicar_vigencia(db: Session, outs: list[AsicSolicitudOut]) -> list[AsicSolicitudOut]:
+    """Rellena fecha_fin_efectiva / es_version_vigente en cada salida.
+
+    La resolución corre SIEMPRE sobre el universo completo de solicitudes
+    publicadas (no sobre el subconjunto filtrado del request): el relevo que
+    recorta a una fila puede venir de otra planta u otro contrato que el filtro
+    excluyó. Filas no publicadas o desistimientos no participan del walk:
+    conservan su fecha_fin cruda y es_version_vigente=False.
+    """
+    universo = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+        )
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        )
+        .all()
+    )
+    vigencias = resolver_vigencias(universo)
+    for o in outs:
+        v = vigencias.get(o.id)
+        if v is not None:
+            o.fecha_fin_efectiva = v.fecha_fin_efectiva
+            o.es_version_vigente = v.vigente
+        else:
+            o.fecha_fin_efectiva = o.fecha_fin
+            o.es_version_vigente = False
+    return outs
+
+
 def _planta_por_sic(db: Session, sics: set[str]) -> dict[str, str]:
     """
     Mapa código SIC -> nombre(s) de planta, derivado de los registros vigentes
@@ -150,7 +185,7 @@ def list_solicitudes(
     if proyecto_id:
         q = q.filter(AsicSolicitud.proyecto_id == proyecto_id)
     rows = q.order_by(AsicSolicitud.fecha_solicitud.desc().nullslast(), AsicSolicitud.id.desc()).all()
-    return _enriquecer_planta(db, [_to_out(s) for s in rows])
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s) for s in rows]))
 
 
 @router.patch("/{id}", response_model=AsicSolicitudOut)
@@ -170,7 +205,7 @@ def patch_solicitud(
     db.commit()
     db.refresh(s)
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first()
-    return _enriquecer_planta(db, [_to_out(s)])[0]
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s)]))[0]
 
 
 @router.post("", response_model=AsicSolicitudOut, status_code=201)
@@ -187,7 +222,7 @@ def create_solicitud(
     db.commit()
     db.refresh(s)
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == s.id).first()
-    return _enriquecer_planta(db, [_to_out(s)])[0]
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s)]))[0]
 
 
 @router.delete("/{id}", status_code=204)

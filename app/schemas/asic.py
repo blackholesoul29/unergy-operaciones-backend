@@ -39,6 +39,15 @@ class AsicSolicitudOut(BaseModel):
     planta_nombre: str | None = None
     contrato_ppa_id: int | None = None
 
+    # Vigencia efectiva (calculada en endpoint vía gescon_vigencia, no almacenada).
+    # fecha_fin_efectiva: fin REAL de la ventana — recortada si un relevo o una
+    # modificación posterior en el mismo SIC superó a esta fila (la fecha_fin
+    # cruda se conserva arriba). None = abierta o sin resolver (fallback: cruda).
+    # es_version_vigente: esta fila es la versión vigente actual de su SIC
+    # (False para filas superadas, terminadas, no publicadas o desistimientos).
+    fecha_fin_efectiva: date | None = None
+    es_version_vigente: bool = False
+
 
 class AsicSolicitudCreate(BaseModel):
     requerimiento_asic: str | None = None

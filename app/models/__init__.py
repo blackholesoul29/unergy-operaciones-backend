@@ -72,3 +72,4 @@ __all__ = [
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
 ]
+from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA

@@ -1322,7 +1322,7 @@ def get_plantas_contratos(
         bolsa_plantas.append(entry)
         (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
-    return {
+    out = {
         "year": year,
         "month": month,
         "venta": venta_out,
@@ -1335,6 +1335,11 @@ def get_plantas_contratos(
         "bolsa_comercializador": bolsa_comercializador,
         "bolsa_libre": bolsa_libre,
     }
+    # Piscinas estandarizadas a-f (misma fuente que GET /clasificacion-energia):
+    # aditivo — re-agrupa lo anterior sin alterar las claves existentes.
+    from app.services.clasificacion_energia import derivar_pools
+    out.update(derivar_pools(out))
+    return out
 
 
 @router.get("/energia-transada")

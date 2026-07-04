@@ -1,5 +1,13 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Entornos válidos. ENVIRONMENT es obligatorio y debe ser uno de estos: así un
+# despliegue que olvide la variable falla al arrancar en vez de correr en modo
+# 'development' por accidente (que relaja SECRET_KEY y otras protecciones).
+# Se usa un default centinela "" (no "development") para que la variable AUSENTE
+# también pase por environment_must_be_valid y reciba el mismo mensaje accionable
+# en español, en vez del "Field required" genérico en inglés de pydantic.
+ALLOWED_ENVIRONMENTS = ("development", "staging", "production")
 
 
 class Settings(BaseSettings):
@@ -7,7 +15,9 @@ class Settings(BaseSettings):
 
 
     APP_NAME: str = "Plataforma Operaciones Unergy"
-    ENVIRONMENT: str = "development"
+    # Default centinela "" (ver ALLOWED_ENVIRONMENTS): ausente y vacío caen ambos
+    # en environment_must_be_valid con un único mensaje en español accionable.
+    ENVIRONMENT: str = ""
     FRONTEND_URL: str = "http://localhost:5173"
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
@@ -111,6 +121,24 @@ class Settings(BaseSettings):
         if v.startswith("postgresql://") and "+psycopg" not in v:
             return v.replace("postgresql://", "postgresql+psycopg://", 1)
         return v
+
+    @model_validator(mode="after")
+    def environment_must_be_valid(self) -> "Settings":
+        # Un solo camino de fallo para AUSENTE, vacío o inválido → mismo mensaje
+        # accionable en español (el caso "prod olvidó ENVIRONMENT" es el más común
+        # y el que este chequeo existe para atrapar). Se normaliza (strip+lower)
+        # para aceptar "Production"/" production " sin sorprender al operador y se
+        # reescribe el valor canónico para que el resto de la app lea minúsculas.
+        normalized = self.ENVIRONMENT.strip().lower()
+        if normalized not in ALLOWED_ENVIRONMENTS:
+            raise ValueError(
+                f"ENVIRONMENT no está configurado o no es válido "
+                f"(recibido: '{self.ENVIRONMENT}'). Defínelo en Railway "
+                f"(o en tu .env local) con uno de: "
+                f"{', '.join(ALLOWED_ENVIRONMENTS)}."
+            )
+        self.ENVIRONMENT = normalized
+        return self
 
 
 settings = Settings()

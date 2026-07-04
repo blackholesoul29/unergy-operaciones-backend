@@ -26,4 +26,5 @@ jobs:
       - name: Run tests
         env:
           SECRET_KEY: ci-test-secret-key-placeholder
+          ENVIRONMENT: development
         run: pytest -q

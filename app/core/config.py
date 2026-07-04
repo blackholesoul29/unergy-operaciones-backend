@@ -1,5 +1,10 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Entornos válidos. ENVIRONMENT es obligatorio y debe ser uno de estos: así un
+# despliegue que olvide la variable falla al arrancar en vez de correr en modo
+# 'development' por accidente (que relaja SECRET_KEY y otras protecciones).
+ALLOWED_ENVIRONMENTS = ("development", "staging", "production")
 
 
 class Settings(BaseSettings):
@@ -7,7 +12,7 @@ class Settings(BaseSettings):
 
 
     APP_NAME: str = "Plataforma Operaciones Unergy"
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str
     FRONTEND_URL: str = "http://localhost:5173"
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
@@ -111,6 +116,15 @@ class Settings(BaseSettings):
         if v.startswith("postgresql://") and "+psycopg" not in v:
             return v.replace("postgresql://", "postgresql+psycopg://", 1)
         return v
+
+    @model_validator(mode="after")
+    def environment_must_be_valid(self) -> "Settings":
+        if self.ENVIRONMENT not in ALLOWED_ENVIRONMENTS:
+            raise ValueError(
+                f"ENVIRONMENT='{self.ENVIRONMENT}' no es válido; usa uno de "
+                f"{', '.join(ALLOWED_ENVIRONMENTS)}."
+            )
+        return self
 
 
 settings = Settings()

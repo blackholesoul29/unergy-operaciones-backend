@@ -14,6 +14,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-qa-0123456789")
+# ENVIRONMENT es obligatorio desde app.core.config; fíjalo para que la
+# construcción de Settings() no falle al colectar los tests.
+os.environ.setdefault("ENVIRONMENT", "development")
 
 _auth_stub = types.ModuleType("app.api.v1.auth")
 _auth_stub.get_current_user = lambda: None

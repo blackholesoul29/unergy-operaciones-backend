@@ -41,23 +41,37 @@ STATUS_PENDING = "PENDING_REVIEW"
 # Frases/sinónimos representativos por código de resolución. El texto libre se compara
 # contra estas frases (no contra el código crudo "reinicio_inversor", que no es lenguaje
 # natural). Derivados del viejo RESOLUCION_KEYWORDS + las etiquetas del catálogo.
+#
+# REGLA (importante): NO incluir sinónimos de UN SOLO token que sean palabras COMUNES
+# ("reinicio", "reset", "visita", "firmware", "reemplazo"). token_set_ratio
+# devuelve 100 cuando una frase es SUBCONJUNTO del texto, así que un único término común
+# suelto dentro de una descripción larga de OTRO tema (p. ej. "no fue necesario reinicio,
+# se cambió el panel" o "el firmware del router de oficina") puntuaría 100 y se
+# auto-clasificaría con confianza total, saltándose la cola de revisión — justo lo que
+# esta capa promete evitar ("mejor no adivinar que adivinar mal"). Las frases de 2+ tokens
+# ("reinicio inversor", "visita tecnica", "actualizacion de firmware") SÍ discriminan bien:
+# solo puntúan 100 si el CONCEPTO completo está presente. Y no se pierde recall en celdas
+# terse de una palabra: "reinicio" a secas sigue puntuando 100 contra "reinicio inversor"
+# porque token_set_ratio es simétrico ante subconjuntos (la query es subconjunto de la
+# frase). Sí se admiten singles DISTINTIVOS que no aparecen incidentalmente ("telegestion",
+# "telemando"). Ver tests test_termino_suelto_en_texto_ajeno_va_a_revision.
 DEFAULT_SYNONYMS: Dict[str, List[str]] = {
     "reinicio_inversor": [
         "reinicio de inversor", "reinicio inversor", "reiniciar inversor",
         "reset inversor", "resetear inversor", "reseteo de inversor",
-        "se reinicio el inversor", "reinicio", "reset",
+        "se reinicio el inversor",
     ],
     "visita_tecnica": [
         "visita tecnica", "visita de tecnico", "revision en sitio",
-        "inspeccion en sitio", "atencion en sitio", "visita",
+        "inspeccion en sitio", "atencion en sitio",
     ],
     "cambio_componente": [
         "cambio de componente", "reemplazo de componente", "cambio de pieza",
-        "cambio de tarjeta", "reemplazo", "cambio de repuesto",
+        "cambio de tarjeta", "cambio de repuesto",
     ],
     "actualizacion_fw": [
         "actualizacion de firmware", "actualizacion firmware", "update de firmware",
-        "actualizacion de software", "firmware", "flasheo de firmware",
+        "actualizacion de software", "flasheo de firmware",
     ],
     "intervencion_red": [
         "intervencion operador de red", "operador de red", "intervencion del or",
@@ -71,18 +85,22 @@ DEFAULT_SYNONYMS: Dict[str, List[str]] = {
         "sin accion requerida", "sin accion", "no aplica", "no requiere accion",
         "ninguna accion", "sin intervencion",
     ],
-    "otro": ["otro"],
+    "otro": [],
 }
 
 
 def _normalize(text: str) -> str:
-    """minúsculas, sin tildes, espacios colapsados, guiones bajos como espacios."""
+    """minúsculas, sin tildes, sin puntuación, guiones bajos como espacios, espacios
+    colapsados."""
     if not text:
         return ""
     text = unicodedata.normalize("NFD", text)
     text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    text = text.replace("_", " ")
-    return re.sub(r"\s+", " ", text.lower().strip())
+    text = text.replace("_", " ").lower()
+    # Puntuación pegada a un token lo vuelve un token distinto ("reinicio," != "reinicio")
+    # y rompe el emparejamiento por tokens: la quitamos ANTES de tokenizar.
+    text = re.sub(r"[^0-9a-z\s]", " ", text)
+    return re.sub(r"\s+", " ", text.strip())
 
 
 def _ratio(a: str, b: str) -> int:
@@ -109,16 +127,27 @@ class FallaResolutionMatcher:
         resolution_codes: List[str],
         synonyms: Optional[Dict[str, List[str]]] = None,
         threshold: int = DEFAULT_THRESHOLD,
+        fallback_code: str = "otro",
     ) -> None:
         if not resolution_codes:
             raise ValueError("resolution_codes no puede estar vacío")
         self.resolution_codes = list(resolution_codes)
         self.threshold = threshold
+        self.fallback_code = fallback_code
         synonyms = synonyms if synonyms is not None else DEFAULT_SYNONYMS
 
         # frase normalizada -> código. Cada código aporta su forma legible más sinónimos.
         self._phrase_to_code: Dict[str, str] = {}
         for code in self.resolution_codes:
+            # El catch-all ("otro") NO es un objetivo semántico: nada "se parece a otro".
+            # Indexarlo haría que un texto con la palabra literal "otro" ("otro día
+            # volvieron a llamar…") puntúe 100 por subconjunto y se auto-clasifique en vez
+            # de ir a revisión. Se omite del índice; sigue siendo el bucket por defecto que
+            # la migración asigna a los PENDING (resolver_resolucion fuerza 'otro' cuando
+            # no hay match confiable), así que no se pierde el destino, solo deja de ser un
+            # falso MATCHED.
+            if code == self.fallback_code:
+                continue
             frases = {_normalize(code)}  # "reinicio_inversor" -> "reinicio inversor"
             for syn in synonyms.get(code, []):
                 frases.add(_normalize(syn))

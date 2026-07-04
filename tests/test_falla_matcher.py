@@ -101,6 +101,84 @@ def test_texto_vacio_es_pending_sin_codigo(matcher):
         assert result["confidence"] == 0
 
 
+# Regresión (falso POSITIVO): un único término común del catálogo dentro de un texto
+# largo de OTRO tema puntuaba 100 por subconjunto (token_set_ratio) y se auto-clasificaba
+# MATCHED, saltándose la revisión. Al no tener sinónimos de un solo token común, estas
+# descripciones ya no alcanzan el umbral y caen a PENDING_REVIEW.
+CASOS_FALSO_POSITIVO = [
+    "No fue necesario reinicio, se cambió el panel dañado en sitio",
+    "Se coordinó visita con el cliente para reunión comercial",
+    "El firmware del router de oficina se actualizó, nada que ver con la planta",
+    "Se reemplazó el filtro de agua de la cocina de la oficina",
+    "Sin novedad, el operador reportó todo normal en la visita administrativa",
+    "Se hizo mantenimiento preventivo general de la planta",
+]
+
+
+@pytest.mark.parametrize("texto", CASOS_FALSO_POSITIVO)
+def test_termino_suelto_en_texto_ajeno_va_a_revision(matcher, texto):
+    result = matcher.match(texto)
+    assert result["status"] == STATUS_PENDING, (
+        f"{texto!r} se auto-clasificó como {result['code']} "
+        f"(conf {result['confidence']}) en vez de ir a revisión manual"
+    )
+    assert result["confidence"] < DEFAULT_THRESHOLD
+
+
+# Regresión (falso NEGATIVO): una descripción legítima on-topic y VERBOSA (una oración
+# completa, como las que llegan desde Sheets) que contiene la frase del catálogo debe
+# seguir emparejando — el texto libre real casi nunca es de 3 palabras. Si el matcher
+# solo acertara en frases terse, la mayoría de las resoluciones caerían a 'otro' y la
+# cola de revisión sería inmanejable, anulando el auto-emparejador.
+CASOS_MATCH_VERBOSO = [
+    ("Se realizó la actualización de firmware del inversor central de la planta solar "
+     "porque presentaba fallo de comunicación recurrente", "actualizacion_fw"),
+    ("El técnico de mantenimiento realizó una visita técnica al sitio para revisar el "
+     "estado de los equipos", "visita_tecnica"),
+    ("Fue necesario el cambio de componente dañado, específicamente la tarjeta de "
+     "control del inversor", "cambio_componente"),
+    ("El equipo se reinició de forma remota mediante gestión remota desde el centro de "
+     "monitoreo", "resolucion_remota"),
+    ("Se procedió a reiniciar el inversor número 3 que estaba en falla",
+     "reinicio_inversor"),
+    ("Intervención del operador de red por corte programado en la zona",
+     "intervencion_red"),
+]
+
+
+@pytest.mark.parametrize("texto,esperado", CASOS_MATCH_VERBOSO)
+def test_descripcion_verbosa_on_topic_sigue_matcheando(matcher, texto, esperado):
+    result = matcher.match(texto)
+    assert result["code"] == esperado, (
+        f"{texto!r} -> {result['code']} (conf {result['confidence']}), "
+        f"esperaba {esperado}"
+    )
+    assert result["status"] == STATUS_MATCHED
+    assert result["confidence"] >= DEFAULT_THRESHOLD
+
+
+def test_palabra_otro_en_texto_ajeno_no_auto_matchea(matcher):
+    # El catch-all 'otro' no es un objetivo semántico: un texto que contiene la palabra
+    # literal "otro" no debe auto-clasificarse @100 como 'otro' (saltándose la revisión).
+    result = matcher.match("otro día volvieron a llamar por la factura pendiente")
+    assert result["status"] == STATUS_PENDING, (
+        f"'otro' en texto ajeno se auto-clasificó: {result}"
+    )
+    assert result["code"] != "otro" or result["confidence"] < DEFAULT_THRESHOLD
+
+
+def test_celda_terse_de_una_palabra_sigue_matcheando(matcher):
+    # Aunque se quitaron los sinónimos de un token, una celda que ES solo esa palabra
+    # sigue matcheando: token_set_ratio es simétrico ante subconjuntos (la query es
+    # subconjunto de la frase de 2 tokens). No se pierde recall en celdas terse.
+    for texto, esperado in [("reinicio", "reinicio_inversor"),
+                            ("visita", "visita_tecnica"),
+                            ("firmware", "actualizacion_fw")]:
+        result = matcher.match(texto)
+        assert result["status"] == STATUS_MATCHED, f"{texto!r} -> {result}"
+        assert result["code"] == esperado
+
+
 def test_codigos_crudos_del_catalogo_auto_emparejan(matcher):
     """Regresión: cada código canónico debe emparejarse consigo mismo."""
     for code in RESOLUTION_CODES:

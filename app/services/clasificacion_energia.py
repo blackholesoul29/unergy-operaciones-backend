@@ -31,10 +31,12 @@ def derivar_pools(data: dict) -> dict:
     a, c = [], []
     for ct in data.get("venta") or []:
         plantas = ct.get("plantas") or []
-        no_dup = [p for p in plantas if not p.get("es_duplicado")]
         dup = [p for p in plantas if p.get("es_duplicado")]
-        # El contrato se lista en (a) aunque quede sin plantas, como hoy.
-        a.append({**ct, "plantas": no_dup})
+        # (a) lista TODAS las plantas del contrato — las duplicadas también
+        # aportan a él y se muestran con su indicador (es_duplicado). En la
+        # tabla/API estándar el duplicado clasifica solo en (c): ver
+        # _filas_desde_pools, que las excluye de las filas de (a).
+        a.append({**ct, "plantas": plantas})
         if dup:
             c.append({**ct, "plantas": dup})
 
@@ -78,6 +80,10 @@ def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEn
             if cid is None and isinstance(ct.get("id"), int):
                 cid = ct["id"]
             for p in ct.get("plantas") or []:
+                # En (a) los duplicados solo se MUESTRAN (badge); su fila
+                # estándar vive en (c) — sin doble clasificación en BD/API.
+                if key == "ppa_venta_ungg" and p.get("es_duplicado"):
+                    continue
                 filas.append(_f(key, p, contrato_id=cid))
     for key in ("bolsa_venta_ungg", "bolsa_venta_ungc"):
         for p in pools[key]:

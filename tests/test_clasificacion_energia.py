@@ -45,10 +45,13 @@ def test_catalogo_tiene_las_6_categorias_estables():
     assert d["regla_pendiente"] is True
 
 
-def test_duplicados_salen_de_venta_y_van_a_compra_bolsa():
+def test_duplicados_visibles_en_venta_y_agrupados_en_compra_bolsa():
+    """La duplicada SÍ se lista en (a) — aporta al contrato — con su flag
+    es_duplicado para el badge; y además se agrupa en (c) por contrato."""
     pools = derivar_pools(_data())["pools"]
     terpel_a = next(c for c in pools["ppa_venta_ungg"] if c["id"] == 1)
-    assert [p["id"] for p in terpel_a["plantas"]] == [10], "la duplicada no infla (a)"
+    assert [p["id"] for p in terpel_a["plantas"]] == [10, 11]
+    assert [p["id"] for p in terpel_a["plantas"] if p.get("es_duplicado")] == [11]
     assert len(pools["bolsa_compra_ungg"]) == 1
     assert [p["id"] for p in pools["bolsa_compra_ungg"][0]["plantas"]] == [11]
     assert pools["bolsa_compra_ungg"][0]["id"] == 1, "agrupada por el contrato al que aporta"
@@ -69,8 +72,10 @@ def test_bolsa_se_reparte_en_e_y_f_y_d_queda_vacia():
 
 def test_counts_cuentan_plantas_no_contratos():
     counts = derivar_pools(_data())["counts"]
+    # (a) cuenta lo que se LISTA (incluye la duplicada con badge); la fila
+    # estándar de la duplicada vive solo en (c).
     assert counts == {
-        "ppa_venta_ungg": 1, "ppa_compra_ungc": 1, "bolsa_compra_ungg": 1,
+        "ppa_venta_ungg": 2, "ppa_compra_ungc": 1, "bolsa_compra_ungg": 1,
         "bolsa_compra_ungc": 0, "bolsa_venta_ungg": 1, "bolsa_venta_ungc": 1,
     }
 

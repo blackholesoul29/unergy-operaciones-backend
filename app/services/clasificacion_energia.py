@@ -72,8 +72,13 @@ def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEn
 
     for key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg"):
         for ct in pools[key]:
+            # Las tarjetas GESCON-puras (compra UNGC) pueden traer id sintético
+            # "gescon-<sic>"; el FK solo admite el id real del contrato PPA.
+            cid = ct.get("contrato_ppa_id")
+            if cid is None and isinstance(ct.get("id"), int):
+                cid = ct["id"]
             for p in ct.get("plantas") or []:
-                filas.append(_f(key, p, contrato_id=ct.get("id")))
+                filas.append(_f(key, p, contrato_id=cid))
     for key in ("bolsa_venta_ungg", "bolsa_venta_ungc"):
         for p in pools[key]:
             filas.append(_f(key, p))

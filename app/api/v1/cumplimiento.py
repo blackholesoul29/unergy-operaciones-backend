@@ -2639,7 +2639,7 @@ def _build_cumplimiento_out(row: CumplimientoMensual) -> dict:
     }
 
 
-def _build_balance_item(row: CumplimientoMensual) -> dict:
+def _build_balance_item(row: CumplimientoMensual, precio_mercado_cop_kwh: float = 0.0) -> dict:
     """Serializa una fila de cumplimiento al contrato de MEM/BalanceView (frontend).
 
     A diferencia de _build_cumplimiento_out (que refleja las columnas crudas), aquí
@@ -2647,13 +2647,22 @@ def _build_balance_item(row: CumplimientoMensual) -> dict:
     (generacion_real, compromiso, precio_bolsa, proyecto_nombre) y adelantamos los
     derivados: balance neto = generación real − compromiso, e impacto financiero
     = balance neto × precio de bolsa (COP estimado, tal como lo etiqueta la vista).
+
+    Precio efectivo: el de la fila si existe; si es NULL, cae al precio de bolsa
+    promedio del mes (`precio_mercado_cop_kwh`) para no valorar en 0 un déficit/
+    excedente real. UNIDADES: precio_bolsa está en COP/kWh y balance en MWh, así que
+    el impacto lleva ×1000 (misma convención COP/kWh→COP que usa cerrar_periodo).
     Los numéricos NULL se normalizan a 0.0 para que sumas y gráficos no rompan.
     """
     contrato = row.contrato_ppa
     proyecto = row.proyecto
     gen = float(row.gen_total_mwh) if row.gen_total_mwh is not None else 0.0
     comp = float(row.compromiso_mwh) if row.compromiso_mwh is not None else 0.0
-    precio = float(row.precio_bolsa_promedio) if row.precio_bolsa_promedio is not None else 0.0
+    precio = (
+        float(row.precio_bolsa_promedio)
+        if row.precio_bolsa_promedio is not None
+        else (precio_mercado_cop_kwh or 0.0)
+    )
     balance_net = gen - comp
     return {
         "contrato_ppa_id": row.contrato_ppa_id,
@@ -2667,7 +2676,8 @@ def _build_balance_item(row: CumplimientoMensual) -> dict:
         "excedentes_bolsa_mwh": float(row.excedentes_bolsa_mwh) if row.excedentes_bolsa_mwh is not None else 0.0,
         "balance_net": balance_net,
         "precio_bolsa": precio,
-        "impacto_financiero": balance_net * precio,
+        # COP = MWh × 1000 (kWh/MWh) × COP/kWh
+        "impacto_financiero": balance_net * 1000 * precio,
         "estado": row.estado,
     }
 
@@ -2684,9 +2694,10 @@ def balance_energetico(
 
     Reúne los snapshots de cumplimiento_mensual del mes/año y los expone con la
     forma que consume la vista MEM/BalanceView del frontend. El precio de bolsa
-    promedio es el real del mes (precios_bolsa_diario vía _get_bolsa_avg), NO un
-    promedio de las filas: es la referencia de mercado con la que la vista estima
-    el impacto financiero cuando una fila no trae su propio precio.
+    promedio es el real del mes (precios_bolsa_diario vía _get_bolsa_avg, en
+    COP/kWh), NO un promedio de las filas; además sirve de referencia de mercado
+    con la que se estima el impacto financiero de una fila que no trae su propio
+    precio (el fallback se resuelve aquí en el backend, ver _build_balance_item).
 
     Si aún no hay snapshots para el período, `contratos` sale vacío: la vista lo
     muestra como "sin datos" en lugar de fabricar cifras.
@@ -2708,12 +2719,13 @@ def balance_energetico(
 
     rows = q.order_by(CumplimientoMensual.contrato_ppa_id).all()
     bolsa = _get_bolsa_avg(db, anio, mes)
+    precio_mercado = bolsa["precio_promedio"] or 0.0
 
     return {
         "anio": anio,
         "mes": mes,
-        "contratos": [_build_balance_item(r) for r in rows],
-        "precio_bolsa_promedio": bolsa["precio_promedio"] or 0.0,
+        "contratos": [_build_balance_item(r, precio_mercado) for r in rows],
+        "precio_bolsa_promedio": precio_mercado,
     }
 
 

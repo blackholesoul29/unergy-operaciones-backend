@@ -47,16 +47,23 @@ def test_full_row_maps_frontend_field_names():
 
 def test_balance_neto_and_impacto_are_derived():
     out = _build_balance_item(_row())
-    # balance neto = generación real − compromiso
+    # balance neto = generación real − compromiso (MWh)
     assert out["balance_net"] == 10.5
-    # impacto financiero = balance neto × precio de bolsa (COP estimado)
-    assert out["impacto_financiero"] == 10.5 * 250.0
+    # impacto = balance (MWh) × 1000 (kWh/MWh) × precio (COP/kWh) = COP
+    assert out["impacto_financiero"] == 10.5 * 1000 * 250.0
 
 
 def test_deficit_yields_negative_balance_and_impacto():
     out = _build_balance_item(_row(gen_total_mwh=Decimal("80"), compromiso_mwh=Decimal("90")))
     assert out["balance_net"] == -10.0
-    assert out["impacto_financiero"] == -10.0 * 250.0
+    assert out["impacto_financiero"] == -10.0 * 1000 * 250.0
+
+
+def test_null_row_price_falls_back_to_month_market_avg():
+    # Sin precio por fila → usa el precio de bolsa promedio del mes (COP/kWh)
+    out = _build_balance_item(_row(precio_bolsa_promedio=None), precio_mercado_cop_kwh=300.0)
+    assert out["precio_bolsa"] == 300.0
+    assert out["impacto_financiero"] == 10.5 * 1000 * 300.0
 
 
 def test_none_numerics_default_to_zero_no_crash():
@@ -65,7 +72,7 @@ def test_none_numerics_default_to_zero_no_crash():
         compras_bolsa_mwh=None, excedentes_bolsa_mwh=None))
     assert out["generacion_real"] == 0.0
     assert out["compromiso"] == 0.0
-    assert out["precio_bolsa"] == 0.0
+    assert out["precio_bolsa"] == 0.0  # sin fallback de mercado → 0.0
     assert out["balance_net"] == 0.0
     assert out["impacto_financiero"] == 0.0
     assert out["compras_bolsa_mwh"] == 0.0

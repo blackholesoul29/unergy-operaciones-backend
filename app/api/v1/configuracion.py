@@ -126,6 +126,10 @@ def actualizar(
     if not c:
         raise HTTPException(404, "Configuración no encontrada")
     cambios = body.model_dump(exclude_unset=True)
+    # `valor_float` es NOT NULL: un null explícito en el body es un error de
+    # validación (422), no un intento de dejarlo sin cambios.
+    if "valor_float" in cambios and cambios["valor_float"] is None:
+        raise HTTPException(422, "valor_float no puede ser null")
     # Rango por tipo: el Update no trae `tipo_parametro`, se valida contra el de la
     # fila existente (mismo criterio físico que en la creación).
     if cambios.get("valor_float") is not None:

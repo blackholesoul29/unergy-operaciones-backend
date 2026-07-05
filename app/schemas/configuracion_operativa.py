@@ -19,7 +19,7 @@ def validar_rango_por_tipo(
     if tipo == TipoParametroConfigEnum.CAPACIDAD_SOLAR:
         if not (0 < valor <= 1):
             raise ValueError(
-                "CAPACIDAD_SOLAR debe ser un factor entre 0 y 1 (exclusivo/inclusivo)"
+                "CAPACIDAD_SOLAR debe ser un factor mayor que 0 y hasta 1 (p. ej. 0.18)"
             )
     elif tipo == TipoParametroConfigEnum.PRECIO_ENERGIA:
         if valor <= 0:

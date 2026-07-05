@@ -277,11 +277,15 @@ def _estimar_perdida_falla(
     existe, si no la global; con respaldo a los valores de referencia históricos.
     """
     solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
+    # Sin potencia o sin downtime productivo el resultado es 0.0 — evita dos queries
+    # de configuración cuyo valor se descartaría.
+    if not potencia_kwp or solar_hours <= 0:
+        return 0.0, 0.0
     factor_solar = obtener_valor_o_defecto(
         db, TipoParametroConfigEnum.CAPACIDAD_SOLAR, proyecto_id)
     precio_cop_kwh = obtener_valor_o_defecto(
         db, TipoParametroConfigEnum.PRECIO_ENERGIA, proyecto_id)
-    kwh_perdidos = round(potencia_kwp * factor_solar * solar_hours, 3) if potencia_kwp else 0.0
+    kwh_perdidos = round(potencia_kwp * factor_solar * solar_hours, 3)
     impacto_cop = round(kwh_perdidos * precio_cop_kwh, 2)
     return kwh_perdidos, impacto_cop
 

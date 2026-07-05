@@ -9,19 +9,27 @@ conservar el histórico de valores.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import get_current_user, _require_admin
 from app.core.database import get_db
-from app.models.configuracion_operativa import ConfiguracionOperativa
+from app.models.configuracion_operativa import (
+    ConfiguracionOperativa, TipoParametroConfigEnum,
+)
 from app.models.proyectos import Proyecto
 from app.schemas.configuracion_operativa import (
     ConfiguracionOperativaCreate,
     ConfiguracionOperativaUpdate,
     ConfiguracionOperativaResponse,
+    validar_rango_por_tipo,
 )
 
 router = APIRouter(prefix="/configuracion", tags=["Configuración"])
+
+_MSG_DUPLICADO = (
+    "Ya existe una configuración para ese proyecto/parámetro en esa fecha de inicio"
+)
 
 
 def _to_out(c: ConfiguracionOperativa) -> ConfiguracionOperativaResponse:
@@ -41,7 +49,7 @@ def _to_out(c: ConfiguracionOperativa) -> ConfiguracionOperativaResponse:
 @router.get("", response_model=list[ConfiguracionOperativaResponse])
 def listar(
     proyecto_id: int | None = Query(None),
-    tipo_parametro: str | None = Query(None),
+    tipo_parametro: TipoParametroConfigEnum | None = Query(None),
     solo_activos: bool = Query(False),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
@@ -51,8 +59,8 @@ def listar(
     )
     if proyecto_id is not None:
         q = q.filter(ConfiguracionOperativa.proyecto_id == proyecto_id)
-    if tipo_parametro:
-        q = q.filter(ConfiguracionOperativa.tipo_parametro == tipo_parametro)
+    if tipo_parametro is not None:
+        q = q.filter(ConfiguracionOperativa.tipo_parametro == tipo_parametro.value)
     if solo_activos:
         q = q.filter(ConfiguracionOperativa.activo.is_(True))
     rows = q.order_by(
@@ -80,7 +88,11 @@ def crear(
 
     cfg = ConfiguracionOperativa(**data)
     db.add(cfg)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, _MSG_DUPLICADO)
     db.refresh(cfg)
     db.refresh(cfg, ["proyecto"])
     return _to_out(cfg)
@@ -113,9 +125,22 @@ def actualizar(
     c = db.query(ConfiguracionOperativa).filter(ConfiguracionOperativa.id == id).first()
     if not c:
         raise HTTPException(404, "Configuración no encontrada")
-    for field, val in body.model_dump(exclude_unset=True).items():
+    cambios = body.model_dump(exclude_unset=True)
+    # Rango por tipo: el Update no trae `tipo_parametro`, se valida contra el de la
+    # fila existente (mismo criterio físico que en la creación).
+    if cambios.get("valor_float") is not None:
+        try:
+            validar_rango_por_tipo(
+                TipoParametroConfigEnum(c.tipo_parametro), cambios["valor_float"])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+    for field, val in cambios.items():
         setattr(c, field, val)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, _MSG_DUPLICADO)
     db.refresh(c)
     db.refresh(c, ["proyecto"])
     return _to_out(c)

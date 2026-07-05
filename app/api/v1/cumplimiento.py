@@ -2639,6 +2639,84 @@ def _build_cumplimiento_out(row: CumplimientoMensual) -> dict:
     }
 
 
+def _build_balance_item(row: CumplimientoMensual) -> dict:
+    """Serializa una fila de cumplimiento al contrato de MEM/BalanceView (frontend).
+
+    A diferencia de _build_cumplimiento_out (que refleja las columnas crudas), aquí
+    usamos los nombres semánticos que lee la vista de balance energético
+    (generacion_real, compromiso, precio_bolsa, proyecto_nombre) y adelantamos los
+    derivados: balance neto = generación real − compromiso, e impacto financiero
+    = balance neto × precio de bolsa (COP estimado, tal como lo etiqueta la vista).
+    Los numéricos NULL se normalizan a 0.0 para que sumas y gráficos no rompan.
+    """
+    contrato = row.contrato_ppa
+    proyecto = row.proyecto
+    gen = float(row.gen_total_mwh) if row.gen_total_mwh is not None else 0.0
+    comp = float(row.compromiso_mwh) if row.compromiso_mwh is not None else 0.0
+    precio = float(row.precio_bolsa_promedio) if row.precio_bolsa_promedio is not None else 0.0
+    balance_net = gen - comp
+    return {
+        "contrato_ppa_id": row.contrato_ppa_id,
+        "proyecto_id": row.proyecto_id,
+        "contrato_nombre": contrato.nombre_interno if contrato else None,
+        "comprador_nombre": contrato.comprador_nombre if contrato else None,
+        "proyecto_nombre": proyecto.nombre_comercial if proyecto else None,
+        "generacion_real": gen,
+        "compromiso": comp,
+        "compras_bolsa_mwh": float(row.compras_bolsa_mwh) if row.compras_bolsa_mwh is not None else 0.0,
+        "excedentes_bolsa_mwh": float(row.excedentes_bolsa_mwh) if row.excedentes_bolsa_mwh is not None else 0.0,
+        "balance_net": balance_net,
+        "precio_bolsa": precio,
+        "impacto_financiero": balance_net * precio,
+        "estado": row.estado,
+    }
+
+
+@router.get("/balance-energetico")
+def balance_energetico(
+    anio: int = Query(..., ge=2020, le=2050),
+    mes: int = Query(..., ge=1, le=12),
+    proyecto_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Balance energético propio del período: generación real vs compromiso PPA.
+
+    Reúne los snapshots de cumplimiento_mensual del mes/año y los expone con la
+    forma que consume la vista MEM/BalanceView del frontend. El precio de bolsa
+    promedio es el real del mes (precios_bolsa_diario vía _get_bolsa_avg), NO un
+    promedio de las filas: es la referencia de mercado con la que la vista estima
+    el impacto financiero cuando una fila no trae su propio precio.
+
+    Si aún no hay snapshots para el período, `contratos` sale vacío: la vista lo
+    muestra como "sin datos" en lugar de fabricar cifras.
+    """
+    q = (
+        db.query(CumplimientoMensual)
+        .join(PPAContrato, CumplimientoMensual.contrato_ppa_id == PPAContrato.id)
+        .options(
+            joinedload(CumplimientoMensual.contrato_ppa),
+            joinedload(CumplimientoMensual.proyecto),
+        )
+        .filter(
+            CumplimientoMensual.anio == anio,
+            CumplimientoMensual.mes == mes,
+        )
+    )
+    if proyecto_id is not None:
+        q = q.filter(CumplimientoMensual.proyecto_id == proyecto_id)
+
+    rows = q.order_by(CumplimientoMensual.contrato_ppa_id).all()
+    bolsa = _get_bolsa_avg(db, anio, mes)
+
+    return {
+        "anio": anio,
+        "mes": mes,
+        "contratos": [_build_balance_item(r) for r in rows],
+        "precio_bolsa_promedio": bolsa["precio_promedio"] or 0.0,
+    }
+
+
 @router.post("/cerrar-periodo")
 def cerrar_periodo(
     body: CerrarPeriodoRequest,

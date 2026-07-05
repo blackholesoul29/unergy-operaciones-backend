@@ -71,5 +71,7 @@ __all__ = [
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
+    "ConfiguracionOperativa", "TipoParametroConfigEnum",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
+from app.models.configuracion_operativa import ConfiguracionOperativa, TipoParametroConfigEnum

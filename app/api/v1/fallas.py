@@ -14,6 +14,8 @@ from app.models import (
 )
 from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
+from app.models.configuracion_operativa import TipoParametroConfigEnum
+from app.services.configuracion_service import obtener_valor_o_defecto
 from app.schemas.fallas import (
     FallaCreate, FallaUpdate, FallaOut,
     FallaSeguimientoCreate, FallaSeguimientoOut,
@@ -263,21 +265,24 @@ _DEFAULT_SLA_HOURS = {
     4: 168,   # baja (7 days)
 }
 
-# Average energy price COP/kWh for economic impact estimation
-_PRECIO_ENERGIA_COP_KWH = 800.0
 
-# Solar capacity factor for kWh loss estimation
-_SOLAR_CAPACITY_FACTOR = 0.18
-
-
-def _estimar_perdida_falla(potencia_kwp, horas_fuera: float) -> tuple[float, float]:
+def _estimar_perdida_falla(
+    potencia_kwp, horas_fuera: float, db: Session, proyecto_id: int | None,
+) -> tuple[float, float]:
     """Estima (kWh perdidos, impacto COP) de una falla. `solar_hours` aproxima las
-    horas productivas como ~50% del downtime (≈12 h solares por 24 h). Función pura
-    y testeable; alimenta el reporte SLA/económico, por eso conviene fijarla con tests.
+    horas productivas como ~50% del downtime (≈12 h solares por 24 h).
+
+    El precio de energía (COP/kWh) y el factor de capacidad solar se resuelven
+    dinámicamente vía `configuracion_service`: config específica del proyecto si
+    existe, si no la global; con respaldo a los valores de referencia históricos.
     """
     solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
-    kwh_perdidos = round(potencia_kwp * _SOLAR_CAPACITY_FACTOR * solar_hours, 3) if potencia_kwp else 0.0
-    impacto_cop = round(kwh_perdidos * _PRECIO_ENERGIA_COP_KWH, 2)
+    factor_solar = obtener_valor_o_defecto(
+        db, TipoParametroConfigEnum.CAPACIDAD_SOLAR, proyecto_id)
+    precio_cop_kwh = obtener_valor_o_defecto(
+        db, TipoParametroConfigEnum.PRECIO_ENERGIA, proyecto_id)
+    kwh_perdidos = round(potencia_kwp * factor_solar * solar_hours, 3) if potencia_kwp else 0.0
+    impacto_cop = round(kwh_perdidos * precio_cop_kwh, 2)
     return kwh_perdidos, impacto_cop
 
 
@@ -1065,7 +1070,8 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
     end = falla.fecha_resolucion or datetime.now(timezone.utc)
     horas_fuera = max(0, (end - start).total_seconds() / 3600)
 
-    kwh_perdidos, impacto_cop = _estimar_perdida_falla(potencia_kwp, horas_fuera)
+    kwh_perdidos, impacto_cop = _estimar_perdida_falla(
+        potencia_kwp, horas_fuera, db, falla.proyecto_id)
 
     # Persist the estimate back to the falla if not already set
     if falla.kwh_perdidos_estimado is None:

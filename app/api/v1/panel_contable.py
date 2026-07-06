@@ -407,6 +407,7 @@ async def cargar_er(
                 "proyecto": proy["nombre_comercial"],
                 "archivo": uf.filename,
                 "ingreso_bruto": float(panel.ingreso_bruto_cop or 0),
+                "debug": parsed.get("_debug"),  # TEMP: diagnóstico Terpel1/Terpel2
             })
             if parsed.get("warnings"):
                 resultados["warnings"].append({"archivo": uf.filename, "detalle": parsed["warnings"]})

@@ -247,6 +247,7 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
     ]
 
     ingresos_detalle = ing.get("ingresos_detalle", [])
+    _debug = ing.get("_debug")
 
     # Garantizar que existan los renglones canónicos del tipo, aunque el parser no
     # los haya encontrado en la hoja principal (NEU/NITRO traen el desglose en
@@ -373,6 +374,7 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
         "kwh": kwh,
         "snapshot": snapshot,
         "warnings": warnings,
+        "_debug": _debug,
     }
 
 
@@ -590,6 +592,11 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
         "venta_bolsa": venta_bolsa,
         "compra_bolsa": compra_bolsa,
         "ingresos_detalle": detalle,
+        "_debug": {  # TEMP: diagnóstico Terpel1/Terpel2, quitar tras confirmar causa raíz.
+            "header_row": header_row,
+            "headers": {j: headers[j] for j in sorted(headers)},
+            "venta_cols": venta_cols,
+        },
     }
 
 

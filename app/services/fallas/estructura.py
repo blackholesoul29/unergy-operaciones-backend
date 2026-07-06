@@ -93,15 +93,16 @@ ESTRUCTURA_FALLAS: list[dict] = [
     },
     {
         "codigo": "eventos_adversos",
-        "etiqueta": "Eventos adversos",
+        "etiqueta": "Eventos naturales",
         "icono": "pi pi-exclamation-triangle",
         "color_hex": "#EF4444",
         "tipo": "opcion",
-        "descripcion": "Eventos externos que afectan la operación del proyecto.",
+        "descripcion": "Eventos naturales o climáticos que afectan la operación del proyecto.",
         "opciones": [
             {"codigo": "incendio", "etiqueta": "Incendio"},
             {"codigo": "inundacion", "etiqueta": "Inundación"},
             {"codigo": "huracan", "etiqueta": "Huracán"},
+            {"codigo": "clima_nublado_lluvioso", "etiqueta": "Clima nublado/lluvioso"},
             {"codigo": "otro", "etiqueta": "Otro", "requiere_detalle": True, "detalle_label": "Describe el evento"},
         ],
     },

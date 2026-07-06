@@ -1184,19 +1184,24 @@ def project_monitoring_detail(
     )
 
     hoy = today.isoformat()
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        inv_f    = ex.submit(client.get_project_inverters, sol_id)
-        pow_f    = ex.submit(client.get_power, sol_id, hoy, hoy)
-        gen_f    = ex.submit(client.get_energy, sol_id,
-                             granularity="day", date_from=start30, date_to=today.isoformat())
-        snap_p_f = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \
-                   if (gaia and node_principal) else None
-        snap_r_f = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) \
-                   if (gaia and node_respaldo) else None
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        inv_f      = ex.submit(client.get_project_inverters, sol_id)
+        pow_f      = ex.submit(client.get_power, sol_id, hoy, hoy)
+        gen_f      = ex.submit(client.get_energy, sol_id,
+                               granularity="day", date_from=start30, date_to=today.isoformat())
+        gen_hoy_f  = ex.submit(client.get_generation, sol_id, hoy, hoy)
+        snap_p_f   = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \
+                     if (gaia and node_principal) else None
+        snap_r_f   = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) \
+                     if (gaia and node_respaldo) else None
 
     inverters  = inv_f.result() or []
     power_data = pow_f.result() or {}
     gen_raw    = gen_f.result() or {}
+    gen_hoy    = gen_hoy_f.result() or {}
+    # Total real de hoy calculado por Solenium (endpoint /generation/, más preciso
+    # que integrar nosotros la curva de potencia de 5 min por trapecios).
+    generation_today_kwh = gen_hoy.get("total_generation_kwh")
 
     snap_p = snap_p_f.result() if snap_p_f else None
     snap_r = snap_r_f.result() if snap_r_f else None
@@ -1280,22 +1285,23 @@ def project_monitoring_detail(
     ]
 
     # ── 30d daily generation (desde get_energy granularity=day) ─────────────
-    gen_raw_energy = gen_raw  # get_energy response
-    raw_energy = (gen_raw_energy.get("results") or gen_raw_energy.get("data") or gen_raw_energy
-                  if isinstance(gen_raw_energy, dict) else gen_raw_energy)
+    gen_results = gen_raw.get("results") if isinstance(gen_raw, dict) else None
+    gen_points = gen_results.get("points") if isinstance(gen_results, dict) else None
+    gen_unit = (gen_results.get("unit") or "kWh").strip().lower() if isinstance(gen_results, dict) else "kwh"
+    gen_factor = 1000.0 if gen_unit == "mwh" else 1.0
+
     daily: dict[str, float] = {}
-    if isinstance(raw_energy, dict):
-        for k, v in raw_energy.items():
-            kwh_val = float(v) if isinstance(v, (int, float)) else float(v["value"]) if isinstance(v, dict) and "value" in v else None
-            if kwh_val is not None:
-                daily[k[:10]] = daily.get(k[:10], 0.0) + kwh_val
-    elif isinstance(raw_energy, list):
-        for item in raw_energy:
-            if isinstance(item, dict):
-                d = item.get("date") or item.get("day") or item.get("time", "")[:10]
-                val = item.get("kwh") or item.get("value") or item.get("energy")
-                if d and val:
-                    daily[d] = daily.get(d, 0.0) + float(val)
+    if isinstance(gen_points, list):
+        for item in gen_points:
+            if not isinstance(item, dict):
+                continue
+            d = item.get("time") or item.get("date") or item.get("day")
+            val = item.get("kwh")
+            if val is None:
+                val = item.get("value") or item.get("energy")
+            if d and val is not None:
+                d = str(d)[:10]
+                daily[d] = daily.get(d, 0.0) + float(val) * gen_factor
     generation_30d = [
         {"date": d, "kwh": round(v, 1)}
         for d, v in sorted(daily.items())
@@ -1313,6 +1319,7 @@ def project_monitoring_detail(
         "capacity_kwp":           float(p.potencia_instalada_kwp or 0),
         "inverters":              processed_inverters,
         "power_curve":            power_curve,
+        "generation_today_kwh":   round(generation_today_kwh, 1) if generation_today_kwh is not None else None,
         "generation_30d":         generation_30d,
         "total_30d_kwh":          round(sum(d["kwh"] for d in generation_30d), 1),
         "has_strings":            has_strings,

@@ -16,13 +16,14 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
+from app.utils.gescon_vigencia import resolver_vigencias
 from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
@@ -490,42 +491,26 @@ def _resolve_gescon(db: Session, contrato_interno: str, year: int, month: int) -
         .all()
     )
 
-    by_sic: dict[str, list] = defaultdict(list)
-    for r in records:
-        by_sic[r.codigo_sic_contrato or f"_id_{r.id}"].append(r)
+    # Núcleo compartido con GET /asic y /alertas (app/utils/gescon_vigencia.py):
+    # el walk por SIC vive allá; aquí solo se interpreta el resultado para la
+    # vista mensual. hasta=last_day reproduce la vista histórica: eventos que
+    # aún no tomaban efecto no desplazan la versión vigente del mes.
+    vigencias = resolver_vigencias(records, hasta=last_day)
 
     result = []
-    for sic_records in by_sic.values():
-        active: dict[int | str, AsicSolicitud] = {}
-        salientes: list = []
-        for r in sic_records:
-            # fecha_inicio NULL = vigente desde siempre (mismo criterio que el
-            # filtro final más abajo). Si el evento aún no tomaba efecto para
-            # el mes consultado, no debe desplazar la versión vigente de ese mes.
-            vigente_desde = r.fecha_inicio or date.min
-            if vigente_desde > last_day:
-                continue
-
-            pid = r.proyecto_id
-            if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
-                if pid is not None:
-                    active.pop(pid, None)
-                continue
-            if pid is None:
-                active[f"_nopid_{r.id}"] = r
-                continue
-            if pid in active:
-                active[pid] = r
-            else:
-                if r.reemplaza_anterior:
-                    corte = vigente_desde - timedelta(days=1)
-                    for saliente in active.values():
-                        fin_efectivo = min(saliente.fecha_fin or date.max, corte)
-                        salientes.append(_AsicVigenciaRecortada(saliente, fin_efectivo))
-                    active.clear()
-                active[pid] = r
-        result.extend(active.values())
-        result.extend(salientes)
+    for r in records:
+        v = vigencias[r.id]
+        if not v.procesado:
+            continue
+        if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
+            continue
+        if v.vigente:
+            result.append(r)
+        elif v.saliente_por_relevo:
+            # Planta relevada a mitad de mes: se conserva con su fecha_fin
+            # EFECTIVA recortada para el prorrateo por días (ver docstring).
+            result.append(_AsicVigenciaRecortada(r, v.fecha_fin_efectiva))
+        # Superseded en sitio (misma planta): la versión nueva la representa.
 
     return [
         r for r in result
@@ -573,6 +558,42 @@ def _clasificar_remanente_bolsa(db: Session, proyecto_id: int, first_day: date, 
     return "libre", None
 
 
+# ── Impacto de mantenimiento ──────────────────────────────────────────────────
+
+def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) -> dict[int, float]:
+    """MWh perdidos por mantenimiento por proyecto, para eventos que solapan el
+    período [first_day, last_day]. Fuente: tabla `mantenimiento_impacto`.
+
+    La energía perdida de un mantenimiento representa energía que la planta HABRÍA
+    entregado de no estar en intervención; al descontarla del esperado, la razón
+    de disponibilidad (entregado vs. disponible) deja de penalizar el downtime
+    excusado y refleja el verdadero riesgo de penalización PPA.
+    """
+    from app.models.mantenimiento_impacto import MantenimientoImpacto
+
+    period_start = datetime(first_day.year, first_day.month, first_day.day, 0, 0, 0, tzinfo=_COL_TZ)
+    period_end = datetime(last_day.year, last_day.month, last_day.day, 23, 59, 59, tzinfo=_COL_TZ)
+
+    rows = (
+        db.query(
+            MantenimientoImpacto.proyecto_id,
+            func.sum(MantenimientoImpacto.lost_energy_kwh).label("lost_kwh"),
+        )
+        .filter(
+            MantenimientoImpacto.lost_energy_kwh.isnot(None),
+            MantenimientoImpacto.start_time <= period_end,
+            MantenimientoImpacto.end_time >= period_start,
+        )
+        .group_by(MantenimientoImpacto.proyecto_id)
+        .all()
+    )
+    return {
+        pid: round(float(lost_kwh) / 1000, 3)
+        for pid, lost_kwh in rows
+        if lost_kwh is not None
+    }
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/ppa")
@@ -613,6 +634,13 @@ def get_resumen(
     es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
     total_dias = calendar.monthrange(year, month)[1]
     dia_actual = today.day if es_mes_actual else total_dias
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
+
+    # Energía perdida por mantenimiento (MWh) por proyecto en el período: se
+    # descuenta del esperado para no penalizar el downtime excusado (ver
+    # _lost_energy_mwh_por_proyecto).
+    lost_map = _lost_energy_mwh_por_proyecto(db, first_day, last_day)
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
     contratos = _contratos_vigentes(db, year, month)
@@ -741,6 +769,17 @@ def get_resumen(
         total_gen += gen_total_c
         total_proy += gen_proy_c
 
+        # Energía perdida por mantenimiento atribuible a las plantas del contrato.
+        # Se descuenta del esperado (mínimo PPA) al medir disponibilidad, para no
+        # penalizar el downtime excusado y así reflejar el riesgo real de penalización.
+        pids_c = {asic.proyecto_id for asic in assignments if asic.proyecto_id}
+        perdida_mant_c = round(sum(lost_map.get(pid, 0.0) for pid in pids_c), 3)
+        gen_disponible_c = round(val_b + perdida_mant_c, 3)
+        if min_mwh is not None:
+            compras_ajustada_c = round(max(0.0, min_mwh - gen_disponible_c), 3)
+        else:
+            compras_ajustada_c = None
+
         contratos_result.append({
             "id": c.id,
             "nombre_interno": c.nombre_interno,
@@ -753,6 +792,11 @@ def get_resumen(
             "estado": estado_c,
             "compras_bolsa_mwh": compras_c,
             "excedentes_bolsa_mwh": excedentes_c,
+            # Impacto de mantenimiento (excusa el downtime programado/no programado).
+            "energia_perdida_mantenimiento_mwh": perdida_mant_c if perdida_mant_c > 0 else None,
+            "gen_disponible_mwh": gen_disponible_c,
+            "compras_bolsa_ajustada_mwh": compras_ajustada_c,
+            "riesgo_penalizacion_mantenimiento": perdida_mant_c > 0,
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_c if bolsa_dup_c > 0 else None,
             "n_plantas_activas": len(assignments),
             "n_duplicados": n_duplicados,
@@ -1199,10 +1243,7 @@ def get_plantas_contratos(
     )
     plantas_map = {p.id: p for p in plantas_db}
 
-    contratos_db = _contratos_vigentes(db, year, month)
-
     contratos_venta = _query_contratos_venta(db, year, month)
-    contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     # --- VENTA: use GESCON to resolve plant assignments ---
     venta_out = []
@@ -1232,31 +1273,78 @@ def get_plantas_contratos(
             "plantas": plantas_list,
         })
 
-    # --- COMPRA: use M2M proyecto relationship, filter by contract dates ---
+    # --- COMPRA (b. ppa_compra_ungc): GESCON PURO ---
+    # Nada del módulo PPA: las compras de UNGC salen de asic_solicitudes —
+    # registros publicados con codigo_sic_comprador == UNGC, agrupados por
+    # contrato_interno. La vigencia se resuelve con el mismo núcleo
+    # (relevos/modificaciones, gescon_vigencia) y la ventana efectiva debe
+    # pisar el mes. Antes se listaban los PPAContrato tipo_contrato='compra'
+    # (compras GD a terceros registradas a mano) — eso NO es UNGC en el MEM.
     compra_out = []
-    for cc in contratos_compra:
-        if cc.fecha_fin and cc.fecha_fin < first_day:
-            continue
-        if cc.fecha_inicio and cc.fecha_inicio > last_day:
-            continue
-        cc_loaded = db.query(PPAContrato).options(selectinload(PPAContrato.proyectos)).filter(PPAContrato.id == cc.id).first()
-        plantas_list = []
-        if cc_loaded:
-            for p in cc_loaded.proyectos:
-                plantas_list.append({
-                    "id": p.id,
-                    "nombre": p.nombre_comercial,
-                    "fecha_inicio": cc.fecha_inicio.isoformat() if cc.fecha_inicio else None,
-                    "fecha_fin": cc.fecha_fin.isoformat() if cc.fecha_fin else None,
+    sics_ungc = [
+        s for (s,) in db.query(AsicSolicitud.codigo_sic_contrato).filter(
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+            AsicSolicitud.codigo_sic_comprador == UNGC_COMERCIALIZADOR,
+            AsicSolicitud.codigo_sic_contrato.isnot(None),
+        ).distinct()
+    ]
+    if sics_ungc:
+        # Se resuelve sobre TODO el historial de esos SICs (un relevo puede
+        # venir de una fila con otro comprador) y luego se filtra a UNGC.
+        registros_ungc = (
+            db.query(AsicSolicitud)
+            .options(joinedload(AsicSolicitud.proyecto))
+            .filter(
+                AsicSolicitud.codigo_sic_contrato.in_(sics_ungc),
+                AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+                AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+            )
+            .order_by(
+                AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+                AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+                AsicSolicitud.created_at.asc(),
+            )
+            .all()
+        )
+        vig_ungc = resolver_vigencias(registros_ungc, hasta=last_day)
+        por_contrato: dict[str, dict] = {}
+        for r in registros_ungc:
+            v = vig_ungc[r.id]
+            if not v.procesado or r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
+                continue
+            if not v.vigente and not v.saliente_por_relevo:
+                continue  # superada en sitio: la representa su versión nueva
+            if (r.codigo_sic_comprador or "") != UNGC_COMERCIALIZADOR:
+                continue
+            fin_ef = v.fecha_fin_efectiva
+            if fin_ef is not None and fin_ef < first_day:
+                continue
+            if r.fecha_inicio and r.fecha_inicio > last_day:
+                continue
+            key = r.contrato_interno or f"SIC {r.codigo_sic_contrato}"
+            card = por_contrato.setdefault(key, {
+                "id": r.contrato_ppa_id or f"gescon-{r.codigo_sic_contrato}",
+                "contrato_ppa_id": r.contrato_ppa_id,
+                "nombre": r.nombre_interno or key,
+                "vendedor_nombre": r.codigo_sic_vendedor or "—",
+                "fecha_inicio": None,
+                "fecha_fin": None,
+                "plantas": [],
+            })
+            if r.contrato_ppa_id and not card["contrato_ppa_id"]:
+                card["contrato_ppa_id"] = r.contrato_ppa_id
+                card["id"] = r.contrato_ppa_id
+            if r.proyecto_id:
+                card["plantas"].append({
+                    "id": r.proyecto_id,
+                    "nombre": r.proyecto.nombre_comercial if r.proyecto else f"Proyecto {r.proyecto_id}",
+                    "codigo_sic": r.codigo_sic_contrato,
+                    "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
+                    # fin EFECTIVO (recortado por relevos), no la fecha cruda
+                    "fecha_fin": fin_ef.isoformat() if fin_ef else (r.fecha_fin.isoformat() if r.fecha_fin else None),
                 })
-        compra_out.append({
-            "id": cc.id,
-            "nombre": cc.nombre_interno or cc.numero_codigo_contrato or f"Compra {cc.id}",
-            "vendedor_nombre": cc.vendedor_nombre,
-            "fecha_inicio": cc.fecha_inicio.isoformat() if cc.fecha_inicio else None,
-            "fecha_fin": cc.fecha_fin.isoformat() if cc.fecha_fin else None,
-            "plantas": plantas_list,
-        })
+        compra_out = sorted(por_contrato.values(), key=lambda c: c["nombre"])
 
     # --- BOLSA: remanente sin contrato PPA, subdividido en comercializador (UNGC) / libre ---
     # Paso POSTERIOR que NO altera la lógica de contratos: solo subdivide el remanente.
@@ -1278,7 +1366,7 @@ def get_plantas_contratos(
         bolsa_plantas.append(entry)
         (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
-    return {
+    out = {
         "year": year,
         "month": month,
         "venta": venta_out,
@@ -1291,6 +1379,11 @@ def get_plantas_contratos(
         "bolsa_comercializador": bolsa_comercializador,
         "bolsa_libre": bolsa_libre,
     }
+    # Piscinas estandarizadas a-f (misma fuente que GET /clasificacion-energia):
+    # aditivo — re-agrupa lo anterior sin alterar las claves existentes.
+    from app.services.clasificacion_energia import derivar_pools
+    out.update(derivar_pools(out))
+    return out
 
 
 @router.get("/energia-transada")

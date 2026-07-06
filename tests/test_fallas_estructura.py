@@ -43,9 +43,11 @@ def test_inversores_tipos_legacy_conservan_etiqueta():
 
 
 def test_eventos_adversos():
+    # codigo se conserva ("eventos_adversos") aunque la etiqueta sea "Eventos naturales".
     ev = get_categoria("eventos_adversos")
+    assert ev["etiqueta"] == "Eventos naturales"
     codigos = {o["codigo"] for o in ev["opciones"]}
-    assert codigos == {"incendio", "inundacion", "huracan", "otro"}
+    assert codigos == {"incendio", "inundacion", "huracan", "clima_nublado_lluvioso", "otro"}
 
 
 def test_tipo_codigo_es_calificado():

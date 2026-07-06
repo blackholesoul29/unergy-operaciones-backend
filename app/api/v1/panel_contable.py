@@ -155,28 +155,22 @@ def _construir_lineas_base(parsed: dict) -> list[dict]:
     def _orig(d: dict) -> dict:
         return {"hoja": d.get("hoja"), "celda": d.get("celda")}
 
-    # INGRESOS. Para NEU/NITRO los conceptos vienen ya desglosados desde el parser
-    # (sección "Ingresos y costos"). Para normal se conserva el formato histórico
-    # con el comercializador en la etiqueta del ingreso bruto.
-    if tipo in ("neu", "nitro"):
-        for d in parsed.get("ingresos_detalle", []):
+    # INGRESOS. Un proyecto puede tener varias fuentes de ingreso bruto (columnas
+    # "Venta ($)" independientes, ej. Terpel 1 / Terpel 2): el parser ya devuelve una
+    # línea por fuente (más Venta/Compra en bolsa si aplica) en `ingresos_detalle`,
+    # con su etiqueta, celda y valor propios. Se guarda una línea por cada una, para
+    # normal/NEU/NITRO por igual (antes 'normal' colapsaba todo en una sola línea
+    # "Ingreso Bruto <comercializador>" y perdía las fuentes adicionales).
+    detalle_ingresos = parsed.get("ingresos_detalle", [])
+    if detalle_ingresos:
+        for d in detalle_ingresos:
             lineas.append({"grupo": "ingresos", "concepto": d["concepto"], "valor": d["valor"], **_orig(d)})
-    else:
+    elif tipo not in ("neu", "nitro"):
+        # Fallback: el parser no detectó ninguna fuente (ER atípico); al menos
+        # dejar una línea "Ingreso Bruto" en 0 para que la usuaria pueda mapearla.
         com = parsed.get("comercializador") or ""
         etiqueta_ing = f"Ingreso Bruto{(' ' + com) if com else ''}".strip()
-        ib = next((d for d in parsed.get("ingresos_detalle", [])
-                   if "bruto" in (d["concepto"].lower())), {})
-        lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing,
-                       "valor": parsed["ingreso_bruto"], **_orig(ib)})
-        if parsed.get("tiene_bolsa"):
-            if parsed.get("venta_bolsa"):
-                vb = next((d for d in parsed.get("ingresos_detalle", [])
-                           if "venta" in d["concepto"].lower() and "bolsa" in d["concepto"].lower()), {})
-                lineas.append({"grupo": "ingresos", "concepto": "Venta en bolsa", "valor": parsed["venta_bolsa"], **_orig(vb)})
-            if parsed.get("compra_bolsa"):
-                cb = next((d for d in parsed.get("ingresos_detalle", [])
-                           if "compra" in d["concepto"].lower() and "bolsa" in d["concepto"].lower()), {})
-                lineas.append({"grupo": "ingresos", "concepto": "Compra en bolsa", "valor": -abs(parsed["compra_bolsa"]), **_orig(cb)})
+        lineas.append({"grupo": "ingresos", "concepto": etiqueta_ing, "valor": parsed["ingreso_bruto"]})
 
     # COMERCIALIZACIÓN XM (desglosada)
     for c in parsed.get("comercializacion", []):
@@ -407,7 +401,6 @@ async def cargar_er(
                 "proyecto": proy["nombre_comercial"],
                 "archivo": uf.filename,
                 "ingreso_bruto": float(panel.ingreso_bruto_cop or 0),
-                "debug": parsed.get("_debug"),  # TEMP: diagnóstico Terpel1/Terpel2
             })
             if parsed.get("warnings"):
                 resultados["warnings"].append({"archivo": uf.filename, "detalle": parsed["warnings"]})

@@ -247,7 +247,6 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
     ]
 
     ingresos_detalle = ing.get("ingresos_detalle", [])
-    _debug = ing.get("_debug")
 
     # Garantizar que existan los renglones canónicos del tipo, aunque el parser no
     # los haya encontrado en la hoja principal (NEU/NITRO traen el desglose en
@@ -352,11 +351,13 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
             ln["hoja"], ln["celda"] = m["hoja"], m["celda"]
 
     # Si el mapeo cambió ingreso bruto / detalle, recomputar los totales de ingresos.
+    # Un proyecto puede tener VARIAS fuentes de ingreso bruto (Terpel 1, Terpel 2…):
+    # sumar todas las líneas "bruto"/"despacho", no solo la primera.
     if ingresos_detalle:
-        ib = next((d["valor"] for d in ingresos_detalle
-                   if "bruto" in _norm(d["concepto"]) or "despacho" in _norm(d["concepto"])), None)
-        if ib is not None:
-            ingreso_bruto = ib
+        ib_lineas = [d["valor"] for d in ingresos_detalle
+                     if "bruto" in _norm(d["concepto"]) or "despacho" in _norm(d["concepto"])]
+        if ib_lineas:
+            ingreso_bruto = sum(ib_lineas)
         total_ingresos = sum(d["valor"] for d in ingresos_detalle)
 
     return {
@@ -374,7 +375,6 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
         "kwh": kwh,
         "snapshot": snapshot,
         "warnings": warnings,
-        "_debug": _debug,
     }
 
 
@@ -592,11 +592,6 @@ def _parse_ingresos(grid: list[list], warnings: list[str]) -> dict:
         "venta_bolsa": venta_bolsa,
         "compra_bolsa": compra_bolsa,
         "ingresos_detalle": detalle,
-        "_debug": {  # TEMP: diagnóstico Terpel1/Terpel2, quitar tras confirmar causa raíz.
-            "header_row": header_row,
-            "headers": {j: headers[j] for j in sorted(headers)},
-            "venta_cols": venta_cols,
-        },
     }
 
 

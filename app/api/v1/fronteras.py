@@ -40,7 +40,7 @@ def _to_out(f: Frontera) -> FronteraOut:
             d.cliente_nombre = f.proyecto.cliente.razon_social_nombre
             d.cliente_correos_cgm = f.proyecto.cliente.correos_cgm or []
     if f.operador:
-        d.operador_comercial = f.operador.nombre_comercial
+        d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
         d.operador_correos = [c.email for c in f.operador.contactos]
     return d
 

@@ -31,6 +31,25 @@ def list_operadores(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return resultado
 
 
+@router.get("/{operador_id}", response_model=OperadorRedOut)
+def get_operador(operador_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    op = (
+        db.query(OperadorRed)
+        .options(selectinload(OperadorRed.contactos))
+        .filter(OperadorRed.id == operador_id)
+        .first()
+    )
+    if not op:
+        raise HTTPException(404, "Operador de red no encontrado")
+    d = OperadorRedOut.model_validate(op)
+    d.fronteras_vinculadas = (
+        db.query(func.count(Frontera.id))
+        .filter(Frontera.operador_red_id == operador_id, Frontera.deleted_at.is_(None))
+        .scalar() or 0
+    )
+    return d
+
+
 def _get_contacto_or_404(contacto_id: int, db: Session) -> OperadorRedContacto:
     c = db.query(OperadorRedContacto).filter(OperadorRedContacto.id == contacto_id).first()
     if not c:

@@ -195,6 +195,7 @@ class ServicioRepresentacionOut(BaseModel):
 
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
+    cliente_id: Optional[int] = None
     portafolio_id: Optional[int] = None
     proyecto_padre_id: Optional[int] = None
     nombre_bitacora: Optional[str] = None
@@ -267,6 +268,7 @@ class ProyectoUpdate(ProyectoCreate):
 class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
+    cliente_id: Optional[int] = None
     portafolio_id: Optional[int]
     proyecto_padre_id: Optional[int]
     nombre_bitacora: Optional[str]

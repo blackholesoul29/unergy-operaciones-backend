@@ -92,6 +92,11 @@ class ContratoServicioCreate(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
     indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
+    # Detalles operacionales y contractuales del servicio
+    service_scope: Optional[str] = None
+    specific_service_terms: Optional[str] = None
+    slas: Optional[str] = None
+    responsibilities: Optional[str] = None
 
 
 class ContratoServicioUpdate(BaseModel):
@@ -134,6 +139,11 @@ class ContratoServicioUpdate(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
     indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
+    # Detalles operacionales y contractuales del servicio
+    service_scope: Optional[str] = None
+    specific_service_terms: Optional[str] = None
+    slas: Optional[str] = None
+    responsibilities: Optional[str] = None
 
 
 class ContratoServicioOut(BaseModel):
@@ -184,6 +194,11 @@ class ContratoServicioOut(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[Any]] = None
     indexacion_representacion: Optional[List[Any]] = None
+    # Detalles operacionales y contractuales del servicio
+    service_scope: Optional[str] = None
+    specific_service_terms: Optional[str] = None
+    slas: Optional[str] = None
+    responsibilities: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

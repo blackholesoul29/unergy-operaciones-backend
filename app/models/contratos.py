@@ -100,6 +100,11 @@ class ContratoServicio(Base):
     tarifa_representacion: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     indexacion_cgm: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     indexacion_representacion: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Detalles operacionales y contractuales del servicio (texto libre)
+    service_scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    specific_service_terms: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responsibilities: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

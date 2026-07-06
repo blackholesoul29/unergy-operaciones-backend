@@ -41,6 +41,7 @@ from app.models.mandatos import (
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
+from app.models.riesgos_bolsa import PrecioBolsa
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -71,5 +72,6 @@ __all__ = [
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
+    "PrecioBolsa",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA

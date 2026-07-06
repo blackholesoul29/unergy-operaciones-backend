@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
@@ -39,7 +41,16 @@ def enviar_reporte_cgm(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    fecha_str = body.fecha.isoformat()
+    if body.fecha_fin < body.fecha_inicio:
+        body.fecha_inicio, body.fecha_fin = body.fecha_fin, body.fecha_inicio
+
+    dias = [
+        (body.fecha_inicio + timedelta(days=i)).isoformat()
+        for i in range((body.fecha_fin - body.fecha_inicio).days + 1)
+    ]
+    multi_hoja = len(dias) > svc.DIAS_UMBRAL_MULTI_HOJA
+    fecha_display = dias[0] if len(dias) == 1 else f"{dias[0]} a {dias[-1]}"
+    fecha_archivo = dias[0] if len(dias) == 1 else f"{dias[0]}_a_{dias[-1]}"
 
     # 1. Resolver, desde la BD, a quién le llega qué (nunca se confía en datos
     #    del frontend más allá de tipo+id).
@@ -79,9 +90,12 @@ def enviar_reporte_cgm(
         gaia = GaiaClient()
         borders = svc.resolver_borders(gaia, frt_codes)
         for frt_code in frt_codes:
-            filas_por_frt[frt_code] = svc.fetch_filas(
-                gaia, frt_code, borders.get(frt_code.lower()), fecha_str
-            )
+            meta = borders.get(frt_code.lower())
+            filas_por_frt[frt_code] = [
+                fila
+                for dia in dias
+                for fila in svc.fetch_filas(gaia, frt_code, meta, dia)
+            ]
 
     # 3. Generar y enviar un Excel por destinatario, filtrado a sus fronteras.
     resultados = []
@@ -107,13 +121,13 @@ def enviar_reporte_cgm(
             for fila in filas_por_frt.get(f.codigo_frontera, [])
         ]
         try:
-            excel_bytes = svc.generar_excel(filas)
+            excel_bytes = svc.generar_excel(filas, multi_hoja=multi_hoja)
             slug = "".join(c if c.isalnum() else "_" for c in nombre.lower()).strip("_")
             email_service.send_reporte_cgm_email(
                 to_emails=correos,
                 excel_bytes=excel_bytes,
-                filename=f"cgm-report-{fecha_str}-{slug}.xlsx",
-                fecha_str=fecha_str,
+                filename=f"cgm-report-{fecha_archivo}-{slug}.xlsx",
+                fecha_str=fecha_display,
                 destinatario_nombre=nombre,
             )
             resultados.append(EnvioResultado(

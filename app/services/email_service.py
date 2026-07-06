@@ -21,7 +21,7 @@ _LOGO_UNERGY = Path(__file__).resolve().parent.parent / "assets" / "logo_unergy.
 _REPORTE_CGM_TEXTO = (
     "Cordial Saludo,\n\n"
     "Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente "
-    "al día {fecha}, reportado al ASIC.\n\n"
+    "{fecha_frase}, reportado al ASIC.\n\n"
     "Quedamos atentos a cualquier observación al respecto.\n\n"
     "Atentamente,\n\n"
     "--\n"
@@ -43,7 +43,7 @@ _REPORTE_CGM_HTML = """\
 <div style="font-family: Arial, sans-serif; font-size: 14px; color:#222;">
   <p>Cordial Saludo,</p>
   <p>Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente
-  al día {fecha}, reportado al ASIC.</p>
+  {fecha_frase}, reportado al ASIC.</p>
   <p>Quedamos atentos a cualquier observación al respecto.</p>
   <p>Atentamente,</p>
   <br>
@@ -595,6 +595,7 @@ def send_reporte_cgm_email(
         )
 
     subject = f"Reporte CGM — {fecha_str} — {destinatario_nombre}"
+    fecha_frase = f"al periodo {fecha_str}" if " a " in fecha_str else f"al día {fecha_str}"
 
     msg = MIMEMultipart("mixed")
     msg["From"] = settings.SMTP_FROM
@@ -603,8 +604,8 @@ def send_reporte_cgm_email(
 
     cuerpo = MIMEMultipart("related")
     alternativa = MIMEMultipart("alternative")
-    alternativa.attach(MIMEText(_REPORTE_CGM_TEXTO.format(fecha=fecha_str), "plain", "utf-8"))
-    alternativa.attach(MIMEText(_REPORTE_CGM_HTML.format(fecha=fecha_str), "html", "utf-8"))
+    alternativa.attach(MIMEText(_REPORTE_CGM_TEXTO.format(fecha_frase=fecha_frase), "plain", "utf-8"))
+    alternativa.attach(MIMEText(_REPORTE_CGM_HTML.format(fecha_frase=fecha_frase), "html", "utf-8"))
     cuerpo.attach(alternativa)
 
     if _LOGO_UNERGY.exists():

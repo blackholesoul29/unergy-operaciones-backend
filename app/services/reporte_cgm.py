@@ -100,11 +100,14 @@ def _estilo_dato(cell):
     cell.border = Border(left=borde, right=borde, top=borde, bottom=borde)
 
 
-def generar_excel(filas: list[dict]) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "CGM Report"
+_ANCHOS_COLUMNA = {
+    "report date": 12, "border frtcode": 14, "border sic code": 30,
+    "border category": 30, "meter": 8, "state": 22,
+    "total reported energy": 18,
+}
 
+
+def _escribir_hoja(ws, filas: list[dict]) -> None:
     for col_idx, nombre in enumerate(COLUMNAS, start=1):
         _estilo_encabezado(ws.cell(row=1, column=col_idx, value=nombre))
 
@@ -115,17 +118,51 @@ def generar_excel(filas: list[dict]) -> bytes:
                 valor = round(valor, 3)
             _estilo_dato(ws.cell(row=row_idx, column=col_idx, value=valor))
 
-    anchos = {
-        "report date": 12, "border frtcode": 14, "border sic code": 30,
-        "border category": 30, "meter": 8, "state": 22,
-        "total reported energy": 18,
-    }
     for col_idx, nombre in enumerate(COLUMNAS, start=1):
         letra = get_column_letter(col_idx)
-        ws.column_dimensions[letra].width = anchos.get(nombre, 8 if nombre.startswith("hour") else 12)
+        ws.column_dimensions[letra].width = _ANCHOS_COLUMNA.get(nombre, 8 if nombre.startswith("hour") else 12)
 
     ws.freeze_panes = "A2"
     ws.row_dimensions[1].height = 30
+
+
+def _nombre_hoja(nombre: str, usados: set[str]) -> str:
+    """Nombre de hoja válido para Excel: máx 31 caracteres, sin : \\ / ? * [ ], único."""
+    limpio = "".join(c for c in (nombre or "Sin nombre") if c not in r':\/?*[]') or "Sin nombre"
+    base = limpio[:31]
+    candidato, i = base, 2
+    while candidato in usados:
+        sufijo = f" ({i})"
+        candidato = base[: 31 - len(sufijo)] + sufijo
+        i += 1
+    usados.add(candidato)
+    return candidato
+
+
+# Por encima de este número de días en el reporte, una sola hoja con todos los
+# proyectos mezclados se vuelve difícil de leer -- se separa una hoja por
+# proyecto (agrupando por "border sic code", que ya junta generación+consumo
+# de la misma planta).
+DIAS_UMBRAL_MULTI_HOJA = 14
+
+
+def generar_excel(filas: list[dict], multi_hoja: bool = False) -> bytes:
+    wb = Workbook()
+
+    if not multi_hoja:
+        ws = wb.active
+        ws.title = "CGM Report"
+        _escribir_hoja(ws, filas)
+    else:
+        wb.remove(wb.active)
+        por_proyecto: dict[str, list[dict]] = {}
+        for fila in filas:
+            por_proyecto.setdefault(fila.get("border sic code") or "Sin nombre", []).append(fila)
+
+        usados: set[str] = set()
+        for nombre_proyecto, filas_proyecto in por_proyecto.items():
+            ws = wb.create_sheet(_nombre_hoja(nombre_proyecto, usados))
+            _escribir_hoja(ws, filas_proyecto)
 
     buf = BytesIO()
     wb.save(buf)

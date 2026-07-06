@@ -9,7 +9,8 @@ class DestinatarioSeleccionado(BaseModel):
 
 
 class EnviarReporteCGMRequest(BaseModel):
-    fecha: date
+    fecha_inicio: date
+    fecha_fin: date
     destinatarios: list[DestinatarioSeleccionado]
 
 

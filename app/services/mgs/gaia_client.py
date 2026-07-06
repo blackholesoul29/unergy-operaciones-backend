@@ -456,6 +456,31 @@ class GaiaClient:
             return data.get("results") or data.get("measurements") or []
         return []
 
+    def get_border_report_status(self, border_id: int, date_str: str) -> dict | None:
+        """Fetch the ASIC report status for a border on a specific date.
+
+        Uses /api/cgm/v1/report_/historic/{border_id}/ (paginated, most recent
+        first) and returns the entry matching report_date == date_str, or None
+        if that date has no report yet.
+
+        Returns a dict with 'status' ('OK'/'WARNING'/'ERROR'), and the hourly
+        curves 'reported_data_main' / 'reported_data_backup' (24 floats each).
+        """
+        url = f"{self._base}/api/cgm/v1/report_/historic/{border_id}/"
+        params: dict | None = {"page_size": 100}
+        for _ in range(30):
+            data = self._get(url, params=params)
+            if not isinstance(data, dict):
+                return None
+            for reporte in data.get("results", []):
+                if reporte.get("report_date") == date_str:
+                    return reporte
+            nxt = data.get("next")
+            if not nxt:
+                return None
+            url, params = nxt, None
+        return None
+
     def get_all_borders(self) -> list[dict]:
         """Fetch all borders registered in Quoia (paginated). Returns flat list of project dicts.
 

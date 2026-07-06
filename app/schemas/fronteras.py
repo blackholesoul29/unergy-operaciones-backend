@@ -241,6 +241,7 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     operador_comercial: Optional[str] = None
+    operador_red_id: Optional[int] = None
     operador_correos: list[str] = []
     cliente_id: Optional[int] = None
     cliente_nombre: Optional[str] = None

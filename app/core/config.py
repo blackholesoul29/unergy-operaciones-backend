@@ -101,6 +101,8 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "operaciones@unergy.io"
+    # Copia oculta (BCC) del Reporte CGM -- lista separada por comas.
+    CORREO_SEGUIMIENTO: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

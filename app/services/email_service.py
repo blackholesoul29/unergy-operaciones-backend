@@ -5,12 +5,81 @@ import logging
 import smtplib
 import ssl
 from datetime import datetime, timezone
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from app.core.config import settings
 
 logger = logging.getLogger("email_service")
+
+_LOGO_UNERGY = Path(__file__).resolve().parent.parent / "assets" / "logo_unergy.png"
+
+_REPORTE_CGM_TEXTO = (
+    "Cordial Saludo,\n\n"
+    "Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente "
+    "al día {fecha}, reportado al ASIC.\n\n"
+    "Quedamos atentos a cualquier observación al respecto.\n\n"
+    "Atentamente,\n\n"
+    "--\n"
+    "Operaciones Unergy\n"
+    "Unergy Energia Digital SAS E.S.P — Empresa de Servicios Públicos\n"
+    "operaciones@unergy.io — Cl. 46 #70a 65 Laureles, Medellín\n\n"
+    "Este documento y los archivos que lo acompañan han sido elaborados exclusivamente para la persona "
+    "o entidad a la que van dirigidos y pueden contener información de carácter reservado, confidencial "
+    "o legalmente protegida. En caso de haber recibido este mensaje por error, le solicitamos notificarlo "
+    "de manera inmediata al remitente y proceder con la eliminación total del documento y de cualquier "
+    "anexo. Queda expresamente prohibido cualquier acceso no autorizado, uso indebido, conservación, "
+    "difusión, reproducción, copia, modificación o redistribución, total o parcial, de su contenido, sin "
+    "autorización expresa, pudiendo acarrear responsabilidades legales conforme a la normativa aplicable. "
+    "Agradecemos su comprensión. Unergy Energía Digital S.A.S. E.S.P. Empresa de Servicios Públicos de "
+    "Energía"
+)
+
+_REPORTE_CGM_HTML = """\
+<div style="font-family: Arial, sans-serif; font-size: 14px; color:#222;">
+  <p>Cordial Saludo,</p>
+  <p>Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente
+  al día {fecha}, reportado al ASIC.</p>
+  <p>Quedamos atentos a cualquier observación al respecto.</p>
+  <p>Atentamente,</p>
+  <br>
+  <div>--</div>
+  <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; font-family: Arial, sans-serif;">
+    <tr>
+      <td style="vertical-align:top; padding-right:18px;">
+        <img src="cid:logo_unergy" width="100" alt="Unergy" style="display:block; margin-bottom:4px;">
+        <div style="font-size:11px; color:#333;">Unergy Energia Digital SAS E.S.P</div>
+        <div style="font-size:11px; font-weight:bold; color:#333;">Empresa de Servicios Públicos</div>
+      </td>
+      <td style="vertical-align:top; padding:0 18px; border-left:1px solid #ddd;">
+        <div style="font-weight:bold; font-size:16px; color:#222;">Operaciones Unergy</div>
+        <div style="width:36px; height:4px; background-color:#8B5CF6; border-radius:2px; margin:6px 0;"></div>
+        <div style="font-style:italic; font-size:12px; color:#555; max-width:240px;">
+          "Sumemos esfuerzos para que la energía del futuro sea sostenible y accesible para todos"
+        </div>
+      </td>
+      <td style="vertical-align:top; padding-left:18px; border-left:1px solid #ddd; font-size:12px; color:#333;">
+        <div>operaciones@unergy.io</div>
+        <div>Cl. 46 #70a 65 Laureles, Medellín</div>
+      </td>
+    </tr>
+  </table>
+  <p style="font-size:10px; color:#888; margin-top:16px;">
+    Este documento y los archivos que lo acompañan han sido elaborados exclusivamente para la persona o
+    entidad a la que van dirigidos y pueden contener información de carácter reservado, confidencial o
+    legalmente protegida. En caso de haber recibido este mensaje por error, le solicitamos notificarlo de
+    manera inmediata al remitente y proceder con la eliminación total del documento y de cualquier anexo.
+    Queda expresamente prohibido cualquier acceso no autorizado, uso indebido, conservación, difusión,
+    reproducción, copia, modificación o redistribución, total o parcial, de su contenido, sin autorización
+    expresa, pudiendo acarrear responsabilidades legales conforme a la normativa aplicable. Agradecemos su
+    comprensión. Unergy Energía Digital S.A.S. E.S.P. Empresa de Servicios Públicos de Energía
+  </p>
+</div>
+"""
 
 
 def _log_send(
@@ -505,6 +574,65 @@ def send_falla_notification_email(
             logger.error("[FALLA_EMAIL] Failed to send to %s for %s: %s", to_email, codigo_falla, exc)
 
     return {"ok": len(enviados) > 0, "enviados": enviados, "errores": errores}
+
+
+def send_reporte_cgm_email(
+    *,
+    to_emails: list[str],
+    excel_bytes: bytes,
+    filename: str,
+    fecha_str: str,
+    destinatario_nombre: str,
+) -> None:
+    """
+    Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
+    Lanza RuntimeError si SMTP no está configurado o falla el envío.
+    """
+    if not settings.SMTP_HOST:
+        raise RuntimeError(
+            "SMTP no configurado. Define SMTP_HOST, SMTP_PORT, SMTP_USER, "
+            "SMTP_PASSWORD y SMTP_FROM en las variables de entorno."
+        )
+
+    subject = f"Reporte CGM — {fecha_str} — {destinatario_nombre}"
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = ", ".join(to_emails)
+    msg["Subject"] = subject
+
+    cuerpo = MIMEMultipart("related")
+    alternativa = MIMEMultipart("alternative")
+    alternativa.attach(MIMEText(_REPORTE_CGM_TEXTO.format(fecha=fecha_str), "plain", "utf-8"))
+    alternativa.attach(MIMEText(_REPORTE_CGM_HTML.format(fecha=fecha_str), "html", "utf-8"))
+    cuerpo.attach(alternativa)
+
+    if _LOGO_UNERGY.exists():
+        with open(_LOGO_UNERGY, "rb") as f:
+            logo = MIMEImage(f.read())
+        logo.add_header("Content-ID", "<logo_unergy>")
+        logo.add_header("Content-Disposition", "inline", filename=_LOGO_UNERGY.name)
+        cuerpo.attach(logo)
+
+    msg.attach(cuerpo)
+
+    adjunto = MIMEBase("application", "octet-stream")
+    adjunto.set_payload(excel_bytes)
+    encoders.encode_base64(adjunto)
+    adjunto.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+    msg.attach(adjunto)
+
+    # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de
+    # seguimiento interno, igual que CORREO_SEGUIMIENTO en el script standalone.
+    cco = [d.strip() for d in settings.CORREO_SEGUIMIENTO.split(",") if d.strip()]
+    sobres = to_emails + [c for c in cco if c not in to_emails]
+
+    try:
+        _smtp_send(msg, sobres)
+        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True)
+    except Exception as exc:
+        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False, error_msg=str(exc))
+        raise RuntimeError(f"No se pudo enviar el reporte CGM: {exc}") from exc
 
 
 def send_test_email(*, to_email: str, cliente_nombre: str) -> None:

@@ -370,6 +370,126 @@ def create_liquidacion(
     return {"id": liq.id, "msg": "Liquidación creada"}
 
 
+# ── Resumen espejo del Panel Contable ──────────────────────────────────────────
+# Debe ir ANTES de "/{id}" — Starlette matchea rutas en orden de registro, y
+# "/{id}" (con id: int) intercepta cualquier segmento literal registrado después
+# (ver bug preexistente en GET /resumen, que sufre lo mismo).
+
+@router.get("/resumen-panel")
+def resumen_liquidaciones_desde_panel(
+    periodo: str = Query(..., description="YYYY-MM"),
+    tipo: str = Query("preliquidacion", description="preliquidacion | oficial"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Resumen de Liquidaciones = espejo de lectura del Panel Contable del período.
+
+    Liquidaciones no calcula nada propio aquí: agrupa PanelContableLinea por
+    inversionista y deriva "valor a pagar" del grupo 'resultado' (o, si el ER de
+    ese proyecto no lo trae, de ingresos - comercializacion - costos - facturas).
+    """
+    try:
+        y, m = periodo.strip().split("-")
+        periodo_norm = f"{int(y):04d}-{int(m):02d}"
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+
+    paneles = (
+        db.query(PanelContable)
+        .options(selectinload(PanelContable.lineas))
+        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == tipo)
+        .order_by(PanelContable.id)
+        .all()
+    )
+
+    nombres = {
+        p.id: p.nombre_comercial
+        for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()
+    }
+
+    proyectos_out = []
+    total_valor_a_pagar = 0.0
+    total_ingresos = 0.0
+    total_costos = 0.0
+
+    for panel in paneles:
+        inv_map: dict = {}
+        for ln in sorted(panel.lineas, key=lambda x: x.orden):
+            key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
+            if key not in inv_map:
+                inv_map[key] = {
+                    "proyecto_inversionista_id": ln.proyecto_inversionista_id,
+                    "nombre": ln.inversionista_nombre,
+                    "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
+                    "grupos": {},
+                    "conceptos": [],
+                }
+            valor = float(ln.valor_cop) if ln.valor_cop is not None else 0.0
+            inv_map[key]["grupos"][ln.grupo] = inv_map[key]["grupos"].get(ln.grupo, 0.0) + valor
+            inv_map[key]["conceptos"].append({
+                "grupo": ln.grupo, "concepto": ln.concepto, "valor_cop": valor,
+            })
+
+        inversionistas_out = []
+        proyecto_valor_a_pagar = 0.0
+        proyecto_ingresos = 0.0
+        proyecto_costos = 0.0
+        for inv in inv_map.values():
+            grupos = inv["grupos"]
+            if "resultado" in grupos:
+                valor_a_pagar = grupos["resultado"]
+            else:
+                valor_a_pagar = (
+                    grupos.get("ingresos", 0.0)
+                    - grupos.get("comercializacion", 0.0)
+                    - grupos.get("costos", 0.0)
+                    - grupos.get("facturas", 0.0)
+                )
+            inversionistas_out.append({
+                "proyecto_inversionista_id": inv["proyecto_inversionista_id"],
+                "nombre": inv["nombre"],
+                "porcentaje": inv["porcentaje"],
+                "valor_a_pagar": round(valor_a_pagar, 2),
+                "grupos_totales": {g: round(v, 2) for g, v in grupos.items()},
+                "conceptos": inv["conceptos"],
+            })
+            proyecto_valor_a_pagar += valor_a_pagar
+            proyecto_ingresos += grupos.get("ingresos", 0.0)
+            proyecto_costos += grupos.get("costos", 0.0) + grupos.get("comercializacion", 0.0)
+
+        proyectos_out.append({
+            "panel_id": panel.id,
+            "proyecto_id": panel.proyecto_id,
+            "proyecto": nombres.get(panel.proyecto_id, f"Proyecto {panel.proyecto_id}"),
+            "consecutivo_ingresos": panel.consecutivo_ingresos,
+            "consecutivo_costos": panel.consecutivo_costos,
+            "fecha_firma": panel.fecha_firma.isoformat() if panel.fecha_firma else None,
+            "liquidar_ingresos": panel.liquidar_ingresos,
+            "liquidar_costos": panel.liquidar_costos,
+            "estado": "firmado" if panel.fecha_firma else "pendiente",
+            "valor_a_pagar_total": round(proyecto_valor_a_pagar, 2),
+            "ingresos_cop": round(proyecto_ingresos, 2),
+            "costos_cop": round(proyecto_costos, 2),
+            "inversionistas": inversionistas_out,
+        })
+        total_valor_a_pagar += proyecto_valor_a_pagar
+        total_ingresos += proyecto_ingresos
+        total_costos += proyecto_costos
+
+    return {
+        "periodo": periodo_norm,
+        "tipo": tipo,
+        "resumen": {
+            "num_proyectos": len(proyectos_out),
+            "valor_a_pagar_total": round(total_valor_a_pagar, 2),
+            "ingresos_total_cop": round(total_ingresos, 2),
+            "costos_total_cop": round(total_costos, 2),
+            "ingreso_neto_cop": round(total_ingresos - total_costos, 2),
+        },
+        "proyectos": proyectos_out,
+    }
+
+
 @router.get("/{id}")
 def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     try:
@@ -984,123 +1104,6 @@ def resumen_liquidaciones(
             }
             for l in liqs
         ],
-    }
-
-
-# ── Resumen espejo del Panel Contable ──────────────────────────────────────────
-
-@router.get("/resumen-panel")
-def resumen_liquidaciones_desde_panel(
-    periodo: str = Query(..., description="YYYY-MM"),
-    tipo: str = Query("preliquidacion", description="preliquidacion | oficial"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Resumen de Liquidaciones = espejo de lectura del Panel Contable del período.
-
-    Liquidaciones no calcula nada propio aquí: agrupa PanelContableLinea por
-    inversionista y deriva "valor a pagar" del grupo 'resultado' (o, si el ER de
-    ese proyecto no lo trae, de ingresos - comercializacion - costos - facturas).
-    """
-    try:
-        y, m = periodo.strip().split("-")
-        periodo_norm = f"{int(y):04d}-{int(m):02d}"
-    except Exception:
-        raise HTTPException(422, "El período debe tener formato YYYY-MM")
-
-    paneles = (
-        db.query(PanelContable)
-        .options(selectinload(PanelContable.lineas))
-        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == tipo)
-        .order_by(PanelContable.id)
-        .all()
-    )
-
-    nombres = {
-        p.id: p.nombre_comercial
-        for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()
-    }
-
-    proyectos_out = []
-    total_valor_a_pagar = 0.0
-    total_ingresos = 0.0
-    total_costos = 0.0
-
-    for panel in paneles:
-        inv_map: dict = {}
-        for ln in sorted(panel.lineas, key=lambda x: x.orden):
-            key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
-            if key not in inv_map:
-                inv_map[key] = {
-                    "proyecto_inversionista_id": ln.proyecto_inversionista_id,
-                    "nombre": ln.inversionista_nombre,
-                    "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
-                    "grupos": {},
-                    "conceptos": [],
-                }
-            valor = float(ln.valor_cop) if ln.valor_cop is not None else 0.0
-            inv_map[key]["grupos"][ln.grupo] = inv_map[key]["grupos"].get(ln.grupo, 0.0) + valor
-            inv_map[key]["conceptos"].append({
-                "grupo": ln.grupo, "concepto": ln.concepto, "valor_cop": valor,
-            })
-
-        inversionistas_out = []
-        proyecto_valor_a_pagar = 0.0
-        proyecto_ingresos = 0.0
-        proyecto_costos = 0.0
-        for inv in inv_map.values():
-            grupos = inv["grupos"]
-            if "resultado" in grupos:
-                valor_a_pagar = grupos["resultado"]
-            else:
-                valor_a_pagar = (
-                    grupos.get("ingresos", 0.0)
-                    - grupos.get("comercializacion", 0.0)
-                    - grupos.get("costos", 0.0)
-                    - grupos.get("facturas", 0.0)
-                )
-            inversionistas_out.append({
-                "proyecto_inversionista_id": inv["proyecto_inversionista_id"],
-                "nombre": inv["nombre"],
-                "porcentaje": inv["porcentaje"],
-                "valor_a_pagar": round(valor_a_pagar, 2),
-                "grupos_totales": {g: round(v, 2) for g, v in grupos.items()},
-                "conceptos": inv["conceptos"],
-            })
-            proyecto_valor_a_pagar += valor_a_pagar
-            proyecto_ingresos += grupos.get("ingresos", 0.0)
-            proyecto_costos += grupos.get("costos", 0.0) + grupos.get("comercializacion", 0.0)
-
-        proyectos_out.append({
-            "panel_id": panel.id,
-            "proyecto_id": panel.proyecto_id,
-            "proyecto": nombres.get(panel.proyecto_id, f"Proyecto {panel.proyecto_id}"),
-            "consecutivo_ingresos": panel.consecutivo_ingresos,
-            "consecutivo_costos": panel.consecutivo_costos,
-            "fecha_firma": panel.fecha_firma.isoformat() if panel.fecha_firma else None,
-            "liquidar_ingresos": panel.liquidar_ingresos,
-            "liquidar_costos": panel.liquidar_costos,
-            "estado": "firmado" if panel.fecha_firma else "pendiente",
-            "valor_a_pagar_total": round(proyecto_valor_a_pagar, 2),
-            "ingresos_cop": round(proyecto_ingresos, 2),
-            "costos_cop": round(proyecto_costos, 2),
-            "inversionistas": inversionistas_out,
-        })
-        total_valor_a_pagar += proyecto_valor_a_pagar
-        total_ingresos += proyecto_ingresos
-        total_costos += proyecto_costos
-
-    return {
-        "periodo": periodo_norm,
-        "tipo": tipo,
-        "resumen": {
-            "num_proyectos": len(proyectos_out),
-            "valor_a_pagar_total": round(total_valor_a_pagar, 2),
-            "ingresos_total_cop": round(total_ingresos, 2),
-            "costos_total_cop": round(total_costos, 2),
-            "ingreso_neto_cop": round(total_ingresos - total_costos, 2),
-        },
-        "proyectos": proyectos_out,
     }
 
 

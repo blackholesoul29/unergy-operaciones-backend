@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura
+from app.models.proyectos import Proyecto
+from app.models.operadores_red import OperadorRed
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
@@ -33,9 +35,20 @@ def _to_out(f: Frontera) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
+        if f.proyecto.cliente:
+            d.cliente_id = f.proyecto.cliente.id
+            d.cliente_nombre = f.proyecto.cliente.razon_social_nombre
+            d.cliente_correos_cgm = f.proyecto.cliente.correos_cgm or []
     if f.operador:
         d.operador_comercial = f.operador.nombre_comercial
+        d.operador_correos = [c.email for c in f.operador.contactos]
     return d
+
+
+_FRONTERA_OPTS = (
+    joinedload(Frontera.proyecto).joinedload(Proyecto.cliente),
+    joinedload(Frontera.operador).joinedload(OperadorRed.contactos),
+)
 
 
 # ── Resumen (must be before /{id} to avoid route conflict) ────────────────────
@@ -121,7 +134,7 @@ def list_fronteras(
 ):
     q = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
+        .options(*_FRONTERA_OPTS)
         .filter(Frontera.deleted_at.is_(None))
     )
     if proyecto_id:
@@ -150,12 +163,12 @@ def create_frontera(
                 setattr(existing, k, v)
             db.commit()
             db.refresh(existing)
-            return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto), joinedload(Frontera.operador)).filter(Frontera.id == existing.id).first())
+            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first())
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
     db.refresh(obj)
-    return _to_out(db.query(Frontera).options(joinedload(Frontera.proyecto), joinedload(Frontera.operador)).filter(Frontera.id == obj.id).first())
+    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first())
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -168,7 +181,7 @@ def get_frontera(
 ):
     f = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
+        .options(*_FRONTERA_OPTS)
         .filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None))
         .first()
     )
@@ -188,7 +201,7 @@ def update_frontera(
 ):
     f = (
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
+        .options(*_FRONTERA_OPTS)
         .filter(Frontera.id == frontera_id, Frontera.deleted_at.is_(None))
         .first()
     )
@@ -200,7 +213,7 @@ def update_frontera(
     db.refresh(f)
     return _to_out(
         db.query(Frontera)
-        .options(joinedload(Frontera.proyecto), joinedload(Frontera.operador))
+        .options(*_FRONTERA_OPTS)
         .filter(Frontera.id == f.id)
         .first()
     )

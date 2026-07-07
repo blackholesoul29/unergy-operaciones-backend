@@ -65,7 +65,6 @@ class Proyecto(Base):
     __tablename__ = "proyectos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True, index=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
     proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
 
@@ -148,7 +147,6 @@ class Proyecto(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relaciones
-    cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="proyectos")
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
     subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)

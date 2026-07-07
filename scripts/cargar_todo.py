@@ -250,7 +250,6 @@ def main():
             existing = db.query(Proyecto).filter_by(topic_slug=p["topic_slug"]).first()
             if existing:
                 existing.nombre_comercial          = p["nombre_comercial"]
-                existing.cliente_id                = cliente_id
                 existing.tipo_tecnologia           = "solar"
                 existing.potencia_instalada_kwp    = p["potencia_instalada_kwp"]
                 existing.cantidad_total_paneles    = p["cantidad_total_paneles"]
@@ -262,7 +261,6 @@ def main():
                 nuevo = Proyecto(
                     nombre_comercial               = p["nombre_comercial"],
                     topic_slug                     = p["topic_slug"],
-                    cliente_id                     = cliente_id,
                     tipo_tecnologia                = "solar",
                     potencia_instalada_kwp         = p["potencia_instalada_kwp"],
                     cantidad_total_paneles         = p["cantidad_total_paneles"],
@@ -314,6 +312,28 @@ def main():
 
         db.commit()
         print(f"Inversionistas: {ok} nuevos, {skip} ya existían, {err} errores")
+
+        # ── 4. Garantía: cliente_nit de PROYECTOS como inversionista 100% ──────
+        # Proyecto ya no guarda un titular suelto -- si el NIT de PROYECTOS no
+        # quedó cubierto por ningún registro de INVERSIONISTAS, se siembra como
+        # inversionista único al 100% (mismo criterio que la migración 038).
+        proyectos_con_inversionista = {
+            r[0] for r in db.query(ProyectoInversionista.proyecto_id).all()
+        }
+        ok = 0
+        for p in PROYECTOS:
+            proy_id = proyectos_by_slug.get(p["topic_slug"])
+            cli_id = clientes_by_nit.get(p["cliente_nit"])
+            if not proy_id or not cli_id or proy_id in proyectos_con_inversionista:
+                continue
+            db.add(ProyectoInversionista(
+                proyecto_id=proy_id, cliente_id=cli_id, porcentaje_participacion=1,
+            ))
+            proyectos_con_inversionista.add(proy_id)
+            ok += 1
+            print(f"  NEW inversionista 100% (garantía) {p['nombre_comercial']} / {p['cliente_nit']}")
+        db.commit()
+        print(f"Garantía de inversionista: {ok} nuevos")
 
         print("\nOK Carga completa sin errores.")
 

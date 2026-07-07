@@ -693,8 +693,8 @@ def backfill_minigranja_inversores(
 
 # ── Puntero de contactos por área ──────────────────────────────────────────────
 # Para cada tipo (operacional/cgm/liquidacion), este proyecto
-# puede apuntar a un Cliente distinto al titular -- ver app/services/contactos.py.
-# Sin fila para un tipo = usa los contactos del cliente titular.
+# puede apuntar a un Cliente específico -- ver app/services/contactos.py.
+# Sin fila para un tipo = usa los contactos de los inversionistas vigentes.
 
 @router.get("/{id}/area-contactos", response_model=list[ProyectoAreaContactoOut])
 def list_area_contactos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):

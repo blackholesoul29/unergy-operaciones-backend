@@ -438,7 +438,6 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
         db.query(Proyecto)
         .options(
             selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
-            selectinload(Proyecto.cliente),
         )
         .order_by(Proyecto.nombre_comercial)
         .all()
@@ -460,8 +459,6 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
                 n = inv.cliente.razon_social_nombre
                 if n not in names:
                     names.append(n)
-        if not names and p.cliente and p.cliente.razon_social_nombre:
-            names.append(p.cliente.razon_social_nombre)
         return names
 
     def _proyecto_detalle(p):

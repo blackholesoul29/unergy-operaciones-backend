@@ -36,8 +36,8 @@ class Contacto(Base):
 
 class ProyectoAreaContacto(Base):
     """Puntero por área: para el `tipo` dado, este Proyecto usa los contactos
-    del Cliente indicado en vez de los de su Cliente titular. Sin fila para un
-    tipo = usa el titular (`Proyecto.cliente_id`). Ver app/services/contactos.py."""
+    del Cliente indicado en vez de los de sus inversionistas vigentes. Sin
+    fila para un tipo = usa los inversionistas. Ver app/services/contactos.py."""
 
     __tablename__ = "proyecto_area_contacto"
     __table_args__ = (

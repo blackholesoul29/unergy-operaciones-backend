@@ -288,7 +288,7 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
                 # Resolver el proyecto real por nombre/alias (mismo criterio que
                 # _auto_create_fallas) en vez de emparejar directamente contra la
                 # tabla de contactos por nombre -- así get_contactos() resuelve
-                # correctamente el puntero de área / cliente titular por FK.
+                # correctamente el puntero de área / inversionistas por FK.
                 proyecto = db.execute(text("""
                     SELECT id FROM proyectos
                     WHERE deleted_at IS NULL

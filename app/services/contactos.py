@@ -9,11 +9,11 @@ exclusivamente ese. Sin puntero para ese tipo, el default es la UNIÓN de los
 contactos de todos los clientes ligados al proyecto vía `ProyectoInversionista`
 vigente (fecha_fin nula o futura).
 
-No se usa `Proyecto.cliente_id` (titular) para esta resolución -- ese campo es
-metadata legada/display, no fuente de contactos. Cada proyecto debe tener su
-propietario representado en `ProyectoInversionista` (aunque sea un único
-inversionista con 100%); ver alembic/versions/038_backfill_titular_inversionista.py
-para el backfill de los proyectos que solo tenían titular sin esa fila.
+`Proyecto` no tiene un titular único (esa columna se eliminó en la migración
+040) -- cada proyecto debe tener su propietario representado en
+`ProyectoInversionista` (aunque sea un único inversionista con 100%); ver
+alembic/versions/038_backfill_titular_inversionista.py para el backfill de
+los proyectos que en su momento solo tenían titular sin esa fila.
 """
 from datetime import date
 from sqlalchemy.orm import Session

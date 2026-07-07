@@ -300,30 +300,22 @@ def get_client_fund(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
 @router.get("/{id}/proyectos")
 def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """List all projects where this client is owner or investor."""
+    """List all projects where this client is an investor."""
     from app.models.proyectos import Proyecto, ProyectoInversionista
     _get_cliente_or_404(id, db)
 
-    # Projects where client is owner
-    owned = db.query(Proyecto).filter(
-        Proyecto.cliente_id == id,
-        Proyecto.deleted_at.is_(None),
-    ).all()
-
-    # Projects where client is investor
     invested_ids = (
         db.query(ProyectoInversionista.proyecto_id)
         .filter(ProyectoInversionista.cliente_id == id)
         .all()
     )
-    invested_project_ids = {r[0] for r in invested_ids} - {p.id for p in owned}
     invested = (
         db.query(Proyecto)
-        .filter(Proyecto.id.in_(invested_project_ids), Proyecto.deleted_at.is_(None))
+        .filter(Proyecto.id.in_({r[0] for r in invested_ids}), Proyecto.deleted_at.is_(None))
         .all()
-    ) if invested_project_ids else []
+    ) if invested_ids else []
 
-    def _proj(p, rol):
+    def _proj(p):
         return {
             "id": p.id,
             "nombre_comercial": p.nombre_comercial,
@@ -331,31 +323,25 @@ def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_
             "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
             "departamento": p.departamento,
             "municipio": p.municipio,
-            "rol": rol,
+            "rol": "inversionista",
         }
 
-    return [_proj(p, "propietario") for p in owned] + [_proj(p, "inversionista") for p in invested]
+    return [_proj(p) for p in invested]
 
 
 @router.get("/{id}/fronteras")
 def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """List fronteras linked to this client via their projects."""
-    from app.models.proyectos import Proyecto, ProyectoInversionista
+    from app.models.proyectos import ProyectoInversionista
     from app.models.fronteras import Frontera
     _get_cliente_or_404(id, db)
 
-    # Gather all project IDs for this client (owned + invested)
-    owned_ids = (
-        db.query(Proyecto.id)
-        .filter(Proyecto.cliente_id == id, Proyecto.deleted_at.is_(None))
-        .all()
-    )
     invested_ids = (
         db.query(ProyectoInversionista.proyecto_id)
         .filter(ProyectoInversionista.cliente_id == id)
         .all()
     )
-    all_project_ids = {r[0] for r in owned_ids} | {r[0] for r in invested_ids}
+    all_project_ids = {r[0] for r in invested_ids}
     if not all_project_ids:
         return []
 

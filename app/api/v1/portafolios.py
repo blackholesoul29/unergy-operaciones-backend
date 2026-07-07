@@ -57,16 +57,16 @@ def _operativo_filter():
 
 
 def _seed_portafolios_if_empty(db: Session) -> None:
-    """Si todavía no hay portafolios, los crea desde el agrupamiento actual por cliente
-    (cliente directo, o primer inversionista) y asigna portafolio_id. Idempotente: sólo
-    corre cuando la tabla está vacía, así no pisa asignaciones manuales posteriores."""
+    """Si todavía no hay portafolios, los crea desde el agrupamiento actual por
+    el primer inversionista de cada proyecto y asigna portafolio_id. Idempotente:
+    sólo corre cuando la tabla está vacía, así no pisa asignaciones manuales
+    posteriores."""
     if db.query(Portafolio).count() > 0:
         return
     proyectos = (
         db.query(Proyecto)
         .filter(Proyecto.deleted_at.is_(None), _operativo_filter())
         .options(
-            selectinload(Proyecto.cliente),
             selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
         )
         .all()
@@ -76,13 +76,10 @@ def _seed_portafolios_if_empty(db: Session) -> None:
         if p.portafolio_id:
             continue
         nombre = None
-        if p.cliente and p.cliente.razon_social_nombre:
-            nombre = p.cliente.razon_social_nombre
-        else:
-            for inv in (p.inversionistas or []):
-                if inv.cliente and inv.cliente.razon_social_nombre:
-                    nombre = inv.cliente.razon_social_nombre
-                    break
+        for inv in (p.inversionistas or []):
+            if inv.cliente and inv.cliente.razon_social_nombre:
+                nombre = inv.cliente.razon_social_nombre
+                break
         if not nombre:
             continue
         port = cache.get(nombre)

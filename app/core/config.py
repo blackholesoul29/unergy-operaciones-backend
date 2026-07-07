@@ -95,6 +95,20 @@ class Settings(BaseSettings):
     ORIGINA_DATABASE_URL: str = ""
     REQUESTSDB_DATABASE_URL: str = ""
 
+    # ── Monitoreo proactivo de auditoría (audit_alerts) ──────────────────────
+    # Detecta cambios críticos en liquidaciones/PPA/generación leyendo audit_log
+    # y dispara alertas por Slack + correo. Todo opcional: sin webhook ni
+    # destinatarios el motor sigue creando registros AuditAlert, solo no notifica.
+    AUDIT_MONITOR_ENABLED: bool = True
+    AUDIT_SCAN_INTERVAL_SECONDS: int = 300          # cada 5 min
+    SLACK_WEBHOOK_URL: str = ""                      # incoming webhook de Slack
+    ALERT_EMAIL_RECIPIENTS: str = ""                # correos separados por coma
+    BUSINESS_HOURS_START: int = 6                   # hora local Colombia (>=)
+    BUSINESS_HOURS_END: int = 20                    # hora local Colombia (<)
+    # Umbrales de cambio crítico de valor (override por AuditRule.condition_json)
+    AUDIT_CRITICAL_VALUE_COP: float = 50_000_000.0  # valor absoluto > $50M COP
+    AUDIT_CRITICAL_PCT_CHANGE: float = 0.10         # o variación > 10%
+
     # SMTP — envío de informes aprobados
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

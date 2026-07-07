@@ -154,3 +154,172 @@ def init_audit() -> None:
     @event.listens_for(Session, "after_flush")
     def _after_flush(session: Session, flush_context: Any) -> None:
         _flush_audit(session)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Monitoreo proactivo — procesa audit_log y dispara alertas configurables.
+# ────────────────────────────────────────────────────────────────────────────
+import logging  # noqa: E402
+from typing import Optional  # noqa: E402
+
+from sqlalchemy.orm import Session as _Session  # noqa: E402
+
+logger = logging.getLogger("audit.monitor")
+
+
+class AuditMonitorService:
+    """Lee registros de `audit_log`, aplica `AuditRuleEngine` y, ante una
+    coincidencia, crea una `AuditAlert` (anti-duplicados por fingerprint) y la
+    notifica vía `NotificationService`.
+
+    El scan periódico lo dispara APScheduler (ver `app/main.py`). El cursor de
+    lectura (`_last_id`) vive en memoria: en el primer scan se inicializa al
+    máximo id existente para no reprocesar el histórico; el fingerprint único
+    protege contra duplicados tras un reinicio.
+    """
+
+    def __init__(self, notifier: Optional[Any] = None) -> None:
+        self._notifier = notifier
+        self._last_id: Optional[int] = None
+        self._role_cache: dict[int, Optional[str]] = {}
+
+    @property
+    def notifier(self):
+        # Import perezoso: evita costo/ciclos si nunca se notifica (p.ej. tests).
+        if self._notifier is None:
+            from app.services.notification_service import NotificationService
+            self._notifier = NotificationService()
+        return self._notifier
+
+    # ── resolución de rol del usuario ────────────────────────────────────────
+    def _resolve_rol(self, db: _Session, usuario_id: Optional[int]) -> Optional[str]:
+        if usuario_id is None:
+            return None
+        if usuario_id in self._role_cache:
+            return self._role_cache[usuario_id]
+        rol = db.execute(
+            text("SELECT rol FROM usuarios WHERE id = :uid"), {"uid": usuario_id}
+        ).scalar()
+        rol = str(rol) if rol is not None else None
+        self._role_cache[usuario_id] = rol
+        return rol
+
+    # ── procesamiento de un registro ─────────────────────────────────────────
+    def process_audit_log(self, db: _Session, record: dict) -> list:
+        """Evalúa un registro de audit_log. Devuelve las AuditAlert creadas."""
+        from app.models.audit_alert import AuditAlert
+        from app.services.audit_rules import TABLE_TO_ENTITY, AuditRuleEngine
+
+        entity_type = TABLE_TO_ENTITY.get(record.get("tabla"))
+        if entity_type is None:
+            return []
+
+        cambios = record.get("cambios")
+        if isinstance(cambios, str):
+            try:
+                cambios = json.loads(cambios)
+            except (ValueError, TypeError):
+                cambios = None
+
+        rol = self._resolve_rol(db, record.get("usuario_id"))
+        overrides = self._load_rule_overrides(db, entity_type)
+
+        triggered = AuditRuleEngine.evaluate(
+            entity_type=entity_type,
+            accion=record.get("accion", ""),
+            cambios=cambios,
+            rol=rol,
+            when=record.get("created_at"),
+            overrides=overrides,
+        )
+        if not triggered:
+            return []
+
+        rule_name = (overrides or {}).get("_rule_name")
+        created: list = []
+        for t in triggered:
+            fingerprint = f"{record.get('id')}:{t['reason']}"
+            exists = db.execute(
+                text("SELECT 1 FROM audit_alerts WHERE fingerprint = :fp"),
+                {"fp": fingerprint},
+            ).scalar()
+            if exists:
+                continue
+
+            alert = AuditAlert(
+                rule_name=rule_name or t["reason"],
+                entity_type=entity_type,
+                entity_id=str(record.get("registro_id")),
+                trigger_reason=t["detalle"],
+                severity=t["severity"],
+                status="pending",
+                fingerprint=fingerprint,
+                audit_log_id=record.get("id"),
+                usuario_nombre=record.get("usuario_nombre"),
+                detalle=t.get("meta"),
+                notificado=False,
+            )
+            db.add(alert)
+            db.flush()  # obtiene id + timestamp para la notificación
+            db.refresh(alert)
+
+            try:
+                result = self.notifier.dispatch(alert)
+                alert.notificado = bool(result.get("slack") or result.get("email"))
+            except Exception as exc:  # noqa: BLE001 — notificar nunca rompe el scan
+                logger.warning("[audit_monitor] fallo notificando alerta %s: %s", alert.id, exc)
+
+            created.append(alert)
+
+        db.commit()
+        return created
+
+    def _load_rule_overrides(self, db: _Session, entity_type: str) -> Optional[dict]:
+        """Regla activa (AuditRule) para el tipo de entidad, si existe."""
+        row = db.execute(
+            text(
+                "SELECT name, condition_json FROM audit_rules "
+                "WHERE entity_type = :et AND active = TRUE "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"et": entity_type},
+        ).first()
+        if row is None:
+            return None
+        overrides = dict(row[1]) if isinstance(row[1], dict) else {}
+        overrides["_rule_name"] = row[0]
+        return overrides
+
+    # ── scan periódico ───────────────────────────────────────────────────────
+    def scan(self, db: _Session, *, limit: int = 500) -> list:
+        """Procesa los registros de audit_log nuevos desde el último scan."""
+        if self._last_id is None:
+            # Primer arranque: no reprocesar el histórico.
+            self._last_id = db.execute(
+                text("SELECT COALESCE(MAX(id), 0) FROM audit_log")
+            ).scalar() or 0
+            return []
+
+        rows = db.execute(
+            text(
+                "SELECT id, tabla, registro_id, accion, usuario_id, usuario_nombre, "
+                "cambios, created_at FROM audit_log "
+                "WHERE id > :last ORDER BY id ASC LIMIT :lim"
+            ),
+            {"last": self._last_id, "lim": limit},
+        ).mappings().all()
+
+        created: list = []
+        for row in rows:
+            record = dict(row)
+            try:
+                created.extend(self.process_audit_log(db, record))
+            except Exception as exc:  # noqa: BLE001 — un registro malo no frena el resto
+                db.rollback()
+                logger.warning("[audit_monitor] fallo procesando audit_log %s: %s", record.get("id"), exc)
+            self._last_id = record["id"]
+        return created
+
+
+# Singleton usado por el scheduler (mantiene el cursor entre corridas).
+audit_monitor = AuditMonitorService()

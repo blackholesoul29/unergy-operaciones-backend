@@ -1991,6 +1991,24 @@ def _scheduled_correlation_sync():
         print(f"[correlation_sync] Failed to get DB session: {e}")
 
 
+def _scheduled_audit_scan():
+    """Escanea audit_log nuevo y dispara alertas de auditoría (cada N seg)."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.audit import audit_monitor
+            created = audit_monitor.scan(db)
+            if created:
+                print(f"[audit_monitor] {len(created)} alerta(s) generada(s)")
+        except Exception as e:
+            db.rollback()
+            print(f"[audit_monitor] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[audit_monitor] Failed to get DB session: {e}")
+
+
 def _scheduled_tsf_sync():
     """Sincronización periódica del pipeline TSF → tabla proyectos (cada 6 h)."""
     try:
@@ -2559,6 +2577,26 @@ def _deferred_init():
                     id="tsf_sync",
                     name="Sync pipeline TSF -> proyectos",
                 )
+
+            # ── Monitoreo proactivo de auditoría ─────────────────────────────
+            # Escanea audit_log y dispara alertas. Se valida la configuración
+            # antes de programar el job; si falta un canal de notificación se
+            # advierte pero igual se registran las alertas en audit_alerts.
+            if settings.AUDIT_MONITOR_ENABLED:
+                interval = settings.AUDIT_SCAN_INTERVAL_SECONDS
+                if interval < 1:
+                    print(f"[startup] audit_monitor: AUDIT_SCAN_INTERVAL_SECONDS inválido ({interval}), usando 300")
+                    interval = 300
+                if not settings.SLACK_WEBHOOK_URL and not settings.ALERT_EMAIL_RECIPIENTS:
+                    print("[startup] audit_monitor: sin SLACK_WEBHOOK_URL ni ALERT_EMAIL_RECIPIENTS — "
+                          "las alertas se registrarán pero no se notificarán")
+                _mgs_scheduler.add_job(
+                    _scheduled_audit_scan,
+                    IntervalTrigger(seconds=interval),
+                    id="audit_monitor",
+                    name="Escaneo de auditoría proactiva",
+                )
+                print(f"[startup] audit_monitor programado cada {interval}s")
 
             _mgs_scheduler.start()
             poll_once_async()

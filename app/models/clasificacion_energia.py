@@ -13,7 +13,7 @@ se compra en bolsa para otro contrato, o PPA compra + venta en bolsa UNGC).
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -89,6 +89,12 @@ class ClasificacionEnergiaMensual(Base):
         BigInteger, ForeignKey("ppa_contratos.id", ondelete="SET NULL"), nullable=True
     )
     codigo_sic: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # True si la fila proviene de la figura "uso del recurso": la planta clasifica
+    # doble — (a) venta PPA + (c) compra interna al cliente a precio bolsa.
+    uso_del_recurso: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
 
     # ventana con la que la planta participa en la categoría (informativa)
     fecha_inicio: Mapped[object] = mapped_column(Date, nullable=True)

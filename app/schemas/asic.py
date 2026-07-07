@@ -29,6 +29,7 @@ class AsicSolicitudOut(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
+    uso_del_recurso: bool = False
     fecha_envio_xm: date | None = None
     fecha_respuesta_xm: date | None = None
     numero_radicado: str | None = None
@@ -73,6 +74,7 @@ class AsicSolicitudCreate(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
+    uso_del_recurso: bool = False
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -106,6 +108,7 @@ class AsicSolicitudUpdate(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
+    uso_del_recurso: bool | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 

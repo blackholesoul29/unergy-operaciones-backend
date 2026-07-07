@@ -45,6 +45,10 @@ def add_columns():
         # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.
         "ALTER TABLE ppa_compromisos_energia ALTER COLUMN cantidad_proyectos SET DEFAULT 0",
         "UPDATE ppa_compromisos_energia SET cantidad_proyectos = 0 WHERE cantidad_proyectos IS NULL",
+        # Figura "Uso del recurso" (spec 2026-07-06): cliente en bolsa, planta usada
+        # en contrato; Unergy le paga a precio bolsa. Clasifica doble (a+c).
+        "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE clasificacion_energia_mensual ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
     ]
     for s in stmts:
         try:

@@ -31,6 +31,7 @@ from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_
 from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
+from app.schemas.liquidaciones import LiquidacionXMIngesta as LiquidacionXMIngestaSchema
 
 router = APIRouter(prefix="/liquidaciones", tags=["Liquidaciones"])
 
@@ -1348,3 +1349,23 @@ async def cargar_excel(
             pass
 
     return resultado
+
+
+# ── Automatización de liquidación XM (disparada al aprobar un informe) ─────────
+
+@router.get(
+    "/informe/{informe_id}",
+    response_model=list[LiquidacionXMIngestaSchema],
+    summary="Datos de liquidación XM generados automáticamente para un informe",
+)
+def get_liquidaciones_de_informe(
+    informe_id: int,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Devuelve las filas ``LiquidacionXMIngesta`` producidas por la
+    automatización al aprobarse el informe (generación diaria × precio de bolsa).
+    """
+    from app.crud import crud_liquidaciones
+
+    return crud_liquidaciones.get_liquidaciones_by_informe_id(db, informe_id)

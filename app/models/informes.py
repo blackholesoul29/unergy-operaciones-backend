@@ -58,6 +58,10 @@ class InformeGuardado(Base):
     correo_enviado: Mapped[bool] = mapped_column(Boolean, default=False)
     correo_enviado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Estado de la automatización de liquidación XM disparada al aprobar el informe.
+    # PENDIENTE | EN_PROCESO | COMPLETADO | ERROR  (ver app/jobs/liquidaciones_automation.py)
+    liquidacion_status: Mapped[str] = mapped_column(String(20), default="PENDIENTE", server_default="PENDIENTE")
+
     # Pipeline de verificación: lista de comentarios del revisor (Juan José).
     # Cada item: {id, autor_email, autor_nombre, mensaje, created_at,
     #             resuelto, resuelto_en, resuelto_por_email, resuelto_por_nombre,

@@ -14,7 +14,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -418,6 +418,7 @@ def update_seccion(
 def change_estado(
     informe_id: int,
     payload: EstadoIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -456,12 +457,16 @@ def change_estado(
             )
 
     now = datetime.now(timezone.utc)
+    estado_anterior = inf.estado
     inf.estado = payload.estado
 
     if payload.estado == "aprobado":
         inf.aprobado_por_id = current_user.id
         inf.aprobado_por_nombre = current_user.nombre
         inf.aprobado_en = now
+        # La aprobación dispara la automatización de liquidación XM (en background).
+        # Se marca PENDIENTE ahora; el job lo pasa a EN_PROCESO/COMPLETADO/ERROR.
+        inf.liquidacion_status = "PENDIENTE"
     elif payload.estado == "revisado":
         # quien marcó revisado = editor
         inf.editado_por_id = current_user.id
@@ -475,6 +480,14 @@ def change_estado(
 
     db.commit()
     db.refresh(inf)
+
+    # Encolar la liquidación SOLO cuando se acaba de aprobar (evita re-disparos al
+    # re-enviar "aprobado" sobre un informe ya aprobado). Import perezoso para no
+    # cargar el orquestador (y su cadena de servicios) en cada arranque del router.
+    if payload.estado == "aprobado" and estado_anterior != "aprobado":
+        from app.jobs.liquidaciones_automation import trigger_liquidacion_proceso
+        background_tasks.add_task(trigger_liquidacion_proceso, inf.id)
+
     return inf
 
 

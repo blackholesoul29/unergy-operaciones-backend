@@ -2,7 +2,8 @@ import enum
 from datetime import datetime, date
 from typing import List
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, CheckConstraint)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, CheckConstraint, Index)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -244,5 +245,66 @@ class LiquidacionFactura(Base):
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="facturas")
     inversionista: Mapped["ProyectoInversionista | None"] = relationship("ProyectoInversionista")
+
+
+class EstadoProcesoIngestaEnum(str, enum.Enum):
+    """Estado de una fila producida por la automatización de liquidación XM."""
+    procesado = "procesado"        # dato calculado con generación + precio de bolsa
+    sin_precio = "sin_precio"      # hubo generación pero el MEM no devolvió precio para la fecha
+    sin_generacion = "sin_generacion"  # no hubo generación registrada para la fecha
+    error = "error"                # falló el cálculo de esta fila
+
+
+class LiquidacionXMIngesta(Base):
+    """Dato de liquidación de mercado (MEM/XM) generado automáticamente al
+    aprobar un informe operativo.
+
+    NO confundir con ``LiquidacionXMDato`` (tabla ``liquidacion_xm_datos``), que
+    guarda las líneas curadas de una ``Liquidacion`` manual. Esta tabla es la
+    salida de la automatización descrita en la spec: correlaciona la generación
+    diaria del proyecto con el precio de bolsa del MEM para el período cubierto
+    por el informe. Es idempotente por informe: el orquestador borra e inserta
+    las filas del informe en cada corrida.
+    """
+    __tablename__ = "liquidacion_xm_ingesta"
+    __table_args__ = (
+        UniqueConstraint("informe_id", "proyecto_id", "fecha", "hora",
+                         name="uq_liq_xm_ingesta_informe_proyecto_fecha_hora"),
+        CheckConstraint("hora IS NULL OR (hora >= 0 AND hora <= 23)",
+                        name="ck_liq_xm_ingesta_hora"),
+        Index("ix_liq_xm_ingesta_informe_id", "informe_id"),
+        Index("ix_liq_xm_ingesta_proyecto_fecha", "proyecto_id", "fecha"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    informe_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("informes_guardados.id", ondelete="CASCADE"), nullable=False
+    )
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id"), nullable=False
+    )
+    # Contrato de Gescon / PPA asociado (opcional). En este repo los contratos de
+    # venta viven en `ppa_contratos`; se referencia si el proyecto tiene uno vigente.
+    ppa_contrato_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ppa_contratos.id", ondelete="SET NULL"), nullable=True
+    )
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    # Granularidad horaria (0-23) cuando la haya; NULL = agregado diario, que es
+    # lo que produce la fuente actual (generacion_diaria).
+    hora: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    energia_generada_kwh: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
+    precio_bolsa_cop_kwh: Mapped[float | None] = mapped_column(Numeric(15, 4), nullable=True)
+    valor_liquidado_cop: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    fuente_datos: Mapped[str] = mapped_column(String(50), nullable=False)
+    estado_proceso: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=EstadoProcesoIngestaEnum.procesado.value
+    )
+    datos_adicionales: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    informe: Mapped["InformeGuardado"] = relationship("InformeGuardado")
+    proyecto: Mapped["Proyecto"] = relationship("Proyecto")
+    ppa_contrato: Mapped["PPAContrato | None"] = relationship("PPAContrato")
 
 

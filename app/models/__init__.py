@@ -9,6 +9,7 @@ from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnu
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
 from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
 from app.models.fronteras import Frontera, FronteraLectura
+from app.models.informes import InformeGuardado
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
@@ -18,6 +19,7 @@ from app.models.fallas import (
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
     LiquidacionMandato, LiquidacionMandatoLinea, LiquidacionFactura,
+    LiquidacionXMIngesta,
 )
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
@@ -49,11 +51,12 @@ __all__ = [
     "ProyectoInversionista", "Portafolio", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
-    "Frontera", "FronteraLectura", "OperadorRed", "OperadorRedContacto",
+    "Frontera", "FronteraLectura", "InformeGuardado", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
+    "LiquidacionXMIngesta",
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Mantenimiento",

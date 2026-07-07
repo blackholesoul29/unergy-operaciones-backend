@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import field_validator, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""
+
+    # MEM / XM market-data REST API — usado por la automatización de liquidación
+    # (app/services/mem_ingestion_service.py) para traer precio de bolsa y
+    # asignaciones. Distinto del FTP de descargas XM (app/services/xm/).
+    XM_API_URL: str = "https://servapi.xm.com.co"
+    XM_API_KEY: SecretStr = SecretStr("")
+    XM_API_TIMEOUT_SECONDS: float = 30.0
+    XM_API_MAX_RETRIES: int = 3
 
     # External databases (read-only correlation)
     ORIGINA_DATABASE_URL: str = ""

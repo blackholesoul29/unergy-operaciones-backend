@@ -10,6 +10,8 @@ Mapeo:
   b. ppa_compra_ungc  ← contratos de compra (tipo_contrato='compra')
   c. bolsa_compra_ungg← plantas es_duplicado=True agrupadas por el contrato de
                         venta al que aportan (origen bolsa). PLC: pendiente.
+                        + plantas uso_del_recurso=True: compra interna al
+                        cliente a precio bolsa (también clasifican en (a)).
   d. bolsa_compra_ungc← sin reglas definidas (siempre vacía, reservada)
   e. bolsa_venta_ungg ← remanente sin SIC vigente ("bolsa_libre")
   f. bolsa_venta_ungc ← remanente con SIC vigente comprador UNGC
@@ -32,13 +34,16 @@ def derivar_pools(data: dict) -> dict:
     for ct in data.get("venta") or []:
         plantas = ct.get("plantas") or []
         dup = [p for p in plantas if p.get("es_duplicado")]
+        ur = [p for p in plantas if p.get("uso_del_recurso")]
         # (a) lista TODAS las plantas del contrato — las duplicadas también
         # aportan a él y se muestran con su indicador (es_duplicado). En la
         # tabla/API estándar el duplicado clasifica solo en (c): ver
         # _filas_desde_pools, que las excluye de las filas de (a).
         a.append({**ct, "plantas": plantas})
-        if dup:
-            c.append({**ct, "plantas": dup})
+        # (c) espejo: duplicados (compra real en bolsa) + uso del recurso (compra
+        # interna al cliente a precio bolsa — esa planta TAMBIÉN clasifica en (a)).
+        if dup or ur:
+            c.append({**ct, "plantas": dup + ur})
 
     pools = {
         "ppa_venta_ungg": a,
@@ -70,6 +75,7 @@ def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEn
             codigo_sic=planta.get("codigo_sic"),
             fecha_inicio=_iso(planta.get("fecha_inicio")),
             fecha_fin=_iso(planta.get("fecha_fin")),
+            uso_del_recurso=bool(planta.get("uso_del_recurso")),
         )
 
     for key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg"):
@@ -82,6 +88,9 @@ def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEn
             for p in ct.get("plantas") or []:
                 # En (a) los duplicados solo se MUESTRAN (badge); su fila
                 # estándar vive en (c) — sin doble clasificación en BD/API.
+                # EXCEPCIÓN deliberada: uso_del_recurso clasifica DOBLE (a+c):
+                # la energía entra por contrato (a) y a la vez Unergy le compra
+                # al cliente a precio bolsa (c). Son dos operaciones reales.
                 if key == "ppa_venta_ungg" and p.get("es_duplicado"):
                     continue
                 filas.append(_f(key, p, contrato_id=cid))

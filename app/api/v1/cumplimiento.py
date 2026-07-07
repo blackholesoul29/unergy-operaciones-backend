@@ -1263,6 +1263,7 @@ def get_plantas_contratos(
                         "fecha_fin": asic.fecha_fin.isoformat() if asic.fecha_fin else None,
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
                         "es_duplicado": bool(asic.es_duplicado),
+                        "uso_del_recurso": bool(asic.uso_del_recurso),
                     })
         venta_out.append({
             "id": c.id,

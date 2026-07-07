@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
@@ -75,7 +76,15 @@ def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current
     if not cliente:
         raise HTTPException(404, "Cliente no encontrado")
     db.delete(cliente)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se puede eliminar: este cliente tiene proyectos u otros registros "
+            "vinculados (como dueño o como inversionista). Desvincúlalos primero.",
+        )
 
 
 @router.post("/{id}/test-correo")

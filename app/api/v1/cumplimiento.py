@@ -1268,6 +1268,8 @@ def get_plantas_contratos(
         venta_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
+            # Clave GESCON (contrato_interno en asic_solicitudes) para el detalle
+            "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
@@ -1327,6 +1329,7 @@ def get_plantas_contratos(
             card = por_contrato.setdefault(key, {
                 "id": r.contrato_ppa_id or f"gescon-{r.codigo_sic_contrato}",
                 "contrato_ppa_id": r.contrato_ppa_id,
+                "contrato_interno": r.contrato_interno,
                 "nombre": r.nombre_interno or key,
                 "vendedor_nombre": r.codigo_sic_vendedor or "—",
                 "fecha_inicio": None,
@@ -1361,6 +1364,7 @@ def get_plantas_contratos(
         compra_externa_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
+            "numero_codigo_contrato": c.numero_codigo_contrato,
             "vendedor_nombre": c.vendedor_nombre,
             "vendedor_nit": c.vendedor_nit,
             "tarifa_base": float(c.tarifa_base) if c.tarifa_base is not None else None,

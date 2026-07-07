@@ -29,6 +29,23 @@ FUENTE_FALLBACK = "bolsa_fallback"  # último precio de bolsa anterior disponibl
 FUENTE_MES = "bolsa_mes"            # promedio mensual de bolsa
 FUENTE_BASE = "contrato_base"       # precio base de contrato (parámetro)
 FUENTE_NINGUNA = "sin_precio"       # no se pudo resolver ningún precio
+FUENTE_PPA = "ppa"                  # tarifa contratada PPA (fijada por el endpoint)
+
+# Etiquetas legibles por humanos para exponer la fuente al usuario final (socios
+# GEO). Nunca mostrar los tokens crudos (`bolsa_mes`, etc.) en la UI.
+FUENTE_LABELS = {
+    FUENTE_DIARIO: "Precio de bolsa del día",
+    FUENTE_FALLBACK: "Último precio de bolsa disponible",
+    FUENTE_MES: "Promedio mensual de bolsa",
+    FUENTE_BASE: "Precio base de contrato",
+    FUENTE_NINGUNA: "Sin precio disponible",
+    FUENTE_PPA: "Tarifa contratada (PPA)",
+}
+
+
+def etiqueta_fuente(fuente) -> str:
+    """Etiqueta legible de una fuente de precio; degrada al token si es desconocida."""
+    return FUENTE_LABELS.get(fuente, fuente or FUENTE_LABELS[FUENTE_NINGUNA])
 
 
 class PrecioResuelto(NamedTuple):

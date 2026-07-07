@@ -31,8 +31,12 @@ from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_
 from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
-from app.utils.xm_price_mapper import XMPriceMapper
-from app.utils.compliance_calculator import calcular_liquidacion
+from app.utils.xm_price_mapper import XMPriceMapper, etiqueta_fuente
+from app.utils.compliance_calculator import (
+    calcular_liquidacion,
+    etiqueta_estado,
+    mensaje_liquidacion,
+)
 
 router = APIRouter(prefix="/liquidaciones", tags=["Liquidaciones"])
 
@@ -1204,7 +1208,18 @@ def auto_populate_xm_datos(
 
     total_kwh = float(gen_row.total_kwh or 0) if gen_row else 0.0
     if total_kwh <= 0:
-        return {"msg": "Sin generación registrada para este período", "xm_datos": []}
+        # Misma forma de respuesta que los demás desenlaces (simetría de contrato).
+        resultado = calcular_liquidacion(total_kwh, None, None)
+        return {
+            "msg": mensaje_liquidacion(resultado, total_kwh, year, month),
+            "xm_datos": [],
+            "estado_cumplimiento": resultado.estado_cumplimiento,
+            "estado_label": etiqueta_estado(resultado.estado_cumplimiento),
+            "fuente_precio": resultado.fuente_precio,
+            "fuente_precio_label": etiqueta_fuente(resultado.fuente_precio),
+            "precio_aplicado": resultado.precio_aplicado,
+            "desglose": resultado.desglose,
+        }
 
     tarifa = 0.0
     tarifa_source = None
@@ -1244,15 +1259,14 @@ def auto_populate_xm_datos(
 
     if resultado.valor_bruto_cop <= 0:
         return {
-            "msg": (
-                f"No se liquidó: {total_kwh:.1f} kWh, "
-                f"estado_cumplimiento={resultado.estado_cumplimiento}, "
-                f"fuente_precio={resultado.fuente_precio}"
-            ),
+            "msg": mensaje_liquidacion(resultado, total_kwh, year, month),
             "xm_datos": [],
             "estado_cumplimiento": resultado.estado_cumplimiento,
+            "estado_label": etiqueta_estado(resultado.estado_cumplimiento),
             "fuente_precio": resultado.fuente_precio,
+            "fuente_precio_label": etiqueta_fuente(resultado.fuente_precio),
             "precio_aplicado": resultado.precio_aplicado,
+            "desglose": resultado.desglose,
         }
 
     frontera_row = db.execute(text("""
@@ -1285,13 +1299,12 @@ def auto_populate_xm_datos(
         db.commit()
 
     return {
-        "msg": (
-            f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} "
-            f"({resultado.fuente_precio}) = ${valor_bruto:,.0f} COP"
-        ),
+        "msg": mensaje_liquidacion(resultado, total_kwh, year, month),
         "xm_datos": [_serializar_xm_dato(dato)],
         "estado_cumplimiento": resultado.estado_cumplimiento,
+        "estado_label": etiqueta_estado(resultado.estado_cumplimiento),
         "fuente_precio": resultado.fuente_precio,
+        "fuente_precio_label": etiqueta_fuente(resultado.fuente_precio),
         "precio_aplicado": resultado.precio_aplicado,
         "desglose": resultado.desglose,
     }

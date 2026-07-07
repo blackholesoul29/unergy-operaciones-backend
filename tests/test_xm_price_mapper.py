@@ -121,3 +121,38 @@ def test_get_month_average_fallback_a_base():
     m = XMPriceMapper(FakeDB(mes=None), precio_base=160)
     r = m.get_month_average(2026, 6)
     assert r.precio == Decimal("160") and r.fuente == FUENTE_BASE
+
+
+# ── Etiquetas legibles de la fuente de precio ─────────────────────────────────
+from app.utils.xm_price_mapper import (  # noqa: E402
+    FUENTE_BASE,
+    FUENTE_DIARIO,
+    FUENTE_FALLBACK,
+    FUENTE_LABELS,
+    FUENTE_NINGUNA,
+    FUENTE_PPA,
+    etiqueta_fuente,
+)
+
+
+def test_etiqueta_fuente_todas_las_fuentes_conocidas():
+    assert etiqueta_fuente(FUENTE_MES) == "Promedio mensual de bolsa"
+    assert etiqueta_fuente(FUENTE_DIARIO) == "Precio de bolsa del día"
+    assert etiqueta_fuente(FUENTE_FALLBACK) == "Último precio de bolsa disponible"
+    assert etiqueta_fuente(FUENTE_BASE) == "Precio base de contrato"
+    assert etiqueta_fuente(FUENTE_PPA) == "Tarifa contratada (PPA)"
+    assert etiqueta_fuente(FUENTE_NINGUNA) == "Sin precio disponible"
+
+
+def test_etiqueta_fuente_desconocida_o_none_no_revienta():
+    # Fuente desconocida degrada al token; None/"" cae a "Sin precio disponible".
+    assert etiqueta_fuente("algo_raro") == "algo_raro"
+    assert etiqueta_fuente(None) == "Sin precio disponible"
+    assert etiqueta_fuente("") == "Sin precio disponible"
+
+
+def test_fuente_labels_no_expone_tokens_crudos():
+    # Ninguna etiqueta debe ser igual a su token interno (todas son legibles).
+    for token, label in FUENTE_LABELS.items():
+        assert label != token
+        assert " " in label  # frase legible, no un identificador

@@ -90,3 +90,59 @@ def test_calculator_evaluar_dia_integra_mapper():
     r = calc.evaluar_dia(1000, "2026-06-15")
     assert r.valor_bruto_cop == 210_000.0
     assert r.fuente_precio == "bolsa_diario"
+
+
+# ── Etiquetas y mensajes de usuario (copy en español, sin tokens crudos) ──────
+from app.utils.compliance_calculator import (  # noqa: E402
+    ESTADO_LABELS,
+    etiqueta_estado,
+    mensaje_liquidacion,
+)
+
+
+def test_etiqueta_estado_conocido_y_desconocido():
+    assert etiqueta_estado(CUMPLE) == "Liquidada"
+    assert etiqueta_estado(SIN_PRECIO) == "Pendiente de precio"
+    assert etiqueta_estado(NO_CUMPLE) == "No liquidada"
+    # Estado desconocido degrada al token, no revienta.
+    assert etiqueta_estado("otro") == "otro"
+    assert etiqueta_estado(None) == ""
+
+
+def test_mensaje_liquidada_incluye_valor_y_fuente_legible():
+    r = calcular_liquidacion(100_000, 200, "bolsa_mes")
+    msg = mensaje_liquidacion(r, 100_000, 2026, 6)
+    assert "Promedio mensual de bolsa" in msg  # etiqueta legible, no "bolsa_mes"
+    assert "20,000,000" in msg
+    assert "bolsa_mes" not in msg  # nunca el token crudo
+
+
+def test_mensaje_sin_precio_es_accionable_y_no_filtra_tokens():
+    r = calcular_liquidacion(100_000, None, "sin_precio")
+    assert r.estado_cumplimiento == SIN_PRECIO
+    msg = mensaje_liquidacion(r, 100_000, 2026, 6)
+    assert "no está publicado" in msg
+    assert "06/2026" in msg
+    assert "reintente" in msg.lower()
+    # No debe filtrar llaves internas del resultado.
+    assert "estado_cumplimiento=" not in msg
+    assert "fuente_precio=" not in msg
+
+
+def test_mensaje_bajo_umbral_menciona_umbral():
+    r = calcular_liquidacion(500, 200, "bolsa_mes", umbral_kwh=1000)
+    assert r.estado_cumplimiento == NO_CUMPLE
+    msg = mensaje_liquidacion(r, 500, 2026, 6)
+    assert "umbral" in msg.lower()
+    assert "1,000 kWh" in msg
+
+
+def test_mensaje_sin_generacion():
+    r = calcular_liquidacion(0, 200, "bolsa_mes")
+    msg = mensaje_liquidacion(r, 0, 2026, 6)
+    assert "sin generación" in msg.lower()
+    assert "06/2026" in msg
+
+
+def test_estado_labels_cubre_todos_los_estados():
+    assert set(ESTADO_LABELS) == {CUMPLE, NO_CUMPLE, SIN_PRECIO}

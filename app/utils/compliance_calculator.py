@@ -18,12 +18,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.utils.xm_price_mapper import FUENTE_NINGUNA, XMPriceMapper
+from app.utils.xm_price_mapper import FUENTE_NINGUNA, XMPriceMapper, etiqueta_fuente
 
 # Estados de cumplimiento
 CUMPLE = "cumple"
 NO_CUMPLE = "no_cumple"
 SIN_PRECIO = "sin_precio"
+
+# Etiquetas legibles del estado. Este endpoint no evalúa una meta de generación
+# (siempre `umbral_kwh=0`), así que "cumple" solo significa "se pudo liquidar".
+# Las etiquetas evitan implicar un cumplimiento de obligación verificado.
+ESTADO_LABELS = {
+    CUMPLE: "Liquidada",
+    NO_CUMPLE: "No liquidada",
+    SIN_PRECIO: "Pendiente de precio",
+}
+
+
+def etiqueta_estado(estado) -> str:
+    """Etiqueta legible del estado de liquidación; degrada al token si es desconocido."""
+    return ESTADO_LABELS.get(estado, estado or "")
 
 
 @dataclass
@@ -104,6 +118,42 @@ def calcular_liquidacion(
             "umbral_kwh": umbral,
         },
     )
+
+
+def mensaje_liquidacion(resultado: ResultadoLiquidacion, total_kwh, year, month) -> str:
+    """Mensaje en español, accionable, para el usuario (función pura, testeable).
+
+    Cubre los tres desenlaces con copy legible (sin exponer tokens internos):
+    - liquidada: energía × precio con la fuente en palabras.
+    - sin precio: explica el rezago de publicación de XM y que se reintente.
+    - no liquidada: sin generación o por debajo del umbral del contrato.
+    """
+    periodo = f"{int(month):02d}/{int(year)}"
+
+    if resultado.estado_cumplimiento == CUMPLE:
+        return (
+            f"Datos XM poblados: {total_kwh:,.1f} kWh × "
+            f"${(resultado.precio_aplicado or 0):,.2f} COP/kWh "
+            f"({etiqueta_fuente(resultado.fuente_precio)}) = "
+            f"${resultado.valor_bruto_cop:,.0f} COP"
+        )
+
+    if resultado.estado_cumplimiento == SIN_PRECIO:
+        return (
+            f"No se liquidó: hay {total_kwh:,.1f} kWh de generación pero el precio "
+            f"de bolsa aún no está publicado para {periodo}. XM suele tener 2-3 días "
+            f"de rezago; reintente cuando los precios estén cargados."
+        )
+
+    # NO_CUMPLE
+    motivo = (resultado.desglose or {}).get("motivo")
+    if motivo == "bajo_umbral":
+        umbral = (resultado.desglose or {}).get("umbral_kwh") or 0
+        return (
+            f"No se liquidó: {total_kwh:,.1f} kWh no alcanzan el umbral de "
+            f"cumplimiento del contrato ({umbral:,.0f} kWh) para {periodo}."
+        )
+    return f"No se liquidó: sin generación registrada para {periodo}."
 
 
 class ComplianceCalculator:

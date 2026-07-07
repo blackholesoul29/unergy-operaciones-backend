@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
@@ -29,7 +30,8 @@ from app.models import (
     MonitoreoVerificacion, Portafolio, ContratoServicio, Mantenimiento,
 )
 from app.models.usuarios import Usuario
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.clientes import Cliente
 from app.utils.proyecto_matching import find_proyecto_by_name
 
 logger = logging.getLogger("monitoreo")
@@ -636,20 +638,23 @@ def verify_code(payload: dict, db: Session = Depends(get_db)):
     verif.usado = True
     db.commit()
 
-    # buscar proyectos asociados al email del cliente
-    proyectos = (
-        db.query(Proyecto)
-        .join(Proyecto.cliente)
+    # Proyectos donde el cliente con este correo es inversionista vigente
+    # (fecha_fin nula o futura) -- ya no depende de ser el titular único.
+    hoy = date.today()
+    filas = (
+        db.query(Proyecto.nombre_comercial)
+        .join(ProyectoInversionista, ProyectoInversionista.proyecto_id == Proyecto.id)
+        .join(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
         .filter(
             Proyecto.estado == "en_operacion",
+            Cliente.correo_electronico.isnot(None),
+            func.lower(Cliente.correo_electronico) == email,
+            (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
         )
+        .distinct()
         .all()
     )
-    # filtrar proyectos donde el cliente tiene correo coincidente
-    proyectos_cliente = [
-        p.nombre_comercial for p in proyectos
-        if p.cliente and p.cliente.correo and p.cliente.correo.lower() == email
-    ]
+    proyectos_cliente = [f[0] for f in filas]
 
     return {"ok": True, "projects": proyectos_cliente, "email": email}
 

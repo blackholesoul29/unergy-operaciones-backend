@@ -243,9 +243,10 @@ class FronteraOut(FronteraBase):
     operador_comercial: Optional[str] = None
     operador_red_id: Optional[int] = None
     operador_correos: list[str] = []
-    cliente_id: Optional[int] = None
-    cliente_nombre: Optional[str] = None
-    cliente_correos_cgm: list[str] = []
+    # Uno por cada cliente que sea fuente del contacto CGM de este proyecto
+    # (puntero de área, o inversionista vigente si no hay puntero) -- puede
+    # haber varios si el proyecto tiene varios inversionistas.
+    clientes_cgm: list[dict] = []
 
 
 class FronteraLecturaCreate(BaseModel):

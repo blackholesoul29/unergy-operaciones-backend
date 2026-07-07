@@ -9,14 +9,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura
-from app.models.proyectos import Proyecto
 from app.models.operadores_red import OperadorRed
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.contactos import get_contactos
+from app.services.contactos import get_contactos, get_clientes_contacto
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
@@ -36,10 +35,10 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
-        if f.proyecto.cliente:
-            d.cliente_id = f.proyecto.cliente.id
-            d.cliente_nombre = f.proyecto.cliente.razon_social_nombre
-        d.cliente_correos_cgm = get_contactos(db, "cgm", proyecto_id=f.proyecto_id)
+        d.clientes_cgm = [
+            {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
+            for c in get_clientes_contacto(db, "cgm", f.proyecto_id)
+        ]
     if f.operador:
         d.operador_red_id = f.operador.id
         d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
@@ -48,7 +47,7 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
 
 
 _FRONTERA_OPTS = (
-    joinedload(Frontera.proyecto).joinedload(Proyecto.cliente),
+    joinedload(Frontera.proyecto),
     joinedload(Frontera.operador).joinedload(OperadorRed.contactos),
 )
 

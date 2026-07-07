@@ -155,7 +155,7 @@ class ProyectoInversorOut(ProyectoInversorCreate):
 # ── Contactos (siempre de Cliente) ────────────────────────────────────────────
 # Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-TipoContacto = Literal["operacional", "cgm", "liquidacion", "soporte", "monitoreo"]
+TipoContacto = Literal["operacional", "cgm", "liquidacion"]
 
 
 class ContactoCreate(BaseModel):

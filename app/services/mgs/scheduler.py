@@ -305,7 +305,7 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
                     logger.debug("No project found for alarm node '%s' — skipping notification", alarm.node_name)
                     continue
 
-                emails = get_contactos(db, "monitoreo", proyecto_id=proyecto["id"])
+                emails = get_contactos(db, "operacional", proyecto_id=proyecto["id"])
                 if not emails:
                     continue
 

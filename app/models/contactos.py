@@ -10,8 +10,6 @@ class TipoContactoEnum(str, enum.Enum):
     operacional = "operacional"
     cgm = "cgm"
     liquidacion = "liquidacion"
-    soporte = "soporte"
-    monitoreo = "monitoreo"
 
 
 class Contacto(Base):

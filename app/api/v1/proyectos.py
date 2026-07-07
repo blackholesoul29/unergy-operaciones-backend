@@ -692,7 +692,7 @@ def backfill_minigranja_inversores(
 
 
 # ── Puntero de contactos por área ──────────────────────────────────────────────
-# Para cada tipo (operacional/cgm/liquidacion/soporte/monitoreo), este proyecto
+# Para cada tipo (operacional/cgm/liquidacion), este proyecto
 # puede apuntar a un Cliente distinto al titular -- ver app/services/contactos.py.
 # Sin fila para un tipo = usa los contactos del cliente titular.
 

@@ -50,11 +50,21 @@ def upgrade() -> None:
             datos_adicionales JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT ck_liq_xm_ingesta_hora CHECK (hora IS NULL OR (hora >= 0 AND hora <= 23)),
-            CONSTRAINT uq_liq_xm_ingesta_informe_proyecto_fecha_hora
-                UNIQUE (informe_id, proyecto_id, fecha, hora)
+            CONSTRAINT ck_liq_xm_ingesta_hora CHECK (hora IS NULL OR (hora >= 0 AND hora <= 23))
         )
     """))
+    # Idempotencia diaria: el agregado diario se guarda con hora=NULL y en Postgres
+    # los NULL son distintos entre sí, así que un UNIQUE plano sobre (..., hora) NO
+    # deduplica las filas diarias (el único caso que produce la fuente actual). Un
+    # índice único sobre COALESCE(hora, -1) colapsa los NULL a un centinela único
+    # (-1 nunca colisiona: el CHECK acota la hora real a 0-23), de modo que un
+    # reproceso concurrente choca con IntegrityError (rollback + estado ERROR en el
+    # orquestador) en vez de duplicar el valor liquidado. Las horas 0-23 siguen
+    # siendo distintas entre sí.
+    conn.execute(sa.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_liq_xm_ingesta_informe_proyecto_fecha_hora "
+        "ON liquidacion_xm_ingesta (informe_id, proyecto_id, fecha, COALESCE(hora, -1))"
+    ))
     conn.execute(sa.text(
         "CREATE INDEX IF NOT EXISTS ix_liq_xm_ingesta_informe_id "
         "ON liquidacion_xm_ingesta (informe_id)"
@@ -66,6 +76,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("uq_liq_xm_ingesta_informe_proyecto_fecha_hora", table_name="liquidacion_xm_ingesta")
     op.drop_index("ix_liq_xm_ingesta_proyecto_fecha", table_name="liquidacion_xm_ingesta")
     op.drop_index("ix_liq_xm_ingesta_informe_id", table_name="liquidacion_xm_ingesta")
     op.drop_table("liquidacion_xm_ingesta")

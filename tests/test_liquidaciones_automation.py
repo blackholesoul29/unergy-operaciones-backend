@@ -196,3 +196,45 @@ def test_run_proceso_informe_inexistente_devuelve_error():
     resumen = orch.run_liquidacion_proceso(fake_db, 12345)
     assert resumen.liquidacion_status == "ERROR"
     assert "no encontrado" in (resumen.error or "").lower()
+
+
+# ── idempotencia a nivel de esquema ──────────────────────────────────────────
+# El orquestador es idempotente por informe vía delete-then-insert, pero la red de
+# seguridad de la DB debe impedir el doble-conteo si dos reprocesos concurrentes se
+# entrelazan. Un UNIQUE plano sobre (..., hora) NO sirve: el agregado diario usa
+# hora=NULL y en Postgres los NULL son distintos entre sí. El índice único debe ir
+# sobre COALESCE(hora, -1) para colapsar los NULL a un centinela único.
+
+def _idempotency_index():
+    from app.models.liquidaciones import LiquidacionXMIngesta
+    tbl = LiquidacionXMIngesta.__table__
+    for ix in tbl.indexes:
+        if ix.name == "uq_liq_xm_ingesta_informe_proyecto_fecha_hora":
+            return ix
+    return None
+
+
+def test_idempotencia_es_indice_unico_sobre_coalesce_hora():
+    ix = _idempotency_index()
+    assert ix is not None, "falta el índice de idempotencia"
+    assert ix.unique is True, "el índice de idempotencia debe ser UNIQUE"
+    exprs = " ".join(str(e) for e in ix.expressions).lower()
+    assert "coalesce(hora, -1)" in exprs, (
+        "el índice debe usar COALESCE(hora, -1); un UNIQUE plano sobre hora deja "
+        "pasar duplicados diarios (NULL distinto de NULL en Postgres)"
+    )
+
+
+def test_no_hay_unique_constraint_plano_con_hora_nullable():
+    # Regresión: la vieja UniqueConstraint(..., "hora") era un no-op para el
+    # agregado diario. No debe reaparecer.
+    from sqlalchemy import UniqueConstraint
+    from app.models.liquidaciones import LiquidacionXMIngesta
+    tbl = LiquidacionXMIngesta.__table__
+    for c in tbl.constraints:
+        if isinstance(c, UniqueConstraint):
+            cols = {col.name for col in c.columns}
+            assert cols != {"informe_id", "proyecto_id", "fecha", "hora"}, (
+                "reapareció el UNIQUE plano sobre hora (no deduplica el agregado "
+                "diario con hora=NULL)"
+            )

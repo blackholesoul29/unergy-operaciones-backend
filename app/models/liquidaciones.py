@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, date
 from typing import List
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, CheckConstraint, Index)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, UniqueConstraint, CheckConstraint, Index, text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -268,8 +268,18 @@ class LiquidacionXMIngesta(Base):
     """
     __tablename__ = "liquidacion_xm_ingesta"
     __table_args__ = (
-        UniqueConstraint("informe_id", "proyecto_id", "fecha", "hora",
-                         name="uq_liq_xm_ingesta_informe_proyecto_fecha_hora"),
+        # Idempotencia diaria: el agregado diario se guarda con hora=NULL y en
+        # Postgres los NULL son distintos entre sí, así que un UNIQUE plano sobre
+        # (..., hora) NO deduplica las filas diarias — que son el único caso que
+        # produce la fuente actual. Un índice único sobre COALESCE(hora, -1)
+        # colapsa los NULL a un único centinela (-1 nunca colisiona: el CHECK
+        # acota la hora real a 0-23), de modo que un reproceso concurrente choca
+        # con IntegrityError (rollback + estado ERROR en el orquestador) en vez de
+        # duplicar silenciosamente el valor liquidado. Las filas horarias (0-23)
+        # siguen siendo distintas entre sí.
+        Index("uq_liq_xm_ingesta_informe_proyecto_fecha_hora",
+              "informe_id", "proyecto_id", "fecha", text("COALESCE(hora, -1)"),
+              unique=True),
         CheckConstraint("hora IS NULL OR (hora >= 0 AND hora <= 23)",
                         name="ck_liq_xm_ingesta_hora"),
         Index("ix_liq_xm_ingesta_informe_id", "informe_id"),

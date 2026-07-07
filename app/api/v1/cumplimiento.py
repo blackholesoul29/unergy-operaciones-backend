@@ -1347,6 +1347,38 @@ def get_plantas_contratos(
                 })
         compra_out = sorted(por_contrato.values(), key=lambda c: c["nombre"])
 
+    # --- COMPRA EXTERNA (g. ppa_compra_externa): PPAs de compra FUERA de GESCON ---
+    # Plantas de terceros a las que Unergy les compra energía directamente con un
+    # PPA firmado a mano (módulo PPA, tipo_contrato='compra') sin registro en
+    # GESCON/ASIC. Antes se listaban en (b); al volver (b) GESCON-puro quedaron
+    # sin piscina. Un PPA de compra que sí llegó a GESCON ya está en (b) y se
+    # excluye aquí para no duplicarlo.
+    gescon_compra_ids = {c["contrato_ppa_id"] for c in compra_out if c.get("contrato_ppa_id")}
+    compra_externa_out = []
+    for c in _contratos_vigentes(db, year, month):
+        if (c.tipo_contrato or "venta") != "compra" or c.id in gescon_compra_ids:
+            continue
+        compra_externa_out.append({
+            "id": c.id,
+            "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
+            "vendedor_nombre": c.vendedor_nombre,
+            "vendedor_nit": c.vendedor_nit,
+            "tarifa_base": float(c.tarifa_base) if c.tarifa_base is not None else None,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            # Plantas externas vinculadas al PPA (no exigen representación ni
+            # estado en_operacion: no son plantas del portafolio Unergy).
+            "plantas": [
+                {
+                    "id": p.id,
+                    "nombre": p.nombre_comercial,
+                    "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+                    "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+                }
+                for p in c.proyectos
+            ],
+        })
+
     # --- BOLSA: remanente sin contrato PPA, subdividido en comercializador (UNGC) / libre ---
     # Paso POSTERIOR que NO altera la lógica de contratos: solo subdivide el remanente.
     bolsa_plantas = []
@@ -1379,6 +1411,7 @@ def get_plantas_contratos(
         "bolsa": bolsa_plantas,
         "bolsa_comercializador": bolsa_comercializador,
         "bolsa_libre": bolsa_libre,
+        "compra_externa": compra_externa_out,
     }
     # Piscinas estandarizadas a-f (misma fuente que GET /clasificacion-energia):
     # aditivo — re-agrupa lo anterior sin alterar las claves existentes.

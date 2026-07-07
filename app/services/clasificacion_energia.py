@@ -16,6 +16,10 @@ Mapeo:
   e. bolsa_venta_ungg ← remanente sin SIC vigente ("bolsa_libre")
   f. bolsa_venta_ungc ← remanente con SIC vigente comprador UNGC
                         ("bolsa_comercializador")
+  g. ppa_compra_externa ← PPAs de compra directa a terceros SIN registro GESCON
+                        (plantas externas, "compra_externa"). Solo piscina de
+                        vista: NO se materializa en el snapshot a-f de BD porque
+                        esas plantas están fuera del MEM.
 """
 from datetime import date
 
@@ -54,10 +58,13 @@ def derivar_pools(data: dict) -> dict:
             or [p for p in (data.get("bolsa") or []) if p.get("piscina") != "comercializador"],
         "bolsa_venta_ungc": data.get("bolsa_comercializador")
             or [p for p in (data.get("bolsa") or []) if p.get("piscina") == "comercializador"],
+        # (g) plantas externas: solo vista, no entra a _filas_desde_pools (fuera del MEM)
+        "ppa_compra_externa": data.get("compra_externa") or [],
     }
     counts = {
         key: (sum(len(ct.get("plantas") or []) for ct in items)
-              if key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg")
+              if key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg",
+                         "ppa_compra_externa")
               else len(items))
         for key, items in pools.items()
     }

@@ -44,6 +44,11 @@ class LiquidacionCreate(BaseModel):
     observaciones_resultados: str | None = None
 
 
+class LiquidacionBatchRequest(BaseModel):
+    month: int
+    year: int
+
+
 class LiquidacionUpdate(BaseModel):
     estado: str | None = None
     estado_resultados_url: str | None = None
@@ -368,6 +373,39 @@ def create_liquidacion(
         raise HTTPException(409, "Ya existe una liquidación para este proyecto y período")
     db.refresh(liq)
     return {"id": liq.id, "msg": "Liquidación creada"}
+
+
+@router.post("/batch-create")
+def batch_create_liquidaciones(
+    body: LiquidacionBatchRequest,
+    db: Session = Depends(get_db),
+    _=Depends(_require_liquidaciones_write),
+):
+    """Genera en lote borradores de liquidación (estado 'iniciada') para el
+    período dado, uno por proyecto en operación con contrato PPA. Idempotente:
+    los proyectos que ya tienen liquidación en ese período se omiten.
+
+    Es el disparador manual del mismo proceso que el job mensual programado."""
+    if not (1 <= body.month <= 12):
+        raise HTTPException(422, "month debe estar entre 1 y 12")
+    if body.year < 2000 or body.year > 2100:
+        raise HTTPException(422, "year fuera de rango")
+
+    from app.services.liquidacion_batch_service import LiquidacionBatchService
+
+    resultados = LiquidacionBatchService().create_monthly_liquidations(db, body.month, body.year)
+    creados = [r for r in resultados if r["status"] == "created"]
+    omitidos = [r for r in resultados if r["status"] == "skipped_existing"]
+    errores = [r for r in resultados if r["status"] == "error"]
+    return {
+        "periodo": f"{body.year:04d}-{body.month:02d}",
+        "creadas": len(creados),
+        "omitidas": len(omitidos),
+        "errores": len(errores),
+        "total_evaluadas": len(resultados),
+        "detalle": resultados,
+        "msg": f"{len(creados)} borradores de liquidación creados",
+    }
 
 
 # ── Resumen espejo del Panel Contable ──────────────────────────────────────────

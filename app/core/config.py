@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     MGS_POLL_INTERVAL_MINUTES: int = 15
     TIMEZONE: str = "America/Bogota"
 
+    # Lote mensual de borradores de liquidación (LiquidacionBatchService).
+    # Corre el día `DAY` del mes a las HH:MM (hora local `TIMEZONE`) y liquida el
+    # mes calendario inmediatamente anterior.
+    LIQUIDATION_BATCH_ENABLED: bool = True
+    LIQUIDATION_BATCH_DAY: int = 5
+    LIQUIDATION_BATCH_HOUR: int = 0
+    LIQUIDATION_BATCH_MINUTE: int = 0
+
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""

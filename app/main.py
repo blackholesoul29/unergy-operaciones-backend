@@ -2324,6 +2324,36 @@ def _scheduled_om_ipc_check():
         db.close()
 
 
+def _scheduled_liquidacion_batch():
+    """Job mensual: genera borradores de liquidación del mes calendario anterior.
+
+    Corre el día `LIQUIDATION_BATCH_DAY` a las HH:MM (ver config). Liquida el mes
+    inmediatamente anterior al actual, así ya existe la generación completa del
+    período. Es idempotente (unicidad proyecto+período), así que un reintento no
+    duplica nada.
+    """
+    from datetime import date as _date
+    from app.services.liquidacion_batch_service import LiquidacionBatchService
+
+    hoy = _date.today()
+    if hoy.month == 1:
+        month, year = 12, hoy.year - 1
+    else:
+        month, year = hoy.month - 1, hoy.year
+
+    db = SessionLocal()
+    try:
+        resultados = LiquidacionBatchService().create_monthly_liquidations(db, month, year)
+        creados = sum(1 for r in resultados if r["status"] == "created")
+        print(f"[liquidacion_batch] {year:04d}-{month:02d}: {creados} borradores creados "
+              f"({len(resultados)} proyectos evaluados)")
+    except Exception as e:
+        db.rollback()
+        print(f"[liquidacion_batch] ERROR: {e}")
+    finally:
+        db.close()
+
+
 _ARR_IPC_SEED = [
     {"año": 2023, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
     {"año": 2024, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
@@ -2551,6 +2581,19 @@ def _deferred_init():
                 id="om_ipc_check",
                 name="Check IPC anual O&M",
             )
+
+            if settings.LIQUIDATION_BATCH_ENABLED:
+                _mgs_scheduler.add_job(
+                    _scheduled_liquidacion_batch,
+                    CronTrigger(
+                        day=settings.LIQUIDATION_BATCH_DAY,
+                        hour=settings.LIQUIDATION_BATCH_HOUR,
+                        minute=settings.LIQUIDATION_BATCH_MINUTE,
+                        timezone=settings.TIMEZONE,
+                    ),
+                    id="liquidacion_batch",
+                    name="Lote mensual borradores de liquidación",
+                )
 
             if settings.ORIGINA_DATABASE_URL:
                 _mgs_scheduler.add_job(

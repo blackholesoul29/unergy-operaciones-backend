@@ -126,6 +126,9 @@ class Liquidacion(Base):
     # Informe PDF editable (HTML embebido, misma dinámica que informes de monitoreo)
     informe_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     informe_actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Marca de auditoría del job mensual de borradores (LiquidacionBatchService).
+    # NULL = creada manualmente; con fecha = generada automáticamente por el lote.
+    fecha_creacion_automatica: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

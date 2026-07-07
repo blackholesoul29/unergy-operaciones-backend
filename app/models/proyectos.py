@@ -154,7 +154,7 @@ class Proyecto(Base):
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
     grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
-    contactos: Mapped[list["ProyectoContacto"]] = relationship("ProyectoContacto", back_populates="proyecto", uselist=True)
+    area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
     fronteras: Mapped[list["Frontera"]] = relationship("Frontera", back_populates="proyecto", uselist=True)
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="proyecto", uselist=True)
@@ -271,20 +271,6 @@ class ProyectoInversor(Base):
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="inversores")
 
-
-class ProyectoContacto(Base):
-    __tablename__ = "proyecto_contactos"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    nombre: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False)
-    tipo: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    recibe_notificaciones: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contactos")
 
 
 class ProyectoInversionista(Base):

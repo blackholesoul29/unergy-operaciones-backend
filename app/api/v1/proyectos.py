@@ -8,8 +8,10 @@ from app.models import Proyecto
 from app.services.tsf_sync import _core
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoGrupoPanel, ProyectoInversor, ProyectoContacto,
+    ProyectoGrupoPanel, ProyectoInversor,
 )
+from app.models.contactos import ProyectoAreaContacto
+from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut,
@@ -17,7 +19,7 @@ from app.schemas.proyectos import (
     ProyectoInfoTecnicaCreate, ProyectoInfoTecnicaOut,
     ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
-    ProyectoContactoCreate, ProyectoContactoUpdate, ProyectoContactoOut,
+    ProyectoAreaContactoSet, ProyectoAreaContactoOut,
 )
 from app.schemas.common import PaginatedResponse
 
@@ -32,7 +34,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.info_tecnica),
             selectinload(Proyecto.grupos_panel),
             selectinload(Proyecto.inversores),
-            selectinload(Proyecto.contactos),
+            selectinload(Proyecto.area_contactos),
             selectinload(Proyecto.servicio_representacion),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         )
@@ -73,7 +75,7 @@ def list_proyectos(
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.inversores),
-        selectinload(Proyecto.contactos),
+        selectinload(Proyecto.area_contactos),
         selectinload(Proyecto.servicio_representacion),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
     )
@@ -271,7 +273,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
     db.query(ProyectoInversionista).filter_by(proyecto_id=id).delete()
     db.query(ProyectoGrupoPanel).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInversor).filter_by(proyecto_id=id).delete()
-    db.query(ProyectoContacto).filter_by(proyecto_id=id).delete()
+    db.query(ProyectoAreaContacto).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).delete()
 
     db.delete(p)
@@ -291,7 +293,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 # project_id_solenium) se copian del perdedor al ganador solo si el ganador los tiene
 # vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
 _MERGE_SIMPLE = [
-    "proyecto_grupos_panel", "proyecto_inversores", "proyecto_contactos",
+    "proyecto_grupos_panel", "proyecto_inversores",
     "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
     "contratos_servicio", "asic_solicitudes",
     "rec_procesos", "costos_variables", "garantias",
@@ -306,6 +308,9 @@ _MERGE_COMPOSITE = [
     ("mapeo_celda_concepto", ["concepto"]),
     ("alias_fuente_ingreso", ["columna_origen"]),
     ("ppa_contrato_proyectos", ["contrato_id"]),
+    # proyecto_area_contacto tiene UNIQUE (proyecto_id, tipo) -- si el ganador
+    # ya tiene un puntero para ese tipo, se descarta el del perdedor.
+    ("proyecto_area_contacto", ["tipo"]),
 ]
 _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
@@ -686,42 +691,50 @@ def backfill_minigranja_inversores(
     return backfill_inversores_minigranjas(db, solo_minigranja=solo_minigranja, dry_run=dry_run)
 
 
-# ── Contactos ─────────────────────────────────────────────────────────────────
+# ── Puntero de contactos por área ──────────────────────────────────────────────
+# Para cada tipo (operacional/cgm/liquidacion/soporte/monitoreo), este proyecto
+# puede apuntar a un Cliente distinto al titular -- ver app/services/contactos.py.
+# Sin fila para un tipo = usa los contactos del cliente titular.
 
-@router.get("/{id}/contactos", response_model=list[ProyectoContactoOut])
-def list_contactos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+@router.get("/{id}/area-contactos", response_model=list[ProyectoAreaContactoOut])
+def list_area_contactos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    return db.query(ProyectoContacto).filter_by(proyecto_id=id).all()
+    rows = (
+        db.query(ProyectoAreaContacto, Cliente.razon_social_nombre)
+        .join(Cliente, Cliente.id == ProyectoAreaContacto.cliente_id)
+        .filter(ProyectoAreaContacto.proyecto_id == id)
+        .all()
+    )
+    out = []
+    for area, nombre in rows:
+        area.cliente_nombre = nombre
+        out.append(area)
+    return out
 
 
-@router.post("/{id}/contactos", response_model=ProyectoContactoOut, status_code=201)
-def add_contacto(id: int, data: ProyectoContactoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+@router.put("/{id}/area-contactos/{tipo}", response_model=ProyectoAreaContactoOut)
+def set_area_contacto(id: int, tipo: str, data: ProyectoAreaContactoSet, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    c = ProyectoContacto(proyecto_id=id, **data.model_dump())
-    db.add(c)
+    if not db.query(Cliente).filter(Cliente.id == data.cliente_id).first():
+        raise HTTPException(404, "Cliente no encontrado")
+    area = db.query(ProyectoAreaContacto).filter_by(proyecto_id=id, tipo=tipo).first()
+    if area:
+        area.cliente_id = data.cliente_id
+    else:
+        area = ProyectoAreaContacto(proyecto_id=id, tipo=tipo, cliente_id=data.cliente_id)
+        db.add(area)
     db.commit()
-    db.refresh(c)
-    return c
+    db.refresh(area)
+    area.cliente_nombre = db.query(Cliente.razon_social_nombre).filter(Cliente.id == data.cliente_id).scalar()
+    return area
 
 
-@router.patch("/{id}/contactos/{c_id}", response_model=ProyectoContactoOut)
-def update_contacto(id: int, c_id: int, data: ProyectoContactoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
-    if not c:
-        raise HTTPException(404, "Contacto no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
-        setattr(c, k, v)
-    db.commit()
-    db.refresh(c)
-    return c
-
-
-@router.delete("/{id}/contactos/{c_id}", status_code=204)
-def delete_contacto(id: int, c_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
-    if not c:
-        raise HTTPException(404, "Contacto no encontrado")
-    db.delete(c)
+@router.delete("/{id}/area-contactos/{tipo}", status_code=204)
+def clear_area_contacto(id: int, tipo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    area = db.query(ProyectoAreaContacto).filter_by(proyecto_id=id, tipo=tipo).first()
+    if not area:
+        raise HTTPException(404, "Este proyecto no tiene un puntero para ese tipo")
+    db.delete(area)
     db.commit()
 
 

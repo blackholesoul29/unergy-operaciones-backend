@@ -13,6 +13,7 @@ from app.schemas.reporte_cgm import (
 )
 from app.services import email_service
 from app.services import reporte_cgm as svc
+from app.services.contactos import get_contactos
 from app.services.mgs.gaia_client import GaiaClient
 
 router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
@@ -72,7 +73,7 @@ def enviar_reporte_cgm(
                 items.append({"dest": dest, "nombre": f"Cliente #{dest.id}", "correos": [], "fronteras": []})
                 continue
             fronteras = _fronteras_de_cliente(db, dest.id)
-            correos = cliente.correos_cgm or []
+            correos = get_contactos(db, "cgm", cliente_id=dest.id)
             nombre = cliente.razon_social_nombre
 
         items.append({"dest": dest, "nombre": nombre, "correos": correos, "fronteras": fronteras})

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime, date
+from app.schemas.clientes import _EMAIL_RE
 
 
 # ── Inversionistas ────────────────────────────────────────────────────────────
@@ -151,25 +152,70 @@ class ProyectoInversorOut(ProyectoInversorCreate):
     model_config = {"from_attributes": True}
 
 
-# ── Contactos ─────────────────────────────────────────────────────────────────
+# ── Contactos (siempre de Cliente) ────────────────────────────────────────────
+# Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-class ProyectoContactoCreate(BaseModel):
-    nombre: str
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "soporte", "monitoreo"]
+
+
+class ContactoCreate(BaseModel):
+    nombre: Optional[str] = None
     email: str
-    tipo: Optional[str] = None
+    tipo: TipoContacto
     recibe_notificaciones: bool = True
 
+    @field_validator("email")
+    @classmethod
+    def validar_email(cls, v: str) -> str:
+        addr = v.strip().lower()
+        if not _EMAIL_RE.match(addr):
+            raise ValueError(f"Dirección de correo inválida: {addr}")
+        return addr
 
-class ProyectoContactoUpdate(BaseModel):
+
+class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
-    tipo: Optional[str] = None
+    tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
+    @field_validator("email")
+    @classmethod
+    def validar_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        addr = v.strip().lower()
+        if not _EMAIL_RE.match(addr):
+            raise ValueError(f"Dirección de correo inválida: {addr}")
+        return addr
 
-class ProyectoContactoOut(ProyectoContactoCreate):
+
+class ContactoOut(BaseModel):
+    id: int
+    cliente_id: int
+    nombre: Optional[str] = None
+    email: str
+    tipo: str
+    recibe_notificaciones: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+# ── Puntero por área (Proyecto → Cliente) ─────────────────────────────────────
+# Para el `tipo` dado, este proyecto usa los contactos de `cliente_id` en vez
+# de los de su cliente titular. Sin fila para un tipo = usa el titular.
+
+class ProyectoAreaContactoSet(BaseModel):
+    cliente_id: int
+
+
+class ProyectoAreaContactoOut(BaseModel):
     id: int
     proyecto_id: int
+    tipo: str
+    cliente_id: int
+    cliente_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -323,13 +369,13 @@ class ProyectoOut(BaseModel):
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []
     inversores: list[ProyectoInversorOut] = []
-    contactos: list[ProyectoContactoOut] = []
+    area_contactos: list[ProyectoAreaContactoOut] = []
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", "grupos_panel", "inversores", "contactos", mode="before")
+    @field_validator("inversionistas", "grupos_panel", "inversores", "area_contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:

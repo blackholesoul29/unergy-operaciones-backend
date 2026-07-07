@@ -16,6 +16,7 @@ from app.schemas.fronteras import (
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
 )
 from app.services.mgs.quoia_client import QuoiaClient
+from app.services.contactos import get_contactos
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
@@ -31,14 +32,14 @@ def _get_quoia() -> QuoiaClient:
     return _quoia
 
 
-def _to_out(f: Frontera) -> FronteraOut:
+def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
         if f.proyecto.cliente:
             d.cliente_id = f.proyecto.cliente.id
             d.cliente_nombre = f.proyecto.cliente.razon_social_nombre
-            d.cliente_correos_cgm = f.proyecto.cliente.correos_cgm or []
+        d.cliente_correos_cgm = get_contactos(db, "cgm", proyecto_id=f.proyecto_id)
     if f.operador:
         d.operador_red_id = f.operador.id
         d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
@@ -146,7 +147,7 @@ def list_fronteras(
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
         q = q.filter(Frontera.estado == estado)
-    return [_to_out(f) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
+    return [_to_out(f, db) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
@@ -164,12 +165,12 @@ def create_frontera(
                 setattr(existing, k, v)
             db.commit()
             db.refresh(existing)
-            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first())
+            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
     db.refresh(obj)
-    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first())
+    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -188,7 +189,7 @@ def get_frontera(
     )
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
-    return _to_out(f)
+    return _to_out(f, db)
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -216,7 +217,8 @@ def update_frontera(
         db.query(Frontera)
         .options(*_FRONTERA_OPTS)
         .filter(Frontera.id == f.id)
-        .first()
+        .first(),
+        db,
     )
 
 

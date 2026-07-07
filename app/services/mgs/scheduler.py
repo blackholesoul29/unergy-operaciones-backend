@@ -271,6 +271,7 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
 def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
     """Send email notifications in a separate DB session so failures don't affect persistence."""
     from app.services.email_service import send_alarm_notification_email
+    from app.services.contactos import get_contactos
 
     notifiable_severities = {Severity.CRITICAL, Severity.WARNING}
     to_notify = [
@@ -284,25 +285,32 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
     try:
         for alarm, alarm_db_id in to_notify:
             try:
-                emails = db.execute(text("""
-                    SELECT DISTINCT pc.email
-                    FROM proyecto_contactos pc
-                    JOIN proyectos p ON pc.proyecto_id = p.id
-                    WHERE p.deleted_at IS NULL
-                      AND pc.recibe_notificaciones = TRUE
-                      AND (p.nombre_comercial = :name
-                           OR p.alias_monitoreo ILIKE :pattern
-                           OR p.nombre_comercial ILIKE :pattern)
+                # Resolver el proyecto real por nombre/alias (mismo criterio que
+                # _auto_create_fallas) en vez de emparejar directamente contra la
+                # tabla de contactos por nombre -- así get_contactos() resuelve
+                # correctamente el puntero de área / cliente titular por FK.
+                proyecto = db.execute(text("""
+                    SELECT id FROM proyectos
+                    WHERE deleted_at IS NULL
+                      AND (nombre_comercial = :name
+                           OR alias_monitoreo ILIKE :pattern
+                           OR nombre_comercial ILIKE :pattern)
+                    LIMIT 1
                 """), {
                     "name": alarm.node_name,
                     "pattern": f"%{alarm.node_name}%",
-                }).scalars().all()
+                }).mappings().first()
 
+                if not proyecto:
+                    logger.debug("No project found for alarm node '%s' — skipping notification", alarm.node_name)
+                    continue
+
+                emails = get_contactos(db, "monitoreo", proyecto_id=proyecto["id"])
                 if not emails:
                     continue
 
                 send_alarm_notification_email(
-                    to_emails=list(emails),
+                    to_emails=emails,
                     proyecto_nombre=alarm.node_name,
                     alarm_type=alarm.alarm_type.value,
                     severity=alarm.severity.value,

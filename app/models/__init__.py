@@ -3,8 +3,9 @@ from app.models.usuarios import Usuario, RolEnum
 from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, ClienteDocumentoComercial
 from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
-    ProyectoInversor, ProyectoContacto, ProyectoInversionista, Portafolio,
+    ProyectoInversor, ProyectoInversionista, Portafolio,
 )
+from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
 from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
 from app.models.fronteras import Frontera, FronteraLectura
@@ -44,7 +45,7 @@ from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimi
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
-    "ProyectoGrupoPanel", "ProyectoInversor", "ProyectoContacto",
+    "ProyectoGrupoPanel", "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
     "ProyectoInversionista", "Portafolio", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",

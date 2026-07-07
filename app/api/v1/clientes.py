@@ -8,11 +8,13 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models.contactos import Contacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
     ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
 )
+from app.schemas.proyectos import ContactoCreate, ContactoUpdate, ContactoOut
 from app.schemas.common import PaginatedResponse
 
 UPLOADS_DIR = Path("uploads/clientes")
@@ -138,6 +140,48 @@ def remove_servicio(id: int, servicio_id: int, db: Session = Depends(get_db), _=
     if not s:
         raise HTTPException(404, "Servicio no encontrado")
     db.delete(s)
+    db.commit()
+
+
+# ── Contactos ─────────────────────────────────────────────────────────────────
+# Correos reales de esta razón social, por área. Aplican por defecto a todos
+# sus proyectos, salvo que un proyecto apunte a otro Cliente para ese mismo
+# `tipo` (ver app/services/contactos.py y /proyectos/{id}/area-contactos).
+
+@router.get("/{id}/contactos", response_model=list[ContactoOut])
+def list_contactos_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_cliente_or_404(id, db)
+    return db.query(Contacto).filter_by(cliente_id=id).all()
+
+
+@router.post("/{id}/contactos", response_model=ContactoOut, status_code=201)
+def add_contacto_cliente(id: int, data: ContactoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_cliente_or_404(id, db)
+    c = Contacto(cliente_id=id, **data.model_dump())
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.patch("/{id}/contactos/{c_id}", response_model=ContactoOut)
+def update_contacto_cliente(id: int, c_id: int, data: ContactoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    c = db.query(Contacto).filter_by(id=c_id, cliente_id=id).first()
+    if not c:
+        raise HTTPException(404, "Contacto no encontrado")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(c, k, v)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.delete("/{id}/contactos/{c_id}", status_code=204)
+def delete_contacto_cliente(id: int, c_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    c = db.query(Contacto).filter_by(id=c_id, cliente_id=id).first()
+    if not c:
+        raise HTTPException(404, "Contacto no encontrado")
+    db.delete(c)
     db.commit()
 
 

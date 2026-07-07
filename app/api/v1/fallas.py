@@ -583,68 +583,6 @@ def list_fallas(
     return {"items": items, "total": total, "page": page, "size": effective_size, "pages": -(-total // effective_size)}
 
 
-def _correos_de_cliente(cliente) -> list[str]:
-    """Correos operacionales de un cliente. Prefiere el array
-    `correos_operacionales`; si está vacío cae al campo legado `correo_operacional`."""
-    if not cliente:
-        return []
-    arr = cliente.correos_operacionales or []
-    if isinstance(arr, list) and arr:
-        return [str(e) for e in arr if e]
-    if cliente.correo_operacional:
-        return [cliente.correo_operacional]
-    return []
-
-
-def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
-    """Correos operacionales a notificar para un proyecto.
-
-    Reúne los correos del cliente dueño (`cliente_id`, si está definido) y de
-    todos los inversionistas vigentes del proyecto (fecha_fin nula = "Vigente",
-    o futura). Cada cliente/inversionista aporta sus propios correos; se
-    devuelven sin duplicados preservando el orden de aparición. Así los
-    proyectos multi-inversionista (p.ej. minigranjas sin `cliente_id` único)
-    notifican a todos los participantes que tengan correos configurados.
-    """
-    from app.models.proyectos import Proyecto, ProyectoInversionista
-    from app.models.clientes import Cliente
-    proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
-    if not proy:
-        return []
-
-    correos: list[str] = []
-
-    # 1) Cliente dueño del proyecto (si existe)
-    if proy.cliente_id:
-        cliente_dueno = db.query(Cliente).filter(Cliente.id == proy.cliente_id).first()
-        correos.extend(_correos_de_cliente(cliente_dueno))
-
-    # 2) Inversionistas vigentes del proyecto
-    hoy = date.today()
-    inversionistas = (
-        db.query(ProyectoInversionista)
-        .filter(
-            ProyectoInversionista.proyecto_id == proyecto_id,
-            (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
-        )
-        .all()
-    )
-    inv_cliente_ids = [inv.cliente_id for inv in inversionistas if inv.cliente_id]
-    if inv_cliente_ids:
-        clientes_inv = db.query(Cliente).filter(Cliente.id.in_(inv_cliente_ids)).all()
-        for c in clientes_inv:
-            correos.extend(_correos_de_cliente(c))
-
-    # Deduplicar preservando el orden
-    vistos: set[str] = set()
-    unicos: list[str] = []
-    for e in correos:
-        if e and e not in vistos:
-            vistos.add(e)
-            unicos.append(e)
-    return unicos
-
-
 _notif_logger = logging.getLogger("fallas.notificacion")
 
 
@@ -660,10 +598,11 @@ def _enviar_notificacion(
     Retorna: {"ok": bool, "enviados": [...], "errores": [...], "sin_correos": bool}
     """
     from app.services.email_service import send_falla_notification_email
+    from app.services.contactos import get_contactos
     from app.core.config import settings
     from datetime import datetime, timezone
 
-    correos = _get_correos_cliente(falla.proyecto_id, db)
+    correos = get_contactos(db, "operacional", proyecto_id=falla.proyecto_id)
     ts = datetime.now(timezone.utc).isoformat()
 
     if not correos:

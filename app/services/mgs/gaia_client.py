@@ -203,6 +203,16 @@ def _find_frt(*names: str) -> str | None:
     return None
 
 
+# Override directo proyecto_id -> (node_principal, node_respaldo).
+# Para medidores que existen como nodo en Gaia pero cuyo proyecto no está
+# registrado como border/frontera en Gaia, por lo que la resolución dinámica
+# (que arma su mapa desde los borders) no los encuentra. Mismo espíritu que el
+# fallback hardcodeado FRONTERA_NODE_MAP, pero indexado por proyecto_id.
+_PROYECTO_NODE_OVERRIDE: dict[int, tuple[int | None, int | None]] = {
+    45: (616, None),  # Minigranja Solar San Pedro — medidor de generación (nodo Gaia 616)
+}
+
+
 def _resolve_frt_and_pair(
     *names: str,
     gaia: "GaiaClient | None" = None,
@@ -233,6 +243,11 @@ def _resolve_frt_and_pair(
     fronteras.proyecto_id (correr scripts/etl_fronteras_proyectos.py), no
     parchear con otro keyword.
     """
+    # Override directo por proyecto_id — se revisa primero y corta antes de
+    # llamar a la API de Gaia (para medidores sin border en Gaia).
+    if proyecto_id is not None and proyecto_id in _PROYECTO_NODE_OVERRIDE:
+        return (None, _PROYECTO_NODE_OVERRIDE[proyecto_id])
+
     maps = _get_dynamic_maps(gaia) if gaia is not None else None
 
     frt: str | None = None

@@ -43,34 +43,26 @@ def _get_gaia() -> GaiaClient:
     return _gaia
 
 
-# ── meter.id → retailer node.id (cached 1 h) ──────────────────────────────────
-# El snapshot eléctrico se pide por node_id, pero el selector entrega meter_id.
-# La API de Quoia expone el vínculo en /api/node/retailer/ (node.meter.id → node.id).
-_meter_node_map: dict[int, int] = {}
-_meter_node_ts: float = 0.0
-_METER_NODE_TTL = 3600.0
+# ── Nodos (medidores) de Quoia vía Gaia/JWT — cacheados 1 h ───────────────────
+# El diagrama fasorial se alimenta del snapshot eléctrico del nodo, que se pide
+# por node_id. La lista de nodos y su lectura usan GaiaClient (GAIA_USER/PASS),
+# que es la credencial realmente configurada en producción.
+_nodes_cache: list[dict] = []
+_nodes_ts: float = 0.0
+_NODES_TTL = 3600.0
 
 
-def _resolve_node_id(gaia: GaiaClient, meter_id: int) -> int | None:
-    """Resuelve el node_id del retailer a partir del meter_id de Quoia.
-
-    Cachea el mapa completo 1 h. Si la API responde vacío, conserva el mapa
-    previo en vez de invalidarlo.
-    """
-    global _meter_node_map, _meter_node_ts
+def _list_gaia_nodes(gaia: GaiaClient) -> list[dict]:
+    """Lista de nodos del retailer (cacheada 1 h). Conserva el cache previo si
+    la API responde vacío en vez de invalidarlo."""
+    global _nodes_cache, _nodes_ts
     now = time.monotonic()
-    if not _meter_node_map or (now - _meter_node_ts) >= _METER_NODE_TTL:
-        mapping: dict[int, int] = {}
-        for node in gaia.get_all_nodes():
-            meter = node.get("meter") or {}
-            if isinstance(meter, dict):
-                mid, nid = meter.get("id"), node.get("id")
-                if mid is not None and nid is not None:
-                    mapping[int(mid)] = int(nid)
-        if mapping:
-            _meter_node_map = mapping
-            _meter_node_ts = now
-    return _meter_node_map.get(int(meter_id))
+    if not _nodes_cache or (now - _nodes_ts) >= _NODES_TTL:
+        nodes = gaia.get_all_nodes()
+        if nodes:
+            _nodes_cache = nodes
+            _nodes_ts = now
+    return _nodes_cache
 
 
 def _to_out(f: Frontera, db: Session) -> FronteraOut:
@@ -401,22 +393,30 @@ class FasorialLecturaOut(BaseModel):
     last_time: str | None = None
 
 
-@router.get("/fasorial/lectura/{meter_id}", response_model=FasorialLecturaOut, tags=["Fronteras"])
+@router.get("/fasorial/nodos", tags=["Fronteras"])
+def fasorial_nodos(_=Depends(get_current_user)):
+    """Lista de nodos/medidores de Quoia (vía Gaia) para el selector del fasorial."""
+    gaia = _get_gaia()
+    out = [
+        {"id": int(n["id"]), "name": n.get("name") or f"Nodo {n['id']}"}
+        for n in _list_gaia_nodes(gaia)
+        if n.get("id") is not None
+    ]
+    out.sort(key=lambda x: x["name"].lower())
+    return {"total": len(out), "nodos": out}
+
+
+@router.get("/fasorial/lectura/{node_id}", response_model=FasorialLecturaOut, tags=["Fronteras"])
 def fasorial_lectura(
-    meter_id: int,
+    node_id: int,
     _=Depends(get_current_user),
 ):
-    """Devuelve la lectura más reciente del medidor (hoy) para el diagrama fasorial.
+    """Devuelve la lectura más reciente del nodo (hoy) para el diagrama fasorial.
 
-    Resuelve meter_id → node_id y toma el snapshot eléctrico del nodo, del cual
-    extrae tensiones (vp1/2/3) y corrientes (cp1/2/3) de fase. Si el medidor no
-    tiene lectura disponible hoy, responde 422.
+    Toma el snapshot eléctrico del nodo y extrae tensiones (vp1/2/3) y corrientes
+    (cp1/2/3) de fase. Si el nodo no tiene lectura disponible hoy, responde 422.
     """
     gaia = _get_gaia()
-    node_id = _resolve_node_id(gaia, meter_id)
-    if node_id is None:
-        raise HTTPException(422, "No fue posible obtener la información del medidor")
-
     snap = gaia.get_node_electrical_snapshot(node_id)
     if not snap:
         raise HTTPException(422, "No fue posible obtener la información del medidor")

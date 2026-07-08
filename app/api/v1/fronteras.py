@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 import io
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -15,11 +16,13 @@ from app.schemas.fronteras import (
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
 )
 from app.services.mgs.quoia_client import QuoiaClient
+from app.services.mgs.gaia_client import GaiaClient
 from app.services.contactos import get_contactos, get_clientes_contacto
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
 _quoia: QuoiaClient | None = None
+_gaia: GaiaClient | None = None
 
 
 def _get_quoia() -> QuoiaClient:
@@ -29,6 +32,45 @@ def _get_quoia() -> QuoiaClient:
     if not _quoia.enabled:
         raise HTTPException(503, "QUOIA_API_TOKEN not configured")
     return _quoia
+
+
+def _get_gaia() -> GaiaClient:
+    global _gaia
+    if _gaia is None:
+        _gaia = GaiaClient()
+    if not _gaia.enabled:
+        raise HTTPException(503, "Credenciales de Gaia/Quoia no configuradas (GAIA_USER/GAIA_PASS)")
+    return _gaia
+
+
+# ── meter.id → retailer node.id (cached 1 h) ──────────────────────────────────
+# El snapshot eléctrico se pide por node_id, pero el selector entrega meter_id.
+# La API de Quoia expone el vínculo en /api/node/retailer/ (node.meter.id → node.id).
+_meter_node_map: dict[int, int] = {}
+_meter_node_ts: float = 0.0
+_METER_NODE_TTL = 3600.0
+
+
+def _resolve_node_id(gaia: GaiaClient, meter_id: int) -> int | None:
+    """Resuelve el node_id del retailer a partir del meter_id de Quoia.
+
+    Cachea el mapa completo 1 h. Si la API responde vacío, conserva el mapa
+    previo en vez de invalidarlo.
+    """
+    global _meter_node_map, _meter_node_ts
+    now = time.monotonic()
+    if not _meter_node_map or (now - _meter_node_ts) >= _METER_NODE_TTL:
+        mapping: dict[int, int] = {}
+        for node in gaia.get_all_nodes():
+            meter = node.get("meter") or {}
+            if isinstance(meter, dict):
+                mid, nid = meter.get("id"), node.get("id")
+                if mid is not None and nid is not None:
+                    mapping[int(mid)] = int(nid)
+        if mapping:
+            _meter_node_map = mapping
+            _meter_node_ts = now
+    return _meter_node_map.get(int(meter_id))
 
 
 def _to_out(f: Frontera, db: Session) -> FronteraOut:
@@ -347,6 +389,49 @@ def quoia_meter_curves(meter_id: int, _=Depends(get_current_user)):
 
 
 # ── Diagrama Fasorial ──────────────────────────────────────────────────────────
+
+class FasorialLecturaOut(BaseModel):
+    """Última lectura del medidor (tensiones y corrientes por fase) desde Quoia."""
+    vp1: float | None
+    vp2: float | None
+    vp3: float | None
+    cp1: float | None
+    cp2: float | None
+    cp3: float | None
+    last_time: str | None = None
+
+
+@router.get("/fasorial/lectura/{meter_id}", response_model=FasorialLecturaOut, tags=["Fronteras"])
+def fasorial_lectura(
+    meter_id: int,
+    _=Depends(get_current_user),
+):
+    """Devuelve la lectura más reciente del medidor (hoy) para el diagrama fasorial.
+
+    Resuelve meter_id → node_id y toma el snapshot eléctrico del nodo, del cual
+    extrae tensiones (vp1/2/3) y corrientes (cp1/2/3) de fase. Si el medidor no
+    tiene lectura disponible hoy, responde 422.
+    """
+    gaia = _get_gaia()
+    node_id = _resolve_node_id(gaia, meter_id)
+    if node_id is None:
+        raise HTTPException(422, "No fue posible obtener la información del medidor")
+
+    snap = gaia.get_node_electrical_snapshot(node_id)
+    if not snap:
+        raise HTTPException(422, "No fue posible obtener la información del medidor")
+
+    vp = (snap.get("vp1"), snap.get("vp2"), snap.get("vp3"))
+    cp = (snap.get("cp1"), snap.get("cp2"), snap.get("cp3"))
+    if all(v is None for v in vp) and all(c is None for c in cp):
+        raise HTTPException(422, "No fue posible obtener la información del medidor")
+
+    return FasorialLecturaOut(
+        vp1=vp[0], vp2=vp[1], vp3=vp[2],
+        cp1=cp[0], cp2=cp[1], cp3=cp[2],
+        last_time=snap.get("last_time"),
+    )
+
 
 class FasorialInput(BaseModel):
     titulo: str

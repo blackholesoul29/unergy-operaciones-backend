@@ -28,6 +28,7 @@ from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
+from app.models.alerta import Alerta
 from app.models.costos_variables import CostoVariable
 from app.models.starlink import StarlinkFactura
 from app.models.inicio_operacion import ProyectoInicioOperacion
@@ -62,6 +63,7 @@ __all__ = [
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",
     "Notificacion", "TipoNotificacionEnum",
+    "Alerta",
     "CostoVariable",
     "StarlinkFactura",
     "ProyectoInicioOperacion",

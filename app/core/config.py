@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     MGS_POLL_INTERVAL_MINUTES: int = 15
     TIMEZONE: str = "America/Bogota"
 
+    # Alertas proactivas de vencimiento de contratos PPA.
+    # Lista separada por comas de días de antelación en que se dispara una alerta
+    # (ej. "90,60,30" → alerta a 90, 60 y 30 días del fin del contrato).
+    PPA_ALERT_DAYS: str = "90,60,30"
+    # Webhook de Slack para el canal de operaciones (notificaciones de alertas).
+    # Vacío ⇒ no se envían notificaciones a Slack (la alerta igual se persiste).
+    SLACK_WEBHOOK_URL_OPERATIONS: str | None = None
+
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""

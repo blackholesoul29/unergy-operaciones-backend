@@ -2453,6 +2453,18 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _scheduled_ppa_expiration_check():
+    """Corre el job de alertas de vencimiento de PPA (async) desde el scheduler
+    síncrono. Diario a las 08:00 America/Bogota."""
+    import asyncio
+    from app.jobs.ppa_expiration_checker import check_ppa_expirations
+    try:
+        created = asyncio.run(check_ppa_expirations())
+        print(f"[scheduler] ppa_expiration_check: {len(created)} alertas nuevas")
+    except Exception as e:
+        print(f"[scheduler] ppa_expiration_check FAILED: {e}")
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2541,6 +2553,13 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_ppa_expiration_check,
+                CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
+                id="ppa_expiration_check",
+                name="Alertas vencimiento contratos PPA",
             )
 
             _mgs_scheduler.add_job(

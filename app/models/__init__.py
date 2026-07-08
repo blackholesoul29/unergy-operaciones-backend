@@ -4,6 +4,7 @@ from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, Clien
 from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
     ProyectoInversor, ProyectoInversionista, Portafolio,
+    ProyectoPendienteIgnorado,
 )
 from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
@@ -46,7 +47,7 @@ from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimi
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
     "ProyectoGrupoPanel", "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
-    "ProyectoInversionista", "Portafolio", "ServicioOperacion",
+    "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
     "Frontera", "FronteraLectura", "FronteraQuoiaIgnorada", "OperadorRed", "OperadorRedContacto",

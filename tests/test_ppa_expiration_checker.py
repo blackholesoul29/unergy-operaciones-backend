@@ -115,14 +115,93 @@ def test_crea_alerta_para_ppa_que_vence_en_90_dias(db, monkeypatch):
     assert len(notifier.sent) == 1         # notificó a Slack
 
 
-def test_no_alerta_si_no_coincide_ventana(db, monkeypatch):
-    _ppa(db, date.today() + timedelta(days=45))  # 45 no está en 90/60/30
+def test_dispara_ventana_mas_ajustada_ya_cruzada(db, monkeypatch):
+    # 45 días no es un umbral exacto, pero YA cruzó la ventana de 60: debe
+    # alertar (con `==` esto se perdía silenciosamente). Escoge la más ajustada.
+    _ppa(db, date.today() + timedelta(days=45))
+    notifier = _FakeNotifier()
+
+    created = _run(db, notifier, monkeypatch)
+
+    assert len(created) == 1
+    alerta = db.query(Alerta).one()
+    assert alerta.days_to_expiration == 60   # ventana más ajustada cruzada
+    assert "45 día" in alerta.description    # el mensaje muestra los días reales
+
+
+def test_catch_up_corrida_perdida(db, monkeypatch):
+    # El job no corrió el día exacto (58 días, no 60): igual debe alertar la
+    # ventana de 60 en la siguiente corrida — tolerante a downtime/deploy.
+    _ppa(db, date.today() + timedelta(days=58))
+    notifier = _FakeNotifier()
+
+    created = _run(db, notifier, monkeypatch)
+
+    assert len(created) == 1
+    assert db.query(Alerta).one().days_to_expiration == 60
+
+
+def test_contrato_dado_de_alta_dentro_de_ultima_ventana(db, monkeypatch):
+    # PPA importado a 20 días: con `==` no alertaría NUNCA. Debe alertar la
+    # ventana de 30 (la que ya cruzó) para no dejar al equipo a ciegas.
+    _ppa(db, date.today() + timedelta(days=20))
+    notifier = _FakeNotifier()
+
+    created = _run(db, notifier, monkeypatch)
+
+    assert len(created) == 1
+    assert db.query(Alerta).one().days_to_expiration == 30
+
+
+def test_vence_hoy_alerta_ventana_minima(db, monkeypatch):
+    _ppa(db, date.today())  # dias = 0
+    notifier = _FakeNotifier()
+
+    created = _run(db, notifier, monkeypatch)
+
+    assert len(created) == 1
+    alerta = db.query(Alerta).one()
+    assert alerta.days_to_expiration == 30
+    assert "hoy" in alerta.description
+
+
+def test_no_alerta_mas_alla_del_horizonte(db, monkeypatch):
+    _ppa(db, date.today() + timedelta(days=120))  # fuera de 90/60/30
     notifier = _FakeNotifier()
 
     created = _run(db, notifier, monkeypatch)
 
     assert created == []
     assert db.query(Alerta).count() == 0
+
+
+def test_no_alerta_si_ya_vencio(db, monkeypatch):
+    _ppa(db, date.today() - timedelta(days=5))  # ya venció
+    notifier = _FakeNotifier()
+
+    created = _run(db, notifier, monkeypatch)
+
+    assert created == []
+    assert db.query(Alerta).count() == 0
+
+
+def test_escalada_entre_ventanas_crea_alertas_distintas(db, monkeypatch):
+    # Un mismo contrato acumula una alerta por cada ventana cruzada: si ya tiene
+    # la de 60, al llegar a la de 30 se crea otra distinta (constraint por banda).
+    ppa = _ppa(db, date.today() + timedelta(days=30))
+    # simula la alerta de 60 ya emitida en una corrida anterior
+    db.add(Alerta(
+        ppa_id=ppa.id, alert_type="PPA_EXPIRING",
+        description="previa", due_date=ppa.fecha_fin,
+        days_to_expiration=60, status="new",
+    ))
+    db.commit()
+
+    created = _run(db, _FakeNotifier(), monkeypatch)
+
+    assert len(created) == 1
+    bandas = {a.days_to_expiration for a in db.query(Alerta).all()}
+    assert bandas == {60, 30}
 
 
 def test_ignora_ppa_borrado(db, monkeypatch):

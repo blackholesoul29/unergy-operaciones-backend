@@ -124,15 +124,16 @@ def _derive_commercial_name(code: str) -> str:
     """Nombre legible derivado del código de proyecto de origina.
 
     Los códigos tienen la forma `<PREFIJO>_<SITIO>`, p. ej.
-    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur". Es el respaldo cuando el proyecto aún
-    no está en la tabla `proyectos`."""
+    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur", y el sitio puede traer guiones
+    (`LA-JAGUA-DEL-PILAR` → "La Jagua Del Pilar"). Es el respaldo cuando el
+    proyecto aún no está en la tabla `proyectos`."""
     if not code:
         return ""
     parts = code.split("_", 1)
     prefix = parts[0]
     is_code_prefix = bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
     readable = (parts[1] if len(parts) > 1 and is_code_prefix else code)
-    readable = readable.replace("_", " ").strip()
+    readable = re.sub(r"[_-]+", " ", readable).strip()
     return readable.title() if readable else code
 
 

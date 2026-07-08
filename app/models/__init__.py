@@ -8,7 +8,7 @@ from app.models.proyectos import (
 from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
 from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
-from app.models.fronteras import Frontera, FronteraLectura
+from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
@@ -49,7 +49,7 @@ __all__ = [
     "ProyectoInversionista", "Portafolio", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
-    "Frontera", "FronteraLectura", "OperadorRed", "OperadorRedContacto",
+    "Frontera", "FronteraLectura", "FronteraQuoiaIgnorada", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",

@@ -9,14 +9,16 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models.fronteras import Frontera, FronteraLectura
+from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed
+from app.models.proyectos import Proyecto
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
+    FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.mgs.gaia_client import GaiaClient
+from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps, _mgs_number
 from app.services.contactos import get_contactos, get_clientes_contacto
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
@@ -334,7 +336,122 @@ def create_lecturas_bulk(
     return objects
 
 
-# ── Quoia endpoints ───────────────────────────────────────────────────────────
+# ── Fronteras pendientes de Quoia (detectar + confirmar, nunca auto-escribir) ──
+
+def _iter_borders_frt(gaia: GaiaClient):
+    """Yield (frt_code_lower, categoria, nombre_quoia, frt_meta) para cada
+    frt_generation/frt_consumption de cada border de Quoia."""
+    for border in gaia.get_all_borders():
+        nombre = (border.get("name") or "").strip()
+        for key, categoria in (("frt_generation", "generacion"), ("frt_consumption", "consumo")):
+            frt = border.get(key)
+            if not frt:
+                continue
+            frt_code = (frt.get("frt_code") or "").strip()
+            if not frt_code:
+                continue
+            yield frt_code.lower(), categoria, nombre, frt
+
+
+@router.get("/quoia/pendientes", response_model=list[FronteraQuoiaPendiente])
+def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Borders de Quoia que todavia no tienen fila en `fronteras` ni fueron
+    marcados como ignorados -- para revisar y confirmar manualmente, nunca
+    se crean solos."""
+    gaia = _get_gaia()
+
+    existentes = {
+        c.lower() for (c,) in db.query(Frontera.codigo_frontera).filter(Frontera.codigo_frontera.isnot(None)).all()
+    }
+    ignorados = {c.lower() for (c,) in db.query(FronteraQuoiaIgnorada.frt_code).all()}
+    proyectos = db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all()
+
+    pendientes: list[FronteraQuoiaPendiente] = []
+    vistos: set[str] = set()
+    for frt_code, categoria, nombre_quoia, _frt in _iter_borders_frt(gaia):
+        if frt_code in existentes or frt_code in ignorados or frt_code in vistos:
+            continue
+        vistos.add(frt_code)
+
+        sugerido_id, sugerido_nombre = None, None
+        num = _mgs_number(nombre_quoia)
+        if num is not None:
+            for pid, pnombre in proyectos:
+                if _mgs_number(pnombre or "") == num:
+                    sugerido_id, sugerido_nombre = pid, pnombre
+                    break
+
+        pendientes.append(FronteraQuoiaPendiente(
+            frt_code=frt_code,
+            nombre_quoia=nombre_quoia,
+            categoria=categoria,
+            proyecto_sugerido_id=sugerido_id,
+            proyecto_sugerido_nombre=sugerido_nombre,
+        ))
+    return pendientes
+
+
+@router.post("/quoia/pendientes/{frt_code}/confirmar", response_model=FronteraOut, status_code=201)
+def confirmar_frontera_quoia(
+    frt_code: str,
+    body: FronteraQuoiaConfirmar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Crea la fila real en `fronteras` para un border de Quoia, tras
+    confirmacion manual del proyecto al que pertenece."""
+    gaia = _get_gaia()
+
+    if not db.query(Proyecto.id).filter(Proyecto.id == body.proyecto_id).first():
+        raise HTTPException(404, "Proyecto no encontrado")
+    if db.query(Frontera).filter(func.lower(Frontera.codigo_frontera) == frt_code.lower()).first():
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera")
+
+    match = None
+    for code, categoria, nombre_quoia, frt in _iter_borders_frt(gaia):
+        if code == frt_code.lower():
+            match = (categoria, nombre_quoia, frt)
+            break
+    if not match:
+        raise HTTPException(404, "Ese frt_code ya no aparece en Quoia")
+    categoria, nombre_quoia, frt = match
+
+    maps = _get_dynamic_maps(gaia) or {}
+    node_principal, _node_respaldo = (maps.get("frt") or {}).get(frt_code.lower(), (None, None))
+
+    obj = Frontera(
+        proyecto_id=body.proyecto_id,
+        codigo_frontera=frt_code,
+        nombre_frontera=body.nombre_frontera or nombre_quoia or frt_code,
+        codigo_propio=body.codigo_propio,
+        tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
+        estado="activa",
+        quoia_border_id=frt.get("id"),
+        quoia_meter_id=node_principal,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
+
+
+@router.post("/quoia/pendientes/{frt_code}/ignorar", status_code=204)
+def ignorar_frontera_quoia(
+    frt_code: str,
+    body: FronteraQuoiaIgnorar,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
+):
+    """Marca un border de Quoia como 'no aplica' para que deje de aparecer
+    en /quoia/pendientes (ej. medidor de prueba, border de un tercero)."""
+    code = frt_code.lower()
+    if db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == code).first():
+        return
+    db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.commit()
+
+
+# ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────
 
 @router.get("/quoia/meters")
 def quoia_meters(

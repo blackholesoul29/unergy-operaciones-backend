@@ -419,10 +419,13 @@ def confirmar_frontera_quoia(
     maps = _get_dynamic_maps(gaia) or {}
     node_principal, _node_respaldo = (maps.get("frt") or {}).get(frt_code.lower(), (None, None))
 
+    nombre_base = body.nombre_frontera or nombre_quoia or frt_code
+    nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
+
     obj = Frontera(
         proyecto_id=body.proyecto_id,
         codigo_frontera=frt_code,
-        nombre_frontera=body.nombre_frontera or nombre_quoia or frt_code,
+        nombre_frontera=nombre_default,
         codigo_propio=body.codigo_propio,
         tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
         estado="activa",

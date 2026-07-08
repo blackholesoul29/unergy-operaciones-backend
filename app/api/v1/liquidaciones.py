@@ -384,13 +384,17 @@ def resumen_liquidaciones_desde_panel(
 ):
     """Resumen de Liquidaciones = espejo de lectura del Panel Contable del período.
 
-    Liquidaciones no calcula nada propio aquí: agrupa PanelContableLinea por
-    inversionista y deriva "valor a pagar" del grupo 'resultado' (o, si el ER de
-    ese proyecto no lo trae, de ingresos - comercializacion - costos - facturas).
+    Fuente única: los tres tabs de Liquidaciones (Resumen, Proyectos,
+    Inversionistas) se arman de aquí, así que cuadran siempre con el Panel.
+    'valor a pagar' sale del grupo 'resultado' (o, si el ER no lo trae, de
+    ingresos - comercializacion - costos - facturas). La tabla Liquidacion queda
+    solo para el detalle operativo (mandatos/facturas/XM); por eso se incluye
+    liquidacion_id por proyecto para poder navegar al detalle.
     """
     try:
         y, m = periodo.strip().split("-")
         periodo_norm = f"{int(y):04d}-{int(m):02d}"
+        periodo_date = date(int(y), int(m), 1)
     except Exception:
         raise HTTPException(422, "El período debe tener formato YYYY-MM")
 
@@ -402,11 +406,66 @@ def resumen_liquidaciones_desde_panel(
         .all()
     )
 
-    nombres = {
-        p.id: p.nombre_comercial
-        for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()
-    }
+    proy_ids = [p.proyecto_id for p in paneles]
 
+    # Nombre + tipo de cada proyecto (solo los del período, no toda la tabla).
+    nombres: dict = {}
+    tipos: dict = {}
+    if proy_ids:
+        for pid, nom, tp in (
+            db.query(Proyecto.id, Proyecto.nombre_comercial, Proyecto.tipo_proyecto)
+            .filter(Proyecto.id.in_(proy_ids))
+            .all()
+        ):
+            nombres[pid] = nom
+            tipos[pid] = tp.value if tp is not None else None
+
+    # Liquidacion (detalle operativo) por proyecto+período → para navegar al detalle.
+    liq_por_proyecto: dict = {}
+    if proy_ids:
+        for lid, pid in (
+            db.query(Liquidacion.id, Liquidacion.proyecto_id)
+            .filter(
+                Liquidacion.proyecto_id.in_(proy_ids),
+                Liquidacion.periodo == periodo_date,
+                Liquidacion.deleted_at.is_(None),
+            )
+            .order_by(Liquidacion.id)
+            .all()
+        ):
+            liq_por_proyecto.setdefault(pid, lid)  # el primero por proyecto
+
+    # Cliente de cada proyecto_inversionista presente en las líneas (para pivotar
+    # la vista Inversionistas por cliente en el frontend). Batch, sin N+1.
+    pi_ids = {
+        ln.proyecto_inversionista_id
+        for p in paneles for ln in p.lineas
+        if ln.proyecto_inversionista_id is not None
+    }
+    cliente_por_pi: dict = {}
+    if pi_ids:
+        for pi_id, cli_id, razon in (
+            db.query(
+                ProyectoInversionista.id,
+                ProyectoInversionista.cliente_id,
+                Cliente.razon_social_nombre,
+            )
+            .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
+            .filter(ProyectoInversionista.id.in_(pi_ids))
+            .all()
+        ):
+            cliente_por_pi[pi_id] = {"cliente_id": cli_id, "cliente_nombre": razon}
+
+    return _construir_resumen_panel(
+        paneles, periodo_norm, tipo, nombres, tipos, liq_por_proyecto, cliente_por_pi
+    )
+
+
+def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
+                             liq_por_proyecto, cliente_por_pi) -> dict:
+    """Arma el resumen espejo a partir de paneles ya cargados y de los mapas de
+    apoyo (nombres/tipos de proyecto, liquidacion_id por proyecto, cliente por
+    proyecto_inversionista). Función pura: sin acceso a DB, testeable sola."""
     proyectos_out = []
     total_valor_a_pagar = 0.0
     total_ingresos = 0.0
@@ -417,8 +476,11 @@ def resumen_liquidaciones_desde_panel(
         for ln in sorted(panel.lineas, key=lambda x: x.orden):
             key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
             if key not in inv_map:
+                cli = cliente_por_pi.get(ln.proyecto_inversionista_id) or {}
                 inv_map[key] = {
                     "proyecto_inversionista_id": ln.proyecto_inversionista_id,
+                    "cliente_id": cli.get("cliente_id"),
+                    "cliente_nombre": cli.get("cliente_nombre") or ln.inversionista_nombre,
                     "nombre": ln.inversionista_nombre,
                     "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
                     "grupos": {},
@@ -447,6 +509,8 @@ def resumen_liquidaciones_desde_panel(
                 )
             inversionistas_out.append({
                 "proyecto_inversionista_id": inv["proyecto_inversionista_id"],
+                "cliente_id": inv["cliente_id"],
+                "cliente_nombre": inv["cliente_nombre"],
                 "nombre": inv["nombre"],
                 "porcentaje": inv["porcentaje"],
                 "valor_a_pagar": round(valor_a_pagar, 2),
@@ -461,6 +525,8 @@ def resumen_liquidaciones_desde_panel(
             "panel_id": panel.id,
             "proyecto_id": panel.proyecto_id,
             "proyecto": nombres.get(panel.proyecto_id, f"Proyecto {panel.proyecto_id}"),
+            "tipo_proyecto": tipos.get(panel.proyecto_id),
+            "liquidacion_id": liq_por_proyecto.get(panel.proyecto_id),
             "consecutivo_ingresos": panel.consecutivo_ingresos,
             "consecutivo_costos": panel.consecutivo_costos,
             "fecha_firma": panel.fecha_firma.isoformat() if panel.fecha_firma else None,

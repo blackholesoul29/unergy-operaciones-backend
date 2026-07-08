@@ -26,8 +26,8 @@ class MandatoInversionista(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
-    correos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="'[]'::jsonb")
-    proyectos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="'[]'::jsonb")
+    correos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    proyectos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

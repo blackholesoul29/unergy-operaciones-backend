@@ -48,6 +48,9 @@ def add_columns():
         # en contrato; Unergy le paga a precio bolsa. Clasifica doble (a+c).
         "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE clasificacion_energia_mensual ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
+        # Panel de fronteras pendientes de Quoia (migracion 043) -- respaldo por
+        # si alembic no llega a aplicarla (ver incidente de la migracion 035).
+        "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_border_id INTEGER",
     ]
     for s in stmts:
         try:

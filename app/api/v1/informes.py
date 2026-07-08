@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -60,6 +60,8 @@ class ComentarioOut(BaseModel):
 
 
 class InformeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tipo: str
     sub_project: str
@@ -97,9 +99,6 @@ class InformeOut(BaseModel):
             {k: val for k, val in m.items() if k != "html_inline"}
             for m in v if isinstance(m, dict)
         ]
-
-    class Config:
-        from_attributes = True
 
 
 class InformeDetailOut(InformeOut):

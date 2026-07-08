@@ -12,6 +12,7 @@ class FronteraBase(BaseModel):
     estado: Optional[str] = "activa"
     estado_operacional: Optional[str] = "activo"
     quoia_meter_id: Optional[int] = None
+    quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
 
@@ -126,6 +127,7 @@ class FronteraUpdate(BaseModel):
     estado: Optional[str] = None
     estado_operacional: Optional[str] = None
     quoia_meter_id: Optional[int] = None
+    quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
 
@@ -287,3 +289,22 @@ class FronteraResumen(BaseModel):
     total_kwh_export_30d: float
     sin_datos_recientes: int
     fronteras_sin_datos: list[dict]
+
+
+class FronteraQuoiaPendiente(BaseModel):
+    frt_code: str
+    nombre_quoia: str
+    categoria: str  # "generacion" | "consumo"
+    proyecto_sugerido_id: Optional[int] = None
+    proyecto_sugerido_nombre: Optional[str] = None
+
+
+class FronteraQuoiaConfirmar(BaseModel):
+    proyecto_id: int
+    nombre_frontera: Optional[str] = None
+    codigo_propio: Optional[str] = None
+    tipo_frontera: Optional[str] = None
+
+
+class FronteraQuoiaIgnorar(BaseModel):
+    motivo: Optional[str] = None

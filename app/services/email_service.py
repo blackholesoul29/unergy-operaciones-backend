@@ -617,7 +617,7 @@ def send_reporte_cgm_email(
 
     msg.attach(cuerpo)
 
-    adjunto = MIMEBase("application", "octet-stream")
+    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     adjunto.set_payload(excel_bytes)
     encoders.encode_base64(adjunto)
     adjunto.add_header("Content-Disposition", f'attachment; filename="{filename}"')

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
-from app.models.contactos import Contacto
+from app.models.contactos import Contacto, ProyectoAreaContacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
     ClienteServicioCreate, ClienteServicioOut,
@@ -77,6 +77,15 @@ def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current
     cliente = db.query(Cliente).filter(Cliente.id == id).first()
     if not cliente:
         raise HTTPException(404, "Cliente no encontrado")
+
+    # Vínculos inofensivos: punteros de contacto (CGM/operacional/liquidación)
+    # que un proyecto tenga apuntando a este cliente. Se borran en cascada --
+    # el proyecto simplemente vuelve a usar sus inversionistas por defecto.
+    # Contactos/servicios/documentos propios ya cascaden vía relationship().
+    # proyecto_inversionistas (participación real) NO se toca: si el cliente
+    # es inversionista de un proyecto, el borrado debe seguir bloqueado.
+    db.query(ProyectoAreaContacto).filter(ProyectoAreaContacto.cliente_id == id).delete()
+
     db.delete(cliente)
     try:
         db.commit()
@@ -84,8 +93,8 @@ def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current
         db.rollback()
         raise HTTPException(
             409,
-            "No se puede eliminar: este cliente tiene proyectos u otros registros "
-            "vinculados (como dueño o como inversionista). Desvincúlalos primero.",
+            "No se puede eliminar: este cliente es inversionista de uno o más "
+            "proyectos. Desvincúlalo primero.",
         )
 
 

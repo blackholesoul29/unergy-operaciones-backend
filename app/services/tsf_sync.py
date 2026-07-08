@@ -136,6 +136,19 @@ def _derive_commercial_name(code: str) -> str:
     return readable.title() if readable else code
 
 
+def _parece_codigo(nombre: str | None) -> bool:
+    """True si `nombre` en realidad es el código interno (p. ej.
+    `COLBOYT123P1_FIRAVITOBA_OCCIDENTE`) en vez de un nombre comercial real --
+    Sun Factory a veces guarda el mismo código en su campo `name`. El código
+    de todos modos siempre queda a salvo en `origina_code`/`codigo_tsf`
+    (vienen del campo `base_name`, aparte), esto solo evita que ensucie el
+    nombre visible."""
+    if not nombre or "_" not in nombre:
+        return not nombre
+    prefix = nombre.split("_", 1)[0]
+    return bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
+
+
 def _tsf_code_from_base_name(base_name: str | None) -> str | None:
     """Código de frontera CREG/TSF derivado del `base_name` de Sun Factory.
 
@@ -425,7 +438,10 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
             "base_name": base_name,
             "tsf_code": _tsf_code_from_base_name(base_name),
             "solenium_id": pid,
-            "commercial_name": p.get("name") or _derive_commercial_name(base_name or ""),
+            "commercial_name": (
+                p.get("name") if p.get("name") and not _parece_codigo(p.get("name"))
+                else _derive_commercial_name(base_name or "")
+            ),
             "status": _SF_IMPORT_STATES.get(p.get("state"), "En construcción"),
             "municipio": p.get("city"),
             "departamento": p.get("department"),

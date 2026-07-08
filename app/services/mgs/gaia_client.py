@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -65,40 +64,6 @@ FRONTERA_NODE_MAP: dict[str, tuple[int | None, int | None]] = {
     "frt_paso_norte": (1750, 1751),  # MGS 0032 - El Paso Norte
 }
 
-# minigranja number → frontera code (for numbered projects sin colisión conocida)
-_NUM_TO_FRT: dict[int, str] = {
-    5:  "frt58839",
-    6:  "frt60629",
-    14: "frt_olimpo14",
-    15: "frt67475",
-    16: "frt68269",
-    17: "frt66597",
-    18: "frt65205",
-    19: "frt67496",
-    20: "frt76581",
-    21: "frt73414",
-    22: "frt74080",
-    23: "frt76586",
-    24: "frt76578",
-    25: "frt82576",
-    26: "frt86234",
-    27: "frt82546",
-    40: "frt87017",
-    41: "frt87018",
-    75: "frt92219",
-    77: "frt92221",
-    32: "frt_paso_norte",
-}
-
-# Números que colisionan entre dos proyectos distintos porque cada sistema los
-# numera diferente (ej. "MGS 0009 El Molino" por nombre comercial vs
-# "Minigranja 0009 La Paz Verso" por nombre de frontera, aunque ese proyecto
-# se llama comercialmente "MGS 0008"). En vez de adivinar uno de los dos,
-# se exige un token distintivo del nombre para desempatar.
-_NUM_COLLISIONS: dict[int, list[tuple[str, str]]] = {
-    9: [("molino", "frt60600"), ("verso", "frt63879")],
-}
-
 # ── Dynamic node map (built from live Quoia API, cached 1 h) ─────────────────
 _dynamic_cache: dict | None = None
 _dynamic_cache_ts: float = 0.0
@@ -106,10 +71,10 @@ _DYNAMIC_CACHE_TTL = 3600  # seconds
 
 
 def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
-    """Return {frt, num} maps built from live Quoia API, cached for 1 hour.
+    """Return {frt, node_meter} maps built from live Quoia API, cached for 1 hour.
 
     frt: frt_code → (node_principal, node_respaldo)
-    num: minigranja_number → frt_code  (from Quoia border names)
+    node_meter: node_id → {marca, modelo, serie}
 
     Returns stale cache on fetch failure rather than None so callers can
     still serve the last known data while the API is temporarily down.
@@ -125,22 +90,22 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         logger.warning("Dynamic node map fetch failed, using stale cache: %s", exc)
         return _dynamic_cache
 
-    # meter_id → node_id
+    # meter_id → node_id, node_id → {marca, modelo, serie}
     meter_to_node: dict[int, int] = {}
+    node_meter: dict[int, dict] = {}
     for node in nodes:
         meter = node.get("meter") or {}
+        nid = node.get("id")
         if isinstance(meter, dict):
             mid = meter.get("id")
-            nid = node.get("id")
             if mid is not None and nid is not None:
                 meter_to_node[int(mid)] = int(nid)
+            info = _meter_info(meter)
+            if info and nid is not None:
+                node_meter[int(nid)] = info
 
     frt_map: dict[str, tuple[int | None, int | None]] = {}
-    num_map: dict[int, str] = {}
-    name_map: dict[str, str] = {}  # normalized_border_name → frt_code
-
     for border in borders:
-        name = border.get("name") or ""
         frt_gen = border.get("frt_generation") or {}
         if not frt_gen:
             continue
@@ -153,54 +118,43 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         node_r = meter_to_node.get(int(back_m)) if back_m else None
         frt_map[frt_code] = (node_p, node_r)
 
-        num = _mgs_number(name)
-        if num is not None and num not in num_map:
-            num_map[num] = frt_code
-
-        norm = _norm(name)
-        if norm and norm not in name_map:
-            name_map[norm] = frt_code
-
-    _dynamic_cache = {"frt": frt_map, "num": num_map, "names": name_map}
+    _dynamic_cache = {"frt": frt_map, "node_meter": node_meter}
     _dynamic_cache_ts = now
-    logger.info(
-        "Dynamic node maps built: %d borders, %d nodes, %d numbered, %d named",
-        len(frt_map), len(meter_to_node), len(num_map), len(name_map),
-    )
+    logger.info("Dynamic node maps built: %d borders, %d nodes", len(frt_map), len(meter_to_node))
     return _dynamic_cache
 
 
-def _norm(s: str) -> str:
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
+def _meter_info(meter: dict) -> dict | None:
+    """Extrae {marca, modelo, serie} de un `node["meter"]` de /api/node/retailer/."""
+    if not isinstance(meter, dict):
+        return None
+    model = meter.get("model") or {}
+    marca = model.get("brand") if isinstance(model, dict) else None
+    modelo = model.get("model") if isinstance(model, dict) else None
+    serie = meter.get("serial")
+    if not (marca or modelo or serie):
+        return None
+    return {"marca": marca, "modelo": modelo, "serie": serie}
+
+
+def get_frt_meter_info(gaia: "GaiaClient", frt_code: str) -> tuple[dict | None, dict | None]:
+    """(info_principal, info_respaldo) para un frt_code, desde el mapa dinámico de nodos.
+
+    Cada info es {marca, modelo, serie} o None si el nodo no tiene medidor
+    con esos datos o el frt_code no tiene border en Quoia."""
+    maps = _get_dynamic_maps(gaia)
+    if not maps:
+        return (None, None)
+    node_p, node_r = maps["frt"].get(frt_code.lower(), (None, None))
+    node_meter = maps.get("node_meter") or {}
+    info_p = node_meter.get(node_p) if node_p is not None else None
+    info_r = node_meter.get(node_r) if node_r is not None else None
+    return (info_p, info_r)
 
 
 def _mgs_number(name: str) -> int | None:
     m = re.search(r"(?:minigranja|mgs|mgr)\s+0*(\d+)", name, re.IGNORECASE)
     return int(m.group(1)) if m else None
-
-
-def _find_frt(*names: str) -> str | None:
-    """Fallback por número estático (_NUM_TO_FRT) para cuando la API dinámica de
-    Quoia no está disponible. Si el número está en _NUM_COLLISIONS, exige un
-    token distintivo del nombre para desempatar en vez de adivinar."""
-    for name in names:
-        if not name:
-            continue
-        num = _mgs_number(name)
-        if num is None:
-            continue
-        if num in _NUM_COLLISIONS:
-            n = _norm(name)
-            for token, frt in _NUM_COLLISIONS[num]:
-                if token in n:
-                    return frt
-            continue  # número ambiguo, ningún token distintivo — mejor no adivinar
-        frt = _NUM_TO_FRT.get(num)
-        if frt:
-            return frt
-    return None
 
 
 # Override directo proyecto_id -> (node_principal, node_respaldo).
@@ -214,7 +168,6 @@ _PROYECTO_NODE_OVERRIDE: dict[int, tuple[int | None, int | None]] = {
 
 
 def _resolve_frt_and_pair(
-    *names: str,
     gaia: "GaiaClient | None" = None,
     proyecto_id: int | None = None,
     db_proyecto_frt_map: "dict[int, str] | None" = None,
@@ -222,63 +175,38 @@ def _resolve_frt_and_pair(
     """Core lookup: (frt_code, (node_principal, node_respaldo)).
 
     Resolution order:
-      0. Direct DB link: fronteras.proyecto_id -> codigo_frontera. Desde que se
-         reconcilió esa columna (ETL 2026-07-02, ver scripts/etl_fronteras_proyectos.py)
-         es la fuente de verdad y cubre prácticamente todos los proyectos — no
-         requiere adivinar nada por nombre/número.
-      1. Dynamic num_map from live Quoia API (numbered projects: MGS 0028, etc.)
-         — fallback para proyectos que aún no tengan el vínculo directo poblado.
-      2. Static _find_frt() (static _NUM_TO_FRT fallback for non-dynamic numbers)
-      3. Node pair from dynamic frt_map
-      4. Hardcoded FRONTERA_NODE_MAP as final fallback (cuando la API de Quoia
-         no está disponible ni siquiera para el mapa dinámico — no lo reemplaza
-         el paso 0, resuelve un problema distinto: disponibilidad de la API, no
-         nombres mal enlazados)
+      0. Override directo por proyecto_id (medidores sin border en Gaia,
+         ver _PROYECTO_NODE_OVERRIDE).
+      1. Vínculo directo en BD: fronteras.proyecto_id -> codigo_frontera. Desde
+         que se reconcilió esa columna (ETL 2026-07-02, ver
+         scripts/etl_fronteras_proyectos.py) es la ÚNICA fuente de verdad --
+         cubre el 100% de los proyectos con frontera de generación registrada
+         (verificado 2026-07-08 contra la BD real). Si un proyecto no tiene
+         este vínculo, no se adivina por nombre/número: se retorna sin match.
+      2. Node pair desde el mapa dinámico de Quoia (frt_map).
+      3. Hardcoded FRONTERA_NODE_MAP como fallback final -- solo para cuando
+         la API de Quoia no está disponible ni siquiera para el mapa
+         dinámico (un problema de disponibilidad, no de vínculos mal hechos).
 
-    Se quitaron el matching por keyword hardcodeado y por substring de nombre
-    (contra fronteras.nombre_frontera y contra los nombres de Quoia) que existían
-    antes del vínculo directo: eran la fuente de los bugs de mapeo original
-    (Cañahuate, El Molino, prefijos "GD" vs "Minigranja Solar"). Si el vínculo
-    directo de un proyecto llega a romperse, el fix es corregir el dato en
-    fronteras.proyecto_id (correr scripts/etl_fronteras_proyectos.py), no
-    parchear con otro keyword.
+    Se quitó la adivinanza por nombre/número (num_map dinámico + _find_frt
+    estático) que quedaba como fallback secundario tras el vínculo directo:
+    con este último cubriendo el 100% de los casos reales, esos pasos nunca
+    se ejecutaban y eran la fuente de los bugs de mapeo original (Cañahuate,
+    El Molino, prefijos "GD" vs "Minigranja Solar"). Si el vínculo directo de
+    un proyecto llega a romperse, el fix es corregir fronteras.proyecto_id
+    (correr scripts/etl_fronteras_proyectos.py), no volver a adivinar.
     """
-    # Override directo por proyecto_id — se revisa primero y corta antes de
-    # llamar a la API de Gaia (para medidores sin border en Gaia).
     if proyecto_id is not None and proyecto_id in _PROYECTO_NODE_OVERRIDE:
         return (None, _PROYECTO_NODE_OVERRIDE[proyecto_id])
 
-    maps = _get_dynamic_maps(gaia) if gaia is not None else None
-
-    frt: str | None = None
-
-    # 0. Direct DB link — highest priority, no guessing needed.
-    if proyecto_id is not None and db_proyecto_frt_map:
-        frt = db_proyecto_frt_map.get(proyecto_id)
-
-    # 1. Number-based lookup against dynamic map
-    if frt is None and maps:
-        for name in names:
-            if not name:
-                continue
-            num = _mgs_number(name)
-            if num is not None:
-                frt = maps["num"].get(num)
-                if frt:
-                    break
-
-    # 2. Static _find_frt (static _NUM_TO_FRT fallback)
-    if frt is None:
-        frt = _find_frt(*names)
-
+    frt = db_proyecto_frt_map.get(proyecto_id) if (proyecto_id is not None and db_proyecto_frt_map) else None
     if frt is None:
         return (None, (None, None))
 
-    # 3. Node pair from dynamic map
+    maps = _get_dynamic_maps(gaia) if gaia is not None else None
     if maps and frt in maps["frt"]:
         return (frt, maps["frt"][frt])
 
-    # 4. Hardcoded fallback
     pair = FRONTERA_NODE_MAP.get(frt)
     return (frt, pair if pair else (None, None))
 
@@ -300,38 +228,32 @@ def build_db_proyecto_frt_map(fronteras: list[tuple[int, str]]) -> dict[int, str
 
 
 def find_gaia_node_id(
-    *names: str,
     gaia: "GaiaClient | None" = None,
     proyecto_id: int | None = None,
     db_proyecto_frt_map: "dict[int, str] | None" = None,
 ) -> int | None:
     """Find the principal Gaia node_id for a project. Returns None if not found."""
     _, (node_p, _) = _resolve_frt_and_pair(
-        *names, gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
+        gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
     )
     return node_p
 
 
 def find_gaia_node_pair(
-    *names: str,
     gaia: "GaiaClient | None" = None,
     proyecto_id: int | None = None,
     db_proyecto_frt_map: "dict[int, str] | None" = None,
 ) -> tuple[int | None, int | None]:
     """Find both (principal, respaldo) Gaia node IDs for a project.
 
-    Si se pasan proyecto_id + db_proyecto_frt_map (construido con
-    build_db_proyecto_frt_map desde fronteras.proyecto_id), se usa ese vínculo
-    directo antes que cualquier otra cosa — es la fuente de verdad reconciliada,
-    no requiere adivinar por nombre.
-
-    If gaia client is provided, resolves node IDs from the live Quoia API
-    (cached 1 hour) — covers all registered borders including new projects
-    not in the hardcoded map. Falls back to FRONTERA_NODE_MAP if needed.
-    Returns (None, None) if no mapping is found.
+    Requiere proyecto_id + db_proyecto_frt_map (construido con
+    build_db_proyecto_frt_map desde fronteras.proyecto_id) -- es la única
+    fuente de verdad, no se adivina por nombre. Si gaia se pasa, resuelve el
+    par de nodos desde el mapa dinámico de Quoia (cacheado 1h); si no, cae al
+    hardcodeado FRONTERA_NODE_MAP. Retorna (None, None) si no hay vínculo.
     """
     _, pair = _resolve_frt_and_pair(
-        *names, gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
+        gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
     )
     return pair
 

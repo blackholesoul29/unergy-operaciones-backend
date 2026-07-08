@@ -1175,9 +1175,6 @@ def project_monitoring_detail(
     ).all()
     _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
     node_principal, node_respaldo = find_gaia_node_pair(
-        p.nombre_comercial or "",
-        p.alias_monitoreo or "",
-        p.nombre_bitacora or "",
         gaia=gaia,
         proyecto_id=p.id,
         db_proyecto_frt_map=_db_proyecto_frt_map,

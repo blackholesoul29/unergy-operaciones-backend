@@ -85,5 +85,6 @@ def test_route_literales_antes_de_id():
     from app.api.v1.liquidaciones import router
     paths = [r.path for r in router.routes]
     i_id = paths.index("/liquidaciones/{id}")
-    for literal in ("/liquidaciones/resumen-panel", "/liquidaciones/resumen"):
+    for literal in ("/liquidaciones/resumen-panel", "/liquidaciones/resumen-panel-rango",
+                    "/liquidaciones/resumen"):
         assert paths.index(literal) < i_id, f"{literal} debe ir antes de /{{id}}"

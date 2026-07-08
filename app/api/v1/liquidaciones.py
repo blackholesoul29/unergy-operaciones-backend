@@ -461,6 +461,106 @@ def resumen_liquidaciones_desde_panel(
     )
 
 
+@router.get("/resumen-panel-rango")
+def resumen_panel_rango(
+    periodo_desde: str = Query(..., description="YYYY-MM"),
+    periodo_hasta: str = Query(..., description="YYYY-MM"),
+    tipo: str = Query("preliquidacion", description="preliquidacion | oficial"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Como resumen-panel pero para un rango de meses. Devuelve un resumen-panel
+    por período (para las gráficas de tendencia y los pivots multi-mes de las
+    vistas Resumen e Inversionistas). Sigue siendo espejo del Panel Contable."""
+    def _norm(p: str) -> str:
+        y, m = p.strip().split("-")
+        return f"{int(y):04d}-{int(m):02d}"
+
+    try:
+        desde = _norm(periodo_desde)
+        hasta = _norm(periodo_hasta)
+        dy, dm = desde.split("-")
+        hy, hm = hasta.split("-")
+        desde_date = date(int(dy), int(dm), 1)
+        hasta_date = date(int(hy), int(hm), 1)
+    except Exception:
+        raise HTTPException(422, "Los períodos deben tener formato YYYY-MM")
+
+    paneles = (
+        db.query(PanelContable)
+        .options(selectinload(PanelContable.lineas))
+        .filter(
+            PanelContable.periodo >= desde,
+            PanelContable.periodo <= hasta,
+            PanelContable.tipo == tipo,
+        )
+        .order_by(PanelContable.periodo, PanelContable.id)
+        .all()
+    )
+
+    por_periodo: dict = {}
+    for p in paneles:
+        por_periodo.setdefault(p.periodo, []).append(p)
+
+    proy_ids = {p.proyecto_id for p in paneles}
+    nombres: dict = {}
+    tipos: dict = {}
+    if proy_ids:
+        for pid, nom, tp in (
+            db.query(Proyecto.id, Proyecto.nombre_comercial, Proyecto.tipo_proyecto)
+            .filter(Proyecto.id.in_(proy_ids)).all()
+        ):
+            nombres[pid] = nom
+            tipos[pid] = tp.value if tp is not None else None
+
+    pi_ids = {
+        ln.proyecto_inversionista_id
+        for p in paneles for ln in p.lineas
+        if ln.proyecto_inversionista_id is not None
+    }
+    cliente_por_pi: dict = {}
+    if pi_ids:
+        for pi_id, cli_id, razon in (
+            db.query(
+                ProyectoInversionista.id,
+                ProyectoInversionista.cliente_id,
+                Cliente.razon_social_nombre,
+            )
+            .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
+            .filter(ProyectoInversionista.id.in_(pi_ids)).all()
+        ):
+            cliente_por_pi[pi_id] = {"cliente_id": cli_id, "cliente_nombre": razon}
+
+    # liquidacion_id por (proyecto, período) para navegar al detalle.
+    liq_map: dict = {}
+    if proy_ids:
+        for lid, pid, per in (
+            db.query(Liquidacion.id, Liquidacion.proyecto_id, Liquidacion.periodo)
+            .filter(
+                Liquidacion.proyecto_id.in_(proy_ids),
+                Liquidacion.periodo >= desde_date,
+                Liquidacion.periodo <= hasta_date,
+                Liquidacion.deleted_at.is_(None),
+            )
+            .order_by(Liquidacion.id).all()
+        ):
+            key = (pid, per.strftime("%Y-%m")) if per else None
+            if key and key not in liq_map:
+                liq_map[key] = lid
+
+    periodos_out = []
+    for per in sorted(por_periodo.keys()):
+        proys_del_periodo = {pp.proyecto_id for pp in por_periodo[per]}
+        liq_por_proyecto = {pid: liq_map.get((pid, per)) for pid in proys_del_periodo}
+        periodos_out.append(
+            _construir_resumen_panel(
+                por_periodo[per], per, tipo, nombres, tipos, liq_por_proyecto, cliente_por_pi
+            )
+        )
+
+    return {"tipo": tipo, "periodos": periodos_out}
+
+
 def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
                              liq_por_proyecto, cliente_por_pi) -> dict:
     """Arma el resumen espejo a partir de paneles ya cargados y de los mapas de

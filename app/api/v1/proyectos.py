@@ -23,7 +23,7 @@ from app.schemas.proyectos import (
     ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
 )
 from app.schemas.common import PaginatedResponse
-from app.services.proyectos_pendientes import resolver_pendientes
+from app.services.proyectos_pendientes import resolver_pendientes, backfill_ubicacion
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -229,8 +229,11 @@ def confirmar_proyecto_pendiente(
             proyecto.estado = "en_operacion"
         if item.get("fase_construccion_sugerida"):
             proyecto.fase_construccion = item["fase_construccion_sugerida"]
-        # Backfill de vínculos -- solo si el proyecto todavía no los tenía.
-        for campo in ("origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project", "project_id_solenium"):
+        # Backfill de vínculos y ubicación -- solo si el proyecto todavía no los tenía.
+        for campo in (
+            "origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project",
+            "project_id_solenium", "municipio", "departamento", "latitud", "longitud",
+        ):
             if getattr(proyecto, campo) is None and item.get(campo) is not None:
                 setattr(proyecto, campo, item[campo])
         db.commit()
@@ -261,6 +264,18 @@ def ignorar_proyecto_pendiente(
         return
     db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
     db.commit()
+
+
+@router.post("/backfill-ubicacion")
+def backfill_ubicacion_proyectos(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Completa latitud/longitud/municipio/departamento en proyectos existentes
+    que les falte ese dato, cruzando contra Sun Factory y Solenium. Idempotente
+    y nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
+    return backfill_ubicacion(db, dry_run=dry_run)
 
 
 @router.get("/{id}", response_model=ProyectoOut)

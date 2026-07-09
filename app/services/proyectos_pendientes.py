@@ -350,3 +350,72 @@ def resolver_pendientes(db: Session) -> list[dict]:
             })
 
     return pendientes
+
+
+def backfill_ubicacion(db: Session, dry_run: bool = True) -> dict:
+    """Completa latitud/longitud/municipio/departamento en proyectos que ya
+    existen pero les falta ese dato, cruzando contra Sun Factory y Solenium
+    (Quoia no trae coordenadas). Match por vínculo directo (ID/código) primero;
+    si no hay vínculo, por nombre normalizado (`_core`). Nunca pisa un valor
+    ya diligenciado."""
+    proyectos = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
+
+    por_sunfactory_id = {p.sunfactory_project_id: p for p in proyectos if p.sunfactory_project_id is not None}
+    por_origina_code = {(p.origina_code or "").upper(): p for p in proyectos if p.origina_code}
+    por_codigo_tsf = {(p.codigo_tsf or "").upper(): p for p in proyectos if p.codigo_tsf}
+    por_solenium_id = {p.project_id_solenium: p for p in proyectos if p.project_id_solenium}
+    por_core = {}
+    for p in proyectos:
+        core = _core(p.nombre_comercial)
+        if len(core) >= 3:
+            por_core.setdefault(core, p)
+
+    candidatos = _fusionar_por_core(_candidatos_sunfactory() + _candidatos_solenium())
+
+    actualizados = []
+    vistos: set[int] = set()
+    for c in candidatos:
+        if c.latitud is None and c.longitud is None and not c.municipio and not c.departamento:
+            continue  # nada que aportar
+
+        match = None
+        if c.sunfactory_project_id is not None:
+            match = por_sunfactory_id.get(c.sunfactory_project_id)
+        if match is None and c.origina_code:
+            match = por_origina_code.get(c.origina_code.upper())
+        if match is None and c.codigo_tsf:
+            match = por_codigo_tsf.get(c.codigo_tsf.upper())
+        if match is None and c.project_id_solenium:
+            match = por_solenium_id.get(c.project_id_solenium)
+        if match is None:
+            match = por_core.get(c.core)
+
+        if match is None or match.id in vistos:
+            continue
+
+        cambios = {}
+        if match.latitud is None and c.latitud is not None:
+            cambios["latitud"] = c.latitud
+        if match.longitud is None and c.longitud is not None:
+            cambios["longitud"] = c.longitud
+        if not match.municipio and c.municipio:
+            cambios["municipio"] = c.municipio
+        if not match.departamento and c.departamento:
+            cambios["departamento"] = c.departamento
+
+        if cambios:
+            vistos.add(match.id)
+            actualizados.append({"id": match.id, "nombre": match.nombre_comercial, "cambios": cambios})
+            if not dry_run:
+                for campo, valor in cambios.items():
+                    setattr(match, campo, valor)
+
+    if not dry_run and actualizados:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "total_candidatos": len(candidatos),
+        "actualizados": len(actualizados),
+        "detalle": actualizados,
+    }

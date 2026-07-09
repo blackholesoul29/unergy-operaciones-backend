@@ -1227,17 +1227,34 @@ def reasignar_consecutivos(
     except Exception:
         raise HTTPException(422, "El período debe tener formato YYYY-MM")
 
+    # Los consecutivos son SOLO del oficial (la preliquidación no lleva; el mandato
+    # oficial = la diferencia). Para cualquier otro tipo, no se numera.
+    if body.tipo != "oficial":
+        return {"ok": True, "solo_faltantes": body.solo_faltantes, "asignados": [],
+                "omitido": "solo_oficial"}
+
     paneles = (
         db.query(PanelContable)
-        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == body.tipo)
+        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == "oficial")
         .order_by(PanelContable.id)
         .all()
     )
+    # Unicidad GLOBAL por cadena: números ya usados por paneles oficiales de OTROS
+    # períodos, que esta reasignación debe respetar (no repetir).
+    otros = (
+        db.query(PanelContable.consecutivo_ingresos, PanelContable.consecutivo_costos)
+        .filter(PanelContable.tipo == "oficial", PanelContable.periodo != periodo_norm)
+        .all()
+    )
+    ocup_ing = {r[0] for r in otros if r[0] is not None}
+    ocup_cos = {r[1] for r in otros if r[1] is not None}
+
     asignados = _asignar_consecutivos(
         paneles,
         body.consecutivo_ingresos_inicial,
         body.consecutivo_costos_inicial,
         solo_faltantes=body.solo_faltantes,
+        ocup_ing_extra=ocup_ing, ocup_cos_extra=ocup_cos,
     )
     db.commit()
     return {"ok": True, "solo_faltantes": body.solo_faltantes, "asignados": asignados}
@@ -1245,16 +1262,22 @@ def reasignar_consecutivos(
 
 def _asignar_consecutivos(
     paneles: list[PanelContable], ini_ing: int, ini_cos: int, solo_faltantes: bool,
+    ocup_ing_extra: set | None = None, ocup_cos_extra: set | None = None,
 ) -> list[dict]:
     """
     Numera (in-place, sin commit) las dos cadenas de consecutivos. Ver
     reasignar_consecutivos para la semántica de `solo_faltantes`.
+    ocup_*_extra: números ya usados en otros períodos (unicidad global por cadena).
     """
+    extras = {"consecutivo_ingresos": ocup_ing_extra or set(),
+              "consecutivo_costos": ocup_cos_extra or set()}
+
     def _cadena(activo, attr, inicio):
-        # Números ya ocupados (solo en modo rellenar, para no chocar con ediciones).
-        ocupados = set()
+        # Ocupados: siempre los de otros períodos (unicidad global) + en modo
+        # rellenar, también los ya asignados de este período (no pisar ediciones).
+        ocupados = set(extras[attr])
         if solo_faltantes:
-            ocupados = {
+            ocupados |= {
                 getattr(p, attr) for p in paneles
                 if activo(p) and getattr(p, attr) is not None
             }
@@ -1296,6 +1319,42 @@ def _asignar_consecutivos(
         }
         for p in paneles
     ]
+
+
+@router.get("/consecutivos-usados")
+def consecutivos_usados(
+    excluir_panel_id: int | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Consecutivos ya usados por paneles OFICIALES (unicidad global por cadena),
+    para que el frontend avise de duplicados y sugiera el siguiente libre. Los
+    consecutivos son solo del oficial (la preliquidación no lleva).
+    excluir_panel_id: el panel en edición, para que no choque consigo mismo."""
+    filas = (
+        db.query(PanelContable.id, PanelContable.consecutivo_ingresos,
+                 PanelContable.consecutivo_costos)
+        .filter(PanelContable.tipo == "oficial")
+        .all()
+    )
+    ing: dict[int, int] = {}
+    cos: dict[int, int] = {}
+    for pid, ci, cc in filas:
+        if pid == excluir_panel_id:
+            continue
+        if ci is not None:
+            ing[ci] = pid
+        if cc is not None:
+            cos[cc] = pid
+
+    def cadena(uso: dict[int, int]) -> dict:
+        return {
+            "usados": sorted(uso.keys()),
+            "siguiente": (max(uso.keys()) + 1) if uso else 1,
+            "por_numero": {str(k): v for k, v in uso.items()},
+        }
+
+    return {"ingresos": cadena(ing), "costos": cadena(cos)}
 
 
 # ── Diferencia preliquidación vs oficial ────────────────────────────────────────

@@ -294,7 +294,17 @@ def _candidatos_solenium() -> list[_Candidato]:
 
 def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
     """Combina candidatos de distintas fuentes que refieren al mismo
-    proyecto real (mismo `core`), sin pisar campos ya llenados."""
+    proyecto real (mismo `core`), sin pisar campos ya llenados.
+
+    Excepción: `fase_construccion`/`estado_sugerido` -- "energizado"/
+    "en_operacion" (evidencia real de Quoia: generación medida, no solo el
+    medidor registrado) SIEMPRE gana, sin importar el orden de llegada.
+    Bug real encontrado 2026-07-09: Sun Factory siempre trae algún
+    fase_construccion (aunque esté desactualizado, ej. "en_construccion"),
+    y como sus candidatos suelen llegar primero en la lista, el "no pisar
+    si ya tiene valor" dejaba la fase vieja de Sun Factory ganando sobre la
+    señal real de Quoia -- proyectos que ya generan de verdad (El Paso
+    Norte, Chiriguaná Norte 2, etc.) nunca se sugerían para actualizar."""
     por_core: dict[str, _Candidato] = {}
     for c in candidatos:
         if len(c.core) < 3:
@@ -304,11 +314,21 @@ def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
             por_core[c.core] = c
             continue
         existente.fuentes |= c.fuentes
+        # "energizado"/"en_operacion" siempre gana; si no, se rellena el
+        # hueco como cualquier otro campo (primero que llegue, sin pisar).
+        if c.fase_construccion == "energizado":
+            existente.fase_construccion = "energizado"
+        elif existente.fase_construccion is None and c.fase_construccion is not None:
+            existente.fase_construccion = c.fase_construccion
+        if c.estado_sugerido == "en_operacion":
+            existente.estado_sugerido = "en_operacion"
+        elif existente.estado_sugerido is None and c.estado_sugerido is not None:
+            existente.estado_sugerido = c.estado_sugerido
         for campo in (
             "municipio", "departamento", "latitud", "longitud", "tipo_proyecto",
-            "fase_construccion", "estado_sugerido", "potencia_ac_kw",
-            "capacidad_instalada_kwp", "sub_project", "project_id_solenium",
-            "origina_code", "codigo_tsf", "sunfactory_project_id", "proyecto_id",
+            "potencia_ac_kw", "capacidad_instalada_kwp", "sub_project",
+            "project_id_solenium", "origina_code", "codigo_tsf",
+            "sunfactory_project_id", "proyecto_id",
         ):
             if getattr(existente, campo) is None and getattr(c, campo) is not None:
                 setattr(existente, campo, getattr(c, campo))

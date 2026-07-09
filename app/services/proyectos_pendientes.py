@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto, ProyectoPendienteIgnorado
-from app.services.mgs.gaia_client import GaiaClient
+from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.tsf_sync import (
     _core, _derive_commercial_name, _parece_codigo,
@@ -137,27 +137,33 @@ def _candidatos_sunfactory() -> list[_Candidato]:
     return out
 
 
-def _tiene_generacion_real(gaia: GaiaClient, frt_code: str, fecha: str) -> bool:
-    """True si el border reportó energía real (suma de eae > 0) ese día.
+def _nodo_tiene_generacion(gaia: GaiaClient, node_id: int | None, node_id_resp: int | None, fecha: str) -> bool:
+    """True si el medidor (principal o respaldo, por node_id) reportó energía
+    real (eae > 0) ese día.
 
-    `last_report_date` por sí solo NO alcanza: un medidor puede quedar
-    registrado en Quoia y reportando ceros (o incluso con status "OK") mientras
-    la planta sigue en obra de verdad -- caso real encontrado 2026-07-09
-    (San Martín Norte, Galeras Occidente, Chimá Oriente 2, Chinú Sur 4, El
-    Paso Norte: `last_report_date` presente, 0 kWh reales ese día)."""
-    try:
-        rows = gaia.get_border_measurements(frt_code, fecha)
-    except Exception:
-        return False
-    total = 0.0
-    for r in rows:
-        v = r.get("eae")
-        if v is not None:
-            try:
-                total += float(v)
-            except (TypeError, ValueError):
-                pass
-    return total > 0
+    Por nodo, NO por frt_code: `/border/{frt}/measurements/` da 400 para
+    algunos borders -- caso real "El Paso Norte" (Quoia lo tiene bajo otro
+    `company`) -- mientras que por nodo funciona siempre y coincide con lo
+    que muestra el dashboard de Quoia."""
+    for nid in (node_id, node_id_resp):
+        if nid is None:
+            continue
+        try:
+            rows = gaia.get_node_measurements(nid, fecha, "eae")
+        except Exception:
+            continue
+        total = 0.0
+        for r in rows:
+            for f in ("eaepd1", "eaepd2", "eaepd3"):
+                v = r.get(f)
+                if v is not None:
+                    try:
+                        total += float(v)
+                    except (TypeError, ValueError):
+                        pass
+        if total > 0:
+            return True
+    return False
 
 
 # Cache de "¿generación real?" por frt_code -- evita repetir ~66 llamadas de
@@ -174,6 +180,9 @@ def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str,
     if _generacion_real_cache is not None and (now - _generacion_real_cache_ts) < _GENERACION_REAL_CACHE_TTL:
         return _generacion_real_cache
 
+    dynamic = _get_dynamic_maps(gaia) or {}
+    frt_a_nodos = dynamic.get("frt") or {}
+
     con_reporte = [
         ((b.get("frt_generation") or {}).get("frt_code", "").strip().lower(),
          (b.get("frt_generation") or {}).get("last_report_date"))
@@ -185,7 +194,8 @@ def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str,
         with ThreadPoolExecutor(max_workers=min(len(con_reporte), 12)) as pool:
             def _check(item):
                 code, fecha = item
-                return code, _tiene_generacion_real(gaia, code, fecha)
+                node_p, node_r = frt_a_nodos.get(code, (None, None))
+                return code, _nodo_tiene_generacion(gaia, node_p, node_r, fecha)
             for code, tiene in pool.map(_check, con_reporte):
                 resultado[code] = tiene
 

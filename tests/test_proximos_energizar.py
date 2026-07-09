@@ -268,9 +268,10 @@ class _FakeResult:
 
 
 class _ExistingRow:
-    def __init__(self, id, manual):
+    def __init__(self, id, manual, estado="en_desarrollo"):
         self.id = id
         self.fecha_estimada_editada_manual = manual
+        self.estado = estado
 
 
 class _FakeDB:
@@ -370,6 +371,41 @@ def test_sync_no_crea_aunque_traiga_sunfactory_project_id(monkeypatch):
     assert stats["sin_match"] == 1
     inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
     assert not inserts
+
+
+def test_sync_no_regresa_fase_si_ya_esta_en_operacion(monkeypatch):
+    # Bug real: un proyecto que Proyectos pendientes ya marcó como
+    # estado='en_operacion' (evidencia real de Quoia/Solenium) no debe volver
+    # a "proximo_energizar"/"en_construccion" solo porque Sun Factory todavía
+    # no actualizó su propio tracker de obra -- el estado real manda.
+    _patch_fetch(monkeypatch, _one_project())  # status "Próximo a energizar" -> fase != energizado
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_operacion"))
+    stats = pe.sync_tsf_projects(db, force=False)
+    assert stats["actualizados"] == 1
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" not in upd_sql
+    assert "avance_obra_pct = COALESCE" in upd_sql  # el resto de los campos si se sincroniza
+
+
+def test_sync_si_actualiza_fase_cuando_no_esta_en_operacion(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_desarrollo"))
+    pe.sync_tsf_projects(db, force=False)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert upd_params["fase"] == "proximo_energizar"
+
+
+def test_sync_si_actualiza_fase_a_energizado_aunque_ya_este_en_operacion(monkeypatch):
+    # Sin conflicto real: si Sun Factory YA dice "Energizado", se aplica igual.
+    proj = _one_project()
+    proj[0]["status"] = "Energizado"
+    _patch_fetch(monkeypatch, proj)
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_operacion"))
+    pe.sync_tsf_projects(db, force=False)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert upd_params["fase"] == "energizado"
 
 
 def test_sync_update_backfills_sunfactory_project_id():

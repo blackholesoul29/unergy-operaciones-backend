@@ -737,7 +737,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
-                    SELECT id, fecha_estimada_editada_manual FROM proyectos
+                    SELECT id, fecha_estimada_editada_manual, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         (CAST(:sol_id AS integer) IS NOT NULL
                              AND sunfactory_project_id = CAST(:sol_id AS integer))
@@ -785,6 +785,12 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 manual = bool(existing.fecha_estimada_editada_manual)
                 # La fecha estimada solo se pisa si no la editó el operador, o si force.
                 set_date = (not manual) or force
+                # Si el proyecto ya quedó confirmado como en operación (ej. vía
+                # Proyectos pendientes con evidencia real de Quoia/Solenium), no
+                # dejar que Sun Factory lo regrese a una fase de obra anterior
+                # solo porque su propio tracker todavía no se actualizó -- el
+                # estado real (`estado`) manda sobre el pipeline de construcción.
+                set_fase = fase == "energizado" or existing.estado != "en_operacion"
                 params = {
                     "id": existing.id,
                     "fase": fase,
@@ -803,6 +809,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     date_sql = (", fecha_estimada_energizacion = :energ, "
                                 "fecha_estimada_editada_manual = FALSE")
                     params["energ"] = energ
+                fase_sql = "fase_construccion = :fase, " if set_fase else ""
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 # sunfactory_project_id se respalda aqui la PRIMERA vez que se
@@ -811,8 +818,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 db.execute(
                     text(f"""
                         UPDATE proyectos SET
-                            fase_construccion = :fase,
-                            avance_obra_pct = COALESCE(:avance, avance_obra_pct),
+                            {fase_sql}avance_obra_pct = COALESCE(:avance, avance_obra_pct),
                             potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp),
                             origina_code = COALESCE(origina_code, :code),
                             codigo_tsf = COALESCE(codigo_tsf, :tsf),

@@ -375,24 +375,6 @@ class GaiaClient:
         data = self._get(url, params=params)
         return data if isinstance(data, list) else []
 
-    def get_border_measurements(self, frt_code: str, date_str: str) -> list[dict]:
-        """Fetch hourly eae measurements for a border (frontera) by its SIC code.
-
-        Uses /api/cgm/v1/border/{frt_code}/measurements/ with the same JWT auth.
-        Returns list of dicts with 'time' and energy fields, empty list on error.
-        """
-        url = f"{self._base}/api/cgm/v1/border/{frt_code}/measurements/"
-        params = {
-            "init_date": f"{date_str}T00:00:00-05:00",
-            "end_date":  f"{date_str}T23:59:59-05:00",
-        }
-        data = self._get(url, params=params)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return data.get("results") or data.get("measurements") or []
-        return []
-
     def get_border_report_status(self, border_id: int, date_str: str) -> dict | None:
         """Fetch the ASIC report status for a border on a specific date.
 

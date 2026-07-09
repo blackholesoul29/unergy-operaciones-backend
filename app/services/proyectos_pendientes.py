@@ -19,6 +19,8 @@ la sugerencia):
 from __future__ import annotations
 
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -135,6 +137,63 @@ def _candidatos_sunfactory() -> list[_Candidato]:
     return out
 
 
+def _tiene_generacion_real(gaia: GaiaClient, frt_code: str, fecha: str) -> bool:
+    """True si el border reportó energía real (suma de eae > 0) ese día.
+
+    `last_report_date` por sí solo NO alcanza: un medidor puede quedar
+    registrado en Quoia y reportando ceros (o incluso con status "OK") mientras
+    la planta sigue en obra de verdad -- caso real encontrado 2026-07-09
+    (San Martín Norte, Galeras Occidente, Chimá Oriente 2, Chinú Sur 4, El
+    Paso Norte: `last_report_date` presente, 0 kWh reales ese día)."""
+    try:
+        rows = gaia.get_border_measurements(frt_code, fecha)
+    except Exception:
+        return False
+    total = 0.0
+    for r in rows:
+        v = r.get("eae")
+        if v is not None:
+            try:
+                total += float(v)
+            except (TypeError, ValueError):
+                pass
+    return total > 0
+
+
+# Cache de "¿generación real?" por frt_code -- evita repetir ~66 llamadas de
+# medición en paralelo en cada GET /proyectos/pendientes (se llama también
+# desde confirmar/ignorar). Mismo TTL que _get_dynamic_maps en gaia_client.
+_generacion_real_cache: dict[str, bool] | None = None
+_generacion_real_cache_ts: float = 0.0
+_GENERACION_REAL_CACHE_TTL = 3600  # segundos
+
+
+def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str, bool]:
+    global _generacion_real_cache, _generacion_real_cache_ts
+    now = time.monotonic()
+    if _generacion_real_cache is not None and (now - _generacion_real_cache_ts) < _GENERACION_REAL_CACHE_TTL:
+        return _generacion_real_cache
+
+    con_reporte = [
+        ((b.get("frt_generation") or {}).get("frt_code", "").strip().lower(),
+         (b.get("frt_generation") or {}).get("last_report_date"))
+        for b in borders
+        if (b.get("frt_generation") or {}).get("last_report_date")
+    ]
+    resultado: dict[str, bool] = {}
+    if con_reporte:
+        with ThreadPoolExecutor(max_workers=min(len(con_reporte), 12)) as pool:
+            def _check(item):
+                code, fecha = item
+                return code, _tiene_generacion_real(gaia, code, fecha)
+            for code, tiene in pool.map(_check, con_reporte):
+                resultado[code] = tiene
+
+    _generacion_real_cache = resultado
+    _generacion_real_cache_ts = now
+    return resultado
+
+
 def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     gaia = GaiaClient()
     if not gaia.enabled:
@@ -143,6 +202,7 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
         borders = gaia.get_all_borders()
     except Exception:
         return []
+    generacion_real = _generacion_real_por_frt(gaia, borders)
 
     out = []
     for b in borders:
@@ -168,7 +228,9 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
             potencia_ac_kw=(float(cap_mw) * 1000) if cap_mw else None,
             proyecto_id=proyecto_id,
         )
-        if gen.get("last_report_date"):
+        # Exige generación real (eae > 0), no solo que el medidor esté
+        # registrado y reportando -- ver _tiene_generacion_real.
+        if gen.get("last_report_date") and generacion_real.get(frt_gen_code):
             c.estado_sugerido = "en_operacion"
             c.fase_construccion = "energizado"
         c.core = _core(c.nombre_raw)

@@ -10,11 +10,18 @@ Fuente del pipeline (igual que el endpoint de lectura original):
      + % de avance de obra. Cruce por base_name ↔ minifarm_project.name.
   3. API de generación Unergy → ¿ya genera? Si sí, está energizada de hecho.
 
-`sync_tsf_projects(db, force)` hace un upsert por `proyectos.origina_code`:
-  - Crea el proyecto si no existe (origen='tsf_sync', estado='en_desarrollo').
-  - Actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada).
+`sync_tsf_projects(db, force)` es SOLO de actualización, ya NO crea proyectos:
+  - Si encuentra el proyecto (por sunfactory_project_id/origina_code/codigo_tsf),
+    actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada).
   - Respeta `fecha_estimada_editada_manual` salvo `force=True` (el operador pidió
     re-sincronizar y sobrescribir sus cambios con la info de Solenium).
+  - Si no encuentra match ni con un candidato de nombre parecido (para sugerir
+    vínculo), lo cuenta en `sin_match` y lo deja pasar -- la CREACIÓN de
+    proyectos nuevos vive ahora en `app/services/proyectos_pendientes.py`
+    (GET /proyectos/pendientes), que cruza Sun Factory + Quoia + Solenium y
+    exige confirmación humana antes de escribir. Antes esta función insertaba
+    la fila sin revisión; el riesgo de duplicados/nombres mal derivados ya no
+    vale la pena ahora que existe esa cola de confirmación dedicada.
 Todos los cruces externos son best-effort: si una fuente no responde, degrada.
 """
 from __future__ import annotations
@@ -705,7 +712,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
     Fuente principal: Sun Factory (la "BD de Solenium/TSF"), accesible por internet.
     No depende de originabotdb (que solo es alcanzable desde la red interna)."""
     projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
-    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
+    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0, "sin_match": 0,
              "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory",
              "sugerencias_vinculo": []}
 
@@ -748,11 +755,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             energ = p["energization_date"]
 
             if existing is None:
-                # Ningun match exacto por id/codigo. Antes de crear una fila nueva,
-                # ver si hay un proyecto ya existente (tipicamente creado a mano,
-                # sin ningun codigo de Sun Factory nunca registrado) que podria ser
-                # el mismo -- para no duplicarlo, se sugiere el vinculo en vez de
-                # crear automaticamente. Ver POST /proyectos/{id}/vincular-sunfactory.
+                # Ningun match exacto por id/codigo. Si hay un proyecto ya existente
+                # con nombre parecido (tipicamente creado a mano, sin ningun codigo
+                # de Sun Factory nunca registrado), se sugiere el vinculo -- ver
+                # POST /proyectos/{id}/vincular-sunfactory.
                 candidato = _buscar_candidato_similar(
                     db, p.get("commercial_name") or code, p.get("municipio"),
                 )
@@ -772,47 +778,9 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     })
                     continue
 
-                db.execute(
-                    text("""
-                        INSERT INTO proyectos (
-                            nombre_comercial, origina_code, codigo_tsf, sunfactory_project_id,
-                            fase_construccion,
-                            fecha_estimada_energizacion, fecha_estimada_editada_manual,
-                            avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
-                            municipio, departamento, latitud, longitud,
-                            estado, tipo_proyecto, origen,
-                            srv_operacion, srv_representacion, srv_cgm,
-                            srv_ppa, srv_promotor, srv_rec, generar_liquidacion,
-                            created_at, updated_at
-                        ) VALUES (
-                            :nombre, :code, :tsf, :sol_id,
-                            :fase,
-                            :energ, FALSE,
-                            :avance, :mwh, :potencia,
-                            :municipio, :departamento, :latitud, :longitud,
-                            'en_desarrollo', 'minigranja', 'tsf_sync',
-                            FALSE, FALSE, FALSE,
-                            FALSE, FALSE, FALSE, FALSE,
-                            NOW(), NOW()
-                        )
-                    """),
-                    {
-                        "nombre": p["commercial_name"] or code,
-                        "code": code,
-                        "tsf": tsf_code,
-                        "sol_id": solenium_pipeline_id,
-                        "fase": fase,
-                        "energ": energ,
-                        "avance": p.get("avance_pct"),
-                        "mwh": p.get("monthly_mwh"),
-                        "potencia": p.get("installed_power_kwp"),
-                        "municipio": p["municipio"],
-                        "departamento": p["departamento"],
-                        "latitud": p["latitud"],
-                        "longitud": p["longitud"],
-                    },
-                )
-                stats["creados"] += 1
+                # Sin match de ningun tipo: ya NO se crea aqui. Queda para que
+                # /proyectos/pendientes lo detecte y un humano lo confirme.
+                stats["sin_match"] += 1
             else:
                 manual = bool(existing.fecha_estimada_editada_manual)
                 # La fecha estimada solo se pisa si no la editó el operador, o si force.

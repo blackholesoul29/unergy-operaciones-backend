@@ -314,18 +314,16 @@ def _patch_fetch(monkeypatch, projects):
     monkeypatch.setattr(pe, "fetch_sunfactory_projects", lambda **k: (projects, []))
 
 
-def test_sync_creates_when_not_existing(monkeypatch):
+def test_sync_no_crea_cuando_no_existe_ya_no_inserta(monkeypatch):
+    # sync_tsf_projects ya NO crea proyectos -- eso quedo en /proyectos/pendientes
+    # (confirmacion humana). Sin match ni candidato parecido, solo se cuenta.
     _patch_fetch(monkeypatch, _one_project())
     db = _FakeDB(existing=None)
     stats = pe.sync_tsf_projects(db, force=False)
-    assert stats["creados"] == 1 and stats["actualizados"] == 0
+    assert stats["creados"] == 0 and stats["actualizados"] == 0
+    assert stats["sin_match"] == 1
     inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
-    assert len(inserts) == 1
-    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
-    assert params["code"] == "COLSUCT3P1_MORROA_SUR"
-    assert params["tsf"] == "COLSUCT3P1"   # codigo_tsf persistido para cruce
-    assert params["fase"] == "proximo_energizar"
-    assert params["energ"] == date(2026, 9, 1)
+    assert not inserts
 
 
 # ── _tsf_code_from_base_name ────────────────────────────────────────────────────
@@ -361,15 +359,17 @@ def test_sync_update_links_codigo_tsf_and_origina_code():
     assert "codigo_tsf = COALESCE(codigo_tsf, :tsf)" in upd_sql
 
 
-def test_sync_creates_with_sunfactory_project_id(monkeypatch):
+def test_sync_no_crea_aunque_traiga_sunfactory_project_id(monkeypatch):
+    # Igual que arriba: sin match existente, ya no crea -- solo se cuenta en sin_match.
     proj = _one_project()
     proj[0]["solenium_id"] = 106
     _patch_fetch(monkeypatch, proj)
     db = _FakeDB(existing=None)
     stats = pe.sync_tsf_projects(db, force=False)
-    assert stats["creados"] == 1
-    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
-    assert params["sol_id"] == 106
+    assert stats["creados"] == 0
+    assert stats["sin_match"] == 1
+    inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
+    assert not inserts
 
 
 def test_sync_update_backfills_sunfactory_project_id():
@@ -527,7 +527,8 @@ def test_sync_sugiere_vinculo_aunque_el_candidato_ya_tenga_otro_id(monkeypatch):
     assert sug["candidato_sunfactory_id_previo"] == 111
 
 
-def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):
+def test_sync_no_crea_cuando_no_hay_candidato_parecido(monkeypatch):
+    # Sin match exacto y sin candidato de nombre parecido -- ya no crea, solo cuenta.
     proj = _one_project()
     proj[0]["solenium_id"] = 999
     _patch_fetch(monkeypatch, proj)
@@ -535,7 +536,8 @@ def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):
     db = _FakeDBConCandidato(candidato_row=None)
     stats = pe.sync_tsf_projects(db, force=False)
 
-    assert stats["creados"] == 1
+    assert stats["creados"] == 0
+    assert stats["sin_match"] == 1
     assert stats["sugerencias_vinculo"] == []
 
 

@@ -193,6 +193,57 @@ def eliminar_factura(
     return {"ok": True}
 
 
+# ── GET /starlink/mapeo ───────────────────────────────────────────────────────
+
+@router.get("/mapeo")
+def listar_mapeo(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Catálogo de mapeos sitio→proyecto, con el nombre comercial resuelto."""
+    filas = db.query(StarlinkMapeoSitio).order_by(StarlinkMapeoSitio.patron).all()
+    pids = {m.proyecto_id for m in filas if m.proyecto_id is not None}
+    nombres = {}
+    if pids:
+        nombres = {
+            pid: nombre
+            for pid, nombre in db.query(Proyecto.id, Proyecto.nombre_comercial)
+                                 .filter(Proyecto.id.in_(pids)).all()
+        }
+    return [
+        {
+            "id": m.id, "patron": m.patron, "proyecto_id": m.proyecto_id,
+            "nombre_comercial": nombres.get(m.proyecto_id), "activo": m.activo,
+        }
+        for m in filas
+    ]
+
+
+# ── PUT /starlink/mapeo ───────────────────────────────────────────────────────
+
+@router.put("/mapeo")
+def upsert_mapeo(payload: dict, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Crea o actualiza un mapeo sitio→proyecto (clave: patron) y reprocesa TODAS
+    las facturas guardadas para reflejar el cambio en las líneas."""
+    patron = (payload.get("patron") or "").strip()
+    if not patron:
+        raise HTTPException(400, "patron es obligatorio.")
+    proyecto_id = payload.get("proyecto_id")
+
+    m = db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.patron == patron).first()
+    if m:
+        m.proyecto_id = proyecto_id
+        m.activo = payload.get("activo", True)
+    else:
+        m = StarlinkMapeoSitio(patron=patron, proyecto_id=proyecto_id,
+                               activo=payload.get("activo", True))
+        db.add(m)
+    db.flush()
+
+    for fac in db.query(StarlinkFactura).all():
+        _regenerar_lineas(db, fac)
+    db.commit()
+    db.refresh(m)
+    return {"ok": True, "id": m.id, "patron": m.patron}
+
+
 # ── POST /starlink/excel ──────────────────────────────────────────────────────
 
 @router.post("/excel")

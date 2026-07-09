@@ -1004,6 +1004,31 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
+    # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
+    # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
+    # camino de deploy en este repo — ver nota de migration 031 arriba).
+    """CREATE TABLE IF NOT EXISTS starlink_mapeo_sitio (
+        id BIGSERIAL PRIMARY KEY,
+        patron VARCHAR(255) NOT NULL UNIQUE,
+        proyecto_id BIGINT REFERENCES proyectos(id),
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_mapeo_sitio_proyecto ON starlink_mapeo_sitio (proyecto_id)",
+    """CREATE TABLE IF NOT EXISTS starlink_factura_linea (
+        id BIGSERIAL PRIMARY KEY,
+        factura_id BIGINT NOT NULL REFERENCES starlink_facturas(id) ON DELETE CASCADE,
+        proyecto_id BIGINT REFERENCES proyectos(id),
+        descripcion VARCHAR(255) NOT NULL,
+        sin_iva NUMERIC(15,2) NOT NULL,
+        iva NUMERIC(15,2) NOT NULL,
+        monto_total NUMERIC(15,2) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_factura ON starlink_factura_linea (factura_id)",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_proyecto ON starlink_factura_linea (proyecto_id)",
 ]
 
 

@@ -1137,6 +1137,86 @@ def _run_catalog_seed() -> None:
         print(f"[catalog seed] skipped: {e}")
 
 
+# Semilla del mapeo sitio Starlink → minigranja. patron (normalizado como queda en
+# agrupado.descripcion) → nombre_comercial del proyecto. Migrado del hardcode
+# STARLINK_TO_PANEL del frontend. NESTLE / OFICINA UNERGY no son minigranjas → NULL.
+_STARLINK_SEED = {
+    "BARAYA": "Minigranja Solar Baraya",
+    "CUMBIA": "Minigranja Solar Cumbia",
+    "EL COPEY OCCIDENTE": "Minigranja Solar Copey",
+    "EL MOLINO": "Minigranja Solar El Molino",
+    "EL OLIMPO": "Minigranja Solar El Olimpo",
+    "EL SON": "Minigranja Solar El Son",
+    "GANDALF": "Minigranja Solar Gandalf",
+    "CANAHUATE": "Minigranja Solar Cañahuate",
+    "IBIRICO": "Minigranja Solar Ibirico",
+    "MAPALE": "Minigranja Solar Mapalé",
+    "LA ESMERALDA": "Minigranja Solar Esmeralda",
+    "LA MESA": "Minigranja Solar La Mesa",
+    "VALLENATA": "Minigranja Solar La Paz Vallenata",
+    "LEYENDA": "Minigranja Solar La Paz Leyenda",
+    "LA RESERVA": "MGS 0012 La Reserva",
+    "PUYA": "Minigranja Solar La Puya",
+    "MGS LA PAZ VERSO": "Minigranja Solar La Paz Verso",
+    "PERUA": "Minigranja Solar Perijá",
+    "SAN DIEGO SUR": "Minigranja Solar San Diego Sur",
+    "URUACO": "Minigranja Solar Uruaco",
+    "VILLANUEVA": "Minigranja Solar Villanueva",
+    "CACICA": "Minigranja Solar La Cacica",
+    "PILONERAS": "Minigranja Solar Las Piloneras",
+    "VALENCIA 1": "Minigranja Solar Valencia Oriente 1",
+    "VALENCIA 2": "Minigranja Solar Valencia Oriente 2",
+    "CHIRIGUANA N2": "Minigranja Solar Chiriguana 2",
+    "CHIRIGUANA N4": "Minigranja Solar Chiriguana 4",
+    # Nombres individuales que produce el parser al dividir splits y que no están en
+    # el mapa del front (JOROPO MAPALE → Joropo/Mapale; PUYA Y MERENGUE → Puya/Merengue):
+    "JOROPO": "Minigranja Solar Joropo",
+    "MERENGUE": "MGS 0019 El Merengue",
+    # Sitios conocidos que NO son minigranjas → proyecto_id NULL (quedan "sin asignar"):
+    "NESTLE": None,
+    "OFICINA UNERGY": None,
+}
+
+
+def _run_starlink_mapeo_seed() -> None:
+    """Siembra starlink_mapeo_sitio (idempotente: no pisa proyecto_id editado) y
+    hace backfill de starlink_factura_linea para las facturas ya guardadas."""
+    from sqlalchemy.orm import sessionmaker
+    from app.models.proyectos import Proyecto
+    from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
+    from app.api.v1.starlink import _regenerar_lineas
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        proyectos = {p.nombre_comercial: p.id for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()}
+        for patron, nombre in _STARLINK_SEED.items():
+            patron = patron.strip()
+            if not patron:
+                continue
+            existente = db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.patron == patron).first()
+            if existente:
+                continue  # idempotente: no tocar lo que ya existe (posible edición manual)
+            db.add(StarlinkMapeoSitio(
+                patron=patron,
+                proyecto_id=proyectos.get(nombre) if nombre else None,
+                activo=True,
+            ))
+        db.flush()
+
+        for fac in db.query(StarlinkFactura).all():
+            tiene = db.query(StarlinkFacturaLinea).filter(StarlinkFacturaLinea.factura_id == fac.id).first()
+            if not tiene:
+                _regenerar_lineas(db, fac)
+        db.commit()
+        print("[starlink seed] OK — mapeo sembrado y backfill de líneas")
+    except Exception as e:
+        db.rollback()
+        print(f"[starlink seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
 def _run_estructura_fallas_seed() -> None:
     """Siembra (idempotente) las categorías/tipos del reporte estructurado a partir
     de ESTRUCTURA_FALLAS. Permite que las vistas/analytics legacy (que muestran
@@ -2495,6 +2575,7 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
+        ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
         ("tipo_migration", _run_tipo_migration),

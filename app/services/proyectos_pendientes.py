@@ -44,6 +44,21 @@ def _excluir_por_nombre(nombre: str) -> bool:
     return any(n.startswith(p) for p in _EXCLUIR_PREFIJOS) or any(x in n for x in _EXCLUIR_NOMBRES)
 
 
+def _coord_valida(lat, lon) -> bool:
+    """Filtra coordenadas placeholder de las fuentes (ej. -1,-1 o 0,0 como
+    "sin dato", visto en Solenium) -- Colombia continental cae aprox. en
+    lat [-5, 16], lon [-82, -65]."""
+    if lat is None or lon is None:
+        return False
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return False
+    if lat == lon:
+        return False
+    return -5 <= lat <= 16 and -82 <= lon <= -65
+
+
 @dataclass
 class _Candidato:
     fuentes: set[str] = field(default_factory=set)
@@ -97,13 +112,14 @@ def _candidatos_sunfactory() -> list[_Candidato]:
         if state == 5:  # Debida diligencia -- demasiado temprano, ni prospecto confirmado
             continue
         base_name = p.get("base_name")
+        lat, lon = p.get("lat"), p.get("lon")
         c = _Candidato(
             fuentes={"sunfactory"},
             nombre_raw=nombre if not _parece_codigo(nombre) else _derive_commercial_name(base_name or nombre),
             municipio=p.get("city"),
             departamento=p.get("department"),
-            latitud=p.get("lat"),
-            longitud=p.get("lon"),
+            latitud=lat if _coord_valida(lat, lon) else None,
+            longitud=lon if _coord_valida(lat, lon) else None,
             tipo_proyecto="minigranja" if p.get("is_minifarm") else "autoconsumo",
             origina_code=base_name,
             codigo_tsf=_tsf_code_from_base_name(base_name),
@@ -187,11 +203,12 @@ def _candidatos_solenium() -> list[_Candidato]:
         else:
             tipo = None  # ambiguo -- que lo decida quien confirma
 
+        lat, lon = p.get("lat"), p.get("lon")
         c = _Candidato(
             fuentes={"solenium"},
             nombre_raw=nombre,
-            latitud=p.get("lat"),
-            longitud=p.get("lon"),
+            latitud=lat if _coord_valida(lat, lon) else None,
+            longitud=lon if _coord_valida(lat, lon) else None,
             tipo_proyecto=tipo,
             capacidad_instalada_kwp=cap_val,
             project_id_solenium=str(p["id"]) if p.get("id") is not None else None,

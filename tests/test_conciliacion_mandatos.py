@@ -218,6 +218,41 @@ def test_bug5_administracion():
     assert res["status"] == "ok"
 
 
+# ── BUG 6: asociado abreviado en el asiento (caso real Sol Sierra, CMU1107) ──
+
+def test_bug6_asociado_abreviado_subconjunto():
+    tag = "[10051] COLCEST53P1 LA PAZ LEYENDA"
+    mand = "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA - 17844 SOL DE LA SIERRA"
+    lineas = [
+        {"asociado": "PA 17844 SOL DE LA SIERRA", "acc": "28151009", "accDesc": "", "debe": 64706.3, "haber": 0, "etiqueta": "", "proj": tag},
+        {"asociado": "PA 17844 SOL DE LA SIERRA", "acc": "28151010", "accDesc": "", "debe": 12294.2, "haber": 0, "etiqueta": "", "proj": tag},
+        {"asociado": "PA 17844 SOL DE LA SIERRA", "acc": "28151020", "accDesc": "", "debe": 2681883.45, "haber": 0, "etiqueta": "", "proj": tag},
+        {"asociado": "PA 17844 SOL DE LA SIERRA", "acc": "28151021", "accDesc": "", "debe": 509557.86, "haber": 0, "etiqueta": "", "proj": tag},
+        # Ruido: otro tercero del MISMO proyecto que NO debe sumarse.
+        {"asociado": "SOLENIUM SAS", "acc": "28151020", "accDesc": "", "debe": 999999, "haber": 0, "etiqueta": "", "proj": tag},
+        # Otro patrimonio Bancolombia con fondo DISTINTO (Nestlé 18254): NO debe cruzar.
+        {"asociado": "FIDUCIARIA BANCOLOMBIA PA NESTLE 18254", "acc": "28151020", "accDesc": "", "debe": 888888, "haber": 0, "etiqueta": "", "proj": tag},
+    ]
+    res = reconciliar({"mandante": mand, "vals": {"int": 64706.3, "iva_int": 12294.2, "admin": 2681883.45, "iva_admin": 509557.86}, "total": 3268441.81}, lineas, tag)
+    assert len(res["lines"]) == 4  # solo las 4 de "PA 17844 SOL DE LA SIERRA"
+    assert round(res["sums"]["admin"]) == 2681883  # sin sumar 999999/888888
+    assert res["status"] == "ok"  # antes: todo faltante, suma 0
+
+
+def test_bug6_fondos_distintos_no_cruzan():
+    tag = "[10051] COLCEST53P1 LA PAZ LEYENDA"
+    lineas = [
+        {"asociado": "PA 17844 SOL DE LA SIERRA", "acc": "28151020", "accDesc": "", "debe": 100, "haber": 0, "etiqueta": "", "proj": tag},
+        {"asociado": "FIDUCIARIA BANCOLOMBIA PA NESTLE 18254", "acc": "28151020", "accDesc": "", "debe": 200, "haber": 0, "etiqueta": "", "proj": tag},
+        {"asociado": "PATRIMONIOS AUTONOMOS SKANDIA SOCIEDAD FIDUCIARIA S.A.", "acc": "28151020", "accDesc": "", "debe": 300, "haber": 0, "etiqueta": "", "proj": tag},
+    ]
+    # Sol Sierra (17844) solo suma su línea; Nestlé (18254) y Skandia quedan fuera.
+    res = reconciliar({"mandante": "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA - 17844 SOL DE LA SIERRA",
+                       "vals": {"admin": 100}, "total": 100}, lineas, tag)
+    assert res["sums"]["admin"] == 100
+    assert len(res["lines"]) == 1
+
+
 def test_bug4_etiqueta_sin_cc_fact_queda_generico():
     mand = "STRADA ASOCIADOS S A S"
     lineas = [{"asociado": mand, "acc": "28150517", "accDesc": "", "debe": 100, "haber": 0, "etiqueta": "ARRIENDO ABRIL", "proj": TAG}]

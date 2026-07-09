@@ -397,12 +397,24 @@ def reconciliar(mandato: dict, details: list[dict], tag: str) -> dict:
                            "txt": "No se asignó etiqueta analítica; no se puede verificar."}],
                 "sums": {}, "lines": []}
 
-    # Mandante por PALABRA COMPLETA y con TODOS los términos distintivos (fix STRADA/ESTRADA).
+    # Mandante por PALABRA COMPLETA (fix STRADA/ESTRADA) pero tolerando abreviaturas.
     mand_tok = name_token_set(mandato.get("mandante"))
 
     def asociado_match(aso):
+        # Coincide si uno de los nombres es SUBCONJUNTO del otro. El asiento suele
+        # abreviar el mandante omitiendo las palabras corporativas — p. ej.
+        # "PA 17844 SOL DE LA SIERRA" vs. el mandante completo "PATRIMONIOS
+        # AUTONOMOS FIDUCIARIA BANCOLOMBIA ... 17844 SOL DE LA SIERRA": comparten
+        # patrimonio + fondo pero el asiento no trae FIDUCIARIA/BANCOLOMBIA. Exigir
+        # TODOS los tokens del mandante fallaba (0 líneas). Se exige que TODOS los
+        # tokens del conjunto MÁS PEQUEÑO estén en el otro, con intersección no
+        # vacía. NO reintroduce STRADA⊂ESTRADA: por palabra completa STRADA y
+        # ESTRADA no comparten ningún token.
         aset = name_token_set(aso)
-        return bool(mand_tok) and all(t in aset for t in mand_tok)
+        if not mand_tok or not aset:
+            return False
+        inter = len(mand_tok & aset)
+        return inter > 0 and (inter == len(mand_tok) or inter == len(aset))
 
     lines = [d for d in details if d["proj"] == tag and asociado_match(d["asociado"])]
 

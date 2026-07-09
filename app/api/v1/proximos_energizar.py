@@ -109,6 +109,11 @@ def listar_proximos_energizar(
         rows = (
             db.query(Proyecto)
             .filter(Proyecto.deleted_at.is_(None))
+            # Si YA lo tenemos marcado como en operación -- así haya sido por
+            # confirmación manual, o vía /proyectos/pendientes con evidencia de
+            # Quoia/Solenium -- no debe seguir apareciendo aquí, aunque Sun
+            # Factory no se haya actualizado y siga diciendo "en construcción".
+            .filter(Proyecto.estado != "en_operacion")
             .filter(
                 or_(
                     # Pipeline TSF: en alguna fase de construcción y aún no energizado.

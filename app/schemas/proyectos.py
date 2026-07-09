@@ -155,12 +155,13 @@ class ProyectoInversorOut(ProyectoInversorCreate):
 # ── Contactos (siempre de Cliente) ────────────────────────────────────────────
 # Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-TipoContacto = Literal["operacional", "cgm", "liquidacion"]
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "comercial", "contable"]
 
 
 class ContactoCreate(BaseModel):
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: TipoContacto
     recibe_notificaciones: bool = True
 
@@ -176,6 +177,7 @@ class ContactoCreate(BaseModel):
 class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
+    telefono: Optional[str] = None
     tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
@@ -195,6 +197,7 @@ class ContactoOut(BaseModel):
     cliente_id: int
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: str
     recibe_notificaciones: bool
     created_at: datetime
@@ -396,3 +399,47 @@ class ProyectoOut(BaseModel):
             except Exception:
                 return None
         return v
+
+
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+
+class ProyectoPendienteOut(BaseModel):
+    clave: str
+    tipo_sugerencia: Literal["crear", "actualizar"]
+    confianza: Literal["id", "nombre", "sin_match"]
+    fuentes: list[str]
+    proyecto_id: Optional[int] = None
+    proyecto_nombre_actual: Optional[str] = None
+    nombre_sugerido: str
+    estado_actual: Optional[str] = None
+    estado_sugerido: Optional[str] = None
+    fase_construccion_actual: Optional[str] = None
+    fase_construccion_sugerida: Optional[str] = None
+    tipo_proyecto_sugerido: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+    sub_project: Optional[str] = None
+    project_id_solenium: Optional[str] = None
+    origina_code: Optional[str] = None
+    codigo_tsf: Optional[str] = None
+    sunfactory_project_id: Optional[int] = None
+
+
+class ProyectoPendienteConfirmar(BaseModel):
+    """Todos los campos son overrides opcionales -- si no se envían, se usa
+    lo que trajo la fuente. `nombre_comercial`/`tipo_proyecto` son
+    obligatorios en la práctica para "crear" (el frontend los pre-llena)."""
+    nombre_comercial: Optional[str] = None
+    tipo_proyecto: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+
+
+class ProyectoPendienteIgnorar(BaseModel):
+    motivo: Optional[str] = None

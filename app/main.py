@@ -996,6 +996,14 @@ _PENDING_DDLS = [
     # fallas→ProyectoResumen, liquidaciones→proyecto) rompe con 500.
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_sunfactory_project_id ON proyectos (sunfactory_project_id) WHERE sunfactory_project_id IS NOT NULL",
+    # Rediseño pestaña Clientes (2026-07): contactos por 5 áreas + teléfono,
+    # renovación automática y fecha de indexación de tarifas en contratos.
+    "ALTER TYPE tipo_contacto_enum ADD VALUE IF NOT EXISTS 'comercial'",
+    "ALTER TYPE tipo_contacto_enum ADD VALUE IF NOT EXISTS 'contable'",
+    "ALTER TABLE contactos ADD COLUMN IF NOT EXISTS telefono VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
 ]
 
 

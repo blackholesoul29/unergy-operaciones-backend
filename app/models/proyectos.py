@@ -294,3 +294,17 @@ class ProyectoInversionista(Base):
     @property
     def cliente_nombre(self) -> str:
         return self.cliente.razon_social_nombre if self.cliente else ""
+
+
+class ProyectoPendienteIgnorado(Base):
+    """Candidato de /proyectos/pendientes (Sun Factory/Quoia/Solenium) marcado
+    a propósito como "no aplica" para que deje de aparecer -- ej. un medidor
+    de prueba, o algo que ya se revisó y no corresponde a un proyecto real."""
+
+    __tablename__ = "proyectos_pendientes_ignorados"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    clave: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    motivo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ignorado_por_usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

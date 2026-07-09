@@ -8,7 +8,7 @@ from app.models import Proyecto
 from app.services.tsf_sync import _core
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoGrupoPanel, ProyectoInversor,
+    ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
 )
 from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
@@ -20,8 +20,10 @@ from app.schemas.proyectos import (
     ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
     ProyectoAreaContactoSet, ProyectoAreaContactoOut,
+    ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
 )
 from app.schemas.common import PaginatedResponse
+from app.services.proyectos_pendientes import resolver_pendientes
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -162,6 +164,103 @@ def create_proyecto(
         )
     db.refresh(proyecto)
     return _get_proyecto_or_404(proyecto.id, db)
+
+
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+# Deben ir antes de /{id} para no chocar -- aunque acá no aplica porque son
+# rutas de 2+ segmentos, se deja el mismo orden por consistencia con el resto.
+
+@router.get("/pendientes", response_model=list[ProyectoPendienteOut])
+def listar_proyectos_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Candidatos de Sun Factory/Quoia/Solenium sin reflejar en `proyectos`,
+    o ya existentes pero con estado/fase desincronizados. Nunca se escriben
+    solos -- ver /pendientes/{clave}/confirmar."""
+    return resolver_pendientes(db)
+
+
+@router.post("/pendientes/{clave}/confirmar", response_model=ProyectoOut, status_code=201)
+def confirmar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteConfirmar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    pendientes = resolver_pendientes(db)
+    item = next((p for p in pendientes if p["clave"] == clave), None)
+    if not item:
+        raise HTTPException(404, "Ese candidato ya no aparece como pendiente (puede que ya se haya resuelto).")
+
+    overrides = body.model_dump(exclude_unset=True)
+    potencia_ac_kw = overrides.get("potencia_ac_kw", item.get("potencia_ac_kw"))
+    capacidad_instalada_kwp = overrides.get("capacidad_instalada_kwp", item.get("capacidad_instalada_kwp"))
+
+    if item["tipo_sugerencia"] == "crear":
+        payload = {
+            "nombre_comercial": overrides.get("nombre_comercial") or item["nombre_sugerido"],
+            "tipo_proyecto": overrides.get("tipo_proyecto") or item.get("tipo_proyecto_sugerido"),
+            "estado": item.get("estado_sugerido") or "en_desarrollo",
+            "municipio": overrides.get("municipio") or item.get("municipio"),
+            "departamento": overrides.get("departamento") or item.get("departamento"),
+            "latitud": item.get("latitud"),
+            "longitud": item.get("longitud"),
+            "fase_construccion": item.get("fase_construccion_sugerida"),
+            "origina_code": item.get("origina_code"),
+            "codigo_tsf": item.get("codigo_tsf"),
+            "sunfactory_project_id": item.get("sunfactory_project_id"),
+            "sub_project": item.get("sub_project"),
+            "project_id_solenium": item.get("project_id_solenium"),
+            "origen": "pendientes",
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        proyecto = Proyecto(**payload)
+        db.add(proyecto)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "No se pudo crear: algún código/ID único ya está en uso por otro proyecto.")
+        db.refresh(proyecto)
+        proyecto_id = proyecto.id
+    else:
+        proyecto = db.query(Proyecto).filter(Proyecto.id == item["proyecto_id"]).first()
+        if not proyecto:
+            raise HTTPException(404, "El proyecto vinculado ya no existe")
+        if item.get("estado_sugerido") and proyecto.estado != "en_operacion" and item["estado_sugerido"] == "en_operacion":
+            proyecto.estado = "en_operacion"
+        if item.get("fase_construccion_sugerida"):
+            proyecto.fase_construccion = item["fase_construccion_sugerida"]
+        # Backfill de vínculos -- solo si el proyecto todavía no los tenía.
+        for campo in ("origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project", "project_id_solenium"):
+            if getattr(proyecto, campo) is None and item.get(campo) is not None:
+                setattr(proyecto, campo, item[campo])
+        db.commit()
+        proyecto_id = proyecto.id
+
+    if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
+        it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()
+        if not it:
+            it = ProyectoInfoTecnica(proyecto_id=proyecto_id)
+            db.add(it)
+        if it.potencia_ac_kw is None and potencia_ac_kw is not None:
+            it.potencia_ac_kw = potencia_ac_kw
+        if it.capacidad_instalada_kwp is None and capacidad_instalada_kwp is not None:
+            it.capacidad_instalada_kwp = capacidad_instalada_kwp
+        db.commit()
+
+    return _get_proyecto_or_404(proyecto_id, db)
+
+
+@router.post("/pendientes/{clave}/ignorar", status_code=204)
+def ignorar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteIgnorar,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
+):
+    if db.query(ProyectoPendienteIgnorado).filter(ProyectoPendienteIgnorado.clave == clave).first():
+        return
+    db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.commit()
 
 
 @router.get("/{id}", response_model=ProyectoOut)

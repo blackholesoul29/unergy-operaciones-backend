@@ -124,15 +124,16 @@ def _derive_commercial_name(code: str) -> str:
     """Nombre legible derivado del código de proyecto de origina.
 
     Los códigos tienen la forma `<PREFIJO>_<SITIO>`, p. ej.
-    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur". Es el respaldo cuando el proyecto aún
-    no está en la tabla `proyectos`."""
+    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur", y el sitio puede traer guiones
+    (`LA-JAGUA-DEL-PILAR` → "La Jagua Del Pilar"). Es el respaldo cuando el
+    proyecto aún no está en la tabla `proyectos`."""
     if not code:
         return ""
     parts = code.split("_", 1)
     prefix = parts[0]
     is_code_prefix = bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
     readable = (parts[1] if len(parts) > 1 and is_code_prefix else code)
-    readable = readable.replace("_", " ").strip()
+    readable = re.sub(r"[_-]+", " ", readable).strip()
     return readable.title() if readable else code
 
 
@@ -586,18 +587,41 @@ def _norm(s: str | None) -> str:
     return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
 
 
-_PREFIJOS_PLANTA_RE = re.compile(r"\b(mgs|mgr|minigranja|granja|solar|gd)\b")
-_NUMERO_SUELTO_RE = re.compile(r"\b0*\d+\b")
+_PREFIJO_CATALOGO_RE = re.compile(r"^(?:(?:mgs|mgr|minigranja|granja|solar|gd)\b\s*)+")
+_NUMERO_CATALOGO_RE = re.compile(r"^0*\d+\s*[-–]?\s*")
+
+# Solenium abrevia la dirección pegada al número de fase (p. ej. "Chiriguana N2"
+# = "Chiriguana Norte 2", "Valencia Or_1" = "Valencia Oriente 1") -- se expande
+# ANTES de comparar para que coincida con la convención completa que usamos
+# internamente. No tocar: '\s*' cubre tanto "n2" (sin espacio) como "or 1"
+# (con espacio, tras _norm() convertir el "_" en espacio).
+_ABREV_DIRECCION = {"n": "norte", "s": "sur", "or": "oriente", "oc": "occidente", "occ": "occidente"}
+_ABREV_DIRECCION_RE = re.compile(
+    r"\b(" + "|".join(_ABREV_DIRECCION) + r")\s*(\d+)\b"
+)
+
+
+def _expandir_abreviaturas_direccion(n: str) -> str:
+    return _ABREV_DIRECCION_RE.sub(lambda m: f"{_ABREV_DIRECCION[m.group(1)]} {m.group(2)}", n)
 
 
 def _core(s: str | None) -> str:
-    """Nombre normalizado sin prefijos de tipo de planta (MGS/Minigranja/GD/...)
-    ni números sueltos -- para comparar el "nombre de lugar" real detrás de
-    convenciones de nomenclatura distintas (p. ej. "MGS 0032 - El Paso Norte" vs
-    "Minigranja 0032 - El Paso Norte")."""
+    """Nombre normalizado sin prefijo de catálogo (MGS/Minigranja/GD/... + el
+    número que le sigue inmediatamente) -- para comparar el "nombre de lugar"
+    real detrás de convenciones de nomenclatura distintas (p. ej.
+    "MGS 0032 - El Paso Norte" vs "Minigranja 0032 - El Paso Norte").
+
+    A propósito NO toca números en cualquier otra posición del nombre: esos
+    suelen ser el número de FASE real ("Norte 2" vs "Norte 4"), y borrarlos
+    colapsaba fases distintas en el mismo core -- bug encontrado 2026-07-08
+    comparando contra Quoia/Solenium en producción (10 proyectos con fase
+    activa que ya reportaban generación real quedaban indistinguibles de
+    fases hermanas). También expande las abreviaturas de dirección que usa
+    Solenium (N2/Or_1) antes de comparar, si no, "sin match" falso."""
     n = _norm(s)
-    n = _PREFIJOS_PLANTA_RE.sub(" ", n)
-    n = _NUMERO_SUELTO_RE.sub(" ", n)
+    n = _expandir_abreviaturas_direccion(n)
+    n = _PREFIJO_CATALOGO_RE.sub("", n)
+    n = _NUMERO_CATALOGO_RE.sub("", n)
     return re.sub(r"\s+", " ", n).strip()
 
 

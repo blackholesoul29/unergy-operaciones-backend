@@ -1,0 +1,352 @@
+"""Proyectos pendientes: fusiona Sun Factory + Quoia + Solenium contra la
+tabla `proyectos`, y produce dos tipos de sugerencia -- nunca escribe solo:
+
+  - "crear": el proyecto no tiene fila en absoluto.
+  - "actualizar": el proyecto ya existe, pero una fuente externa contradice
+    su `estado`/`fase_construccion` actual (ej. Sun Factory sigue diciendo
+    "en construcción" mientras Quoia/Solenium ya lo ven generando), o le
+    faltan datos (Potencia AC/Capacidad instalada) que la fuente sí tiene.
+
+Cascada de confianza (nunca se auto-aplica, solo decide qué tan segura es
+la sugerencia):
+  1. Match exacto por ID/código -- sunfactory_project_id, origina_code/
+     codigo_tsf, project_id_solenium, o fronteras.codigo_frontera ya
+     vinculada a un proyecto.
+  2. Sin match por ID, nombre normalizado (`_core`) coincide -- se sugiere
+     igual, pero como "actualizar" (vincular), nunca como auto-match.
+  3. Sin match en absoluto -- candidato genuino a "crear".
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from sqlalchemy.orm import Session
+
+from app.models.fronteras import Frontera
+from app.models.proyectos import Proyecto, ProyectoPendienteIgnorado
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.mgs.solenium_client import SoleniumClient
+from app.services.tsf_sync import (
+    _core, _derive_commercial_name, _parece_codigo,
+    _sunfactory_all_projects, _sunfactory_token,
+    _SF_IMPORT_STATES, _STATUS_TO_FASE,
+)
+
+# Sun Factory usa este listado para el propio edificio de Solenium y para
+# proyectos ya dados de baja -- nunca son candidatos reales.
+_EXCLUIR_NOMBRES = ("solenium piso",)
+_EXCLUIR_PREFIJOS = ("deprecated",)
+
+
+def _excluir_por_nombre(nombre: str) -> bool:
+    n = (nombre or "").strip().lower()
+    return any(n.startswith(p) for p in _EXCLUIR_PREFIJOS) or any(x in n for x in _EXCLUIR_NOMBRES)
+
+
+@dataclass
+class _Candidato:
+    fuentes: set[str] = field(default_factory=set)
+    nombre_raw: str = ""
+    core: str = ""
+    municipio: str | None = None
+    departamento: str | None = None
+    latitud: float | None = None
+    longitud: float | None = None
+    tipo_proyecto: str | None = None
+    fase_construccion: str | None = None
+    estado_sugerido: str | None = None
+    potencia_ac_kw: float | None = None
+    capacidad_instalada_kwp: float | None = None
+    sub_project: str | None = None
+    project_id_solenium: str | None = None
+    origina_code: str | None = None
+    codigo_tsf: str | None = None
+    sunfactory_project_id: int | None = None
+    proyecto_id: int | None = None  # si ya se resolvió contra uno existente
+
+
+def _tsf_code_from_base_name(base_name: str | None) -> str | None:
+    if not base_name:
+        return None
+    prefix = base_name.split("_", 1)[0]
+    return prefix if re.match(r"^COL[A-Z0-9]+$", prefix) else None
+
+
+def _candidatos_sunfactory() -> list[_Candidato]:
+    """Todos los estados (no solo el pipeline de construcción) -- para
+    /proyectos/pendientes nos interesa tanto lo que sigue en obra como lo
+    que Sun Factory ya marcó como operando, no solo lo primero."""
+    try:
+        token = _sunfactory_token()
+    except Exception:
+        token = None
+    if not token:
+        return []
+    try:
+        raw = _sunfactory_all_projects(token)
+    except Exception:
+        return []
+
+    out = []
+    for p in raw:
+        nombre = (p.get("name") or "").strip()
+        if not nombre or _excluir_por_nombre(nombre):
+            continue
+        state = p.get("state")
+        if state == 5:  # Debida diligencia -- demasiado temprano, ni prospecto confirmado
+            continue
+        base_name = p.get("base_name")
+        c = _Candidato(
+            fuentes={"sunfactory"},
+            nombre_raw=nombre if not _parece_codigo(nombre) else _derive_commercial_name(base_name or nombre),
+            municipio=p.get("city"),
+            departamento=p.get("department"),
+            latitud=p.get("lat"),
+            longitud=p.get("lon"),
+            tipo_proyecto="minigranja" if p.get("is_minifarm") else "autoconsumo",
+            origina_code=base_name,
+            codigo_tsf=_tsf_code_from_base_name(base_name),
+            sunfactory_project_id=p.get("id"),
+        )
+        if state == 2:
+            c.estado_sugerido = "en_operacion"
+            c.fase_construccion = "energizado"
+        elif state in _SF_IMPORT_STATES:
+            c.fase_construccion = _STATUS_TO_FASE.get(_SF_IMPORT_STATES[state])
+        c.core = _core(c.nombre_raw)
+        out.append(c)
+    return out
+
+
+def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
+    gaia = GaiaClient()
+    if not gaia.enabled:
+        return []
+    try:
+        borders = gaia.get_all_borders()
+    except Exception:
+        return []
+
+    out = []
+    for b in borders:
+        nombre = (b.get("name") or "").strip()
+        if not nombre or _excluir_por_nombre(nombre):
+            continue
+        gen = b.get("frt_generation") or {}
+        cons = b.get("frt_consumption") or {}
+        frt_gen_code = (gen.get("frt_code") or "").strip().lower()
+        frt_cons_code = (cons.get("frt_code") or "").strip().lower()
+
+        # Ya vinculado a un proyecto vía fronteras.codigo_frontera -- match
+        # directo, no hace falta adivinar por nombre.
+        proyecto_id = fronteras_vinculadas.get(frt_gen_code) or fronteras_vinculadas.get(frt_cons_code)
+
+        cap_mw = gen.get("installed_capacity")
+        c = _Candidato(
+            fuentes={"quoia"},
+            nombre_raw=nombre,
+            tipo_proyecto="minigranja" if re.match(r"^(mgs|minigranja)\b", nombre, re.IGNORECASE) else (
+                "gd" if nombre.upper().startswith("GD ") else None
+            ),
+            potencia_ac_kw=(float(cap_mw) * 1000) if cap_mw else None,
+            proyecto_id=proyecto_id,
+        )
+        if gen.get("last_report_date"):
+            c.estado_sugerido = "en_operacion"
+            c.fase_construccion = "energizado"
+        c.core = _core(c.nombre_raw)
+        out.append(c)
+    return out
+
+
+def _candidatos_solenium() -> list[_Candidato]:
+    client = SoleniumClient()
+    if not client.enabled:
+        return []
+    try:
+        raw = client.get_projects()
+    except Exception:
+        return []
+
+    out = []
+    for p in raw:
+        nombre = (p.get("name") or "").strip()
+        if not nombre or _excluir_por_nombre(nombre):
+            continue
+        cap = p.get("installed_capacity")
+        try:
+            cap_val = float(cap) if cap is not None else None
+        except (TypeError, ValueError):
+            cap_val = None  # "Desconocida"
+
+        if p.get("is_minifarm"):
+            tipo = "minigranja"
+        elif p.get("is_self_consumption"):
+            tipo = "autoconsumo"
+        else:
+            tipo = None  # ambiguo -- que lo decida quien confirma
+
+        c = _Candidato(
+            fuentes={"solenium"},
+            nombre_raw=nombre,
+            latitud=p.get("lat"),
+            longitud=p.get("lon"),
+            tipo_proyecto=tipo,
+            capacidad_instalada_kwp=cap_val,
+            project_id_solenium=str(p["id"]) if p.get("id") is not None else None,
+            estado_sugerido="en_operacion",
+            fase_construccion="energizado",
+        )
+        c.core = _core(c.nombre_raw)
+        out.append(c)
+    return out
+
+
+def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
+    """Combina candidatos de distintas fuentes que refieren al mismo
+    proyecto real (mismo `core`), sin pisar campos ya llenados."""
+    por_core: dict[str, _Candidato] = {}
+    for c in candidatos:
+        if len(c.core) < 3:
+            continue
+        existente = por_core.get(c.core)
+        if existente is None:
+            por_core[c.core] = c
+            continue
+        existente.fuentes |= c.fuentes
+        for campo in (
+            "municipio", "departamento", "latitud", "longitud", "tipo_proyecto",
+            "fase_construccion", "estado_sugerido", "potencia_ac_kw",
+            "capacidad_instalada_kwp", "sub_project", "project_id_solenium",
+            "origina_code", "codigo_tsf", "sunfactory_project_id", "proyecto_id",
+        ):
+            if getattr(existente, campo) is None and getattr(c, campo) is not None:
+                setattr(existente, campo, getattr(c, campo))
+    return list(por_core.values())
+
+
+def resolver_pendientes(db: Session) -> list[dict]:
+    proyectos = db.query(
+        Proyecto.id, Proyecto.nombre_comercial, Proyecto.estado, Proyecto.fase_construccion,
+        Proyecto.origina_code, Proyecto.codigo_tsf, Proyecto.sunfactory_project_id,
+        Proyecto.sub_project, Proyecto.project_id_solenium,
+    ).filter(Proyecto.deleted_at.is_(None)).all()
+
+    por_sunfactory_id = {p.sunfactory_project_id: p for p in proyectos if p.sunfactory_project_id is not None}
+    por_origina_code = {(p.origina_code or "").upper(): p for p in proyectos if p.origina_code}
+    por_codigo_tsf = {(p.codigo_tsf or "").upper(): p for p in proyectos if p.codigo_tsf}
+    por_solenium_id = {p.project_id_solenium: p for p in proyectos if p.project_id_solenium}
+    por_core = {}
+    for p in proyectos:
+        core = _core(p.nombre_comercial)
+        if len(core) >= 3:
+            por_core.setdefault(core, p)
+
+    fronteras_vinculadas = {
+        (codigo or "").lower(): proyecto_id
+        for codigo, proyecto_id in db.query(Frontera.codigo_frontera, Frontera.proyecto_id)
+        .filter(Frontera.proyecto_id.isnot(None), Frontera.codigo_frontera.isnot(None))
+        .all()
+    }
+
+    ignorados = {row[0] for row in db.query(ProyectoPendienteIgnorado.clave).all()}
+
+    crudos = (
+        _candidatos_sunfactory()
+        + _candidatos_quoia(fronteras_vinculadas)
+        + _candidatos_solenium()
+    )
+    candidatos = _fusionar_por_core(crudos)
+
+    pendientes: list[dict] = []
+    vistos_proyecto_id: set[int] = set()
+
+    for c in candidatos:
+        match = None
+        # 1. Match exacto por ID/código.
+        if c.sunfactory_project_id is not None:
+            match = por_sunfactory_id.get(c.sunfactory_project_id)
+        if match is None and c.origina_code:
+            match = por_origina_code.get(c.origina_code.upper())
+        if match is None and c.codigo_tsf:
+            match = por_codigo_tsf.get(c.codigo_tsf.upper())
+        if match is None and c.project_id_solenium:
+            match = por_solenium_id.get(c.project_id_solenium)
+        if match is None and c.proyecto_id:
+            match = next((p for p in proyectos if p.id == c.proyecto_id), None)
+
+        confianza = "id"
+        # 2. Sin match por ID -- probar nombre normalizado.
+        if match is None:
+            match = por_core.get(c.core)
+            confianza = "nombre" if match else "id"
+
+        clave = f"core:{c.core}"
+        if clave in ignorados:
+            continue
+
+        if match is not None:
+            if match.id in vistos_proyecto_id:
+                continue
+            necesita_actualizar = (
+                (c.estado_sugerido == "en_operacion" and match.estado != "en_operacion")
+                or (c.fase_construccion and match.fase_construccion != c.fase_construccion)
+                or (confianza == "nombre")  # vínculo sin confirmar todavía
+            )
+            if not necesita_actualizar:
+                continue
+            vistos_proyecto_id.add(match.id)
+            pendientes.append({
+                "clave": clave,
+                "tipo_sugerencia": "actualizar",
+                "confianza": confianza,
+                "fuentes": sorted(c.fuentes),
+                "proyecto_id": match.id,
+                "proyecto_nombre_actual": match.nombre_comercial,
+                "nombre_sugerido": c.nombre_raw,
+                "estado_actual": match.estado,
+                "estado_sugerido": c.estado_sugerido,
+                "fase_construccion_actual": match.fase_construccion,
+                "fase_construccion_sugerida": c.fase_construccion,
+                "tipo_proyecto_sugerido": c.tipo_proyecto,
+                "municipio": c.municipio,
+                "departamento": c.departamento,
+                "latitud": c.latitud,
+                "longitud": c.longitud,
+                "potencia_ac_kw": c.potencia_ac_kw,
+                "capacidad_instalada_kwp": c.capacidad_instalada_kwp,
+                "sub_project": c.sub_project,
+                "project_id_solenium": c.project_id_solenium,
+                "origina_code": c.origina_code,
+                "codigo_tsf": c.codigo_tsf,
+                "sunfactory_project_id": c.sunfactory_project_id,
+            })
+        else:
+            pendientes.append({
+                "clave": clave,
+                "tipo_sugerencia": "crear",
+                "confianza": "sin_match",
+                "fuentes": sorted(c.fuentes),
+                "proyecto_id": None,
+                "proyecto_nombre_actual": None,
+                "nombre_sugerido": c.nombre_raw,
+                "estado_actual": None,
+                "estado_sugerido": c.estado_sugerido or "en_desarrollo",
+                "fase_construccion_actual": None,
+                "fase_construccion_sugerida": c.fase_construccion,
+                "tipo_proyecto_sugerido": c.tipo_proyecto,
+                "municipio": c.municipio,
+                "departamento": c.departamento,
+                "latitud": c.latitud,
+                "longitud": c.longitud,
+                "potencia_ac_kw": c.potencia_ac_kw,
+                "capacidad_instalada_kwp": c.capacidad_instalada_kwp,
+                "sub_project": c.sub_project,
+                "project_id_solenium": c.project_id_solenium,
+                "origina_code": c.origina_code,
+                "codigo_tsf": c.codigo_tsf,
+                "sunfactory_project_id": c.sunfactory_project_id,
+            })
+
+    return pendientes

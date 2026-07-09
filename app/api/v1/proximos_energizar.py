@@ -23,8 +23,12 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
+from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
-from app.services.tsf_sync import _FASE_TO_LABEL, _STATUS_TO_FASE, sync_tsf_projects
+from app.services.tsf_sync import (
+    _FASE_TO_LABEL, _STATUS_TO_FASE, _sunfactory_energization, _sunfactory_token,
+    sync_tsf_projects,
+)
 
 logger = logging.getLogger("proximos_energizar")
 router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"])
@@ -76,7 +80,7 @@ def _contract_names(proyecto: Proyecto) -> list[str]:
     return names
 
 
-def _serialize(p: Proyecto) -> dict:
+def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
     """Forma compatible con el frontend (ProyectosProximosEnergizar.vue)."""
     fase = p.fase_construccion
     status = _FASE_TO_LABEL.get(fase) if fase else None
@@ -93,7 +97,34 @@ def _serialize(p: Proyecto) -> dict:
         "departamento": p.departamento,
         "origen": p.origen,
         "editadaManual": bool(p.fecha_estimada_editada_manual),
+        # "Frontera asignada" -- pregunta frecuente: qué proyectos en construcción
+        # ya tienen frontera comercial registrada (señal real de energización
+        # inminente, más confiable que la fase de Sun Factory). Viene de nuestra
+        # propia tabla `fronteras`, no de una llamada en vivo a Quoia.
+        "tieneFrontera": frontera is not None,
+        "codigoFrontera": frontera["codigo_frontera"] if frontera else None,
     }
+
+
+def _fronteras_por_proyecto(db: Session, proyecto_ids: list[int]) -> dict[int, dict]:
+    """{ proyecto_id: {codigo_frontera} } para la frontera de generación de cada
+    proyecto (si tiene varias, se queda con la primera). Une generacion y
+    generacion_consumo -- ambas son borders de punto de generación real."""
+    if not proyecto_ids:
+        return {}
+    out: dict[int, dict] = {}
+    rows = (
+        db.query(Frontera.proyecto_id, Frontera.codigo_frontera)
+        .filter(
+            Frontera.proyecto_id.in_(proyecto_ids),
+            Frontera.tipo_frontera.in_(["generacion", "generacion_consumo"]),
+            Frontera.deleted_at.is_(None),
+        )
+        .all()
+    )
+    for proyecto_id, codigo in rows:
+        out.setdefault(proyecto_id, {"codigo_frontera": codigo})
+    return out
 
 
 @router.get("")
@@ -135,7 +166,12 @@ def listar_proximos_energizar(
         return {"projects": [], "source": "error", "count": 0,
                 "warning": "No se pudo cargar la lista. Intenta «Sincronizar ahora» "
                            "para poblar el pipeline desde Solenium/TSF."}
-    return {"projects": [_serialize(p) for p in rows], "source": "operaciones_db", "count": len(rows)}
+    fronteras = _fronteras_por_proyecto(db, [p.id for p in rows])
+    return {
+        "projects": [_serialize(p, fronteras.get(p.id)) for p in rows],
+        "source": "operaciones_db",
+        "count": len(rows),
+    }
 
 
 @router.post("/sync")
@@ -192,4 +228,40 @@ def actualizar(
 
     db.commit()
     db.refresh(p)
-    return _serialize(p)
+    return _serialize(p, _fronteras_por_proyecto(db, [p.id]).get(p.id))
+
+
+@router.post("/{proyecto_id}/restaurar-fecha")
+def restaurar_fecha(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+) -> dict:
+    """Descarta la fecha editada a mano de ESTE proyecto y trae de nuevo la de
+    Sun Factory. Reemplaza al botón global de "forzar sobrescritura": más
+    seguro (un proyecto a la vez, con el operador viendo cuál) y más
+    descubrible (vive junto al ícono que ya marca "editada manualmente")."""
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
+    if p is None:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    if not p.sunfactory_project_id:
+        raise HTTPException(status_code=400,
+                             detail="Este proyecto no tiene vínculo con Sun Factory -- no hay fecha automática que restaurar.")
+
+    token = _sunfactory_token()
+    if not token:
+        raise HTTPException(status_code=502, detail="Credenciales de Sun Factory no configuradas.")
+    try:
+        energ = _sunfactory_energization(token, p.sunfactory_project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar Sun Factory: {exc}")
+    if not energ or not energ.get("energization_date"):
+        raise HTTPException(status_code=404, detail="Sun Factory no tiene una fecha de energización para este proyecto todavía.")
+
+    p.fecha_estimada_energizacion = energ["energization_date"]
+    p.fecha_estimada_editada_manual = False
+    if energ.get("avance_pct") is not None:
+        p.avance_obra_pct = energ["avance_pct"]
+    db.commit()
+    db.refresh(p)
+    return _serialize(p, _fronteras_por_proyecto(db, [p.id]).get(p.id))

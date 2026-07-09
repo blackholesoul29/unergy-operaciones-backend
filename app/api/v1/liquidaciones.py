@@ -598,15 +598,14 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
         proyecto_costos = 0.0
         for inv in inv_map.values():
             grupos = inv["grupos"]
+            # El Panel guarda comercializacion/costos/facturas con signo NEGATIVO, así
+            # que el valor a pagar es la SUMA de todas las líneas con su signo — idéntico
+            # a utilidad(inv) del Panel Contable (PanelContableView.vue:625). Si existe un
+            # grupo 'resultado' explícito, ese ya es el neto y no se re-suma.
             if "resultado" in grupos:
                 valor_a_pagar = grupos["resultado"]
             else:
-                valor_a_pagar = (
-                    grupos.get("ingresos", 0.0)
-                    - grupos.get("comercializacion", 0.0)
-                    - grupos.get("costos", 0.0)
-                    - grupos.get("facturas", 0.0)
-                )
+                valor_a_pagar = sum(grupos.values())
             inversionistas_out.append({
                 "proyecto_inversionista_id": inv["proyecto_inversionista_id"],
                 "cliente_id": inv["cliente_id"],
@@ -619,7 +618,12 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
             })
             proyecto_valor_a_pagar += valor_a_pagar
             proyecto_ingresos += grupos.get("ingresos", 0.0)
-            proyecto_costos += grupos.get("costos", 0.0) + grupos.get("comercializacion", 0.0)
+            # Costos = todo lo que resta (comercializacion + costos + facturas), con signo.
+            proyecto_costos += (
+                grupos.get("comercializacion", 0.0)
+                + grupos.get("costos", 0.0)
+                + grupos.get("facturas", 0.0)
+            )
 
         proyectos_out.append({
             "panel_id": panel.id,
@@ -650,7 +654,8 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
             "valor_a_pagar_total": round(total_valor_a_pagar, 2),
             "ingresos_total_cop": round(total_ingresos, 2),
             "costos_total_cop": round(total_costos, 2),
-            "ingreso_neto_cop": round(total_ingresos - total_costos, 2),
+            # costos ya viene con signo negativo → neto = ingresos + costos.
+            "ingreso_neto_cop": round(total_ingresos + total_costos, 2),
         },
         "proyectos": proyectos_out,
     }

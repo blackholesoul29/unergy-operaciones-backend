@@ -16,20 +16,25 @@ class BalanceMensual(BaseModel):
     """Balance energético consolidado de un mes."""
     anio: int
     mes: int = Field(..., ge=1, le=12)
+    # True si el mes tiene algún dato REAL (generación/consumo/bolsa/precio). Un mes
+    # futuro o sin lecturas es False y sale con estado "SIN_DATOS" — no es déficit.
+    realizado: bool
     # Fuentes (MWh)
     generacion_real_mwh: float
     compromiso_ppa_mwh: float
     consumo_clientes_mwh: float
     # Posición neta en bolsa = exportado − importado en fronteras de generación.
     venta_bolsa_mwh: float
-    precio_bolsa_promedio: float | None = None
+    # Precio de bolsa promedio en COP/kWh (fuente precios_bolsa_diario, igual que
+    # /cumplimiento y /dashboard).
+    precio_bolsa_promedio_cop_kwh: float | None = None
     # Derivados
     superavit_mwh: float
-    estado: str  # "SUPERAVIT" | "DEFICIT" | "NEUTRO"
+    estado: str  # "SUPERAVIT" | "DEFICIT" | "NEUTRO" | "SIN_DATOS"
 
 
 class BalanceResumen(BaseModel):
-    """Totales acumulados año-a-fecha (solo meses con generación registrada)."""
+    """Totales acumulados año-a-fecha (solo meses realizados con dato real)."""
     generacion_total_mwh: float
     compromiso_ppa_total_mwh: float
     consumo_clientes_total_mwh: float

@@ -29,13 +29,13 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import extract, func, text
+from sqlalchemy import extract, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.generacion import GeneracionDiaria
-from app.models.contratos import PPACompromisoEnergia
+from app.models.contratos import PPAContrato, PPACompromisoEnergia
 from app.models.fronteras import Frontera, FronteraLectura, TipoFronteraEnum
 from app.schemas.balance import BalanceResponse
 
@@ -83,12 +83,28 @@ def _superavit_y_estado(gen: float, ppa: float, consumo: float, bolsa: float):
     return superavit, estado
 
 
-def _proyeccion_fin_anio(balance_acumulado: float, meses_con_datos: int) -> float | None:
+def _es_anio_calendario(start_date: date, end_date: date) -> bool:
+    """True sii el rango es exactamente un año calendario (1-ene → 31-dic)."""
+    return (
+        start_date.month == 1
+        and start_date.day == 1
+        and end_date.year == start_date.year
+        and end_date.month == 12
+        and end_date.day == 31
+    )
+
+
+def _proyeccion_fin_anio(
+    balance_acumulado: float, meses_con_datos: int, proyectar: bool
+) -> float | None:
     """Proyección lineal del balance a fin de año: promedio mensual YTD × 12.
 
-    Devuelve None si aún no hay meses con datos sobre los cuales promediar.
+    Devuelve None si:
+      * ``proyectar`` es False — el rango no es un año calendario, así que un
+        "×12 a fin de año" no significaría nada (el nombre engañaría al lector), o
+      * aún no hay meses realizados sobre los cuales promediar.
     """
-    if meses_con_datos <= 0:
+    if not proyectar or meses_con_datos <= 0:
         return None
     return round(balance_acumulado / meses_con_datos * 12, 3)
 
@@ -104,10 +120,16 @@ def build_balance(
 ) -> dict:
     """Ensambla la respuesta a partir de los agregados mensuales ya calculados.
 
-    Cada ``*_map`` está indexado por (año, mes). El resumen YTD y la proyección se
-    calculan solo sobre los meses con generación registrada (``gen_map``), que son
-    los meses efectivamente transcurridos con dato — un mes futuro con solo
-    compromiso PPA no debe arrastrar el promedio.
+    Cada ``*_map`` está indexado por (año, mes). Un mes se considera **realizado**
+    si tiene algún dato REAL registrado — generación, consumo, posición en bolsa o
+    precio (el compromiso PPA es una obligación a futuro y NO cuenta como dato
+    realizado). Los meses no realizados (futuros o sin lecturas) se marcan
+    ``estado="SIN_DATOS"`` en vez de clasificarlos como SUPERAVIT/DEFICIT: pintar
+    un mes que aún no ocurre como "déficit" es indistinguible de un déficit real
+    para quien lee la tabla.
+
+    El resumen YTD y la proyección se calculan solo sobre los meses realizados —
+    un mes futuro con solo compromiso PPA no debe arrastrar el promedio.
     """
     meses = []
     for (y, m) in _iter_periods(start_date, end_date):
@@ -116,20 +138,24 @@ def build_balance(
         consumo = consumo_map.get((y, m), 0.0)
         bolsa = bolsa_map.get((y, m), 0.0)
         precio = precio_map.get((y, m))
+        realizado = any((y, m) in mp for mp in (gen_map, consumo_map, bolsa_map, precio_map))
         superavit, estado = _superavit_y_estado(gen, ppa, consumo, bolsa)
+        if not realizado:
+            estado = "SIN_DATOS"
         meses.append({
             "anio": y,
             "mes": m,
+            "realizado": realizado,
             "generacion_real_mwh": round(gen, 3),
             "compromiso_ppa_mwh": round(ppa, 3),
             "consumo_clientes_mwh": round(consumo, 3),
             "venta_bolsa_mwh": round(bolsa, 3),
-            "precio_bolsa_promedio": round(precio, 2) if precio is not None else None,
+            "precio_bolsa_promedio_cop_kwh": round(precio, 2) if precio is not None else None,
             "superavit_mwh": superavit,
             "estado": estado,
         })
 
-    realizados = [x for x in meses if (x["anio"], x["mes"]) in gen_map]
+    realizados = [x for x in meses if x["realizado"]]
     n = len(realizados)
     balance_acumulado = round(sum(x["superavit_mwh"] for x in realizados), 3)
     resumen = {
@@ -138,7 +164,9 @@ def build_balance(
         "consumo_clientes_total_mwh": round(sum(x["consumo_clientes_mwh"] for x in realizados), 3),
         "venta_bolsa_total_mwh": round(sum(x["venta_bolsa_mwh"] for x in realizados), 3),
         "balance_acumulado_mwh": balance_acumulado,
-        "proyeccion_fin_anio_mwh": _proyeccion_fin_anio(balance_acumulado, n),
+        "proyeccion_fin_anio_mwh": _proyeccion_fin_anio(
+            balance_acumulado, n, _es_anio_calendario(start_date, end_date)
+        ),
         "meses_con_datos": n,
     }
     return {
@@ -178,18 +206,37 @@ def _generacion_map(db: Session, start_date: date, end_date: date) -> dict:
 def _compromiso_ppa_map(db: Session, start_date: date, end_date: date) -> dict:
     """MWh de compromiso PPA (energía mínima) por mes.
 
-    Filtra por rango de años; los meses fuera del rango pedido no se usan porque
-    build_balance solo consulta los (año, mes) del período.
+    Solo cuenta compromisos de contratos VIGENTES y no soft-deleted, misma
+    definición que `/cumplimiento` (`_contratos_vigentes`): un compromiso del mes
+    (año, mes) entra sii el contrato no está borrado y su ventana de vigencia
+    solapa ese mes —
+        (fecha_inicio IS NULL OR fecha_inicio <= último día del mes) AND
+        (fecha_fin    IS NULL OR fecha_fin    >= primer  día del mes).
+    Sin esto, un contrato cancelado (soft-delete deja las filas hijas por no ser
+    un DELETE real) o ya terminado inflaría el compromiso y el balance
+    contradiría a /cumplimiento para el mismo portafolio.
+
+    La comparación de vigencia se hace a resolución de mes con el ordinal
+    `año*12 + mes` (equivalente a comparar contra primer/último día del mes).
+    Filtra además por rango de años; los meses fuera del rango pedido no se usan
+    porque build_balance solo consulta los (año, mes) del período.
     """
+    comp_ord = PPACompromisoEnergia.año * 12 + PPACompromisoEnergia.mes
+    ini_ord = extract("year", PPAContrato.fecha_inicio) * 12 + extract("month", PPAContrato.fecha_inicio)
+    fin_ord = extract("year", PPAContrato.fecha_fin) * 12 + extract("month", PPAContrato.fecha_fin)
     rows = (
         db.query(
             PPACompromisoEnergia.año.label("y"),
             PPACompromisoEnergia.mes.label("m"),
             func.sum(PPACompromisoEnergia.energia_minima).label("mwh"),
         )
+        .join(PPAContrato, PPACompromisoEnergia.contrato_id == PPAContrato.id)
         .filter(
+            PPAContrato.deleted_at.is_(None),
             PPACompromisoEnergia.año >= start_date.year,
             PPACompromisoEnergia.año <= end_date.year,
+            or_(PPAContrato.fecha_inicio.is_(None), ini_ord <= comp_ord),
+            or_(PPAContrato.fecha_fin.is_(None), fin_ord >= comp_ord),
         )
         .group_by(PPACompromisoEnergia.año, PPACompromisoEnergia.mes)
         .all()

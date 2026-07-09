@@ -155,12 +155,13 @@ class ProyectoInversorOut(ProyectoInversorCreate):
 # ── Contactos (siempre de Cliente) ────────────────────────────────────────────
 # Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-TipoContacto = Literal["operacional", "cgm", "liquidacion"]
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "comercial", "contable"]
 
 
 class ContactoCreate(BaseModel):
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: TipoContacto
     recibe_notificaciones: bool = True
 
@@ -176,6 +177,7 @@ class ContactoCreate(BaseModel):
 class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
+    telefono: Optional[str] = None
     tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
@@ -195,6 +197,7 @@ class ContactoOut(BaseModel):
     cliente_id: int
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: str
     recibe_notificaciones: bool
     created_at: datetime

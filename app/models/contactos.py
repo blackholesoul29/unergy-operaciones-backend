@@ -10,6 +10,8 @@ class TipoContactoEnum(str, enum.Enum):
     operacional = "operacional"
     cgm = "cgm"
     liquidacion = "liquidacion"
+    comercial = "comercial"
+    contable = "contable"
 
 
 class Contacto(Base):
@@ -26,6 +28,7 @@ class Contacto(Base):
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoContactoEnum, name="tipo_contacto_enum"), nullable=False)
     recibe_notificaciones: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

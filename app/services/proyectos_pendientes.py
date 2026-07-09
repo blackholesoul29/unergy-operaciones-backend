@@ -400,7 +400,19 @@ def resolver_pendientes(db: Session) -> list[dict]:
                 continue
             necesita_actualizar = (
                 (c.estado_sugerido == "en_operacion" and match.estado != "en_operacion")
-                or (c.fase_construccion and match.fase_construccion != c.fase_construccion)
+                or (
+                    c.fase_construccion
+                    and match.fase_construccion != c.fase_construccion
+                    # Nunca sugerir que un proyecto YA "energizado" regrese a
+                    # una fase de obra anterior -- mismo bug que el de
+                    # sync_tsf_projects: Sun Factory puede seguir trayendo un
+                    # status de obra desactualizado para un proyecto que ya
+                    # se confirmó operando (caso real 2026-07-09: "Chima
+                    # Oriente"/"Chiriguana N1"/"Valencia Oriente 1" ya estaban
+                    # en energizado y esto los sugería de vuelta a
+                    # en_construccion).
+                    and match.fase_construccion != "energizado"
+                )
                 or (confianza == "nombre")  # vínculo sin confirmar todavía
             )
             if not necesita_actualizar:

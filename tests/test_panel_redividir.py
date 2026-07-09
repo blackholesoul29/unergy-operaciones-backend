@@ -92,3 +92,32 @@ def test_reconstruir_base_conceptos_y_signos():
     assert abs(by["Ingreso Bruto"] - 100_000_000.0) < 1.0
     assert abs(by["Arranque y parada"] - (-200_000.0)) < 1.0   # signo preservado
     assert abs(by["Administracion"] - (-500_000.0)) < 1.0
+
+
+# ── Detección de escala de % en _procesar_invs (fix histórico + refactor batch) ────
+
+from types import SimpleNamespace
+from app.api.v1.panel_contable import _procesar_invs
+
+
+def _row(id, pct):
+    return SimpleNamespace(id=id, porcentaje_participacion=pct,
+                           fecha_inicio=None, fecha_fin=None, razon_social_nombre=f"INV {id}")
+
+
+def test_procesar_invs_single_100_como_fraccion():
+    # Un único inversionista guardado como 1.0 debe interpretarse como 100%, no 1%.
+    out = _procesar_invs([_row(1, 1.0)])
+    assert out[0]["pct"] == 100.0 and out[0]["fraccion"] == 1.0
+
+
+def test_procesar_invs_fraccion_dos_inversionistas():
+    out = {o["id"]: o for o in _procesar_invs([_row(1, 0.5), _row(2, 0.5)])}
+    assert out[1]["pct"] == 50.0 and out[1]["fraccion"] == 0.5
+    assert out[2]["pct"] == 50.0 and out[2]["fraccion"] == 0.5
+
+
+def test_procesar_invs_escala_0_100():
+    out = {o["id"]: o for o in _procesar_invs([_row(1, 60.0), _row(2, 40.0)])}
+    assert out[1]["pct"] == 60.0 and abs(out[1]["fraccion"] - 0.6) < 1e-9
+    assert out[2]["pct"] == 40.0 and abs(out[2]["fraccion"] - 0.4) < 1e-9

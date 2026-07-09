@@ -668,19 +668,6 @@ def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_curren
         if not liq:
             raise HTTPException(404, "Liquidación no encontrada")
 
-        costos = db.query(LiquidacionCosto).filter(LiquidacionCosto.liquidacion_id == id).all()
-        facturas = db.query(LiquidacionFactura).filter(LiquidacionFactura.liquidacion_id == id).all()
-        mandatos = (
-            db.query(LiquidacionMandato)
-            .options(
-                selectinload(LiquidacionMandato.lineas),
-                selectinload(LiquidacionMandato.inversionista)
-                    .selectinload(ProyectoInversionista.cliente),
-            )
-            .filter(LiquidacionMandato.liquidacion_id == id)
-            .all()
-        )
-
         try:
             xm_datos = db.query(LiquidacionXMDato).filter(LiquidacionXMDato.liquidacion_id == id).all()
         except Exception:
@@ -688,10 +675,10 @@ def get_liquidacion(id: int, db: Session = Depends(get_db), _=Depends(get_curren
             xm_datos = []
 
         data = _serializar_liquidacion_base(liq)
-        data["costos"] = [_serializar_costo(c) for c in costos]
-        data["facturas"] = [_serializar_factura(f) for f in facturas]
-        data["mandatos"] = [_serializar_mandato(m) for m in mandatos]
         data["xm_datos"] = [_serializar_xm_dato(x) for x in xm_datos]
+        # Los costos/facturas/mandatos operativos (carga Excel vieja) ya no se sirven
+        # aquí: el Estado de Resultados del detalle y del PDF es espejo del Panel
+        # Contable (GET /liquidaciones/resumen-panel). El modelo/datos se conservan.
         return data
     except HTTPException:
         raise
@@ -799,163 +786,6 @@ def limpiar_liquidacion(
     except Exception:
         db.rollback()
 
-    db.commit()
-
-
-# ── Costos ─────────────────────────────────────────────────────────────────────
-
-@router.post("/{id}/costos", status_code=201)
-def add_costo(id: int, body: CostoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
-        raise HTTPException(404, "Liquidación no encontrada")
-    costo = LiquidacionCosto(liquidacion_id=id, **body.model_dump())
-    db.add(costo)
-    db.commit()
-    db.refresh(costo)
-    return _serializar_costo(costo)
-
-
-@router.patch("/{id}/costos/{costo_id}")
-def update_costo(id: int, costo_id: int, body: CostoUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    costo = db.query(LiquidacionCosto).filter(
-        LiquidacionCosto.id == costo_id, LiquidacionCosto.liquidacion_id == id
-    ).first()
-    if not costo:
-        raise HTTPException(404, "Costo no encontrado")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(costo, field, value)
-    db.commit()
-    return _serializar_costo(costo)
-
-
-@router.delete("/{id}/costos/{costo_id}", status_code=204)
-def delete_costo(id: int, costo_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    costo = db.query(LiquidacionCosto).filter(
-        LiquidacionCosto.id == costo_id, LiquidacionCosto.liquidacion_id == id
-    ).first()
-    if not costo:
-        raise HTTPException(404, "Costo no encontrado")
-    db.delete(costo)
-    db.commit()
-
-
-# ── Mandatos ───────────────────────────────────────────────────────────────────
-
-@router.post("/{id}/mandatos", status_code=201)
-def add_mandato(id: int, body: MandatoCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
-        raise HTTPException(404, "Liquidación no encontrada")
-    mandato = LiquidacionMandato(liquidacion_id=id, **body.model_dump())
-    db.add(mandato)
-    db.commit()
-    db.refresh(mandato)
-    return {"id": mandato.id, "msg": "Mandato creado"}
-
-
-@router.patch("/{id}/mandatos/{mandato_id}")
-def update_mandato(id: int, mandato_id: int, body: MandatoUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    mandato = db.query(LiquidacionMandato).filter(
-        LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
-    ).first()
-    if not mandato:
-        raise HTTPException(404, "Mandato no encontrado")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(mandato, field, value)
-    db.commit()
-    return {"msg": "Mandato actualizado"}
-
-
-@router.delete("/{id}/mandatos/{mandato_id}", status_code=204)
-def delete_mandato(id: int, mandato_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    mandato = db.query(LiquidacionMandato).filter(
-        LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
-    ).first()
-    if not mandato:
-        raise HTTPException(404, "Mandato no encontrado")
-    # Delete child lineas first to avoid FK constraint violation
-    db.query(LiquidacionMandatoLinea).filter(
-        LiquidacionMandatoLinea.mandato_id == mandato_id
-    ).delete(synchronize_session=False)
-    db.delete(mandato)
-    db.commit()
-
-
-# ── Líneas de mandato ──────────────────────────────────────────────────────────
-
-@router.post("/{id}/mandatos/{mandato_id}/lineas", status_code=201)
-def add_linea(id: int, mandato_id: int, body: LineaCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    mandato = db.query(LiquidacionMandato).filter(
-        LiquidacionMandato.id == mandato_id, LiquidacionMandato.liquidacion_id == id
-    ).first()
-    if not mandato:
-        raise HTTPException(404, "Mandato no encontrado")
-    linea = LiquidacionMandatoLinea(mandato_id=mandato_id, **body.model_dump())
-    db.add(linea)
-    db.commit()
-    db.refresh(linea)
-    return _serializar_linea(linea)
-
-
-@router.patch("/{id}/mandatos/{mandato_id}/lineas/{linea_id}")
-def update_linea(id: int, mandato_id: int, linea_id: int, body: LineaUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    linea = db.query(LiquidacionMandatoLinea).filter(
-        LiquidacionMandatoLinea.id == linea_id,
-        LiquidacionMandatoLinea.mandato_id == mandato_id,
-    ).first()
-    if not linea:
-        raise HTTPException(404, "Línea no encontrada")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(linea, field, value)
-    db.commit()
-    return _serializar_linea(linea)
-
-
-@router.delete("/{id}/mandatos/{mandato_id}/lineas/{linea_id}", status_code=204)
-def delete_linea(id: int, mandato_id: int, linea_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    linea = db.query(LiquidacionMandatoLinea).filter(
-        LiquidacionMandatoLinea.id == linea_id,
-        LiquidacionMandatoLinea.mandato_id == mandato_id,
-    ).first()
-    if not linea:
-        raise HTTPException(404, "Línea no encontrada")
-    db.delete(linea)
-    db.commit()
-
-
-# ── Facturas de servicio ───────────────────────────────────────────────────────
-
-@router.post("/{id}/facturas", status_code=201)
-def add_factura(id: int, body: FacturaCreate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    if not db.query(Liquidacion).filter(Liquidacion.id == id, Liquidacion.deleted_at.is_(None)).first():
-        raise HTTPException(404, "Liquidación no encontrada")
-    factura = LiquidacionFactura(liquidacion_id=id, **body.model_dump())
-    db.add(factura)
-    db.commit()
-    db.refresh(factura)
-    return _serializar_factura(factura)
-
-
-@router.patch("/{id}/facturas/{factura_id}")
-def update_factura(id: int, factura_id: int, body: FacturaUpdate, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    factura = db.query(LiquidacionFactura).filter(
-        LiquidacionFactura.id == factura_id, LiquidacionFactura.liquidacion_id == id
-    ).first()
-    if not factura:
-        raise HTTPException(404, "Factura no encontrada")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(factura, field, value)
-    db.commit()
-    return _serializar_factura(factura)
-
-
-@router.delete("/{id}/facturas/{factura_id}", status_code=204)
-def delete_factura(id: int, factura_id: int, db: Session = Depends(get_db), _=Depends(_require_liquidaciones_write)):
-    factura = db.query(LiquidacionFactura).filter(
-        LiquidacionFactura.id == factura_id, LiquidacionFactura.liquidacion_id == id
-    ).first()
-    if not factura:
-        raise HTTPException(404, "Factura no encontrada")
-    db.delete(factura)
     db.commit()
 
 

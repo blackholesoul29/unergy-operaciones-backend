@@ -456,9 +456,24 @@ def resumen_liquidaciones_desde_panel(
         ):
             cliente_por_pi[pi_id] = {"cliente_id": cli_id, "cliente_nombre": razon}
 
-    return _construir_resumen_panel(
+    resultado = _construir_resumen_panel(
         paneles, periodo_norm, tipo, nombres, tipos, liq_por_proyecto, cliente_por_pi
     )
+
+    # Alertas: proyectos minigranja en operación que NO tienen panel este período
+    # (posible carga de ER faltante). Solo para tipo preliquidacion.
+    sin_panel = []
+    if tipo == "preliquidacion":
+        q = (
+            db.query(Proyecto.id, Proyecto.nombre_comercial)
+            .filter(Proyecto.estado == "en_operacion",
+                    Proyecto.tipo_proyecto == "minigranja")
+        )
+        if proy_ids:
+            q = q.filter(~Proyecto.id.in_(proy_ids))
+        sin_panel = [{"proyecto_id": pid, "proyecto": nom} for pid, nom in q.all()]
+    resultado["sin_panel"] = sin_panel
+    return resultado
 
 
 @router.get("/resumen-panel-rango")
@@ -590,6 +605,9 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
             inv_map[key]["grupos"][ln.grupo] = inv_map[key]["grupos"].get(ln.grupo, 0.0) + valor
             inv_map[key]["conceptos"].append({
                 "grupo": ln.grupo, "concepto": ln.concepto, "valor_cop": valor,
+                # Trazabilidad (auditoría): comprobante contable y celda de origen del ER.
+                "comprobante_contable": ln.comprobante_contable,
+                "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
             })
 
         inversionistas_out = []

@@ -32,7 +32,8 @@ def test_linea_none_valor_does_not_crash():
 def _mk_linea(pi_id, nombre, pct, grupo, concepto, valor, orden):
     return SimpleNamespace(proyecto_inversionista_id=pi_id, inversionista_nombre=nombre,
                            porcentaje=pct, grupo=grupo, concepto=concepto,
-                           valor_cop=valor, orden=orden)
+                           valor_cop=valor, orden=orden,
+                           comprobante_contable=None, hoja=None, celda=None)
 
 
 def _mk_panel(pid, lineas):

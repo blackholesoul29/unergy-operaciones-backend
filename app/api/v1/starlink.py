@@ -19,10 +19,32 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
-from app.models.starlink import StarlinkFactura
+from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
+from app.models.proyectos import Proyecto
+from app.services.starlink_resolver import resolver_lineas
 from app.services.starlink_parser import parsear_pdf, ResultadoStarlink
 
 router = APIRouter(prefix="/starlink", tags=["Starlink"])
+
+
+def _regenerar_lineas(db: Session, fac: StarlinkFactura) -> None:
+    """(Re)genera starlink_factura_linea para una factura desde su agrupado_json,
+    resolviendo cada sitio contra el catálogo starlink_mapeo_sitio (match por nombre)."""
+    agrupado = json.loads(fac.agrupado_json)
+    mapeos = [
+        {"patron": m.patron, "proyecto_id": m.proyecto_id}
+        for m in db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.activo.is_(True)).all()
+    ]
+    db.query(StarlinkFacturaLinea).filter(StarlinkFacturaLinea.factura_id == fac.id).delete()
+    for ln in resolver_lineas(agrupado, mapeos):
+        db.add(StarlinkFacturaLinea(
+            factura_id=fac.id,
+            proyecto_id=ln["proyecto_id"],
+            descripcion=ln["descripcion"],
+            sin_iva=ln["sin_iva"],
+            iva=ln["iva"],
+            monto_total=ln["monto_total"],
+        ))
 
 
 # ── POST /starlink/procesar-pdf ───────────────────────────────────────────────
@@ -75,6 +97,32 @@ def obtener_factura(
     fac = db.query(StarlinkFactura).filter(StarlinkFactura.periodo == periodo).first()
     if not fac:
         raise HTTPException(404, f"No hay datos para el período {periodo}.")
+
+    lineas_rows = (
+        db.query(StarlinkFacturaLinea)
+        .filter(StarlinkFacturaLinea.factura_id == fac.id)
+        .all()
+    )
+    pids = {l.proyecto_id for l in lineas_rows if l.proyecto_id is not None}
+    nombres = {}
+    if pids:
+        nombres = {
+            pid: nombre
+            for pid, nombre in db.query(Proyecto.id, Proyecto.nombre_comercial)
+                                 .filter(Proyecto.id.in_(pids)).all()
+        }
+    lineas = [
+        {
+            "descripcion":      l.descripcion,
+            "proyecto_id":      l.proyecto_id,
+            "nombre_comercial": nombres.get(l.proyecto_id),
+            "sin_iva":          float(l.sin_iva),
+            "iva":              float(l.iva),
+            "monto_total":      float(l.monto_total),
+        }
+        for l in lineas_rows
+    ]
+
     return {
         "periodo":        fac.periodo,
         "items":          json.loads(fac.items_json),
@@ -82,6 +130,7 @@ def obtener_factura(
         "cargos_totales": float(fac.cargos_totales) if fac.cargos_totales else None,
         "suma_items":     float(fac.suma_items),
         "updated_at":     fac.updated_at.isoformat() if fac.updated_at else None,
+        "lineas":         lineas,
     }
 
 
@@ -120,6 +169,8 @@ def guardar_factura(
         )
         db.add(fac)
 
+    db.flush()          # asegura fac.id antes de generar las líneas
+    _regenerar_lineas(db, fac)
     db.commit()
     db.refresh(fac)
     return {"ok": True, "periodo": fac.periodo}
@@ -140,6 +191,57 @@ def eliminar_factura(
     db.delete(fac)
     db.commit()
     return {"ok": True}
+
+
+# ── GET /starlink/mapeo ───────────────────────────────────────────────────────
+
+@router.get("/mapeo")
+def listar_mapeo(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Catálogo de mapeos sitio→proyecto, con el nombre comercial resuelto."""
+    filas = db.query(StarlinkMapeoSitio).order_by(StarlinkMapeoSitio.patron).all()
+    pids = {m.proyecto_id for m in filas if m.proyecto_id is not None}
+    nombres = {}
+    if pids:
+        nombres = {
+            pid: nombre
+            for pid, nombre in db.query(Proyecto.id, Proyecto.nombre_comercial)
+                                 .filter(Proyecto.id.in_(pids)).all()
+        }
+    return [
+        {
+            "id": m.id, "patron": m.patron, "proyecto_id": m.proyecto_id,
+            "nombre_comercial": nombres.get(m.proyecto_id), "activo": m.activo,
+        }
+        for m in filas
+    ]
+
+
+# ── PUT /starlink/mapeo ───────────────────────────────────────────────────────
+
+@router.put("/mapeo")
+def upsert_mapeo(payload: dict, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Crea o actualiza un mapeo sitio→proyecto (clave: patron) y reprocesa TODAS
+    las facturas guardadas para reflejar el cambio en las líneas."""
+    patron = (payload.get("patron") or "").strip()
+    if not patron:
+        raise HTTPException(400, "patron es obligatorio.")
+    proyecto_id = payload.get("proyecto_id")
+
+    m = db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.patron == patron).first()
+    if m:
+        m.proyecto_id = proyecto_id
+        m.activo = payload.get("activo", True)
+    else:
+        m = StarlinkMapeoSitio(patron=patron, proyecto_id=proyecto_id,
+                               activo=payload.get("activo", True))
+        db.add(m)
+    db.flush()
+
+    for fac in db.query(StarlinkFactura).all():
+        _regenerar_lineas(db, fac)
+    db.commit()
+    db.refresh(m)
+    return {"ok": True, "id": m.id, "patron": m.patron}
 
 
 # ── POST /starlink/excel ──────────────────────────────────────────────────────

@@ -47,15 +47,16 @@ por FK a `proyectos`, que el consolidado lee por `proyecto_id`.
 ### Modelo de datos
 
 **Tabla nueva `starlink_mapeo_sitio`** — catálogo persistido y editable del mapeo
-sitio → proyecto (reemplaza el hardcode de `STARLINK_TO_PANEL`):
+sitio → proyecto (reemplaza el hardcode de `STARLINK_TO_PANEL`). El mapeo es **1:1**:
+los splits (ej. "GANDALF Y CAÑAHUATE" → 50/50) ya los resuelve el parser en
+`_construir_agrupado` **antes** de agrupar, así que el `agrupado` guardado ya trae una
+entrada por sitio individual ("Gandalf", "Cañahuate"):
 
 | columna | tipo | nota |
 |---|---|---|
 | `id` | BigInteger PK | |
-| `patron` | String, unique | nombre del sitio tal como aparece en el PDF, normalizado (ej. `BARAYA`, `GANDALF Y CAÑAHUATE`) |
+| `patron` | String, unique | nombre del sitio normalizado tal como queda en `agrupado.descripcion` (ej. `BARAYA`, `GANDALF`, `CANAHUATE`) |
 | `proyecto_id` | FK → `proyectos.id`, nullable | destino; NULL = sitio conocido pero sin asignar |
-| `proyecto_id_secundario` | FK → `proyectos.id`, nullable | segundo destino para splits 50/50 |
-| `porcentaje` | Numeric(5,4), default 1.0 | fracción al `proyecto_id` (0.5 en splits); el resto va al secundario |
 | `activo` | Boolean, default true | |
 | `created_at` / `updated_at` | DateTime | |
 
@@ -73,8 +74,9 @@ sitio → proyecto (reemplaza el hardcode de `STARLINK_TO_PANEL`):
 | `created_at` / `updated_at` | DateTime | |
 
 `starlink_facturas` (JSON por período) **se conserva** como fuente cruda. Las tablas
-nuevas son la proyección normalizada. Los splits (`GANDALF Y CAÑAHUATE` → 50/50) se
-representan como **dos filas** en `starlink_factura_linea`, una por `proyecto_id`.
+nuevas son la proyección normalizada. Como los splits ya vienen resueltos en el
+`agrupado`, cada entrada del `agrupado` produce **exactamente una fila** en
+`starlink_factura_linea`.
 
 ### Resolución (dónde y cuándo)
 
@@ -111,16 +113,23 @@ representan como **dos filas** en `starlink_factura_linea`, una por `proyecto_id
 - `StarlinkPDF.vue`: columna con la minigranja resuelta; UI para asignar/corregir los
   sitios "sin asignar" contra `starlink_mapeo_sitio`.
 
-### Migración y backfill (Alembic)
+### Migración y backfill (`_PENDING_DDLS` + seed en startup)
 
-1. Migración que crea `starlink_mapeo_sitio` y `starlink_factura_linea`.
-2. **Data migration** que:
+**Importante:** en este proyecto Alembic NO es el camino de deploy (ver comentario en
+`app/main.py`: *"Alembic roto: la columna se provisiona aquí, no vía alembic upgrade"*).
+El mecanismo real es DDL idempotente en `_PENDING_DDLS` (que corre en cada arranque) +
+funciones de seed en el startup (patrón `_run_catalog_seed`).
+
+1. **DDL** en `_PENDING_DDLS` de `app/main.py`: `CREATE TABLE IF NOT EXISTS` para
+   `starlink_mapeo_sitio` y `starlink_factura_linea`, más sus índices/FK.
+2. **Seed + backfill** en una función de startup `_run_starlink_mapeo_seed()`:
    - Siembra `starlink_mapeo_sitio` con las entradas actuales de `STARLINK_TO_PANEL`
      y los `SPLITS` del parser, resolviendo cada `patron` a `proyecto_id` por
-     `nombre_comercial`.
+     `nombre_comercial`. **Idempotente:** solo inserta patrones faltantes; NO pisa un
+     `proyecto_id` ya editado por el usuario (ver memoria `feedback_seed_no_sobreescribe_datos`).
    - Reprocesa los `starlink_facturas` existentes generando sus `starlink_factura_linea`.
-   Respeta la regla de no tocar BD directamente: todo vía Alembic desplegado por
-   Railway (ver memoria `feedback_no_direct_db`).
+   Todo se despliega vía Git → Railway; nada de conexión directa a BD (memoria
+   `feedback_no_direct_db`).
 
 ## Riesgos / consideraciones
 
@@ -132,8 +141,9 @@ representan como **dos filas** en `starlink_factura_linea`, una por `proyecto_id
 - **Reproceso al editar mapeo:** definir si editar un `patron` reprocesa solo el período
   abierto o todos los períodos guardados. Propuesta: reprocesar todos (son pocos) para
   mantener consistencia histórica.
-- **Splits con porcentaje ≠ 50/50:** el modelo soporta `porcentaje` arbitrario, pero
-  la UI inicial puede limitarse a 50/50 (YAGNI) y ampliarse si aparece el caso.
+- **Splits nuevos:** si aparece un sitio combinado que el parser aún no divide, se
+  agrega al dict `SPLITS` del parser (patrón existente), no al mapeo. El mapeo se
+  mantiene 1:1 (YAGNI).
 
 ## Criterios de aceptación
 

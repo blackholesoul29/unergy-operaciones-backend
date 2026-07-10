@@ -86,6 +86,14 @@ class Proyecto(Base):
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Fecha de inicio de comercialización = primer día con generación real de energía.
+    # Se autoderiva de la API de generación (app.services.comercializacion) y se
+    # persiste aquí; una planta con esta fecha se considera comercializando y entra
+    # a Cumplimiento. Editable a mano (marca fecha_comercializacion_editada_manual).
+    fecha_inicio_comercializacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # El operador fijó la fecha de comercialización a mano → el backfill/job diario
+    # no la vuelve a pisar (mismo patrón que fecha_estimada_editada_manual).
+    fecha_comercializacion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -261,6 +261,8 @@ class ProyectoCreate(BaseModel):
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
     fecha_fin_representacion: Optional[date] = None
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -333,6 +335,8 @@ class ProyectoOut(BaseModel):
     estado: str
     fecha_entrada_operacion: Optional[date]
     fecha_fin_representacion: Optional[date]
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]

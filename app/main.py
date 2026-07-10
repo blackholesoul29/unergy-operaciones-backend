@@ -2102,6 +2102,27 @@ def _scheduled_correlation_sync():
         print(f"[correlation_sync] Failed to get DB session: {e}")
 
 
+def _scheduled_comercializacion_backfill():
+    """Rellena la fecha de inicio de comercialización (primer día con generación
+    real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
+    respeta las fechas editadas a mano. Así una planta nueva entra a Cumplimiento
+    en cuanto registra su primera generación."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.comercializacion import backfill_comercializacion
+            res = backfill_comercializacion(db, force=False, dry_run=False)
+            print(f"[comercializacion_backfill] OK — {len(res.get('actualizados', []))} fechas nuevas, "
+                  f"{len(res.get('sin_generacion', []))} sin generación, "
+                  f"{len(res.get('sin_identificador', []))} sin identificador")
+        except Exception as e:
+            print(f"[comercializacion_backfill] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[comercializacion_backfill] Failed to get DB session: {e}")
+
+
 def _scheduled_tsf_sync():
     """Sincronización periódica del pipeline TSF → tabla proyectos (cada 6 h)."""
     try:
@@ -2655,6 +2676,16 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            # Fecha de inicio de comercialización (primer día con generación real):
+            # backfill diario para plantas que aún no la tienen. La corrida inicial
+            # post-deploy se dispara a mano vía POST /cumplimiento/backfill-comercializacion.
+            _mgs_scheduler.add_job(
+                _scheduled_comercializacion_backfill,
+                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
+                id="comercializacion_backfill",
+                name="Backfill fecha inicio comercializacion",
             )
 
             _mgs_scheduler.add_job(

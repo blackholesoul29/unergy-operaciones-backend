@@ -323,6 +323,12 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     payload = data.model_dump(exclude_unset=True)
     _verificar_unicos(db, payload, excluir_id=id)
 
+    # Si el usuario edita la fecha de inicio de comercialización a mano, marca el
+    # flag para que el backfill/job diario no la vuelva a pisar (salvo que él mismo
+    # mande el flag explícito en el payload).
+    if "fecha_inicio_comercializacion" in payload and "fecha_comercializacion_editada_manual" not in payload:
+        p.fecha_comercializacion_editada_manual = True
+
     for k, v in payload.items():
         setattr(p, k, v)
     try:

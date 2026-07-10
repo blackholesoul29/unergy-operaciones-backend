@@ -25,6 +25,8 @@ from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.proyectos_pendientes import _generacion_real_por_frt
 from app.services.tsf_sync import (
     _FASE_TO_LABEL, _STATUS_TO_FASE, _pick_energization_milestone, _sunfactory_all_projects,
     _sunfactory_energization, _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
@@ -169,6 +171,30 @@ def listar_proximos_energizar(
                 "warning": "No se pudo cargar la lista. Intenta «Sincronizar ahora» "
                            "para poblar el pipeline desde Solenium/TSF."}
     fronteras = _fronteras_por_proyecto(db, [p.id for p in rows])
+
+    # De los que tienen frontera, verificar generación real en Quoia -- si ya
+    # genera de verdad, no debe seguir apareciendo aquí como "próximo a
+    # energizar" aunque todavía nadie lo haya confirmado en Proyectos
+    # pendientes. NO toca `estado`/`fase_construccion` en la BD -- esa
+    # confirmación oficial sigue siendo manual, esto solo evita que la vista
+    # dependa de que alguien revise Pendientes a tiempo. Cacheado 1h (mismo
+    # caché que usa Pendientes) así que en la práctica casi nunca golpea Quoia.
+    generando_ya: set[int] = set()
+    ids_con_frontera = [p.id for p in rows if p.id in fronteras]
+    if ids_con_frontera:
+        try:
+            gaia = GaiaClient()
+            if gaia.enabled:
+                borders = gaia.get_all_borders()
+                generacion_real = _generacion_real_por_frt(gaia, borders)
+                for pid in ids_con_frontera:
+                    codigo = (fronteras[pid]["codigo_frontera"] or "").strip().lower()
+                    if generacion_real.get(codigo):
+                        generando_ya.add(pid)
+        except Exception as exc:
+            logger.warning("Verificación de generación real falló (se ignora, no bloquea la vista): %s", exc)
+
+    rows = [p for p in rows if p.id not in generando_ya]
     return {
         "projects": [_serialize(p, fronteras.get(p.id)) for p in rows],
         "source": "operaciones_db",

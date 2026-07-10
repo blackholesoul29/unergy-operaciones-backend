@@ -229,6 +229,34 @@ def create_frontera(
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
 
+@router.get("/debug-quoia-border")
+def debug_quoia_border(frt_code: str = Query(...), _=Depends(get_current_user)):
+    """Diagnóstico de solo lectura: ¿este frt_code aparece en el listado de
+    fronteras que devuelve Quoia (gaia.get_all_borders(), la misma fuente que
+    usa Reporte CGM para el nombre y el ID del border)? Sirve para diagnosticar
+    filas sin nombre / "Sin reporte" en el Excel -- pasa exactamente cuando
+    este código no aparece en ese listado. Va ANTES de /{frontera_id} en el
+    router -- si no, FastAPI intenta parsear "debug-quoia-border" como int."""
+    gaia = _get_gaia()
+    code = frt_code.strip().lower()
+    borders = gaia.get_all_borders()
+    match = None
+    for b in borders:
+        for key in ("frt_generation", "frt_consumption"):
+            frt = b.get(key) or {}
+            if (frt.get("frt_code") or "").strip().lower() == code:
+                match = {"proyecto_quoia": b.get("name"), "tipo": key, **frt}
+                break
+        if match:
+            break
+    return {
+        "frt_code": code,
+        "total_borders_en_quoia": len(borders),
+        "encontrado": match is not None,
+        "detalle": match,
+    }
+
+
 # ── Detail ────────────────────────────────────────────────────────────────────
 
 @router.get("/{frontera_id}", response_model=FronteraOut)
@@ -620,33 +648,6 @@ def backfill_operador_red(
 
 
 # ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────
-
-@router.get("/debug-quoia-border")
-def debug_quoia_border(frt_code: str = Query(...), _=Depends(get_current_user)):
-    """Diagnóstico de solo lectura: ¿este frt_code aparece en el listado de
-    fronteras que devuelve Quoia (gaia.get_all_borders(), la misma fuente que
-    usa Reporte CGM para el nombre y el ID del border)? Sirve para diagnosticar
-    filas sin nombre / "Sin reporte" en el Excel -- pasa exactamente cuando
-    este código no aparece en ese listado."""
-    gaia = _get_gaia()
-    code = frt_code.strip().lower()
-    borders = gaia.get_all_borders()
-    match = None
-    for b in borders:
-        for key in ("frt_generation", "frt_consumption"):
-            frt = b.get(key) or {}
-            if (frt.get("frt_code") or "").strip().lower() == code:
-                match = {"proyecto_quoia": b.get("name"), "tipo": key, **frt}
-                break
-        if match:
-            break
-    return {
-        "frt_code": code,
-        "total_borders_en_quoia": len(borders),
-        "encontrado": match is not None,
-        "detalle": match,
-    }
-
 
 @router.get("/quoia/meters")
 def quoia_meters(

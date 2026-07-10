@@ -23,7 +23,8 @@ from app.schemas.proyectos import (
     ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
 )
 from app.schemas.common import PaginatedResponse
-from app.services.proyectos_pendientes import resolver_pendientes, backfill_ubicacion
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -281,6 +282,54 @@ def backfill_ubicacion_proyectos(
 @router.get("/{id}", response_model=ProyectoOut)
 def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
+
+
+@router.get("/{id}/debug-generacion")
+def debug_generacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)) -> dict:
+    """Diagnóstico de solo lectura: ¿la(s) frontera(s) de generación de este
+    proyecto tienen generación REAL hoy en Quoia? Usa el mismo método por nodo
+    (no por frt_code -- ya sabemos que ese da 400 para algunos borders) que
+    Proyectos pendientes, cacheado 1h. Sirve para verificar si un proyecto
+    marcado `en_operacion` de verdad está comercializando energía."""
+    fronteras = (
+        db.query(Frontera)
+        .filter(
+            Frontera.proyecto_id == id,
+            Frontera.deleted_at.is_(None),
+            Frontera.tipo_frontera.in_(["generacion", "generacion_consumo"]),
+        )
+        .all()
+    )
+    if not fronteras:
+        return {"tiene_frontera": False, "detalle": "Este proyecto no tiene frontera de generación registrada."}
+
+    gaia = GaiaClient()
+    if not gaia.enabled:
+        raise HTTPException(status_code=502, detail="Credenciales de Quoia no configuradas.")
+    try:
+        borders = gaia.get_all_borders()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar Quoia: {exc}")
+    generacion_real = _generacion_real_por_frt(gaia, borders)
+
+    borders_by_code = {}
+    for b in borders:
+        gen = b.get("frt_generation") or {}
+        code = (gen.get("frt_code") or "").strip().lower()
+        if code:
+            borders_by_code[code] = gen
+
+    resultado = []
+    for f in fronteras:
+        codigo = (f.codigo_frontera or "").strip().lower()
+        info = borders_by_code.get(codigo, {})
+        resultado.append({
+            "codigo_frontera": f.codigo_frontera,
+            "tipo_frontera": f.tipo_frontera,
+            "last_report_date": info.get("last_report_date"),
+            "generacion_real_hoy": generacion_real.get(codigo, False),
+        })
+    return {"tiene_frontera": True, "fronteras": resultado}
 
 
 # Columnas con restricción UNIQUE en el modelo Proyecto. Si se intenta asignar a un

@@ -24,6 +24,7 @@ from app.schemas.proyectos import (
 )
 from app.schemas.common import PaginatedResponse
 from app.services.mgs.gaia_client import GaiaClient
+from app.services.operadores_red_sync import sincronizar_operador_red
 from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
@@ -390,6 +391,9 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
             "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
             "ya está en uso por otro proyecto.",
         )
+    if "operador_red_id" in payload:
+        sincronizar_operador_red(db, p)
+        db.commit()
     return _get_proyecto_or_404(id, db)
 
 

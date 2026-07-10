@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
@@ -20,11 +20,29 @@ from app.schemas.fronteras import (
 from app.services.mgs.quoia_client import QuoiaClient
 from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
+from app.services.operadores_red_sync import sincronizar_operador_red
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
 _quoia: QuoiaClient | None = None
 _gaia: GaiaClient | None = None
+
+
+def _sync_operador_red_para_proyecto(db: Session, proyecto_id: int | None) -> None:
+    """Rellena `operador_red_id` entre este proyecto y sus fronteras (en la
+    dirección que haga falta) tras crear/editar una frontera vinculada."""
+    if proyecto_id is None:
+        return
+    proyecto = (
+        db.query(Proyecto)
+        .options(selectinload(Proyecto.fronteras))
+        .filter(Proyecto.id == proyecto_id)
+        .first()
+    )
+    if proyecto is None:
+        return
+    sincronizar_operador_red(db, proyecto)
+    db.commit()
 
 
 def _get_quoia() -> QuoiaClient:
@@ -199,11 +217,13 @@ def create_frontera(
             for k, v in body.model_dump(exclude_none=True).items():
                 setattr(existing, k, v)
             db.commit()
+            _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             db.refresh(existing)
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
+    _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
@@ -247,6 +267,7 @@ def update_frontera(
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(f, k, v)
     db.commit()
+    _sync_operador_red_para_proyecto(db, f.proyecto_id)
     db.refresh(f)
     return _to_out(
         db.query(Frontera)
@@ -443,6 +464,7 @@ def confirmar_frontera_quoia(
         obj.nro_serie_med_resp = info_resp.get("serie")
     db.add(obj)
     db.commit()
+    _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 

@@ -1029,6 +1029,10 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_factura ON starlink_factura_linea (factura_id)",
     "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_proyecto ON starlink_factura_linea (proyecto_id)",
+    # Vínculo estructurado de operador de red también en proyectos (2026-07-10)
+    # -- antes solo existía en fronteras, y sin forma de editarlo desde la API.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_operador_red_id ON proyectos (operador_red_id)",
 ]
 
 

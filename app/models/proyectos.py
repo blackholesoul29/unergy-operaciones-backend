@@ -101,7 +101,17 @@ class Proyecto(Base):
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Legacy (texto libre, sin validar contra el catálogo) -- preferir
+    # `operador_red_id` para datos nuevos. Se mantiene por compatibilidad con
+    # registros ya diligenciados y como respaldo si el catálogo no tiene el
+    # operador todavía.
     operador_red: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
+    # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene
+    # valor, se rellena desde la primera frontera que sí lo tenga; si se edita
+    # en el proyecto, se rellena hacia las fronteras que todavía no lo tengan.
+    # Nunca se pisa un valor ya diligenciado en ningún lado (ver proyectos.py).
+    operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     project_id_solenium: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
 
     # Servicios activos
@@ -166,6 +176,7 @@ class Proyecto(Base):
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
     fronteras: Mapped[list["Frontera"]] = relationship("Frontera", back_populates="proyecto", uselist=True)
+    operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="proyectos")
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="proyecto", uselist=True)
     generaciones: Mapped[list["GeneracionDiaria"]] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
     mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
@@ -180,10 +191,13 @@ class Proyecto(Base):
 
     @property
     def operador_red_legal(self) -> str | None:
-        """Nombre legal del operador de red (catálogo operadores_red), tomado de
-        la primera frontera con el vínculo poblado. Requiere precargar
-        `fronteras` + `fronteras.operador` (selectinload) para no golpear la BD
-        por cada proyecto."""
+        """Nombre legal del operador de red (catálogo operadores_red). Primero
+        el vínculo propio del proyecto; si no lo tiene, el de la primera
+        frontera que sí lo tenga (caso de datos aún no sincronizados).
+        Requiere precargar `operador` y `fronteras.operador` (selectinload)
+        para no golpear la BD por cada proyecto."""
+        if self.operador:
+            return self.operador.nombre_legal
         for f in self.fronteras:
             if f.operador:
                 return f.operador.nombre_legal

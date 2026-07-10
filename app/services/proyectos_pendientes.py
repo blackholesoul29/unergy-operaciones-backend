@@ -302,6 +302,57 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     return out
 
 
+# Cache de "¿generación real sostenida?" por project_id de Solenium -- mismo
+# criterio y TTL que Quoia (ver _generacion_real_multidia_por_frt): el listado
+# de proyectos de Solenium por sí solo NO implica que ya opere, solo que
+# existe en su sistema de monitoreo.
+_generacion_solenium_cache: dict[int, bool] | None = None
+_generacion_solenium_cache_ts: float = 0.0
+
+
+def _generacion_real_solenium(client: SoleniumClient, project_ids: list[int]) -> dict[int, bool]:
+    """¿Este proyecto de Solenium generó de verdad (kWh > 0, vía inversores)
+    en cada uno de los últimos `_DIAS_GENERACION_SOSTENIDA` días? Mismo
+    principio que para Quoia: que un proyecto esté en el listado de Solenium
+    no prueba que esté operando -- eso solo lo confirma generación medida."""
+    global _generacion_solenium_cache, _generacion_solenium_cache_ts
+    now = time.monotonic()
+    if _generacion_solenium_cache is not None and (now - _generacion_solenium_cache_ts) < _GENERACION_REAL_CACHE_TTL:
+        return _generacion_solenium_cache
+
+    hoy = date.today()
+    dias_ventana = [(hoy - timedelta(days=i)).isoformat() for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
+    fecha_desde = min(dias_ventana)
+    fecha_hasta = hoy.isoformat()
+
+    resultado: dict[int, bool] = {}
+    ids = [pid for pid in project_ids if pid is not None]
+    if ids:
+        with ThreadPoolExecutor(max_workers=min(len(ids), 12)) as pool:
+            def _check(pid):
+                try:
+                    gen = client.get_generation(pid, fecha_desde, fecha_hasta) or {}
+                    if "results" in gen:
+                        gen = gen["results"]
+                    gen_kwh_map = gen.get("generation_kwh") or {}
+                    por_dia: dict[str, float] = {}
+                    for ts, v in gen_kwh_map.items():
+                        try:
+                            dia = str(ts)[:10]
+                            por_dia[dia] = por_dia.get(dia, 0.0) + float(v)
+                        except (TypeError, ValueError):
+                            continue
+                    return pid, all(por_dia.get(d, 0.0) > 0 for d in dias_ventana)
+                except Exception:
+                    return pid, False
+            for pid, tiene in pool.map(_check, ids):
+                resultado[pid] = tiene
+
+    _generacion_solenium_cache = resultado
+    _generacion_solenium_cache_ts = now
+    return resultado
+
+
 def _candidatos_solenium() -> list[_Candidato]:
     client = SoleniumClient()
     if not client.enabled:
@@ -310,6 +361,8 @@ def _candidatos_solenium() -> list[_Candidato]:
         raw = client.get_projects()
     except Exception:
         return []
+
+    generacion_real = _generacion_real_solenium(client, [p.get("id") for p in raw])
 
     out = []
     for p in raw:
@@ -338,9 +391,12 @@ def _candidatos_solenium() -> list[_Candidato]:
             tipo_proyecto=tipo,
             capacidad_instalada_kwp=cap_val,
             project_id_solenium=str(p["id"]) if p.get("id") is not None else None,
-            estado_sugerido="en_operacion",
-            fase_construccion="energizado",
         )
+        # Aparecer en el listado de Solenium NO prueba que ya opere -- exige
+        # generación real sostenida (mismo criterio que Quoia).
+        if generacion_real.get(p.get("id")):
+            c.estado_sugerido = "en_operacion"
+            c.fase_construccion = "energizado"
         c.core = _core(c.nombre_raw)
         out.append(c)
     return out

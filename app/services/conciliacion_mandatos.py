@@ -132,16 +132,42 @@ def _strip_money(s):
     return {"is_number": False, "body": t, "neg": neg}
 
 
-def parse_mandato_number(s) -> float:
-    """Monto del MANDATO (PDF), formato US: coma=miles, punto=decimal.
-    Ej.: "2,011.51" -> 2011.51 ; "$ 2,011,510.00" -> 2011510.
+def normalizar_cifra(s) -> float:
+    """Normaliza una CIFRA a float detectando si la coma/punto es miles o decimal.
+
+    Función ÚNICA de parseo numérico; sirve para AMBAS fuentes sin saber el origen:
+      - Mandato (PDF), formato US: coma=miles, punto=decimal  ("2,011.51" → 2011.51)
+      - Asiento (Excel), formato CO: punto=miles, coma=decimal ("2.011,51" → 2011.51)
+
+    Reglas:
+      1. Si ya es número, se devuelve tal cual (así llegan las celdas del xlsx).
+      2. Se quitan $ y espacios; negativo por signo "-" o paréntesis "(1.234)".
+      3. Si hay coma Y punto: el ÚLTIMO en aparecer es el DECIMAL; el otro, miles.
+      4. Un solo tipo de separador:
+           - varias veces                      → miles   ("1.234.567"/"1,234,567")
+           - una vez con EXACTAMENTE 3 dígitos  → miles   ("497,333"/"129.413")
+           - una vez con ≠3 dígitos             → decimal ("0,50"→0.5 / "12.5")
+    La regla 4 asume el dominio (pesos): no hay importes de 3 decimales. → 0 si vacío.
     """
     p = _strip_money(s)
     if not p:
         return 0
     if p["is_number"]:
         return p["value"]
-    t = p["body"].replace(",", "")  # comas = miles -> quitar; punto = decimal, se conserva
+    body = p["body"]
+    has_comma = "," in body
+    has_dot = "." in body
+    if has_comma and has_dot:
+        coma_es_decimal = body.rfind(",") > body.rfind(".")
+        t = body.replace(".", "").replace(",", ".") if coma_es_decimal else body.replace(",", "")
+    elif has_comma or has_dot:
+        sep = "," if has_comma else "."
+        parts = body.split(sep)
+        una_vez = len(parts) == 2
+        decimales = len(parts[1]) if una_vez else 0
+        t = body.replace(sep, ".") if (una_vez and decimales != 3) else "".join(parts)
+    else:
+        t = body
     try:
         n = float(t)
     except ValueError:
@@ -149,21 +175,9 @@ def parse_mandato_number(s) -> float:
     return -n if p["neg"] else n
 
 
-def parse_asiento_number(s) -> float:
-    """Monto del ASIENTO (Excel Odoo), formato CO: punto=miles, coma=decimal.
-    Ej.: "2.011,51" -> 2011.51 ; "129.413" -> 129413.
-    """
-    p = _strip_money(s)
-    if not p:
-        return 0
-    if p["is_number"]:
-        return p["value"]
-    t = p["body"].replace(".", "").replace(",", ".")  # puntos=miles -> quitar; coma=decimal -> punto
-    try:
-        n = float(t)
-    except ValueError:
-        return 0
-    return -n if p["neg"] else n
+# @deprecated: usar normalizar_cifra. Alias por compatibilidad; delegan en la única función.
+parse_mandato_number = normalizar_cifra
+parse_asiento_number = normalizar_cifra
 
 
 # ===================== PARSEO DE ASIENTOS (Excel Odoo) =====================

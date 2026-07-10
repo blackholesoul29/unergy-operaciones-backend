@@ -7,8 +7,40 @@ suma de líneas duplicadas y split de arriendo por etiqueta.
 """
 from app.services.conciliacion_mandatos import (
     parse_asientos, extract_mandate, suggest_tag, reconciliar,
-    parse_mandato_number, parse_asiento_number, expandir_abreviaturas,
+    parse_mandato_number, parse_asiento_number, normalizar_cifra, expandir_abreviaturas,
 )
+
+
+# ── normalizar_cifra: función única que detecta miles/decimal en ambos formatos ──
+
+def test_normalizar_cifra_formato_us():
+    assert normalizar_cifra("1,234,567") == 1234567
+    assert normalizar_cifra("2,011.51") == 2011.51
+    assert normalizar_cifra("$ 2,011,510.00") == 2011510
+    assert normalizar_cifra("497,333") == 497333          # una coma, 3 dígitos → miles
+    assert normalizar_cifra("0.50") == 0.5
+    assert normalizar_cifra("2,681,883.45") == 2681883.45  # caso real Sol Sierra
+
+
+def test_normalizar_cifra_formato_co():
+    assert normalizar_cifra("1.234.567") == 1234567
+    assert normalizar_cifra("2.011,51") == 2011.51
+    assert normalizar_cifra("129.413") == 129413           # un punto, 3 dígitos → miles
+    assert normalizar_cifra("$ 1.234.567,89") == 1234567.89
+    assert normalizar_cifra("0,50") == 0.5
+
+
+def test_normalizar_cifra_bordes():
+    assert normalizar_cifra("129") == 129
+    assert normalizar_cifra("-1,000.50") == -1000.5
+    assert normalizar_cifra("-1.000,50") == -1000.5
+    assert normalizar_cifra("(1.234)") == -1234            # paréntesis contable = negativo
+    assert normalizar_cifra(2011.51) == 2011.51            # número nativo pasa directo
+    assert normalizar_cifra("") == 0 and normalizar_cifra(None) == 0
+    # Mismo valor, distinta fuente → coinciden (no diferencia de miles)
+    assert abs(normalizar_cifra("2,011.51") - normalizar_cifra("2.011,51")) < 0.001
+    # Regresión "Auditoría PDFs": US con comas NO debe leerse como 2.011
+    assert normalizar_cifra("2,011,510.00") != 2.011
 
 
 # ── Parseo numérico por fuente (US vs CO) ────────────────────────────────────

@@ -26,8 +26,8 @@ from app.core.database import get_db
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
 from app.services.tsf_sync import (
-    _FASE_TO_LABEL, _STATUS_TO_FASE, _sunfactory_energization, _sunfactory_token,
-    sync_tsf_projects,
+    _FASE_TO_LABEL, _STATUS_TO_FASE, _pick_energization_milestone, _sunfactory_all_projects,
+    _sunfactory_energization, _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
 )
 
 logger = logging.getLogger("proximos_energizar")
@@ -289,3 +289,51 @@ def restaurar_fecha(
     db.commit()
     db.refresh(p)
     return _serialize(p, _fronteras_por_proyecto(db, [p.id]).get(p.id))
+
+
+@router.get("/{proyecto_id}/debug-sunfactory")
+def debug_sunfactory(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+) -> dict:
+    """Diagnóstico de solo lectura: qué trae Sun Factory CRUDO para este proyecto
+    (milestones sin filtrar + el registro del listado con su `next_milestone`).
+    Sirve para responder "¿por qué no tiene fecha/avance?" sin adivinar -- muestra
+    si Sun Factory de verdad no tiene el dato, o si simplemente el botón on-demand
+    (que no consulta milestones) no lo ha traído todavía."""
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
+    if p is None:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    if not p.sunfactory_project_id:
+        return {"vinculado": False, "detalle": "Este proyecto no tiene sunfactory_project_id."}
+
+    token = _sunfactory_token()
+    if not token:
+        raise HTTPException(status_code=502, detail="Credenciales de Sun Factory no configuradas.")
+
+    try:
+        milestones = _sunfactory_milestones_raw(token, p.sunfactory_project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar milestones: {exc}")
+    elegido = _pick_energization_milestone(milestones)
+
+    listado = next(
+        (row for row in _sunfactory_all_projects(token) if row.get("id") == p.sunfactory_project_id),
+        None,
+    )
+
+    return {
+        "vinculado": True,
+        "sunfactory_project_id": p.sunfactory_project_id,
+        "fecha_actual_bd": p.fecha_estimada_energizacion.isoformat() if p.fecha_estimada_energizacion else None,
+        "editada_manual": bool(p.fecha_estimada_editada_manual),
+        "milestones_total": len(milestones),
+        "milestones_con_fecha": [
+            {"name": m.get("name"), "date": m.get("date"), "planned_date": m.get("planned_date")}
+            for m in milestones if m.get("date") or m.get("planned_date")
+        ],
+        "milestone_energizacion_elegido": elegido,
+        "sunfactory_state": listado.get("state") if listado else None,
+        "next_milestone_del_listado": listado.get("next_milestone") if listado else None,
+    }

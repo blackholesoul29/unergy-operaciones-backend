@@ -245,21 +245,29 @@ def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
     return {"energization_date": ed, "avance_pct": avance, "milestone": chosen.get("name")}
 
 
-def _sunfactory_energization(token: str, project_id: int) -> dict | None:
-    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
+def _sunfactory_milestones_raw(token: str, project_id: int) -> list[dict]:
+    """Milestones crudos de un proyecto vía Sun Factory (con paginación). Separado
+    de `_sunfactory_energization` para poder inspeccionarlos sin filtrar (ver
+    endpoint de diagnóstico `/proximos-energizar/{id}/debug-sunfactory`)."""
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     milestones: list[dict] = []
     url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
+    with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
+        pages = 0
+        while url and pages < 20:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
+            url = data.get("next") if isinstance(data, dict) else None
+            pages += 1
+    return milestones
+
+
+def _sunfactory_energization(token: str, project_id: int) -> dict | None:
+    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
     try:
-        with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
-            pages = 0
-            while url and pages < 20:
-                resp = client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-                milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
-                url = data.get("next") if isinstance(data, dict) else None
-                pages += 1
+        milestones = _sunfactory_milestones_raw(token, project_id)
     except Exception as exc:
         logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
         return None

@@ -248,7 +248,11 @@ def upsert_informe(
                 "Reviértelo a borrador antes de guardar una nueva versión.",
             )
         existing.html_content = payload.html_content
-        existing.charts_data = charts_data_parsed
+        # No pisar charts_data cuando el cliente no lo envía: la vista de detalle
+        # guarda solo html_content y antes cada guardado borraba los charts.
+        if charts_data_parsed is not None:
+            existing.charts_data = charts_data_parsed
+            flag_modified(existing, "charts_data")
         if payload.miembros is not None:
             existing.miembros = payload.miembros
             flag_modified(existing, "miembros")

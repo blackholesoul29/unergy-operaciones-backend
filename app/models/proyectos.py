@@ -125,6 +125,9 @@ class Proyecto(Base):
     # 'en_desarrollo' mientras la planta no opera). Etiquetas: en_construccion |
     # pruebas | proximo_energizar | energizado.
     fase_construccion: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # El operador cambió la fase a mano → el sync periódico no la pisa (salvo force
+    # o que Sun Factory reporte "energizado", que siempre gana).
+    fase_construccion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Fecha tentativa de energización (de TSF la 1ª vez; editable por operaciones).
     fecha_estimada_energizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     # El operador cambió la fecha estimada → el sync periódico no la pisa (salvo force).

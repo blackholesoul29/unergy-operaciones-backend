@@ -268,9 +268,10 @@ class _FakeResult:
 
 
 class _ExistingRow:
-    def __init__(self, id, manual, estado="en_desarrollo"):
+    def __init__(self, id, manual, estado="en_desarrollo", manual_fase=False):
         self.id = id
         self.fecha_estimada_editada_manual = manual
+        self.fase_construccion_editada_manual = manual_fase
         self.estado = estado
 
 
@@ -402,6 +403,39 @@ def test_sync_si_actualiza_fase_a_energizado_aunque_ya_este_en_operacion(monkeyp
     proj[0]["status"] = "Energizado"
     _patch_fetch(monkeypatch, proj)
     db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_operacion"))
+    pe.sync_tsf_projects(db, force=False)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert upd_params["fase"] == "energizado"
+
+
+def test_sync_respects_manual_fase_without_force(monkeypatch):
+    # El operador corrigió el Estado a mano en la tabla -- el sync no debe
+    # pisarlo de vuelta (mismo criterio que la fecha estimada).
+    _patch_fetch(monkeypatch, _one_project())  # status "Próximo a energizar"
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_desarrollo", manual_fase=True))
+    pe.sync_tsf_projects(db, force=False)
+    upd_sql = next(s for s, _ in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" not in upd_sql
+
+
+def test_sync_force_overwrites_manual_fase(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_desarrollo", manual_fase=True))
+    pe.sync_tsf_projects(db, force=True)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert "fase_construccion_editada_manual = FALSE" in upd_sql
+    assert upd_params["fase"] == "proximo_energizar"
+
+
+def test_sync_energizado_gana_aunque_fase_este_editada_a_mano(monkeypatch):
+    # "Energizado" de Sun Factory siempre gana, incluso sobre una fase editada
+    # a mano -- mismo criterio que ya tenía para estado='en_operacion'.
+    proj = _one_project()
+    proj[0]["status"] = "Energizado"
+    _patch_fetch(monkeypatch, proj)
+    db = _FakeDB(existing=_ExistingRow(id=7, manual=False, estado="en_desarrollo", manual_fase=True))
     pe.sync_tsf_projects(db, force=False)
     upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
     assert "fase_construccion = :fase" in upd_sql

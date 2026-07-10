@@ -737,7 +737,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
-                    SELECT id, fecha_estimada_editada_manual, estado FROM proyectos
+                    SELECT id, fecha_estimada_editada_manual, fase_construccion_editada_manual, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         (CAST(:sol_id AS integer) IS NOT NULL
                              AND sunfactory_project_id = CAST(:sol_id AS integer))
@@ -790,7 +790,13 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 # dejar que Sun Factory lo regrese a una fase de obra anterior
                 # solo porque su propio tracker todavía no se actualizó -- el
                 # estado real (`estado`) manda sobre el pipeline de construcción.
-                set_fase = fase == "energizado" or existing.estado != "en_operacion"
+                # Tampoco se pisa una fase editada a mano por el operador (salvo
+                # que Sun Factory ya reporte "energizado", que siempre gana, o
+                # force -- mismo criterio que la fecha estimada).
+                manual_fase = bool(existing.fase_construccion_editada_manual)
+                set_fase = fase == "energizado" or (
+                    existing.estado != "en_operacion" and (not manual_fase or force)
+                )
                 params = {
                     "id": existing.id,
                     "fase": fase,
@@ -809,7 +815,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     date_sql = (", fecha_estimada_energizacion = :energ, "
                                 "fecha_estimada_editada_manual = FALSE")
                     params["energ"] = energ
-                fase_sql = "fase_construccion = :fase, " if set_fase else ""
+                fase_sql = (
+                    "fase_construccion = :fase, fase_construccion_editada_manual = FALSE, "
+                    if set_fase else ""
+                )
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 # sunfactory_project_id se respalda aqui la PRIMERA vez que se

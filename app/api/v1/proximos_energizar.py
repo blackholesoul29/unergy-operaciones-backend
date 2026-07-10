@@ -39,6 +39,7 @@ router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"
 _TSF_COLUMNS_DDL = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
@@ -97,6 +98,7 @@ def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
         "departamento": p.departamento,
         "origen": p.origen,
         "editadaManual": bool(p.fecha_estimada_editada_manual),
+        "estadoEditadoManual": bool(p.fase_construccion_editada_manual),
         # "Frontera asignada" -- pregunta frecuente: qué proyectos en construcción
         # ya tienen frontera comercial registrada (señal real de energización
         # inminente, más confiable que la fase de Sun Factory). Viene de nuestra
@@ -240,7 +242,10 @@ def actualizar(
         p.mwh_mes_estimado = body.monthlyMwh
     if body.status is not None:
         # Acepta etiqueta o slug; normaliza a slug.
-        p.fase_construccion = _STATUS_TO_FASE.get(body.status, body.status)
+        nueva_fase = _STATUS_TO_FASE.get(body.status, body.status)
+        if nueva_fase != p.fase_construccion:
+            p.fase_construccion = nueva_fase
+            p.fase_construccion_editada_manual = True
     if body.energizationDate is not None and body.energizationDate != p.fecha_estimada_energizacion:
         p.fecha_estimada_energizacion = body.energizationDate
         p.fecha_estimada_editada_manual = True

@@ -2593,6 +2593,23 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _run_arr_link_backfill() -> None:
+    """Vincula arr_proyectos con la tabla maestra proyectos por nombre (fill-if-null).
+    Corre después del seed de Arriendos para que los arr_proyecto ya existan."""
+    from sqlalchemy.orm import sessionmaker
+    from app.services.arr_link import backfill_arr_proyecto_links
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        rep = backfill_arr_proyecto_links(db)
+        if rep["vinculados"]:
+            print(f"[arr_link] {rep['vinculados']} vinculados, "
+                  f"{len(rep['sin_match'])} sin match")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2610,6 +2627,7 @@ def _deferred_init():
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
+        ("arr_link_backfill", _run_arr_link_backfill),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:

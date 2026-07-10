@@ -1033,6 +1033,15 @@ _PENDING_DDLS = [
     # -- antes solo existía en fronteras, y sin forma de editarlo desde la API.
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_operador_red_id ON proyectos (operador_red_id)",
+    # migration — módulo CRM comercial (2026-07-10)
+    # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
+    "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_oportunidad_id ON proyectos (oportunidad_id)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_tipo VARCHAR(30)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
+    "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
 ]
 
 

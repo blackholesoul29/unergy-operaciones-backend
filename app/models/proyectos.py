@@ -114,6 +114,12 @@ class Proyecto(Base):
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     project_id_solenium: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
 
+    # ── CRM comercial ────────────────────────────────────────────────────────
+    # Oportunidad (pipeline comercial) a la que pertenece este proyecto.
+    # NULL = proyecto fuera del CRM (histórico o creado por otro flujo).
+    # (operador_red_id ya existe arriba, vínculo al catálogo compartido.)
+    oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
+
     # Servicios activos
     srv_operacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_representacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -15,17 +15,18 @@ from app.models.proyectos import Proyecto
 
 
 def sincronizar_operador_red(db: Session, proyecto: Proyecto) -> None:
-    """Rellena `operador_red_id` en la dirección que haga falta:
-    - Si el proyecto ya lo tiene, lo copia a las fronteras que no lo tengan.
-    - Si el proyecto no lo tiene, lo toma de la primera frontera que sí lo
-      tenga.
-    No hace commit -- el caller ya está dentro de una transacción."""
-    if proyecto.operador_red_id is not None:
-        for f in proyecto.fronteras:
-            if f.operador_red_id is None:
-                f.operador_red_id = proyecto.operador_red_id
-    else:
+    """Rellena `operador_red_id` en las dos direcciones, en la misma pasada:
+    primero adopta el del proyecto desde la primera frontera que lo tenga (si
+    el proyecto todavía no tiene ninguno), y siempre cascada hacia el resto de
+    fronteras que sigan sin él -- así una sola frontera con el dato ya
+    diligenciado lo propaga a sus hermanas en la misma llamada, no solo al
+    proyecto. No hace commit -- el caller ya está dentro de una transacción."""
+    if proyecto.operador_red_id is None:
         for f in proyecto.fronteras:
             if f.operador_red_id is not None:
                 proyecto.operador_red_id = f.operador_red_id
                 break
+    if proyecto.operador_red_id is not None:
+        for f in proyecto.fronteras:
+            if f.operador_red_id is None:
+                f.operador_red_id = proyecto.operador_red_id

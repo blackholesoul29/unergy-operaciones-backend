@@ -22,6 +22,16 @@ def test_rellena_proyecto_desde_primera_frontera_con_valor():
     assert p.operador_red_id == 2
 
 
+def test_rellena_hermanas_en_la_misma_pasada_al_adoptar_del_proyecto():
+    # Caso real 2026-07-10 "El Paso Norte": ninguna de las dos tenía el dato;
+    # se vinculó la de generación a mano -- la de consumo debe quedar
+    # sincronizada en la MISMA llamada, no solo el proyecto.
+    p = _proyecto_con_fronteras(None, 1, None)
+    sincronizar_operador_red(None, p)
+    assert p.operador_red_id == 1
+    assert [f.operador_red_id for f in p.fronteras] == [1, 1]
+
+
 def test_no_pisa_valor_ya_diligenciado_en_frontera():
     # El proyecto dice 1, pero esta frontera ya tenía 9 -- no se pisa.
     p = _proyecto_con_fronteras(1, 9)

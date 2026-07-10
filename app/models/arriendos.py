@@ -12,6 +12,7 @@ class ArrProyecto(Base):
 
     id:          Mapped[int]        = mapped_column(BigInteger, primary_key=True)
     codigo:      Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
+    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     nombre:      Mapped[str]        = mapped_column(String(255), nullable=False)
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     valor_base:    Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)

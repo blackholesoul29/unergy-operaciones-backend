@@ -754,6 +754,8 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_periodo ON arr_seleccion_mensual (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_proyecto ON arr_seleccion_mensual (arr_proyecto_id)",
+    "ALTER TABLE arr_proyectos ADD COLUMN IF NOT EXISTS proyecto_id BIGINT REFERENCES proyectos(id)",
+    "CREATE INDEX IF NOT EXISTS ix_arr_proyectos_proyecto_id ON arr_proyectos (proyecto_id)",
     # Factura consolidada mensual del proveedor
     """CREATE TABLE IF NOT EXISTS om_factura_mensual (
         id             BIGSERIAL PRIMARY KEY,

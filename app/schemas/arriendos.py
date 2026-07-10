@@ -19,6 +19,7 @@ class ArrIPCUpsert(BaseModel):
 class ArrProyectoIn(BaseModel):
     nombre: str
     codigo: Optional[str] = None
+    proyecto_id: Optional[int] = None
     fecha_firma_contrato: Optional[date] = None
     valor_base: Optional[float] = None
     canon_archivo: Optional[float] = None

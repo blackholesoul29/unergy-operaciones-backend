@@ -18,6 +18,7 @@ from app.schemas.arriendos import (
     ArrSeleccionGuardar, ArrSeleccionOut,
 )
 from app.services.arr_calculator import calcular_arriendo
+from app.services.arr_contrato_sync import sync_arr_to_contrato
 
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
@@ -65,6 +66,8 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
 def crear_proyecto(payload: ArrProyectoIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
     p = ArrProyecto(**payload.model_dump())
     db.add(p); db.commit(); db.refresh(p)
+    sync_arr_to_contrato(p, db)
+    db.refresh(p)
     return p
 
 
@@ -76,6 +79,8 @@ def editar_proyecto(proyecto_id: int, payload: ArrProyectoIn, db: Session = Depe
     for k, v in payload.model_dump().items():
         setattr(p, k, v)
     db.commit(); db.refresh(p)
+    sync_arr_to_contrato(p, db)
+    db.refresh(p)
     return p
 
 

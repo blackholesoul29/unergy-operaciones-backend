@@ -11,6 +11,7 @@ from app.schemas.contratos_servicio import (
     ImportarIndexacionEntry, FilaFactura,
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
+from app.services.arr_contrato_sync import sync_contrato_to_arr
 
 router = APIRouter(prefix="/contratos-servicio", tags=["ContratoServicio"])
 
@@ -101,6 +102,8 @@ def create_contrato(
     db.flush()
     _sync_partes(contrato, db)
     db.commit()
+    if contrato.servicio_aplica == "arriendo":
+        sync_contrato_to_arr(contrato, db)
     return _get_or_404(contrato.id, db)
 
 
@@ -170,6 +173,8 @@ def update_contrato(
         setattr(contrato, k, v)
     _sync_partes(contrato, db)
     db.commit()
+    if contrato.servicio_aplica == "arriendo":
+        sync_contrato_to_arr(contrato, db)
     return _get_or_404(id, db)
 
 

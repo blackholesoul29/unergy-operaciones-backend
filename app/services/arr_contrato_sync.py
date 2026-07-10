@@ -15,12 +15,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 
-def _estado_from_activo(activo: bool | None) -> str:
-    return "vigente" if activo else "terminado"
-
-
 def sync_arr_to_contrato(arr, db: Session) -> None:
-    """Upsert del contrato de arriendo del proyecto vinculado con los datos del arr_proyecto."""
+    """Upsert del contrato de arriendo del proyecto vinculado con los datos del arr_proyecto.
+    Fill-if-not-null y sin pisar estados ricos del contrato (en_renovacion/vencido)."""
     from app.models.contratos import ContratoServicio
 
     if getattr(arr, "proyecto_id", None) is None:
@@ -34,13 +31,21 @@ def sync_arr_to_contrato(arr, db: Session) -> None:
         )
         .first()
     )
-    if contrato is None:
-        contrato = ContratoServicio(proyecto_id=arr.proyecto_id, servicio_aplica="arriendo")
+    creado = contrato is None
+    if creado:
+        contrato = ContratoServicio(
+            proyecto_id=arr.proyecto_id, servicio_aplica="arriendo", estado="vigente"
+        )
         db.add(contrato)
 
-    contrato.tarifa_base = arr.valor_base
-    contrato.fecha_firma_contrato = arr.fecha_firma_contrato
-    contrato.estado = _estado_from_activo(arr.activo)
+    if arr.valor_base is not None:
+        contrato.tarifa_base = arr.valor_base
+    if arr.fecha_firma_contrato is not None:
+        contrato.fecha_firma_contrato = arr.fecha_firma_contrato
+    # No pisar estados ricos (en_renovacion/vencido) fijados desde Operación:
+    # solo marcar terminado si el arr fue explícitamente desactivado.
+    if arr.activo is False:
+        contrato.estado = "terminado"
     db.commit()
 
 

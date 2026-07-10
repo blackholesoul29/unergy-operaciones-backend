@@ -64,6 +64,12 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
 
 @router.post("/proyectos", response_model=ArrProyectoOut)
 def crear_proyecto(payload: ArrProyectoIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    if payload.proyecto_id is not None:
+        existente = db.query(ArrProyecto).filter(
+            ArrProyecto.proyecto_id == payload.proyecto_id
+        ).first()
+        if existente:
+            raise HTTPException(409, "Ya existe un arriendo para este proyecto")
     p = ArrProyecto(**payload.model_dump())
     db.add(p); db.commit(); db.refresh(p)
     sync_arr_to_contrato(p, db)

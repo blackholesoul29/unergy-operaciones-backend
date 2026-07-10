@@ -90,3 +90,43 @@ def test_sync_contrato_to_arr_escribe_de_vuelta(db):
 
     assert float(db.query(ArrProyecto).get(10).valor_base) == 9_999
     assert db.query(ArrProyecto).get(10).fecha_firma_contrato == date(2026, 2, 2)
+
+
+def test_sync_arr_no_pisa_estado_rico_existente(db):
+    _base(db)
+    db.add(ContratoServicio(id=5, proyecto_id=1, servicio_aplica="arriendo",
+                            tarifa_base=1, estado="en_renovacion"))
+    arr = ArrProyecto(id=10, nombre="X", proyecto_id=1, valor_base=3_000, activo=True)
+    db.add(arr); db.commit()
+
+    sync_arr_to_contrato(arr, db)
+
+    c = db.query(ContratoServicio).filter_by(proyecto_id=1, servicio_aplica="arriendo").first()
+    assert c.estado == "en_renovacion"       # estado rico NO se pisa
+    assert float(c.tarifa_base) == 3_000     # valor sí se actualiza
+
+
+def test_sync_arr_valor_none_no_borra_contrato(db):
+    _base(db)
+    db.add(ContratoServicio(id=5, proyecto_id=1, servicio_aplica="arriendo",
+                            tarifa_base=7_500, estado="vigente"))
+    arr = ArrProyecto(id=10, nombre="X", proyecto_id=1, valor_base=None, activo=True)
+    db.add(arr); db.commit()
+
+    sync_arr_to_contrato(arr, db)
+
+    c = db.query(ContratoServicio).filter_by(proyecto_id=1, servicio_aplica="arriendo").first()
+    assert float(c.tarifa_base) == 7_500     # NO se borra con None
+
+
+def test_sync_arr_inactivo_marca_terminado(db):
+    _base(db)
+    db.add(ContratoServicio(id=5, proyecto_id=1, servicio_aplica="arriendo",
+                            tarifa_base=1, estado="vigente"))
+    arr = ArrProyecto(id=10, nombre="X", proyecto_id=1, valor_base=1, activo=False)
+    db.add(arr); db.commit()
+
+    sync_arr_to_contrato(arr, db)
+
+    c = db.query(ContratoServicio).filter_by(proyecto_id=1, servicio_aplica="arriendo").first()
+    assert c.estado == "terminado"

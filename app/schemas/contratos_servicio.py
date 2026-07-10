@@ -68,6 +68,7 @@ class ContratoServicioCreate(BaseModel):
     canones_otros: Optional[float] = None
     estado: Optional[str] = "vigente"
     fecha_firma_contrato: Optional[date] = None
+    fecha_inicio_om: Optional[date] = None
     renovacion_automatica: Optional[bool] = None
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None

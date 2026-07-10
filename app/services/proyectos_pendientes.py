@@ -22,6 +22,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -81,6 +82,10 @@ class _Candidato:
     codigo_tsf: str | None = None
     sunfactory_project_id: int | None = None
     proyecto_id: int | None = None  # si ya se resolvió contra uno existente
+    # Solo lo llena _candidatos_quoia -- generación real sostenida varios días
+    # (no solo el último reportado). Se exige cuando el candidato NO tiene
+    # corroboración de Sun Factory/Solenium (ver resolver_pendientes).
+    generacion_multidia: bool = False
 
 
 def _tsf_code_from_base_name(base_name: str | None) -> str | None:
@@ -204,6 +209,50 @@ def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str,
     return resultado
 
 
+# Cache de "¿generación sostenida varios días?" -- más caro que el de 1 día
+# (repite la medición por N días), así que solo se calcula para los frt_code
+# que YA pasaron el chequeo de 1 día (subconjunto chico). Mismo TTL.
+_generacion_multidia_cache: dict[str, bool] | None = None
+_generacion_multidia_cache_ts: float = 0.0
+_DIAS_GENERACION_SOSTENIDA = 3
+
+
+def _generacion_real_multidia_por_frt(
+    gaia: GaiaClient, frt_codes: list[str],
+) -> dict[str, bool]:
+    """Como `_generacion_real_por_frt`, pero exige generación real en los
+    últimos `_DIAS_GENERACION_SOSTENIDA` días completos (no el día de hoy,
+    que puede estar parcial) -- una sola lectura aislada (prueba/calibración
+    de un proyecto recién comisionado) no basta para considerar que ya opera
+    de verdad. Caso real 2026-07-10: Garza/La Perdiz/Taurus VIII-X pasaban el
+    chequeo de 1 día, pero ese mismo día, revisado después, mostraba
+    generación real en cero -- solo se sostuvo un día aislado."""
+    global _generacion_multidia_cache, _generacion_multidia_cache_ts
+    now = time.monotonic()
+    if _generacion_multidia_cache is not None and (now - _generacion_multidia_cache_ts) < _GENERACION_REAL_CACHE_TTL:
+        return _generacion_multidia_cache
+
+    dynamic = _get_dynamic_maps(gaia) or {}
+    frt_a_nodos = dynamic.get("frt") or {}
+    hoy = date.today()
+    fechas = [(hoy - timedelta(days=i)).isoformat() for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
+
+    resultado: dict[str, bool] = {}
+    codigos = [c for c in frt_codes if c]
+    if codigos:
+        with ThreadPoolExecutor(max_workers=min(len(codigos), 12)) as pool:
+            def _check(code):
+                node_p, node_r = frt_a_nodos.get(code, (None, None))
+                sostenida = all(_nodo_tiene_generacion(gaia, node_p, node_r, f) for f in fechas)
+                return code, sostenida
+            for code, tiene in pool.map(_check, codigos):
+                resultado[code] = tiene
+
+    _generacion_multidia_cache = resultado
+    _generacion_multidia_cache_ts = now
+    return resultado
+
+
 def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     gaia = GaiaClient()
     if not gaia.enabled:
@@ -213,6 +262,10 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     except Exception:
         return []
     generacion_real = _generacion_real_por_frt(gaia, borders)
+    # Multi-día solo para los que ya pasaron el de 1 día -- subconjunto chico,
+    # evita multiplicar por 3 las llamadas de medición para todo el pipeline.
+    codigos_1dia = [code for code, tiene in generacion_real.items() if tiene]
+    generacion_multidia = _generacion_real_multidia_por_frt(gaia, codigos_1dia)
 
     out = []
     for b in borders:
@@ -243,6 +296,7 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
         if gen.get("last_report_date") and generacion_real.get(frt_gen_code):
             c.estado_sugerido = "en_operacion"
             c.fase_construccion = "energizado"
+            c.generacion_multidia = generacion_multidia.get(frt_gen_code, False)
         c.core = _core(c.nombre_raw)
         out.append(c)
     return out
@@ -324,6 +378,7 @@ def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
             existente.estado_sugerido = "en_operacion"
         elif existente.estado_sugerido is None and c.estado_sugerido is not None:
             existente.estado_sugerido = c.estado_sugerido
+        existente.generacion_multidia = existente.generacion_multidia or c.generacion_multidia
         for campo in (
             "municipio", "departamento", "latitud", "longitud", "tipo_proyecto",
             "potencia_ac_kw", "capacidad_instalada_kwp", "sub_project",
@@ -333,6 +388,19 @@ def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
             if getattr(existente, campo) is None and getattr(c, campo) is not None:
                 setattr(existente, campo, getattr(c, campo))
     return list(por_core.values())
+
+
+def _reforzar_solo_quoia(candidatos: list[_Candidato]) -> None:
+    """Sin corroboración de Sun Factory/Solenium (el candidato viene solo de
+    Quoia), exige generación sostenida varios días, no solo el último
+    reportado -- caso real 2026-07-10: Garza/La Perdiz/Taurus VIII-X se
+    confirmaron como "en operación" con evidencia de un solo día que resultó
+    ser aislada (prueba/calibración), sin que ninguna otra fuente respaldara
+    la sugerencia. Muta `candidatos` in-place."""
+    for c in candidatos:
+        if c.fuentes == {"quoia"} and c.estado_sugerido == "en_operacion" and not c.generacion_multidia:
+            c.estado_sugerido = None
+            c.fase_construccion = None
 
 
 def resolver_pendientes(db: Session) -> list[dict]:
@@ -367,6 +435,7 @@ def resolver_pendientes(db: Session) -> list[dict]:
         + _candidatos_solenium()
     )
     candidatos = _fusionar_por_core(crudos)
+    _reforzar_solo_quoia(candidatos)
 
     pendientes: list[dict] = []
     vistos_proyecto_id: set[int] = set()

@@ -18,7 +18,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, or_, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -195,10 +195,22 @@ def listar_proximos_energizar(
             logger.warning("Verificación de generación real falló (se ignora, no bloquea la vista): %s", exc)
 
     rows = [p for p in rows if p.id not in generando_ya]
+
+    # Última vez que el sync (on-demand o el job de 6h) tocó CUALQUIER proyecto
+    # vinculado a Sun Factory -- no depende de que el usuario haya apretado
+    # "Actualizar" en su propia sesión, así que sigue siendo correcto aunque
+    # recién se cargue la página por primera vez.
+    ultima_sync = (
+        db.query(func.max(Proyecto.updated_at))
+        .filter(Proyecto.sunfactory_project_id.isnot(None), Proyecto.deleted_at.is_(None))
+        .scalar()
+    )
+
     return {
         "projects": [_serialize(p, fronteras.get(p.id)) for p in rows],
         "source": "operaciones_db",
         "count": len(rows),
+        "ultimaSincronizacion": ultima_sync.isoformat() if ultima_sync else None,
     }
 
 

@@ -105,10 +105,6 @@ def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
         # propia tabla `fronteras`, no de una llamada en vivo a Quoia.
         "tieneFrontera": frontera is not None,
         "codigoFrontera": frontera["codigo_frontera"] if frontera else None,
-        # Ya confirmado como operando (vía Proyectos pendientes / frontera con
-        # evidencia real), pero Sun Factory todavía no actualizó su fase -- caso
-        # real "Galeras": si no se marca aparte, se ve como si siguiera en obra.
-        "yaOperando": p.estado == "en_operacion",
     }
 
 
@@ -165,20 +161,6 @@ def listar_proximos_energizar(
             .order_by(Proyecto.fecha_estimada_energizacion.asc().nullslast())
             .all()
         )
-
-        # Caso real "Galeras": ya opera (estado='en_operacion', normalmente
-        # confirmado por tener frontera con evidencia real) pero Sun Factory
-        # todavía no actualizó su fase de obra. Se listan aparte -- no porque
-        # sigan en el pipeline de construcción, sino para que el desfase entre
-        # `estado` y `fase_construccion` no pase desapercibido.
-        desfasados = (
-            db.query(Proyecto)
-            .filter(Proyecto.deleted_at.is_(None))
-            .filter(Proyecto.estado == "en_operacion")
-            .filter(Proyecto.fase_construccion.isnot(None), Proyecto.fase_construccion != "energizado")
-            .order_by(Proyecto.nombre_comercial.asc())
-            .all()
-        )
     except Exception as exc:
         # Nunca tumbar la vista por un problema de esquema/consulta: degradar.
         db.rollback()
@@ -186,7 +168,6 @@ def listar_proximos_energizar(
         return {"projects": [], "source": "error", "count": 0,
                 "warning": "No se pudo cargar la lista. Intenta «Sincronizar ahora» "
                            "para poblar el pipeline desde Solenium/TSF."}
-    rows = desfasados + rows
     fronteras = _fronteras_por_proyecto(db, [p.id for p in rows])
     return {
         "projects": [_serialize(p, fronteras.get(p.id)) for p in rows],

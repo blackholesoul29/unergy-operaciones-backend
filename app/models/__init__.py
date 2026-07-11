@@ -20,6 +20,7 @@ from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionXMDato,
     LiquidacionMandato, LiquidacionMandatoLinea, LiquidacionFactura,
 )
+from app.models.liquidacion_xm import LiquidacionXMDatoIngesta
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
 from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
@@ -55,6 +56,7 @@ __all__ = [
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
+    "LiquidacionXMDatoIngesta",
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Mantenimiento",

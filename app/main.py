@@ -1042,6 +1042,24 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
     "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration 050 — liquidacion_xm_dato: datos crudos de liquidación XM por archivo
+    # (pipeline de ingesta). NO confundir con liquidacion_xm_datos (facturación).
+    """CREATE TABLE IF NOT EXISTS liquidacion_xm_dato (
+        id BIGSERIAL PRIMARY KEY,
+        codigo_recurso VARCHAR(50) NOT NULL,
+        fecha DATE NOT NULL,
+        agente VARCHAR(100),
+        tipo_recurso VARCHAR(100),
+        capacidad_efectiva_neta_mw NUMERIC(10, 4),
+        generacion_kwh NUMERIC(18, 4),
+        precio_liquidacion_cop_kwh NUMERIC(18, 4),
+        valor_liquidacion_cop NUMERIC(18, 2),
+        fuente_archivo VARCHAR(100) NOT NULL,
+        fecha_ingesta TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        hash_fila VARCHAR(64) NOT NULL
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_liquidacion_xm_dato_hash ON liquidacion_xm_dato (hash_fila)",
+    "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_dato_recurso_fecha ON liquidacion_xm_dato (codigo_recurso, fecha)",
 ]
 
 
@@ -2600,6 +2618,19 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _scheduled_xm_ingestion():
+    """Daily ingest of XM Excel files from the incoming directory."""
+    try:
+        from app.jobs.xm_data_ingestion_job import run_daily_xm_ingestion
+        resumen = run_daily_xm_ingestion()
+        print(
+            f"[xm_ingestion] procesados={resumen['archivos_procesados']} "
+            f"errores={resumen['archivos_con_error']} filas_nuevas={resumen['filas_nuevas']}"
+        )
+    except Exception as e:
+        print(f"[xm_ingestion] Failed: {e}")
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2689,6 +2720,14 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            # Ingesta diaria de archivos XM (listado_recursos / generacion_distribuida).
+            _mgs_scheduler.add_job(
+                _scheduled_xm_ingestion,
+                CronTrigger(hour=4, minute=0, timezone=settings.TIMEZONE),
+                id="xm_data_ingestion",
+                name="Ingesta diaria de archivos XM",
             )
 
             # Fecha de inicio de comercialización (primer día con generación real):

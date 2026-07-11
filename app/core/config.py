@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # CRM comercial: días sin respuesta antes de alertar (configurable por env).
     COMERCIAL_ALERTA_DIAS: int = 5
 
+    # Pipeline de ingesta de archivos XM (listado_recursos / generacion_distribuida).
+    # El job diario escanea XM_INCOMING_FILES_PATH y, tras procesar, archiva en
+    # XM_ARCHIVE_FILES_PATH. Rutas relativas al working dir del backend.
+    XM_INCOMING_FILES_PATH: str = "datos/xm/incoming"
+    XM_ARCHIVE_FILES_PATH: str = "datos/xm/archive"
+
     @field_validator("SECRET_KEY", mode="after")
     @classmethod
     def secret_key_must_be_set(cls, v: str, info) -> str:

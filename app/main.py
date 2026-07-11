@@ -824,7 +824,6 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
@@ -2142,7 +2141,7 @@ def _scheduled_tsf_sync():
         db = SessionLocal()
         try:
             from app.services.tsf_sync import sync_tsf_projects
-            stats = sync_tsf_projects(db, force=False)
+            stats = sync_tsf_projects(db)
             print(f"[tsf_sync] OK — creados={stats.get('creados', 0)} "
                   f"actualizados={stats.get('actualizados', 0)} errores={stats.get('errores', 0)}")
         except Exception as e:

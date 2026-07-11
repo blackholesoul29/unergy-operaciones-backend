@@ -291,7 +291,6 @@ class ProyectoCreate(BaseModel):
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
@@ -367,7 +366,6 @@ class ProyectoOut(BaseModel):
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None

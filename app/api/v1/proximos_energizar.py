@@ -5,19 +5,18 @@ vivo aquí: un job lo sincroniza periódicamente hacia la tabla `proyectos`
 (ver `app/services/tsf_sync.py`). Este router solo:
   - GET  `/proximos-energizar`        → lee de `proyectos` (pipeline + fechas futuras).
   - POST `/proximos-energizar/sync`   → dispara la sincronización on-demand (force opc.).
-  - PATCH `/proximos-energizar/{id}`  → persiste ediciones del operador (marca la
-                                        fecha como editada manualmente).
 
-Así la vista vive 100% en la BD (sin localStorage) y los proyectos quedan listos
-para relacionarse con contratos PPA y monitorear cumplimiento de energía.
+Todos los campos son de solo lectura: vienen tal cual de Sun Factory/TSF, sin
+edición manual del operador. Así la vista vive 100% en la BD (sin localStorage)
+y los proyectos quedan listos para relacionarse con contratos PPA y monitorear
+cumplimiento de energía.
 """
 from __future__ import annotations
 
 import logging
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
@@ -28,8 +27,8 @@ from app.models.proyectos import Proyecto
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.proyectos_pendientes import _generacion_real_por_frt
 from app.services.tsf_sync import (
-    _FASE_TO_LABEL, _STATUS_TO_FASE, _pick_energization_milestone, _sunfactory_all_projects,
-    _sunfactory_energization, _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
+    _FASE_TO_LABEL, _pick_energization_milestone, _sunfactory_all_projects,
+    _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
 )
 
 logger = logging.getLogger("proximos_energizar")
@@ -41,9 +40,7 @@ router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"
 _TSF_COLUMNS_DDL = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
@@ -99,8 +96,6 @@ def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
         "municipio": p.municipio,
         "departamento": p.departamento,
         "origen": p.origen,
-        "editadaManual": bool(p.fecha_estimada_editada_manual),
-        "estadoEditadoManual": bool(p.fase_construccion_editada_manual),
         # "Frontera asignada" -- pregunta frecuente: qué proyectos en construcción
         # ya tienen frontera comercial registrada (señal real de energización
         # inminente, más confiable que la fase de Sun Factory). Viene de nuestra
@@ -216,98 +211,22 @@ def listar_proximos_energizar(
 
 @router.post("/sync")
 def sincronizar(
-    force: bool = Query(False, description="Sobrescribe las fechas editadas manualmente con la info de Solenium."),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> dict:
-    """Dispara la sincronización TSF → proyectos on-demand (botones de la vista).
+    """Dispara la sincronización TSF → proyectos on-demand (botón de la vista).
 
     On-demand corre con `enrich_dates=False` (rápido: solo el listado de Sun Factory
     + upserts, sin las ~99 llamadas de hitos que harían timeout el request). El job
     programado de 6h trae luego la fecha de energización precisa (RETIE)."""
     _ensure_tsf_columns(db)
     try:
-        stats = sync_tsf_projects(db, force=force, enrich_dates=False)
+        stats = sync_tsf_projects(db, enrich_dates=False)
     except Exception as exc:
         logger.warning("sync TSF falló: %s", exc)
         raise HTTPException(status_code=502,
                             detail=f"No se pudo sincronizar con Solenium/TSF: {exc}")
     return stats
-
-
-class ProximoEnergizarPatch(BaseModel):
-    commercialName: str | None = None
-    energizationDate: date | None = None
-    monthlyMwh: float | None = None
-    status: str | None = None  # etiqueta ('Próximo a energizar') o slug ('proximo_energizar')
-
-
-@router.patch("/{proyecto_id}")
-def actualizar(
-    proyecto_id: int,
-    body: ProximoEnergizarPatch,
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-) -> dict:
-    """Persiste ediciones inline del operador. Cambiar la fecha la marca como
-    editada manualmente, para que el sync periódico no la pise (salvo force)."""
-    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
-    if p is None:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-
-    if body.commercialName is not None:
-        p.nombre_comercial = body.commercialName
-    if body.monthlyMwh is not None:
-        p.mwh_mes_estimado = body.monthlyMwh
-    if body.status is not None:
-        # Acepta etiqueta o slug; normaliza a slug.
-        nueva_fase = _STATUS_TO_FASE.get(body.status, body.status)
-        if nueva_fase != p.fase_construccion:
-            p.fase_construccion = nueva_fase
-            p.fase_construccion_editada_manual = True
-    if body.energizationDate is not None and body.energizationDate != p.fecha_estimada_energizacion:
-        p.fecha_estimada_energizacion = body.energizationDate
-        p.fecha_estimada_editada_manual = True
-
-    db.commit()
-    db.refresh(p)
-    return _serialize(p, _fronteras_por_proyecto(db, [p.id]).get(p.id))
-
-
-@router.post("/{proyecto_id}/restaurar-fecha")
-def restaurar_fecha(
-    proyecto_id: int,
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-) -> dict:
-    """Descarta la fecha editada a mano de ESTE proyecto y trae de nuevo la de
-    Sun Factory. Reemplaza al botón global de "forzar sobrescritura": más
-    seguro (un proyecto a la vez, con el operador viendo cuál) y más
-    descubrible (vive junto al ícono que ya marca "editada manualmente")."""
-    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
-    if p is None:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    if not p.sunfactory_project_id:
-        raise HTTPException(status_code=400,
-                             detail="Este proyecto no tiene vínculo con Sun Factory -- no hay fecha automática que restaurar.")
-
-    token = _sunfactory_token()
-    if not token:
-        raise HTTPException(status_code=502, detail="Credenciales de Sun Factory no configuradas.")
-    try:
-        energ = _sunfactory_energization(token, p.sunfactory_project_id)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo consultar Sun Factory: {exc}")
-    if not energ or not energ.get("energization_date"):
-        raise HTTPException(status_code=404, detail="Sun Factory no tiene una fecha de energización para este proyecto todavía.")
-
-    p.fecha_estimada_energizacion = energ["energization_date"]
-    p.fecha_estimada_editada_manual = False
-    if energ.get("avance_pct") is not None:
-        p.avance_obra_pct = energ["avance_pct"]
-    db.commit()
-    db.refresh(p)
-    return _serialize(p, _fronteras_por_proyecto(db, [p.id]).get(p.id))
 
 
 @router.get("/{proyecto_id}/debug-sunfactory")
@@ -346,7 +265,6 @@ def debug_sunfactory(
         "vinculado": True,
         "sunfactory_project_id": p.sunfactory_project_id,
         "fecha_actual_bd": p.fecha_estimada_energizacion.isoformat() if p.fecha_estimada_energizacion else None,
-        "editada_manual": bool(p.fecha_estimada_editada_manual),
         "milestones_total": len(milestones),
         "milestones_con_fecha": [
             {"name": m.get("name"), "date": m.get("date"), "planned_date": m.get("planned_date")}

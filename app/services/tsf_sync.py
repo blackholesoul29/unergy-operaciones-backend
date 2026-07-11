@@ -10,11 +10,10 @@ Fuente del pipeline (igual que el endpoint de lectura original):
      + % de avance de obra. Cruce por base_name ↔ minifarm_project.name.
   3. API de generación Unergy → ¿ya genera? Si sí, está energizada de hecho.
 
-`sync_tsf_projects(db, force)` es SOLO de actualización, ya NO crea proyectos:
+`sync_tsf_projects(db)` es SOLO de actualización, ya NO crea proyectos:
   - Si encuentra el proyecto (por sunfactory_project_id/origina_code/codigo_tsf),
-    actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada).
-  - Respeta `fecha_estimada_editada_manual` salvo `force=True` (el operador pidió
-    re-sincronizar y sobrescribir sus cambios con la info de Solenium).
+    actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada)
+    -- siempre desde la fuente, sin edición manual del operador que respetar.
   - Si no encuentra match ni con un candidato de nombre parecido (para sugerir
     vínculo), lo cuenta en `sin_match` y lo deja pasar -- la CREACIÓN de
     proyectos nuevos vive ahora en `app/services/proyectos_pendientes.py`
@@ -706,11 +705,8 @@ _STATUS_TO_FASE = {
 _FASE_TO_LABEL = {v: k for k, v in _STATUS_TO_FASE.items()}
 
 
-def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = True) -> dict:
+def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
     """Upsert del pipeline TSF en `proyectos`. Devuelve estadísticas.
-
-    `force=True`: sobrescribe la fecha estimada incluso si el operador la editó
-    manualmente, y resetea la marca (Solenium suele tener la fecha más fresca).
 
     `enrich_dates=False`: NO consulta los hitos de cada proyecto (que son ~99
     llamadas HTTP y pueden hacer timeout en un request síncrono); usa la fecha del
@@ -745,7 +741,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
-                    SELECT id, fecha_estimada_editada_manual, fase_construccion_editada_manual, estado FROM proyectos
+                    SELECT id, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         (CAST(:sol_id AS integer) IS NOT NULL
                              AND sunfactory_project_id = CAST(:sol_id AS integer))
@@ -790,21 +786,13 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 # /proyectos/pendientes lo detecte y un humano lo confirme.
                 stats["sin_match"] += 1
             else:
-                manual = bool(existing.fecha_estimada_editada_manual)
-                # La fecha estimada solo se pisa si no la editó el operador, o si force.
-                set_date = (not manual) or force
                 # Si el proyecto ya quedó confirmado como en operación (ej. vía
                 # Proyectos pendientes con evidencia real de Quoia/Solenium), no
                 # dejar que Sun Factory lo regrese a una fase de obra anterior
                 # solo porque su propio tracker todavía no se actualizó -- el
-                # estado real (`estado`) manda sobre el pipeline de construcción.
-                # Tampoco se pisa una fase editada a mano por el operador (salvo
-                # que Sun Factory ya reporte "energizado", que siempre gana, o
-                # force -- mismo criterio que la fecha estimada).
-                manual_fase = bool(existing.fase_construccion_editada_manual)
-                set_fase = fase == "energizado" or (
-                    existing.estado != "en_operacion" and (not manual_fase or force)
-                )
+                # estado real (`estado`) manda sobre el pipeline de construcción,
+                # salvo que Sun Factory ya reporte "energizado", que siempre gana.
+                set_fase = fase == "energizado" or existing.estado != "en_operacion"
                 params = {
                     "id": existing.id,
                     "fase": fase,
@@ -819,14 +807,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     "longitud": p["longitud"],
                 }
                 date_sql = ""
-                if set_date and energ is not None:
-                    date_sql = (", fecha_estimada_energizacion = :energ, "
-                                "fecha_estimada_editada_manual = FALSE")
+                if energ is not None:
+                    date_sql = ", fecha_estimada_energizacion = :energ"
                     params["energ"] = energ
-                fase_sql = (
-                    "fase_construccion = :fase, fase_construccion_editada_manual = FALSE, "
-                    if set_fase else ""
-                )
+                fase_sql = "fase_construccion = :fase, " if set_fase else ""
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 # sunfactory_project_id se respalda aqui la PRIMERA vez que se

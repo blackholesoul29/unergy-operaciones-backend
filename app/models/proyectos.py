@@ -92,7 +92,7 @@ class Proyecto(Base):
     # a Cumplimiento. Editable a mano (marca fecha_comercializacion_editada_manual).
     fecha_inicio_comercializacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     # El operador fijó la fecha de comercialización a mano → el backfill/job diario
-    # no la vuelve a pisar (mismo patrón que fecha_estimada_editada_manual).
+    # no la vuelve a pisar.
     fecha_comercializacion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -149,13 +149,8 @@ class Proyecto(Base):
     # 'en_desarrollo' mientras la planta no opera). Etiquetas: en_construccion |
     # pruebas | proximo_energizar | energizado.
     fase_construccion: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    # El operador cambió la fase a mano → el sync periódico no la pisa (salvo force
-    # o que Sun Factory reporte "energizado", que siempre gana).
-    fase_construccion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Fecha tentativa de energización (de TSF la 1ª vez; editable por operaciones).
+    # Fecha tentativa de energización -- siempre la que trae Sun Factory (solo lectura).
     fecha_estimada_energizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # El operador cambió la fecha estimada → el sync periódico no la pisa (salvo force).
-    fecha_estimada_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # % de avance de obra (Sun Factory).
     avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Proyección de generación mensual (MWh), editable por operaciones.

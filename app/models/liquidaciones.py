@@ -26,6 +26,13 @@ class TipoVentaLiqEnum(str, enum.Enum):
     autoconsumo = "autoconsumo"
 
 
+class EstadoLiquidacionXMEnum(str, enum.Enum):
+    """Estados del cálculo del motor de liquidación XM (por proyecto/período)."""
+    pendiente = "pendiente"
+    calculado = "calculado"
+    auditado = "auditado"
+
+
 class TipoCostoEnum(str, enum.Enum):
     mantenimiento = "mantenimiento"
     internet = "internet"
@@ -171,6 +178,37 @@ class LiquidacionXMDato(Base):
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="xm_datos")
     frontera: Mapped["Frontera | None"] = relationship("Frontera", back_populates="xm_datos")
+
+
+class LiquidacionXMCalculo(Base):
+    """Resultado del motor de liquidación automática por proyecto y período.
+
+    Cruza la generación REAL del proyecto con su compromiso PPA y el precio
+    promedio de bolsa (XM) del mes para obtener la diferencia energética y su
+    valoración monetaria. Es el modelo de datos intermedio del motor
+    (`app/services/liquidacion_engine.py`).
+
+    NOTA: no confundir con `LiquidacionXMDato` (detalle de facturación por
+    frontera, vinculado a `liquidaciones`). Esta tabla es independiente y se
+    ancla directamente al proyecto y al período. Ver migración 049.
+    """
+    __tablename__ = "liquidacion_xm_calculos"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "periodo", name="uq_liquidacion_xm_calc_proyecto_periodo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
+    periodo: Mapped[date] = mapped_column(Date, nullable=False)  # primer día del mes
+    generacion_real: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
+    compromiso_ppa: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
+    precio_xm_promedio: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)  # COP/MWh
+    diferencia_mwh: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
+    valor_liquidacion: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)  # COP
+    estado: Mapped[str] = mapped_column(String(20), nullable=False, default="pendiente")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="liquidacion_xm_calculos")
 
 
 class LiquidacionMandato(Base):

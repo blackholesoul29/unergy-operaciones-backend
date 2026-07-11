@@ -3279,3 +3279,43 @@ def fix_enlaces(
 
     db.commit()
     return {"status": "ok", "actions": actions}
+
+
+# ── Consumo del motor de liquidación XM ─────────────────────────────────────────
+# Expone los cálculos del motor (liquidacion_xm_calculos) para que los reportes de
+# cumplimiento contractual los consuman junto con la vista de cumplimiento mensual.
+
+@router.get("/liquidacion-xm/{proyecto_id}")
+def get_liquidacion_xm_proyecto(
+    proyecto_id: int,
+    year: int | None = Query(None, ge=2020, le=2050),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Cálculos de liquidación XM (gen real vs compromiso PPA a precio XM) de un
+    proyecto, opcionalmente filtrados por año. Fuente para reportes de
+    cumplimiento contractual."""
+    from app.models.liquidaciones import LiquidacionXMCalculo
+
+    q = db.query(LiquidacionXMCalculo).filter(LiquidacionXMCalculo.proyecto_id == proyecto_id)
+    if year is not None:
+        q = q.filter(
+            LiquidacionXMCalculo.periodo >= date(year, 1, 1),
+            LiquidacionXMCalculo.periodo <= date(year, 12, 31),
+        )
+    rows = q.order_by(LiquidacionXMCalculo.periodo.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "proyecto_id": r.proyecto_id,
+            "periodo": r.periodo.isoformat() if r.periodo else None,
+            "generacion_real": float(r.generacion_real) if r.generacion_real is not None else None,
+            "compromiso_ppa": float(r.compromiso_ppa) if r.compromiso_ppa is not None else None,
+            "precio_xm_promedio": float(r.precio_xm_promedio) if r.precio_xm_promedio is not None else None,
+            "diferencia_mwh": float(r.diferencia_mwh) if r.diferencia_mwh is not None else None,
+            "valor_liquidacion": float(r.valor_liquidacion) if r.valor_liquidacion is not None else None,
+            "estado": r.estado,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]

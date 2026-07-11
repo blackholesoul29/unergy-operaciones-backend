@@ -17,8 +17,9 @@ from app.models.fallas import (
     FallaInversor,
 )
 from app.models.liquidaciones import (
-    Liquidacion, LiquidacionCosto, LiquidacionXMDato,
+    Liquidacion, LiquidacionCosto, LiquidacionXMDato, LiquidacionXMCalculo,
     LiquidacionMandato, LiquidacionMandatoLinea, LiquidacionFactura,
+    EstadoLiquidacionXMEnum,
 )
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
@@ -53,8 +54,9 @@ __all__ = [
     "Frontera", "FronteraLectura", "FronteraQuoiaIgnorada", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
-    "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
+    "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato", "LiquidacionXMCalculo",
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
+    "EstadoLiquidacionXMEnum",
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Mantenimiento",

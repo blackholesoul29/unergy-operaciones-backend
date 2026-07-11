@@ -187,6 +187,7 @@ class Proyecto(Base):
     generaciones: Mapped[list["GeneracionDiaria"]] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
     mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
     liquidaciones: Mapped[list["Liquidacion"]] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
+    liquidacion_xm_calculos: Mapped[list["LiquidacionXMCalculo"]] = relationship("LiquidacionXMCalculo", back_populates="proyecto", uselist=True)
     asic_solicitudes: Mapped[list["AsicSolicitud"]] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
     rec_procesos: Mapped[list["RecProceso"]] = relationship("RecProceso", back_populates="proyecto", uselist=True)
     promotor_seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)

@@ -22,10 +22,15 @@ def _require_liquidaciones_write(current: Usuario = Depends(get_current_user)):
 from app.models.liquidaciones import (
     Liquidacion, LiquidacionCosto, LiquidacionMandato,
     LiquidacionMandatoLinea, LiquidacionFactura, LiquidacionXMDato,
+    LiquidacionXMCalculo,
     TipoCostoEnum, TipoMandatoEnum, TipoLineaMandatoEnum,
     TipoFacturaServicioEnum, EstadoLiquidacionEnum,
     EstadoMandatoEnum, EstadoFacturaEnum,
 )
+from app.services.liquidacion_engine import (
+    LiquidacionEngine, DatosFaltantesError, LiquidacionEngineError,
+)
+from app.schemas.liquidacion import LiquidacionTriggerRequest, LiquidacionResponse
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_table
 from app.models.clientes import Cliente
@@ -677,6 +682,78 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
         },
         "proyectos": proyectos_out,
     }
+
+
+# ── Motor de liquidación automática XM ──────────────────────────────────────────
+# Rutas del motor (gen real vs compromiso PPA a precio XM → liquidacion_xm_calculos).
+# El segmento literal "motor" DEBE registrarse ANTES de "/{id}" (ver comentario y
+# test_route_literales_antes_de_id): Starlette matchea en orden de registro.
+
+def _serializar_calculo(c: LiquidacionXMCalculo) -> dict:
+    return {
+        "id": c.id,
+        "proyecto_id": c.proyecto_id,
+        "periodo": c.periodo.isoformat() if c.periodo else None,
+        "generacion_real": float(c.generacion_real) if c.generacion_real is not None else None,
+        "compromiso_ppa": float(c.compromiso_ppa) if c.compromiso_ppa is not None else None,
+        "precio_xm_promedio": float(c.precio_xm_promedio) if c.precio_xm_promedio is not None else None,
+        "diferencia_mwh": float(c.diferencia_mwh) if c.diferencia_mwh is not None else None,
+        "valor_liquidacion": float(c.valor_liquidacion) if c.valor_liquidacion is not None else None,
+        "estado": c.estado,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.post("/motor/trigger-calculation")
+def trigger_calculation(
+    body: LiquidacionTriggerRequest,
+    db: Session = Depends(get_db),
+    _=Depends(_require_liquidaciones_write),
+):
+    """Dispara el motor de liquidación para un proyecto y período (mes/año).
+
+    Cruza generación real + compromiso PPA + precio XM del mes y persiste el
+    resultado en `liquidacion_xm_calculos`. Idempotente: si ya existe un cálculo
+    para el período lo recalcula (salvo que esté 'auditado').
+    """
+    proyecto = db.query(Proyecto).filter(Proyecto.id == body.proyecto_id).first()
+    if not proyecto:
+        raise HTTPException(404, "Proyecto no encontrado")
+
+    engine = LiquidacionEngine(db)
+    try:
+        registro = engine.calcular_liquidacion_proyecto(body.proyecto_id, body.mes, body.anio)
+    except DatosFaltantesError as exc:
+        raise HTTPException(422, str(exc))
+    except LiquidacionEngineError as exc:
+        raise HTTPException(409, str(exc))
+
+    return {"msg": "Liquidación calculada", "calculo": _serializar_calculo(registro)}
+
+
+@router.get("/motor/{proyecto_id}/periodo/{mes}/{anio}", response_model=LiquidacionResponse)
+def get_calculo_liquidacion(
+    proyecto_id: int,
+    mes: int,
+    anio: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Consulta el cálculo de liquidación de un proyecto en un período."""
+    if not (1 <= mes <= 12):
+        raise HTTPException(422, "El mes debe estar entre 1 y 12")
+    periodo = date(anio, mes, 1)
+    calc = (
+        db.query(LiquidacionXMCalculo)
+        .filter(
+            LiquidacionXMCalculo.proyecto_id == proyecto_id,
+            LiquidacionXMCalculo.periodo == periodo,
+        )
+        .first()
+    )
+    if not calc:
+        raise HTTPException(404, "No hay liquidación calculada para este proyecto y período")
+    return calc
 
 
 @router.get("/{id}")

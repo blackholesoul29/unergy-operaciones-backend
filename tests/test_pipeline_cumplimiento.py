@@ -115,3 +115,76 @@ def test_max_ausente_usa_el_minimo_como_tope():
     v = calcular_valores_cumplimiento(gen_kwh=130_000, min_mwh=100, max_mwh=None)
     assert v["estado_calc"] == "excedente"
     assert v["excedentes_bolsa_mwh"] == 30.0
+
+
+# ── run_pipeline_mensual: sin dato de energía NO sobrescribe el snapshot ──────
+
+def test_pipeline_sin_energia_no_sobreescribe_snapshot(monkeypatch):
+    """Regresión: un contrato sin dato de energía en las fuentes locales NO debe
+    fabricar un déficit total ni sobrescribir un cumplimiento ya calculado (p.ej.
+    por cerrar-periodo, fuente API Unergy) con ceros. Debe omitirse y contarse en
+    ``contratos_sin_dato``.
+
+    Ausencia de dato ≠ 0 MWh: antes de este guard, el pipeline mensual
+    ``origen='automatico'`` clobbereaba el snapshot cerrado con gen=0 → déficit y
+    ``compras_bolsa_cop`` fantasma (corrupción de dato financiero).
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.api.v1.cumplimiento as cumpl_api
+    import app.services.pipeline_cumplimiento as pipe
+    import app.models  # noqa: F401  registra todos los modelos en el metadata
+    from app.models.base import Base
+    from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
+    from app.models.contratos import PPACompromisoEnergia, PPATarifa
+    from app.models.liquidaciones import Liquidacion, LiquidacionXMDato
+
+    engine = create_engine("sqlite:///:memory:")
+    # Se crean también las tablas de liquidación para que la RUTA de sobrescritura
+    # se ejerza de verdad: sin el guard, el orquestador llega hasta el DELETE de
+    # liquidacion_xm_datos, así el test falla por la aserción de clobber (y no por
+    # una tabla ausente).
+    Base.metadata.create_all(
+        engine,
+        tables=[CumplimientoMensual.__table__, PPACompromisoEnergia.__table__,
+                PPATarifa.__table__, Liquidacion.__table__, LiquidacionXMDato.__table__],
+    )
+    db = sessionmaker(bind=engine)()
+
+    # Snapshot autoritativo previo: energía real 123.0 MWh, estado cerrado.
+    prev = CumplimientoMensual(
+        id=1, contrato_ppa_id=42, anio=2026, mes=6,
+        gen_total_mwh=123.0, compromiso_mwh=100.0,
+        estado=EstadoCumplimientoEnum.cerrado, origen="manual",
+    )
+    db.add(prev)
+    db.commit()
+
+    contrato = SimpleNamespace(id=42, numero_codigo_contrato="C-42")
+    monkeypatch.setattr(cumpl_api, "_contratos_vigentes", lambda db, a, m: [contrato])
+    monkeypatch.setattr(
+        cumpl_api, "_resolve_gescon",
+        lambda db, cod, a, m: [SimpleNamespace(proyecto_id=7, porcentaje_despacho=1.0)],
+    )
+    monkeypatch.setattr(cumpl_api, "_get_bolsa_avg", lambda db, a, m: {"precio_promedio": 250.0})
+    monkeypatch.setattr(pipe, "_usuario_sistema_id", lambda db: 1)
+    # Sin dato de energía en las fuentes locales para la planta.
+    monkeypatch.setattr(
+        pipe, "_energia_proyecto_kwh",
+        lambda db, pid, a, m: {"energia_kwh": None, "fuente": None, "frontera_id": None},
+    )
+
+    result = pipe.run_pipeline_mensual(db, 2026, 6)
+
+    assert result["contratos_sin_dato"] == 1
+    assert result["codigos_sin_dato"] == ["C-42"]
+    assert result["cumplimiento_recs_processed"] == 0
+    assert result["liquidaciones_recs_created"] == 0
+
+    db.refresh(prev)
+    # El snapshot previo queda INTACTO (no clobbered a 0 / déficit fantasma).
+    assert float(prev.gen_total_mwh) == 123.0
+    assert prev.estado == EstadoCumplimientoEnum.cerrado
+    assert prev.origen == "manual"
+    db.close()

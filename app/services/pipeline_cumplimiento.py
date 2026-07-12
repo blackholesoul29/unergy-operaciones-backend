@@ -255,6 +255,8 @@ def run_pipeline_mensual(
             "anio": anio, "mes": mes,
             "cumplimiento_recs_processed": 0,
             "liquidaciones_recs_created": 0,
+            "contratos_sin_dato": 0,
+            "codigos_sin_dato": [],
         }
 
     compromisos_map = {
@@ -277,6 +279,8 @@ def run_pipeline_mensual(
 
     cumplimiento_procesados = 0
     liquidaciones_creadas = 0
+    contratos_sin_dato = 0
+    codigos_sin_dato: list[str] = []
     liquidacion_por_proyecto: dict[tuple[int, date], Liquidacion] = {}
 
     for c in contratos:
@@ -306,6 +310,17 @@ def run_pipeline_mensual(
                 })
 
         gen_kwh = round(gen_kwh_total, 3) if hubo_energia else None
+
+        # Sin dato de energía en las fuentes locales (lecturas de frontera /
+        # generación diaria) para NINGUNA planta del contrato: se omite el
+        # contrato. Ausencia de dato ≠ 0 MWh — persistir 0 fabricaría un déficit
+        # total y compras de bolsa fantasma en COP y, peor, sobrescribiría un
+        # cumplimiento ya calculado por cerrar-periodo (fuente API Unergy) con
+        # ceros. Un 0 medido real llega como 0.0 (no None) y sí se procesa.
+        if gen_kwh is None:
+            contratos_sin_dato += 1
+            codigos_sin_dato.append(c.numero_codigo_contrato or f"contrato_id={c.id}")
+            continue
 
         compromiso = compromisos_map.get(c.id)
         min_mwh = (
@@ -405,13 +420,26 @@ def run_pipeline_mensual(
 
     db.commit()
 
+    if codigos_sin_dato:
+        # Accionable para operaciones: estos contratos no tienen lecturas de
+        # frontera ni generación diaria en el período; para obtener su
+        # cumplimiento hay que correr cerrar-periodo (fuente API Unergy).
+        logger.warning(
+            "Pipeline cumplimiento %s-%02d: %d contratos omitidos por falta de "
+            "dato de energía en fuentes locales: %s",
+            anio, mes, contratos_sin_dato, ", ".join(codigos_sin_dato),
+        )
+
     return {
         "status": "ok",
         "message": (
             f"Pipeline {anio}-{mes:02d}: {cumplimiento_procesados} cumplimientos, "
-            f"{liquidaciones_creadas} datos XM"
+            f"{liquidaciones_creadas} datos XM, {contratos_sin_dato} contratos sin "
+            f"dato de energía (omitidos)"
         ),
         "anio": anio, "mes": mes,
         "cumplimiento_recs_processed": cumplimiento_procesados,
         "liquidaciones_recs_created": liquidaciones_creadas,
+        "contratos_sin_dato": contratos_sin_dato,
+        "codigos_sin_dato": codigos_sin_dato,
     }

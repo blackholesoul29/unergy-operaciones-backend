@@ -9,12 +9,14 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user, _require_admin
 from app.core.database import get_db
 from app.models.garantias import Garantia, GarantiaMovimiento, EstadoGarantiaEnum
+from app.models.garantia_cobertura import GarantiaCoberturaHistorico
 from app.models.proyectos import Proyecto
 from app.models.contratos import PPAContrato
 from app.schemas.garantias import (
     GarantiaCreate, GarantiaUpdate, GarantiaOut,
     MovimientoCreate, MovimientoOut,
 )
+from app.schemas.garantia_cobertura import GarantiaMonitoreoConfig
 
 router = APIRouter(prefix="/garantias", tags=["Garantías"])
 
@@ -34,6 +36,10 @@ def _garantia_to_out(g: Garantia) -> dict:
         "fecha_vencimiento": g.fecha_vencimiento.isoformat() if g.fecha_vencimiento else None,
         "estado": g.estado.value if g.estado else None,
         "observaciones": g.observaciones,
+        "monitoreo_cobertura_activo": bool(g.monitoreo_cobertura_activo),
+        "tipo_calculo_cobertura": g.tipo_calculo_cobertura,
+        "umbral_alerta_amarilla": float(g.umbral_alerta_amarilla) if g.umbral_alerta_amarilla is not None else None,
+        "umbral_alerta_roja": float(g.umbral_alerta_roja) if g.umbral_alerta_roja is not None else None,
         "created_at": g.created_at.isoformat() if g.created_at else None,
         "updated_at": g.updated_at.isoformat() if g.updated_at else None,
         "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else None,
@@ -353,4 +359,60 @@ def create_movimiento(
         "concepto": mov.concepto,
         "referencia_xm": mov.referencia_xm,
         "created_at": mov.created_at.isoformat() if mov.created_at else None,
+    }
+
+
+# ── Monitoreo de cobertura ────────────────────────────────────────────────────
+def _historico_to_out(h: GarantiaCoberturaHistorico) -> dict:
+    return {
+        "id": h.id,
+        "garantia_id": h.garantia_id,
+        "fecha_verificacion": h.fecha_verificacion.isoformat() if h.fecha_verificacion else None,
+        "valor_requerido": float(h.valor_requerido) if h.valor_requerido is not None else None,
+        "valor_actual_garantia": float(h.valor_actual_garantia) if h.valor_actual_garantia is not None else None,
+        "cobertura_porcentaje": float(h.cobertura_porcentaje) if h.cobertura_porcentaje is not None else None,
+        "nivel_alerta": h.nivel_alerta,
+        "detalles_calculo": h.detalles_calculo,
+    }
+
+
+@router.put("/{garantia_id}/monitoreo_config")
+def update_monitoreo_config(
+    garantia_id: int,
+    data: GarantiaMonitoreoConfig,
+    db: Session = Depends(get_db),
+    _=Depends(_require_admin),
+):
+    """Actualiza la configuración de monitoreo de cobertura de una garantía."""
+    g = db.query(Garantia).filter(Garantia.id == garantia_id).first()
+    if not g:
+        raise HTTPException(404, "Garantía no encontrada")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(g, k, v)
+    db.commit()
+    db.refresh(g)
+    return _garantia_to_out(g)
+
+
+@router.get("/{garantia_id}/cobertura_historico")
+def cobertura_historico(
+    garantia_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Histórico de verificaciones de cobertura, más recientes primero."""
+    g = db.query(Garantia).filter(Garantia.id == garantia_id).first()
+    if not g:
+        raise HTTPException(404, "Garantía no encontrada")
+    registros = (
+        db.query(GarantiaCoberturaHistorico)
+        .filter(GarantiaCoberturaHistorico.garantia_id == garantia_id)
+        .order_by(GarantiaCoberturaHistorico.fecha_verificacion.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "items": [_historico_to_out(h) for h in registros],
+        "total": len(registros),
     }

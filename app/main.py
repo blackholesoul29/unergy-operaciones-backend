@@ -1041,6 +1041,23 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
     "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration 052 — monitoreo de cobertura de garantías
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS monitoreo_cobertura_activo BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS tipo_calculo_cobertura VARCHAR(100)",
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_amarilla NUMERIC(5,4) NOT NULL DEFAULT 0.90",
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_roja NUMERIC(5,4) NOT NULL DEFAULT 0.95",
+    """CREATE TABLE IF NOT EXISTS garantia_cobertura_historico (
+        id BIGSERIAL PRIMARY KEY,
+        garantia_id BIGINT NOT NULL REFERENCES garantias(id) ON DELETE CASCADE,
+        fecha_verificacion TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        valor_requerido NUMERIC(20,2) NOT NULL,
+        valor_actual_garantia NUMERIC(20,2) NOT NULL,
+        cobertura_porcentaje NUMERIC(7,4) NOT NULL,
+        nivel_alerta VARCHAR(20) NOT NULL,
+        detalles_calculo JSONB
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_garantia_cobertura_historico_garantia_id ON garantia_cobertura_historico (garantia_id)",
+    "CREATE INDEX IF NOT EXISTS ix_garantia_cobertura_historico_fecha ON garantia_cobertura_historico (fecha_verificacion DESC)",
 ]
 
 
@@ -2705,6 +2722,15 @@ def _deferred_init():
                 CronTrigger(month=1, day=1, hour=9, minute=0, timezone=settings.TIMEZONE),
                 id="om_ipc_check",
                 name="Check IPC anual O&M",
+            )
+
+            # Monitoreo diario de cobertura de garantías (2:00 AM).
+            from app.jobs.garantia_monitor_job import run_verificar_cobertura_de_garantias
+            _mgs_scheduler.add_job(
+                run_verificar_cobertura_de_garantias,
+                CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
+                id="garantia_cobertura_monitor",
+                name="Monitoreo cobertura de garantías",
             )
 
             if settings.ORIGINA_DATABASE_URL:

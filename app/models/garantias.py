@@ -3,7 +3,7 @@ import enum
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -56,9 +56,22 @@ class Garantia(TimestampMixin, Base):
     )
     observaciones: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Monitoreo automático de cobertura de la garantía (job programado).
+    # Ver app/services/garantia_coverage_service.py y app/jobs/garantia_monitor_job.py.
+    monitoreo_cobertura_activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tipo_calculo_cobertura: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    umbral_alerta_amarilla: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.90)
+    umbral_alerta_roja: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.95)
+
     proyecto = relationship("Proyecto", backref="garantias", lazy="select")
     contrato_ppa = relationship("PPAContrato", backref="garantias", lazy="select")
     movimientos = relationship("GarantiaMovimiento", back_populates="garantia", cascade="all, delete-orphan", order_by="GarantiaMovimiento.fecha.desc()")
+    cobertura_historico = relationship(
+        "GarantiaCoberturaHistorico",
+        back_populates="garantia",
+        cascade="all, delete-orphan",
+        order_by="GarantiaCoberturaHistorico.fecha_verificacion.desc()",
+    )
 
 
 class GarantiaMovimiento(Base):

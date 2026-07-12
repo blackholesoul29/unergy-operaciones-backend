@@ -1044,8 +1044,8 @@ _PENDING_DDLS = [
     # migration 052 — monitoreo de cobertura de garantías
     "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS monitoreo_cobertura_activo BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS tipo_calculo_cobertura VARCHAR(100)",
-    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_amarilla NUMERIC(5,4) NOT NULL DEFAULT 0.90",
-    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_roja NUMERIC(5,4) NOT NULL DEFAULT 0.95",
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_amarilla NUMERIC(5,4) NOT NULL DEFAULT 0.95",
+    "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS umbral_alerta_roja NUMERIC(5,4) NOT NULL DEFAULT 0.90",
     """CREATE TABLE IF NOT EXISTS garantia_cobertura_historico (
         id BIGSERIAL PRIMARY KEY,
         garantia_id BIGINT NOT NULL REFERENCES garantias(id) ON DELETE CASCADE,

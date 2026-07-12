@@ -60,8 +60,8 @@ class Garantia(TimestampMixin, Base):
     # Ver app/services/garantia_coverage_service.py y app/jobs/garantia_monitor_job.py.
     monitoreo_cobertura_activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tipo_calculo_cobertura: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    umbral_alerta_amarilla: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.90)
-    umbral_alerta_roja: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.95)
+    umbral_alerta_amarilla: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.95)
+    umbral_alerta_roja: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=0.90)
 
     proyecto = relationship("Proyecto", backref="garantias", lazy="select")
     contrato_ppa = relationship("PPAContrato", backref="garantias", lazy="select")

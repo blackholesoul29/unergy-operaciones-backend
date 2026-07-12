@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 NIVELES_ALERTA = ("VERDE", "AMARILLO", "ROJO")
 
@@ -46,3 +46,13 @@ class GarantiaMonitoreoConfig(BaseModel):
         if v is not None and not (0 < v <= 1):
             raise ValueError("los umbrales deben estar en el rango (0, 1]")
         return v
+
+    @model_validator(mode="after")
+    def roja_no_supera_amarilla(self):
+        r, a = self.umbral_alerta_roja, self.umbral_alerta_amarilla
+        if r is not None and a is not None and r > a:
+            raise ValueError(
+                "el umbral de alerta roja debe ser menor o igual que el de amarilla "
+                "(la roja es el piso más estricto de cobertura)"
+            )
+        return self

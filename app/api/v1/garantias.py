@@ -387,7 +387,19 @@ def update_monitoreo_config(
     g = db.query(Garantia).filter(Garantia.id == garantia_id).first()
     if not g:
         raise HTTPException(404, "Garantía no encontrada")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    cambios = data.model_dump(exclude_unset=True)
+    # La config RESULTANTE (payload parcial + valores guardados) también debe
+    # respetar roja <= amarilla; si no, la config visible mentiría sobre cuándo
+    # dispara cada severidad.
+    roja = cambios.get("umbral_alerta_roja", g.umbral_alerta_roja)
+    amarilla = cambios.get("umbral_alerta_amarilla", g.umbral_alerta_amarilla)
+    if roja is not None and amarilla is not None and float(roja) > float(amarilla):
+        raise HTTPException(
+            422,
+            "el umbral de alerta roja debe ser menor o igual que el de amarilla "
+            "(la roja es el piso más estricto de cobertura)",
+        )
+    for k, v in cambios.items():
         setattr(g, k, v)
     db.commit()
     db.refresh(g)

@@ -27,11 +27,11 @@ def upgrade() -> None:
     )
     op.execute(
         "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS "
-        "umbral_alerta_amarilla NUMERIC(5,4) NOT NULL DEFAULT 0.90"
+        "umbral_alerta_amarilla NUMERIC(5,4) NOT NULL DEFAULT 0.95"
     )
     op.execute(
         "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS "
-        "umbral_alerta_roja NUMERIC(5,4) NOT NULL DEFAULT 0.95"
+        "umbral_alerta_roja NUMERIC(5,4) NOT NULL DEFAULT 0.90"
     )
     op.execute(
         """CREATE TABLE IF NOT EXISTS garantia_cobertura_historico (

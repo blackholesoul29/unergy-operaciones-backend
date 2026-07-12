@@ -66,11 +66,11 @@ def clasificar_nivel_alerta(
     """Nivel de alerta según la cobertura.
 
     Los umbrales son pisos de cobertura: por debajo de ellos hay sub-cobertura.
-    La línea ROJA es siempre el piso MÁS estricto (menor) y la AMARILLA el menos
-    estricto (mayor); tomamos min()/max() para que la clasificación quede bien
-    ordenada sin importar cómo se hayan configurado los dos umbrales.
+    La línea ROJA es el piso MÁS estricto (menor) y la AMARILLA el menos estricto
+    (mayor). La config exige roja <= amarilla (422 si no); el min()/max() de abajo
+    queda solo como red de seguridad ante datos legados invertidos.
 
-    Con los defaults (amarilla=0.90, roja=0.95): cobertura < 0.90 → ROJO,
+    Con los defaults (roja=0.90, amarilla=0.95): cobertura < 0.90 → ROJO,
     < 0.95 → AMARILLO, ≥ 0.95 → VERDE. Cobertura None (sin exposición) → VERDE.
     """
     if cobertura_porcentaje is None:

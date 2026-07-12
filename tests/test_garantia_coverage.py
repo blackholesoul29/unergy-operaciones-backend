@@ -2,9 +2,10 @@
 
 Semántica (ver garantia_coverage_service):
 - cobertura = valor_actual / valor_requerido (más alta = mejor).
-- Los umbrales son pisos de cobertura; la línea ROJA es min(amarilla, roja) y la
-  AMARILLA es max(...). Con los defaults (0.90, 0.95): <0.90 ROJO, <0.95 AMARILLO,
+- Los umbrales son pisos de cobertura; la ROJA es el piso más estricto (menor).
+  Con los defaults (roja=0.90, amarilla=0.95): <0.90 ROJO, <0.95 AMARILLO,
   ≥0.95 VERDE. Sin exposición (valor_requerido<=0) → cobertura None → VERDE.
+  Config invertida (legado): min()/max() interno la reordena como red de seguridad.
 """
 from app.services.garantia_coverage_service import (
     calcular_valor_requerido,
@@ -38,19 +39,19 @@ def test_cobertura_requerido_cero_es_none():
 
 def test_clasificacion_verde():
     # cobertura 1.0 ≥ 0.95 → VERDE
-    assert clasificar_nivel_alerta(1.0, 0.90, 0.95) == "VERDE"
-    assert clasificar_nivel_alerta(0.95, 0.90, 0.95) == "VERDE"
+    assert clasificar_nivel_alerta(1.0, 0.95, 0.90) == "VERDE"
+    assert clasificar_nivel_alerta(0.95, 0.95, 0.90) == "VERDE"
 
 
 def test_clasificacion_amarillo():
     # 0.90 ≤ cobertura < 0.95 → AMARILLO
-    assert clasificar_nivel_alerta(0.92, 0.90, 0.95) == "AMARILLO"
-    assert clasificar_nivel_alerta(0.90, 0.90, 0.95) == "AMARILLO"
+    assert clasificar_nivel_alerta(0.92, 0.95, 0.90) == "AMARILLO"
+    assert clasificar_nivel_alerta(0.90, 0.95, 0.90) == "AMARILLO"
 
 
 def test_clasificacion_rojo():
     # cobertura < 0.90 → ROJO
-    assert clasificar_nivel_alerta(0.89, 0.90, 0.95) == "ROJO"
+    assert clasificar_nivel_alerta(0.89, 0.95, 0.90) == "ROJO"
     assert clasificar_nivel_alerta(0.5, 0.90, 0.95) == "ROJO"
 
 
@@ -116,3 +117,22 @@ def test_evaluar_cobertura_sin_exposicion_es_verde():
     assert res["valor_requerido"] == 0
     assert res["cobertura_porcentaje"] is None
     assert res["nivel_alerta"] == "VERDE"
+
+
+def test_config_invertida_se_reordena_como_red_de_seguridad():
+    # Datos legados con umbrales cruzados (roja > amarilla): el clasificador
+    # los reordena internamente y la severidad no se degrada.
+    assert clasificar_nivel_alerta(0.89, 0.90, 0.95) == "ROJO"
+    assert clasificar_nivel_alerta(0.92, 0.90, 0.95) == "AMARILLO"
+    assert clasificar_nivel_alerta(0.96, 0.90, 0.95) == "VERDE"
+
+
+def test_schema_rechaza_roja_mayor_que_amarilla():
+    import pytest
+    from pydantic import ValidationError
+    from app.schemas.garantia_cobertura import GarantiaMonitoreoConfig
+
+    with pytest.raises(ValidationError):
+        GarantiaMonitoreoConfig(umbral_alerta_roja=0.95, umbral_alerta_amarilla=0.90)
+    ok = GarantiaMonitoreoConfig(umbral_alerta_roja=0.90, umbral_alerta_amarilla=0.95)
+    assert ok.umbral_alerta_roja == 0.90

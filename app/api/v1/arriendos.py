@@ -1,6 +1,7 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
 import json
+import re
 from pathlib import Path as _Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -22,12 +23,48 @@ from app.services.arr_calculator import calcular_arriendo
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
 
+_PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
 def _validar_periodo(periodo: str):
-    try:
-        _, mes = periodo.split("-")
-        assert 1 <= int(mes) <= 12
-    except Exception:
+    # Estricto: EXACTAMENTE YYYY-MM. El split() laxo anterior aceptaba
+    # cadenas como "../-01", que se usaban en el path de escritura (traversal).
+    # fullmatch (no match) para que un "\n" final no cuele por el ancla '$'.
+    if not _PERIODO_RE.fullmatch(periodo or ""):
         raise HTTPException(400, "periodo debe tener formato YYYY-MM")
+
+
+def _sanit(nombre, fallback: str = "documento.pdf") -> str:
+    """Reduce cualquier entrada a un basename seguro para escribir a disco.
+
+    Descarta componentes de directorio (`Path(...).name`), elimina separadores y
+    caracteres peligrosos, y neutraliza nombres puramente de traversal (``.``,
+    ``..``, dot-leading). Nunca devuelve cadena vacía ni un nombre que empiece
+    por punto, de modo que no puede escapar del directorio destino. ``fallback``
+    permite un nombre único por predio/pago para no colisionar cuando el nombre
+    de origen es 100% basura.
+    """
+    base = _Path(str(nombre or "")).name
+    # Descarta separadores, caracteres peligrosos y de control (incl. \x00, que
+    # además haría fallar write_bytes con ValueError → 500 no manejado).
+    limpio = "".join(
+        c for c in base if c not in '/\\:*?"<>|' and ord(c) >= 32
+    ).strip().lstrip(".")
+    return limpio or fallback
+
+
+def _dir_seguro(periodo: str, codigo_contrato: str) -> _Path:
+    """Directorio de destino garantizado dentro de ``_UPLOADS_DIR``.
+
+    ``codigo_contrato`` llega del cliente sin validar; se sanitiza a un único
+    componente y, como red de seguridad (defensa en profundidad), se verifica
+    contención tras ``resolve()`` — el mismo guard que ya usa la descarga.
+    """
+    base = _UPLOADS_DIR.resolve()
+    destino = (base / periodo / _sanit(codigo_contrato)).resolve()
+    if base != destino and base not in destino.parents:
+        raise HTTPException(400, "Ruta de destino inválida")
+    return destino
 
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
@@ -188,12 +225,11 @@ async def upload_documento(
     """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
     _validar_periodo(periodo)
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _dir_seguro(periodo, codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
-    # Guardar archivo principal
-    ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
-    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante
+    # Guardar archivo principal (nombre sanitizado — nunca escapa el directorio)
+    nombre_archivo = _sanit(nombre_resultante)
     ruta_principal = directorio / nombre_archivo
     ruta_principal.write_bytes(await file.read())
 
@@ -202,7 +238,7 @@ async def upload_documento(
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
         ext_sec   = _Path(file_secundario.filename).suffix or ".pdf"
-        nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
+        nombre_sec = f"{_sanit(nombre_resultante).rsplit('.', 1)[0]}_enviada{ext_sec}"
         ruta_obj   = directorio / nombre_sec
         ruta_obj.write_bytes(await file_secundario.read())
         ruta_sec = str(ruta_obj)
@@ -269,7 +305,7 @@ async def upload_cuenta_cobro(
     except Exception:
         raise HTTPException(400, "predios debe ser un JSON array no vacío")
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _dir_seguro(periodo, codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Leer el archivo principal una sola vez (se copia por cada predio)
@@ -290,10 +326,6 @@ async def upload_cuenta_cobro(
         ruta_obj   = directorio / nombre_sec
         ruta_obj.write_bytes(await file_secundario.read())
         ruta_sec   = str(ruta_obj)
-
-    def _sanit(nombre: str) -> str:
-        limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
-        return limpio or f"documento_pago{pago_id}.pdf"
 
     asociados = 0
     sin_match = 0
@@ -318,7 +350,11 @@ async def upload_cuenta_cobro(
                 partes.append(nombre_arrendatario)
             partes.append(proy_nombre or "SIN-MATCH")
             nombre_resultante = "_".join(partes) + ".pdf"
-        nombre_arch = _sanit(str(nombre_resultante))
+        # Fallback único por predio/pago para no colisionar si el nombre es basura.
+        nombre_arch = _sanit(
+            str(nombre_resultante),
+            fallback=f"{_sanit(codigo_predio or 'predio', fallback='predio')}_pago{pago_id}.pdf",
+        )
 
         # Escribir la copia renombrada de este predio
         ruta_copia = directorio / nombre_arch

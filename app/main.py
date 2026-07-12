@@ -1052,7 +1052,7 @@ _PENDING_DDLS = [
         fecha_verificacion TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         valor_requerido NUMERIC(20,2) NOT NULL,
         valor_actual_garantia NUMERIC(20,2) NOT NULL,
-        cobertura_porcentaje NUMERIC(7,4) NOT NULL,
+        cobertura_porcentaje NUMERIC(12,4),
         nivel_alerta VARCHAR(20) NOT NULL,
         detalles_calculo JSONB
     )""",

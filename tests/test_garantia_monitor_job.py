@@ -129,3 +129,41 @@ def test_alerta_roja_notifica_a_usuarios():
     assert len(notifs) == 2
     assert resumen == {"procesadas": 1, "alertas": 1, "errores": 0}
     m_mail.assert_called_once()
+
+
+def test_cobertura_extrema_se_persiste_sin_overflow():
+    # Proyecto con generación 30d casi nula: requerido minúsculo → cobertura enorme.
+    # Con NUMERIC(7,4) esto desbordaba cada noche y el error quedaba invisible.
+    res = {
+        "valor_requerido": 16_000.0,
+        "valor_actual_garantia": 100_000_000.0,
+        "cobertura_porcentaje": 6250.0,
+        "nivel_alerta": "VERDE",
+        "detalles_calculo": {"generacion_kwh_30d": 500},
+    }
+    session = _FakeSession(garantias=[_garantia(3)], usuarios=[_usuario()])
+    resumen, _ = _correr(session, res)
+
+    historicos = [o for o in session.added if isinstance(o, GarantiaCoberturaHistorico)]
+    assert len(historicos) == 1
+    assert historicos[0].cobertura_porcentaje == 6250.0
+    assert resumen == {"procesadas": 1, "alertas": 0, "errores": 0}
+
+
+def test_sin_exposicion_persiste_null_no_cero():
+    # Sin exposición (cobertura None → VERDE) el histórico guarda NULL, no un
+    # 0.0000+VERDE contradictorio que una UI leería como "0% cubierta, verde".
+    res = {
+        "valor_requerido": 0.0,
+        "valor_actual_garantia": 3_500_000.0,
+        "cobertura_porcentaje": None,
+        "nivel_alerta": "VERDE",
+        "detalles_calculo": {"generacion_kwh_30d": 0},
+    }
+    session = _FakeSession(garantias=[_garantia(4)], usuarios=[_usuario()])
+    resumen, _ = _correr(session, res)
+
+    historicos = [o for o in session.added if isinstance(o, GarantiaCoberturaHistorico)]
+    assert len(historicos) == 1
+    assert historicos[0].cobertura_porcentaje is None
+    assert resumen == {"procesadas": 1, "alertas": 0, "errores": 0}

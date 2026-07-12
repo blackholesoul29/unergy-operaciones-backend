@@ -88,8 +88,7 @@ async def verificar_cobertura_de_garantias() -> dict:
                     garantia_id=garantia.id,
                     valor_requerido=resultado["valor_requerido"],
                     valor_actual_garantia=resultado["valor_actual_garantia"],
-                    cobertura_porcentaje=resultado["cobertura_porcentaje"]
-                    if resultado["cobertura_porcentaje"] is not None else 0,
+                    cobertura_porcentaje=resultado["cobertura_porcentaje"],
                     nivel_alerta=resultado["nivel_alerta"],
                     detalles_calculo=resultado["detalles_calculo"],
                 )

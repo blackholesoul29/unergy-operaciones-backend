@@ -27,7 +27,7 @@ class GarantiaCoberturaHistorico(Base):
     )
     valor_requerido: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False)
     valor_actual_garantia: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False)
-    cobertura_porcentaje: Mapped[float] = mapped_column(Numeric(7, 4), nullable=False)
+    cobertura_porcentaje: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
     nivel_alerta: Mapped[str] = mapped_column(String(20), nullable=False)  # VERDE, AMARILLO, ROJO
     detalles_calculo: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 

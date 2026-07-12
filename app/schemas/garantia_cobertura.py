@@ -11,7 +11,7 @@ class GarantiaCoberturaHistoricoBase(BaseModel):
     garantia_id: int
     valor_requerido: float
     valor_actual_garantia: float
-    cobertura_porcentaje: float
+    cobertura_porcentaje: Optional[float] = None
     nivel_alerta: str
     detalles_calculo: Optional[dict[str, Any]] = None
 

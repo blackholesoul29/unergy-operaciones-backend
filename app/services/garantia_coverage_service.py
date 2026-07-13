@@ -108,6 +108,9 @@ def evaluar_cobertura(
             "umbral_amarilla": umbral_amarilla,
             "umbral_roja": umbral_roja,
             "ventana_dias": VENTANA_GENERACION_DIAS,
+            # La fórmula de exposición es provisional (pendiente la contractual
+            # real); el frontend y las alertas deben divulgarlo.
+            "formula_provisional": True,
         },
     }
 

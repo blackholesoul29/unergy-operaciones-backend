@@ -31,8 +31,10 @@ def _notificar_alerta(db, garantia: Garantia, resultado: dict) -> None:
     titulo = f"Cobertura de garantía {nivel} — {proyecto_nombre}"
     mensaje = (
         f"La garantía #{garantia.id} ({proyecto_nombre}) tiene una cobertura de {cobertura_pct} "
-        f"(requerido ${resultado['valor_requerido']:,.0f} / actual ${resultado['valor_actual_garantia']:,.0f}). "
-        f"Nivel de alerta: {nivel}."
+        f"(requerido estimado ${resultado['valor_requerido']:,.0f} / actual ${resultado['valor_actual_garantia']:,.0f}). "
+        f"Nivel de alerta: {nivel}. "
+        "El valor requerido es una estimación provisional (generación 30d × precio de bolsa × factor); "
+        "la fórmula contractual definitiva está pendiente."
     )
     link = f"/garantias/{garantia.id}"
 

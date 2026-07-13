@@ -78,6 +78,8 @@ def test_evaluar_cobertura_bien_cubierta():
     assert res["nivel_alerta"] == "VERDE"
     assert res["cobertura_porcentaje"] > 1.0
     assert res["detalles_calculo"]["generacion_kwh_30d"] == 100_000
+    # La fórmula es provisional y el resultado debe divulgarlo (anti-fabricación).
+    assert res["detalles_calculo"]["formula_provisional"] is True
 
 
 def test_evaluar_cobertura_alerta_amarilla():

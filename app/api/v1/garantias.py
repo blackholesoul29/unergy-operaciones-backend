@@ -388,6 +388,12 @@ def update_monitoreo_config(
     if not g:
         raise HTTPException(404, "Garantía no encontrada")
     cambios = data.model_dump(exclude_unset=True)
+    # tipo_calculo_cobertura es el único campo nullable; un null explícito en
+    # los demás (NOT NULL) se ignora en vez de reventar en el commit.
+    cambios = {
+        k: v for k, v in cambios.items()
+        if v is not None or k == "tipo_calculo_cobertura"
+    }
     # La config RESULTANTE (payload parcial + valores guardados) también debe
     # respetar roja <= amarilla; si no, la config visible mentiría sobre cuándo
     # dispara cada severidad.

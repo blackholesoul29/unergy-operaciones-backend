@@ -4,8 +4,13 @@ Agrega la configuración de monitoreo a `garantias` y crea la tabla histórica
 `garantia_cobertura_historico` que registra cada verificación del job
 `verificar_cobertura_de_garantias`.
 
+⚠️ Cadena re-linealizada 2026-07-24 (master c87a1f8, head 050): 052 revisa
+20260615 (rama liq-xm-ingesta-idempotency), que a su vez cuelga de 057←056←
+055←051←050. Esta rama se mergea DESPUÉS de liq-xm-ingesta según el orden de
+la cola; si el orden cambia, actualizar down_revision a la head vigente.
+
 Revision ID: 052
-Revises: 047
+Revises: 20260615
 Create Date: 2026-07-12
 """
 from alembic import op

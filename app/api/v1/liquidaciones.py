@@ -28,6 +28,7 @@ from app.models.liquidaciones import (
 )
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_table
+from app.services.liquidacion_calculator import TarifaNoResuelta, calcular_xm
 from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
@@ -904,8 +905,7 @@ def auto_populate_xm_datos(
     if total_kwh <= 0:
         return {"msg": "Sin generación registrada para este período", "xm_datos": []}
 
-    tarifa = 0.0
-    tarifa_source = "bolsa"
+    tarifa_ppa = None
 
     # For PPA tipo_venta, look up the contracted tariff first
     if liq.tipo_venta == "ppa":
@@ -926,21 +926,28 @@ def auto_populate_xm_datos(
             .first()
         )
         if ppa_tarifa_row and ppa_tarifa_row.tarifa:
-            tarifa = float(ppa_tarifa_row.tarifa)
-            tarifa_source = "ppa"
+            tarifa_ppa = float(ppa_tarifa_row.tarifa)
 
-    # Fall back to bolsa price average if no PPA tariff found or tipo_venta is not PPA
-    if tarifa == 0.0:
-        precio_row = db.execute(text("""
-            SELECT AVG(precio_promedio_kwh) as tarifa_avg
-            FROM precios_bolsa_diario
-            WHERE EXTRACT(YEAR FROM fecha) = :year
-              AND EXTRACT(MONTH FROM fecha) = :month
-              AND precio_promedio_kwh IS NOT NULL
-        """), {"year": year, "month": month}).first()
+    # Fall back to bolsa price average if no PPA tariff found or tipo_venta is not PPA.
+    # La columna es precio_promedio (COP/kWh) — igual que en dashboard y cumplimiento.
+    precio_row = db.execute(text("""
+        SELECT AVG(precio_promedio) as tarifa_avg
+        FROM precios_bolsa_diario
+        WHERE EXTRACT(YEAR FROM fecha) = :year
+          AND EXTRACT(MONTH FROM fecha) = :month
+          AND precio_promedio IS NOT NULL
+    """), {"year": year, "month": month}).first()
+    precio_bolsa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else None
 
-        tarifa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else 0.0
-        tarifa_source = "bolsa"
+    try:
+        calc = calcular_xm(
+            energia_kwh=total_kwh,
+            tipo_venta=liq.tipo_venta,
+            tarifa_ppa=tarifa_ppa,
+            precio_bolsa=precio_bolsa,
+        )
+    except TarifaNoResuelta as e:
+        raise HTTPException(422, str(e))
 
     frontera_row = db.execute(text("""
         SELECT f.id
@@ -952,14 +959,14 @@ def auto_populate_xm_datos(
     frontera_id = frontera_row.id if frontera_row else None
 
     tipo_venta = liq.tipo_venta or "bolsa"
-    valor_bruto = round(total_kwh * tarifa, 2)
+    valor_bruto = calc.valor_bruto_cop
 
     dato = LiquidacionXMDato(
         liquidacion_id=id,
         frontera_id=frontera_id,
         tipo_venta=tipo_venta,
-        energia_kwh=round(total_kwh, 3),
-        tarifa_aplicada_kwh=round(tarifa, 6),
+        energia_kwh=calc.energia_kwh,
+        tarifa_aplicada_kwh=calc.tarifa_kwh,
         valor_bruto_cop=valor_bruto,
     )
     db.add(dato)
@@ -972,7 +979,7 @@ def auto_populate_xm_datos(
         db.commit()
 
     return {
-        "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${tarifa:.2f} ({tarifa_source}) = ${valor_bruto:,.0f} COP",
+        "msg": f"Datos XM poblados: {total_kwh:.1f} kWh × ${calc.tarifa_kwh:.2f} ({calc.origen_tarifa}) = ${valor_bruto:,.0f} COP",
         "xm_datos": [_serializar_xm_dato(dato)],
     }
 

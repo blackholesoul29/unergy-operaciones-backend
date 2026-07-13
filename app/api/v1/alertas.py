@@ -225,7 +225,7 @@ def alertas_riesgo_asic(
 ):
     """PPA activos sin cobertura ASIC publicada hoy. Ver `app.services.asic_monitor`."""
     hoy = date.today()
-    alertas = generar_alertas_riesgo_asic(db, umbral_dias=umbral_dias)
+    alertas = generar_alertas_riesgo_asic(db, umbral_dias=umbral_dias, hoy=hoy)
     return {
         "fecha_consulta": str(hoy),
         "total_alertas": len(alertas),

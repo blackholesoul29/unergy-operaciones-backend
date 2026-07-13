@@ -1041,6 +1041,13 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
     "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration — CRM sub-ofertas + etiqueta comunidad (2026-07-13)
+    # Postgres no soporta IF NOT EXISTS en RENAME VALUE: si ya se renombró lanza
+    # excepción y _run_column_migrations la salta (idempotente por tolerancia).
+    # La tabla oportunidad_ofertas y sus enums los crea create_all al arranque.
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'fin' TO 'servicio_operativo'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
 ]
 
 

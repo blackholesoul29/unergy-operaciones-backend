@@ -1041,6 +1041,19 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
     "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration 054 — cumplimiento_cierre_log: bitácora del cierre mensual automático
+    """CREATE TABLE IF NOT EXISTS cumplimiento_cierre_log (
+        id BIGSERIAL PRIMARY KEY,
+        ejecutado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        anio INTEGER NOT NULL,
+        mes INTEGER NOT NULL,
+        origen VARCHAR(20) NOT NULL DEFAULT 'scheduler',
+        contratos_procesados INTEGER NOT NULL DEFAULT 0,
+        contratos_con_deficit INTEGER NOT NULL DEFAULT 0,
+        contratos_cumplidos INTEGER NOT NULL DEFAULT 0,
+        error TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_cumplimiento_cierre_at ON cumplimiento_cierre_log (ejecutado_at DESC)",
 ]
 
 
@@ -2114,6 +2127,31 @@ def _scheduled_correlation_sync():
         print(f"[correlation_sync] Failed to get DB session: {e}")
 
 
+def _scheduled_cierre_cumplimiento():
+    """Cierra el cumplimiento PPA del mes anterior (corre el día 1, 02:00).
+
+    Es idempotente: `cerrar_periodo` hace upsert por (contrato, anio, mes) y no
+    toca los registros ya `facturado`, así que re-correrlo a mano no duplica ni
+    pisa lo facturado. Cada corrida queda en `cumplimiento_cierre_log`, que
+    expone GET /api/v1/cumplimiento/cierre-status."""
+    try:
+        db = SessionLocal()
+        try:
+            from datetime import date
+            from app.services.cumplimiento_engine import cerrar_periodo_mes, periodo_anterior
+            anio, mes = periodo_anterior(date.today())
+            res = cerrar_periodo_mes(db, anio, mes, origen="scheduler")
+            print(f"[cierre_cumplimiento] OK — {anio}-{mes:02d}: "
+                  f"{res.get('contratos_procesados', 0)} contratos, "
+                  f"{res.get('contratos_con_deficit', 0)} con déficit")
+        except Exception as e:
+            print(f"[cierre_cumplimiento] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[cierre_cumplimiento] Failed to get DB session: {e}")
+
+
 def _scheduled_comercializacion_backfill():
     """Rellena la fecha de inicio de comercialización (primer día con generación
     real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
@@ -2688,6 +2726,16 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            # Cierre mensual de cumplimiento PPA: el día 1 a las 02:00 se cierra el
+            # mes que acaba de terminar. Corre después del ingest de bolsa (11:00
+            # diario), así que el precio promedio del mes ya está completo.
+            _mgs_scheduler.add_job(
+                _scheduled_cierre_cumplimiento,
+                CronTrigger(day=1, hour=2, minute=0, timezone=settings.TIMEZONE),
+                id="cierre_cumplimiento",
+                name="Cierre mensual de cumplimiento PPA",
             )
 
             # Fecha de inicio de comercialización (primer día con generación real):

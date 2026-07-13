@@ -932,11 +932,11 @@ def auto_populate_xm_datos(
     # Fall back to bolsa price average if no PPA tariff found or tipo_venta is not PPA
     if tarifa == 0.0:
         precio_row = db.execute(text("""
-            SELECT AVG(precio_promedio_kwh) as tarifa_avg
+            SELECT AVG(precio_promedio) as tarifa_avg
             FROM precios_bolsa_diario
             WHERE EXTRACT(YEAR FROM fecha) = :year
               AND EXTRACT(MONTH FROM fecha) = :month
-              AND precio_promedio_kwh IS NOT NULL
+              AND precio_promedio IS NOT NULL
         """), {"year": year, "month": month}).first()
 
         tarifa = float(precio_row.tarifa_avg) if precio_row and precio_row.tarifa_avg else 0.0

@@ -2985,6 +2985,32 @@ def cerrar_periodo(
     }
 
 
+@router.get("/cierre-status")
+def cierre_status(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Última corrida del cierre mensual de cumplimiento (health check del scheduler).
+
+    `ultima` es null si el cierre automático nunca ha corrido en este entorno.
+    El job corre el día 1 de cada mes a las 02:00 y cierra el mes anterior.
+    """
+    from app.services.cumplimiento_engine import periodo_anterior, ultimo_cierre
+
+    anio_esperado, mes_esperado = periodo_anterior(date.today())
+    ultima = ultimo_cierre(db)
+    return {
+        "ultima": ultima,
+        "periodo_esperado": {"anio": anio_esperado, "mes": mes_esperado},
+        "al_dia": bool(
+            ultima
+            and ultima["ok"]
+            and (ultima["anio"], ultima["mes"]) == (anio_esperado, mes_esperado)
+        ),
+    }
+
+
 @router.get("/historico")
 def historico_cumplimiento(
     contrato_id: Optional[int] = Query(None),

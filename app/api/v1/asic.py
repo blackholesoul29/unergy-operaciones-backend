@@ -10,6 +10,8 @@ from app.models.asic import (
 )
 from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
+from app.schemas.asic_status import AsicStatus, PPAAsicStatusResponse
+from app.services.asic_monitor import get_ppa_asic_status
 from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
@@ -200,6 +202,31 @@ def list_solicitudes(
         q = q.filter(AsicSolicitud.proyecto_id == proyecto_id)
     rows = q.order_by(AsicSolicitud.fecha_solicitud.desc().nullslast(), AsicSolicitud.id.desc()).all()
     return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s) for s in rows]))
+
+
+@router.get("/ppa-status", response_model=list[PPAAsicStatusResponse])
+def listar_ppa_asic_status(
+    status_filter: AsicStatus | None = Query(None, description="Filtra por estado de cobertura."),
+    is_critical_only: bool = Query(False, description="Solo los contratos con es_critico=True."),
+    umbral_dias: int | None = Query(
+        None, ge=0,
+        description="Días radicado sin publicar antes de que un PENDIENTE sea crítico. Default: ASIC_ALERTA_DIAS.",
+    ),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Cobertura ASIC de los PPA ACTIVOS hoy (ventana comercial vigente, no borrados).
+
+    PUBLICADA = hay un registro GESCON publicado y VIGENTE que cubre hoy; PENDIENTE =
+    hay registros pero ninguno cubre hoy (en proceso, rechazado, vencido o relevado);
+    NINGUNA = no hay un solo registro ligado al contrato. Ver `app.services.asic_monitor`.
+    """
+    return get_ppa_asic_status(
+        db,
+        status_filter=status_filter,
+        is_critical_only=is_critical_only,
+        umbral_dias=umbral_dias,
+    )
 
 
 @router.patch("/{id}", response_model=AsicSolicitudOut)

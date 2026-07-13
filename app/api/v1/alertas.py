@@ -23,6 +23,8 @@ from app.models.proyectos import Proyecto
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.schemas.asic_status import AsicStatus
+from app.services.asic_monitor import get_ppa_asic_status
 from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
@@ -148,6 +150,64 @@ def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_u
         "fecha_consulta": str(hoy),
         "huerfanos": huerfanos,
         "duplicados": duplicados,
+    }
+
+
+def generar_alertas_riesgo_asic(
+    db: Session,
+    umbral_dias: int | None = None,
+    hoy: date | None = None,
+) -> list[dict]:
+    """Alertas de PPA activo sin cobertura ASIC publicada.
+
+    Payload estandarizado (no se persiste: no hay tabla de alertas — este módulo
+    las calcula al vuelo, igual que las de contratos y cumplimiento). Pensado
+    para consumirse desde el endpoint o desde un job periódico.
+
+    Severidad ALTA en ambos casos críticos: con el contrato ACTIVO, tanto "nada
+    radicado" como "radicado hace semanas sin publicar" significan lo mismo hoy
+    —la energía se está entregando sin que el ASIC reconozca el contrato—.
+    """
+    criticos = get_ppa_asic_status(db, is_critical_only=True, umbral_dias=umbral_dias, hoy=hoy)
+
+    alertas = []
+    for c in criticos:
+        if c.asic_status == AsicStatus.NINGUNA:
+            mensaje = "PPA activo sin asignación ASIC publicada"
+        else:
+            dias = f" (radicado hace {c.dias_pendiente} días)" if c.dias_pendiente is not None else ""
+            mensaje = f"PPA activo con registro GESCON sin publicar{dias}"
+        alertas.append({
+            "tipo": "RIESGO_ASIC",
+            "ppa_id": c.ppa_id,
+            "mensaje": mensaje,
+            "severidad": "ALTA",
+            # Contexto para la UI (no forma parte del contrato mínimo del spec).
+            "ppa_nombre": c.ppa_nombre,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "asic_status": c.asic_status.value,
+            "asic_solicitud_id": c.asic_solicitud_id,
+            "dias_pendiente": c.dias_pendiente,
+        })
+    return alertas
+
+
+@router.get("/riesgo-asic")
+def alertas_riesgo_asic(
+    umbral_dias: int | None = Query(
+        None, ge=0,
+        description="Días radicado sin publicar antes de que un PENDIENTE alerte. Default: ASIC_ALERTA_DIAS.",
+    ),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """PPA activos sin cobertura ASIC publicada hoy. Ver `app.services.asic_monitor`."""
+    hoy = date.today()
+    alertas = generar_alertas_riesgo_asic(db, umbral_dias=umbral_dias)
+    return {
+        "fecha_consulta": str(hoy),
+        "total_alertas": len(alertas),
+        "alertas": alertas,
     }
 
 

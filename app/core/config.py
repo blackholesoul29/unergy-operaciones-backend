@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
     # CRM comercial: días sin respuesta antes de alertar (configurable por env).
     COMERCIAL_ALERTA_DIAS: int = 5
+    # Cobertura ASIC: días que un PPA activo puede llevar con su registro GESCON
+    # radicado pero sin publicar antes de que la alerta se vuelva crítica.
+    ASIC_ALERTA_DIAS: int = 15
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod

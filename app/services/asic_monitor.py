@@ -80,6 +80,15 @@ class CoberturaAsic:
     codigo_sic_contrato: str | None
     dias_pendiente: int | None
     es_critico: bool
+    # estado_solicitud del registro que sustenta el veredicto. En PENDIENTE
+    # distingue el subcaso: "publicado" = la cobertura existió y venció/fue
+    # relevada (acción: radicar NUEVA solicitud); otro estado = trámite que
+    # nunca publicó (acción: hacer seguimiento). None en NINGUNA.
+    estado_registro: str | None = None
+    # Fin efectivo de la ventana del registro sustentante (si la tiene):
+    # en PUBLICADA, cuándo vence la cobertura de hoy; en PENDIENTE-publicado,
+    # cuándo venció o fue relevada.
+    fin_cobertura: date | None = None
 
 
 def ppa_activo(contrato: PPAContrato, hoy: date) -> bool:
@@ -116,7 +125,8 @@ def clasificar_cobertura(
         # El vigente más reciente: es el que sustenta la cobertura de hoy.
         actual = max(cubren, key=lambda r: (r.fecha_inicio or date.min, r.id))
         return CoberturaAsic(
-            AsicStatus.PUBLICADA, actual.id, actual.codigo_sic_contrato, None, es_critico=False
+            AsicStatus.PUBLICADA, actual.id, actual.codigo_sic_contrato, None, es_critico=False,
+            estado_registro=actual.estado, fin_cobertura=actual.fecha_fin_efectiva,
         )
 
     ultimo = max(registros, key=lambda r: (r.fecha_radicacion or date.min, r.id))
@@ -127,7 +137,9 @@ def clasificar_cobertura(
     # PPA activo sin cobertura es el riesgo, y la fecha ausente no lo atenúa.
     es_critico = dias is None or dias > umbral_dias
     return CoberturaAsic(
-        AsicStatus.PENDIENTE, ultimo.id, ultimo.codigo_sic_contrato, dias, es_critico=es_critico
+        AsicStatus.PENDIENTE, ultimo.id, ultimo.codigo_sic_contrato, dias, es_critico=es_critico,
+        estado_registro=ultimo.estado,
+        fin_cobertura=ultimo.fecha_fin_efectiva if ultimo.estado == EstadoSolicitudAsicEnum.publicado.value else None,
     )
 
 
@@ -174,10 +186,12 @@ def _registros_por_ppa(db: Session, contratos: list[PPAContrato], hoy: date) -> 
     )
     vigencias = resolver_vigencias(universo, hasta=hoy)
 
+    # strip en AMBOS lados: un numero_codigo_contrato guardado con espacios
+    # colgantes no debe producir un falso NINGUNA.
     por_codigo = {
-        c.numero_codigo_contrato: c.id
+        c.numero_codigo_contrato.strip(): c.id
         for c in contratos
-        if c.numero_codigo_contrato
+        if c.numero_codigo_contrato and c.numero_codigo_contrato.strip()
     }
     ids_vivos = {c.id for c in contratos}
 
@@ -203,6 +217,11 @@ def get_ppa_asic_status(
 
     Los contratos vencidos o aún no iniciados quedan fuera: un PPA que terminó
     en 2024 sin registro GESCON no es un riesgo, es historia.
+
+    Los PPA de COMPRA también quedan fuera: la compra externa se firma a mano
+    sin registro en GESCON/ASIC por diseño (ver "COMPRA EXTERNA" en
+    cumplimiento.py y `_query_contratos_venta`) — monitorearles cobertura
+    fabricaría un crítico falso permanente por cada contrato de compra.
     """
     hoy = hoy or date.today()
     umbral = settings.ASIC_ALERTA_DIAS if umbral_dias is None else umbral_dias
@@ -210,7 +229,7 @@ def get_ppa_asic_status(
     contratos = [
         c
         for c in db.query(PPAContrato).filter(PPAContrato.deleted_at.is_(None)).all()
-        if ppa_activo(c, hoy)
+        if ppa_activo(c, hoy) and (c.tipo_contrato or "venta") != "compra"
     ]
     registros_por_ppa = _registros_por_ppa(db, contratos, hoy)
 
@@ -235,6 +254,8 @@ def get_ppa_asic_status(
                 asic_status=cobertura.status,
                 asic_solicitud_id=cobertura.asic_solicitud_id,
                 codigo_sic_contrato=cobertura.codigo_sic_contrato,
+                estado_registro=cobertura.estado_registro,
+                fin_cobertura=cobertura.fin_cobertura,
                 dias_pendiente=cobertura.dias_pendiente,
                 fecha_ultima_actualizacion=max(actualizaciones) if actualizaciones else None,
                 es_critico=cobertura.es_critico,

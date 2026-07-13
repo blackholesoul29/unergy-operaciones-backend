@@ -164,19 +164,39 @@ def generar_alertas_riesgo_asic(
     las calcula al vuelo, igual que las de contratos y cumplimiento). Pensado
     para consumirse desde el endpoint o desde un job periódico.
 
-    Severidad ALTA en ambos casos críticos: con el contrato ACTIVO, tanto "nada
-    radicado" como "radicado hace semanas sin publicar" significan lo mismo hoy
-    —la energía se está entregando sin que el ASIC reconozca el contrato—.
+    Severidad ALTA en todos los casos críticos: con el contrato ACTIVO, "nada
+    radicado", "radicado hace semanas sin publicar" y "publicado pero la
+    cobertura venció/fue relevada" significan lo mismo hoy —la energía se está
+    entregando sin que el ASIC reconozca el contrato—. El mensaje sí distingue
+    el subcaso, porque la acción del operador es distinta: hacer seguimiento a
+    un trámite en curso vs radicar una solicitud NUEVA.
     """
+    hoy = hoy or date.today()
     criticos = get_ppa_asic_status(db, is_critical_only=True, umbral_dias=umbral_dias, hoy=hoy)
 
     alertas = []
     for c in criticos:
         if c.asic_status == AsicStatus.NINGUNA:
-            mensaje = "PPA activo sin asignación ASIC publicada"
+            mensaje = "PPA activo sin asignación ASIC publicada — radicar registro ante el ASIC"
+        elif c.estado_registro == "publicado":
+            # El registro SÍ publicó: la cobertura existió y hoy no rige (vencida,
+            # relevada o con inicio futuro). Decir "sin publicar" aquí mandaría al
+            # operador a perseguir un trámite que no existe.
+            if c.fin_cobertura is not None and c.fin_cobertura < hoy:
+                mensaje = (
+                    f"cobertura GESCON venció o fue relevada el {c.fin_cobertura} — "
+                    "radicar nueva solicitud ante el ASIC"
+                )
+            else:
+                mensaje = (
+                    "registro GESCON publicado pero sin cobertura vigente hoy — "
+                    "verificar la ventana del registro ante el ASIC"
+                )
+        elif c.estado_registro == "rechazado":
+            mensaje = "última solicitud GESCON rechazada — radicar nueva solicitud ante el ASIC"
         else:
-            dias = f" (radicado hace {c.dias_pendiente} días)" if c.dias_pendiente is not None else ""
-            mensaje = f"PPA activo con registro GESCON sin publicar{dias}"
+            dias = f" hace {c.dias_pendiente} días" if c.dias_pendiente is not None else ""
+            mensaje = f"registro GESCON radicado{dias} sin publicar — hacer seguimiento ante el ASIC"
         alertas.append({
             "tipo": "RIESGO_ASIC",
             "ppa_id": c.ppa_id,
@@ -187,6 +207,8 @@ def generar_alertas_riesgo_asic(
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "asic_status": c.asic_status.value,
             "asic_solicitud_id": c.asic_solicitud_id,
+            "estado_registro": c.estado_registro,
+            "fin_cobertura": str(c.fin_cobertura) if c.fin_cobertura else None,
             "dias_pendiente": c.dias_pendiente,
         })
     return alertas

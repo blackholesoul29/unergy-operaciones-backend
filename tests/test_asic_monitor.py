@@ -339,7 +339,7 @@ def test_payload_de_alerta(db):
     a = alertas[0]
     assert a["tipo"] == "RIESGO_ASIC"
     assert a["ppa_id"] == sin_asic.id
-    assert a["mensaje"] == "PPA activo sin asignación ASIC publicada"
+    assert a["mensaje"] == "PPA activo sin asignación ASIC publicada — radicar registro ante el ASIC"
     assert a["severidad"] == "ALTA"
 
 
@@ -354,6 +354,8 @@ def test_alerta_de_pendiente_vencido_menciona_los_dias(db):
     assert alertas[0]["asic_status"] == "PENDIENTE"
     assert alertas[0]["dias_pendiente"] == 40
     assert "40 días" in alertas[0]["mensaje"]
+    assert "sin publicar" in alertas[0]["mensaje"]
+    assert "seguimiento" in alertas[0]["mensaje"]
 
 
 def test_sin_criticos_no_hay_alertas(db):
@@ -362,3 +364,94 @@ def test_sin_criticos_no_hay_alertas(db):
     db.commit()
 
     assert alertas_api.generar_alertas_riesgo_asic(db, umbral_dias=15, hoy=HOY) == []
+
+
+def test_ppa_de_compra_queda_fuera_del_monitoreo(db):
+    """La compra externa se firma a mano sin registro GESCON/ASIC por diseño
+    (mismo criterio que _query_contratos_venta en cumplimiento.py): un PPA de
+    compra activo y sin registros NO es un crítico, es lo normal."""
+    _ppa(db, "PPA Compra", tipo_contrato="compra")
+    venta = _ppa(db, "PPA Venta", tipo_contrato="venta")
+    sin_tipo = _ppa(db, "PPA Sin Tipo", tipo_contrato=None)  # legado: cuenta como venta
+    db.commit()
+
+    filas = get_ppa_asic_status(db, hoy=HOY)
+    assert {f.ppa_id for f in filas} == {venta.id, sin_tipo.id}
+    alertas = alertas_api.generar_alertas_riesgo_asic(db, umbral_dias=15, hoy=HOY)
+    assert {a["ppa_id"] for a in alertas} == {venta.id, sin_tipo.id}
+
+
+def test_alerta_de_cobertura_vencida_no_dice_sin_publicar(db):
+    """El caso insignia: el registro SÍ publicó y su cobertura efectiva venció.
+    Decir 'sin publicar' mandaría a ops a perseguir un trámite inexistente; la
+    acción correcta es radicar una solicitud NUEVA."""
+    c = _ppa(db, "PPA Cobertura Vencida")
+    _sol(db, contrato_ppa_id=c.id, codigo_sic_contrato="991",
+         fecha_inicio=_hace(300), fecha_solicitud=_hace(300), fecha_fin=_hace(10))
+    db.commit()
+
+    alertas = alertas_api.generar_alertas_riesgo_asic(db, umbral_dias=15, hoy=HOY)
+    assert len(alertas) == 1
+    a = alertas[0]
+    assert a["estado_registro"] == "publicado"
+    assert a["fin_cobertura"] == str(_hace(10))
+    assert "sin publicar" not in a["mensaje"]
+    assert "venció o fue relevada" in a["mensaje"]
+    assert "radicar nueva solicitud" in a["mensaje"]
+
+
+def test_alerta_de_registro_relevado_pide_nueva_solicitud(db):
+    """Relevo entre contratos: la fila vieja sigue 'publicado' con fecha_fin
+    cruda futura, pero la vigencia efectiva terminó cuando entró el relevo."""
+    reserva = _planta(db, "MGS 0013")
+    otra = _planta(db, "Planta Relevo 2")
+    viejo = _ppa(db, "PPA Relevado")
+    nuevo = _ppa(db, "PPA Que Releva")
+    _sol(db, contrato_ppa_id=viejo.id, proyecto_id=reserva.id, codigo_sic_contrato="87200",
+         fecha_inicio=_hace(300), fecha_solicitud=_hace(300), fecha_fin=FUTURO)
+    _sol(db, contrato_ppa_id=nuevo.id, proyecto_id=otra.id, codigo_sic_contrato="87200",
+         tipo_solicitud=TipoSolicitudAsicEnum.modificacion,
+         fecha_inicio=_hace(30), fecha_solicitud=_hace(30), fecha_fin=FUTURO)
+    db.commit()
+
+    alertas = {a["ppa_id"]: a for a in alertas_api.generar_alertas_riesgo_asic(db, umbral_dias=15, hoy=HOY)}
+    a = alertas[viejo.id]
+    assert a["estado_registro"] == "publicado"
+    assert "sin publicar" not in a["mensaje"]
+    assert "radicar nueva solicitud" in a["mensaje"]
+
+
+def test_alerta_de_rechazado_pide_nueva_solicitud(db):
+    c = _ppa(db, "PPA Rechazado")
+    _sol(db, contrato_ppa_id=c.id, codigo_sic_contrato="992", fecha_fin=FUTURO,
+         estado_solicitud=EstadoSolicitudAsicEnum.rechazado, fecha_solicitud=_hace(40))
+    db.commit()
+
+    alertas = alertas_api.generar_alertas_riesgo_asic(db, umbral_dias=15, hoy=HOY)
+    assert len(alertas) == 1
+    assert "rechazada" in alertas[0]["mensaje"]
+    assert "radicar nueva solicitud" in alertas[0]["mensaje"]
+
+
+def test_status_expone_estado_registro_y_fin_cobertura(db):
+    """PUBLICADA también expone cuándo vence la cobertura actual — útil para la UI."""
+    c = _ppa(db, "PPA Publicado Con Fin")
+    fin = HOY + timedelta(days=90)
+    _sol(db, contrato_ppa_id=c.id, codigo_sic_contrato="993", fecha_fin=fin)
+    db.commit()
+
+    fila = _por_ppa(get_ppa_asic_status(db, hoy=HOY))[c.id]
+    assert fila.asic_status == AsicStatus.PUBLICADA
+    assert fila.estado_registro == "publicado"
+    assert fila.fin_cobertura == fin
+
+
+def test_codigo_contrato_con_espacios_casa_igual(db):
+    """numero_codigo_contrato guardado con espacios colgantes no debe producir
+    un falso NINGUNA: strip en ambos lados de la ligadura."""
+    c = _ppa(db, "PPA Espacios", numero_codigo_contrato="UNERGY 010-2025  ")
+    _sol(db, contrato_interno="UNERGY 010-2025", codigo_sic_contrato="994", fecha_fin=FUTURO)
+    db.commit()
+
+    fila = _por_ppa(get_ppa_asic_status(db, hoy=HOY))[c.id]
+    assert fila.asic_status == AsicStatus.PUBLICADA

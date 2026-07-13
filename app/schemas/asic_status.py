@@ -37,8 +37,16 @@ class PPAAsicStatusResponse(BaseModel):
     # reciente de los que no alcanzan a cubrir (PENDIENTE). None en NINGUNA.
     asic_solicitud_id: int | None = None
     codigo_sic_contrato: str | None = None
-    # Días desde que se radicó ese último registro sin llegar a publicarse/cubrir.
-    # Solo en PENDIENTE — es el contador contra el que corre el umbral.
+    # estado_solicitud del registro sustentante. En PENDIENTE distingue el
+    # subcaso: "publicado" = hubo cobertura y venció/fue relevada (radicar nueva
+    # solicitud); otro estado = trámite que nunca publicó (hacer seguimiento).
+    estado_registro: str | None = None
+    # Fin efectivo de la ventana del registro sustentante: en PUBLICADA, cuándo
+    # vence la cobertura actual; en PENDIENTE-publicado, cuándo venció/fue relevada.
+    fin_cobertura: date | None = None
+    # Días desde que se radicó ese último registro. Solo en PENDIENTE — es el
+    # contador contra el que corre el umbral, tanto si el registro sigue en
+    # trámite como si publicó y su cobertura ya venció.
     dias_pendiente: int | None = None
     # updated_at más reciente entre los registros GESCON del contrato.
     fecha_ultima_actualizacion: datetime | None = None

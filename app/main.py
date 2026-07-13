@@ -15,7 +15,7 @@ _PENDING_DDLS = [
     # alarmas de desconexión — estado por proyecto (anti-spam + re-aviso diario)
     """CREATE TABLE IF NOT EXISTS alarma_estado (
         id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
         categoria VARCHAR(20) NOT NULL,
         estado VARCHAR(30) NOT NULL,
         dia DATE,

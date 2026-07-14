@@ -20,6 +20,37 @@ def _validate_email_list(v: list) -> list:
     return result
 
 
+class ContactoParaClienteCreate(BaseModel):
+    """Contacto a crear junto con el cliente (ver create_cliente). Definida acá
+    (no reutiliza ContactoCreate de schemas/proyectos) para evitar un import
+    circular: schemas/proyectos.py ya importa _EMAIL_RE desde este archivo."""
+    nombre: Optional[str] = None
+    telefono: Optional[str] = None
+    email: str
+    tipo: str = "comercial"
+
+    @field_validator("email")
+    @classmethod
+    def email_valido(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("email inválido")
+        return v
+
+
+class ClienteServicioCreate(BaseModel):
+    tipo: str
+    fecha_inicio: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class ClienteServicioOut(ClienteServicioCreate):
+    id: int
+    cliente_id: int
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class ClienteCreate(BaseModel):
     razon_social_nombre: str
     nit_cedula: Optional[str] = None
@@ -45,6 +76,8 @@ class ClienteCreate(BaseModel):
     rut_url: Optional[str] = None
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
+    contactos: list[ContactoParaClienteCreate] = []
+    servicios: list[ClienteServicioCreate] = []
 
     @field_validator("correos_operacionales", "correos_cgm", mode="before")
     @classmethod
@@ -54,19 +87,6 @@ class ClienteCreate(BaseModel):
 
 class ClienteUpdate(ClienteCreate):
     razon_social_nombre: Optional[str] = None
-
-
-class ClienteServicioCreate(BaseModel):
-    tipo: str
-    fecha_inicio: Optional[date] = None
-    notas: Optional[str] = None
-
-
-class ClienteServicioOut(ClienteServicioCreate):
-    id: int
-    cliente_id: int
-    created_at: datetime
-    model_config = {"from_attributes": True}
 
 
 class ClienteDocumentoCreate(BaseModel):

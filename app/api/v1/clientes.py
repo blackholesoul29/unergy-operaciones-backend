@@ -145,8 +145,16 @@ def create_cliente(
                     "candidato_nombre": duplicado.razon_social_nombre,
                 },
             )
-    cliente = Cliente(**data.model_dump())
+    payload = data.model_dump(exclude={"contactos", "servicios"})
+    cliente = Cliente(**payload)
     db.add(cliente)
+    db.flush()  # asigna cliente.id sin cerrar la transacción
+    for c in data.contactos:
+        db.add(Contacto(cliente_id=cliente.id, nombre=c.nombre, telefono=c.telefono,
+                         email=c.email, tipo=c.tipo))
+    for s in data.servicios:
+        db.add(ClienteServicio(cliente_id=cliente.id, tipo=s.tipo,
+                                fecha_inicio=s.fecha_inicio, notas=s.notas))
     db.commit()
     return _get_cliente_or_404(cliente.id, db)
 

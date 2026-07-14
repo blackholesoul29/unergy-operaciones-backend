@@ -97,3 +97,36 @@ def test_fusiona_y_reasigna(db, escenario):
     # idempotente: segunda corrida no fusiona nada
     r2 = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
     assert r2["fusionados"] == 0
+
+
+def test_match_difuso_por_tokens(db):
+    # Operativo dueño de "GD Naos 4"; prospecto con planta "Naos 4" (sin 'GD').
+    d = Cliente(razon_social_nombre="Naos 4 S.A.S.", origen_tipo="referido")
+    db.add(d)
+    db.flush()
+    p = Proyecto(id=44, nombre_comercial="GD Naos 4")
+    db.add(p)
+    db.flush()
+    db.add(ProyectoInversionista(proyecto_id=44, cliente_id=d.id))
+    c = _prospecto(db, "Empresa X", "Naos 4")
+    db.commit()
+    r = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    assert r["fusionados"] == 1
+    assert db.query(Cliente).filter(Cliente.id == c.id).first().deleted_at is not None
+
+
+def test_generico_no_fusiona(db):
+    # Nova vs Vega comparten solo palabras genéricas (granja/solar) → NO fusiona.
+    d = Cliente(razon_social_nombre="Granja Solares Nova", origen_tipo="referido")
+    db.add(d)
+    db.flush()
+    p = Proyecto(id=71, nombre_comercial="Granja Solar Nova I")
+    db.add(p)
+    db.flush()
+    db.add(ProyectoInversionista(proyecto_id=71, cliente_id=d.id))
+    c = _prospecto(db, "Empresa Vega", "Granja Solar Vega 2")
+    db.commit()
+    r = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    assert r["fusionados"] == 0
+    assert r["sin_canonico"] == 1
+    assert db.query(Cliente).filter(Cliente.id == c.id).first().deleted_at is None

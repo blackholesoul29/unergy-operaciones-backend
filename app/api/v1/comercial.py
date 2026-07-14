@@ -624,17 +624,6 @@ def importar_hojas(
     for op in db.query(Oportunidad).filter(Oportunidad.deleted_at.is_(None)).all():
         op_por_cliente.setdefault(op.cliente_id, op)
 
-    def _client_key(empresa_raw: str) -> str:
-        """Clave normalizada del cliente DUEÑO de la fila: resuelve el caso de la
-        hoja de energía donde 'empresa' es en realidad el nombre de una planta."""
-        key = _norm_nombre(empresa_raw)
-        if key in cli_idx:
-            return key
-        dueno = planta_a_empresa.get(key)
-        if dueno:
-            return _norm_nombre(dueno)
-        return key
-
     # Clave de dedup/upsert: por numero_oferta si existe; si no, (cliente, tipo, planta).
     of_por_key = {}
     existentes = (
@@ -662,41 +651,20 @@ def importar_hojas(
     # las preexistentes conservan su estado).
     ops_creadas: set = set()
 
-    def cliente_para(empresa_raw):
+    def resolver_cliente(empresa_raw):
+        """Cliente EXISTENTE que corresponde a esta empresa, de forma DETERMINISTA
+        (exacto por nombre normalizado, o planta→dueño), o None si habría que
+        crearlo. Puro: no crea ni cuenta. NO usa match difuso a propósito: el fuzzy
+        cambia entre corridas (crece el set de candidatos) y rompería la
+        idempotencia del import; los duplicados por similitud los limpia después
+        la tarea `dedup_clientes` (con guarda de ambigüedad y reversible)."""
         key = _norm_nombre(empresa_raw)
         if key in cli_idx:
-            res["clientes"]["reusados"] += 1
             return cli_idx[key]
         dueno = planta_a_empresa.get(key)
         if dueno and _norm_nombre(dueno) in cli_idx:
-            res["clientes"]["reusados"] += 1
             return cli_idx[_norm_nombre(dueno)]
-        # Sin match exacto -- antes de crear uno nuevo, intenta un match difuso
-        # (mismo algoritmo de proyectos/clientes manuales, ver nombre_matching.py).
-        # Import automático sin humano presente: si el match es de baja confianza
-        # o ambiguo, mejor_candidato() ya devuelve None y se sigue creando como
-        # antes -- esto solo evita el caso confiable (p. ej. "Quantum" vs "Quantum
-        # Energy Ingenieria S.A.S.", el caso real que motivó este cambio).
-        candidatos = [(c, [c.razon_social_nombre]) for c in cli_idx.values()]
-        match, score = mejor_candidato(empresa_raw, candidatos)
-        if match:
-            res["clientes"]["reusados"] += 1
-            res["detalle"]["fusionados_por_similitud"].append({
-                "empresa_hoja": empresa_raw,
-                "cliente_existente": match.razon_social_nombre,
-                "score": score,
-            })
-            cli_idx[key] = match
-            return match
-        res["clientes"]["a_crear"] += 1
-        res["detalle"]["clientes_nuevos"].append(empresa_raw)
-        if dry_run:
-            return None
-        c = Cliente(razon_social_nombre=empresa_raw)
-        db.add(c)
-        db.flush()
-        cli_idx[key] = c
-        return c
+        return None
 
     def oportunidad_para(cliente):
         if cliente is None:
@@ -724,7 +692,13 @@ def importar_hojas(
         tipo = row["tipo"]
         num = row.get("numero_oferta")
         planta = row.get("planta_nombre") or (empresa if tipo == "compra_energia" else None)
-        key = num if num else (_client_key(empresa), tipo, _norm_nombre(planta))
+        # Clave de dedup coherente con el preload: por consecutivo, o por
+        # (razón del cliente RESUELTO, tipo, planta). Usar el razón del cliente
+        # resuelto (no el de la hoja) mantiene la idempotencia cuando el match es
+        # difuso (empresa de la hoja ≠ razón social del cliente existente).
+        resuelto = resolver_cliente(empresa)
+        razon_key = _norm_nombre(resuelto.razon_social_nombre) if resuelto else _norm_nombre(empresa)
+        key = num if num else (razon_key, tipo, _norm_nombre(planta))
         etapa = (row.get("etapa_texto") or "").strip().lower()
         resultado = _ETAPA_A_RESULTADO.get(etapa, "pendiente")
         proj_id = proy_idx.get(_norm_nombre(planta)) if planta else None
@@ -760,7 +734,22 @@ def importar_hojas(
             res["ofertas"]["faltantes_no_creadas"] += 1
             continue
 
-        cliente = cliente_para(empresa)
+        # Resolver-o-crear el cliente (ya pasado el dedup, solo al crear la oferta).
+        if resuelto is not None:
+            cliente = resuelto
+            res["clientes"]["reusados"] += 1
+            if _norm_nombre(empresa) != _norm_nombre(cliente.razon_social_nombre):
+                res["detalle"]["fusionados_por_similitud"].append(
+                    {"empresa_hoja": empresa, "cliente_existente": cliente.razon_social_nombre})
+        else:
+            res["clientes"]["a_crear"] += 1
+            res["detalle"]["clientes_nuevos"].append(empresa)
+            cliente = None
+            if not dry_run:
+                cliente = Cliente(razon_social_nombre=empresa)
+                db.add(cliente)
+                db.flush()
+                cli_idx[_norm_nombre(empresa)] = cliente
         if not dry_run and cliente is not None:
             op = oportunidad_para(cliente)
             if op is not None:
@@ -797,10 +786,11 @@ def dedup_clientes(
     - candidato = cliente con origen_tipo NULL + oportunidad es_migrada con ≥1
       oferta + SIN huella operativa (no inversionista/contrato/PPA); o sea un
       prospecto puro creado por el import.
-    - canónico (alta confianza): (a) la planta de alguna de sus ofertas coincide
-      con un Proyecto existente cuyo dueño (inversionista) es un cliente NO
-      prospecto → ese dueño; o (b) el nombre normaliza exactamente igual a otro
-      cliente no prospecto. Si no hay canónico claro, se deja intacto.
+    - canónico: vía el matcher difuso compartido (app.utils.nombre_matching, con
+      guarda de ambigüedad): (a) la planta de alguna de sus ofertas coincide con
+      un Proyecto existente cuyo dueño (inversionista) es un cliente NO prospecto
+      → ese dueño; o (b) la razón social coincide con otro cliente no prospecto.
+      Si no hay match confiable/único, se deja intacto (sin_canonico).
     - acción: mueve las ofertas al canónico (enlazando proyecto_id) y hace
       soft-delete del prospecto y su oportunidad (deleted_at; reversible).
     Idempotente. Solo admin; dry_run=true no escribe."""
@@ -822,22 +812,25 @@ def dedup_clientes(
         and not footprint.get(c.id)
     } if cand_ids else set()
 
-    # Índices: Proyecto por nombre normalizado y sus dueños (inversionistas).
-    proy_norm = {}
-    for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all():
-        if nom:
-            proy_norm.setdefault(_norm_nombre(nom), pid)
+    # Candidatos para el matcher difuso compartido (app.utils.nombre_matching):
+    # tolera tildes/typos, ignora ruido del sector (solar/granja/gd…) y NO adivina
+    # si dos candidatos quedan parejos (guarda de ambigüedad).
+    proy_items = [
+        (pid, [nom]) for pid, nom in
+        db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all()
+        if nom
+    ]
     owners: dict = {}
     for pid, cid in db.query(ProyectoInversionista.proyecto_id, ProyectoInversionista.cliente_id).all():
         owners.setdefault(pid, []).append(cid)
-    # Clientes NO prospecto por nombre normalizado (para match exacto de nombre).
-    cli_no_prospecto = {}
-    for c in db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all():
-        if c.id not in prospect_ids:
-            cli_no_prospecto.setdefault(_norm_nombre(c.razon_social_nombre), c.id)
+    cli_items = [
+        (c.id, [c.razon_social_nombre])
+        for c in db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
+        if c.id not in prospect_ids and c.razon_social_nombre
+    ]
 
     res = {"dry_run": dry_run, "prospectos": len(prospect_ids),
-           "fusionados": 0, "sin_canonico": 0, "detalle": []}
+           "fusionados": 0, "sin_canonico": 0, "detalle": [], "sin_canonico_nombres": []}
 
     for C in db.query(Cliente).filter(Cliente.id.in_(prospect_ids)).all() if prospect_ids else []:
         ofertas = (
@@ -845,29 +838,30 @@ def dedup_clientes(
             .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
             .filter(Oportunidad.cliente_id == C.id, Oportunidad.deleted_at.is_(None)).all()
         )
-        # Nombres a probar: razón social + planta de cada oferta.
-        nombres = [C.razon_social_nombre] + [o.planta_nombre for o in ofertas if o.planta_nombre]
         canonico = None
         matched_proy = None
         regla = None
-        for nombre in nombres:
-            k = _norm_nombre(nombre)
-            if not k:
-                continue
-            pid = proy_norm.get(k)
+        # 1) La planta de alguna oferta (o la razón social, útil cuando la "empresa"
+        #    de la hoja de energía era el nombre de la planta) matchea un Proyecto
+        #    existente → su dueño operativo es el canónico.
+        for nombre in [o.planta_nombre for o in ofertas if o.planta_nombre] + [C.razon_social_nombre]:
+            pid, score = mejor_candidato(nombre, proy_items)
             if pid:
                 for owner in owners.get(pid, []):
                     if owner not in prospect_ids and owner != C.id:
-                        canonico, matched_proy, regla = owner, pid, "planta→dueño"
+                        canonico, matched_proy, regla = owner, pid, f"planta→dueño ({score})"
                         break
             if canonico:
                 break
-            did = cli_no_prospecto.get(k)
+        # 2) Si no, la razón social matchea directamente un cliente operativo.
+        if not canonico:
+            did, score = mejor_candidato(C.razon_social_nombre, cli_items)
             if did and did != C.id:
-                canonico, regla = did, "nombre exacto"
-                break
+                canonico, regla = did, f"nombre ({score})"
         if not canonico:
             res["sin_canonico"] += 1
+            if len(res["sin_canonico_nombres"]) < 80:
+                res["sin_canonico_nombres"].append(C.razon_social_nombre)
             continue
 
         res["fusionados"] += 1

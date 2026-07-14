@@ -489,11 +489,7 @@ _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
     "proyecto_inicio_operacion",
 ]
-_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium", "sunfactory_project_id"]
-# Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el
-# valor del perdedor (a diferencia de _MERGE_SCALAR_UNIQUE, no hace falta
-# liberarlos en el perdedor antes de copiar: no hay constraint que choque).
-_MERGE_SCALAR_FILL_IF_EMPTY = ["municipio", "departamento", "latitud", "longitud", "codigo_tsf"]
+_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium"]
 
 
 def _scalar(db, sql, params):
@@ -564,9 +560,9 @@ def merge_proyectos(
     if n_subp:
         movimientos.append({"tabla": "proyectos (subproyectos)", "a_mover": n_subp, "descartadas_por_colision": 0})
 
-    # Campos escalares vacíos en el ganador: qué se copiaría del perdedor
+    # Campos escalares únicos: qué se copiaría al ganador
     campos_copiados = []
-    for f in _MERGE_SCALAR_UNIQUE + _MERGE_SCALAR_FILL_IF_EMPTY:
+    for f in _MERGE_SCALAR_UNIQUE:
         val_keeper = getattr(ganador, f, None)
         val_loser = getattr(perdedor, f, None)
         if (val_keeper in (None, "")) and (val_loser not in (None, "")):

@@ -268,9 +268,9 @@ class _FakeResult:
 
 
 class _ExistingRow:
-    def __init__(self, id, manual):
+    def __init__(self, id, estado="en_desarrollo"):
         self.id = id
-        self.fecha_estimada_editada_manual = manual
+        self.estado = estado
 
 
 class _FakeDB:
@@ -314,18 +314,16 @@ def _patch_fetch(monkeypatch, projects):
     monkeypatch.setattr(pe, "fetch_sunfactory_projects", lambda **k: (projects, []))
 
 
-def test_sync_creates_when_not_existing(monkeypatch):
+def test_sync_no_crea_cuando_no_existe_ya_no_inserta(monkeypatch):
+    # sync_tsf_projects ya NO crea proyectos -- eso quedo en /proyectos/pendientes
+    # (confirmacion humana). Sin match ni candidato parecido, solo se cuenta.
     _patch_fetch(monkeypatch, _one_project())
     db = _FakeDB(existing=None)
-    stats = pe.sync_tsf_projects(db, force=False)
-    assert stats["creados"] == 1 and stats["actualizados"] == 0
+    stats = pe.sync_tsf_projects(db)
+    assert stats["creados"] == 0 and stats["actualizados"] == 0
+    assert stats["sin_match"] == 1
     inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
-    assert len(inserts) == 1
-    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
-    assert params["code"] == "COLSUCT3P1_MORROA_SUR"
-    assert params["tsf"] == "COLSUCT3P1"   # codigo_tsf persistido para cruce
-    assert params["fase"] == "proximo_energizar"
-    assert params["energ"] == date(2026, 9, 1)
+    assert not inserts
 
 
 # ── _tsf_code_from_base_name ────────────────────────────────────────────────────
@@ -347,12 +345,12 @@ def test_sync_update_links_codigo_tsf_and_origina_code():
     # ACTUALIZA (no duplica) y enlaza origina_code/codigo_tsf vía COALESCE.
     import types
     projects = _one_project()
-    db = _FakeDB(existing=_ExistingRow(id=7, manual=False))
+    db = _FakeDB(existing=_ExistingRow(id=7))
     # parchear el fetch directamente (sin monkeypatch fixture)
     orig = pe.fetch_sunfactory_projects
     pe.fetch_sunfactory_projects = lambda **k: (projects, [])
     try:
-        stats = pe.sync_tsf_projects(db, force=False)
+        stats = pe.sync_tsf_projects(db)
     finally:
         pe.fetch_sunfactory_projects = orig
     assert stats["actualizados"] == 1 and stats["creados"] == 0
@@ -361,25 +359,62 @@ def test_sync_update_links_codigo_tsf_and_origina_code():
     assert "codigo_tsf = COALESCE(codigo_tsf, :tsf)" in upd_sql
 
 
-def test_sync_creates_with_sunfactory_project_id(monkeypatch):
+def test_sync_no_crea_aunque_traiga_sunfactory_project_id(monkeypatch):
+    # Igual que arriba: sin match existente, ya no crea -- solo se cuenta en sin_match.
     proj = _one_project()
     proj[0]["solenium_id"] = 106
     _patch_fetch(monkeypatch, proj)
     db = _FakeDB(existing=None)
-    stats = pe.sync_tsf_projects(db, force=False)
-    assert stats["creados"] == 1
-    _, params = next((s, p) for s, p in db.statements if "INSERT INTO proyectos" in s)
-    assert params["sol_id"] == 106
+    stats = pe.sync_tsf_projects(db)
+    assert stats["creados"] == 0
+    assert stats["sin_match"] == 1
+    inserts = [s for s, _ in db.statements if "INSERT INTO proyectos" in s]
+    assert not inserts
+
+
+def test_sync_no_regresa_fase_si_ya_esta_en_operacion(monkeypatch):
+    # Bug real: un proyecto que Proyectos pendientes ya marcó como
+    # estado='en_operacion' (evidencia real de Quoia/Solenium) no debe volver
+    # a "proximo_energizar"/"en_construccion" solo porque Sun Factory todavía
+    # no actualizó su propio tracker de obra -- el estado real manda.
+    _patch_fetch(monkeypatch, _one_project())  # status "Próximo a energizar" -> fase != energizado
+    db = _FakeDB(existing=_ExistingRow(id=7, estado="en_operacion"))
+    stats = pe.sync_tsf_projects(db)
+    assert stats["actualizados"] == 1
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" not in upd_sql
+    assert "avance_obra_pct = COALESCE" in upd_sql  # el resto de los campos si se sincroniza
+
+
+def test_sync_si_actualiza_fase_cuando_no_esta_en_operacion(monkeypatch):
+    _patch_fetch(monkeypatch, _one_project())
+    db = _FakeDB(existing=_ExistingRow(id=7, estado="en_desarrollo"))
+    pe.sync_tsf_projects(db)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert upd_params["fase"] == "proximo_energizar"
+
+
+def test_sync_si_actualiza_fase_a_energizado_aunque_ya_este_en_operacion(monkeypatch):
+    # Sin conflicto real: si Sun Factory YA dice "Energizado", se aplica igual.
+    proj = _one_project()
+    proj[0]["status"] = "Energizado"
+    _patch_fetch(monkeypatch, proj)
+    db = _FakeDB(existing=_ExistingRow(id=7, estado="en_operacion"))
+    pe.sync_tsf_projects(db)
+    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
+    assert "fase_construccion = :fase" in upd_sql
+    assert upd_params["fase"] == "energizado"
 
 
 def test_sync_update_backfills_sunfactory_project_id():
     proj = _one_project()
     proj[0]["solenium_id"] = 106
-    db = _FakeDB(existing=_ExistingRow(id=7, manual=False))
+    db = _FakeDB(existing=_ExistingRow(id=7))
     orig = pe.fetch_sunfactory_projects
     pe.fetch_sunfactory_projects = lambda **k: (proj, [])
     try:
-        stats = pe.sync_tsf_projects(db, force=False)
+        stats = pe.sync_tsf_projects(db)
     finally:
         pe.fetch_sunfactory_projects = orig
     assert stats["actualizados"] == 1
@@ -404,7 +439,7 @@ class _FakeDBMatchByIdOnly:
         self.statements.append((sql, params))
         if sql.strip().upper().startswith("SELECT"):
             if params.get("sol_id") == self.existing_sol_id:
-                return _FakeResult(_ExistingRow(id=self.existing_id, manual=False))
+                return _FakeResult(_ExistingRow(id=self.existing_id))
             return _FakeResult(None)
         return _FakeResult(None)
 
@@ -421,37 +456,19 @@ def test_sync_no_duplica_cuando_sun_factory_cambia_el_codigo(monkeypatch):
     _patch_fetch(monkeypatch, proj)
 
     db = _FakeDBMatchByIdOnly(existing_id=210, existing_sol_id=106)
-    stats = pe.sync_tsf_projects(db, force=False)
+    stats = pe.sync_tsf_projects(db)
 
     assert stats["creados"] == 0, "no debio crear un duplicado: el sunfactory_project_id ya existia"
     assert stats["actualizados"] == 1
 
 
-def test_sync_updates_date_when_not_manual(monkeypatch):
+def test_sync_updates_date(monkeypatch):
     _patch_fetch(monkeypatch, _one_project())
-    db = _FakeDB(existing=_ExistingRow(id=42, manual=False))
-    stats = pe.sync_tsf_projects(db, force=False)
+    db = _FakeDB(existing=_ExistingRow(id=42))
+    stats = pe.sync_tsf_projects(db)
     assert stats["actualizados"] == 1 and stats["creados"] == 0
     upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
     assert "fecha_estimada_energizacion" in upd_sql  # sí actualiza la fecha
-    assert upd_params["energ"] == date(2026, 9, 1)
-
-
-def test_sync_respects_manual_date_without_force(monkeypatch):
-    _patch_fetch(monkeypatch, _one_project())
-    db = _FakeDB(existing=_ExistingRow(id=42, manual=True))
-    pe.sync_tsf_projects(db, force=False)
-    upd_sql = next(s for s, _ in db.statements if s.strip().upper().startswith("UPDATE"))
-    assert "fecha_estimada_energizacion" not in upd_sql  # NO toca la fecha editada a mano
-
-
-def test_sync_force_overwrites_manual_date(monkeypatch):
-    _patch_fetch(monkeypatch, _one_project())
-    db = _FakeDB(existing=_ExistingRow(id=42, manual=True))
-    pe.sync_tsf_projects(db, force=True)
-    upd_sql, upd_params = next((s, p) for s, p in db.statements if s.strip().upper().startswith("UPDATE"))
-    assert "fecha_estimada_energizacion" in upd_sql      # force sí la sobrescribe
-    assert "fecha_estimada_editada_manual = FALSE" in upd_sql  # y resetea la marca
     assert upd_params["energ"] == date(2026, 9, 1)
 
 
@@ -469,7 +486,7 @@ class _FakeDBConCandidato:
         sql = str(stmt)
         params = params or {}
         self.statements.append((sql, params))
-        if "fecha_estimada_editada_manual" in sql:
+        if "SELECT id, estado FROM proyectos" in sql:
             return _FakeResult(None)  # ningun match exacto
         if "nombre_comercial, municipio" in sql:
             return _FakeResult(self.candidato_row)
@@ -490,7 +507,7 @@ def test_sync_sugiere_vinculo_en_vez_de_duplicar(monkeypatch):
     candidato = types.SimpleNamespace(id=55, nombre_comercial="Minigranja Morroa Sur (manual)",
                                        municipio="Morroa", sunfactory_project_id=None)
     db = _FakeDBConCandidato(candidato_row=candidato)
-    stats = pe.sync_tsf_projects(db, force=False)
+    stats = pe.sync_tsf_projects(db)
 
     assert stats["creados"] == 0, "no debio crear un proyecto nuevo habiendo un candidato parecido"
     assert stats["actualizados"] == 0
@@ -518,7 +535,7 @@ def test_sync_sugiere_vinculo_aunque_el_candidato_ya_tenga_otro_id(monkeypatch):
     candidato = types.SimpleNamespace(id=210, nombre_comercial="Minigranja 0029 - Monterrubio",
                                        municipio="La Paz", sunfactory_project_id=111)
     db = _FakeDBConCandidato(candidato_row=candidato)
-    stats = pe.sync_tsf_projects(db, force=False)
+    stats = pe.sync_tsf_projects(db)
 
     assert stats["creados"] == 0, "no debio duplicar: el candidato ya vinculado a otro id sigue siendo sugerido"
     assert len(stats["sugerencias_vinculo"]) == 1
@@ -527,15 +544,17 @@ def test_sync_sugiere_vinculo_aunque_el_candidato_ya_tenga_otro_id(monkeypatch):
     assert sug["candidato_sunfactory_id_previo"] == 111
 
 
-def test_sync_crea_normal_cuando_no_hay_candidato_parecido(monkeypatch):
+def test_sync_no_crea_cuando_no_hay_candidato_parecido(monkeypatch):
+    # Sin match exacto y sin candidato de nombre parecido -- ya no crea, solo cuenta.
     proj = _one_project()
     proj[0]["solenium_id"] = 999
     _patch_fetch(monkeypatch, proj)
 
     db = _FakeDBConCandidato(candidato_row=None)
-    stats = pe.sync_tsf_projects(db, force=False)
+    stats = pe.sync_tsf_projects(db)
 
-    assert stats["creados"] == 1
+    assert stats["creados"] == 0
+    assert stats["sin_match"] == 1
     assert stats["sugerencias_vinculo"] == []
 
 

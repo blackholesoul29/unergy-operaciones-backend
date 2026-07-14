@@ -155,12 +155,13 @@ class ProyectoInversorOut(ProyectoInversorCreate):
 # ── Contactos (siempre de Cliente) ────────────────────────────────────────────
 # Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-TipoContacto = Literal["operacional", "cgm", "liquidacion"]
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "comercial", "contable"]
 
 
 class ContactoCreate(BaseModel):
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: TipoContacto
     recibe_notificaciones: bool = True
 
@@ -176,6 +177,7 @@ class ContactoCreate(BaseModel):
 class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
+    telefono: Optional[str] = None
     tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
@@ -195,6 +197,7 @@ class ContactoOut(BaseModel):
     cliente_id: int
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: str
     recibe_notificaciones: bool
     created_at: datetime
@@ -258,6 +261,8 @@ class ProyectoCreate(BaseModel):
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
     fecha_fin_representacion: Optional[date] = None
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -265,6 +270,7 @@ class ProyectoCreate(BaseModel):
     longitud: Optional[float] = None
     tipo_conexion: Optional[str] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
     estado_resultados_url: Optional[str] = None
@@ -280,12 +286,14 @@ class ProyectoCreate(BaseModel):
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: Optional[bool] = None
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
@@ -330,6 +338,8 @@ class ProyectoOut(BaseModel):
     estado: str
     fecha_entrada_operacion: Optional[date]
     fecha_fin_representacion: Optional[date]
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]
@@ -337,6 +347,7 @@ class ProyectoOut(BaseModel):
     longitud: Optional[float]
     tipo_conexion: Optional[str]
     operador_red: Optional[str]
+    operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
@@ -353,12 +364,14 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: bool = False
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None

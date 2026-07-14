@@ -10,11 +10,17 @@ Fuente del pipeline (igual que el endpoint de lectura original):
      + % de avance de obra. Cruce por base_name ↔ minifarm_project.name.
   3. API de generación Unergy → ¿ya genera? Si sí, está energizada de hecho.
 
-`sync_tsf_projects(db, force)` hace un upsert por `proyectos.origina_code`:
-  - Crea el proyecto si no existe (origen='tsf_sync', estado='en_desarrollo').
-  - Actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada).
-  - Respeta `fecha_estimada_editada_manual` salvo `force=True` (el operador pidió
-    re-sincronizar y sobrescribir sus cambios con la info de Solenium).
+`sync_tsf_projects(db)` es SOLO de actualización, ya NO crea proyectos:
+  - Si encuentra el proyecto (por sunfactory_project_id/origina_code/codigo_tsf),
+    actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada)
+    -- siempre desde la fuente, sin edición manual del operador que respetar.
+  - Si no encuentra match ni con un candidato de nombre parecido (para sugerir
+    vínculo), lo cuenta en `sin_match` y lo deja pasar -- la CREACIÓN de
+    proyectos nuevos vive ahora en `app/services/proyectos_pendientes.py`
+    (GET /proyectos/pendientes), que cruza Sun Factory + Quoia + Solenium y
+    exige confirmación humana antes de escribir. Antes esta función insertaba
+    la fila sin revisión; el riesgo de duplicados/nombres mal derivados ya no
+    vale la pena ahora que existe esa cola de confirmación dedicada.
 Todos los cruces externos son best-effort: si una fuente no responde, degrada.
 """
 from __future__ import annotations
@@ -238,21 +244,29 @@ def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
     return {"energization_date": ed, "avance_pct": avance, "milestone": chosen.get("name")}
 
 
-def _sunfactory_energization(token: str, project_id: int) -> dict | None:
-    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
+def _sunfactory_milestones_raw(token: str, project_id: int) -> list[dict]:
+    """Milestones crudos de un proyecto vía Sun Factory (con paginación). Separado
+    de `_sunfactory_energization` para poder inspeccionarlos sin filtrar (ver
+    endpoint de diagnóstico `/proximos-energizar/{id}/debug-sunfactory`)."""
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     milestones: list[dict] = []
     url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
+    with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
+        pages = 0
+        while url and pages < 20:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
+            url = data.get("next") if isinstance(data, dict) else None
+            pages += 1
+    return milestones
+
+
+def _sunfactory_energization(token: str, project_id: int) -> dict | None:
+    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
     try:
-        with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
-            pages = 0
-            while url and pages < 20:
-                resp = client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-                milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
-                url = data.get("next") if isinstance(data, dict) else None
-                pages += 1
+        milestones = _sunfactory_milestones_raw(token, project_id)
     except Exception as exc:
         logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
         return None
@@ -691,11 +705,8 @@ _STATUS_TO_FASE = {
 _FASE_TO_LABEL = {v: k for k, v in _STATUS_TO_FASE.items()}
 
 
-def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = True) -> dict:
+def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
     """Upsert del pipeline TSF en `proyectos`. Devuelve estadísticas.
-
-    `force=True`: sobrescribe la fecha estimada incluso si el operador la editó
-    manualmente, y resetea la marca (Solenium suele tener la fecha más fresca).
 
     `enrich_dates=False`: NO consulta los hitos de cada proyecto (que son ~99
     llamadas HTTP y pueden hacer timeout en un request síncrono); usa la fecha del
@@ -705,7 +716,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
     Fuente principal: Sun Factory (la "BD de Solenium/TSF"), accesible por internet.
     No depende de originabotdb (que solo es alcanzable desde la red interna)."""
     projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
-    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
+    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0, "sin_match": 0,
              "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory",
              "sugerencias_vinculo": []}
 
@@ -730,7 +741,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
-                    SELECT id, fecha_estimada_editada_manual FROM proyectos
+                    SELECT id, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         (CAST(:sol_id AS integer) IS NOT NULL
                              AND sunfactory_project_id = CAST(:sol_id AS integer))
@@ -748,11 +759,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             energ = p["energization_date"]
 
             if existing is None:
-                # Ningun match exacto por id/codigo. Antes de crear una fila nueva,
-                # ver si hay un proyecto ya existente (tipicamente creado a mano,
-                # sin ningun codigo de Sun Factory nunca registrado) que podria ser
-                # el mismo -- para no duplicarlo, se sugiere el vinculo en vez de
-                # crear automaticamente. Ver POST /proyectos/{id}/vincular-sunfactory.
+                # Ningun match exacto por id/codigo. Si hay un proyecto ya existente
+                # con nombre parecido (tipicamente creado a mano, sin ningun codigo
+                # de Sun Factory nunca registrado), se sugiere el vinculo -- ver
+                # POST /proyectos/{id}/vincular-sunfactory.
                 candidato = _buscar_candidato_similar(
                     db, p.get("commercial_name") or code, p.get("municipio"),
                 )
@@ -772,51 +782,17 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     })
                     continue
 
-                db.execute(
-                    text("""
-                        INSERT INTO proyectos (
-                            nombre_comercial, origina_code, codigo_tsf, sunfactory_project_id,
-                            fase_construccion,
-                            fecha_estimada_energizacion, fecha_estimada_editada_manual,
-                            avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
-                            municipio, departamento, latitud, longitud,
-                            estado, tipo_proyecto, origen,
-                            srv_operacion, srv_representacion, srv_cgm,
-                            srv_ppa, srv_promotor, srv_rec, generar_liquidacion,
-                            created_at, updated_at
-                        ) VALUES (
-                            :nombre, :code, :tsf, :sol_id,
-                            :fase,
-                            :energ, FALSE,
-                            :avance, :mwh, :potencia,
-                            :municipio, :departamento, :latitud, :longitud,
-                            'en_desarrollo', 'minigranja', 'tsf_sync',
-                            FALSE, FALSE, FALSE,
-                            FALSE, FALSE, FALSE, FALSE,
-                            NOW(), NOW()
-                        )
-                    """),
-                    {
-                        "nombre": p["commercial_name"] or code,
-                        "code": code,
-                        "tsf": tsf_code,
-                        "sol_id": solenium_pipeline_id,
-                        "fase": fase,
-                        "energ": energ,
-                        "avance": p.get("avance_pct"),
-                        "mwh": p.get("monthly_mwh"),
-                        "potencia": p.get("installed_power_kwp"),
-                        "municipio": p["municipio"],
-                        "departamento": p["departamento"],
-                        "latitud": p["latitud"],
-                        "longitud": p["longitud"],
-                    },
-                )
-                stats["creados"] += 1
+                # Sin match de ningun tipo: ya NO se crea aqui. Queda para que
+                # /proyectos/pendientes lo detecte y un humano lo confirme.
+                stats["sin_match"] += 1
             else:
-                manual = bool(existing.fecha_estimada_editada_manual)
-                # La fecha estimada solo se pisa si no la editó el operador, o si force.
-                set_date = (not manual) or force
+                # Si el proyecto ya quedó confirmado como en operación (ej. vía
+                # Proyectos pendientes con evidencia real de Quoia/Solenium), no
+                # dejar que Sun Factory lo regrese a una fase de obra anterior
+                # solo porque su propio tracker todavía no se actualizó -- el
+                # estado real (`estado`) manda sobre el pipeline de construcción,
+                # salvo que Sun Factory ya reporte "energizado", que siempre gana.
+                set_fase = fase == "energizado" or existing.estado != "en_operacion"
                 params = {
                     "id": existing.id,
                     "fase": fase,
@@ -831,10 +807,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     "longitud": p["longitud"],
                 }
                 date_sql = ""
-                if set_date and energ is not None:
-                    date_sql = (", fecha_estimada_energizacion = :energ, "
-                                "fecha_estimada_editada_manual = FALSE")
+                if energ is not None:
+                    date_sql = ", fecha_estimada_energizacion = :energ"
                     params["energ"] = energ
+                fase_sql = "fase_construccion = :fase, " if set_fase else ""
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 # sunfactory_project_id se respalda aqui la PRIMERA vez que se
@@ -843,8 +819,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 db.execute(
                     text(f"""
                         UPDATE proyectos SET
-                            fase_construccion = :fase,
-                            avance_obra_pct = COALESCE(:avance, avance_obra_pct),
+                            {fase_sql}avance_obra_pct = COALESCE(:avance, avance_obra_pct),
                             potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp),
                             origina_code = COALESCE(origina_code, :code),
                             codigo_tsf = COALESCE(codigo_tsf, :tsf),

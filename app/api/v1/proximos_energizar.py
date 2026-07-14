@@ -5,26 +5,31 @@ vivo aquí: un job lo sincroniza periódicamente hacia la tabla `proyectos`
 (ver `app/services/tsf_sync.py`). Este router solo:
   - GET  `/proximos-energizar`        → lee de `proyectos` (pipeline + fechas futuras).
   - POST `/proximos-energizar/sync`   → dispara la sincronización on-demand (force opc.).
-  - PATCH `/proximos-energizar/{id}`  → persiste ediciones del operador (marca la
-                                        fecha como editada manualmente).
 
-Así la vista vive 100% en la BD (sin localStorage) y los proyectos quedan listos
-para relacionarse con contratos PPA y monitorear cumplimiento de energía.
+Todos los campos son de solo lectura: vienen tal cual de Sun Factory/TSF, sin
+edición manual del operador. Así la vista vive 100% en la BD (sin localStorage)
+y los proyectos quedan listos para relacionarse con contratos PPA y monitorear
+cumplimiento de energía.
 """
 from __future__ import annotations
 
 import logging
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import and_, or_, text
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
+from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto
-from app.services.tsf_sync import _FASE_TO_LABEL, _STATUS_TO_FASE, sync_tsf_projects
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.proyectos_pendientes import _generacion_real_por_frt
+from app.services.tsf_sync import (
+    _FASE_TO_LABEL, _pick_energization_milestone, _sunfactory_all_projects,
+    _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
+)
 
 logger = logging.getLogger("proximos_energizar")
 router = APIRouter(prefix="/proximos-energizar", tags=["Próximos a energizarse"])
@@ -36,7 +41,6 @@ _TSF_COLUMNS_DDL = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
@@ -76,7 +80,7 @@ def _contract_names(proyecto: Proyecto) -> list[str]:
     return names
 
 
-def _serialize(p: Proyecto) -> dict:
+def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
     """Forma compatible con el frontend (ProyectosProximosEnergizar.vue)."""
     fase = p.fase_construccion
     status = _FASE_TO_LABEL.get(fase) if fase else None
@@ -92,8 +96,34 @@ def _serialize(p: Proyecto) -> dict:
         "municipio": p.municipio,
         "departamento": p.departamento,
         "origen": p.origen,
-        "editadaManual": bool(p.fecha_estimada_editada_manual),
+        # "Frontera asignada" -- pregunta frecuente: qué proyectos en construcción
+        # ya tienen frontera comercial registrada (señal real de energización
+        # inminente, más confiable que la fase de Sun Factory). Viene de nuestra
+        # propia tabla `fronteras`, no de una llamada en vivo a Quoia.
+        "tieneFrontera": frontera is not None,
+        "codigoFrontera": frontera["codigo_frontera"] if frontera else None,
     }
+
+
+def _fronteras_por_proyecto(db: Session, proyecto_ids: list[int]) -> dict[int, dict]:
+    """{ proyecto_id: {codigo_frontera} } para la frontera de generación de cada
+    proyecto (si tiene varias, se queda con la primera). Une generacion y
+    generacion_consumo -- ambas son borders de punto de generación real."""
+    if not proyecto_ids:
+        return {}
+    out: dict[int, dict] = {}
+    rows = (
+        db.query(Frontera.proyecto_id, Frontera.codigo_frontera)
+        .filter(
+            Frontera.proyecto_id.in_(proyecto_ids),
+            Frontera.tipo_frontera.in_(["generacion", "generacion_consumo"]),
+            Frontera.deleted_at.is_(None),
+        )
+        .all()
+    )
+    for proyecto_id, codigo in rows:
+        out.setdefault(proyecto_id, {"codigo_frontera": codigo})
+    return out
 
 
 @router.get("")
@@ -135,23 +165,63 @@ def listar_proximos_energizar(
         return {"projects": [], "source": "error", "count": 0,
                 "warning": "No se pudo cargar la lista. Intenta «Sincronizar ahora» "
                            "para poblar el pipeline desde Solenium/TSF."}
-    return {"projects": [_serialize(p) for p in rows], "source": "operaciones_db", "count": len(rows)}
+    fronteras = _fronteras_por_proyecto(db, [p.id for p in rows])
+
+    # De los que tienen frontera, verificar generación real en Quoia -- si ya
+    # genera de verdad, no debe seguir apareciendo aquí como "próximo a
+    # energizar" aunque todavía nadie lo haya confirmado en Proyectos
+    # pendientes. NO toca `estado`/`fase_construccion` en la BD -- esa
+    # confirmación oficial sigue siendo manual, esto solo evita que la vista
+    # dependa de que alguien revise Pendientes a tiempo. Cacheado 1h (mismo
+    # caché que usa Pendientes) así que en la práctica casi nunca golpea Quoia.
+    generando_ya: set[int] = set()
+    ids_con_frontera = [p.id for p in rows if p.id in fronteras]
+    if ids_con_frontera:
+        try:
+            gaia = GaiaClient()
+            if gaia.enabled:
+                borders = gaia.get_all_borders()
+                generacion_real = _generacion_real_por_frt(gaia, borders)
+                for pid in ids_con_frontera:
+                    codigo = (fronteras[pid]["codigo_frontera"] or "").strip().lower()
+                    if generacion_real.get(codigo):
+                        generando_ya.add(pid)
+        except Exception as exc:
+            logger.warning("Verificación de generación real falló (se ignora, no bloquea la vista): %s", exc)
+
+    rows = [p for p in rows if p.id not in generando_ya]
+
+    # Última vez que el sync (on-demand o el job de 6h) tocó CUALQUIER proyecto
+    # vinculado a Sun Factory -- no depende de que el usuario haya apretado
+    # "Actualizar" en su propia sesión, así que sigue siendo correcto aunque
+    # recién se cargue la página por primera vez.
+    ultima_sync = (
+        db.query(func.max(Proyecto.updated_at))
+        .filter(Proyecto.sunfactory_project_id.isnot(None), Proyecto.deleted_at.is_(None))
+        .scalar()
+    )
+
+    return {
+        "projects": [_serialize(p, fronteras.get(p.id)) for p in rows],
+        "source": "operaciones_db",
+        "count": len(rows),
+        "ultimaSincronizacion": ultima_sync.isoformat() if ultima_sync else None,
+    }
 
 
 @router.post("/sync")
 def sincronizar(
-    force: bool = Query(False, description="Sobrescribe las fechas editadas manualmente con la info de Solenium."),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> dict:
-    """Dispara la sincronización TSF → proyectos on-demand (botones de la vista).
+    """Dispara la sincronización TSF → proyectos on-demand (botón de la vista).
 
     On-demand corre con `enrich_dates=False` (rápido: solo el listado de Sun Factory
     + upserts, sin las ~99 llamadas de hitos que harían timeout el request). El job
     programado de 6h trae luego la fecha de energización precisa (RETIE)."""
     _ensure_tsf_columns(db)
     try:
-        stats = sync_tsf_projects(db, force=force, enrich_dates=False)
+        stats = sync_tsf_projects(db, enrich_dates=False)
     except Exception as exc:
         logger.warning("sync TSF falló: %s", exc)
         raise HTTPException(status_code=502,
@@ -159,37 +229,48 @@ def sincronizar(
     return stats
 
 
-class ProximoEnergizarPatch(BaseModel):
-    commercialName: str | None = None
-    energizationDate: date | None = None
-    monthlyMwh: float | None = None
-    status: str | None = None  # etiqueta ('Próximo a energizar') o slug ('proximo_energizar')
-
-
-@router.patch("/{proyecto_id}")
-def actualizar(
+@router.get("/{proyecto_id}/debug-sunfactory")
+def debug_sunfactory(
     proyecto_id: int,
-    body: ProximoEnergizarPatch,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> dict:
-    """Persiste ediciones inline del operador. Cambiar la fecha la marca como
-    editada manualmente, para que el sync periódico no la pise (salvo force)."""
+    """Diagnóstico de solo lectura: qué trae Sun Factory CRUDO para este proyecto
+    (milestones sin filtrar + el registro del listado con su `next_milestone`).
+    Sirve para responder "¿por qué no tiene fecha/avance?" sin adivinar -- muestra
+    si Sun Factory de verdad no tiene el dato, o si simplemente el botón on-demand
+    (que no consulta milestones) no lo ha traído todavía."""
     p = db.query(Proyecto).filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
     if p is None:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    if not p.sunfactory_project_id:
+        return {"vinculado": False, "detalle": "Este proyecto no tiene sunfactory_project_id."}
 
-    if body.commercialName is not None:
-        p.nombre_comercial = body.commercialName
-    if body.monthlyMwh is not None:
-        p.mwh_mes_estimado = body.monthlyMwh
-    if body.status is not None:
-        # Acepta etiqueta o slug; normaliza a slug.
-        p.fase_construccion = _STATUS_TO_FASE.get(body.status, body.status)
-    if body.energizationDate is not None and body.energizationDate != p.fecha_estimada_energizacion:
-        p.fecha_estimada_energizacion = body.energizationDate
-        p.fecha_estimada_editada_manual = True
+    token = _sunfactory_token()
+    if not token:
+        raise HTTPException(status_code=502, detail="Credenciales de Sun Factory no configuradas.")
 
-    db.commit()
-    db.refresh(p)
-    return _serialize(p)
+    try:
+        milestones = _sunfactory_milestones_raw(token, p.sunfactory_project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar milestones: {exc}")
+    elegido = _pick_energization_milestone(milestones)
+
+    listado = next(
+        (row for row in _sunfactory_all_projects(token) if row.get("id") == p.sunfactory_project_id),
+        None,
+    )
+
+    return {
+        "vinculado": True,
+        "sunfactory_project_id": p.sunfactory_project_id,
+        "fecha_actual_bd": p.fecha_estimada_energizacion.isoformat() if p.fecha_estimada_energizacion else None,
+        "milestones_total": len(milestones),
+        "milestones_con_fecha": [
+            {"name": m.get("name"), "date": m.get("date"), "planned_date": m.get("planned_date")}
+            for m in milestones if m.get("date") or m.get("planned_date")
+        ],
+        "milestone_energizacion_elegido": elegido,
+        "sunfactory_state": listado.get("state") if listado else None,
+        "next_milestone_del_listado": listado.get("next_milestone") if listado else None,
+    }

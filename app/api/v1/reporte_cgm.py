@@ -96,6 +96,14 @@ def enviar_reporte_cgm(
         borders = svc.resolver_borders(gaia, frt_codes)
         for frt_code in frt_codes:
             meta = borders.get(frt_code.lower())
+            if meta is None:
+                # No aparece en el listado de Quoia (caso real 2026-07-10:
+                # Bayunca/San Onofre registrados ahí bajo otra compañía) --
+                # no hay nombre ni dato real que reportar, así que no se
+                # incluye ninguna fila para este frt_code. Distinto del caso
+                # "sí está en Quoia pero no reportó este día" (eso sí se deja
+                # como "Sin reporte" dentro de fetch_filas).
+                continue
             filas_por_frt[frt_code] = [
                 fila
                 for dia in dias

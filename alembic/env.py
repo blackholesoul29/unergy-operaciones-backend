@@ -35,7 +35,15 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        # transaction_per_migration: con varias ramas en cola, `upgrade heads` aplica
+        # N migraciones de golpe. En una sola transacción, UNA mala revierte a las
+        # demás y el deploy queda con cero migraciones aplicadas. Una transacción por
+        # migración acota el daño a la que falla; las anteriores quedan commiteadas.
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

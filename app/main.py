@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, SessionLocal
+from app.core.migraciones import estado_salud
 from app.api.v1.router import api_router
 
 # Idempotent DDL run at startup — safe to run on every boot
@@ -2837,4 +2838,9 @@ if _monitoreo_path.exists() and any(_monitoreo_path.iterdir()):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": settings.APP_NAME}
+    """`degraded` cuando el arranque no pudo aplicar las migraciones.
+
+    Sin esto el deploy queda verde mientras el esquema está viejo: la API
+    responde 200 y los datos salen mal en silencio. Ver `app/core/migraciones.py`.
+    """
+    return estado_salud(settings.APP_NAME)

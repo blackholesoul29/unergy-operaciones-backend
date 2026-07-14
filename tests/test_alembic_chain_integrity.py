@@ -19,6 +19,17 @@ forkean de master a la vez y cada una queda como head independiente. Exigir un
 sola rama rechazada dejaría colgante a todas las siguientes. La solución es
 ``alembic upgrade heads`` (plural) en `start.sh`, que aplica todas las ramas en
 cualquier orden de merge. Lo único que debe ser único es el **id**.
+
+PERO eso tiene un costo que debes conocer ANTES de escribir tu migración: con
+varios heads en master, Alembic ya no sabe sobre cuál construir.
+
+  * ``alembic revision`` falla con "Multiple heads are present". Ramifica
+    explícitamente: ``alembic revision --head <id> -m "..."`` (o escribe el
+    archivo a mano, que es lo que hace este repo).
+  * ``alembic downgrade -1`` es AMBIGUO con varios heads: baja una rama
+    arbitraria. Nombra la revisión: ``alembic downgrade <id>``.
+  * Cuando la cola de merges se drene, colapsa los heads con un solo
+    ``alembic merge heads`` y master vuelve a tener un head único.
 """
 import os
 import re
@@ -84,24 +95,78 @@ def test_all_down_revisions_resolve():
     assert not dangling, f"down_revision colgante (no existe): {dangling}"
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Solo líneas EJECUTABLES: si el guard mirara el archivo entero, un `alembic upgrade
+# heads` comentado lo dejaría verde mientras el deploy no migra nada.
+_UPGRADE_RE = re.compile(r"alembic\s+upgrade\s+(heads|head)\b")
+
+
+def _executable_upgrade_calls(text):
+    """[(nº línea, 'head'|'heads')] de cada `alembic upgrade` NO comentado."""
+    out = []
+    for i, raw in enumerate(text.splitlines(), start=1):
+        line = raw.split("#", 1)[0]  # descarta comentarios de shell
+        m = _UPGRADE_RE.search(line)
+        if m:
+            out.append((i, m.group(1)))
+    return out
+
+
 def test_start_sh_upgrades_all_heads():
-    """El deploy debe correr `alembic upgrade heads` (plural).
+    """El deploy debe correr `alembic upgrade heads` (plural), y de verdad.
 
     Varias ramas se forkean de master al mismo tiempo y cada una aporta un head
     independiente. Con `head` singular Alembic aborta con "Multiple head
-    revisions", `start.sh` solo emite un WARNING y el servidor arranca SIN
-    ninguna migración aplicada. `heads` aplica todas las ramas, en cualquier
-    orden de merge.
+    revisions" y el servidor arranca SIN ninguna migración aplicada. `heads`
+    aplica todas las ramas, en cualquier orden de merge.
     """
-    start_sh = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "start.sh"
+    with open(os.path.join(REPO_ROOT, "start.sh"), encoding="utf-8") as fh:
+        calls = _executable_upgrade_calls(fh.read())
+
+    assert calls, (
+        "start.sh no ejecuta ningún `alembic upgrade` (¿comentado?). El deploy "
+        "arrancaría sin aplicar migraciones."
     )
-    text = open(start_sh, encoding="utf-8").read()
-    assert re.search(r"alembic\s+upgrade\s+heads\b", text), (
-        "start.sh debe usar `alembic upgrade heads` (plural). Con `head` "
-        "singular, cualquier bifurcación hace que el deploy salte TODAS las "
-        "migraciones y el servidor arranque con tablas faltantes."
+    singulares = [n for n, form in calls if form == "head"]
+    assert not singulares, (
+        f"start.sh usa `alembic upgrade head` (singular) en la(s) línea(s) {singulares}. "
+        "Con cualquier bifurcación, el deploy salta TODAS las migraciones y el "
+        "servidor arranca con el esquema viejo. Usa `heads`."
     )
-    assert not re.search(r"alembic\s+upgrade\s+head\b", text), (
-        "start.sh todavía usa `alembic upgrade head` (singular) en alguna línea."
+
+
+def test_no_other_runner_uses_singular_head():
+    """Ningún OTRO script del repo puede reintroducir el `head` singular.
+
+    El fix de `start.sh` no sirve de nada si mañana un Dockerfile, un workflow de
+    CI o un Makefile corre `alembic upgrade head` por su cuenta.
+    """
+    ofensores = []
+    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "tests"}
+        ]
+        for fname in filenames:
+            if not (
+                fname.endswith((".sh", ".yml", ".yaml", ".toml", ".py"))
+                or fname.startswith(("Dockerfile", "Makefile", "Procfile"))
+            ):
+                continue
+            path = os.path.join(dirpath, fname)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for num, form in _executable_upgrade_calls(text):
+                if form == "head":
+                    ofensores.append(f"{os.path.relpath(path, REPO_ROOT)}:{num}")
+
+    assert not ofensores, (
+        f"`alembic upgrade head` (singular) en: {ofensores}. Con varias ramas en cola "
+        "eso aborta con 'Multiple head revisions' y no aplica NINGUNA migración. "
+        "Usa `heads`."
     )

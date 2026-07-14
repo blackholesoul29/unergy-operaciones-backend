@@ -2,9 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, SessionLocal
@@ -44,15 +42,6 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_fecha ON generacion_diaria (fecha)",
-    """CREATE TABLE IF NOT EXISTS monitoreo_verificaciones (
-        id BIGSERIAL PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        codigo VARCHAR(6) NOT NULL,
-        usado BOOLEAN NOT NULL DEFAULT FALSE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
     # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh JSONB",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh JSONB",
@@ -2850,23 +2839,6 @@ _uploads_path = Path("uploads")
 _uploads_path.mkdir(exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=str(_uploads_path)), name="uploads")
 
-# ── monitoreo: servir fallas-unergy como SPA ─────────────────────────────────
-_monitoreo_path = Path("static/monitoreo")
-_monitoreo_path.mkdir(parents=True, exist_ok=True)
-
-_monitoreo_index = _monitoreo_path / "index.html"
-
-
-@app.get("/monitoreo", include_in_schema=False)
-@app.get("/monitoreo/", include_in_schema=False)
-async def serve_monitoreo():
-    if _monitoreo_index.exists():
-        return FileResponse(str(_monitoreo_index), media_type="text/html")
-    return {"error": "Monitoreo no desplegado aún. Ejecuta scripts/patch_monitoreo.py"}
-
-
-if _monitoreo_path.exists() and any(_monitoreo_path.iterdir()):
-    app.mount("/monitoreo/static", StaticFiles(directory=str(_monitoreo_path)), name="monitoreo_static")
 
 
 @app.get("/health")

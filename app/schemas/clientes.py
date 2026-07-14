@@ -25,7 +25,6 @@ class ClienteCreate(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    correo_electronico: Optional[str] = None
     correo_liquidacion: Optional[str] = None
     correo_monitoreo: Optional[str] = None
     correo_soporte: Optional[str] = None
@@ -109,7 +108,6 @@ class ClienteBase(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    correo_electronico: Optional[str] = None
     correo_liquidacion: Optional[str] = None
     correo_monitoreo: Optional[str] = None
     correo_soporte: Optional[str] = None

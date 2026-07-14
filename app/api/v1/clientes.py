@@ -691,7 +691,7 @@ _MERGE_CLIENTE_COMPOSITE = [
 # copiarse al ganador (mismo tratamiento que sunfactory_project_id en proyectos).
 _MERGE_CLIENTE_SCALAR_UNIQUE = ["nit_cedula"]
 _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY = [
-    "correo_electronico", "telefono_contacto", "direccion", "ciudad", "departamento",
+    "telefono_contacto", "direccion", "ciudad", "departamento",
     "tipo_persona", "representante_legal", "origina_investment_id",
 ]
 

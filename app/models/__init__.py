@@ -24,7 +24,7 @@ from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
 from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
 from app.models.mantenimientos import Mantenimiento
-from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
+from app.models.generacion import GeneracionDiaria
 from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
@@ -58,7 +58,7 @@ __all__ = [
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Mantenimiento",
-    "GeneracionDiaria", "MonitoreoVerificacion",
+    "GeneracionDiaria",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",

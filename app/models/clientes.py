@@ -43,7 +43,6 @@ class Cliente(Base):
     nit_cedula: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo_persona: Mapped[str | None] = mapped_column(SAEnum(TipoPersonaEnum, name="tipo_persona_enum"), nullable=True)
     representante_legal: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_electronico: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_liquidacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)

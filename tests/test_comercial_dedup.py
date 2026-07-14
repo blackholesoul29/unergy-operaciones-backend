@@ -74,7 +74,7 @@ def escenario(db):
 
 
 def test_dry_run_identifica_no_borra(db, escenario):
-    r = api.dedup_clientes(dry_run=True, db=db, current=ADMIN)
+    r = api.dedup_clientes(dry_run=True, umbral=0.85, db=db, current=ADMIN)
     assert r["prospectos"] == 2
     assert r["fusionados"] == 1
     assert r["sin_canonico"] == 1
@@ -82,7 +82,7 @@ def test_dry_run_identifica_no_borra(db, escenario):
 
 
 def test_fusiona_y_reasigna(db, escenario):
-    api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    api.dedup_clientes(dry_run=False, umbral=0.85, db=db, current=ADMIN)
     # C soft-deleted
     c = db.query(Cliente).filter(Cliente.id == escenario["c"]).first()
     assert c.deleted_at is not None
@@ -95,7 +95,7 @@ def test_fusiona_y_reasigna(db, escenario):
     e = db.query(Cliente).filter(Cliente.id == escenario["e"]).first()
     assert e.deleted_at is None
     # idempotente: segunda corrida no fusiona nada
-    r2 = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    r2 = api.dedup_clientes(dry_run=False, umbral=0.85, db=db, current=ADMIN)
     assert r2["fusionados"] == 0
 
 
@@ -110,7 +110,7 @@ def test_match_difuso_por_tokens(db):
     db.add(ProyectoInversionista(proyecto_id=44, cliente_id=d.id))
     c = _prospecto(db, "Empresa X", "Naos 4")
     db.commit()
-    r = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    r = api.dedup_clientes(dry_run=False, umbral=0.85, db=db, current=ADMIN)
     assert r["fusionados"] == 1
     assert db.query(Cliente).filter(Cliente.id == c.id).first().deleted_at is not None
 
@@ -126,7 +126,7 @@ def test_generico_no_fusiona(db):
     db.add(ProyectoInversionista(proyecto_id=71, cliente_id=d.id))
     c = _prospecto(db, "Empresa Vega", "Granja Solar Vega 2")
     db.commit()
-    r = api.dedup_clientes(dry_run=False, db=db, current=ADMIN)
+    r = api.dedup_clientes(dry_run=False, umbral=0.85, db=db, current=ADMIN)
     assert r["fusionados"] == 0
     assert r["sin_canonico"] == 1
     assert db.query(Cliente).filter(Cliente.id == c.id).first().deleted_at is None

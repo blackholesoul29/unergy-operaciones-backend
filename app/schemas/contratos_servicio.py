@@ -49,6 +49,15 @@ class ProyectoBasico(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FronteraBasico(BaseModel):
+    id: int
+    codigo_frontera: Optional[str] = None
+    nombre_frontera: str
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    model_config = {"from_attributes": True}
+
+
 class ContratoServicioCreate(BaseModel):
     proyecto_id: Optional[int] = None
     servicio_aplica: str  # representacion | operacion | rec
@@ -94,6 +103,8 @@ class ContratoServicioCreate(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
     indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
+    # Fronteras (puntos de medida) cubiertas por el contrato
+    frontera_ids: List[int] = []
 
 
 class ContratoServicioUpdate(BaseModel):
@@ -138,6 +149,8 @@ class ContratoServicioUpdate(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[FilaIndexacionCGM]] = None
     indexacion_representacion: Optional[List[FilaIndexacionCGM]] = None
+    # None = no tocar las fronteras actuales; [] = desvincular todas
+    frontera_ids: Optional[List[int]] = None
 
 
 class ContratoServicioOut(BaseModel):
@@ -190,6 +203,7 @@ class ContratoServicioOut(BaseModel):
     tarifa_representacion: Optional[float] = None
     indexacion_cgm: Optional[List[Any]] = None
     indexacion_representacion: Optional[List[Any]] = None
+    fronteras: List[FronteraBasico] = []
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

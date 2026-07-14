@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+from app.models.contrato_frontera import ContratoFrontera
 
 
 class ServicioAplicaEnum(str, enum.Enum):
@@ -110,6 +111,9 @@ class ContratoServicio(Base):
     contratante: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[contratante_id])
     prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
+    fronteras: Mapped[list["Frontera"]] = relationship(
+        "Frontera", secondary=ContratoFrontera.__tablename__, back_populates="contratos",
+    )
 
 
 class PPAContrato(Base):

@@ -119,6 +119,10 @@ class Proyecto(Base):
     # NULL = proyecto fuera del CRM (histórico o creado por otro flujo).
     # (operador_red_id ya existe arriba, vínculo al catálogo compartido.)
     oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
+    # Etiqueta de comunidad energética (ortogonal a Rep/Energía: cualquier planta
+    # puede o no pertenecer a una comunidad).
+    es_comunidad_energetica: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    nombre_comunidad: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Servicios activos
     srv_operacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

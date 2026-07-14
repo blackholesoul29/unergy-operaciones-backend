@@ -24,6 +24,15 @@ def calcular_alerta(
     última gestión de bitácora. Alerta solo con MÁS de `umbral_dias` días
     (5 días exactos NO alertan) y solo en ESTADOS_CON_ALERTA.
     """
+    # Defensivo: si algún datetime viene naive (p.ej. roundtrip por un backend
+    # sin timezone), se alinea al tz de `ahora` para no romper la resta.
+    def _com(dt):
+        if dt is not None and dt.tzinfo is None and ahora.tzinfo is not None:
+            return dt.replace(tzinfo=ahora.tzinfo)
+        return dt
+
+    estado_desde = _com(estado_desde)
+    ultima_gestion = _com(ultima_gestion)
     referencia = estado_desde
     if ultima_gestion is not None and ultima_gestion > referencia:
         referencia = ultima_gestion

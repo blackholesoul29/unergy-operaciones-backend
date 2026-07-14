@@ -1041,6 +1041,13 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
     "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration — CRM sub-ofertas + etiqueta comunidad (2026-07-13)
+    # Postgres no soporta IF NOT EXISTS en RENAME VALUE: si ya se renombró lanza
+    # excepción y _run_column_migrations la salta (idempotente por tolerancia).
+    # La tabla oportunidad_ofertas y sus enums los crea create_all al arranque.
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'fin' TO 'servicio_operativo'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
     # migration 052 — monitoreo de cobertura de garantías
     "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS monitoreo_cobertura_activo BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE garantias ADD COLUMN IF NOT EXISTS tipo_calculo_cobertura VARCHAR(100)",
@@ -2616,6 +2623,39 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _run_comercial_import() -> None:
+    """Carga idempotente de las hojas de prospección (Servicios + Energía +
+    Comunidades) al CRM comercial — mismo patrón que los demás *_seed. Corre en
+    el arranque, dentro del contenedor, contra la BD real; no requiere token.
+    Idempotente (por consecutivo o (cliente,tipo,planta)), así que repetir el
+    boot no duplica. Ver data/comercial_seed.json y POST /comercial/importar-hojas."""
+    from types import SimpleNamespace
+    from app.core.database import SessionLocal
+    from app.api.v1.comercial import importar_hojas
+
+    db = SessionLocal()
+    try:
+        from app.models.comercial import OportunidadOferta
+        # One-shot: si ya hay ofertas cargadas, no volver a tocar (evita recrear
+        # filas que el equipo pudo borrar). Para recargar, usar el endpoint admin.
+        if db.query(OportunidadOferta.id).first() is not None:
+            print("[startup] comercial_import: ya hay ofertas, se omite")
+            return
+        admin_id = None
+        try:
+            from app.models.usuarios import Usuario
+            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
+            admin_id = adm.id if adm else None
+        except Exception:
+            admin_id = None
+        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
+        res = importar_hojas(dry_run=False, db=db, current=current)
+        print(f"[startup] comercial_import: clientes={res['clientes']} "
+              f"ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2625,6 +2665,7 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
+        ("comercial_import", _run_comercial_import),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),

@@ -286,6 +286,9 @@ class ProyectoCreate(BaseModel):
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: Optional[bool] = None
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
@@ -361,6 +364,9 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: bool = False
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None

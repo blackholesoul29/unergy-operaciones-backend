@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -12,7 +12,7 @@ from app.models import (
     Falla, FallaSeguimiento, FallaIntervalo, FallaInversor,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
     FallaCreate, FallaUpdate, FallaOut,
@@ -555,10 +555,14 @@ def list_fallas(
     if proyecto_id:
         query = query.filter(Falla.proyecto_id == proyecto_id)
     if cliente_id:
-        # Filter fallas by projects belonging to a specific client
+        # Proyectos donde este cliente es inversionista vigente (fecha_fin nula o futura).
+        hoy = date.today()
         client_project_ids = (
-            db.query(Proyecto.id)
-            .filter(Proyecto.cliente_id == cliente_id, Proyecto.deleted_at.is_(None))
+            db.query(ProyectoInversionista.proyecto_id)
+            .filter(
+                ProyectoInversionista.cliente_id == cliente_id,
+                (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
+            )
             .subquery()
         )
         query = query.filter(Falla.proyecto_id.in_(client_project_ids))
@@ -583,68 +587,6 @@ def list_fallas(
     return {"items": items, "total": total, "page": page, "size": effective_size, "pages": -(-total // effective_size)}
 
 
-def _correos_de_cliente(cliente) -> list[str]:
-    """Correos operacionales de un cliente. Prefiere el array
-    `correos_operacionales`; si está vacío cae al campo legado `correo_operacional`."""
-    if not cliente:
-        return []
-    arr = cliente.correos_operacionales or []
-    if isinstance(arr, list) and arr:
-        return [str(e) for e in arr if e]
-    if cliente.correo_operacional:
-        return [cliente.correo_operacional]
-    return []
-
-
-def _get_correos_cliente(proyecto_id: int, db) -> list[str]:
-    """Correos operacionales a notificar para un proyecto.
-
-    Reúne los correos del cliente dueño (`cliente_id`, si está definido) y de
-    todos los inversionistas vigentes del proyecto (fecha_fin nula = "Vigente",
-    o futura). Cada cliente/inversionista aporta sus propios correos; se
-    devuelven sin duplicados preservando el orden de aparición. Así los
-    proyectos multi-inversionista (p.ej. minigranjas sin `cliente_id` único)
-    notifican a todos los participantes que tengan correos configurados.
-    """
-    from app.models.proyectos import Proyecto, ProyectoInversionista
-    from app.models.clientes import Cliente
-    proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
-    if not proy:
-        return []
-
-    correos: list[str] = []
-
-    # 1) Cliente dueño del proyecto (si existe)
-    if proy.cliente_id:
-        cliente_dueno = db.query(Cliente).filter(Cliente.id == proy.cliente_id).first()
-        correos.extend(_correos_de_cliente(cliente_dueno))
-
-    # 2) Inversionistas vigentes del proyecto
-    hoy = date.today()
-    inversionistas = (
-        db.query(ProyectoInversionista)
-        .filter(
-            ProyectoInversionista.proyecto_id == proyecto_id,
-            (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
-        )
-        .all()
-    )
-    inv_cliente_ids = [inv.cliente_id for inv in inversionistas if inv.cliente_id]
-    if inv_cliente_ids:
-        clientes_inv = db.query(Cliente).filter(Cliente.id.in_(inv_cliente_ids)).all()
-        for c in clientes_inv:
-            correos.extend(_correos_de_cliente(c))
-
-    # Deduplicar preservando el orden
-    vistos: set[str] = set()
-    unicos: list[str] = []
-    for e in correos:
-        if e and e not in vistos:
-            vistos.add(e)
-            unicos.append(e)
-    return unicos
-
-
 _notif_logger = logging.getLogger("fallas.notificacion")
 
 
@@ -660,10 +602,11 @@ def _enviar_notificacion(
     Retorna: {"ok": bool, "enviados": [...], "errores": [...], "sin_correos": bool}
     """
     from app.services.email_service import send_falla_notification_email
+    from app.services.contactos import get_contactos
     from app.core.config import settings
     from datetime import datetime, timezone
 
-    correos = _get_correos_cliente(falla.proyecto_id, db)
+    correos = get_contactos(db, "operacional", proyecto_id=falla.proyecto_id)
     ts = datetime.now(timezone.utc).isoformat()
 
     if not correos:
@@ -717,6 +660,7 @@ def create_falla(
     fotos = dump.pop("fotos_urls", None)
     intervalos = dump.pop("intervalos", None)
     inversores = dump.pop("inversores", None)  # no es columna → se procesa aparte
+    generar_impacto = dump.pop("generar_impacto", False)  # dispara MantenimientoImpacto
 
     # Camino estructurado: validar antes de crear nada.
     categoria_codigo = dump.get("categoria_codigo")
@@ -760,7 +704,65 @@ def create_falla(
     # Alarmas de comunicación (frontera / inversores / total) — no bloqueante
     _alarmas_post_guardado(falla.id, db)
 
+    # Impacto de mantenimiento (opcional): si la falla derivó en una intervención,
+    # crea el registro con energía perdida/impacto calculados. No bloqueante.
+    if generar_impacto:
+        _generar_impacto_mantenimiento(falla, current_user, db)
+
     return _get_or_404(falla.id, db)
+
+
+def _generar_impacto_mantenimiento(falla: Falla, current_user, db: Session) -> None:
+    """Crea un MantenimientoImpacto ligado a la falla usando su ventana temporal.
+
+    Ventana: [fecha_ocurrencia, fecha_resolucion]; si falta la ocurrencia se usa
+    fecha/hora de identificación, y si falta la resolución se cierra con la hora
+    actual. Silenciosa ante errores: nunca debe tumbar la creación de la falla.
+    """
+    from app.models.mantenimiento_impacto import MantenimientoImpacto
+    from app.services.impact_calculator import ImpactCalculator
+
+    try:
+        inicio = falla.fecha_ocurrencia
+        if inicio is None and falla.fecha_identificacion:
+            inicio = datetime.combine(
+                falla.fecha_identificacion, falla.hora_identificacion or time(0, 0),
+                tzinfo=_COL_TZ,
+            )
+        if inicio is None:
+            return
+        fin = falla.fecha_resolucion or datetime.now(_COL_TZ)
+        if inicio.tzinfo is None:
+            inicio = inicio.replace(tzinfo=_COL_TZ)
+        if fin.tzinfo is None:
+            fin = fin.replace(tzinfo=_COL_TZ)
+        if fin < inicio:
+            fin = inicio
+
+        m = MantenimientoImpacto(
+            proyecto_id=falla.proyecto_id,
+            falla_id=falla.id,
+            maintenance_type="unscheduled",  # nace de una falla → no programado
+            start_time=inicio,
+            end_time=fin,
+            created_by=getattr(current_user, "id", None),
+        )
+        metrics = ImpactCalculator(db).calculate_impact(
+            proyecto_id=m.proyecto_id, start=m.start_time, end=m.end_time,
+        )
+        m.expected_generation_kwh = metrics["expected_generation_kwh"]
+        m.actual_generation_kwh = metrics["actual_generation_kwh"]
+        m.lost_energy_kwh = metrics["lost_energy_kwh"]
+        m.financial_impact_cop = metrics["financial_impact_cop"]
+        m.ppa_penalty_risk_flag = metrics["ppa_penalty_risk_flag"]
+        db.add(m)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logging.getLogger(__name__).warning(
+            "No se pudo generar impacto de mantenimiento para falla %s", falla.id,
+            exc_info=True,
+        )
 
 
 def backfill_tipos_estructurados(db: Session, dry_run: bool = False) -> dict:

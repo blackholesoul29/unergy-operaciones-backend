@@ -82,6 +82,10 @@ class Frontera(Base):
     fecha_inicio_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     operador_red: Mapped[str | None] = mapped_column(String(255), nullable=True)
     operador_red_zona: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Vínculo estructurado hacia el catálogo de operadores (operador_red arriba
+    # sigue siendo el texto de GESCON; este FK es para la integración del
+    # reporte CGM -- ver operadores_red_contactos para los correos).
+    operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
     predio_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     nombre_predio: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -139,6 +143,10 @@ class Frontera(Base):
 
     # Quoia meter link
     quoia_meter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Id interno del border en Quoia -- lo requiere get_border_report_status(),
+    # que no acepta frt_code. Se guarda al confirmar desde /quoia/pendientes
+    # para no tener que resolverlo con una llamada extra en cada reporte CGM.
+    quoia_border_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Estado operacional (lifecycle)
     estado_operacional: Mapped[str | None] = mapped_column(
@@ -164,9 +172,9 @@ class Frontera(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fronteras")
-    equipos: Mapped[list] = relationship("Equipo", back_populates="frontera")
-    lecturas: Mapped[list] = relationship("FronteraLectura", back_populates="frontera")
-    xm_datos: Mapped[list] = relationship("LiquidacionXMDato", back_populates="frontera")
+    lecturas: Mapped[list["FronteraLectura"]] = relationship("FronteraLectura", back_populates="frontera")
+    xm_datos: Mapped[list["LiquidacionXMDato"]] = relationship("LiquidacionXMDato", back_populates="frontera")
+    operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="fronteras")
 
 
 class FronteraLectura(Base):
@@ -190,3 +198,17 @@ class FronteraLectura(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     frontera: Mapped["Frontera"] = relationship("Frontera", back_populates="lecturas")
+
+
+class FronteraQuoiaIgnorada(Base):
+    """Borders de Quoia marcados a propósito como 'no aplica' en el panel de
+    /fronteras/quoia/pendientes, para que dejen de aparecer como pendientes
+    (ej. medidores de prueba, borders de un tercero)."""
+
+    __tablename__ = "fronteras_quoia_ignoradas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frt_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    motivo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ignorado_por_usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -29,15 +29,25 @@ def test_frontera_equipos_y_flags():
 
 def test_inversores_tipos_falla():
     assert INVERSOR_TIPO_FALLA_CODIGOS == {
-        "no_generacion", "generacion_anomala", "limitacion_potencia",
-        "strings_mal_conectados", "perdida_comunicacion",
+        "baja_tension_ac", "baja_tension_dc", "baja_resistencia_aislamiento",
+        "problemas_ventilacion", "falla_dispositivo", "problema_cadena_fotovoltaica",
+        "sobre_temperatura", "arco_ac", "arco_dc", "perdida_comunicacion",
     }
 
 
+def test_inversores_tipos_legacy_conservan_etiqueta():
+    # Los tipos retirados ya no son válidos para reportar, pero su etiqueta
+    # sigue resolviéndose para no degradar fallas históricas.
+    assert "no_generacion" not in INVERSOR_TIPO_FALLA_CODIGOS
+    assert etiqueta_subtipo("inversores", "no_generacion") == "No generación"
+
+
 def test_eventos_adversos():
+    # codigo se conserva ("eventos_adversos") aunque la etiqueta sea "Eventos naturales".
     ev = get_categoria("eventos_adversos")
+    assert ev["etiqueta"] == "Eventos naturales"
     codigos = {o["codigo"] for o in ev["opciones"]}
-    assert codigos == {"incendio", "inundacion", "huracan", "otro"}
+    assert codigos == {"incendio", "inundacion", "huracan", "clima_nublado_lluvioso", "otro"}
 
 
 def test_tipo_codigo_es_calificado():
@@ -80,7 +90,7 @@ def test_validar_inversores_requiere_tipos():
 
 
 def test_validar_inversores_tipos_ok():
-    assert validar_clasificacion("inversores", None, inversores_tipos=["no_generacion", "perdida_comunicacion"]) == (True, None)
+    assert validar_clasificacion("inversores", None, inversores_tipos=["baja_tension_ac", "perdida_comunicacion"]) == (True, None)
 
 
 def test_validar_inversores_tipos_invalidos():

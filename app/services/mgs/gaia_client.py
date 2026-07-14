@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -65,72 +64,6 @@ FRONTERA_NODE_MAP: dict[str, tuple[int | None, int | None]] = {
     "frt_paso_norte": (1750, 1751),  # MGS 0032 - El Paso Norte
 }
 
-# minigranja number → frontera code (for numbered projects)
-_NUM_TO_FRT: dict[int, str] = {
-    5:  "frt58839",
-    6:  "frt60629",
-    9:  "frt63879",
-    14: "frt_olimpo14",
-    15: "frt67475",
-    16: "frt68269",
-    17: "frt66597",
-    18: "frt65205",
-    19: "frt67496",
-    20: "frt76581",
-    21: "frt73414",
-    22: "frt74080",
-    23: "frt76586",
-    24: "frt76578",
-    25: "frt82576",
-    26: "frt86234",
-    27: "frt82546",
-    40: "frt87017",
-    41: "frt87018",
-    75: "frt92219",
-    77: "frt92221",
-    32: "frt_paso_norte",
-}
-
-# keyword → frontera code
-# Cubre proyectos cuyos nombres en BD no tienen el patrón "minigranja NNN" / "mgs NNN"
-_KW_TO_FRT: dict[str, str] = {
-    # Primeras minigranjas (sin número en el nombre comercial)
-    "baraya":           "frt55044",
-    "gandalf":          "frt55090",
-    "canahuate":        "frt55093",
-    # La Paz (varias — orden importa: más específico primero)
-    "vallenata":        "frt58839",
-    "perija":           "frt60629",
-    "verso":            "frt63879",
-    "leyenda":          "frt65205",
-    "esmeralda":        "frt66597",
-    # MGS con nombres propios
-    "el son":           "frt67475",
-    "merengue":         "frt67496",
-    "la puya":          "frt68269",
-    "ibirico":          "frt73414",
-    "la cumbia":        "frt74080",
-    "san diego sur":    "frt76578",
-    "mapale":           "frt76581",
-    "joropo":           "frt76586",
-    "valencia oriente 2":"frt82546",
-    "copey occidente":  "frt82576",
-    "los bongos":       "frt82846",
-    "san pelayo":       "frt84587",
-    "valencia oriente": "frt86234",   # después de "valencia oriente 2"
-    "la cacica":        "frt87017",
-    "las piloneras":    "frt87018",
-    "la catedral":      "frt87336",
-    "cienaga generacion":"frt89202",
-    "chiriquana norte 2":"frt92219",
-    "chiriquana norte 4":"frt92221",
-    "olimpo":           "frt_olimpo14",
-    "la reserva":       "frt_reserva",
-    "paso norte":       "frt_paso_norte",
-    "la mesa":          "frt78765",
-    "el molino":        "frt60600",
-}
-
 # ── Dynamic node map (built from live Quoia API, cached 1 h) ─────────────────
 _dynamic_cache: dict | None = None
 _dynamic_cache_ts: float = 0.0
@@ -138,10 +71,10 @@ _DYNAMIC_CACHE_TTL = 3600  # seconds
 
 
 def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
-    """Return {frt, num} maps built from live Quoia API, cached for 1 hour.
+    """Return {frt, node_meter} maps built from live Quoia API, cached for 1 hour.
 
     frt: frt_code → (node_principal, node_respaldo)
-    num: minigranja_number → frt_code  (from Quoia border names)
+    node_meter: node_id → {marca, modelo, serie}
 
     Returns stale cache on fetch failure rather than None so callers can
     still serve the last known data while the API is temporarily down.
@@ -157,22 +90,22 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         logger.warning("Dynamic node map fetch failed, using stale cache: %s", exc)
         return _dynamic_cache
 
-    # meter_id → node_id
+    # meter_id → node_id, node_id → {marca, modelo, serie}
     meter_to_node: dict[int, int] = {}
+    node_meter: dict[int, dict] = {}
     for node in nodes:
         meter = node.get("meter") or {}
+        nid = node.get("id")
         if isinstance(meter, dict):
             mid = meter.get("id")
-            nid = node.get("id")
             if mid is not None and nid is not None:
                 meter_to_node[int(mid)] = int(nid)
+            info = _meter_info(meter)
+            if info and nid is not None:
+                node_meter[int(nid)] = info
 
     frt_map: dict[str, tuple[int | None, int | None]] = {}
-    num_map: dict[int, str] = {}
-    name_map: dict[str, str] = {}  # normalized_border_name → frt_code
-
     for border in borders:
-        name = border.get("name") or ""
         frt_gen = border.get("frt_generation") or {}
         if not frt_gen:
             continue
@@ -185,27 +118,38 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         node_r = meter_to_node.get(int(back_m)) if back_m else None
         frt_map[frt_code] = (node_p, node_r)
 
-        num = _mgs_number(name)
-        if num is not None and num not in num_map:
-            num_map[num] = frt_code
-
-        norm = _norm(name)
-        if norm and norm not in name_map:
-            name_map[norm] = frt_code
-
-    _dynamic_cache = {"frt": frt_map, "num": num_map, "names": name_map}
+    _dynamic_cache = {"frt": frt_map, "node_meter": node_meter}
     _dynamic_cache_ts = now
-    logger.info(
-        "Dynamic node maps built: %d borders, %d nodes, %d numbered, %d named",
-        len(frt_map), len(meter_to_node), len(num_map), len(name_map),
-    )
+    logger.info("Dynamic node maps built: %d borders, %d nodes", len(frt_map), len(meter_to_node))
     return _dynamic_cache
 
 
-def _norm(s: str) -> str:
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
+def _meter_info(meter: dict) -> dict | None:
+    """Extrae {marca, modelo, serie} de un `node["meter"]` de /api/node/retailer/."""
+    if not isinstance(meter, dict):
+        return None
+    model = meter.get("model") or {}
+    marca = model.get("brand") if isinstance(model, dict) else None
+    modelo = model.get("model") if isinstance(model, dict) else None
+    serie = meter.get("serial")
+    if not (marca or modelo or serie):
+        return None
+    return {"marca": marca, "modelo": modelo, "serie": serie}
+
+
+def get_frt_meter_info(gaia: "GaiaClient", frt_code: str) -> tuple[dict | None, dict | None]:
+    """(info_principal, info_respaldo) para un frt_code, desde el mapa dinámico de nodos.
+
+    Cada info es {marca, modelo, serie} o None si el nodo no tiene medidor
+    con esos datos o el frt_code no tiene border en Quoia."""
+    maps = _get_dynamic_maps(gaia)
+    if not maps:
+        return (None, None)
+    node_p, node_r = maps["frt"].get(frt_code.lower(), (None, None))
+    node_meter = maps.get("node_meter") or {}
+    info_p = node_meter.get(node_p) if node_p is not None else None
+    info_r = node_meter.get(node_r) if node_r is not None else None
+    return (info_p, info_r)
 
 
 def _mgs_number(name: str) -> int | None:
@@ -213,171 +157,104 @@ def _mgs_number(name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _find_frt(*names: str) -> str | None:
-    """Resolve frontera code from project name(s)."""
-    # Sort keywords longest-first so "valencia oriente 2" matches before "valencia oriente"
-    _kw_sorted = sorted(_KW_TO_FRT.items(), key=lambda x: -len(x[0]))
-    for name in names:
-        if not name:
-            continue
-        num = _mgs_number(name)
-        if num is not None:
-            frt = _NUM_TO_FRT.get(num)
-            if frt:
-                return frt
-        n = _norm(name)
-        for kw, frt in _kw_sorted:
-            if kw in n:
-                return frt
-    return None
+# Override directo proyecto_id -> (node_principal, node_respaldo).
+# Para medidores que existen como nodo en Gaia pero cuyo proyecto no está
+# registrado como border/frontera en Gaia, por lo que la resolución dinámica
+# (que arma su mapa desde los borders) no los encuentra. Mismo espíritu que el
+# fallback hardcodeado FRONTERA_NODE_MAP, pero indexado por proyecto_id.
+_PROYECTO_NODE_OVERRIDE: dict[int, tuple[int | None, int | None]] = {
+    45: (616, None),  # Minigranja Solar San Pedro — medidor de generación (nodo Gaia 616)
+}
 
 
 def _resolve_frt_and_pair(
-    *names: str,
     gaia: "GaiaClient | None" = None,
-    db_name_map: "dict[str, str] | None" = None,
+    proyecto_id: int | None = None,
+    db_proyecto_frt_map: "dict[int, str] | None" = None,
 ) -> tuple[str | None, tuple[int | None, int | None]]:
     """Core lookup: (frt_code, (node_principal, node_respaldo)).
 
     Resolution order:
-      1. Static keyword map (_KW_TO_FRT) — highest priority, most specific.
-         Prevents false number matches when a project name contains a number that
-         coincidentally maps to a different project (e.g. "MGS 0005 Cañahuate"
-         would otherwise match La Paz Vallenata via number 5).
-      2. Dynamic num_map from live Quoia API (numbered projects: MGS 0028, etc.)
-      3. Static _find_frt() (static _NUM_TO_FRT fallback for non-dynamic numbers)
-      3.5. DB name_map — substring match against fronteras.nombre_frontera (same DB,
-           more reliable than Quoia API names since both sides come from the same system)
-      4. Dynamic name_map — normalized substring match against Quoia border names
-         (covers projects without number and not in hardcoded keywords, e.g. MGS La Mesa)
-      5. Node pair from dynamic frt_map
-      6. Hardcoded FRONTERA_NODE_MAP as final fallback
+      0. Override directo por proyecto_id (medidores sin border en Gaia,
+         ver _PROYECTO_NODE_OVERRIDE).
+      1. Vínculo directo en BD: fronteras.proyecto_id -> codigo_frontera. Desde
+         que se reconcilió esa columna (ETL 2026-07-02, ver
+         scripts/etl_fronteras_proyectos.py) es la ÚNICA fuente de verdad --
+         cubre el 100% de los proyectos con frontera de generación registrada
+         (verificado 2026-07-08 contra la BD real). Si un proyecto no tiene
+         este vínculo, no se adivina por nombre/número: se retorna sin match.
+      2. Node pair desde el mapa dinámico de Quoia (frt_map).
+      3. Hardcoded FRONTERA_NODE_MAP como fallback final -- solo para cuando
+         la API de Quoia no está disponible ni siquiera para el mapa
+         dinámico (un problema de disponibilidad, no de vínculos mal hechos).
+
+    Se quitó la adivinanza por nombre/número (num_map dinámico + _find_frt
+    estático) que quedaba como fallback secundario tras el vínculo directo:
+    con este último cubriendo el 100% de los casos reales, esos pasos nunca
+    se ejecutaban y eran la fuente de los bugs de mapeo original (Cañahuate,
+    El Molino, prefijos "GD" vs "Minigranja Solar"). Si el vínculo directo de
+    un proyecto llega a romperse, el fix es corregir fronteras.proyecto_id
+    (correr scripts/etl_fronteras_proyectos.py), no volver a adivinar.
     """
-    maps = _get_dynamic_maps(gaia) if gaia is not None else None
+    if proyecto_id is not None and proyecto_id in _PROYECTO_NODE_OVERRIDE:
+        return (None, _PROYECTO_NODE_OVERRIDE[proyecto_id])
 
-    frt: str | None = None
-
-    # 1. Keyword lookup — takes priority over number-based resolution.
-    _kw_sorted = sorted(_KW_TO_FRT.items(), key=lambda x: -len(x[0]))
-    for name in names:
-        if not name:
-            continue
-        n = _norm(name)
-        for kw, kw_frt in _kw_sorted:
-            if kw in n:
-                frt = kw_frt
-                break
-        if frt:
-            break
-
-    # 2. Number-based lookup against dynamic map
-    if frt is None and maps:
-        for name in names:
-            if not name:
-                continue
-            num = _mgs_number(name)
-            if num is not None:
-                frt = maps["num"].get(num)
-                if frt:
-                    break
-
-    # 3. Static _find_frt (static _NUM_TO_FRT fallback)
-    if frt is None:
-        frt = _find_frt(*names)
-
-    # 3.5. DB name_map — substring match against fronteras.nombre_frontera.
-    #      More reliable than Quoia API names since both project and frontera
-    #      names live in the same DB.
-    if frt is None and db_name_map:
-        sorted_db = sorted(db_name_map.items(), key=lambda x: -len(x[0]))
-        for input_name in names:
-            if not input_name:
-                continue
-            n = _norm(input_name)
-            if len(n) < 4:
-                continue
-            for border_norm, border_frt in sorted_db:
-                if len(border_norm) < 4:
-                    continue
-                if n in border_norm or border_norm in n:
-                    frt = border_frt
-                    break
-            if frt:
-                break
-
-    # 4. Dynamic name matching: check if any input name is a substring of a
-    #    Quoia border name or vice versa. Sorted longest-first to prefer specific
-    #    matches. Minimum 4 chars to avoid false positives on short tokens.
-    if frt is None and maps and maps.get("names"):
-        name_map = maps["names"]
-        # Sort longest border name first (more specific match wins)
-        sorted_names = sorted(name_map.items(), key=lambda x: -len(x[0]))
-        for input_name in names:
-            if not input_name:
-                continue
-            n = _norm(input_name)
-            if len(n) < 4:
-                continue
-            for border_norm, border_frt in sorted_names:
-                if len(border_norm) < 4:
-                    continue
-                if n in border_norm or border_norm in n:
-                    frt = border_frt
-                    break
-            if frt:
-                break
-
+    frt = db_proyecto_frt_map.get(proyecto_id) if (proyecto_id is not None and db_proyecto_frt_map) else None
     if frt is None:
         return (None, (None, None))
 
-    # 5. Node pair from dynamic map
+    maps = _get_dynamic_maps(gaia) if gaia is not None else None
     if maps and frt in maps["frt"]:
         return (frt, maps["frt"][frt])
 
-    # 6. Hardcoded fallback
     pair = FRONTERA_NODE_MAP.get(frt)
     return (frt, pair if pair else (None, None))
 
 
-def build_db_name_map(fronteras: list[tuple[str, str]]) -> dict[str, str]:
-    """Build a normalized nombre→frt_code map from DB fronteras (nombre_frontera, codigo_frontera) pairs.
+def build_db_proyecto_frt_map(fronteras: list[tuple[int, str]]) -> dict[int, str]:
+    """Build a proyecto_id -> frt_code map from DB fronteras (proyecto_id, codigo_frontera) pairs.
 
-    Call this once per request with the result of querying the fronteras table,
-    then pass the result to find_gaia_node_pair as db_name_map.
+    Esta es la fuente de verdad directa desde que fronteras.proyecto_id se
+    reconcilió (ver scripts/etl_fronteras_proyectos.py, 2026-07-02): reemplaza
+    la necesidad de adivinar por nombre/número en la mayoría de los casos.
+    Pásalo como db_proyecto_frt_map a find_gaia_node_pair junto con el
+    proyecto_id del proyecto que se está resolviendo.
     """
-    result: dict[str, str] = {}
-    for nombre, codigo in fronteras:
-        if nombre and codigo:
-            key = _norm(nombre)
-            if key and key not in result:
-                result[key] = codigo
+    result: dict[int, str] = {}
+    for proyecto_id, codigo in fronteras:
+        if proyecto_id is not None and codigo:
+            result.setdefault(int(proyecto_id), codigo.lower())
     return result
 
 
-def find_gaia_node_id(*names: str, gaia: "GaiaClient | None" = None) -> int | None:
+def find_gaia_node_id(
+    gaia: "GaiaClient | None" = None,
+    proyecto_id: int | None = None,
+    db_proyecto_frt_map: "dict[int, str] | None" = None,
+) -> int | None:
     """Find the principal Gaia node_id for a project. Returns None if not found."""
-    _, (node_p, _) = _resolve_frt_and_pair(*names, gaia=gaia)
+    _, (node_p, _) = _resolve_frt_and_pair(
+        gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
+    )
     return node_p
 
 
 def find_gaia_node_pair(
-    *names: str,
     gaia: "GaiaClient | None" = None,
-    db_name_map: "dict[str, str] | None" = None,
+    proyecto_id: int | None = None,
+    db_proyecto_frt_map: "dict[int, str] | None" = None,
 ) -> tuple[int | None, int | None]:
     """Find both (principal, respaldo) Gaia node IDs for a project.
 
-    If db_name_map is provided (built from fronteras.nombre_frontera via
-    build_db_name_map), it is used for name matching before falling back to
-    the live Quoia API maps — giving a more reliable resolution since both
-    project names and frontera names come from the same DB.
-
-    If gaia client is provided, resolves node IDs from the live Quoia API
-    (cached 1 hour) — covers all registered borders including new projects
-    not in the hardcoded map. Falls back to FRONTERA_NODE_MAP if needed.
-    Returns (None, None) if no mapping is found.
+    Requiere proyecto_id + db_proyecto_frt_map (construido con
+    build_db_proyecto_frt_map desde fronteras.proyecto_id) -- es la única
+    fuente de verdad, no se adivina por nombre. Si gaia se pasa, resuelve el
+    par de nodos desde el mapa dinámico de Quoia (cacheado 1h); si no, cae al
+    hardcodeado FRONTERA_NODE_MAP. Retorna (None, None) si no hay vínculo.
     """
-    _, pair = _resolve_frt_and_pair(*names, gaia=gaia, db_name_map=db_name_map)
+    _, pair = _resolve_frt_and_pair(
+        gaia=gaia, proyecto_id=proyecto_id, db_proyecto_frt_map=db_proyecto_frt_map,
+    )
     return pair
 
 
@@ -498,23 +375,30 @@ class GaiaClient:
         data = self._get(url, params=params)
         return data if isinstance(data, list) else []
 
-    def get_border_measurements(self, frt_code: str, date_str: str) -> list[dict]:
-        """Fetch hourly eae measurements for a border (frontera) by its SIC code.
+    def get_border_report_status(self, border_id: int, date_str: str) -> dict | None:
+        """Fetch the ASIC report status for a border on a specific date.
 
-        Uses /api/cgm/v1/border/{frt_code}/measurements/ with the same JWT auth.
-        Returns list of dicts with 'time' and energy fields, empty list on error.
+        Uses /api/cgm/v1/report_/historic/{border_id}/ (paginated, most recent
+        first) and returns the entry matching report_date == date_str, or None
+        if that date has no report yet.
+
+        Returns a dict with 'status' ('OK'/'WARNING'/'ERROR'), and the hourly
+        curves 'reported_data_main' / 'reported_data_backup' (24 floats each).
         """
-        url = f"{self._base}/api/cgm/v1/border/{frt_code}/measurements/"
-        params = {
-            "init_date": f"{date_str}T00:00:00-05:00",
-            "end_date":  f"{date_str}T23:59:59-05:00",
-        }
-        data = self._get(url, params=params)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return data.get("results") or data.get("measurements") or []
-        return []
+        url = f"{self._base}/api/cgm/v1/report_/historic/{border_id}/"
+        params: dict | None = {"page_size": 100}
+        for _ in range(30):
+            data = self._get(url, params=params)
+            if not isinstance(data, dict):
+                return None
+            for reporte in data.get("results", []):
+                if reporte.get("report_date") == date_str:
+                    return reporte
+            nxt = data.get("next")
+            if not nxt:
+                return None
+            url, params = nxt, None
+        return None
 
     def get_all_borders(self) -> list[dict]:
         """Fetch all borders registered in Quoia (paginated). Returns flat list of project dicts.
@@ -661,36 +545,92 @@ class GaiaClient:
         _ap_divisor = 1000.0 if _max_ap > 5000 else 1.0
 
         # ── Time series for power chart → always kW ───────────────────────────
-        power_series = [
-            {"time": r["time"], "kw": round(
-                sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor, 3
-            )}
-            for r in results["ap"]
-            if any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")
-        ]
+        # abs(): algunos medidores reportan AP en negativo todo el día (polaridad
+        # del CT invertida en sitio) mientras eae sigue acumulando bien -- ver
+        # caso MGS 0032 El Paso Norte, 2026-07-02. Esta función solo se usa para
+        # monitorear generación (nunca consumo puro), así que una potencia
+        # negativa nunca es un dato real a preservar, siempre es el defecto del
+        # medidor. Se deja un warning para poder rastrear qué medidores lo
+        # tienen y mandarlos a revisar físicamente -- no se corrige solo en
+        # silencio para siempre.
+        _ap_negative_count = 0
+        ap_series = []
+        for r in results["ap"]:
+            if not (any(r.get(k) is not None for k in ("app1", "app2", "app3")) and r.get("time")):
+                continue
+            raw_kw = sum(float(r.get(k) or 0) for k in ("app1", "app2", "app3")) / _ap_divisor
+            if raw_kw < 0:
+                _ap_negative_count += 1
+            ap_series.append({"time": r["time"], "kw": round(abs(raw_kw), 3)})
 
-        # Fallback: si no hay datos de AP, derivar potencia de los deltas de eae
-        if not power_series and eae:
-            _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
-            _prev_t: str | None = None
-            for r in eae:
-                t = r.get("time")
-                if not t:
-                    continue
-                delta_kwh = sum(float(r.get(k) or 0) for k in ("eaepd1", "eaepd2", "eaepd3")) / _eae_factor
-                if delta_kwh <= 0 or _prev_t is None:
-                    _prev_t = t
-                    continue
-                try:
-                    from datetime import datetime, timezone
-                    def _parse(s: str):
-                        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-                    dt_h = (_parse(t) - _parse(_prev_t)).total_seconds() / 3600.0
-                    if dt_h > 0:
-                        power_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
-                except Exception:
-                    pass
+        if _ap_negative_count:
+            logger.warning(
+                "Medidor %s reportó AP negativo en %d de %d lecturas hoy -- "
+                "probable polaridad de CT invertida en sitio; se corrigió el signo para mostrar.",
+                node_id, _ap_negative_count, len(ap_series),
+            )
+
+        # Potencia derivada de los deltas de eae -- se calcula siempre (no solo
+        # cuando AP está vacío del todo) para poder rellenar los huecos de
+        # tiempo donde el medidor dejó de reportar potencia instantánea (AP)
+        # pero siguió acumulando energía exportada (eae). Antes el fallback
+        # solo se activaba si AP no tenía NINGÚN dato en todo el día; si el
+        # medidor reportaba AP solo hasta cierta hora (ej. se cortó a media
+        # tarde) la curva quedaba truncada ahí aunque el total de energía sí
+        # incluyera esas horas -- ver caso Perijá, 2026-07-02.
+        def _parse_t(s: str):
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+        eae_derived_series = []
+        _eae_factor = 1000.0 if node_id in _EAE_WH_NODES else 1.0  # Wh→kWh si aplica
+        _prev_t: str | None = None
+        for r in eae:
+            t = r.get("time")
+            if not t:
+                continue
+            delta_kwh = sum(float(r.get(k) or 0) for k in ("eaepd1", "eaepd2", "eaepd3")) / _eae_factor
+            if delta_kwh <= 0 or _prev_t is None:
                 _prev_t = t
+                continue
+            try:
+                dt_h = (_parse_t(t) - _parse_t(_prev_t)).total_seconds() / 3600.0
+                # Piso mínimo de 6 min: si dos lecturas de eae caen casi pegadas
+                # (a veces pasa, un registro extra a un segundo del anterior),
+                # dividir por un intervalo casi nulo dispara una potencia
+                # absurda (ej. 500,000 kW) -- mejor descartar ese punto que
+                # inventar un pico sin sentido.
+                if dt_h >= 0.1:
+                    eae_derived_series.append({"time": t, "kw": round(delta_kwh / dt_h, 3)})
+            except Exception:
+                pass
+            _prev_t = t
+
+        # AP tiene prioridad (es la medición real de potencia instantánea);
+        # eae rellena cualquier hueco de tiempo sin AP -- al inicio, en medio
+        # (ej. se cae la conexión y se recupera más tarde) o al final. No basta
+        # con rellenar solo la cola: si AP se cae y luego se recupera, el hueco
+        # queda en medio del día, no al final. La comparación es por cercanía
+        # en el tiempo (±10 min), no por texto exacto: ap y eae no siempre
+        # comparten el mismo segundo exacto de lectura aunque sean del mismo
+        # intervalo (ej. 16:00:00 vs 16:00:01), y comparar el string tal cual
+        # dejaba pasar "huecos" falsos que no eran huecos reales.
+        _GAP_TOLERANCE_SEC = 600  # 10 min
+        try:
+            _ap_dt = sorted(_parse_t(pt["time"]) for pt in ap_series)
+        except Exception:
+            _ap_dt = []
+
+        def _tiene_ap_cerca(t_str: str) -> bool:
+            try:
+                t = _parse_t(t_str)
+            except Exception:
+                return True  # si no se puede parsear, no lo agregamos (más cauto)
+            return any(abs((t - apt).total_seconds()) <= _GAP_TOLERANCE_SEC for apt in _ap_dt)
+
+        power_series = sorted(
+            ap_series + [pt for pt in eae_derived_series if not _tiene_ap_cerca(pt["time"])],
+            key=lambda pt: pt["time"],
+        )
 
         # ── eae unit: nodos en _EAE_WH_NODES retornan Wh; el resto ya es kWh ──
         _eae_raw = _sum("eaepd1", "eaepd2", "eaepd3", data=eae)

@@ -31,6 +31,7 @@ class ClienteCreate(BaseModel):
     correo_soporte: Optional[str] = None
     correo_operacional: Optional[str] = None
     correos_operacionales: list[str] = []
+    correos_cgm: list[str] = []
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -43,8 +44,10 @@ class ClienteCreate(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     rut_url: Optional[str] = None
+    origen_tipo: Optional[str] = None
+    origen_detalle: Optional[str] = None
 
-    @field_validator("correos_operacionales", mode="before")
+    @field_validator("correos_operacionales", "correos_cgm", mode="before")
     @classmethod
     def validate_correos(cls, v):
         return _validate_email_list(v or [])
@@ -77,6 +80,7 @@ class ClienteDocumentoCreate(BaseModel):
     archivo_nombre: Optional[str] = None
     servicio_id: Optional[int] = None
     notas: Optional[str] = None
+    oportunidad_id: Optional[int] = None
 
 
 class ClienteDocumentoUpdate(BaseModel):
@@ -88,6 +92,7 @@ class ClienteDocumentoUpdate(BaseModel):
     archivo_nombre: Optional[str] = None
     servicio_id: Optional[int] = None
     notas: Optional[str] = None
+    oportunidad_id: Optional[int] = None
 
 
 class ClienteDocumentoOut(ClienteDocumentoCreate):
@@ -110,6 +115,7 @@ class ClienteBase(BaseModel):
     correo_soporte: Optional[str] = None
     correo_operacional: Optional[str] = None
     correos_operacionales: list[str] = []
+    correos_cgm: list[str] = []
     telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -133,10 +139,12 @@ class ClienteListOut(ClienteBase):
 
 
 class ClienteOut(ClienteBase):
+    origen_tipo: Optional[str] = None
+    origen_detalle: Optional[str] = None
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 
-    @field_validator("servicios", "documentos_comerciales", "correos_operacionales", mode="before")
+    @field_validator("servicios", "documentos_comerciales", "correos_operacionales", "correos_cgm", mode="before")
     @classmethod
     def none_to_list(cls, v):
         if v is None:

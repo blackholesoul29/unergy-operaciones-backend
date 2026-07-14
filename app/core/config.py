@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 480
     # Token de larga duración para la app móvil (PWA) — default 30 días
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
+    # CRM comercial: días sin respuesta antes de alertar (configurable por env).
+    COMERCIAL_ALERTA_DIAS: int = 5
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod
@@ -101,6 +103,8 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "operaciones@unergy.io"
+    # Copia oculta (BCC) del Reporte CGM -- lista separada por comas.
+    CORREO_SEGUIMIENTO: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

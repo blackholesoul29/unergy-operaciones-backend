@@ -1,26 +1,16 @@
 """
-Matching fuzzy entre nombres de proyectos externos (Excel / fallas-unergy)
+Matching entre nombres de proyectos externos (Excel / fallas-unergy / webhooks)
 y los registros en la tabla proyectos.
 
 Estrategia por orden de prioridad:
-  1. Exacto sobre nombre_comercial (case-insensitive)
-  2. Exacto sobre alguno de los alias_monitoreo (separados por |)
-  3. Exacto sobre nombre_bitacora o nombre_clientes (si existen)
-  4. Coincidencia parcial: el término externo contiene nombre_comercial o viceversa
-  5. Similitud SequenceMatcher ≥ 0.75 sobre nombre_comercial
+  1. Exacto (case-insensitive, sin tildes) sobre nombre_comercial, nombre_bitacora,
+     nombre_clientes o alguno de los alias_monitoreo (separados por |)
+  2. app.utils.nombre_matching.mejor_candidato() -- ver ese módulo para el detalle
+     del algoritmo (compartido con scripts/cargar_fronteras_gescon.py).
 """
-import re
-import unicodedata
-from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
 from app.models.proyectos import Proyecto
-
-
-def _normalize(text: str) -> str:
-    """Quita tildes, pone minúsculas, elimina caracteres no alfanuméricos."""
-    nfkd = unicodedata.normalize("NFKD", text)
-    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9\s]", " ", ascii_str.lower()).strip()
+from app.utils.nombre_matching import normalizar, mejor_candidato
 
 
 def _all_names(proyecto: Proyecto) -> list[str]:
@@ -43,38 +33,15 @@ def find_proyecto_by_name(db: Session, nombre_externo: str) -> Proyecto | None:
         return None
 
     proyectos = db.query(Proyecto).all()
-    norm_ext = _normalize(nombre_externo)
+    norm_ext = normalizar(nombre_externo)
 
-    # Paso 1 y 2 y 3: coincidencia exacta normalizada
+    # 1. Coincidencia exacta normalizada
     for proy in proyectos:
         for name in _all_names(proy):
-            if _normalize(name) == norm_ext:
+            if normalizar(name) == norm_ext:
                 return proy
 
-    # Paso 4: coincidencia parcial (uno contiene al otro)
-    best_partial: Proyecto | None = None
-    best_partial_len = 0
-    for proy in proyectos:
-        for name in _all_names(proy):
-            norm_db = _normalize(name)
-            if norm_ext in norm_db or norm_db in norm_ext:
-                # preferir el match más largo (más específico)
-                matched_len = max(len(norm_ext), len(norm_db))
-                if matched_len > best_partial_len:
-                    best_partial = proy
-                    best_partial_len = matched_len
-
-    if best_partial:
-        return best_partial
-
-    # Paso 5: similitud SequenceMatcher
-    best_score = 0.0
-    best_fuzzy: Proyecto | None = None
-    for proy in proyectos:
-        for name in _all_names(proy):
-            score = SequenceMatcher(None, norm_ext, _normalize(name)).ratio()
-            if score > best_score:
-                best_score = score
-                best_fuzzy = proy
-
-    return best_fuzzy if best_score >= 0.75 else None
+    # 2. Solapamiento de tokens + similitud, con desambiguación (ver nombre_matching.py)
+    candidatos = [(proy, _all_names(proy)) for proy in proyectos]
+    ganador, _score = mejor_candidato(nombre_externo, candidatos)
+    return ganador

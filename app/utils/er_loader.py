@@ -351,11 +351,13 @@ def parsear_er(path: str, tipo: str = "normal", mapeos: dict | None = None,
             ln["hoja"], ln["celda"] = m["hoja"], m["celda"]
 
     # Si el mapeo cambió ingreso bruto / detalle, recomputar los totales de ingresos.
+    # Un proyecto puede tener VARIAS fuentes de ingreso bruto (Terpel 1, Terpel 2…):
+    # sumar todas las líneas "bruto"/"despacho", no solo la primera.
     if ingresos_detalle:
-        ib = next((d["valor"] for d in ingresos_detalle
-                   if "bruto" in _norm(d["concepto"]) or "despacho" in _norm(d["concepto"])), None)
-        if ib is not None:
-            ingreso_bruto = ib
+        ib_lineas = [d["valor"] for d in ingresos_detalle
+                     if "bruto" in _norm(d["concepto"]) or "despacho" in _norm(d["concepto"])]
+        if ib_lineas:
+            ingreso_bruto = sum(ib_lineas)
         total_ingresos = sum(d["valor"] for d in ingresos_detalle)
 
     return {

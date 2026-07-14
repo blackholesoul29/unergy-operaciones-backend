@@ -75,10 +75,15 @@ ESTRUCTURA_FALLAS: list[dict] = [
         "descripcion": "Inversores del proyecto (lista parametrizable por proyecto).",
         "requiere_proyecto_unico": True,
         "tipos_falla": [
-            {"codigo": "no_generacion", "etiqueta": "No generación"},
-            {"codigo": "generacion_anomala", "etiqueta": "Generación anómala"},
-            {"codigo": "limitacion_potencia", "etiqueta": "Limitación de potencia"},
-            {"codigo": "strings_mal_conectados", "etiqueta": "Strings mal conectados"},
+            {"codigo": "baja_tension_ac", "etiqueta": "Baja tensión AC"},
+            {"codigo": "baja_tension_dc", "etiqueta": "Baja tensión DC"},
+            {"codigo": "baja_resistencia_aislamiento", "etiqueta": "Baja resistencia de aislamiento"},
+            {"codigo": "problemas_ventilacion", "etiqueta": "Problemas de ventilación"},
+            {"codigo": "falla_dispositivo", "etiqueta": "Falla del dispositivo"},
+            {"codigo": "problema_cadena_fotovoltaica", "etiqueta": "Problema en cadena fotovoltaico"},
+            {"codigo": "sobre_temperatura", "etiqueta": "Sobre temperatura"},
+            {"codigo": "arco_ac", "etiqueta": "Arco en AC"},
+            {"codigo": "arco_dc", "etiqueta": "Arco en DC"},
             {
                 "codigo": "perdida_comunicacion",
                 "etiqueta": "Pérdida de comunicación (internet)",
@@ -88,21 +93,32 @@ ESTRUCTURA_FALLAS: list[dict] = [
     },
     {
         "codigo": "eventos_adversos",
-        "etiqueta": "Eventos adversos",
+        "etiqueta": "Eventos naturales",
         "icono": "pi pi-exclamation-triangle",
         "color_hex": "#EF4444",
         "tipo": "opcion",
-        "descripcion": "Eventos externos que afectan la operación del proyecto.",
+        "descripcion": "Eventos naturales o climáticos que afectan la operación del proyecto.",
         "opciones": [
             {"codigo": "incendio", "etiqueta": "Incendio"},
             {"codigo": "inundacion", "etiqueta": "Inundación"},
             {"codigo": "huracan", "etiqueta": "Huracán"},
+            {"codigo": "clima_nublado_lluvioso", "etiqueta": "Clima nublado/lluvioso"},
             {"codigo": "otro", "etiqueta": "Otro", "requiere_detalle": True, "detalle_label": "Describe el evento"},
         ],
     },
 ]
 
 CATEGORIA_CODIGOS = {c["codigo"] for c in ESTRUCTURA_FALLAS}
+
+# Tipos de falla de inversores retirados de las opciones (ya no se ofrecen al
+# reportar), pero conservados para resolver la etiqueta de fallas históricas y
+# no degradar informes/vistas ya guardados. NO reintroducir en tipos_falla.
+INVERSOR_TIPOS_LEGACY = {
+    "no_generacion": "No generación",
+    "generacion_anomala": "Generación anómala",
+    "limitacion_potencia": "Limitación de potencia",
+    "strings_mal_conectados": "Strings mal conectados",
+}
 
 INVERSOR_TIPO_FALLA_CODIGOS = {
     t["codigo"]
@@ -145,6 +161,9 @@ def etiqueta_subtipo(categoria_codigo: str, subtipo_codigo: str) -> str | None:
     for op in pool:
         if op["codigo"] == subtipo_codigo:
             return op["etiqueta"]
+    # Respaldo: tipos de inversores retirados (fallas históricas conservan su etiqueta)
+    if categoria_codigo == "inversores":
+        return INVERSOR_TIPOS_LEGACY.get(subtipo_codigo)
     return None
 
 

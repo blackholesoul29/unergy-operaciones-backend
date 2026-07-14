@@ -1,63 +1,81 @@
 """
 Alertas operativas basadas en el estado del GESCON/ASIC.
 
-Lógica GESCON (GESCON_LOGICA.md):
-- Por cada SIC, el estado vigente es el de la última solicitud publicada
-  (excluye desistimientos), ordenada por fecha_solicitud DESC.
-- Activo = tipo != 'terminacion' AND fecha_fin >= hoy.
+Vigencia GESCON: resuelta por `app/utils/gescon_vigencia.resolver_vigencias`
+(el mismo núcleo de `_resolve_gescon` de Cumplimiento y de GET /asic). Una fila
+es la versión vigente de su SIC solo si ningún relevo/modificación posterior la
+superó — procesando cronológicamente por `fecha_inicio` (cuándo tomó efecto),
+no por `fecha_solicitud` (cuándo se radicó; ordenar por radicación era el bug
+histórico documentado en el docstring de `_resolve_gescon`).
 
-Usa DISTINCT ON (PostgreSQL) para obtener la última fila por SIC en una sola
-pasada — mucho más eficiente que la alternativa subquery+join.
+Activo hoy = versión vigente + tipo != 'terminacion' + fecha_fin efectiva >= hoy.
+(El DISTINCT ON anterior por fecha_solicitud contaba filas ya relevadas: una
+planta reubicada de contrato aparecía "activa en 2+ contratos a la vez".)
 """
 from datetime import date
 from collections import defaultdict
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.proyectos import Proyecto
+from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
-
-_LATEST_SIC_SQL = text("""
-    SELECT DISTINCT ON (codigo_sic_contrato)
-        id,
-        proyecto_id,
-        codigo_sic_contrato,
-        tipo_solicitud,
-        contrato_interno,
-        fecha_solicitud,
-        fecha_inicio,
-        fecha_fin,
-        porcentaje_fncer
-    FROM asic_solicitudes
-    WHERE estado_solicitud = 'publicado'
-      AND tipo_solicitud    != 'desistimiento'
-      AND codigo_sic_contrato IS NOT NULL
-    ORDER BY codigo_sic_contrato, fecha_solicitud DESC NULLS LAST
-""")
 
 
 @router.get("/contratos-ppa")
 def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
     hoy = date.today()
 
-    # ── 1. Latest published solicitud per SIC (single query, DISTINCT ON) ───
-    rows = db.execute(_LATEST_SIC_SQL).mappings().all()
+    # ── 1. Universo publicado + resolución de vigencia efectiva ─────────────
+    records = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+            AsicSolicitud.codigo_sic_contrato.isnot(None),
+        )
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        )
+        .all()
+    )
+    # hasta=hoy: un relevo/modificación con efecto FUTURO aún no desplaza a la
+    # versión vigente de hoy (mismo principio del bug histórico de ordenar por
+    # fecha_solicitud). La pregunta de este endpoint es "¿qué está activo HOY?".
+    vigencias = resolver_vigencias(records, hasta=hoy)
 
-    # ── 2. Active SICs: not terminated + fecha_fin >= hoy ───────────────────
+    # ── 2. Activos hoy: versión vigente + fecha_fin efectiva >= hoy ─────────
     sics_por_proyecto: dict[int, list[dict]] = defaultdict(list)
-    for r in rows:
-        if r["tipo_solicitud"] == "terminacion":
+    for r in records:
+        v = vigencias[r.id]
+        if not v.vigente:
             continue
-        if r["fecha_fin"] is None or r["fecha_fin"] < hoy:
+        if r.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
             continue
-        if r["proyecto_id"]:
-            sics_por_proyecto[r["proyecto_id"]].append(dict(r))
+        fin = v.fecha_fin_efectiva
+        if fin is None or fin < hoy:
+            # None (abierta) excluida por paridad con el comportamiento previo.
+            continue
+        if r.proyecto_id:
+            sics_por_proyecto[r.proyecto_id].append({
+                "id": r.id,
+                "codigo_sic_contrato": r.codigo_sic_contrato,
+                "contrato_interno": r.contrato_interno,
+                "tipo_solicitud": getattr(r.tipo_solicitud, "value", r.tipo_solicitud),
+                "fecha_inicio": r.fecha_inicio,
+                # ventana EFECTIVA: es la que define la simultaneidad real
+                "fecha_fin": fin,
+                "porcentaje_fncer": r.porcentaje_fncer,
+                "es_duplicado": bool(r.es_duplicado),
+            })
 
     proyectos_con_sic = set(sics_por_proyecto.keys())
 
@@ -90,10 +108,13 @@ def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_u
     ]
 
     # ── 5. Duplicados ─────────────────────────────────────────────────────────
+    # Solo cuenta la duplicidad SIN resolver: los registros marcados es_duplicado
+    # (compra en bolsa) ya declararon su cruce y no deben volver a alertar.
     proyecto_idx = {p.id: p for p in proyectos}
     duplicados = []
     for pid, sics in sics_por_proyecto.items():
-        if len(sics) < 2:
+        sin_resolver = [s for s in sics if not s["es_duplicado"]]
+        if len(sin_resolver) < 2:
             continue
         p = proyecto_idx.get(pid)
         if not p:
@@ -114,7 +135,7 @@ def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_u
                             "fecha_fin": str(s["fecha_fin"]) if s["fecha_fin"] else None,
                             "porcentaje_fncer": float(s["porcentaje_fncer"]) if s["porcentaje_fncer"] else None,
                         }
-                        for s in sics
+                        for s in sin_resolver
                     ],
                     key=lambda x: x["fecha_inicio"] or "",
                 ),

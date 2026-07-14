@@ -28,13 +28,6 @@ class FuenteDatosEnum(str, enum.Enum):
     otro = "otro"
 
 
-class EstadoCertificadoEnum(str, enum.Enum):
-    vigente = "vigente"
-    transferido = "transferido"
-    vencido = "vencido"
-    anulado = "anulado"
-
-
 class RecProceso(Base):
     __tablename__ = "rec_procesos"
 
@@ -59,23 +52,3 @@ class RecProceso(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="rec_procesos")
-    certificado: Mapped["RecCertificado | None"] = relationship("RecCertificado", back_populates="proceso", uselist=False)
-
-
-class RecCertificado(Base):
-    __tablename__ = "rec_certificados"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proceso_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rec_procesos.id"), unique=True, nullable=False, index=True)
-    numero_certificado: Mapped[str] = mapped_column(String(100), nullable=False)
-    fecha_emision: Mapped[date] = mapped_column(Date, nullable=False)
-    energia_certificada_mwh: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
-    periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)
-    periodo_fin: Mapped[date] = mapped_column(Date, nullable=False)
-    titular_nombre: Mapped[str] = mapped_column(String(255), nullable=False)
-    titular_nit: Mapped[str] = mapped_column(String(20), nullable=False)
-    estado: Mapped[str] = mapped_column(SAEnum(EstadoCertificadoEnum, name="estado_certificado_enum"), nullable=False, default="vigente")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proceso: Mapped["RecProceso"] = relationship("RecProceso", back_populates="certificado")

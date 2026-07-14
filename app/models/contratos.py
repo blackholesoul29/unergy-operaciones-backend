@@ -83,6 +83,9 @@ class ContratoServicio(Base):
     estado: Mapped[str] = mapped_column(SAEnum(EstadoContratoEnum, name="estado_contrato_enum"), nullable=False, default="vigente")
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_inicio_om: Mapped[date | None] = mapped_column(Date, nullable=True)  # inicio de operación real (para indexación O&M)
+    # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
+    renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fecha_indexacion: Mapped[date | None] = mapped_column(Date, nullable=True)  # fecha de indexación de tarifas
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -104,7 +107,6 @@ class ContratoServicio(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contratos_servicio")
-    documentos: Mapped[list] = relationship("Documento", primaryjoin="and_(Documento.entity_type=='contrato_servicio', foreign(Documento.entity_id)==ContratoServicio.id)", viewonly=True)
     contratante: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[contratante_id])
     prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
@@ -143,6 +145,8 @@ class PPAContrato(Base):
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
+    renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -214,25 +218,3 @@ class PagoServicio(Base):
     )
 
 
-class EstadoArriendoEnum(str, enum.Enum):
-    vigente = "vigente"
-    vencido = "vencido"
-    terminado = "terminado"
-    en_renovacion = "en_renovacion"
-
-
-class ContratoArriendo(Base):
-    __tablename__ = "contratos_arriendo"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    propietario_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
-    hectareas: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
-    verificado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
-    estado: Mapped[str | None] = mapped_column(SAEnum(EstadoArriendoEnum, name="estado_arriendo_enum"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contratos_arriendo")

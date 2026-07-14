@@ -10,6 +10,7 @@ from app.models.asic import (
 )
 from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate, AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut
+from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/asic", tags=["ASIC"])
 
@@ -82,11 +83,59 @@ def _validar_fecha_fin_vs_ppa(db: Session, solicitud: AsicSolicitud) -> None:
         )
 
 
+def _validar_flags_exclusivos(es_duplicado: bool, uso_del_recurso: bool) -> None:
+    """'Compra en bolsa' (es_duplicado) y 'Uso del recurso' son figuras distintas:
+    la primera es compra real en el mercado spot; la segunda, compromiso de pagarle
+    al cliente a precio bolsa una planta que entra al contrato. No pueden coexistir."""
+    if es_duplicado and uso_del_recurso:
+        raise HTTPException(
+            422,
+            "Un registro no puede ser 'Compra en bolsa' y 'Uso del recurso' a la vez. "
+            "Marca 'Compra en bolsa' si la planta coexiste en otro contrato con origen "
+            "bolsa, o 'Uso del recurso' si el cliente está en bolsa y Unergy usa la "
+            "planta para cumplir este contrato.",
+        )
+
+
 def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
     d = AsicSolicitudOut.model_validate(s)
     if s.proyecto:
         d.planta_nombre = s.proyecto.nombre_comercial
     return d
+
+
+def _aplicar_vigencia(db: Session, outs: list[AsicSolicitudOut]) -> list[AsicSolicitudOut]:
+    """Rellena fecha_fin_efectiva / es_version_vigente en cada salida.
+
+    La resolución corre SIEMPRE sobre el universo completo de solicitudes
+    publicadas (no sobre el subconjunto filtrado del request): el relevo que
+    recorta a una fila puede venir de otra planta u otro contrato que el filtro
+    excluyó. Filas no publicadas o desistimientos no participan del walk:
+    conservan su fecha_fin cruda y es_version_vigente=False.
+    """
+    universo = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+        )
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        )
+        .all()
+    )
+    vigencias = resolver_vigencias(universo)
+    for o in outs:
+        v = vigencias.get(o.id)
+        if v is not None:
+            o.fecha_fin_efectiva = v.fecha_fin_efectiva
+            o.es_version_vigente = v.vigente
+        else:
+            o.fecha_fin_efectiva = o.fecha_fin
+            o.es_version_vigente = False
+    return outs
 
 
 def _planta_por_sic(db: Session, sics: set[str]) -> dict[str, str]:
@@ -150,7 +199,7 @@ def list_solicitudes(
     if proyecto_id:
         q = q.filter(AsicSolicitud.proyecto_id == proyecto_id)
     rows = q.order_by(AsicSolicitud.fecha_solicitud.desc().nullslast(), AsicSolicitud.id.desc()).all()
-    return _enriquecer_planta(db, [_to_out(s) for s in rows])
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s) for s in rows]))
 
 
 @router.patch("/{id}", response_model=AsicSolicitudOut)
@@ -165,12 +214,13 @@ def patch_solicitud(
         raise HTTPException(404, "No encontrado")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
+    _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
     _validar_fecha_fin_vs_ppa(db, s)
     _auto_terminate(db, s)
     db.commit()
     db.refresh(s)
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == id).first()
-    return _enriquecer_planta(db, [_to_out(s)])[0]
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s)]))[0]
 
 
 @router.post("", response_model=AsicSolicitudOut, status_code=201)
@@ -180,6 +230,7 @@ def create_solicitud(
     _=Depends(get_current_user),
 ):
     s = AsicSolicitud(**data.model_dump())
+    _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
     db.add(s)
     db.flush()
     _validar_fecha_fin_vs_ppa(db, s)
@@ -187,7 +238,7 @@ def create_solicitud(
     db.commit()
     db.refresh(s)
     s = db.query(AsicSolicitud).options(joinedload(AsicSolicitud.proyecto)).filter(AsicSolicitud.id == s.id).first()
-    return _enriquecer_planta(db, [_to_out(s)])[0]
+    return _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(s)]))[0]
 
 
 @router.delete("/{id}", status_code=204)

@@ -15,6 +15,7 @@ class RolEnum(str, enum.Enum):
     solo_lectura = "solo_lectura"
     coordinador = "coordinador"
     tecnico = "tecnico"
+    comercial = "comercial"
 
 
 class Usuario(Base):

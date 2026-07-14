@@ -129,7 +129,6 @@ _PENDING_DDLS = [
     "ALTER TABLE liquidacion_mandato_lineas ADD COLUMN IF NOT EXISTS referencia_factura VARCHAR(255)",
     "ALTER TABLE liquidacion_mandato_lineas ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS ingreso_neto_usd NUMERIC(18,2)",
-    "ALTER TABLE proyectos ALTER COLUMN cliente_id DROP NOT NULL",
     # enum values for liquidaciones
     "ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'despacho'",
     "ALTER TYPE tipo_linea_mandato_enum ADD VALUE IF NOT EXISTS 'ventas_en_bolsa'",
@@ -422,7 +421,6 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_audit_log_usuario ON audit_log (usuario_id) WHERE usuario_id IS NOT NULL",
     # ── DB audit P2-4: missing performance indexes ──────────────────────────
     "CREATE INDEX IF NOT EXISTS ix_proyectos_estado ON proyectos (estado)",
-    "CREATE INDEX IF NOT EXISTS ix_proyectos_cliente ON proyectos (cliente_id) WHERE cliente_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_estado_proyecto ON fallas (estado_id, proyecto_id)",
     "CREATE INDEX IF NOT EXISTS ix_fallas_fecha_identificacion ON fallas (fecha_identificacion DESC NULLS LAST)",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_proyecto_periodo ON liquidaciones (proyecto_id, periodo)",
@@ -826,7 +824,6 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
@@ -992,6 +989,67 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_falla ON falla_inversores (falla_id)",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_inversor ON falla_inversores (proyecto_inversor_id)",
+    # migration 031 — ID estable de Sun Factory en proyectos (Alembic roto: la
+    # columna del modelo Proyecto se provisiona aquí, no vía alembic upgrade).
+    # Sin esta DDL, cualquier query que cargue columnas de Proyecto (proyectos,
+    # fallas→ProyectoResumen, liquidaciones→proyecto) rompe con 500.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_sunfactory_project_id ON proyectos (sunfactory_project_id) WHERE sunfactory_project_id IS NOT NULL",
+    # Rediseño pestaña Clientes (2026-07): contactos por 5 áreas + teléfono,
+    # renovación automática y fecha de indexación de tarifas en contratos.
+    "ALTER TYPE tipo_contacto_enum ADD VALUE IF NOT EXISTS 'comercial'",
+    "ALTER TYPE tipo_contacto_enum ADD VALUE IF NOT EXISTS 'contable'",
+    "ALTER TABLE contactos ADD COLUMN IF NOT EXISTS telefono VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
+    # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
+    # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
+    # camino de deploy en este repo — ver nota de migration 031 arriba).
+    """CREATE TABLE IF NOT EXISTS starlink_mapeo_sitio (
+        id BIGSERIAL PRIMARY KEY,
+        patron VARCHAR(255) NOT NULL UNIQUE,
+        proyecto_id BIGINT REFERENCES proyectos(id),
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_mapeo_sitio_proyecto ON starlink_mapeo_sitio (proyecto_id)",
+    """CREATE TABLE IF NOT EXISTS starlink_factura_linea (
+        id BIGSERIAL PRIMARY KEY,
+        factura_id BIGINT NOT NULL REFERENCES starlink_facturas(id) ON DELETE CASCADE,
+        proyecto_id BIGINT REFERENCES proyectos(id),
+        descripcion VARCHAR(255) NOT NULL,
+        sin_iva NUMERIC(15,2) NOT NULL,
+        iva NUMERIC(15,2) NOT NULL,
+        monto_total NUMERIC(15,2) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_factura ON starlink_factura_linea (factura_id)",
+    "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_proyecto ON starlink_factura_linea (proyecto_id)",
+    # Vínculo estructurado de operador de red también en proyectos (2026-07-10)
+    # -- antes solo existía en fronteras, y sin forma de editarlo desde la API.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_operador_red_id ON proyectos (operador_red_id)",
+    # migration — módulo CRM comercial (2026-07-10)
+    # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
+    "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
+    "CREATE INDEX IF NOT EXISTS ix_proyectos_oportunidad_id ON proyectos (oportunidad_id)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_tipo VARCHAR(30)",
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
+    "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_docs_oportunidad_id ON cliente_documentos_comerciales (oportunidad_id)",
+    # migration — CRM sub-ofertas + etiqueta comunidad (2026-07-13)
+    # Postgres no soporta IF NOT EXISTS en RENAME VALUE: si ya se renombró lanza
+    # excepción y _run_column_migrations la salta (idempotente por tolerancia).
+    # La tabla oportunidad_ofertas y sus enums los crea create_all al arranque.
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'fin' TO 'servicio_operativo'",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
+    # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
 ]
 
 
@@ -1100,6 +1158,86 @@ def _run_catalog_seed() -> None:
         print(f"[catalog seed] skipped: {e}")
 
 
+# Semilla del mapeo sitio Starlink → minigranja. patron (normalizado como queda en
+# agrupado.descripcion) → nombre_comercial del proyecto. Migrado del hardcode
+# STARLINK_TO_PANEL del frontend. NESTLE / OFICINA UNERGY no son minigranjas → NULL.
+_STARLINK_SEED = {
+    "BARAYA": "Minigranja Solar Baraya",
+    "CUMBIA": "Minigranja Solar Cumbia",
+    "EL COPEY OCCIDENTE": "Minigranja Solar Copey",
+    "EL MOLINO": "Minigranja Solar El Molino",
+    "EL OLIMPO": "Minigranja Solar El Olimpo",
+    "EL SON": "Minigranja Solar El Son",
+    "GANDALF": "Minigranja Solar Gandalf",
+    "CANAHUATE": "Minigranja Solar Cañahuate",
+    "IBIRICO": "Minigranja Solar Ibirico",
+    "MAPALE": "Minigranja Solar Mapalé",
+    "LA ESMERALDA": "Minigranja Solar Esmeralda",
+    "LA MESA": "Minigranja Solar La Mesa",
+    "VALLENATA": "Minigranja Solar La Paz Vallenata",
+    "LEYENDA": "Minigranja Solar La Paz Leyenda",
+    "LA RESERVA": "MGS 0012 La Reserva",
+    "PUYA": "Minigranja Solar La Puya",
+    "MGS LA PAZ VERSO": "Minigranja Solar La Paz Verso",
+    "PERUA": "Minigranja Solar Perijá",
+    "SAN DIEGO SUR": "Minigranja Solar San Diego Sur",
+    "URUACO": "Minigranja Solar Uruaco",
+    "VILLANUEVA": "Minigranja Solar Villanueva",
+    "CACICA": "Minigranja Solar La Cacica",
+    "PILONERAS": "Minigranja Solar Las Piloneras",
+    "VALENCIA 1": "Minigranja Solar Valencia Oriente 1",
+    "VALENCIA 2": "Minigranja Solar Valencia Oriente 2",
+    "CHIRIGUANA N2": "Minigranja Solar Chiriguana 2",
+    "CHIRIGUANA N4": "Minigranja Solar Chiriguana 4",
+    # Nombres individuales que produce el parser al dividir splits y que no están en
+    # el mapa del front (JOROPO MAPALE → Joropo/Mapale; PUYA Y MERENGUE → Puya/Merengue):
+    "JOROPO": "Minigranja Solar Joropo",
+    "MERENGUE": "MGS 0019 El Merengue",
+    # Sitios conocidos que NO son minigranjas → proyecto_id NULL (quedan "sin asignar"):
+    "NESTLE": None,
+    "OFICINA UNERGY": None,
+}
+
+
+def _run_starlink_mapeo_seed() -> None:
+    """Siembra starlink_mapeo_sitio (idempotente: no pisa proyecto_id editado) y
+    hace backfill de starlink_factura_linea para las facturas ya guardadas."""
+    from sqlalchemy.orm import sessionmaker
+    from app.models.proyectos import Proyecto
+    from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
+    from app.api.v1.starlink import _regenerar_lineas
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        proyectos = {p.nombre_comercial: p.id for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()}
+        for patron, nombre in _STARLINK_SEED.items():
+            patron = patron.strip()
+            if not patron:
+                continue
+            existente = db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.patron == patron).first()
+            if existente:
+                continue  # idempotente: no tocar lo que ya existe (posible edición manual)
+            db.add(StarlinkMapeoSitio(
+                patron=patron,
+                proyecto_id=proyectos.get(nombre) if nombre else None,
+                activo=True,
+            ))
+        db.flush()
+
+        for fac in db.query(StarlinkFactura).all():
+            tiene = db.query(StarlinkFacturaLinea).filter(StarlinkFacturaLinea.factura_id == fac.id).first()
+            if not tiene:
+                _regenerar_lineas(db, fac)
+        db.commit()
+        print("[starlink seed] OK — mapeo sembrado y backfill de líneas")
+    except Exception as e:
+        db.rollback()
+        print(f"[starlink seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
 def _run_estructura_fallas_seed() -> None:
     """Siembra (idempotente) las categorías/tipos del reporte estructurado a partir
     de ESTRUCTURA_FALLAS. Permite que las vistas/analytics legacy (que muestran
@@ -1144,6 +1282,23 @@ def _run_estructura_fallas_seed() -> None:
                             etiqueta=sub["etiqueta"], descripcion=sub.get("descripcion"),
                             activa=True,
                         ))
+            # Desactivar tipos de inversores retirados de la estructura: dejan de
+            # ofrecerse, pero se conserva la fila (no se borra) para no romper
+            # fallas históricas que aún referencian ese tipo_id.
+            inv_cat = next((c for c in ESTRUCTURA_FALLAS if c["codigo"] == "inversores"), None)
+            if inv_cat:
+                vigentes = {tipo_codigo("inversores", t["codigo"]) for t in inv_cat.get("tipos_falla", [])}
+                obsoletos = (
+                    db.query(FallaCatTipo)
+                    .filter(FallaCatTipo.codigo.like("inversores.%"),
+                            FallaCatTipo.codigo.notin_(vigentes),
+                            FallaCatTipo.activa == True)
+                    .all()
+                )
+                for t in obsoletos:
+                    t.activa = False
+                if obsoletos:
+                    print(f"[estructura fallas seed] {len(obsoletos)} tipo(s) de inversores desactivados")
             db.commit()
             print("[estructura fallas seed] OK")
         except Exception as e:
@@ -1861,24 +2016,24 @@ def _scheduled_generation_sync():
             if not data:
                 continue
 
-            raw = data.get("results") or data.get("data") or data if isinstance(data, dict) else data
+            results = data.get("results") if isinstance(data, dict) else None
+            points = results.get("points") if isinstance(results, dict) else None
+            unit = (results.get("unit") or "kWh").strip().lower() if isinstance(results, dict) else "kwh"
+            factor = 1000.0 if unit == "mwh" else 1.0
+
             day_rows = []
-            if isinstance(raw, dict):
-                for k, v in raw.items():
-                    kwh = None
-                    if isinstance(v, (int, float)):
-                        kwh = v
-                    elif isinstance(v, dict) and "value" in v:
-                        kwh = v["value"]
-                    if kwh is not None and kwh > 0:
-                        day_rows.append((k, round(kwh, 3)))
-            elif isinstance(raw, list):
-                for item in raw:
-                    if isinstance(item, dict):
-                        d = item.get("date") or item.get("day")
-                        kwh = item.get("kwh") or item.get("value") or item.get("energy")
-                        if d and kwh and float(kwh) > 0:
-                            day_rows.append((str(d), round(float(kwh), 3)))
+            if isinstance(points, list):
+                for item in points:
+                    if not isinstance(item, dict):
+                        continue
+                    d = item.get("time") or item.get("date") or item.get("day")
+                    val = item.get("kwh")
+                    if val is None:
+                        val = item.get("value") or item.get("energy")
+                    if d and val is not None:
+                        kwh = float(val) * factor
+                        if kwh > 0:
+                            day_rows.append((str(d)[:10], round(kwh, 3)))
 
             if not day_rows:
                 continue
@@ -1968,13 +2123,34 @@ def _scheduled_correlation_sync():
         print(f"[correlation_sync] Failed to get DB session: {e}")
 
 
+def _scheduled_comercializacion_backfill():
+    """Rellena la fecha de inicio de comercialización (primer día con generación
+    real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
+    respeta las fechas editadas a mano. Así una planta nueva entra a Cumplimiento
+    en cuanto registra su primera generación."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.comercializacion import backfill_comercializacion
+            res = backfill_comercializacion(db, force=False, dry_run=False)
+            print(f"[comercializacion_backfill] OK — {len(res.get('actualizados', []))} fechas nuevas, "
+                  f"{len(res.get('sin_generacion', []))} sin generación, "
+                  f"{len(res.get('sin_identificador', []))} sin identificador")
+        except Exception as e:
+            print(f"[comercializacion_backfill] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[comercializacion_backfill] Failed to get DB session: {e}")
+
+
 def _scheduled_tsf_sync():
     """Sincronización periódica del pipeline TSF → tabla proyectos (cada 6 h)."""
     try:
         db = SessionLocal()
         try:
             from app.services.tsf_sync import sync_tsf_projects
-            stats = sync_tsf_projects(db, force=False)
+            stats = sync_tsf_projects(db)
             print(f"[tsf_sync] OK — creados={stats.get('creados', 0)} "
                   f"actualizados={stats.get('actualizados', 0)} errores={stats.get('errores', 0)}")
         except Exception as e:
@@ -2432,6 +2608,70 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _run_comercial_import() -> None:
+    """Carga idempotente de las hojas de prospección (Servicios + Energía +
+    Comunidades) al CRM comercial — mismo patrón que los demás *_seed. Corre en
+    el arranque, dentro del contenedor, contra la BD real; no requiere token.
+    Idempotente (por consecutivo o (cliente,tipo,planta)), así que repetir el
+    boot no duplica. Ver data/comercial_seed.json y POST /comercial/importar-hojas."""
+    from types import SimpleNamespace
+    from app.core.database import SessionLocal
+    from app.api.v1.comercial import importar_hojas
+
+    db = SessionLocal()
+    try:
+        from app.models.comercial import OportunidadOferta
+        hay_ofertas = db.query(OportunidadOferta.id).first() is not None
+        hay_detalle = (db.query(OportunidadOferta.id)
+                       .filter(OportunidadOferta.detalle.isnot(None)).first() is not None)
+        if hay_ofertas and hay_detalle:
+            # Ya cargado y enriquecido (la señal se apaga porque las filas de
+            # servicios sí reciben `detalle`). No tocar (evita recrear borradas).
+            print("[startup] comercial_import: ya cargado y enriquecido, se omite")
+            return
+        admin_id = None
+        try:
+            from app.models.usuarios import Usuario
+            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
+            admin_id = adm.id if adm else None
+        except Exception:
+            admin_id = None
+        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
+        # 0 ofertas → carga completa. Ya hay ofertas pero sin detalle → solo
+        # enriquecer (rellena detalle/precio/etc. sin crear ni resucitar borradas).
+        crear = not hay_ofertas
+        res = importar_hojas(dry_run=False, crear_faltantes=crear, db=db, current=current)
+        print(f"[startup] comercial_import (crear_faltantes={crear}): "
+              f"clientes={res['clientes']} ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+    finally:
+        db.close()
+
+
+def _run_comercial_dedup() -> None:
+    """Fusiona clientes-prospecto que el import creó por duplicado cuando ya
+    existía el cliente operativo (match por planta→dueño o nombre exacto).
+    Conservador + soft-delete (reversible) + idempotente. Corre tras el import."""
+    from types import SimpleNamespace
+    from app.core.database import SessionLocal
+    from app.api.v1.comercial import dedup_clientes
+
+    db = SessionLocal()
+    try:
+        admin_id = None
+        try:
+            from app.models.usuarios import Usuario
+            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
+            admin_id = adm.id if adm else None
+        except Exception:
+            admin_id = None
+        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
+        res = dedup_clientes(dry_run=False, db=db, current=current)
+        print(f"[startup] comercial_dedup: prospectos={res['prospectos']} "
+              f"fusionados={res['fusionados']} sin_canonico={res['sin_canonico']}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2441,6 +2681,9 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
+        ("comercial_import", _run_comercial_import),
+        ("comercial_dedup", _run_comercial_dedup),
+        ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
         ("tipo_migration", _run_tipo_migration),
@@ -2520,6 +2763,16 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            # Fecha de inicio de comercialización (primer día con generación real):
+            # backfill diario para plantas que aún no la tienen. La corrida inicial
+            # post-deploy se dispara a mano vía POST /cumplimiento/backfill-comercializacion.
+            _mgs_scheduler.add_job(
+                _scheduled_comercializacion_backfill,
+                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
+                id="comercializacion_backfill",
+                name="Backfill fecha inicio comercializacion",
             )
 
             _mgs_scheduler.add_job(

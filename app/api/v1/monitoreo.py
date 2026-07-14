@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
@@ -29,7 +30,8 @@ from app.models import (
     MonitoreoVerificacion, Portafolio, ContratoServicio, Mantenimiento,
 )
 from app.models.usuarios import Usuario
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.clientes import Cliente
 from app.utils.proyecto_matching import find_proyecto_by_name
 
 logger = logging.getLogger("monitoreo")
@@ -436,7 +438,6 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
         db.query(Proyecto)
         .options(
             selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
-            selectinload(Proyecto.cliente),
         )
         .order_by(Proyecto.nombre_comercial)
         .all()
@@ -458,8 +459,6 @@ def get_proyectos_monitoreo(db: Session = Depends(get_db), _=Depends(get_current
                 n = inv.cliente.razon_social_nombre
                 if n not in names:
                     names.append(n)
-        if not names and p.cliente and p.cliente.razon_social_nombre:
-            names.append(p.cliente.razon_social_nombre)
         return names
 
     def _proyecto_detalle(p):
@@ -636,20 +635,23 @@ def verify_code(payload: dict, db: Session = Depends(get_db)):
     verif.usado = True
     db.commit()
 
-    # buscar proyectos asociados al email del cliente
-    proyectos = (
-        db.query(Proyecto)
-        .join(Proyecto.cliente)
+    # Proyectos donde el cliente con este correo es inversionista vigente
+    # (fecha_fin nula o futura) -- ya no depende de ser el titular único.
+    hoy = date.today()
+    filas = (
+        db.query(Proyecto.nombre_comercial)
+        .join(ProyectoInversionista, ProyectoInversionista.proyecto_id == Proyecto.id)
+        .join(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
         .filter(
             Proyecto.estado == "en_operacion",
+            Cliente.correo_electronico.isnot(None),
+            func.lower(Cliente.correo_electronico) == email,
+            (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
         )
+        .distinct()
         .all()
     )
-    # filtrar proyectos donde el cliente tiene correo coincidente
-    proyectos_cliente = [
-        p.nombre_comercial for p in proyectos
-        if p.cliente and p.cliente.correo and p.cliente.correo.lower() == email
-    ]
+    proyectos_cliente = [f[0] for f in filas]
 
     return {"ok": True, "projects": proyectos_cliente, "email": email}
 
@@ -1190,8 +1192,15 @@ def sync_proyectos(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Llena campos faltantes de proyectos desde proyectos_solares_completo.json
-    y aplica el mapeo de Operadores de Red. Solo admin."""
+    """Llena campos faltantes de proyectos desde proyectos_solares_completo.json.
+    Solo admin.
+
+    Ya no aplica el mapeo hardcodeado de Operadores de Red (OR_MAP): desde
+    2026-07-02, proyectos.operador_red se llena de forma confiable desde
+    fronteras.operador_red (dato oficial de GESCON) a través del vínculo
+    fronteras.proyecto_id -- ese mapeo hardcodeado quedaba obsoleto en cuanto
+    se agregaba un proyecto nuevo, y podía pisar en silencio el dato bueno con
+    un valor viejo si este endpoint se volvía a correr."""
     if current_user.rol.value not in ("admin", "operaciones"):
         raise HTTPException(403, "Sin permisos")
 
@@ -1200,17 +1209,6 @@ def sync_proyectos(
     from pathlib import Path as _Path
     from app.models.proyectos import ProyectoInfoTecnica
 
-    OR_MAP = {
-        "Perija": "Afinia", "El son": "Afinia", "Molino": "Air-e",
-        "La Puya": "Afinia", "Villanueva": "Air-e", "Reserva": "ESSA",
-        "Cañahuate": "Afinia", "La Paz Leyenda": "Afinia", "La Paz Verso": "Afinia",
-        "San Pedro": "Afinia", "La Paz Vallenata": "Afinia", "Gandalf": "Afinia",
-        "Uruaco": "Air-e", "Baraya": "Afinia", "La Paz Esmeralda": "Afinia",
-        "El merengue": "Afinia", "El Olimpo": "ESSA", "Ibirico": "Afinia",
-        "La Mesa": "ESSA", "San Diego Sur": "Afinia", "La Cacica 2": "Afinia",
-        "La Molina": "Afinia", "La Cumbia": "Afinia",
-        "Valencia 1": "Afinia", "Valencia 2": "Afinia",
-    }
     NOMBRE_MAP = {
         "MGS 0004 Valle de Gandalf": "Gandalf",
         "MGS 0005 Cañahuate": "Cañahuate",
@@ -1278,20 +1276,9 @@ def sync_proyectos(
         if changed:
             updated.append(proj.nombre_comercial)
 
-    or_updated, or_skipped = [], []
-    for kw, operador in OR_MAP.items():
-        proj = _find(kw)
-        if not proj:
-            or_skipped.append(kw); continue
-        if not proj.operador_red or proj.operador_red.strip() != operador:
-            proj.operador_red = operador
-            or_updated.append(proj.nombre_comercial)
-
     db.commit()
     return {
         "ok": True,
         "json_actualizados": updated,
         "json_saltados": skipped,
-        "or_actualizados": or_updated,
-        "or_saltados": or_skipped,
     }

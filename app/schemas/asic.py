@@ -29,6 +29,7 @@ class AsicSolicitudOut(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
+    uso_del_recurso: bool = False
     fecha_envio_xm: date | None = None
     fecha_respuesta_xm: date | None = None
     numero_radicado: str | None = None
@@ -38,6 +39,15 @@ class AsicSolicitudOut(BaseModel):
     proyecto_id: int | None = None
     planta_nombre: str | None = None
     contrato_ppa_id: int | None = None
+
+    # Vigencia efectiva (calculada en endpoint vía gescon_vigencia, no almacenada).
+    # fecha_fin_efectiva: fin REAL de la ventana — recortada si un relevo o una
+    # modificación posterior en el mismo SIC superó a esta fila (la fecha_fin
+    # cruda se conserva arriba). None = abierta o sin resolver (fallback: cruda).
+    # es_version_vigente: esta fila es la versión vigente actual de su SIC
+    # (False para filas superadas, terminadas, no publicadas o desistimientos).
+    fecha_fin_efectiva: date | None = None
+    es_version_vigente: bool = False
 
 
 class AsicSolicitudCreate(BaseModel):
@@ -64,6 +74,7 @@ class AsicSolicitudCreate(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
+    uso_del_recurso: bool = False
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -97,6 +108,7 @@ class AsicSolicitudUpdate(BaseModel):
     link_archivo: str | None = None
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
+    uso_del_recurso: bool | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 

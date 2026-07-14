@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime, date
+from app.schemas.clientes import _EMAIL_RE
 
 
 # ── Inversionistas ────────────────────────────────────────────────────────────
@@ -151,25 +152,73 @@ class ProyectoInversorOut(ProyectoInversorCreate):
     model_config = {"from_attributes": True}
 
 
-# ── Contactos ─────────────────────────────────────────────────────────────────
+# ── Contactos (siempre de Cliente) ────────────────────────────────────────────
+# Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-class ProyectoContactoCreate(BaseModel):
-    nombre: str
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "comercial", "contable"]
+
+
+class ContactoCreate(BaseModel):
+    nombre: Optional[str] = None
     email: str
-    tipo: Optional[str] = None
+    telefono: Optional[str] = None
+    tipo: TipoContacto
     recibe_notificaciones: bool = True
 
+    @field_validator("email")
+    @classmethod
+    def validar_email(cls, v: str) -> str:
+        addr = v.strip().lower()
+        if not _EMAIL_RE.match(addr):
+            raise ValueError(f"Dirección de correo inválida: {addr}")
+        return addr
 
-class ProyectoContactoUpdate(BaseModel):
+
+class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
-    tipo: Optional[str] = None
+    telefono: Optional[str] = None
+    tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
+    @field_validator("email")
+    @classmethod
+    def validar_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        addr = v.strip().lower()
+        if not _EMAIL_RE.match(addr):
+            raise ValueError(f"Dirección de correo inválida: {addr}")
+        return addr
 
-class ProyectoContactoOut(ProyectoContactoCreate):
+
+class ContactoOut(BaseModel):
+    id: int
+    cliente_id: int
+    nombre: Optional[str] = None
+    email: str
+    telefono: Optional[str] = None
+    tipo: str
+    recibe_notificaciones: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+# ── Puntero por área (Proyecto → Cliente) ─────────────────────────────────────
+# Para el `tipo` dado, este proyecto usa los contactos de `cliente_id` en vez
+# de los de sus inversionistas vigentes. Sin fila = usa los inversionistas.
+
+class ProyectoAreaContactoSet(BaseModel):
+    cliente_id: int
+
+
+class ProyectoAreaContactoOut(BaseModel):
     id: int
     proyecto_id: int
+    tipo: str
+    cliente_id: int
+    cliente_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -212,6 +261,8 @@ class ProyectoCreate(BaseModel):
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
     fecha_fin_representacion: Optional[date] = None
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -219,6 +270,7 @@ class ProyectoCreate(BaseModel):
     longitud: Optional[float] = None
     tipo_conexion: Optional[str] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
     estado_resultados_url: Optional[str] = None
@@ -234,12 +286,14 @@ class ProyectoCreate(BaseModel):
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: Optional[bool] = None
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
@@ -284,6 +338,8 @@ class ProyectoOut(BaseModel):
     estado: str
     fecha_entrada_operacion: Optional[date]
     fecha_fin_representacion: Optional[date]
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]
@@ -291,6 +347,8 @@ class ProyectoOut(BaseModel):
     longitud: Optional[float]
     tipo_conexion: Optional[str]
     operador_red: Optional[str]
+    operador_red_id: Optional[int] = None
+    operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
     estado_resultados_url: Optional[str]
@@ -306,12 +364,14 @@ class ProyectoOut(BaseModel):
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: bool = False
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
@@ -320,13 +380,13 @@ class ProyectoOut(BaseModel):
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []
     inversores: list[ProyectoInversorOut] = []
-    contactos: list[ProyectoContactoOut] = []
+    area_contactos: list[ProyectoAreaContactoOut] = []
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", "grupos_panel", "inversores", "contactos", mode="before")
+    @field_validator("inversionistas", "grupos_panel", "inversores", "area_contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:
@@ -349,3 +409,47 @@ class ProyectoOut(BaseModel):
             except Exception:
                 return None
         return v
+
+
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+
+class ProyectoPendienteOut(BaseModel):
+    clave: str
+    tipo_sugerencia: Literal["crear", "actualizar"]
+    confianza: Literal["id", "nombre", "sin_match"]
+    fuentes: list[str]
+    proyecto_id: Optional[int] = None
+    proyecto_nombre_actual: Optional[str] = None
+    nombre_sugerido: str
+    estado_actual: Optional[str] = None
+    estado_sugerido: Optional[str] = None
+    fase_construccion_actual: Optional[str] = None
+    fase_construccion_sugerida: Optional[str] = None
+    tipo_proyecto_sugerido: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+    sub_project: Optional[str] = None
+    project_id_solenium: Optional[str] = None
+    origina_code: Optional[str] = None
+    codigo_tsf: Optional[str] = None
+    sunfactory_project_id: Optional[int] = None
+
+
+class ProyectoPendienteConfirmar(BaseModel):
+    """Todos los campos son overrides opcionales -- si no se envían, se usa
+    lo que trajo la fuente. `nombre_comercial`/`tipo_proyecto` son
+    obligatorios en la práctica para "crear" (el frontend los pre-llena)."""
+    nombre_comercial: Optional[str] = None
+    tipo_proyecto: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+
+
+class ProyectoPendienteIgnorar(BaseModel):
+    motivo: Optional[str] = None

@@ -6,13 +6,19 @@ base de datos) para poder correr en cualquier entorno de CI sin dependencias.
 Atrapan, en cada PR, la clase de fallo recurrente que rompe el deploy:
 
   * ids de `revision` duplicados entre ramas que se forkearon de master en
-    momentos distintos (ej. dos archivos con ``revision = "020"``);
-  * múltiples *heads* (cadena bifurcada) → ``alembic upgrade head`` lanza
-    "Multiple head revisions" y el deploy salta TODAS las migraciones;
-  * `down_revision` colgante que no apunta a ninguna revisión existente.
+    momentos distintos (ej. dos archivos con ``revision = "020"``). Es el fallo
+    MÁS grave y es SILENCIOSO: Alembic indexa por id, así que el segundo archivo
+    desaparece del grafo, ``upgrade`` reporta éxito, estampa el id — y esa
+    migración ya no puede correr nunca;
+  * `down_revision` colgante que no apunta a ninguna revisión existente;
+  * que el deploy use ``alembic upgrade head`` (singular) en vez de ``heads``.
 
-Si esta prueba falla, NO mergees a master hasta relinealizar la cadena a un
-único head con ids únicos.
+*Heads* múltiples SÍ están permitidos: con una cola de PRs, varias ramas se
+forkean de master a la vez y cada una queda como head independiente. Exigir un
+único head obligaría a re-linealizar toda la cola a mano en cada merge, y una
+sola rama rechazada dejaría colgante a todas las siguientes. La solución es
+``alembic upgrade heads`` (plural) en `start.sh`, que aplica todas las ramas en
+cualquier orden de merge. Lo único que debe ser único es el **id**.
 """
 import os
 import re
@@ -78,15 +84,24 @@ def test_all_down_revisions_resolve():
     assert not dangling, f"down_revision colgante (no existe): {dangling}"
 
 
-def test_single_head():
-    """La cadena debe tener exactamente un head (sin bifurcaciones)."""
-    migs = _parse_migrations()
-    referenced = set()
-    for _rid, _fname, downs in migs:
-        referenced.update(downs)
-    all_ids = {rid for rid, _fname, _downs in migs}
-    heads = sorted(rid for rid in all_ids if rid not in referenced)
-    assert len(heads) == 1, (
-        f"se esperaba 1 head, hay {len(heads)}: {heads}. "
-        "`alembic upgrade head` fallará y el deploy saltará las migraciones."
+def test_start_sh_upgrades_all_heads():
+    """El deploy debe correr `alembic upgrade heads` (plural).
+
+    Varias ramas se forkean de master al mismo tiempo y cada una aporta un head
+    independiente. Con `head` singular Alembic aborta con "Multiple head
+    revisions", `start.sh` solo emite un WARNING y el servidor arranca SIN
+    ninguna migración aplicada. `heads` aplica todas las ramas, en cualquier
+    orden de merge.
+    """
+    start_sh = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "start.sh"
+    )
+    text = open(start_sh, encoding="utf-8").read()
+    assert re.search(r"alembic\s+upgrade\s+heads\b", text), (
+        "start.sh debe usar `alembic upgrade heads` (plural). Con `head` "
+        "singular, cualquier bifurcación hace que el deploy salte TODAS las "
+        "migraciones y el servidor arranque con tablas faltantes."
+    )
+    assert not re.search(r"alembic\s+upgrade\s+head\b", text), (
+        "start.sh todavía usa `alembic upgrade head` (singular) en alguna línea."
     )

@@ -4,7 +4,11 @@ if ! python init_db.py; then
     echo "WARNING: DB init failed — lifespan will retry DDL"
 fi
 echo "Running Alembic migrations..."
-if ! alembic upgrade head; then
+# `heads` (plural), no `head`: varias ramas se forkean de master a la vez y cada
+# una queda como head independiente. Con `head` singular Alembic aborta con
+# "Multiple head revisions" y NINGUNA migración se aplica — el servidor arranca
+# igual y las tablas nuevas simplemente no existen.
+if ! alembic upgrade heads; then
     echo "WARNING: Alembic migration failed — check logs above"
 fi
 

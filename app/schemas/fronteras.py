@@ -25,6 +25,7 @@ class FronteraBase(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
@@ -140,6 +141,7 @@ class FronteraUpdate(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
@@ -243,7 +245,6 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     operador_comercial: Optional[str] = None
-    operador_red_id: Optional[int] = None
     operador_correos: list[str] = []
     # Uno por cada cliente que sea fuente del contacto CGM de este proyecto
     # (puntero de área, o inversionista vigente si no hay puntero) -- puede

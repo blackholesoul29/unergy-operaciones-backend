@@ -213,7 +213,41 @@ def _inversionistas_de(db: Session, proyecto_id: int, periodo: str | None = None
         .filter(ProyectoInversionista.proyecto_id == proyecto_id)
         .all()
     )
+    return _procesar_invs(rows, periodo)
 
+
+def _inversionistas_de_batch(
+    db: Session, proyecto_ids, periodo: str | None = None
+) -> dict[int, list[dict]]:
+    """Igual que _inversionistas_de pero para varios proyectos en UNA sola query
+    (evita el N+1 en redividir). La detección de escala de % es por proyecto."""
+    ids = list({pid for pid in proyecto_ids})
+    if not ids:
+        return {}
+    rows = (
+        db.query(
+            ProyectoInversionista.proyecto_id,
+            ProyectoInversionista.id,
+            ProyectoInversionista.porcentaje_participacion,
+            ProyectoInversionista.fecha_inicio,
+            ProyectoInversionista.fecha_fin,
+            Cliente.razon_social_nombre,
+        )
+        .outerjoin(Cliente, ProyectoInversionista.cliente_id == Cliente.id)
+        .filter(ProyectoInversionista.proyecto_id.in_(ids))
+        .all()
+    )
+    por_proy: dict[int, list] = {}
+    for r in rows:
+        por_proy.setdefault(r.proyecto_id, []).append(r)
+    return {pid: _procesar_invs(por_proy.get(pid, []), periodo) for pid in ids}
+
+
+def _procesar_invs(rows, periodo: str | None = None) -> list[dict]:
+    """Normaliza filas de proyecto_inversionistas (ya consultadas) a la lista de
+    inversionistas con fracción/pct. Puro respecto a la DB — sirve para el caso de
+    un proyecto y para el batch. rows: objetos con id, porcentaje_participacion,
+    fecha_inicio, fecha_fin, razon_social_nombre."""
     # Filtrar por período: solo inversionistas activos durante el mes. Un
     # inversionista está activo si empezó antes del fin de mes y no terminó antes
     # de que empiece (misma lógica que match_inversionista de liquidaciones).
@@ -603,10 +637,15 @@ def listar(
         .all()
     )
 
-    nombres = {
-        p.id: p.nombre_comercial
-        for p in db.query(Proyecto.id, Proyecto.nombre_comercial).all()
-    }
+    # Solo los nombres de los proyectos del período (antes cargaba la tabla completa).
+    proy_ids = [p.proyecto_id for p in paneles]
+    nombres = {}
+    if proy_ids:
+        nombres = {
+            pid: nom
+            for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial)
+            .filter(Proyecto.id.in_(proy_ids)).all()
+        }
 
     return {
         "periodo": periodo_norm,
@@ -810,13 +849,19 @@ def redividir(
         q = q.filter(PanelContable.proyecto_id == body.proyecto_id)
     paneles = q.order_by(PanelContable.id).all()
 
+    # Batch: todos los inversionistas de los proyectos del período en una query
+    # (antes era _inversionistas_de por panel → N+1).
+    invs_por_proy = _inversionistas_de_batch(
+        db, [p.proyecto_id for p in paneles], periodo_norm
+    )
+
     redivididos, saltados = [], []
     for panel in paneles:
         lineas = [_linea_dict(ln) for ln in panel.lineas]
         if not lineas:
             saltados.append({"panel_id": panel.id, "proyecto_id": panel.proyecto_id, "motivo": "sin_lineas"})
             continue
-        invs = _inversionistas_de(db, panel.proyecto_id, periodo_norm)
+        invs = invs_por_proy.get(panel.proyecto_id) or []
         if not invs:
             invs = [{"id": None, "nombre": "Sin inversionistas", "fraccion": 1.0, "pct": 100.0}]
         if not body.forzar and not _division_desactualizada(lineas, invs):
@@ -1182,17 +1227,34 @@ def reasignar_consecutivos(
     except Exception:
         raise HTTPException(422, "El período debe tener formato YYYY-MM")
 
+    # Los consecutivos son SOLO del oficial (la preliquidación no lleva; el mandato
+    # oficial = la diferencia). Para cualquier otro tipo, no se numera.
+    if body.tipo != "oficial":
+        return {"ok": True, "solo_faltantes": body.solo_faltantes, "asignados": [],
+                "omitido": "solo_oficial"}
+
     paneles = (
         db.query(PanelContable)
-        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == body.tipo)
+        .filter(PanelContable.periodo == periodo_norm, PanelContable.tipo == "oficial")
         .order_by(PanelContable.id)
         .all()
     )
+    # Unicidad GLOBAL por cadena: números ya usados por paneles oficiales de OTROS
+    # períodos, que esta reasignación debe respetar (no repetir).
+    otros = (
+        db.query(PanelContable.consecutivo_ingresos, PanelContable.consecutivo_costos)
+        .filter(PanelContable.tipo == "oficial", PanelContable.periodo != periodo_norm)
+        .all()
+    )
+    ocup_ing = {r[0] for r in otros if r[0] is not None}
+    ocup_cos = {r[1] for r in otros if r[1] is not None}
+
     asignados = _asignar_consecutivos(
         paneles,
         body.consecutivo_ingresos_inicial,
         body.consecutivo_costos_inicial,
         solo_faltantes=body.solo_faltantes,
+        ocup_ing_extra=ocup_ing, ocup_cos_extra=ocup_cos,
     )
     db.commit()
     return {"ok": True, "solo_faltantes": body.solo_faltantes, "asignados": asignados}
@@ -1200,16 +1262,22 @@ def reasignar_consecutivos(
 
 def _asignar_consecutivos(
     paneles: list[PanelContable], ini_ing: int, ini_cos: int, solo_faltantes: bool,
+    ocup_ing_extra: set | None = None, ocup_cos_extra: set | None = None,
 ) -> list[dict]:
     """
     Numera (in-place, sin commit) las dos cadenas de consecutivos. Ver
     reasignar_consecutivos para la semántica de `solo_faltantes`.
+    ocup_*_extra: números ya usados en otros períodos (unicidad global por cadena).
     """
+    extras = {"consecutivo_ingresos": ocup_ing_extra or set(),
+              "consecutivo_costos": ocup_cos_extra or set()}
+
     def _cadena(activo, attr, inicio):
-        # Números ya ocupados (solo en modo rellenar, para no chocar con ediciones).
-        ocupados = set()
+        # Ocupados: siempre los de otros períodos (unicidad global) + en modo
+        # rellenar, también los ya asignados de este período (no pisar ediciones).
+        ocupados = set(extras[attr])
         if solo_faltantes:
-            ocupados = {
+            ocupados |= {
                 getattr(p, attr) for p in paneles
                 if activo(p) and getattr(p, attr) is not None
             }
@@ -1251,6 +1319,42 @@ def _asignar_consecutivos(
         }
         for p in paneles
     ]
+
+
+@router.get("/consecutivos-usados")
+def consecutivos_usados(
+    excluir_panel_id: int | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Consecutivos ya usados por paneles OFICIALES (unicidad global por cadena),
+    para que el frontend avise de duplicados y sugiera el siguiente libre. Los
+    consecutivos son solo del oficial (la preliquidación no lleva).
+    excluir_panel_id: el panel en edición, para que no choque consigo mismo."""
+    filas = (
+        db.query(PanelContable.id, PanelContable.consecutivo_ingresos,
+                 PanelContable.consecutivo_costos)
+        .filter(PanelContable.tipo == "oficial")
+        .all()
+    )
+    ing: dict[int, int] = {}
+    cos: dict[int, int] = {}
+    for pid, ci, cc in filas:
+        if pid == excluir_panel_id:
+            continue
+        if ci is not None:
+            ing[ci] = pid
+        if cc is not None:
+            cos[cc] = pid
+
+    def cadena(uso: dict[int, int]) -> dict:
+        return {
+            "usados": sorted(uso.keys()),
+            "siguiente": (max(uso.keys()) + 1) if uso else 1,
+            "por_numero": {str(k): v for k, v in uso.items()},
+        }
+
+    return {"ingresos": cadena(ing), "costos": cadena(cos)}
 
 
 # ── Diferencia preliquidación vs oficial ────────────────────────────────────────

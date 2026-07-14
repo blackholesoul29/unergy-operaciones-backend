@@ -620,7 +620,12 @@ def send_reporte_cgm_email(
     adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     adjunto.set_payload(excel_bytes)
     encoders.encode_base64(adjunto)
-    adjunto.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+    # filename como parámetro aparte (no interpolado en el string) -- así
+    # Python aplica la codificación RFC 2231 si el nombre tiene tildes/ñ
+    # (ej. "COX ENERGY GENERACIÓN...", "CGM Ingeniería"). Interpolado a mano
+    # como antes, Gmail no lo interpretaba y mostraba el adjunto sin nombre
+    # ni ícono ("noname").
+    adjunto.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(adjunto)
 
     # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de

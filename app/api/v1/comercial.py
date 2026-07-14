@@ -73,7 +73,7 @@ def _oferta_out(o: OportunidadOferta) -> dict:
         "resultado": o.resultado if isinstance(o.resultado, str) else o.resultado.value,
         "etapa_texto": o.etapa_texto, "fecha_oferta": o.fecha_oferta,
         "fecha_tentativa_inicio": o.fecha_tentativa_inicio,
-        "contrato_firmado": o.contrato_firmado, "notas": o.notas,
+        "contrato_firmado": o.contrato_firmado, "detalle": o.detalle, "notas": o.notas,
     }
 
 
@@ -550,15 +550,36 @@ def _etapa_global(resultados: set[str]) -> str:
     return "prospeccion"
 
 
+def _build_detalle(row: dict) -> dict | None:
+    """Detalle crudo de la hoja para la sub-oferta. Para servicios_operacionales
+    parsea 'Servicios buscados' (viñetas) en una lista para identificar cada
+    servicio; agrega FPO y, si vinieran, tiempo/tipo de contrato de energía."""
+    d: dict = {}
+    sb = row.get("servicios_buscados")
+    if sb:
+        servicios = [s.strip(" •").strip() for s in str(sb).split("•") if s.strip(" •").strip()]
+        if servicios:
+            d["servicios"] = servicios
+        d["servicios_texto"] = sb
+    for k in ("fpo", "tiempo", "tipo_contrato"):
+        if row.get(k):
+            d[k] = row[k]
+    return d or None
+
+
 @router.post("/importar-hojas")
 def importar_hojas(
     dry_run: bool = Query(True),
+    crear_faltantes: bool = Query(True, description="false: solo enriquece ofertas ya existentes, no crea nuevas"),
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
-    """Carga las hojas de prospección (Servicios Operacionales + Comercialización
-    de Energía + Comunidades) al CRM. Idempotente por `numero_oferta`. Una
-    oportunidad por cliente (find-or-create); cada fila de hoja = una sub-oferta.
-    Solo admin; `dry_run=true` no escribe."""
+    """Carga/sincroniza las hojas de prospección (Servicios Operacionales +
+    Comercialización de Energía + Comunidades) al CRM. Una oportunidad por
+    cliente (find-or-create); cada fila de hoja = una sub-oferta. Upsert por
+    `numero_oferta` o, si falta, por (cliente, tipo, planta): si la oferta ya
+    existe, RELLENA los campos vacíos (detalle/precio/contrato/planta/fecha) sin
+    pisar `resultado`/`etapa`. `crear_faltantes=false` solo enriquece. Solo
+    admin; `dry_run=true` no escribe."""
     if current.rol.value != "admin":
         raise HTTPException(403, "Solo admin")
     if not _SEED_PATH.exists():
@@ -597,25 +618,23 @@ def importar_hojas(
             return _norm_nombre(dueno)
         return key
 
-    # Idempotencia: por numero_oferta si existe; si no, por (cliente, tipo, planta).
-    seen = set()
+    # Clave de dedup/upsert: por numero_oferta si existe; si no, (cliente, tipo, planta).
+    of_por_key = {}
     existentes = (
-        db.query(OportunidadOferta.numero_oferta, OportunidadOferta.tipo,
-                 OportunidadOferta.planta_nombre, Cliente.razon_social_nombre)
+        db.query(OportunidadOferta, Cliente.razon_social_nombre)
         .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
         .join(Cliente, Cliente.id == Oportunidad.cliente_id).all()
     )
-    for num, tipo, planta, razon in existentes:
-        if num:
-            seen.add(num)
-        else:
-            t = tipo if isinstance(tipo, str) else tipo.value
-            seen.add((_norm_nombre(razon), t, _norm_nombre(planta)))
+    for o, razon in existentes:
+        t = o.tipo if isinstance(o.tipo, str) else o.tipo.value
+        k = o.numero_oferta if o.numero_oferta else (_norm_nombre(razon), t, _norm_nombre(o.planta_nombre))
+        of_por_key.setdefault(k, o)
+    seen_run = set()   # dedup dentro del propio seed
 
     res = {
         "dry_run": dry_run,
         "clientes": {"a_crear": 0, "reusados": 0},
-        "ofertas": {"creadas": 0, "saltadas": 0},
+        "ofertas": {"creadas": 0, "enriquecidas": 0, "sin_cambio": 0, "faltantes_no_creadas": 0},
         "sin_empresa": 0,
         "detalle": {"clientes_nuevos": [], "sin_match_planta": []},
     }
@@ -671,29 +690,56 @@ def importar_hojas(
         tipo = row["tipo"]
         num = row.get("numero_oferta")
         planta = row.get("planta_nombre") or (empresa if tipo == "compra_energia" else None)
-        # Clave de idempotencia (misma lógica que el preload de `seen`).
         key = num if num else (_client_key(empresa), tipo, _norm_nombre(planta))
-        if key in seen:
-            res["ofertas"]["saltadas"] += 1
-            continue
-        seen.add(key)
         etapa = (row.get("etapa_texto") or "").strip().lower()
         resultado = _ETAPA_A_RESULTADO.get(etapa, "pendiente")
-        cliente = cliente_para(empresa)
         proj_id = proy_idx.get(_norm_nombre(planta)) if planta else None
         if planta and proj_id is None:
             res["detalle"]["sin_match_planta"].append(planta)
-        if not dry_run:
+        detalle = _build_detalle(row)
+
+        existente = of_por_key.get(key)
+        if existente is not None:
+            # Enriquecer: rellenar SOLO los campos vacíos; nunca pisar resultado/etapa.
+            if not dry_run:
+                campos = {
+                    "detalle": detalle, "precio_detalle": row.get("precio_detalle"),
+                    "contrato_firmado": row.get("contrato_firmado"), "planta_nombre": planta,
+                    "proyecto_id": proj_id, "fecha_oferta": _parse_fecha(row.get("fecha_oferta")),
+                }
+                cambio = False
+                for campo, val in campos.items():
+                    if val is not None and getattr(existente, campo) in (None, "", {}):
+                        setattr(existente, campo, val)
+                        cambio = True
+                res["ofertas"]["enriquecidas" if cambio else "sin_cambio"] += 1
+            else:
+                res["ofertas"]["enriquecidas"] += 1
+            continue
+
+        if key in seen_run:      # duplicado dentro del propio seed
+            res["ofertas"]["sin_cambio"] += 1
+            continue
+        seen_run.add(key)
+
+        if not crear_faltantes:
+            res["ofertas"]["faltantes_no_creadas"] += 1
+            continue
+
+        cliente = cliente_para(empresa)
+        if not dry_run and cliente is not None:
             op = oportunidad_para(cliente)
             if op is not None:
-                db.add(OportunidadOferta(
+                nueva = OportunidadOferta(
                     oportunidad_id=op.id, tipo=tipo, planta_nombre=planta,
                     proyecto_id=proj_id, numero_oferta=num,
                     precio_detalle=row.get("precio_detalle"), resultado=resultado,
                     etapa_texto=row.get("etapa_texto"),
                     contrato_firmado=row.get("contrato_firmado"),
                     fecha_oferta=_parse_fecha(row.get("fecha_oferta")),
-                    notas=row.get("servicios_buscados")))
+                    detalle=detalle)
+                db.add(nueva)
+                of_por_key[key] = nueva
                 resultados_por_cli.setdefault(cliente.id, set()).add(resultado)
         res["ofertas"]["creadas"] += 1
 

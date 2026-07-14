@@ -1048,6 +1048,8 @@ _PENDING_DDLS = [
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'fin' TO 'servicio_operativo'",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
+    # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
 ]
 
 
@@ -2619,10 +2621,13 @@ def _run_comercial_import() -> None:
     db = SessionLocal()
     try:
         from app.models.comercial import OportunidadOferta
-        # One-shot: si ya hay ofertas cargadas, no volver a tocar (evita recrear
-        # filas que el equipo pudo borrar). Para recargar, usar el endpoint admin.
-        if db.query(OportunidadOferta.id).first() is not None:
-            print("[startup] comercial_import: ya hay ofertas, se omite")
+        hay_ofertas = db.query(OportunidadOferta.id).first() is not None
+        hay_detalle = (db.query(OportunidadOferta.id)
+                       .filter(OportunidadOferta.detalle.isnot(None)).first() is not None)
+        if hay_ofertas and hay_detalle:
+            # Ya cargado y enriquecido (la señal se apaga porque las filas de
+            # servicios sí reciben `detalle`). No tocar (evita recrear borradas).
+            print("[startup] comercial_import: ya cargado y enriquecido, se omite")
             return
         admin_id = None
         try:
@@ -2632,9 +2637,12 @@ def _run_comercial_import() -> None:
         except Exception:
             admin_id = None
         current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
-        res = importar_hojas(dry_run=False, db=db, current=current)
-        print(f"[startup] comercial_import: clientes={res['clientes']} "
-              f"ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+        # 0 ofertas → carga completa. Ya hay ofertas pero sin detalle → solo
+        # enriquecer (rellena detalle/precio/etc. sin crear ni resucitar borradas).
+        crear = not hay_ofertas
+        res = importar_hojas(dry_run=False, crear_faltantes=crear, db=db, current=current)
+        print(f"[startup] comercial_import (crear_faltantes={crear}): "
+              f"clientes={res['clientes']} ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
     finally:
         db.close()
 

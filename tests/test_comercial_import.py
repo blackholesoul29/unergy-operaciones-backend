@@ -85,6 +85,29 @@ def test_mapeo_etapa_resultado(db):
     assert denegadas and all(o.resultado.value == "declinado" for o in denegadas)
 
 
+def test_detalle_servicios_poblado(db):
+    api.importar_hojas(dry_run=False, db=db, current=ADMIN)
+    serv = [
+        o for o in db.query(OportunidadOferta).all()
+        if o.tipo.value == "servicios_operacionales" and (o.detalle or {}).get("servicios")
+    ]
+    assert serv, "esperaba servicios buscados parseados en detalle"
+    assert isinstance(serv[0].detalle["servicios"], list) and serv[0].detalle["servicios"]
+
+
+def test_enriquece_sin_crear(db):
+    api.importar_hojas(dry_run=False, db=db, current=ADMIN)
+    n = db.query(OportunidadOferta).count()
+    # simula "cargado sin detalle" (estado previo al arreglo) y enriquece
+    db.query(OportunidadOferta).update({OportunidadOferta.detalle: None})
+    db.commit()
+    r = api.importar_hojas(dry_run=False, crear_faltantes=False, db=db, current=ADMIN)
+    assert r["ofertas"]["creadas"] == 0
+    assert r["ofertas"]["faltantes_no_creadas"] == 0        # todas ya existían
+    assert db.query(OportunidadOferta).count() == n         # no creó nada
+    assert db.query(OportunidadOferta).filter(OportunidadOferta.detalle.isnot(None)).first() is not None
+
+
 def test_no_admin_rechazado(db):
     no_admin = types.SimpleNamespace(id=2, rol=types.SimpleNamespace(value="comercial"))
     with pytest.raises(Exception):

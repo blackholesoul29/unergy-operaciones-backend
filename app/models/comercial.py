@@ -2,6 +2,7 @@ import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Boolean, Date, DateTime,
                         ForeignKey, Enum as SAEnum, Text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -146,6 +147,9 @@ class OportunidadOferta(Base):
     fecha_oferta: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_tentativa_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     contrato_firmado: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
+    # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.
+    detalle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

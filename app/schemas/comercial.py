@@ -71,6 +71,7 @@ class OfertaCreate(BaseModel):
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
     notas: Optional[str] = None
 
 
@@ -85,6 +86,7 @@ class OfertaUpdate(BaseModel):
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
     notas: Optional[str] = None
 
 

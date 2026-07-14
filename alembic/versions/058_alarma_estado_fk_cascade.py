@@ -13,13 +13,13 @@ ORM), así que aquí solo se verifica; en la práctica es no-op. A diferencia de
 alarma_estado, sus filas son datos reales de generación: si alguna BD tuviera
 huérfanas, se aborta con un error en vez de borrarlas en silencio.
 
-Revision ID: 053
+Revision ID: 058
 Revises: 047
 Create Date: 2026-07-13
 """
 from alembic import op
 
-revision = "053"
+revision = "058"
 down_revision = "047"
 branch_labels = None
 depends_on = None

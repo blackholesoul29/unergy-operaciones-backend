@@ -15,6 +15,7 @@ from app.models import (
     Garantia, CumplimientoMensual,
 )
 from app.models.garantias import EstadoGarantiaEnum
+from app.services.garantias_saldo import saldos_vivos
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("dashboard")
@@ -165,12 +166,15 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
             )
             .scalar() or 0
         )
-        total_row = (
-            db.query(func.sum(Garantia.valor_cop))
+        # Saldo VIVO, no el constituido: `valor_cop` nunca baja con los cobros de XM, así
+        # que sumarlo aquí sobreestimaba la cobertura en el primer KPI que ve operaciones.
+        vigentes = (
+            db.query(Garantia)
             .filter(Garantia.estado == EstadoGarantiaEnum.vigente)
-            .scalar()
+            .all()
         )
-        garantias_valor_total = round(float(total_row), 0) if total_row else 0
+        saldos = saldos_vivos(db, vigentes)
+        garantias_valor_total = round(sum(saldos[g.id] for g in vigentes), 0) if vigentes else 0
     except Exception:
         pass
 

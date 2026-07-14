@@ -20,11 +20,10 @@ from app.services.garantias_saldo import saldos_vivos
 router = APIRouter(prefix="/garantias", tags=["Garantías"])
 
 
-def _garantia_to_out(g: Garantia, saldo_vivo_cop: Optional[float] = None) -> dict:
-    # `valor_cop` es el valor constituido y nunca baja; el saldo disponible vive en los
-    # movimientos. Sin mapa de saldos, degradamos al constituido (nunca a 0).
-    if saldo_vivo_cop is None:
-        saldo_vivo_cop = float(g.valor_cop) if g.valor_cop is not None else 0
+def _garantia_to_out(g: Garantia, saldo_vivo_cop: float) -> dict:
+    # `saldo_vivo_cop` es OBLIGATORIO a propósito: un default que degrade al constituido
+    # convierte un call site olvidado en un número falso pero creíble — exactamente el bug
+    # que este módulo existe para matar. El fallback honesto vive en `saldo_vivo()`.
     d = {
         "id": g.id,
         "proyecto_id": g.proyecto_id,
@@ -58,7 +57,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
 
     saldos = saldos_vivos(db, vigentes)
     total_valor = sum(float(g.valor_cop or 0) for g in vigentes)
-    total_saldo_vivo = sum(saldos.get(g.id, float(g.valor_cop or 0)) for g in vigentes)
+    total_saldo_vivo = sum(saldos[g.id] for g in vigentes)
     count_vigentes = len(vigentes)
 
     expiring_soon = [g for g in vigentes if g.fecha_vencimiento and g.fecha_vencimiento <= threshold_30d]
@@ -84,7 +83,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
             by_tipo[t] = {"count": 0, "valor_cop": 0, "saldo_vivo_cop": 0}
         by_tipo[t]["count"] += 1
         by_tipo[t]["valor_cop"] += float(g.valor_cop or 0)
-        by_tipo[t]["saldo_vivo_cop"] += saldos.get(g.id, float(g.valor_cop or 0))
+        by_tipo[t]["saldo_vivo_cop"] += saldos[g.id]
 
     # Recent movements (last 30 days)
     recent_movs = (
@@ -106,7 +105,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
                 "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else "—",
                 "fecha_vencimiento": g.fecha_vencimiento.isoformat(),
                 "valor_cop": float(g.valor_cop or 0),
-                "saldo_vivo_cop": round(saldos.get(g.id, float(g.valor_cop or 0)), 2),
+                "saldo_vivo_cop": round(saldos[g.id], 2),
                 "dias_restantes": (g.fecha_vencimiento - today).days,
             }
             for g in sorted(expiring_soon, key=lambda x: x.fecha_vencimiento)
@@ -160,7 +159,7 @@ def list_garantias(
     garantias = q.order_by(Garantia.fecha_vencimiento.nullslast(), Garantia.id).all()
     saldos = saldos_vivos(db, garantias)
     return {
-        "items": [_garantia_to_out(g, saldos.get(g.id)) for g in garantias],
+        "items": [_garantia_to_out(g, saldos[g.id]) for g in garantias],
         "total": len(garantias),
     }
 
@@ -200,7 +199,7 @@ def vencimientos_proximos(
             "tipo": g.tipo.value if g.tipo else None,
             "entidad": g.entidad,
             "valor_cop": float(g.valor_cop or 0),
-            "saldo_vivo_cop": round(saldos.get(g.id, float(g.valor_cop or 0)), 2),
+            "saldo_vivo_cop": round(saldos[g.id], 2),
             "fecha_vencimiento": g.fecha_vencimiento.isoformat(),
             "dias_restantes": dias_restantes,
         }
@@ -214,9 +213,7 @@ def vencimientos_proximos(
     return {
         "total": len(garantias),
         "valor_total_cop": round(sum(float(g.valor_cop or 0) for g in garantias), 2),
-        "saldo_vivo_total_cop": round(
-            sum(saldos.get(g.id, float(g.valor_cop or 0)) for g in garantias), 2
-        ),
+        "saldo_vivo_total_cop": round(sum(saldos[g.id] for g in garantias), 2),
         "buckets": buckets,
     }
 
@@ -226,7 +223,7 @@ def get_garantia(garantia_id: int, db: Session = Depends(get_db), _=Depends(get_
     g = db.query(Garantia).filter(Garantia.id == garantia_id).first()
     if not g:
         raise HTTPException(404, "Garantía no encontrada")
-    out = _garantia_to_out(g, saldos_vivos(db, [g]).get(g.id))
+    out = _garantia_to_out(g, saldos_vivos(db, [g])[g.id])
     out["movimientos"] = [
         {
             "id": m.id,
@@ -260,7 +257,7 @@ def create_garantia(
     db.add(g)
     db.commit()
     db.refresh(g)
-    return _garantia_to_out(g)
+    return _garantia_to_out(g, saldos_vivos(db, [g])[g.id])
 
 
 @router.patch("/{garantia_id}")
@@ -277,7 +274,7 @@ def update_garantia(
         setattr(g, k, v)
     db.commit()
     db.refresh(g)
-    return _garantia_to_out(g)
+    return _garantia_to_out(g, saldos_vivos(db, [g])[g.id])
 
 
 @router.delete("/{garantia_id}", status_code=204)

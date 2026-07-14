@@ -18,6 +18,8 @@ from app.api.v1.auth import get_current_user
 from app.models.usuarios import Usuario
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
+from app.api.v1.clientes import buscar_cliente_duplicado
+from app.utils.nombre_matching import mejor_candidato
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
@@ -200,6 +202,21 @@ def create_oportunidad(
             raise HTTPException(422, "Cliente no encontrado")
     else:
         cn = data.cliente_nuevo
+        if not data.forzar_cliente_duplicado:
+            duplicado = buscar_cliente_duplicado(db, cn.razon_social_nombre)
+            if duplicado:
+                raise HTTPException(
+                    409,
+                    {
+                        "mensaje": (
+                            f"Ya existe un cliente con un nombre muy parecido: "
+                            f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                        ),
+                        "duplicado_nombre": True,
+                        "candidato_id": duplicado.id,
+                        "candidato_nombre": duplicado.razon_social_nombre,
+                    },
+                )
         cliente = Cliente(
             razon_social_nombre=cn.razon_social_nombre,
             nit_cedula=cn.nit_cedula or None,
@@ -636,7 +653,7 @@ def importar_hojas(
         "clientes": {"a_crear": 0, "reusados": 0},
         "ofertas": {"creadas": 0, "enriquecidas": 0, "sin_cambio": 0, "faltantes_no_creadas": 0},
         "sin_empresa": 0,
-        "detalle": {"clientes_nuevos": [], "sin_match_planta": []},
+        "detalle": {"clientes_nuevos": [], "sin_match_planta": [], "fusionados_por_similitud": []},
     }
     ahora = col_now()
     # Acumula resultados por cliente para derivar la etapa global de la oportunidad.
@@ -654,6 +671,23 @@ def importar_hojas(
         if dueno and _norm_nombre(dueno) in cli_idx:
             res["clientes"]["reusados"] += 1
             return cli_idx[_norm_nombre(dueno)]
+        # Sin match exacto -- antes de crear uno nuevo, intenta un match difuso
+        # (mismo algoritmo de proyectos/clientes manuales, ver nombre_matching.py).
+        # Import automático sin humano presente: si el match es de baja confianza
+        # o ambiguo, mejor_candidato() ya devuelve None y se sigue creando como
+        # antes -- esto solo evita el caso confiable (p. ej. "Quantum" vs "Quantum
+        # Energy Ingenieria S.A.S.", el caso real que motivó este cambio).
+        candidatos = [(c, [c.razon_social_nombre]) for c in cli_idx.values()]
+        match, score = mejor_candidato(empresa_raw, candidatos)
+        if match:
+            res["clientes"]["reusados"] += 1
+            res["detalle"]["fusionados_por_similitud"].append({
+                "empresa_hoja": empresa_raw,
+                "cliente_existente": match.razon_social_nombre,
+                "score": score,
+            })
+            cli_idx[key] = match
+            return match
         res["clientes"]["a_crear"] += 1
         res["detalle"]["clientes_nuevos"].append(empresa_raw)
         if dry_run:

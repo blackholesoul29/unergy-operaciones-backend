@@ -41,6 +41,9 @@ class OportunidadCreate(BaseModel):
     nombre: Optional[str] = None
     tipo_servicio: Optional[TipoServicioLiteral] = None
     notas: Optional[str] = None
+    forzar_cliente_duplicado: bool = Field(
+        False, description="true: crear cliente_nuevo igual aunque exista uno con nombre muy parecido"
+    )
 
     @model_validator(mode="after")
     def exactamente_un_cliente(self):

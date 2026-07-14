@@ -17,6 +17,7 @@ from app.schemas.clientes import (
 )
 from app.schemas.proyectos import ContactoCreate, ContactoUpdate, ContactoOut
 from app.schemas.common import PaginatedResponse
+from app.utils.nombre_matching import mejor_candidato
 
 UPLOADS_DIR = Path("uploads/clientes")
 ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
@@ -102,8 +103,47 @@ def vista_comercial(
     return filas
 
 
+def buscar_cliente_duplicado(db: Session, razon_social_nombre: str | None, excluir_id: int | None = None) -> Cliente | None:
+    """Busca un cliente ya existente con nombre muy parecido (mismo algoritmo de
+    tokens+similitud que ya usan proyectos/fronteras -- ver app/utils/nombre_matching.py).
+
+    Deliberadamente permisivo (puede marcar como "parecidos" dos empresas distintas
+    que comparten una palabra común): el aviso no bloquea, solo exige confirmar
+    "crear de todos modos". Caso real que motivó esto: la migración del CRM creó
+    "Quantum" como cliente nuevo cuando ya existía "Quantum Energy Ingenieria S.A.S."
+    -- un match exacto de nombre no lo hubiera detectado."""
+    if not razon_social_nombre:
+        return None
+    query = db.query(Cliente).filter(Cliente.deleted_at.is_(None))
+    if excluir_id:
+        query = query.filter(Cliente.id != excluir_id)
+    candidatos = [(c, [c.razon_social_nombre]) for c in query.all()]
+    match, _score = mejor_candidato(razon_social_nombre, candidatos)
+    return match
+
+
 @router.post("", response_model=ClienteOut, status_code=201)
-def create_cliente(data: ClienteCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def create_cliente(
+    data: ClienteCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un cliente con nombre muy parecido"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    if not forzar:
+        duplicado = buscar_cliente_duplicado(db, data.razon_social_nombre)
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un cliente con un nombre muy parecido: "
+                        f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.razon_social_nombre,
+                },
+            )
     cliente = Cliente(**data.model_dump())
     db.add(cliente)
     db.commit()

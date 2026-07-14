@@ -13,7 +13,7 @@ se compra en bolsa para otro contrato, o PPA compra + venta en bolsa UNGC).
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -25,7 +25,9 @@ CATEGORIAS_ENERGIA = [
         "key": "ppa_venta_ungg", "letra": "a", "agente": "UNGG",
         "mercado": "ppa", "rol": "venta", "label": "PPA Venta (UNGG)",
         "descripcion": "Plantas en contratos GESCON donde UNGG le vende a otro "
-                       "agente (Terpel, NEU, etc.).",
+                       "agente (Terpel, NEU, etc.). Incluye plantas en 'uso del "
+                       "recurso' (cliente en bolsa; se le liquida a precio bolsa), "
+                       "marcadas con uso_del_recurso=true.",
         "regla_pendiente": False,
     },
     {
@@ -40,8 +42,10 @@ CATEGORIAS_ENERGIA = [
         "mercado": "bolsa", "rol": "compra", "label": "Compra en Bolsa (UNGG)",
         "descripcion": "Compras de UNGG a precio de bolsa. Hoy: plantas "
                        "duplicadas que aportan a un contrato con origen bolsa. "
-                       "Los contratos PLC entrarán aquí cuando se liquiden en "
-                       "plataforma.",
+                       "Incluye la compra interna de 'uso del recurso' "
+                       "(uso_del_recurso=true): el vendedor es el cliente dueño "
+                       "de la planta, no el mercado. Los contratos PLC entrarán "
+                       "aquí cuando se liquiden en plataforma.",
         "regla_pendiente": False,
     },
     {
@@ -89,6 +93,12 @@ class ClasificacionEnergiaMensual(Base):
         BigInteger, ForeignKey("ppa_contratos.id", ondelete="SET NULL"), nullable=True
     )
     codigo_sic: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # True si la fila proviene de la figura "uso del recurso": la planta clasifica
+    # doble — (a) venta PPA + (c) compra interna al cliente a precio bolsa.
+    uso_del_recurso: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
 
     # ventana con la que la planta participa en la categoría (informativa)
     fecha_inicio: Mapped[object] = mapped_column(Date, nullable=True)

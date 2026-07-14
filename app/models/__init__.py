@@ -3,11 +3,13 @@ from app.models.usuarios import Usuario, RolEnum
 from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, ClienteDocumentoComercial
 from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
-    ProyectoInversor, ProyectoContacto, ProyectoInversionista, Portafolio,
+    ProyectoInversor, ProyectoInversionista, Portafolio,
+    ProyectoPendienteIgnorado,
 )
+from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
 from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
-from app.models.fronteras import Frontera, FronteraLectura
+from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
 from app.models.fallas import (
     FallaCatCategoria, FallaCatTipo, FallaCatEstado,
@@ -28,7 +30,7 @@ from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.models.costos_variables import CostoVariable
-from app.models.starlink import StarlinkFactura
+from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
 from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
@@ -45,11 +47,11 @@ from app.models.riesgos_bolsa import PrecioBolsa
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
-    "ProyectoGrupoPanel", "ProyectoInversor", "ProyectoContacto",
-    "ProyectoInversionista", "Portafolio", "ServicioOperacion",
+    "ProyectoGrupoPanel", "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
+    "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
-    "Frontera", "FronteraLectura", "OperadorRed", "OperadorRedContacto",
+    "Frontera", "FronteraLectura", "FronteraQuoiaIgnorada", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
     "Liquidacion", "LiquidacionCosto", "LiquidacionXMDato",
@@ -63,7 +65,7 @@ __all__ = [
     "CumplimientoMensual",
     "Notificacion", "TipoNotificacionEnum",
     "CostoVariable",
-    "StarlinkFactura",
+    "StarlinkFactura", "StarlinkMapeoSitio", "StarlinkFacturaLinea",
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
@@ -75,3 +77,7 @@ __all__ = [
     "PrecioBolsa",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
+from app.models.comercial import (
+    Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
+    EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
+)

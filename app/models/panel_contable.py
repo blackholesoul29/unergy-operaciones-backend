@@ -5,7 +5,7 @@ from sqlalchemy import (
     BigInteger, String, Numeric, Boolean, Date, DateTime, Integer,
     ForeignKey, Text, UniqueConstraint, Index,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 from sqlalchemy.sql import func
 from app.models.base import Base
 
@@ -59,8 +59,10 @@ class PanelContable(Base):
 
     er_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Snapshot del ER recalculado: {hoja: {coord: valor}} en JSON. Permite releer
-    # una celda al cambiar el mapeo sin volver a subir el archivo.
-    er_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # una celda al cambiar el mapeo sin volver a subir el archivo. deferred: es un
+    # TEXT grande que no se necesita al listar/serializar paneles; se carga solo
+    # cuando se accede (mapeo-celda / fuente-ingreso), no en cada GET /panel-contable.
+    er_snapshot: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
     generado_por_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("usuarios.id"), nullable=True
     )

@@ -1,25 +1,49 @@
 from datetime import date, datetime, timedelta, timezone
 import io
+import time
+import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_, text
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models.fronteras import Frontera, FronteraLectura
-from app.models.proyectos import Proyecto
+from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed
+from app.models.proyectos import Proyecto
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
+    FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
+from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps, _mgs_number, get_frt_meter_info
+from app.services.contactos import get_contactos, get_clientes_contacto
+from app.services.operadores_red_sync import sincronizar_operador_red
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
 _quoia: QuoiaClient | None = None
+_gaia: GaiaClient | None = None
+
+
+def _sync_operador_red_para_proyecto(db: Session, proyecto_id: int | None) -> None:
+    """Rellena `operador_red_id` entre este proyecto y sus fronteras (en la
+    dirección que haga falta) tras crear/editar una frontera vinculada."""
+    if proyecto_id is None:
+        return
+    proyecto = (
+        db.query(Proyecto)
+        .options(selectinload(Proyecto.fronteras))
+        .filter(Proyecto.id == proyecto_id)
+        .first()
+    )
+    if proyecto is None:
+        return
+    sincronizar_operador_red(db, proyecto)
+    db.commit()
 
 
 def _get_quoia() -> QuoiaClient:
@@ -31,22 +55,54 @@ def _get_quoia() -> QuoiaClient:
     return _quoia
 
 
-def _to_out(f: Frontera) -> FronteraOut:
+def _get_gaia() -> GaiaClient:
+    global _gaia
+    if _gaia is None:
+        _gaia = GaiaClient()
+    if not _gaia.enabled:
+        raise HTTPException(503, "Credenciales de Gaia/Quoia no configuradas (GAIA_USER/GAIA_PASS)")
+    return _gaia
+
+
+# ── Nodos (medidores) de Quoia vía Gaia/JWT — cacheados 1 h ───────────────────
+# El diagrama fasorial se alimenta del snapshot eléctrico del nodo, que se pide
+# por node_id. La lista de nodos y su lectura usan GaiaClient (GAIA_USER/PASS),
+# que es la credencial realmente configurada en producción.
+_nodes_cache: list[dict] = []
+_nodes_ts: float = 0.0
+_NODES_TTL = 3600.0
+
+
+def _list_gaia_nodes(gaia: GaiaClient) -> list[dict]:
+    """Lista de nodos del retailer (cacheada 1 h). Conserva el cache previo si
+    la API responde vacío en vez de invalidarlo."""
+    global _nodes_cache, _nodes_ts
+    now = time.monotonic()
+    if not _nodes_cache or (now - _nodes_ts) >= _NODES_TTL:
+        nodes = gaia.get_all_nodes()
+        if nodes:
+            _nodes_cache = nodes
+            _nodes_ts = now
+    return _nodes_cache
+
+
+def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
-        if f.proyecto.cliente:
-            d.cliente_id = f.proyecto.cliente.id
-            d.cliente_nombre = f.proyecto.cliente.razon_social_nombre
-            d.cliente_correos_cgm = f.proyecto.cliente.correos_cgm or []
+        d.clientes_cgm = [
+            {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
+            for c in get_clientes_contacto(db, "cgm", f.proyecto_id)
+        ]
     if f.operador:
-        d.operador_comercial = f.operador.nombre_comercial
+        d.operador_red_id = f.operador.id
+        d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
         d.operador_correos = [c.email for c in f.operador.contactos]
     return d
 
 
 _FRONTERA_OPTS = (
-    joinedload(Frontera.proyecto).joinedload(Proyecto.cliente),
+    joinedload(Frontera.proyecto),
     joinedload(Frontera.operador).joinedload(OperadorRed.contactos),
 )
 
@@ -145,7 +201,7 @@ def list_fronteras(
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
         q = q.filter(Frontera.estado == estado)
-    return [_to_out(f) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
+    return [_to_out(f, db) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
@@ -162,13 +218,43 @@ def create_frontera(
             for k, v in body.model_dump(exclude_none=True).items():
                 setattr(existing, k, v)
             db.commit()
+            _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             db.refresh(existing)
-            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first())
+            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
+    _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     db.refresh(obj)
-    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first())
+    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
+
+
+@router.get("/debug-quoia-border")
+def debug_quoia_border(frt_code: str = Query(...), _=Depends(get_current_user)):
+    """Diagnóstico de solo lectura: ¿este frt_code aparece en el listado de
+    fronteras que devuelve Quoia (gaia.get_all_borders(), la misma fuente que
+    usa Reporte CGM para el nombre y el ID del border)? Sirve para diagnosticar
+    filas sin nombre / "Sin reporte" en el Excel -- pasa exactamente cuando
+    este código no aparece en ese listado. Va ANTES de /{frontera_id} en el
+    router -- si no, FastAPI intenta parsear "debug-quoia-border" como int."""
+    gaia = _get_gaia()
+    code = frt_code.strip().lower()
+    borders = gaia.get_all_borders()
+    match = None
+    for b in borders:
+        for key in ("frt_generation", "frt_consumption"):
+            frt = b.get(key) or {}
+            if (frt.get("frt_code") or "").strip().lower() == code:
+                match = {"proyecto_quoia": b.get("name"), "tipo": key, **frt}
+                break
+        if match:
+            break
+    return {
+        "frt_code": code,
+        "total_borders_en_quoia": len(borders),
+        "encontrado": match is not None,
+        "detalle": match,
+    }
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -187,7 +273,7 @@ def get_frontera(
     )
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
-    return _to_out(f)
+    return _to_out(f, db)
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -210,12 +296,14 @@ def update_frontera(
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(f, k, v)
     db.commit()
+    _sync_operador_red_para_proyecto(db, f.proyecto_id)
     db.refresh(f)
     return _to_out(
         db.query(Frontera)
         .options(*_FRONTERA_OPTS)
         .filter(Frontera.id == f.id)
-        .first()
+        .first(),
+        db,
     )
 
 
@@ -298,7 +386,268 @@ def create_lecturas_bulk(
     return objects
 
 
-# ── Quoia endpoints ───────────────────────────────────────────────────────────
+# ── Fronteras pendientes de Quoia (detectar + confirmar, nunca auto-escribir) ──
+
+def _iter_borders_frt(gaia: GaiaClient):
+    """Yield (frt_code_lower, categoria, nombre_quoia, frt_meta) para cada
+    frt_generation/frt_consumption de cada border de Quoia."""
+    for border in gaia.get_all_borders():
+        nombre = (border.get("name") or "").strip()
+        for key, categoria in (("frt_generation", "generacion"), ("frt_consumption", "consumo")):
+            frt = border.get(key)
+            if not frt:
+                continue
+            frt_code = (frt.get("frt_code") or "").strip()
+            if not frt_code:
+                continue
+            yield frt_code.lower(), categoria, nombre, frt
+
+
+@router.get("/quoia/pendientes", response_model=list[FronteraQuoiaPendiente])
+def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Borders de Quoia que todavia no tienen fila en `fronteras` ni fueron
+    marcados como ignorados -- para revisar y confirmar manualmente, nunca
+    se crean solos."""
+    gaia = _get_gaia()
+
+    existentes = {
+        c.lower() for (c,) in db.query(Frontera.codigo_frontera).filter(Frontera.codigo_frontera.isnot(None)).all()
+    }
+    ignorados = {c.lower() for (c,) in db.query(FronteraQuoiaIgnorada.frt_code).all()}
+    proyectos = db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all()
+
+    pendientes: list[FronteraQuoiaPendiente] = []
+    vistos: set[str] = set()
+    for frt_code, categoria, nombre_quoia, _frt in _iter_borders_frt(gaia):
+        if frt_code in existentes or frt_code in ignorados or frt_code in vistos:
+            continue
+        vistos.add(frt_code)
+
+        sugerido_id, sugerido_nombre = None, None
+        num = _mgs_number(nombre_quoia)
+        if num is not None:
+            for pid, pnombre in proyectos:
+                if _mgs_number(pnombre or "") == num:
+                    sugerido_id, sugerido_nombre = pid, pnombre
+                    break
+
+        pendientes.append(FronteraQuoiaPendiente(
+            frt_code=frt_code,
+            nombre_quoia=nombre_quoia,
+            categoria=categoria,
+            proyecto_sugerido_id=sugerido_id,
+            proyecto_sugerido_nombre=sugerido_nombre,
+        ))
+    return pendientes
+
+
+@router.post("/quoia/pendientes/{frt_code}/confirmar", response_model=FronteraOut, status_code=201)
+def confirmar_frontera_quoia(
+    frt_code: str,
+    body: FronteraQuoiaConfirmar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Crea la fila real en `fronteras` para un border de Quoia, tras
+    confirmacion manual del proyecto al que pertenece."""
+    gaia = _get_gaia()
+
+    if not db.query(Proyecto.id).filter(Proyecto.id == body.proyecto_id).first():
+        raise HTTPException(404, "Proyecto no encontrado")
+    if db.query(Frontera).filter(func.lower(Frontera.codigo_frontera) == frt_code.lower()).first():
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera")
+
+    match = None
+    for code, categoria, nombre_quoia, frt in _iter_borders_frt(gaia):
+        if code == frt_code.lower():
+            match = (categoria, nombre_quoia, frt)
+            break
+    if not match:
+        raise HTTPException(404, "Ese frt_code ya no aparece en Quoia")
+    categoria, nombre_quoia, frt = match
+
+    maps = _get_dynamic_maps(gaia) or {}
+    node_principal, _node_respaldo = (maps.get("frt") or {}).get(frt_code.lower(), (None, None))
+    info_ppal, info_resp = get_frt_meter_info(gaia, frt_code)
+
+    nombre_base = body.nombre_frontera or nombre_quoia or frt_code
+    nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
+
+    obj = Frontera(
+        proyecto_id=body.proyecto_id,
+        codigo_frontera=frt_code,
+        nombre_frontera=nombre_default,
+        codigo_propio=body.codigo_propio,
+        tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
+        estado="activa",
+        quoia_border_id=frt.get("id"),
+        quoia_meter_id=node_principal,
+    )
+    if info_ppal:
+        obj.marca_med_ppal = info_ppal.get("marca")
+        obj.modelo_med_ppal = info_ppal.get("modelo")
+        obj.nro_serie_med_ppal = info_ppal.get("serie")
+    if info_resp:
+        obj.marca_med_resp = info_resp.get("marca")
+        obj.modelo_med_resp = info_resp.get("modelo")
+        obj.nro_serie_med_resp = info_resp.get("serie")
+    db.add(obj)
+    db.commit()
+    _sync_operador_red_para_proyecto(db, obj.proyecto_id)
+    db.refresh(obj)
+    return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
+
+
+@router.post("/quoia/pendientes/{frt_code}/ignorar", status_code=204)
+def ignorar_frontera_quoia(
+    frt_code: str,
+    body: FronteraQuoiaIgnorar,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
+):
+    """Marca un border de Quoia como 'no aplica' para que deje de aparecer
+    en /quoia/pendientes (ej. medidor de prueba, border de un tercero)."""
+    code = frt_code.lower()
+    if db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == code).first():
+        return
+    db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.commit()
+
+
+def _backfill_medidor_info(db: Session, dry_run: bool = True) -> dict:
+    """Completa marca/modelo/serie de medidor (ppal + respaldo) desde Quoia en
+    fronteras que ya existen pero les falta ese dato. Nunca pisa un campo que
+    ya tenga valor -- solo llena huecos."""
+    gaia = _get_gaia()
+    fronteras = db.query(Frontera).filter(
+        Frontera.codigo_frontera.isnot(None),
+        or_(
+            Frontera.marca_med_ppal.is_(None), Frontera.modelo_med_ppal.is_(None),
+            Frontera.nro_serie_med_ppal.is_(None), Frontera.marca_med_resp.is_(None),
+            Frontera.modelo_med_resp.is_(None), Frontera.nro_serie_med_resp.is_(None),
+        ),
+    ).all()
+
+    actualizadas = []
+    sin_info = []
+    for f in fronteras:
+        info_ppal, info_resp = get_frt_meter_info(gaia, f.codigo_frontera)
+        cambios = {}
+        for prefix, info in (("ppal", info_ppal), ("resp", info_resp)):
+            if not info:
+                continue
+            for campo, valor in (("marca", info.get("marca")), ("modelo", info.get("modelo")), ("serie", info.get("serie"))):
+                if not valor:
+                    continue
+                attr = f"{'nro_serie' if campo == 'serie' else campo}_med_{prefix}"
+                if getattr(f, attr) is None:
+                    cambios[attr] = valor
+
+        if cambios:
+            actualizadas.append({"id": f.id, "nombre": f.nombre_frontera, "cambios": cambios})
+            if not dry_run:
+                for attr, valor in cambios.items():
+                    setattr(f, attr, valor)
+        else:
+            sin_info.append({"id": f.id, "nombre": f.nombre_frontera})
+
+    if not dry_run and actualizadas:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "total_candidatas": len(fronteras),
+        "actualizadas": len(actualizadas),
+        "sin_info_en_quoia": len(sin_info),
+        "detalle": actualizadas,
+    }
+
+
+@router.post("/backfill-medidor")
+def backfill_medidor(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Backfill de marca/modelo/serie de medidor (principal y respaldo) desde
+    Quoia para fronteras existentes que les falte ese dato. Idempotente y
+    nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
+    return _backfill_medidor_info(db, dry_run=dry_run)
+
+
+def _normalizar_nombre_operador(s: str | None) -> str:
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.strip().lower()
+
+
+def _backfill_operador_red_info(db: Session, dry_run: bool = True) -> dict:
+    """Vincula al catálogo (`operadores_red`) los proyectos cuyo
+    `operador_red` de texto libre YA diligenciado coincide (normalizado, sin
+    tildes/mayúsculas) con el `nombre_legal`/`nombre_comercial` de un
+    operador -- y cascada el vínculo hacia sus fronteras que todavía no lo
+    tengan. Nunca pisa un `operador_red_id` ya diligenciado en ningún lado.
+    Sin botón en el frontend a propósito (mismo criterio que
+    backfill-medidor): se corre puntualmente cuando haga falta."""
+    catalogo = db.query(OperadorRed).all()
+    por_nombre: dict[str, int] = {}
+    for o in catalogo:
+        por_nombre[_normalizar_nombre_operador(o.nombre_legal)] = o.id
+        if o.nombre_comercial:
+            por_nombre[_normalizar_nombre_operador(o.nombre_comercial)] = o.id
+
+    proyectos = (
+        db.query(Proyecto)
+        .options(selectinload(Proyecto.fronteras))
+        .filter(Proyecto.operador_red_id.is_(None), Proyecto.operador_red.isnot(None))
+        .all()
+    )
+
+    actualizados = []
+    sin_match = []
+    for p in proyectos:
+        operador_id = por_nombre.get(_normalizar_nombre_operador(p.operador_red))
+        if operador_id is None:
+            sin_match.append({"id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red})
+            continue
+        fronteras_afectadas = [f.id for f in p.fronteras if f.operador_red_id is None]
+        actualizados.append({
+            "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
+            "operador_red_id": operador_id, "fronteras_afectadas": fronteras_afectadas,
+        })
+        if not dry_run:
+            p.operador_red_id = operador_id
+            sincronizar_operador_red(db, p)
+
+    if not dry_run and actualizados:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "total_candidatos": len(proyectos),
+        "actualizados": len(actualizados),
+        "sin_match": len(sin_match),
+        "detalle": actualizados,
+        "detalle_sin_match": sin_match,
+    }
+
+
+@router.post("/backfill-operador-red")
+def backfill_operador_red(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Vincula al catálogo de operadores los proyectos/fronteras cuyo texto
+    libre ya diligenciado coincide con un operador existente. Idempotente,
+    nunca pisa un vínculo ya hecho. Sin botón en el frontend (se corre
+    puntualmente, ver comentario en `_backfill_operador_red_info`)."""
+    return _backfill_operador_red_info(db, dry_run=dry_run)
+
+
+# ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────
 
 @router.get("/quoia/meters")
 def quoia_meters(
@@ -345,6 +694,57 @@ def quoia_meter_curves(meter_id: int, _=Depends(get_current_user)):
 
 
 # ── Diagrama Fasorial ──────────────────────────────────────────────────────────
+
+class FasorialLecturaOut(BaseModel):
+    """Última lectura del medidor (tensiones y corrientes por fase) desde Quoia."""
+    vp1: float | None
+    vp2: float | None
+    vp3: float | None
+    cp1: float | None
+    cp2: float | None
+    cp3: float | None
+    last_time: str | None = None
+
+
+@router.get("/fasorial/nodos", tags=["Fronteras"])
+def fasorial_nodos(_=Depends(get_current_user)):
+    """Lista de nodos/medidores de Quoia (vía Gaia) para el selector del fasorial."""
+    gaia = _get_gaia()
+    out = [
+        {"id": int(n["id"]), "name": n.get("name") or f"Nodo {n['id']}"}
+        for n in _list_gaia_nodes(gaia)
+        if n.get("id") is not None
+    ]
+    out.sort(key=lambda x: x["name"].lower())
+    return {"total": len(out), "nodos": out}
+
+
+@router.get("/fasorial/lectura/{node_id}", response_model=FasorialLecturaOut, tags=["Fronteras"])
+def fasorial_lectura(
+    node_id: int,
+    _=Depends(get_current_user),
+):
+    """Devuelve la lectura más reciente del nodo (hoy) para el diagrama fasorial.
+
+    Toma el snapshot eléctrico del nodo y extrae tensiones (vp1/2/3) y corrientes
+    (cp1/2/3) de fase. Si el nodo no tiene lectura disponible hoy, responde 422.
+    """
+    gaia = _get_gaia()
+    snap = gaia.get_node_electrical_snapshot(node_id)
+    if not snap:
+        raise HTTPException(422, "No fue posible obtener la información del medidor")
+
+    vp = (snap.get("vp1"), snap.get("vp2"), snap.get("vp3"))
+    cp = (snap.get("cp1"), snap.get("cp2"), snap.get("cp3"))
+    if all(v is None for v in vp) and all(c is None for c in cp):
+        raise HTTPException(422, "No fue posible obtener la información del medidor")
+
+    return FasorialLecturaOut(
+        vp1=vp[0], vp2=vp[1], vp3=vp[2],
+        cp1=cp[0], cp2=cp[1], cp3=cp[2],
+        last_time=snap.get("last_time"),
+    )
+
 
 class FasorialInput(BaseModel):
     titulo: str

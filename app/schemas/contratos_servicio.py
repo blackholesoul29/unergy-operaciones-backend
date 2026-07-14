@@ -68,6 +68,8 @@ class ContratoServicioCreate(BaseModel):
     canones_otros: Optional[float] = None
     estado: Optional[str] = "vigente"
     fecha_firma_contrato: Optional[date] = None
+    renovacion_automatica: Optional[bool] = None
+    fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
     # CGM
@@ -116,6 +118,8 @@ class ContratoServicioUpdate(BaseModel):
     canones_otros: Optional[float] = None
     estado: Optional[str] = None
     fecha_firma_contrato: Optional[date] = None
+    renovacion_automatica: Optional[bool] = None
+    fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
     tiene_cgm: Optional[bool] = None
@@ -168,6 +172,8 @@ class ContratoServicioOut(BaseModel):
     canones_otros: Optional[float] = None
     estado: str
     fecha_firma_contrato: Optional[date] = None
+    renovacion_automatica: Optional[bool] = None
+    fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
     tiene_cgm: bool = False

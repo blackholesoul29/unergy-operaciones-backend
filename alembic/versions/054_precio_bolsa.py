@@ -1,7 +1,7 @@
 """Tabla precio_bolsa (módulo Riesgos de Bolsa)
 
-Revision ID: 037
-Revises: 036
+Revision ID: 054
+Revises: 053
 Create Date: 2026-07-06
 
 Relinealizada de 036→037 (nightwatch): el build original forkeó de master (head
@@ -11,8 +11,8 @@ Relinealizada de 036→037 (nightwatch): el build original forkeó de master (he
 """
 from alembic import op
 
-revision = "037"
-down_revision = "036"
+revision = "054"
+down_revision = "053"
 branch_labels = None
 depends_on = None
 

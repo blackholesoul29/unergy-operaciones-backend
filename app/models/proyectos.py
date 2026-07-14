@@ -65,7 +65,6 @@ class Proyecto(Base):
     __tablename__ = "proyectos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True, index=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
     proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
 
@@ -87,6 +86,14 @@ class Proyecto(Base):
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
     fecha_entrada_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_fin_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Fecha de inicio de comercialización = primer día con generación real de energía.
+    # Se autoderiva de la API de generación (app.services.comercializacion) y se
+    # persiste aquí; una planta con esta fecha se considera comercializando y entra
+    # a Cumplimiento. Editable a mano (marca fecha_comercializacion_editada_manual).
+    fecha_inicio_comercializacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # El operador fijó la fecha de comercialización a mano → el backfill/job diario
+    # no la vuelve a pisar.
+    fecha_comercializacion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -94,8 +101,28 @@ class Proyecto(Base):
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Legacy (texto libre, sin validar contra el catálogo) -- preferir
+    # `operador_red_id` para datos nuevos. Se mantiene por compatibilidad con
+    # registros ya diligenciados y como respaldo si el catálogo no tiene el
+    # operador todavía.
     operador_red: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
+    # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene
+    # valor, se rellena desde la primera frontera que sí lo tenga; si se edita
+    # en el proyecto, se rellena hacia las fronteras que todavía no lo tengan.
+    # Nunca se pisa un valor ya diligenciado en ningún lado (ver proyectos.py).
+    operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     project_id_solenium: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+
+    # ── CRM comercial ────────────────────────────────────────────────────────
+    # Oportunidad (pipeline comercial) a la que pertenece este proyecto.
+    # NULL = proyecto fuera del CRM (histórico o creado por otro flujo).
+    # (operador_red_id ya existe arriba, vínculo al catálogo compartido.)
+    oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
+    # Etiqueta de comunidad energética (ortogonal a Rep/Energía: cualquier planta
+    # puede o no pertenecer a una comunidad).
+    es_comunidad_energetica: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    nombre_comunidad: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Servicios activos
     srv_operacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -126,10 +153,8 @@ class Proyecto(Base):
     # 'en_desarrollo' mientras la planta no opera). Etiquetas: en_construccion |
     # pruebas | proximo_energizar | energizado.
     fase_construccion: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    # Fecha tentativa de energización (de TSF la 1ª vez; editable por operaciones).
+    # Fecha tentativa de energización -- siempre la que trae Sun Factory (solo lectura).
     fecha_estimada_energizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # El operador cambió la fecha estimada → el sync periódico no la pisa (salvo force).
-    fecha_estimada_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # % de avance de obra (Sun Factory).
     avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Proyección de generación mensual (MWh), editable por operaciones.
@@ -148,15 +173,15 @@ class Proyecto(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relaciones
-    cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="proyectos")
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
     subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
     grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
-    contactos: Mapped[list["ProyectoContacto"]] = relationship("ProyectoContacto", back_populates="proyecto", uselist=True)
+    area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
     fronteras: Mapped[list["Frontera"]] = relationship("Frontera", back_populates="proyecto", uselist=True)
+    operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="proyectos")
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="proyecto", uselist=True)
     generaciones: Mapped[list["GeneracionDiaria"]] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
     mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
@@ -171,10 +196,13 @@ class Proyecto(Base):
 
     @property
     def operador_red_legal(self) -> str | None:
-        """Nombre legal del operador de red (catálogo operadores_red), tomado de
-        la primera frontera con el vínculo poblado. Requiere precargar
-        `fronteras` + `fronteras.operador` (selectinload) para no golpear la BD
-        por cada proyecto."""
+        """Nombre legal del operador de red (catálogo operadores_red). Primero
+        el vínculo propio del proyecto; si no lo tiene, el de la primera
+        frontera que sí lo tenga (caso de datos aún no sincronizados).
+        Requiere precargar `operador` y `fronteras.operador` (selectinload)
+        para no golpear la BD por cada proyecto."""
+        if self.operador:
+            return self.operador.nombre_legal
         for f in self.fronteras:
             if f.operador:
                 return f.operador.nombre_legal
@@ -272,20 +300,6 @@ class ProyectoInversor(Base):
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="inversores")
 
 
-class ProyectoContacto(Base):
-    __tablename__ = "proyecto_contactos"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    nombre: Mapped[str] = mapped_column(String(255), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False)
-    tipo: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    recibe_notificaciones: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contactos")
-
 
 class ProyectoInversionista(Base):
     __tablename__ = "proyecto_inversionistas"
@@ -310,3 +324,17 @@ class ProyectoInversionista(Base):
     @property
     def cliente_nombre(self) -> str:
         return self.cliente.razon_social_nombre if self.cliente else ""
+
+
+class ProyectoPendienteIgnorado(Base):
+    """Candidato de /proyectos/pendientes (Sun Factory/Quoia/Solenium) marcado
+    a propósito como "no aplica" para que deje de aparecer -- ej. un medidor
+    de prueba, o algo que ya se revisó y no corresponde a un proyecto real."""
+
+    __tablename__ = "proyectos_pendientes_ignorados"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    clave: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    motivo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ignorado_por_usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

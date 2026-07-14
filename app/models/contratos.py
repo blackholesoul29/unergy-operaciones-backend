@@ -83,6 +83,9 @@ class ContratoServicio(Base):
     estado: Mapped[str] = mapped_column(SAEnum(EstadoContratoEnum, name="estado_contrato_enum"), nullable=False, default="vigente")
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_inicio_om: Mapped[date | None] = mapped_column(Date, nullable=True)  # inicio de operación real (para indexación O&M)
+    # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
+    renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fecha_indexacion: Mapped[date | None] = mapped_column(Date, nullable=True)  # fecha de indexación de tarifas
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -147,6 +150,8 @@ class PPAContrato(Base):
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
+    renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

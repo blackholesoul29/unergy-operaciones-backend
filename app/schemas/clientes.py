@@ -44,6 +44,8 @@ class ClienteCreate(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     rut_url: Optional[str] = None
+    origen_tipo: Optional[str] = None
+    origen_detalle: Optional[str] = None
 
     @field_validator("correos_operacionales", "correos_cgm", mode="before")
     @classmethod
@@ -78,6 +80,7 @@ class ClienteDocumentoCreate(BaseModel):
     archivo_nombre: Optional[str] = None
     servicio_id: Optional[int] = None
     notas: Optional[str] = None
+    oportunidad_id: Optional[int] = None
 
 
 class ClienteDocumentoUpdate(BaseModel):
@@ -89,6 +92,7 @@ class ClienteDocumentoUpdate(BaseModel):
     archivo_nombre: Optional[str] = None
     servicio_id: Optional[int] = None
     notas: Optional[str] = None
+    oportunidad_id: Optional[int] = None
 
 
 class ClienteDocumentoOut(ClienteDocumentoCreate):
@@ -135,6 +139,8 @@ class ClienteListOut(ClienteBase):
 
 
 class ClienteOut(ClienteBase):
+    origen_tipo: Optional[str] = None
+    origen_detalle: Optional[str] = None
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 

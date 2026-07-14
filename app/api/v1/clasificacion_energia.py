@@ -26,6 +26,19 @@ from app.services.clasificacion_energia import recalcular_clasificacion
 router = APIRouter(prefix="/clasificacion-energia", tags=["Clasificación energía"])
 
 
+def _vendedor_uso_recurso(r) -> str | None:
+    """Para la fila (c) de uso del recurso el vendedor es el cliente (inversionistas
+    del proyecto), no el mercado spot."""
+    if not r.uso_del_recurso or r.categoria != "bolsa_compra_ungg" or not r.proyecto:
+        return None
+    nombres = [
+        inv.cliente.razon_social_nombre
+        for inv in (r.proyecto.inversionistas or [])
+        if inv.cliente and inv.cliente.razon_social_nombre
+    ]
+    return " / ".join(nombres) or None
+
+
 @router.get("/categorias")
 def get_categorias(_=Depends(get_current_user)):
     """Catálogo estandarizado de las 6 categorías (a-f). Estable: `key` es el
@@ -85,6 +98,8 @@ def get_clasificacion(
                 "codigo_sic": r.codigo_sic,
                 "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
                 "fecha_fin": r.fecha_fin.isoformat() if r.fecha_fin else None,
+                "uso_del_recurso": bool(r.uso_del_recurso),
+                "vendedor_nombre": _vendedor_uso_recurso(r),
             }
             for r in rows
         ],

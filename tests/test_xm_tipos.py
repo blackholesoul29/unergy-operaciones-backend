@@ -45,3 +45,17 @@ def test_tipos_enriquecibles_y_columna():
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["grip"] == "PLANTA"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["arrpas"] == "SUBMERCADO"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["cxcsb"] == "SUBMERCADO"
+
+
+def test_tserv_es_publico_y_mensual():
+    validar_tipo("tserv")
+    assert ruta_directorio("tserv", 2026, 5) == "/INFORMACION_XM/PUBLICOK/SIC/COMERCIA/2026-05"
+    assert es_mensual("tserv") is True
+    assert nombre_archivo("tserv", "txf", 2026, 5) == "tserv05.txf"
+
+
+def test_afac_es_publico_y_mensual():
+    validar_tipo("afac")
+    assert ruta_directorio("afac", 2026, 5) == "/INFORMACION_XM/PUBLICOK/SIC/COMERCIA/2026-05"
+    assert es_mensual("afac") is True
+    assert nombre_archivo("afac", "txf", 2026, 5) == "afac05.txf"

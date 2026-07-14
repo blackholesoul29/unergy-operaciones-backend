@@ -15,6 +15,8 @@ TIPOS_CONFIG = {
     "tgrl":     {"ruta": "publica", "patron": "diario"},
     "trsd":     {"ruta": "publica", "patron": "diario"},
     "cxcsb":    {"ruta": "publica", "patron": "mensual"},
+    "tserv":    {"ruta": "publica", "patron": "mensual"},
+    "afac":     {"ruta": "publica", "patron": "mensual"},
 }
 
 # Tipos cuyo archivo trae código SIC de planta y se puede enriquecer con

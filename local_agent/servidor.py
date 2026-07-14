@@ -23,6 +23,13 @@ from pathlib import Path
 # reutilizando app.services.xm.* del backend en el mismo repo.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Carga local_agent/.env si existe — cualquiera del equipo puede fijar ahí
+# su propia XM_CACHE_DIR sin tocar variables de entorno de Windows. Sin
+# .env, cada quien recibe un default sensato según su usuario (ver
+# app/services/xm/cache_local.py).
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse

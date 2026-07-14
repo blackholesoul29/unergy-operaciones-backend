@@ -17,8 +17,9 @@ import app.models  # noqa: F401
 from app.models import Proyecto
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica, ProyectoGrupoPanel,
-    ProyectoInversor, ProyectoContacto,
+    ProyectoInversor,
 )
+from app.models.contactos import ProyectoAreaContacto, Contacto
 from app.models.servicios import ServicioRepresentacion
 from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
@@ -49,7 +50,7 @@ def db():
         tables=[
             Proyecto.__table__, Cliente.__table__, ProyectoInversionista.__table__,
             ProyectoInfoTecnica.__table__, ProyectoGrupoPanel.__table__,
-            ProyectoInversor.__table__, ProyectoContacto.__table__,
+            ProyectoInversor.__table__, ProyectoAreaContacto.__table__, Contacto.__table__,
             ServicioRepresentacion.__table__,
             # crear_proyecto/actualizar_proyecto ahora hacen
             # selectinload(Proyecto.fronteras).selectinload(Frontera.operador)

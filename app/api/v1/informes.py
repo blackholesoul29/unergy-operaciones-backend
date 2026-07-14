@@ -6,7 +6,7 @@ Endpoints:
   GET    /api/v1/informes/              — listar (filtros opcionales)
   GET    /api/v1/informes/{id}          — detalle
   PATCH  /api/v1/informes/{id}/estado   — cambiar estado (revisado / aprobado)
-  POST   /api/v1/informes/{id}/enviar   — enviar por email al correo_operacional del cliente
+  POST   /api/v1/informes/{id}/enviar   — enviar por email a los contactos tipo "operacional" del proyecto
 """
 from __future__ import annotations
 
@@ -136,13 +136,12 @@ def _es_remitente(u: Usuario) -> bool:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _get_correo_operacional(db: Session, sub_project: str) -> Optional[str]:
-    """Busca el correo_operacional del cliente asociado al proyecto."""
+def _get_proyecto_id_por_sub_project(db: Session, sub_project: str) -> Optional[int]:
+    """Resuelve el proyecto asociado a un sub_project/nombre/alias de monitoreo."""
     row = db.execute(
         text("""
-            SELECT c.correo_operacional
+            SELECT p.id
             FROM proyectos p
-            JOIN clientes c ON c.id = p.cliente_id
             WHERE p.sub_project = :sp
                OR p.nombre_comercial = :sp
                OR p.alias_monitoreo ILIKE :sp_like
@@ -150,9 +149,7 @@ def _get_correo_operacional(db: Session, sub_project: str) -> Optional[str]:
         """),
         {"sp": sub_project, "sp_like": f"%{sub_project}%"},
     ).fetchone()
-    if row and row[0]:
-        return row[0]
-    return None
+    return row[0] if row else None
 
 
 # Separador de páginas usado por el frontend al unir las páginas del informe.
@@ -639,12 +636,15 @@ def enviar_informe(
             "Sólo Laura H. (o el verificador/admin) puede disparar el envío del informe por correo."
         )
 
-    correo = _get_correo_operacional(db, inf.sub_project)
-    if not correo:
+    from app.services.contactos import get_contactos
+
+    proyecto_id = _get_proyecto_id_por_sub_project(db, inf.sub_project)
+    correos = get_contactos(db, "operacional", proyecto_id=proyecto_id) if proyecto_id else []
+    if not correos:
         raise HTTPException(
             422,
-            "No se encontró correo_operacional para este proyecto. "
-            "Configúralo en la ficha del cliente.",
+            "No se encontró un contacto operacional para este proyecto. "
+            "Configúralo en la ficha del cliente o del proyecto (tab Contactos).",
         )
 
     # Portafolio: enviar siempre el HTML compuesto vivo (consolidada + individuales actuales).
@@ -653,7 +653,7 @@ def enviar_informe(
     try:
         from app.services.email_service import send_informe_email
         send_informe_email(
-            to_email=correo,
+            to_emails=correos,
             proyecto_nombre=inf.proyecto_nombre or inf.sub_project,
             periodo_display=inf.periodo_display or f"{inf.periodo_desde} — {inf.periodo_hasta}",
             aprobado_por=inf.aprobado_por_nombre or current_user.nombre,
@@ -669,4 +669,4 @@ def enviar_informe(
     inf.enviado_por_id = current_user.id
     inf.enviado_por_nombre = current_user.nombre
     db.commit()
-    return {"ok": True, "enviado_a": correo}
+    return {"ok": True, "enviado_a": correos}

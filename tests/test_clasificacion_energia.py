@@ -77,6 +77,7 @@ def test_counts_cuentan_plantas_no_contratos():
     assert counts == {
         "ppa_venta_ungg": 2, "ppa_compra_ungc": 1, "bolsa_compra_ungg": 1,
         "bolsa_compra_ungc": 0, "bolsa_venta_ungg": 1, "bolsa_venta_ungc": 1,
+        "ppa_compra_externa": 0,
     }
 
 

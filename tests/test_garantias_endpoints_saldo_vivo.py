@@ -6,20 +6,12 @@ garantía que `GET` reportaba agotada (0). El mismo campo, dos verdades. El par�
 ahora es obligatorio; estos tests fijan el contrato.
 """
 import datetime as dt
-import sys
-import types
 
 import pytest
 from sqlalchemy import create_engine, BigInteger
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
-
-# El stub de conftest solo define `get_current_user`; el router de garantías también
-# importa `_require_admin` para las rutas de escritura.
-_auth = sys.modules.get("app.api.v1.auth")
-if _auth is not None and not hasattr(_auth, "_require_admin"):
-    _auth._require_admin = lambda: None
 
 from app.models.base import Base
 import app.models  # noqa: F401

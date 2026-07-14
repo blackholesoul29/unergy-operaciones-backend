@@ -62,7 +62,12 @@ def saldo_vivo(valor_cop, saldo_posterior: Optional[float], tiene_movimiento: bo
 
 
 def saldos_vivos(db: Session, garantias) -> Dict[int, float]:
-    """Mapa `garantia_id -> saldo vivo` para una colección de garantías. Una sola query."""
+    """Mapa `garantia_id -> saldo vivo` para una colección de garantías. Una sola query.
+
+    Siempre devuelve una entrada por cada garantía recibida — los callers indexan por
+    `[g.id]` a propósito, para que un id faltante reviente en vez de degradar en silencio.
+    """
+    garantias = list(garantias)  # un generador se consumiría en el primer recorrido
     posteriores = saldos_posteriores(db, [g.id for g in garantias])
     return {
         g.id: saldo_vivo(g.valor_cop, posteriores.get(g.id), g.id in posteriores)

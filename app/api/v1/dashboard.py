@@ -150,6 +150,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     garantias_vigentes = 0
     garantias_por_vencer = 0
     garantias_valor_total = 0
+    garantias_saldo_vivo_total = 0
     try:
         threshold = today + timedelta(days=30)
         garantias_vigentes = (
@@ -166,17 +167,21 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
             )
             .scalar() or 0
         )
-        # Saldo VIVO, no el constituido: `valor_cop` nunca baja con los cobros de XM, así
-        # que sumarlo aquí sobreestimaba la cobertura en el primer KPI que ve operaciones.
+        # `garantias_valor_total` conserva su significado (valor CONSTITUIDO) para no
+        # cambiarle el sentido a un campo ya publicado. El saldo disponible —el que de
+        # verdad mide la cobertura frente a XM, y que `valor_cop` nunca refleja porque no
+        # baja con los cobros— se expone aparte, en `garantias_saldo_vivo_total`.
         vigentes = (
             db.query(Garantia)
             .filter(Garantia.estado == EstadoGarantiaEnum.vigente)
             .all()
         )
+        garantias_valor_total = round(sum(float(g.valor_cop or 0) for g in vigentes), 0)
         saldos = saldos_vivos(db, vigentes)
-        garantias_valor_total = round(sum(saldos[g.id] for g in vigentes), 0) if vigentes else 0
+        garantias_saldo_vivo_total = round(sum(saldos[g.id] for g in vigentes), 0)
     except Exception:
-        pass
+        # Un 0 mudo en cobertura es justo la mentira que este cambio persigue: que quede rastro.
+        logger.warning("KPI de garantías no disponible; se reporta 0", exc_info=True)
 
     # Liquidaciones: projects pending settlement this month
     liquidaciones_pendientes = 0
@@ -280,6 +285,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "garantias_vigentes": garantias_vigentes,
         "garantias_por_vencer": garantias_por_vencer,
         "garantias_valor_total_cop": garantias_valor_total,
+        "garantias_saldo_vivo_total_cop": garantias_saldo_vivo_total,
         "gen_solenium_last_date": gen_last_date,
         "gen_solenium_projects": gen_projects_with_data,
         "liquidaciones_pendientes": liquidaciones_pendientes,

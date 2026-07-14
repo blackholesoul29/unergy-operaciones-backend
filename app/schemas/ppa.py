@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import Literal
 
@@ -74,7 +74,7 @@ class PPAContratoCreate(BaseModel):
     gescon_fecha_fin: date | None = None
     gescon_precio: float | None = None
     gescon_cantidades_kwh: float | None = None
-    precio_penalidad_mwh: float | None = None  # COP/MWh
+    precio_penalidad_mwh: float | None = Field(default=None, ge=0)  # COP/MWh
     tipo_precio_referencia: TipoPrecioReferencia = "HIBRIDO"
     tipo_contrato: str | None = "venta"
     carpeta_link: str | None = None
@@ -109,7 +109,7 @@ class PPAContratoUpdate(BaseModel):
     gescon_fecha_fin: date | None = None
     gescon_precio: float | None = None
     gescon_cantidades_kwh: float | None = None
-    precio_penalidad_mwh: float | None = None  # COP/MWh
+    precio_penalidad_mwh: float | None = Field(default=None, ge=0)  # COP/MWh
     # None = no se toca (la columna es NOT NULL; el endpoint ignora el null explícito).
     tipo_precio_referencia: TipoPrecioReferencia | None = None
     tipo_contrato: str | None = None

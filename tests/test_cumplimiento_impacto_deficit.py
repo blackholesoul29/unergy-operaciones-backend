@@ -152,10 +152,9 @@ def _jsonb_as_text(element, compiler, **kw):
 @pytest.fixture
 def db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(
-        engine,
-        tables=[Proyecto.__table__, PPAContrato.__table__, CumplimientoMensual.__table__],
-    )
+    # Metadata completo: PPAContratoOut serializa relaciones del contrato
+    # (tarifas, compromisos, proyectos) — crear tablas sueltas es whack-a-mole.
+    Base.metadata.create_all(engine)
     s = sessionmaker(bind=engine)()
     yield s
     s.close()
@@ -190,3 +189,37 @@ def test_alerta_sin_penalidad_mantiene_la_valoracion_a_bolsa(db):
     assert a["fuente_precio"] == "BOLSA"
     assert a["impacto_estimado_cop"] == 50 * 1000 * BOLSA_KWH  # fórmula histórica
     assert a["precio_bolsa_promedio"] == BOLSA_KWH  # el crudo COP/kWh sigue expuesto
+
+
+# --- Schema y PATCH: la penalidad no acepta basura y el null no desasigna ----
+
+def test_penalidad_negativa_rechazada_en_schema():
+    """Una penalidad negativa fabricaría un impacto negativo en la alerta."""
+    from pydantic import ValidationError
+    from app.schemas.ppa import PPAContratoCreate, PPAContratoUpdate
+
+    with pytest.raises(ValidationError):
+        PPAContratoCreate(nombre_interno="X", precio_penalidad_mwh=-400_000)
+    with pytest.raises(ValidationError):
+        PPAContratoUpdate(precio_penalidad_mwh=-1)
+
+
+def test_patch_null_explicito_no_desasigna_tipo_precio(db):
+    """tipo_precio_referencia es NOT NULL: un null explícito en el PATCH se
+    ignora (queda el valor previo); la penalidad nullable sí se puede borrar."""
+    from app.api.v1 import ppa as ppa_api
+    from app.schemas.ppa import PPAContratoUpdate
+
+    db.add(PPAContrato(
+        id=7, nombre_interno="PPA Patch",
+        precio_penalidad_mwh=400_000, tipo_precio_referencia="PENALIDAD_CONTRACTUAL",
+    ))
+    db.commit()
+
+    data = PPAContratoUpdate.model_validate(
+        {"tipo_precio_referencia": None, "precio_penalidad_mwh": None}
+    )
+    out = ppa_api.update_contrato(id=7, data=data, db=db, _=None)
+
+    assert out["tipo_precio_referencia"] == "PENALIDAD_CONTRACTUAL"  # null ignorado
+    assert out["precio_penalidad_mwh"] is None  # nullable: sí se desasigna

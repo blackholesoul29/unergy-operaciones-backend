@@ -9,14 +9,14 @@ captured in migration 047. This migration version-controls that DDL too, so
 Every statement is idempotent, so applying this after 047 (or on an already
 up-to-date database) is a safe no-op.
 
-Revision ID: 048
-Revises: 047
+Revision ID: 060
+Revises: 059
 Create Date: 2026-07-11
 """
 from alembic import op
 
-revision = "048"
-down_revision = "047"
+revision = "060"
+down_revision = "059"
 branch_labels = None
 depends_on = None
 

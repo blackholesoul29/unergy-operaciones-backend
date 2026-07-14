@@ -12,13 +12,13 @@ Every statement is idempotent (``IF NOT EXISTS`` / guarded ``UPDATE`` /
 already exists), so applying this on a database that was previously kept in sync
 by the old startup path is a safe no-op.
 
-Revision ID: 047
+Revision ID: 059
 Revises: 046
 Create Date: 2026-07-11
 """
 from alembic import op
 
-revision = "047"
+revision = "059"
 down_revision = "046"
 branch_labels = None
 depends_on = None

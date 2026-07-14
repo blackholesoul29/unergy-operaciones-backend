@@ -751,3 +751,120 @@ def importar_hojas(
                 op.estado = _etapa_global(resultados)
         db.commit()
     return res
+
+
+@router.post("/dedup-clientes")
+def dedup_clientes(
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
+):
+    """Limpia los clientes-prospecto que el import creó por duplicado cuando ya
+    existía el cliente operativo. CONSERVADOR y REVERSIBLE:
+    - candidato = cliente con origen_tipo NULL + oportunidad es_migrada con ≥1
+      oferta + SIN huella operativa (no inversionista/contrato/PPA); o sea un
+      prospecto puro creado por el import.
+    - canónico (alta confianza): (a) la planta de alguna de sus ofertas coincide
+      con un Proyecto existente cuyo dueño (inversionista) es un cliente NO
+      prospecto → ese dueño; o (b) el nombre normaliza exactamente igual a otro
+      cliente no prospecto. Si no hay canónico claro, se deja intacto.
+    - acción: mueve las ofertas al canónico (enlazando proyecto_id) y hace
+      soft-delete del prospecto y su oportunidad (deleted_at; reversible).
+    Idempotente. Solo admin; dry_run=true no escribe."""
+    if current.rol.value != "admin":
+        raise HTTPException(403, "Solo admin")
+    from app.services.clientes_panel import proyectos_por_cliente
+
+    # Candidatos: clientes con oportunidad es_migrada que tiene ofertas.
+    cand_ids = {
+        cid for (cid,) in db.query(Oportunidad.cliente_id)
+        .join(OportunidadOferta, OportunidadOferta.oportunidad_id == Oportunidad.id)
+        .filter(Oportunidad.deleted_at.is_(None), Oportunidad.es_migrada.is_(True))
+        .distinct().all()
+    }
+    footprint = proyectos_por_cliente(db, cand_ids) if cand_ids else {}
+    prospect_ids = {
+        c.id for c in db.query(Cliente).filter(Cliente.id.in_(cand_ids)).all()
+        if c.id in cand_ids and c.origen_tipo is None and c.deleted_at is None
+        and not footprint.get(c.id)
+    } if cand_ids else set()
+
+    # Índices: Proyecto por nombre normalizado y sus dueños (inversionistas).
+    proy_norm = {}
+    for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all():
+        if nom:
+            proy_norm.setdefault(_norm_nombre(nom), pid)
+    owners: dict = {}
+    for pid, cid in db.query(ProyectoInversionista.proyecto_id, ProyectoInversionista.cliente_id).all():
+        owners.setdefault(pid, []).append(cid)
+    # Clientes NO prospecto por nombre normalizado (para match exacto de nombre).
+    cli_no_prospecto = {}
+    for c in db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all():
+        if c.id not in prospect_ids:
+            cli_no_prospecto.setdefault(_norm_nombre(c.razon_social_nombre), c.id)
+
+    res = {"dry_run": dry_run, "prospectos": len(prospect_ids),
+           "fusionados": 0, "sin_canonico": 0, "detalle": []}
+
+    for C in db.query(Cliente).filter(Cliente.id.in_(prospect_ids)).all() if prospect_ids else []:
+        ofertas = (
+            db.query(OportunidadOferta)
+            .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+            .filter(Oportunidad.cliente_id == C.id, Oportunidad.deleted_at.is_(None)).all()
+        )
+        # Nombres a probar: razón social + planta de cada oferta.
+        nombres = [C.razon_social_nombre] + [o.planta_nombre for o in ofertas if o.planta_nombre]
+        canonico = None
+        matched_proy = None
+        regla = None
+        for nombre in nombres:
+            k = _norm_nombre(nombre)
+            if not k:
+                continue
+            pid = proy_norm.get(k)
+            if pid:
+                for owner in owners.get(pid, []):
+                    if owner not in prospect_ids and owner != C.id:
+                        canonico, matched_proy, regla = owner, pid, "planta→dueño"
+                        break
+            if canonico:
+                break
+            did = cli_no_prospecto.get(k)
+            if did and did != C.id:
+                canonico, regla = did, "nombre exacto"
+                break
+        if not canonico:
+            res["sin_canonico"] += 1
+            continue
+
+        res["fusionados"] += 1
+        res["detalle"].append({"prospecto_id": C.id, "prospecto": C.razon_social_nombre,
+                               "canonico_id": canonico, "regla": regla,
+                               "ofertas": len(ofertas), "proyecto": matched_proy})
+        if dry_run:
+            continue
+
+        # Oportunidad destino del canónico (reusar o crear).
+        d_op = (db.query(Oportunidad)
+                .filter(Oportunidad.cliente_id == canonico, Oportunidad.deleted_at.is_(None))
+                .order_by(Oportunidad.id).first())
+        if not d_op:
+            d_op = Oportunidad(cliente_id=canonico, estado="servicio_operativo",
+                               estado_desde=col_now(), es_migrada=True,
+                               creado_por_usuario_id=current.id)
+            db.add(d_op)
+            db.flush()
+            db.add(OportunidadEstadoHistorial(
+                oportunidad_id=d_op.id, estado_anterior=None,
+                estado_nuevo="servicio_operativo", usuario_id=current.id))
+        for o in ofertas:
+            o.oportunidad_id = d_op.id
+            if matched_proy and o.proyecto_id is None:
+                o.proyecto_id = matched_proy
+        # Soft-delete del prospecto y sus oportunidades (ya vacías).
+        for op in db.query(Oportunidad).filter(Oportunidad.cliente_id == C.id, Oportunidad.deleted_at.is_(None)).all():
+            op.deleted_at = col_now()
+        C.deleted_at = col_now()
+
+    if not dry_run:
+        db.commit()
+    return res

@@ -15,11 +15,16 @@ from app.schemas.garantias import (
     GarantiaCreate, GarantiaUpdate, GarantiaOut,
     MovimientoCreate, MovimientoOut,
 )
+from app.services.garantias_saldo import saldos_vivos
 
 router = APIRouter(prefix="/garantias", tags=["Garantías"])
 
 
-def _garantia_to_out(g: Garantia) -> dict:
+def _garantia_to_out(g: Garantia, saldo_vivo_cop: Optional[float] = None) -> dict:
+    # `valor_cop` es el valor constituido y nunca baja; el saldo disponible vive en los
+    # movimientos. Sin mapa de saldos, degradamos al constituido (nunca a 0).
+    if saldo_vivo_cop is None:
+        saldo_vivo_cop = float(g.valor_cop) if g.valor_cop is not None else 0
     d = {
         "id": g.id,
         "proyecto_id": g.proyecto_id,
@@ -29,6 +34,7 @@ def _garantia_to_out(g: Garantia) -> dict:
         "entidad": g.entidad,
         "numero_referencia": g.numero_referencia,
         "valor_cop": float(g.valor_cop) if g.valor_cop is not None else 0,
+        "saldo_vivo_cop": round(saldo_vivo_cop, 2),
         "porcentaje_cobertura": float(g.porcentaje_cobertura) if g.porcentaje_cobertura is not None else None,
         "fecha_constitucion": g.fecha_constitucion.isoformat() if g.fecha_constitucion else None,
         "fecha_vencimiento": g.fecha_vencimiento.isoformat() if g.fecha_vencimiento else None,
@@ -50,7 +56,9 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
 
     vigentes = db.query(Garantia).filter(Garantia.estado == EstadoGarantiaEnum.vigente).all()
 
+    saldos = saldos_vivos(db, vigentes)
     total_valor = sum(float(g.valor_cop or 0) for g in vigentes)
+    total_saldo_vivo = sum(saldos.get(g.id, float(g.valor_cop or 0)) for g in vigentes)
     count_vigentes = len(vigentes)
 
     expiring_soon = [g for g in vigentes if g.fecha_vencimiento and g.fecha_vencimiento <= threshold_30d]
@@ -73,9 +81,10 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
     for g in vigentes:
         t = g.tipo.value if g.tipo else "otro"
         if t not in by_tipo:
-            by_tipo[t] = {"count": 0, "valor_cop": 0}
+            by_tipo[t] = {"count": 0, "valor_cop": 0, "saldo_vivo_cop": 0}
         by_tipo[t]["count"] += 1
         by_tipo[t]["valor_cop"] += float(g.valor_cop or 0)
+        by_tipo[t]["saldo_vivo_cop"] += saldos.get(g.id, float(g.valor_cop or 0))
 
     # Recent movements (last 30 days)
     recent_movs = (
@@ -88,6 +97,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
 
     return {
         "total_valor_cop": round(total_valor, 2),
+        "total_saldo_vivo_cop": round(total_saldo_vivo, 2),
         "count_vigentes": count_vigentes,
         "count_vencidas": already_expired,
         "expiring_30d": [
@@ -96,6 +106,7 @@ def garantias_resumen(db: Session = Depends(get_db), _=Depends(get_current_user)
                 "proyecto_nombre": g.proyecto.nombre_comercial if g.proyecto else "—",
                 "fecha_vencimiento": g.fecha_vencimiento.isoformat(),
                 "valor_cop": float(g.valor_cop or 0),
+                "saldo_vivo_cop": round(saldos.get(g.id, float(g.valor_cop or 0)), 2),
                 "dias_restantes": (g.fecha_vencimiento - today).days,
             }
             for g in sorted(expiring_soon, key=lambda x: x.fecha_vencimiento)
@@ -147,8 +158,9 @@ def list_garantias(
             Garantia.fecha_vencimiento <= cutoff,
         )
     garantias = q.order_by(Garantia.fecha_vencimiento.nullslast(), Garantia.id).all()
+    saldos = saldos_vivos(db, garantias)
     return {
-        "items": [_garantia_to_out(g) for g in garantias],
+        "items": [_garantia_to_out(g, saldos.get(g.id)) for g in garantias],
         "total": len(garantias),
     }
 
@@ -175,6 +187,8 @@ def vencimientos_proximos(
         .all()
     )
 
+    saldos = saldos_vivos(db, garantias)
+
     # Group by 30/60/90 day buckets
     buckets = {"30_dias": [], "60_dias": [], "90_dias": []}
     for g in garantias:
@@ -186,6 +200,7 @@ def vencimientos_proximos(
             "tipo": g.tipo.value if g.tipo else None,
             "entidad": g.entidad,
             "valor_cop": float(g.valor_cop or 0),
+            "saldo_vivo_cop": round(saldos.get(g.id, float(g.valor_cop or 0)), 2),
             "fecha_vencimiento": g.fecha_vencimiento.isoformat(),
             "dias_restantes": dias_restantes,
         }
@@ -199,6 +214,9 @@ def vencimientos_proximos(
     return {
         "total": len(garantias),
         "valor_total_cop": round(sum(float(g.valor_cop or 0) for g in garantias), 2),
+        "saldo_vivo_total_cop": round(
+            sum(saldos.get(g.id, float(g.valor_cop or 0)) for g in garantias), 2
+        ),
         "buckets": buckets,
     }
 
@@ -208,7 +226,7 @@ def get_garantia(garantia_id: int, db: Session = Depends(get_db), _=Depends(get_
     g = db.query(Garantia).filter(Garantia.id == garantia_id).first()
     if not g:
         raise HTTPException(404, "Garantía no encontrada")
-    out = _garantia_to_out(g)
+    out = _garantia_to_out(g, saldos_vivos(db, [g]).get(g.id))
     out["movimientos"] = [
         {
             "id": m.id,

@@ -54,6 +54,8 @@ class GarantiaOut(GarantiaBase):
     updated_at: datetime
     proyecto_nombre: Optional[str] = None
     contrato_nombre: Optional[str] = None
+    # Valor disponible tras los movimientos. `valor_cop` es el constituido y nunca baja.
+    saldo_vivo_cop: Optional[float] = None
 
 
 class MovimientoBase(BaseModel):

@@ -143,6 +143,14 @@ class PPAContrato(Base):
     gescon_precio: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     gescon_cantidades_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Penalidad por MWh no entregado pactada en el PPA. OJO: COP/MWh, mientras que
+    # el precio de bolsa (cumplimiento_mensual.precio_bolsa_promedio) es COP/kWh.
+    precio_penalidad_mwh: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Con qué precio se valora el déficit: HIBRIDO (el mayor entre penalidad y
+    # bolsa), PENALIDAD_CONTRACTUAL o PRECIO_BOLSA. Ver app/services/cumplimiento_service.py.
+    tipo_precio_referencia: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="HIBRIDO", default="HIBRIDO",
+    )
     tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva

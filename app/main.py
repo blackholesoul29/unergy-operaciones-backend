@@ -1003,6 +1003,10 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
+    # Valoración del déficit PPA (2026-07): penalidad contractual en COP/MWh y
+    # con qué precio se valora el faltante. Ver migration 055.
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS precio_penalidad_mwh NUMERIC(12,2)",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_precio_referencia VARCHAR(50) NOT NULL DEFAULT 'HIBRIDO'",
     # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
     # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
     # camino de deploy en este repo — ver nota de migration 031 arriba).

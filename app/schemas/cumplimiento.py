@@ -59,3 +59,38 @@ class CerrarPeriodoResponse(BaseModel):
 
 class FacturarRequest(BaseModel):
     liquidacion_id: int | None = None
+
+
+class AlertaDeficitPPAOut(BaseModel):
+    """Alerta de déficit de cumplimiento PPA (GET /alertas/cumplimiento-ppa)."""
+    tipo: str
+    severidad: str
+    contrato_ppa_id: int
+    contrato_nombre: str | None = None
+    comprador_nombre: str | None = None
+    anio: int
+    mes: int
+    gen_total_mwh: float
+    compromiso_mwh: float
+    cobertura_pct: float
+    deficit_mwh: float
+    impacto_estimado_cop: float | None = None
+    precio_bolsa_promedio: float | None = None  # COP/kWh (fuente XM)
+    # Con qué precio se valoró el déficit: el frontend muestra el número y de
+    # dónde salió ('BOLSA' o 'PENALIDAD_CONTRACTUAL').
+    precio_aplicado_mwh: float | None = None  # COP/MWh
+    fuente_precio: str | None = None
+    mensaje: str
+
+
+class PeriodoOut(BaseModel):
+    anio: int
+    mes: int
+
+
+class AlertasCumplimientoPPAOut(BaseModel):
+    fecha_consulta: str
+    periodo: PeriodoOut
+    umbral_pct: float
+    total_alertas: int
+    alertas: list[AlertaDeficitPPAOut]

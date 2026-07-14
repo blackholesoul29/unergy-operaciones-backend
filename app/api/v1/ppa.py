@@ -307,6 +307,10 @@ def update_contrato(
     contrato = _get_contrato_or_404(id, db)
     update_data = data.model_dump(exclude_unset=True, exclude={"proyecto_ids"})
     for k, v in update_data.items():
+        # tipo_precio_referencia es NOT NULL: un null explícito no lo desasigna,
+        # deja el valor que ya tenía (o el default HIBRIDO).
+        if k == "tipo_precio_referencia" and v is None:
+            continue
         setattr(contrato, k, v)
     if data.proyecto_ids is not None:
         _set_proyectos(contrato, data.proyecto_ids, db)

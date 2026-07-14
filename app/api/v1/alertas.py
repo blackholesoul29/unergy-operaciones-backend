@@ -23,9 +23,17 @@ from app.models.proyectos import Proyecto
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.schemas.cumplimiento import AlertasCumplimientoPPAOut
+from app.services.cumplimiento_service import calcular_impacto_deficit
 from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
+
+# Cómo se lee la fuente del precio en el mensaje de la alerta.
+_ETIQUETA_FUENTE = {
+    "BOLSA": "precio de bolsa",
+    "PENALIDAD_CONTRACTUAL": "penalidad contractual",
+}
 
 
 @router.get("/contratos-ppa")
@@ -151,7 +159,7 @@ def alertas_contratos_ppa(db: Session = Depends(get_db), _=Depends(get_current_u
     }
 
 
-@router.get("/cumplimiento-ppa")
+@router.get("/cumplimiento-ppa", response_model=AlertasCumplimientoPPAOut)
 def alertas_cumplimiento_ppa(
     anio: int | None = Query(None, ge=2020, le=2050),
     mes: int | None = Query(None, ge=1, le=12),
@@ -193,11 +201,13 @@ def alertas_cumplimiento_ppa(
             continue
 
         deficit_mwh = round(comp - gen, 3)
-        # Estimate COP impact
-        precio = float(r.precio_bolsa_promedio) if r.precio_bolsa_promedio is not None else None
-        impacto_cop = round(deficit_mwh * 1000 * precio, 0) if precio is not None else None
-
         contrato = r.contrato_ppa
+        # El precio de bolsa (COP/kWh) ya no es el único referente: si el PPA pactó
+        # penalidad por MWh no entregado, el contrato decide cuál manda.
+        precio = float(r.precio_bolsa_promedio) if r.precio_bolsa_promedio is not None else None
+        impacto = calcular_impacto_deficit(deficit_mwh, contrato, precio)
+        impacto_cop = impacto.impacto_cop
+
         alertas.append({
             "tipo": "deficit_cumplimiento_ppa",
             "severidad": "alta" if cobertura < 80 else "media",
@@ -212,10 +222,16 @@ def alertas_cumplimiento_ppa(
             "deficit_mwh": deficit_mwh,
             "impacto_estimado_cop": impacto_cop,
             "precio_bolsa_promedio": precio,
+            "precio_aplicado_mwh": impacto.precio_aplicado_mwh,
+            "fuente_precio": impacto.fuente_precio,
             "mensaje": (
                 f"{contrato.nombre_interno or 'Contrato'}: "
                 f"deficit de {deficit_mwh:.1f} MWh ({cobertura:.0f}% cobertura)"
-                + (f", impacto estimado ${impacto_cop:,.0f} COP" if impacto_cop else "")
+                + (
+                    f", impacto estimado ${impacto_cop:,.0f} COP"
+                    f" ({_ETIQUETA_FUENTE.get(impacto.fuente_precio, impacto.fuente_precio)})"
+                    if impacto_cop else ""
+                )
             ),
         })
 

@@ -779,6 +779,7 @@ def importar_hojas(
 @router.post("/dedup-clientes")
 def dedup_clientes(
     dry_run: bool = Query(True),
+    umbral: float = Query(0.85, description="score mínimo para auto-fusionar (evita falsos positivos por palabras genéricas como 'energia')"),
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
     """Limpia los clientes-prospecto que el import creó por duplicado cuando ya
@@ -846,7 +847,7 @@ def dedup_clientes(
         #    existente → su dueño operativo es el canónico.
         for nombre in [o.planta_nombre for o in ofertas if o.planta_nombre] + [C.razon_social_nombre]:
             pid, score = mejor_candidato(nombre, proy_items)
-            if pid:
+            if pid and score >= umbral:
                 for owner in owners.get(pid, []):
                     if owner not in prospect_ids and owner != C.id:
                         canonico, matched_proy, regla = owner, pid, f"planta→dueño ({score})"
@@ -856,7 +857,7 @@ def dedup_clientes(
         # 2) Si no, la razón social matchea directamente un cliente operativo.
         if not canonico:
             did, score = mejor_candidato(C.razon_social_nombre, cli_items)
-            if did and did != C.id:
+            if did and did != C.id and score >= umbral:
                 canonico, regla = did, f"nombre ({score})"
         if not canonico:
             res["sin_canonico"] += 1

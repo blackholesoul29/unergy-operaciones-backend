@@ -2665,7 +2665,7 @@ def _run_comercial_dedup() -> None:
         except Exception:
             admin_id = None
         current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
-        res = dedup_clientes(dry_run=False, db=db, current=current)
+        res = dedup_clientes(dry_run=False, umbral=0.85, db=db, current=current)
         print(f"[startup] comercial_dedup: prospectos={res['prospectos']} "
               f"fusionados={res['fusionados']} sin_canonico={res['sin_canonico']}")
     finally:

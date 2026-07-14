@@ -136,6 +136,22 @@ def test_start_sh_upgrades_all_heads():
     )
 
 
+def test_env_py_usa_una_transaccion_por_migracion():
+    """`upgrade heads` debe commitear migración por migración.
+
+    Con la cola de ramas, un solo `upgrade heads` aplica N migraciones. Si van
+    todas en UNA transacción, una migración mala revierte a las demás y el deploy
+    queda con CERO aplicadas — exactamente el fallo que `heads` vino a evitar.
+    """
+    with open(os.path.join(REPO_ROOT, "alembic", "env.py"), encoding="utf-8") as fh:
+        env_py = fh.read()
+    assert re.search(r"transaction_per_migration\s*=\s*True", env_py), (
+        "alembic/env.py debe configurar `transaction_per_migration=True`. Sin eso, "
+        "`upgrade heads` corre todas las ramas en una sola transacción y una "
+        "migración mala revierte a todas las buenas."
+    )
+
+
 def test_no_other_runner_uses_singular_head():
     """Ningún OTRO script del repo puede reintroducir el `head` singular.
 

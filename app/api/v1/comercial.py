@@ -116,7 +116,7 @@ def _oferta_out(o: OportunidadOferta) -> dict:
         "etapa_texto": o.etapa_texto, "fecha_oferta": o.fecha_oferta,
         "fecha_tentativa_inicio": o.fecha_tentativa_inicio,
         "contrato_firmado": o.contrato_firmado, "detalle": o.detalle, "notas": o.notas,
-        "created_at": o.created_at,
+        "created_at": o.created_at, "updated_at": o.updated_at,
     }
 
 
@@ -255,6 +255,71 @@ def list_oportunidades(
         row["codigo_seguimiento"] = (lead[1]["codigo_seguimiento"] if lead
                                      else _norm_codigo(op.numero_oferta))
         if solo_alerta and not row["alerta"]:
+            continue
+        out.append(row)
+    return out
+
+
+@router.get("/ofertas")
+def list_ofertas_todas(
+    tipo: str | None = Query(None),
+    estado: str | None = Query(None),
+    resultado: str | None = Query(None),
+    q: str | None = Query(None),
+    solo_alerta: bool = Query(False),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Lista PLANA de todas las ofertas (la oferta es la unidad). Cada fila trae
+    su código de seguimiento, tipo, planta/proyecto, resultado y —heredados de su
+    oportunidad— el estado del pipeline, el cliente y la alerta. Ordenada por la
+    más reciente. Esta es la fuente de la vista principal de /comercial."""
+    _check_comercial(current)
+    ult_sq = (
+        db.query(OportunidadGestion.oportunidad_id.label("oid"),
+                 func.max(OportunidadGestion.fecha).label("ultima"))
+        .group_by(OportunidadGestion.oportunidad_id).subquery()
+    )
+    qy = (
+        db.query(OportunidadOferta, Oportunidad, Cliente, ult_sq.c.ultima)
+        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+        .join(Cliente, Cliente.id == Oportunidad.cliente_id)
+        .outerjoin(ult_sq, ult_sq.c.oid == Oportunidad.id)
+        .filter(Oportunidad.deleted_at.is_(None), Cliente.deleted_at.is_(None))
+    )
+    if tipo:
+        qy = qy.filter(OportunidadOferta.tipo == tipo)
+    if estado:
+        qy = qy.filter(Oportunidad.estado == estado)
+    if resultado:
+        qy = qy.filter(OportunidadOferta.resultado == resultado)
+    if q:
+        like = f"%{q.strip()}%"
+        qy = qy.filter(
+            OportunidadOferta.numero_oferta.ilike(like)
+            | OportunidadOferta.planta_nombre.ilike(like)
+            | Cliente.razon_social_nombre.ilike(like)
+            | Oportunidad.nombre.ilike(like)
+        )
+    ahora = col_now()
+    filas = qy.order_by(OportunidadOferta.updated_at.desc(), OportunidadOferta.id.desc()).all()
+    out = []
+    for of, op, cli, ultima in filas:
+        estado_op = op.estado if isinstance(op.estado, str) else op.estado.value
+        dias, alerta = calcular_alerta(estado_op, op.estado_desde, ultima,
+                                       settings.COMERCIAL_ALERTA_DIAS, ahora)
+        row = _oferta_out(of)
+        row.update({
+            "cliente_id": op.cliente_id,
+            "cliente_razon_social": cli.razon_social_nombre,
+            "cliente_nit": cli.nit_cedula,
+            "oportunidad_nombre": op.nombre or cli.razon_social_nombre,
+            "estado": estado_op,                # etapa del pipeline (heredada de la oportunidad)
+            "estado_desde": op.estado_desde,
+            "dias_sin_respuesta": dias,
+            "alerta": alerta,
+        })
+        if solo_alerta and not alerta:
             continue
         out.append(row)
     return out

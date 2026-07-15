@@ -73,6 +73,7 @@ class ClienteCreate(BaseModel):
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
+    reteiva_pct: Optional[float] = None
     rut_url: Optional[str] = None
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
@@ -145,6 +146,7 @@ class ClienteBase(BaseModel):
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
+    reteiva_pct: Optional[float] = None
     rut_url: Optional[str] = None
     origina_investment_id: Optional[int] = None
     created_at: Optional[datetime] = None

@@ -61,6 +61,7 @@ class Cliente(Base):
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    reteiva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     rut_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Origen comercial del cliente. VARCHAR (no enum de BD) a propósito:
     # la tabla ya existe y un tipo nuevo complicaría la migración; la

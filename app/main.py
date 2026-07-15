@@ -54,6 +54,23 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
     # impuestos por cliente — reteiva (retención de IVA), separada de reteica
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
+    # soportes/comprobantes (archivo Drive) por transacción del panel contable
+    """CREATE TABLE IF NOT EXISTS panel_soporte (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        periodo VARCHAR(7) NOT NULL,
+        tipo VARCHAR(20) NOT NULL,
+        grupo VARCHAR(20) NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        archivo_url VARCHAR(1000) NOT NULL,
+        archivo_nombre VARCHAR(300),
+        drive_file_id VARCHAR(120),
+        created_by_id BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_soporte ON panel_soporte (proyecto_id, periodo, tipo, grupo, concepto)",
+    "CREATE INDEX IF NOT EXISTS ix_panel_soporte_lookup ON panel_soporte (proyecto_id, periodo, tipo)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

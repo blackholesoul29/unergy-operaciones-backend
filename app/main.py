@@ -1050,6 +1050,19 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
     # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
+    # migration — CRM: pipeline de 6 estados a nivel oportunidad (2026-07-15)
+    # RENAME VALUE migra los datos in-place (sin UPDATE) y es idempotente por
+    # tolerancia (si ya se renombró, lanza y _run_column_migrations lo salta).
+    # ADD VALUE va al bloque autocommit (debe correr fuera de transacción).
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'oferta' TO 'envio_oferta'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion' TO 'negociacion_contrato'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'servicio_operativo' TO 'operando'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'firmado'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'declinado'",
+    # Estandariza el prefijo del código de seguimiento OF→OP (oferta y oportunidad).
+    # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
+    "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
 ]
 
 

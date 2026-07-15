@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date
 
 from app.services.xm.unificador import (
-    encoding_para, unificar, nombre_salida, exportar, enriquecer,
+    encoding_para, unificar, nombre_salida, exportar, enriquecer, filtrar_agente_ungg,
 )
 
 
@@ -82,6 +82,28 @@ def test_enriquecer_sin_ningun_match_devuelve_vacio():
     df2, sin_match = enriquecer(df, "grip", {"2026-05": {}}, "PLANTA")
     assert df2.empty
     assert sin_match == {"9999"}
+
+
+def test_filtrar_agente_ungg_deja_solo_filas_ungg():
+    # tgrl no tiene código SIC de planta; su "filtro Unergy" es quedarse
+    # solo con las filas del agente UNGG (como el notebook original).
+    df = pd.DataFrame({
+        "Fecha": ["2026-06-01", "2026-06-01", "2026-06-01"],
+        "CODIGO": ["EBIC", "EBIC", "DEUD"],
+        "AGENTE": ["UNGG", "ENDG", "UNGG"],
+        "HORA 01": [1, 2, 3],
+    })
+    out = filtrar_agente_ungg(df, "AGENTE")
+    assert list(out["AGENTE"]) == ["UNGG", "UNGG"]
+    assert list(out["CODIGO"]) == ["EBIC", "DEUD"]
+    # no agrega columnas de nombre/MW
+    assert "Nombre de la Frontera" not in out.columns
+
+
+def test_filtrar_agente_ungg_columna_ausente_da_error_claro():
+    df = pd.DataFrame({"Fecha": ["2026-06-01"], "OTRA": ["x"]})
+    with pytest.raises(ValueError, match="AGENTE"):
+        filtrar_agente_ungg(df, "AGENTE")
 
 
 def test_enriquecer_columna_ausente_da_error_claro():

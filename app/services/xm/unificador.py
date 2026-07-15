@@ -51,6 +51,22 @@ def exportar(df: pd.DataFrame) -> tuple[bytes, bytes]:
     return buf_xlsx.read(), buf_txt.read()
 
 
+def filtrar_agente_ungg(df: pd.DataFrame, columna_agente: str = "AGENTE") -> pd.DataFrame:
+    """Filtra el archivo a solo las filas del agente UNGG.
+
+    Para tipos como tgrl que listan todos los agentes del mercado y NO
+    traen código SIC de planta — el "filtro Unergy" aquí es simplemente
+    quedarse con las filas cuyo AGENTE == 'UNGG' (igual que el notebook
+    original, que filtraba por la 2ª columna). No agrega columnas.
+    """
+    if columna_agente not in df.columns:
+        raise ValueError(
+            f"El archivo no tiene la columna '{columna_agente}' necesaria para "
+            f"filtrar por agente UNGG."
+        )
+    return df[df[columna_agente].astype(str).str.strip() == "UNGG"].copy()
+
+
 def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_codigo: str):
     """fronteras_por_mes: {'YYYY-MM': {codigo: {nombre, tipo, mw}}, ...}.
 

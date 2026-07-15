@@ -12,7 +12,7 @@ from app.services.xm.exceptions import (
 )
 from app.services.xm.ftp_client import conectar_ftp, descargar_bytes, listar_directorio
 from app.services.xm.fronteras import obtener_fronteras_mes
-from app.services.xm.unificador import enriquecer, exportar, nombre_salida, unificar
+from app.services.xm.unificador import enriquecer, exportar, filtrar_agente_ungg, nombre_salida, unificar
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,13 @@ def ejecutar_job(job_id: str, ftp_params: dict, tipo: str, extension: str,
             df, sin_match_set = enriquecer(df, tipo, fronteras_por_mes, columna)
             codigos_sin_match = sorted(map(str, sin_match_set))
             logger.info("Job %s: enriquecimiento listo, %d códigos sin match", job_id, len(codigos_sin_match))
+
+        elif enriquecer_flag and tipo in tipos.TIPOS_FILTRO_AGENTE and not df.empty:
+            # tgrl: no hay código SIC de planta; el "solo Unergy" es filtrar
+            # las filas del agente UNGG (no descarga fronteras ni agrega columnas).
+            antes = len(df)
+            df = filtrar_agente_ungg(df, tipos.COLUMNA_AGENTE)
+            logger.info("Job %s: filtrado por agente UNGG, %d -> %d filas", job_id, antes, len(df))
 
         nombre_xlsx, nombre_txt = nombre_salida(tipo, extension, fecha_inicio, fecha_fin)
         logger.info("Job %s: exportando %d filas a Excel/TXT (puede tardar con archivos grandes)", job_id, len(df))

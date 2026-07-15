@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 from datetime import date
 
@@ -81,3 +82,30 @@ def test_enriquecer_sin_ningun_match_devuelve_vacio():
     df2, sin_match = enriquecer(df, "grip", {"2026-05": {}}, "PLANTA")
     assert df2.empty
     assert sin_match == {"9999"}
+
+
+def test_enriquecer_columna_ausente_da_error_claro():
+    df = pd.DataFrame({"FechaDocumento": ["2026-05-01"], "OTRA": ["x"]})
+    with pytest.raises(ValueError, match="PLANTA"):
+        enriquecer(df, "grip", {"2026-05": {}}, "PLANTA")
+
+
+def test_enriquecer_ignora_codigos_vacios_o_nan():
+    # Los archivos reales de XM traen filas de totales/footer con la columna
+    # de código vacía. En pandas 3.0 esos vacíos quedan como NaN (float), no
+    # como texto — sin_match no debe contener floats (rompía sorted() en el
+    # orquestador con "'<' not supported between float and str").
+    df = pd.DataFrame({
+        "FechaDocumento": ["2026-05-01", "2026-05-01", "2026-05-01"],
+        "SUBMERCADO": ["3A44", None, "9999"],
+    })
+    fronteras_por_mes = {
+        "2026-05": {"3A44": {"nombre": "Bayunca I", "tipo": "Generacion", "mw": 3.0}},
+    }
+    df2, sin_match = enriquecer(df, "arrpas", fronteras_por_mes, "SUBMERCADO")
+    assert list(df2["SUBMERCADO"]) == ["3A44"]
+    # solo el código real "9999" queda como sin-match; el vacío/NaN se ignora
+    assert sin_match == {"9999"}
+    assert all(isinstance(c, str) for c in sin_match)
+    # y sorted() (lo que hace el orquestador) no debe reventar
+    assert sorted(sin_match) == ["9999"]

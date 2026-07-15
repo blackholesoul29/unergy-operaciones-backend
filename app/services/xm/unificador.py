@@ -67,8 +67,18 @@ def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_cod
     (el que también atiende las peticiones HTTP de polling), eso hace
     que la pestaña web vea timeouts aunque la descarga siga viva.
     """
+    if columna_codigo not in df.columns:
+        raise ValueError(
+            f"El archivo no tiene la columna '{columna_codigo}' necesaria para "
+            f"enriquecer este tipo — no se puede filtrar por planta Unergy."
+        )
     meses_dato = df["FechaDocumento"].astype(str).str.slice(0, 7)
-    codigos = df[columna_codigo].astype(str).str.strip()
+    # fillna("") ANTES de astype(str): en pandas 3.0 el nuevo dtype string
+    # preserva los vacíos como NaN (float) incluso tras .astype(str), y esos
+    # NaN terminaban en sin_match mezclando float+str, lo que rompía el
+    # sorted() del orquestador ("'<' not supported between float and str").
+    # Los archivos de XM traen filas de totales/footer con el código vacío.
+    codigos = df[columna_codigo].fillna("").astype(str).str.strip()
     claves = meses_dato + "|" + codigos
 
     tabla_combinada = {
@@ -79,7 +89,8 @@ def enriquecer(df: pd.DataFrame, tipo: str, fronteras_por_mes: dict, columna_cod
     info_por_fila = claves.map(tabla_combinada)
     coincide = info_por_fila.notna()
 
-    sin_match = set(codigos[~coincide])
+    # Solo códigos reales sin match; se ignoran los vacíos (footer/totales).
+    sin_match = {c for c in codigos[~coincide] if c}
 
     df = df[coincide].copy()
     info_coincidente = info_por_fila[coincide]

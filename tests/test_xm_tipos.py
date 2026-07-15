@@ -41,10 +41,14 @@ def test_nombre_archivo_diario_sin_dia_lanza():
 
 
 def test_tipos_enriquecibles_y_columna():
-    assert TIPOS_ENRIQUECIBLES == {"grip", "arrpas", "tgrl", "cxcsb"}
+    # tgrl NO es enriquecible: su archivo no trae código SIC de planta
+    # (columnas CODIGO/AGENTE), solo grip/arrpas/cxcsb tienen PLANTA/SUBMERCADO.
+    assert TIPOS_ENRIQUECIBLES == {"grip", "arrpas", "cxcsb"}
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["grip"] == "PLANTA"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["arrpas"] == "SUBMERCADO"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["cxcsb"] == "SUBMERCADO"
+    assert "tgrl" not in TIPOS_ENRIQUECIBLES
+    assert "tgrl" not in COLUMNA_CODIGO_ENRIQUECIMIENTO
 
 
 def test_tserv_es_publico_y_mensual():

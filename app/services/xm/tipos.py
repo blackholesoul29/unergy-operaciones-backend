@@ -21,12 +21,13 @@ TIPOS_CONFIG = {
 
 # Tipos cuyo archivo trae código SIC de planta y se puede enriquecer con
 # nombre + MW desde el snapshot mensual de fronteras del FTP.
-TIPOS_ENRIQUECIBLES = {"grip", "arrpas", "tgrl", "cxcsb"}
+# OJO: tgrl NO va aquí — su archivo no tiene columna de código SIC de planta
+# (trae CODIGO/AGENTE), así que no hay contra qué cruzar las fronteras.
+TIPOS_ENRIQUECIBLES = {"grip", "arrpas", "cxcsb"}
 
 # Columna del archivo XM que trae el código SIC de planta, según tipo.
 COLUMNA_CODIGO_ENRIQUECIMIENTO = {
     "grip": "PLANTA",
-    "tgrl": "PLANTA",
     "arrpas": "SUBMERCADO",
     "cxcsb": "SUBMERCADO",
 }

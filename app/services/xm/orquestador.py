@@ -98,7 +98,7 @@ def ejecutar_job(job_id: str, ftp_params: dict, tipo: str, extension: str,
 
             columna = tipos.COLUMNA_CODIGO_ENRIQUECIMIENTO[tipo]
             df, sin_match_set = enriquecer(df, tipo, fronteras_por_mes, columna)
-            codigos_sin_match = sorted(sin_match_set)
+            codigos_sin_match = sorted(map(str, sin_match_set))
             logger.info("Job %s: enriquecimiento listo, %d códigos sin match", job_id, len(codigos_sin_match))
 
         nombre_xlsx, nombre_txt = nombre_salida(tipo, extension, fecha_inicio, fecha_fin)

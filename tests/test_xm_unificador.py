@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date
 
 from app.services.xm.unificador import (
-    encoding_para, unificar, nombre_salida, exportar, enriquecer, filtrar_agente_ungg,
+    encoding_para, unificar, nombre_salida, exportar, enriquecer, filtrar_por_agente,
 )
 
 
@@ -84,26 +84,30 @@ def test_enriquecer_sin_ningun_match_devuelve_vacio():
     assert sin_match == {"9999"}
 
 
-def test_filtrar_agente_ungg_deja_solo_filas_ungg():
+def test_filtrar_por_agente_deja_solo_ese_agente():
     # tgrl no tiene código SIC de planta; su "filtro Unergy" es quedarse
-    # solo con las filas del agente UNGG (como el notebook original).
+    # solo con las filas del agente elegido (UNGG o UNGC).
     df = pd.DataFrame({
-        "Fecha": ["2026-06-01", "2026-06-01", "2026-06-01"],
-        "CODIGO": ["EBIC", "EBIC", "DEUD"],
-        "AGENTE": ["UNGG", "ENDG", "UNGG"],
-        "HORA 01": [1, 2, 3],
+        "Fecha": ["2026-06-01", "2026-06-01", "2026-06-01", "2026-06-01"],
+        "CODIGO": ["EBIC", "EBIC", "DEUD", "VENT"],
+        "AGENTE": ["UNGG", "ENDG", "UNGG", "UNGC"],
+        "HORA 01": [1, 2, 3, 4],
     })
-    out = filtrar_agente_ungg(df, "AGENTE")
-    assert list(out["AGENTE"]) == ["UNGG", "UNGG"]
-    assert list(out["CODIGO"]) == ["EBIC", "DEUD"]
+    ungg = filtrar_por_agente(df, "AGENTE", "UNGG")
+    assert list(ungg["CODIGO"]) == ["EBIC", "DEUD"]
+    assert set(ungg["AGENTE"]) == {"UNGG"}
+
+    ungc = filtrar_por_agente(df, "AGENTE", "UNGC")
+    assert list(ungc["CODIGO"]) == ["VENT"]
+    assert set(ungc["AGENTE"]) == {"UNGC"}
     # no agrega columnas de nombre/MW
-    assert "Nombre de la Frontera" not in out.columns
+    assert "Nombre de la Frontera" not in ungg.columns
 
 
-def test_filtrar_agente_ungg_columna_ausente_da_error_claro():
+def test_filtrar_por_agente_columna_ausente_da_error_claro():
     df = pd.DataFrame({"Fecha": ["2026-06-01"], "OTRA": ["x"]})
     with pytest.raises(ValueError, match="AGENTE"):
-        filtrar_agente_ungg(df, "AGENTE")
+        filtrar_por_agente(df, "AGENTE", "UNGG")
 
 
 def test_enriquecer_columna_ausente_da_error_claro():

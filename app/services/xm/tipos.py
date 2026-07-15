@@ -32,11 +32,14 @@ COLUMNA_CODIGO_ENRIQUECIMIENTO = {
     "cxcsb": "SUBMERCADO",
 }
 
-# Tipos que, con el checkbox, se filtran a solo las filas del agente UNGG
-# (listan todos los agentes del mercado y no traen código SIC de planta —
-# el notebook original de tgrl filtraba por la columna AGENTE == 'UNGG').
+# Tipos que, con el checkbox, se filtran a solo las filas de un agente de
+# Unergy (listan todos los agentes del mercado y no traen código SIC de
+# planta — el notebook original de tgrl filtraba por la columna AGENTE).
+# Unergy participa como generador (UNGG) y como comercializador (UNGC).
 TIPOS_FILTRO_AGENTE = {"tgrl"}
 COLUMNA_AGENTE = "AGENTE"
+AGENTES_VALIDOS = {"UNGG", "UNGC"}
+AGENTE_POR_DEFECTO = "UNGG"
 
 # Todos los tipos a los que aplica el checkbox "solo Unergy" (SIC o agente).
 TIPOS_FILTRABLES = TIPOS_ENRIQUECIBLES | TIPOS_FILTRO_AGENTE

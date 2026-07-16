@@ -35,6 +35,7 @@ from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
+from app.utils.impuestos_factura import impuestos_de_factura
 
 logger = logging.getLogger(__name__)
 
@@ -665,15 +666,42 @@ def listar(
                 "archivo_nombre": s.archivo_nombre,
             }
 
+    # Tasas del cliente por proyecto_inversionista (para el desglose de impuestos
+    # de las facturas de servicio en tiempo de lectura).
+    pi_ids = {
+        ln.proyecto_inversionista_id
+        for p in paneles for ln in p.lineas
+        if ln.proyecto_inversionista_id is not None
+    }
+    rates_por_pi: dict = {}
+    if pi_ids:
+        for pi_id, iva, ret, rei, ica in (
+            db.query(
+                ProyectoInversionista.id,
+                Cliente.iva_pct, Cliente.retencion_pct,
+                Cliente.reteiva_pct, Cliente.reteica_pct,
+            )
+            .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
+            .filter(ProyectoInversionista.id.in_(pi_ids)).all()
+        ):
+            rates_por_pi[pi_id] = {
+                "iva_pct": float(iva) if iva is not None else None,
+                "retencion_pct": float(ret) if ret is not None else None,
+                "reteiva_pct": float(rei) if rei is not None else None,
+                "reteica_pct": float(ica) if ica is not None else None,
+            }
+
     return {
         "periodo": periodo_norm,
         "tipo": tipo,
-        "paneles": [_serializar_panel(p, nombres, sop_map) for p in paneles],
+        "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi) for p in paneles],
     }
 
 
-def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None) -> dict:
+def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None,
+                      rates_por_pi: dict | None = None) -> dict:
     sop_map = sop_map or {}
+    rates_por_pi = rates_por_pi or {}
     def _sop(grupo, concepto):
         return sop_map.get((p.proyecto_id, grupo, concepto))
     # Agrupar líneas por inversionista.
@@ -687,11 +715,12 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
                 "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
                 "lineas": [],
             }
+        base_val = float(ln.valor_cop) if ln.valor_cop is not None else 0.0
         inv_map[key]["lineas"].append({
             "id": ln.id,
             "grupo": ln.grupo,
             "concepto": ln.concepto,
-            "valor_cop": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
+            "valor_cop": base_val,
             "comprobante_contable": ln.comprobante_contable,
             "hoja": ln.hoja,
             "celda": ln.celda,
@@ -700,25 +729,33 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
             "orden": ln.orden,
             "soporte": _sop(ln.grupo, ln.concepto),
         })
+        # Desglose de impuestos de la factura de servicio (tiempo de lectura).
+        for imp in impuestos_de_factura(ln.concepto, base_val,
+                                        rates_por_pi.get(ln.proyecto_inversionista_id)):
+            inv_map[key]["lineas"].append({
+                "id": None, "grupo": "facturas", "concepto": imp["concepto"],
+                "valor_cop": imp["valor"], "comprobante_contable": None,
+                "hoja": None, "celda": None, "origen": None, "orden": ln.orden,
+                "soporte": _sop("facturas", imp["concepto"]), "derivada": True,
+            })
 
-    # Vista 100%: el valor TOTAL del proyecto por concepto (suma de todos los
-    # inversionistas, = antes de dividir). Preserva el orden de aparición.
+    # Vista 100%: valor TOTAL del proyecto por concepto, agregando las líneas ya
+    # enriquecidas (base + impuestos) de todos los inversionistas.
     total_100: list[dict] = []
     idx_100: dict = {}
-    for ln in sorted(p.lineas, key=lambda x: x.orden):
-        k = (ln.grupo, ln.concepto)
-        v = float(ln.valor_cop) if ln.valor_cop is not None else 0.0
-        if k not in idx_100:
-            idx_100[k] = len(total_100)
-            total_100.append({
-                "grupo": ln.grupo, "concepto": ln.concepto, "valor_cop": v,
-                "hoja": ln.hoja, "celda": ln.celda,
-                "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
-                "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
-                "soporte": _sop(ln.grupo, ln.concepto),
-            })
-        else:
-            total_100[idx_100[k]]["valor_cop"] += v
+    for inv in inv_map.values():
+        for l in inv["lineas"]:
+            k = (l["grupo"], l["concepto"])
+            if k not in idx_100:
+                idx_100[k] = len(total_100)
+                total_100.append({
+                    "grupo": l["grupo"], "concepto": l["concepto"], "valor_cop": l["valor_cop"],
+                    "hoja": l["hoja"], "celda": l["celda"], "origen": l["origen"],
+                    "comprobante_contable": l["comprobante_contable"], "orden": l["orden"],
+                    "soporte": l.get("soporte"),
+                })
+            else:
+                total_100[idx_100[k]]["valor_cop"] += l["valor_cop"]
 
     return {
         "id": p.id,

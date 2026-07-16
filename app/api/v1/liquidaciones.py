@@ -31,6 +31,7 @@ from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_
 from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
+from app.utils.impuestos_factura import impuestos_de_factura
 
 router = APIRouter(prefix="/liquidaciones", tags=["Liquidaciones"])
 
@@ -442,19 +443,7 @@ def resumen_liquidaciones_desde_panel(
         for p in paneles for ln in p.lineas
         if ln.proyecto_inversionista_id is not None
     }
-    cliente_por_pi: dict = {}
-    if pi_ids:
-        for pi_id, cli_id, razon in (
-            db.query(
-                ProyectoInversionista.id,
-                ProyectoInversionista.cliente_id,
-                Cliente.razon_social_nombre,
-            )
-            .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
-            .filter(ProyectoInversionista.id.in_(pi_ids))
-            .all()
-        ):
-            cliente_por_pi[pi_id] = {"cliente_id": cli_id, "cliente_nombre": razon}
+    cliente_por_pi = _cliente_por_pi_con_tasas(db, pi_ids)
 
     resultado = _construir_resumen_panel(
         paneles, periodo_norm, tipo, nombres, tipos, liq_por_proyecto, cliente_por_pi
@@ -533,18 +522,7 @@ def resumen_panel_rango(
         for p in paneles for ln in p.lineas
         if ln.proyecto_inversionista_id is not None
     }
-    cliente_por_pi: dict = {}
-    if pi_ids:
-        for pi_id, cli_id, razon in (
-            db.query(
-                ProyectoInversionista.id,
-                ProyectoInversionista.cliente_id,
-                Cliente.razon_social_nombre,
-            )
-            .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
-            .filter(ProyectoInversionista.id.in_(pi_ids)).all()
-        ):
-            cliente_por_pi[pi_id] = {"cliente_id": cli_id, "cliente_nombre": razon}
+    cliente_por_pi = _cliente_por_pi_con_tasas(db, pi_ids)
 
     # liquidacion_id por (proyecto, período) para navegar al detalle.
     liq_map: dict = {}
@@ -576,6 +554,38 @@ def resumen_panel_rango(
     return {"tipo": tipo, "periodos": periodos_out}
 
 
+def _cliente_por_pi_con_tasas(db, pi_ids) -> dict:
+    """Mapa proyecto_inversionista_id → {cliente_id, cliente_nombre, tasas...}.
+    Las tasas (iva/retencion/reteiva/reteica _pct) alimentan el desglose de
+    impuestos de las facturas de servicio en tiempo de lectura."""
+    out: dict = {}
+    if not pi_ids:
+        return out
+    for pi_id, cli_id, razon, iva, ret, rei, ica in (
+        db.query(
+            ProyectoInversionista.id,
+            ProyectoInversionista.cliente_id,
+            Cliente.razon_social_nombre,
+            Cliente.iva_pct,
+            Cliente.retencion_pct,
+            Cliente.reteiva_pct,
+            Cliente.reteica_pct,
+        )
+        .outerjoin(Cliente, Cliente.id == ProyectoInversionista.cliente_id)
+        .filter(ProyectoInversionista.id.in_(pi_ids))
+        .all()
+    ):
+        out[pi_id] = {
+            "cliente_id": cli_id,
+            "cliente_nombre": razon,
+            "iva_pct": float(iva) if iva is not None else None,
+            "retencion_pct": float(ret) if ret is not None else None,
+            "reteiva_pct": float(rei) if rei is not None else None,
+            "reteica_pct": float(ica) if ica is not None else None,
+        }
+    return out
+
+
 def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
                              liq_por_proyecto, cliente_por_pi) -> dict:
     """Arma el resumen espejo a partir de paneles ya cargados y de los mapas de
@@ -598,6 +608,7 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
                     "cliente_nombre": cli.get("cliente_nombre") or ln.inversionista_nombre,
                     "nombre": ln.inversionista_nombre,
                     "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
+                    "rates": cli,
                     "grupos": {},
                     "conceptos": [],
                 }
@@ -609,6 +620,14 @@ def _construir_resumen_panel(paneles, periodo_norm, tipo, nombres, tipos,
                 "comprobante_contable": ln.comprobante_contable,
                 "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
             })
+            # Desglose de impuestos de la factura de servicio (Rep/CGM/Admin) en
+            # tiempo de lectura, con las tasas del cliente. base + IVA − retenciones.
+            for imp in impuestos_de_factura(ln.concepto, valor, inv_map[key]["rates"]):
+                inv_map[key]["grupos"]["facturas"] = inv_map[key]["grupos"].get("facturas", 0.0) + imp["valor"]
+                inv_map[key]["conceptos"].append({
+                    "grupo": "facturas", "concepto": imp["concepto"], "valor_cop": imp["valor"],
+                    "comprobante_contable": None, "origen": None,
+                })
 
         inversionistas_out = []
         proyecto_valor_a_pagar = 0.0

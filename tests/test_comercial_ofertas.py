@@ -1,5 +1,5 @@
 """Modelo de sub-ofertas del CRM (oportunidad_ofertas) + rename del estado
-terminal fin→servicio_operativo. Harness: SQLite en memoria (igual que
+terminal fin→servicio_operativo→operando. Harness: SQLite en memoria (igual que
 test_clientes_panel), ejercitando el ORM directamente."""
 import datetime as dt
 
@@ -45,9 +45,10 @@ def db():
 
 
 def test_enum_terminal_renombrado():
-    # 'fin' ya no existe; el estado terminal es servicio_operativo.
+    # 'fin' y 'servicio_operativo' ya no existen; el estado terminal es operando.
     assert not hasattr(EstadoOportunidadEnum, "fin")
-    assert EstadoOportunidadEnum.servicio_operativo.value == "servicio_operativo"
+    assert not hasattr(EstadoOportunidadEnum, "servicio_operativo")
+    assert EstadoOportunidadEnum.operando.value == "operando"
 
 
 def test_crear_oferta_ligada(db):
@@ -75,7 +76,7 @@ def test_default_resultado_pendiente(db):
     cli = Cliente(razon_social_nombre="Beta")
     db.add(cli)
     db.flush()
-    op = Oportunidad(cliente_id=cli.id, estado="oferta")
+    op = Oportunidad(cliente_id=cli.id, estado="envio_oferta")
     db.add(op)
     db.flush()
     of = OportunidadOferta(oportunidad_id=op.id, tipo="compra_energia")

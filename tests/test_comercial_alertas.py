@@ -1,9 +1,10 @@
 """calcular_alerta: contador de días sin respuesta del CRM comercial.
 
 Función pura — la referencia es max(estado_desde, última gestión).
-Alerta solo en estados activos (prospeccion/oferta/negociacion) y solo con
-MÁS de `umbral_dias` días (el día exacto del umbral NO alerta). Fin nunca
-alerta (decisión de spec: migrar históricos a Fin no debe generar ruido).
+Alerta solo en estados activos (prospeccion/envio_oferta/negociacion_contrato)
+y solo con MÁS de `umbral_dias` días (el día exacto del umbral NO alerta). Los
+estados terminales (operando/declinado) nunca alertan (decisión de spec:
+migrar históricos a un terminal no debe generar ruido).
 """
 from datetime import datetime, timedelta, timezone
 
@@ -22,30 +23,32 @@ def test_sin_gestiones_supera_umbral():
 
 
 def test_umbral_exacto_no_alerta():
-    dias, alerta = calcular_alerta("oferta", _hace(5), None, 5, AHORA)
+    dias, alerta = calcular_alerta("envio_oferta", _hace(5), None, 5, AHORA)
     assert (dias, alerta) == (5, False)
 
 
 def test_gestion_reciente_reinicia_contador():
     # Estado viejo (20 días) pero gestión de hace 2 → no alerta.
-    dias, alerta = calcular_alerta("negociacion", _hace(20), _hace(2), 5, AHORA)
+    dias, alerta = calcular_alerta("negociacion_contrato", _hace(20), _hace(2), 5, AHORA)
     assert (dias, alerta) == (2, False)
 
 
 def test_gestion_anterior_al_cambio_de_estado_no_cuenta():
     # La gestión es más vieja que la entrada al estado → manda estado_desde.
-    dias, alerta = calcular_alerta("oferta", _hace(7), _hace(30), 5, AHORA)
+    dias, alerta = calcular_alerta("envio_oferta", _hace(7), _hace(30), 5, AHORA)
     assert (dias, alerta) == (7, True)
 
 
-def test_fin_nunca_alerta():
-    dias, alerta = calcular_alerta("fin", _hace(400), None, 5, AHORA)
-    assert dias == 400
-    assert alerta is False
+def test_terminal_nunca_alerta():
+    # firmado/operando/declinado están excluidos A PROPÓSITO de la alerta.
+    for estado in ("firmado", "operando", "declinado"):
+        dias, alerta = calcular_alerta(estado, _hace(400), None, 5, AHORA)
+        assert dias == 400
+        assert alerta is False
 
 
 def test_estados_con_alerta_son_los_tres_activos():
-    assert ESTADOS_CON_ALERTA == frozenset({"prospeccion", "oferta", "negociacion"})
+    assert ESTADOS_CON_ALERTA == frozenset({"prospeccion", "envio_oferta", "negociacion_contrato"})
 
 
 def test_umbral_configurable():

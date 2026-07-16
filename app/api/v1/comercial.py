@@ -6,7 +6,7 @@ existentes. Solo roles admin y comercial (lectura y escritura).
 import json
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -66,16 +66,57 @@ def _proyecto_out(p: Proyecto) -> dict:
     }
 
 
+# Código de seguimiento: prefijo estandarizado OF→OP (oferta y oportunidad).
+# Segmento de tipo para ofertas NUEVAS (las existentes conservan su segmento real,
+# p. ej. 'REPCGM'): compra de energía = COM, servicios/representación = REP,
+# comunidad energética = CEN.
+_SEG_TIPO = {
+    "servicios_operacionales": "REP",
+    "compra_energia": "COM",
+    "comunidad_energetica": "CEN",
+}
+_RE_CONSECUTIVO = re.compile(r"No\.\s*(\d+)")
+
+
+def _norm_codigo(s: str | None) -> str | None:
+    """Estandariza el prefijo del código de seguimiento OF→OP. Idempotente."""
+    if s and s[:2].upper() == "OF":
+        return "OP" + s[2:]
+    return s
+
+
+def _next_consecutivo(db: Session) -> int:
+    """Siguiente consecutivo global (máx NNNN visto en los códigos + 1)."""
+    mx = 0
+    for (c,) in db.query(OportunidadOferta.numero_oferta).filter(
+            OportunidadOferta.numero_oferta.isnot(None)).all():
+        m = _RE_CONSECUTIVO.search(c or "")
+        if m:
+            mx = max(mx, int(m.group(1)))
+    return mx + 1
+
+
+def _gen_codigo(db: Session, tipo: str, fecha) -> str:
+    """Genera un código de seguimiento OP.{SEG} No.{NNNN}-{MM}-{YYYY} para una
+    oferta nueva sin número. MM/YYYY salen de `fecha` (o del ahora Colombia)."""
+    ref = fecha or col_now()
+    seg = _SEG_TIPO.get(tipo, "REP")
+    return f"OP.{seg} No.{_next_consecutivo(db):04d}-{ref.month}-{ref.year}"
+
+
 def _oferta_out(o: OportunidadOferta) -> dict:
     return {
         "id": o.id, "oportunidad_id": o.oportunidad_id,
         "tipo": o.tipo if isinstance(o.tipo, str) else o.tipo.value,
         "planta_nombre": o.planta_nombre, "proyecto_id": o.proyecto_id,
-        "numero_oferta": o.numero_oferta, "precio_detalle": o.precio_detalle,
+        "numero_oferta": o.numero_oferta,
+        "codigo_seguimiento": _norm_codigo(o.numero_oferta),
+        "precio_detalle": o.precio_detalle,
         "resultado": o.resultado if isinstance(o.resultado, str) else o.resultado.value,
         "etapa_texto": o.etapa_texto, "fecha_oferta": o.fecha_oferta,
         "fecha_tentativa_inicio": o.fecha_tentativa_inicio,
         "contrato_firmado": o.contrato_firmado, "detalle": o.detalle, "notas": o.notas,
+        "created_at": o.created_at, "updated_at": o.updated_at,
     }
 
 
@@ -106,6 +147,8 @@ def _op_base_out(op: Oportunidad, cliente: Cliente, ultima_gestion, ahora: datet
         "dias_sin_respuesta": dias,
         "alerta": alerta,
         "ultima_gestion_fecha": ultima_gestion,
+        "created_at": op.created_at,
+        "updated_at": op.updated_at,
     }
 
 
@@ -173,13 +216,110 @@ def list_oportunidades(
         for oid, tipo, n in cont:
             t = tipo if isinstance(tipo, str) else tipo.value
             resumen_por_op.setdefault(oid, {})[t] = int(n)
+    # Oferta "principal" por oportunidad (la más reciente por fecha/id): de ahí sale
+    # el código de seguimiento que se muestra en la fila. La oportunidad "hereda" la
+    # identidad de su oferta líder; todas comparten la familia OP.*.
+    lead_por_op: dict = {}
+    num_ofertas_por_op: dict = {}
+    if op_ids:
+        ofs = (
+            db.query(OportunidadOferta.oportunidad_id, OportunidadOferta.numero_oferta,
+                     OportunidadOferta.planta_nombre, OportunidadOferta.tipo,
+                     OportunidadOferta.proyecto_id, OportunidadOferta.fecha_oferta,
+                     OportunidadOferta.id)
+            .filter(OportunidadOferta.oportunidad_id.in_(op_ids)).all()
+        )
+        for oid, num, planta, tipo, pid, fecha, ofid in ofs:
+            num_ofertas_por_op[oid] = num_ofertas_por_op.get(oid, 0) + 1
+            # clave de "más reciente": fecha_oferta (date.min si falta) y luego id
+            clave = (fecha or date.min, ofid)
+            prev = lead_por_op.get(oid)
+            if prev is None or clave > prev[0]:
+                lead_por_op[oid] = (clave, {
+                    "codigo_seguimiento": _norm_codigo(num),
+                    "planta_nombre": planta,
+                    "tipo": tipo if isinstance(tipo, str) else tipo.value,
+                    "proyecto_id": pid,
+                })
     out = []
     for op, cli, ultima, n_proy, kwp in filas:
         row = _op_base_out(op, cli, ultima, ahora)
         row["num_proyectos"] = int(n_proy or 0)
         row["capacidad_total_kwp"] = float(kwp or 0)
         row["resumen_ofertas"] = resumen_por_op.get(op.id, {})
+        row["num_ofertas"] = num_ofertas_por_op.get(op.id, 0)
+        lead = lead_por_op.get(op.id)
+        row["oferta_principal"] = lead[1] if lead else None
+        # Código de seguimiento de la fila: el de la oferta líder o, si no hay
+        # ofertas, el consecutivo propio de la oportunidad (también normalizado).
+        row["codigo_seguimiento"] = (lead[1]["codigo_seguimiento"] if lead
+                                     else _norm_codigo(op.numero_oferta))
         if solo_alerta and not row["alerta"]:
+            continue
+        out.append(row)
+    return out
+
+
+@router.get("/ofertas")
+def list_ofertas_todas(
+    tipo: str | None = Query(None),
+    estado: str | None = Query(None),
+    resultado: str | None = Query(None),
+    q: str | None = Query(None),
+    solo_alerta: bool = Query(False),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Lista PLANA de todas las ofertas (la oferta es la unidad). Cada fila trae
+    su código de seguimiento, tipo, planta/proyecto, resultado y —heredados de su
+    oportunidad— el estado del pipeline, el cliente y la alerta. Ordenada por la
+    más reciente. Esta es la fuente de la vista principal de /comercial."""
+    _check_comercial(current)
+    ult_sq = (
+        db.query(OportunidadGestion.oportunidad_id.label("oid"),
+                 func.max(OportunidadGestion.fecha).label("ultima"))
+        .group_by(OportunidadGestion.oportunidad_id).subquery()
+    )
+    qy = (
+        db.query(OportunidadOferta, Oportunidad, Cliente, ult_sq.c.ultima)
+        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+        .join(Cliente, Cliente.id == Oportunidad.cliente_id)
+        .outerjoin(ult_sq, ult_sq.c.oid == Oportunidad.id)
+        .filter(Oportunidad.deleted_at.is_(None), Cliente.deleted_at.is_(None))
+    )
+    if tipo:
+        qy = qy.filter(OportunidadOferta.tipo == tipo)
+    if estado:
+        qy = qy.filter(Oportunidad.estado == estado)
+    if resultado:
+        qy = qy.filter(OportunidadOferta.resultado == resultado)
+    if q:
+        like = f"%{q.strip()}%"
+        qy = qy.filter(
+            OportunidadOferta.numero_oferta.ilike(like)
+            | OportunidadOferta.planta_nombre.ilike(like)
+            | Cliente.razon_social_nombre.ilike(like)
+            | Oportunidad.nombre.ilike(like)
+        )
+    ahora = col_now()
+    filas = qy.order_by(OportunidadOferta.updated_at.desc(), OportunidadOferta.id.desc()).all()
+    out = []
+    for of, op, cli, ultima in filas:
+        estado_op = op.estado if isinstance(op.estado, str) else op.estado.value
+        dias, alerta = calcular_alerta(estado_op, op.estado_desde, ultima,
+                                       settings.COMERCIAL_ALERTA_DIAS, ahora)
+        row = _oferta_out(of)
+        row.update({
+            "cliente_id": op.cliente_id,
+            "cliente_razon_social": cli.razon_social_nombre,
+            "cliente_nit": cli.nit_cedula,
+            "oportunidad_nombre": op.nombre or cli.razon_social_nombre,
+            "estado": estado_op,                # etapa del pipeline (heredada de la oportunidad)
+            "estado_desde": op.estado_desde,
+            "dias_sin_respuesta": dias,
+            "alerta": alerta,
+        })
+        if solo_alerta and not alerta:
             continue
         out.append(row)
     return out
@@ -444,7 +584,11 @@ def create_oferta(
 ):
     _check_comercial(current)
     _get_oportunidad_or_404(id, db)
-    o = OportunidadOferta(oportunidad_id=id, **data.model_dump())
+    payload = data.model_dump()
+    # Autogenera el código de seguimiento OP.{SEG} No.{NNNN}-{MM}-{YYYY} si no se envió.
+    if not payload.get("numero_oferta"):
+        payload["numero_oferta"] = _gen_codigo(db, payload["tipo"], payload.get("fecha_oferta"))
+    o = OportunidadOferta(oportunidad_id=id, **payload)
     db.add(o)
     db.commit()
     db.refresh(o)
@@ -480,7 +624,7 @@ def backfill(
     dry_run: bool = Query(True),
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
-    """Migración inicial: 1 oportunidad en 'fin' por cliente existente sin
+    """Migración inicial: 1 oportunidad en 'operando' por cliente existente sin
     oportunidad, vinculando sus proyectos (vía ProyectoInversionista — la
     misma relación que usa GET /clientes/{id}/proyectos). Idempotente."""
     if current.rol.value != "admin":
@@ -513,13 +657,13 @@ def backfill(
         resumen["detalle"].append({"cliente_id": c.id, "razon_social": c.razon_social_nombre,
                                    "proyectos": len(proyecto_ids)})
         if not dry_run:
-            op = Oportunidad(cliente_id=c.id, estado="servicio_operativo", estado_desde=ahora,
+            op = Oportunidad(cliente_id=c.id, estado="operando", estado_desde=ahora,
                              es_migrada=True, creado_por_usuario_id=current.id)
             db.add(op)
             db.flush()
             db.add(OportunidadEstadoHistorial(
                 oportunidad_id=op.id, estado_anterior=None,
-                estado_nuevo="servicio_operativo", usuario_id=current.id))
+                estado_nuevo="operando", usuario_id=current.id))
             if proyecto_ids:
                 db.query(Proyecto).filter(Proyecto.id.in_(proyecto_ids)).update(
                     {"oportunidad_id": op.id}, synchronize_session=False)
@@ -561,9 +705,9 @@ def _parse_fecha(s):
 
 def _etapa_global(resultados: set[str]) -> str:
     if "aceptado" in resultados:
-        return "servicio_operativo"
+        return "operando"
     if resultados & {"pendiente"}:
-        return "oferta"
+        return "envio_oferta"
     return "prospeccion"
 
 
@@ -877,14 +1021,14 @@ def dedup_clientes(
                 .filter(Oportunidad.cliente_id == canonico, Oportunidad.deleted_at.is_(None))
                 .order_by(Oportunidad.id).first())
         if not d_op:
-            d_op = Oportunidad(cliente_id=canonico, estado="servicio_operativo",
+            d_op = Oportunidad(cliente_id=canonico, estado="operando",
                                estado_desde=col_now(), es_migrada=True,
                                creado_por_usuario_id=current.id)
             db.add(d_op)
             db.flush()
             db.add(OportunidadEstadoHistorial(
                 oportunidad_id=d_op.id, estado_anterior=None,
-                estado_nuevo="servicio_operativo", usuario_id=current.id))
+                estado_nuevo="operando", usuario_id=current.id))
         for o in ofertas:
             o.oportunidad_id = d_op.id
             if matched_proy and o.proyecto_id is None:

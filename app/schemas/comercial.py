@@ -3,7 +3,9 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 OrigenClienteLiteral = Literal["prospeccion_propia", "recomendacion", "referido", "otro"]
-EstadoOportunidadLiteral = Literal["prospeccion", "oferta", "negociacion", "servicio_operativo"]
+EstadoOportunidadLiteral = Literal[
+    "prospeccion", "envio_oferta", "negociacion_contrato", "firmado", "operando", "declinado"
+]
 TipoServicioLiteral = Literal["representacion", "comunidad_energetica"]
 TipoOfertaLiteral = Literal["servicios_operacionales", "compra_energia", "comunidad_energetica"]
 ResultadoOfertaLiteral = Literal["pendiente", "aceptado", "declinado"]

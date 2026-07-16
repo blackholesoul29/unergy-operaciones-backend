@@ -29,7 +29,7 @@ import json
 
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, ClasificacionLiquidacion, MapeoCeldaConcepto,
-    AliasFuenteIngreso,
+    AliasFuenteIngreso, PanelSoporte,
 )
 from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
@@ -647,14 +647,35 @@ def listar(
             .filter(Proyecto.id.in_(proy_ids)).all()
         }
 
+    # Soportes (archivos Drive) del período/tipo, indexados por (proyecto, grupo, concepto).
+    sop_map: dict = {}
+    if proy_ids:
+        sops = (
+            db.query(PanelSoporte)
+            .filter(
+                PanelSoporte.periodo == periodo_norm,
+                PanelSoporte.tipo == tipo,
+                PanelSoporte.proyecto_id.in_(proy_ids),
+            )
+            .all()
+        )
+        for s in sops:
+            sop_map[(s.proyecto_id, s.grupo, s.concepto)] = {
+                "archivo_url": s.archivo_url,
+                "archivo_nombre": s.archivo_nombre,
+            }
+
     return {
         "periodo": periodo_norm,
         "tipo": tipo,
-        "paneles": [_serializar_panel(p, nombres) for p in paneles],
+        "paneles": [_serializar_panel(p, nombres, sop_map) for p in paneles],
     }
 
 
-def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
+def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None) -> dict:
+    sop_map = sop_map or {}
+    def _sop(grupo, concepto):
+        return sop_map.get((p.proyecto_id, grupo, concepto))
     # Agrupar líneas por inversionista.
     inv_map: dict = {}
     for ln in sorted(p.lineas, key=lambda x: x.orden):
@@ -677,6 +698,7 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
             # "hoja!celda" listo para mostrar/editar en el frontend (None si es derivado).
             "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
             "orden": ln.orden,
+            "soporte": _sop(ln.grupo, ln.concepto),
         })
 
     # Vista 100%: el valor TOTAL del proyecto por concepto (suma de todos los
@@ -693,6 +715,7 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
                 "hoja": ln.hoja, "celda": ln.celda,
                 "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
                 "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
+                "soporte": _sop(ln.grupo, ln.concepto),
             })
         else:
             total_100[idx_100[k]]["valor_cop"] += v
@@ -719,6 +742,112 @@ def _serializar_panel(p: PanelContable, nombres: dict) -> dict:
         # Vista 100% (total proyecto sin dividir).
         "total_100": total_100,
     }
+
+
+# ── Soportes/comprobantes por transacción (archivo en Google Drive) ───────────
+_SOPORTE_MAX = 20 * 1024 * 1024  # 20 MB
+
+
+@router.post("/{panel_id}/soporte")
+async def subir_soporte(
+    panel_id: int,
+    grupo: str = Form(...),
+    concepto: str = Form(...),
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Sube un archivo de soporte a Drive y lo ancla a (proyecto, periodo, tipo,
+    grupo, concepto). Sobrevive a recargas del ER (no depende de la línea)."""
+    panel = db.query(PanelContable).filter(PanelContable.id == panel_id).first()
+    if not panel:
+        raise HTTPException(404, "Panel no encontrado")
+
+    contenido = await archivo.read()
+    if len(contenido) > _SOPORTE_MAX:
+        raise HTTPException(400, "El archivo supera el límite de 20 MB")
+
+    import io
+    from googleapiclient.http import MediaIoBaseUpload
+    from app.api.v1.fallas import (
+        _get_drive_service, _get_or_create_folder, DRIVE_ROOT_FOLDER_ID,
+    )
+
+    proy_nombre = (
+        db.query(Proyecto.nombre_comercial).filter(Proyecto.id == panel.proyecto_id).scalar()
+        or f"Proyecto {panel.proyecto_id}"
+    )
+    try:
+        service = _get_drive_service()
+        proy_folder = _get_or_create_folder(service, proy_nombre, DRIVE_ROOT_FOLDER_ID)
+        panel_folder = _get_or_create_folder(
+            service, f"Panel {panel.periodo} {panel.tipo}", proy_folder
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error accediendo a Drive: {e}")
+
+    nombre = archivo.filename or f"soporte_{concepto}"
+    media = MediaIoBaseUpload(
+        io.BytesIO(contenido), mimetype=archivo.content_type or "application/octet-stream"
+    )
+    try:
+        up = service.files().create(
+            body={"name": nombre, "parents": [panel_folder]},
+            media_body=media, fields="id, webViewLink", supportsAllDrives=True,
+        ).execute()
+    except Exception as e:
+        raise HTTPException(500, f"Error subiendo a Drive: {e}")
+
+    file_id = up["id"]
+    url = up.get("webViewLink", f"https://drive.google.com/file/d/{file_id}/view")
+
+    sop = (
+        db.query(PanelSoporte).filter(
+            PanelSoporte.proyecto_id == panel.proyecto_id,
+            PanelSoporte.periodo == panel.periodo,
+            PanelSoporte.tipo == panel.tipo,
+            PanelSoporte.grupo == grupo,
+            PanelSoporte.concepto == concepto,
+        ).first()
+    )
+    if sop is None:
+        sop = PanelSoporte(
+            proyecto_id=panel.proyecto_id, periodo=panel.periodo, tipo=panel.tipo,
+            grupo=grupo, concepto=concepto,
+        )
+        db.add(sop)
+    sop.archivo_url = url
+    sop.archivo_nombre = nombre
+    sop.drive_file_id = file_id
+    sop.created_by_id = getattr(usuario, "id", None)
+    db.commit()
+
+    return {"grupo": grupo, "concepto": concepto, "archivo_url": url, "archivo_nombre": nombre}
+
+
+@router.delete("/{panel_id}/soporte")
+def eliminar_soporte(
+    panel_id: int,
+    grupo: str = Query(...),
+    concepto: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Quita el soporte de (grupo, concepto). El archivo queda en Drive."""
+    panel = db.query(PanelContable).filter(PanelContable.id == panel_id).first()
+    if not panel:
+        raise HTTPException(404, "Panel no encontrado")
+    db.query(PanelSoporte).filter(
+        PanelSoporte.proyecto_id == panel.proyecto_id,
+        PanelSoporte.periodo == panel.periodo,
+        PanelSoporte.tipo == panel.tipo,
+        PanelSoporte.grupo == grupo,
+        PanelSoporte.concepto == concepto,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Re-división: refrescar el reparto por inversionista sin re-subir el ER ──────

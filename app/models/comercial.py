@@ -9,10 +9,15 @@ from app.models.base import Base
 
 
 class EstadoOportunidadEnum(str, enum.Enum):
+    # Pipeline de 6 estados (2026-07-15). Los 4 anteriores se renombraron in-place:
+    # oferta→envio_oferta, negociacion→negociacion_contrato, servicio_operativo→operando
+    # (que a su vez venía de 'fin'). firmado y declinado son nuevos.
     prospeccion = "prospeccion"
-    oferta = "oferta"
-    negociacion = "negociacion"
-    servicio_operativo = "servicio_operativo"   # antes 'fin' (renombrado 2026-07-13)
+    envio_oferta = "envio_oferta"
+    negociacion_contrato = "negociacion_contrato"
+    firmado = "firmado"
+    operando = "operando"
+    declinado = "declinado"
 
 
 class TipoServicioOportunidadEnum(str, enum.Enum):

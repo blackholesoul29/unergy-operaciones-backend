@@ -52,6 +52,25 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
+    # impuestos por cliente — reteiva (retención de IVA), separada de reteica
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
+    # soportes/comprobantes (archivo Drive) por transacción del panel contable
+    """CREATE TABLE IF NOT EXISTS panel_soporte (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        periodo VARCHAR(7) NOT NULL,
+        tipo VARCHAR(20) NOT NULL,
+        grupo VARCHAR(20) NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        archivo_url VARCHAR(1000) NOT NULL,
+        archivo_nombre VARCHAR(300),
+        drive_file_id VARCHAR(120),
+        created_by_id BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_soporte ON panel_soporte (proyecto_id, periodo, tipo, grupo, concepto)",
+    "CREATE INDEX IF NOT EXISTS ix_panel_soporte_lookup ON panel_soporte (proyecto_id, periodo, tipo)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,
@@ -1039,6 +1058,19 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
     # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
+    # migration — CRM: pipeline de 6 estados a nivel oportunidad (2026-07-15)
+    # RENAME VALUE migra los datos in-place (sin UPDATE) y es idempotente por
+    # tolerancia (si ya se renombró, lanza y _run_column_migrations lo salta).
+    # ADD VALUE va al bloque autocommit (debe correr fuera de transacción).
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'oferta' TO 'envio_oferta'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion' TO 'negociacion_contrato'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'servicio_operativo' TO 'operando'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'firmado'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'declinado'",
+    # Estandariza el prefijo del código de seguimiento OF→OP (oferta y oportunidad).
+    # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
+    "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
 ]
 
 

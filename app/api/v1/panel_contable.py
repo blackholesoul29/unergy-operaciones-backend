@@ -752,7 +752,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
                     "grupo": l["grupo"], "concepto": l["concepto"], "valor_cop": l["valor_cop"],
                     "hoja": l["hoja"], "celda": l["celda"], "origen": l["origen"],
                     "comprobante_contable": l["comprobante_contable"], "orden": l["orden"],
-                    "soporte": l.get("soporte"),
+                    "soporte": l.get("soporte"), "derivada": l.get("derivada", False),
                 })
             else:
                 total_100[idx_100[k]]["valor_cop"] += l["valor_cop"]

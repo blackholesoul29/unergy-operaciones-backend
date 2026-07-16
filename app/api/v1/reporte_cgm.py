@@ -80,6 +80,13 @@ def enviar_reporte_cgm(
             correos = get_contactos(db, "cgm", cliente_id=dest.id)
             nombre = cliente.razon_social_nombre
 
+        # Filtro opcional a proyectos puntuales dentro de este destinatario --
+        # el frontend siempre manda la selección explícita (nunca None), pero
+        # se respeta None por si algún otro consumidor de la API no lo manda.
+        if dest.proyectos is not None:
+            proyectos_ids = set(dest.proyectos)
+            fronteras = [f for f in fronteras if f.proyecto_id in proyectos_ids]
+
         items.append({"dest": dest, "nombre": nombre, "correos": correos, "fronteras": fronteras})
 
     # 2. Un solo lote de llamadas a Quoia -- solo los frt_codes que realmente

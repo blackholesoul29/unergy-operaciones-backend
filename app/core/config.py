@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 480
     # Token de larga duración para la app móvil (PWA) — default 30 días
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
+    # CRM comercial: días sin respuesta antes de alertar (configurable por env).
+    COMERCIAL_ALERTA_DIAS: int = 5
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod

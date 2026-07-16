@@ -12,7 +12,7 @@ from app.models import (
     Falla, FallaSeguimiento, FallaIntervalo, FallaInversor,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
     FallaCreate, FallaUpdate, FallaOut,
@@ -555,10 +555,14 @@ def list_fallas(
     if proyecto_id:
         query = query.filter(Falla.proyecto_id == proyecto_id)
     if cliente_id:
-        # Filter fallas by projects belonging to a specific client
+        # Proyectos donde este cliente es inversionista vigente (fecha_fin nula o futura).
+        hoy = date.today()
         client_project_ids = (
-            db.query(Proyecto.id)
-            .filter(Proyecto.cliente_id == cliente_id, Proyecto.deleted_at.is_(None))
+            db.query(ProyectoInversionista.proyecto_id)
+            .filter(
+                ProyectoInversionista.cliente_id == cliente_id,
+                (ProyectoInversionista.fecha_fin.is_(None)) | (ProyectoInversionista.fecha_fin >= hoy),
+            )
             .subquery()
         )
         query = query.filter(Falla.proyecto_id.in_(client_project_ids))

@@ -25,6 +25,20 @@ def test_guardar_crea_carpeta_del_anio_si_no_existe(tmp_path, monkeypatch):
     assert (tmp_path / "2025" / "dspcttos0101.txf").is_file()
 
 
-def test_carpeta_base_usa_default_si_no_hay_variable_de_entorno(monkeypatch):
+def test_carpeta_base_usa_la_de_jessica_si_es_su_usuario(monkeypatch):
     monkeypatch.delenv("XM_CACHE_DIR", raising=False)
+    monkeypatch.setattr(cache_local, "_usuario_actual", lambda: "jessi")
     assert str(cache_local.carpeta_base()).endswith("Archivos_Filezilla")
+
+
+def test_carpeta_base_usa_default_generico_para_otro_usuario(monkeypatch, tmp_path):
+    monkeypatch.delenv("XM_CACHE_DIR", raising=False)
+    monkeypatch.setattr(cache_local, "_usuario_actual", lambda: "juanjose")
+    monkeypatch.setattr(cache_local.Path, "home", classmethod(lambda cls: tmp_path))
+    assert cache_local.carpeta_base() == tmp_path / "Documentos" / "Xm" / "Archivos_Filezilla"
+
+
+def test_carpeta_base_variable_de_entorno_gana_a_cualquier_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("XM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(cache_local, "_usuario_actual", lambda: "jessi")
+    assert cache_local.carpeta_base() == tmp_path

@@ -12,6 +12,7 @@ class FronteraBase(BaseModel):
     estado: Optional[str] = "activa"
     estado_operacional: Optional[str] = "activo"
     quoia_meter_id: Optional[int] = None
+    quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
 
@@ -24,6 +25,7 @@ class FronteraBase(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
@@ -126,6 +128,7 @@ class FronteraUpdate(BaseModel):
     estado: Optional[str] = None
     estado_operacional: Optional[str] = None
     quoia_meter_id: Optional[int] = None
+    quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
 
@@ -138,6 +141,7 @@ class FronteraUpdate(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
@@ -241,11 +245,11 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     operador_comercial: Optional[str] = None
-    operador_red_id: Optional[int] = None
     operador_correos: list[str] = []
-    cliente_id: Optional[int] = None
-    cliente_nombre: Optional[str] = None
-    cliente_correos_cgm: list[str] = []
+    # Uno por cada cliente que sea fuente del contacto CGM de este proyecto
+    # (puntero de área, o inversionista vigente si no hay puntero) -- puede
+    # haber varios si el proyecto tiene varios inversionistas.
+    clientes_cgm: list[dict] = []
 
 
 class FronteraLecturaCreate(BaseModel):
@@ -286,3 +290,22 @@ class FronteraResumen(BaseModel):
     total_kwh_export_30d: float
     sin_datos_recientes: int
     fronteras_sin_datos: list[dict]
+
+
+class FronteraQuoiaPendiente(BaseModel):
+    frt_code: str
+    nombre_quoia: str
+    categoria: str  # "generacion" | "consumo"
+    proyecto_sugerido_id: Optional[int] = None
+    proyecto_sugerido_nombre: Optional[str] = None
+
+
+class FronteraQuoiaConfirmar(BaseModel):
+    proyecto_id: int
+    nombre_frontera: Optional[str] = None
+    codigo_propio: Optional[str] = None
+    tipo_frontera: Optional[str] = None
+
+
+class FronteraQuoiaIgnorar(BaseModel):
+    motivo: Optional[str] = None

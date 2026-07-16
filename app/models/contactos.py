@@ -10,8 +10,8 @@ class TipoContactoEnum(str, enum.Enum):
     operacional = "operacional"
     cgm = "cgm"
     liquidacion = "liquidacion"
-    soporte = "soporte"
-    monitoreo = "monitoreo"
+    comercial = "comercial"
+    contable = "contable"
 
 
 class Contacto(Base):
@@ -28,6 +28,7 @@ class Contacto(Base):
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoContactoEnum, name="tipo_contacto_enum"), nullable=False)
     recibe_notificaciones: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -38,8 +39,8 @@ class Contacto(Base):
 
 class ProyectoAreaContacto(Base):
     """Puntero por área: para el `tipo` dado, este Proyecto usa los contactos
-    del Cliente indicado en vez de los de su Cliente titular. Sin fila para un
-    tipo = usa el titular (`Proyecto.cliente_id`). Ver app/services/contactos.py."""
+    del Cliente indicado en vez de los de sus inversionistas vigentes. Sin
+    fila para un tipo = usa los inversionistas. Ver app/services/contactos.py."""
 
     __tablename__ = "proyecto_area_contacto"
     __table_args__ = (

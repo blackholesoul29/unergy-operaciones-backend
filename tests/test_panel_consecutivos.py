@@ -37,3 +37,13 @@ def test_cadena_costos_independiente_de_ingresos():
     assert (a.consecutivo_ingresos, b.consecutivo_ingresos, c.consecutivo_ingresos) == (900, None, 901)
     # Costos: b y c -> 800, 801 ; a sin costos -> None
     assert (a.consecutivo_costos, b.consecutivo_costos, c.consecutivo_costos) == (None, 800, 801)
+
+
+def test_unicidad_global_salta_ocupados_de_otros_periodos():
+    # Unicidad global por cadena: si 900/901 ya los usan oficiales de otros períodos,
+    # esta reasignación (desde 900) debe saltarlos y numerar 902, 903.
+    a = _panel(1, liq_ing=True)
+    b = _panel(2, liq_ing=True)
+    _asignar_consecutivos([a, b], ini_ing=900, ini_cos=800, solo_faltantes=False,
+                          ocup_ing_extra={900, 901})
+    assert (a.consecutivo_ingresos, b.consecutivo_ingresos) == (902, 903)

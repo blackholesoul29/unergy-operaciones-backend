@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.utils.gescon_vigencia import resolver_vigencias
+from app.services.comercializacion import identificador_monitoreo as _mon_id
 from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
@@ -558,6 +559,28 @@ def _clasificar_remanente_bolsa(db: Session, proyecto_id: int, first_day: date, 
     return "libre", None
 
 
+def _fin_efectivo_asic(db: Session, asic: AsicSolicitud, last_day: date) -> date | None:
+    """Fin EFECTIVO de la ventana de `asic`, recortado por supersesiones/relevos
+    en su SIC (vista histórica al mes consultado, mismo criterio que la piscina
+    b — caso La Reserva). Fallback: la fecha_fin cruda del registro."""
+    universo = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.codigo_sic_contrato == asic.codigo_sic_contrato,
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+        )
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        )
+        .all()
+    )
+    v = resolver_vigencias(universo, hasta=last_day).get(asic.id)
+    return v.fecha_fin_efectiva if v else asic.fecha_fin
+
+
 # ── Impacto de mantenimiento ──────────────────────────────────────────────────
 
 def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) -> dict[int, float]:
@@ -706,15 +729,18 @@ def get_resumen(
 
         gen_total_c = 0.0
         bolsa_dup_c = 0.0
+        ur_c = 0.0
         plantas_sin_datos: list[str] = []
         dias_datos: list[int] = []
         n_duplicados = 0
+        n_uso_recurso = 0
 
         for asic in assignments:
             proyecto = asic.proyecto
             nombre = proyecto.nombre_comercial if proyecto else f"Proyecto {asic.proyecto_id}"
             pct = float(asic.porcentaje_despacho or 0)
             is_dup = bool(asic.es_duplicado)
+            is_ur = bool(getattr(asic, "uso_del_recurso", False))
             if proyecto and proyecto.sub_project:
                 gd = gen_cache.get(proyecto.sub_project, {"mwh": None, "ultimo_dia": None})
                 gp = gd["mwh"]
@@ -727,6 +753,11 @@ def get_resumen(
                     if is_dup:
                         bolsa_dup_c += mwh_contrato
                         n_duplicados += 1
+                    if is_ur:
+                        # Uso del recurso: cuenta como suministro normal del contrato;
+                        # la sub-cifra estima lo que se le pagará al cliente a bolsa.
+                        ur_c += mwh_contrato
+                        n_uso_recurso += 1
                     if gd.get("ultimo_dia") is not None:
                         dias_datos.append(gd["ultimo_dia"])
                 else:
@@ -736,6 +767,7 @@ def get_resumen(
 
         gen_total_c = round(gen_total_c, 3)
         bolsa_dup_c = round(bolsa_dup_c, 3)
+        ur_c = round(ur_c, 3)
         gen_proy_c = (
             round(gen_total_c * total_dias / dia_actual, 3)
             if es_mes_actual and dia_actual > 0 and gen_total_c > 0
@@ -798,8 +830,10 @@ def get_resumen(
             "compras_bolsa_ajustada_mwh": compras_ajustada_c,
             "riesgo_penalizacion_mantenimiento": perdida_mant_c > 0,
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_c if bolsa_dup_c > 0 else None,
+            "uso_recurso_mwh": ur_c if ur_c > 0 else None,
             "n_plantas_activas": len(assignments),
             "n_duplicados": n_duplicados,
+            "n_uso_recurso": n_uso_recurso,
             "plantas_sin_datos": plantas_sin_datos,
             "dia_min_datos": min(dias_datos) if dias_datos else None,
             # Indicador de cumplimiento de plantas: registradas (numerador) vs esperadas (denominador).
@@ -852,6 +886,12 @@ def get_resumen(
                 c["excedentes_bolsa_cop"] = round(c["excedentes_bolsa_mwh"] * 1000 * precio_bolsa, 0)
             else:
                 c["excedentes_bolsa_cop"] = None
+            if c.get("uso_recurso_mwh"):
+                # Costo interno estimado: lo que Unergy le pagará al cliente a precio
+                # bolsa (el pago real es manual en Liquidaciones).
+                c["uso_recurso_cop"] = round(c["uso_recurso_mwh"] * 1000 * precio_bolsa, 0)
+            else:
+                c["uso_recurso_cop"] = None
 
     return {
         "periodo": {
@@ -940,7 +980,13 @@ def get_simulador(
         .filter(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.sub_project.isnot(None),
+            # Entra a Cumplimiento si YA tiene fecha de inicio de comercialización
+            # (primer día con generación real, autoderivada) O si tiene sub_project
+            # (comportamiento previo). Aditivo: no saca ninguna planta que ya salía.
+            or_(
+                Proyecto.fecha_inicio_comercializacion.isnot(None),
+                Proyecto.sub_project.isnot(None),
+            ),
             # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
             # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
             Proyecto.srv_representacion.is_(True),
@@ -985,6 +1031,7 @@ def get_simulador(
                 "contrato_id": c.id,
                 "pct_despacho": float(asic.porcentaje_despacho or 0),
                 "es_duplicado": bool(asic.es_duplicado),
+                "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
                 "proyecto_id": asic.proyecto_id,
                 "fecha_inicio": asic.fecha_inicio,
                 "fecha_fin": asic.fecha_fin,
@@ -1014,7 +1061,7 @@ def get_simulador(
     dia_actual = today.day if es_mes_actual else total_dias
     dias_restantes = (total_dias - dia_actual) if es_mes_actual else 0
 
-    sp_list = [p.sub_project for p in plantas_db if p.sub_project]
+    sp_list = [_mon_id(p) for p in plantas_db if _mon_id(p)]
     gen_cache: dict[str, float | None] = {}
     avg_cache_sim: dict[str, float | None] = {}
     gen_warning: str | None = None
@@ -1064,7 +1111,7 @@ def get_simulador(
 
     range_cache_sim: dict = {}
     if not es_mes_futuro:
-        _sp_by_pid = {pid: (plantas_by_id[pid].sub_project if pid in plantas_by_id else None)
+        _sp_by_pid = {pid: (_mon_id(plantas_by_id[pid]) if pid in plantas_by_id else None)
                       for pid in set(proyecto_primary) | {d["proyecto_id"] for d in proyecto_dups}}
         need_range_sim: set = set()
         for entry in list(proyecto_primary.values()) + proyecto_dups:
@@ -1125,15 +1172,16 @@ def get_simulador(
             # Energía escalada a la vigencia de ESTA asignación (clave del fix:
             # una planta que solo estuvo parte del mes en el contrato refleja la
             # generación real de esos días, no el total del mes).
-            row_mwh, row_proy = _scoped_gen(p.sub_project, asn["fecha_inicio"], asn["fecha_fin"])
+            row_mwh, row_proy = _scoped_gen(_mon_id(p), asn["fecha_inicio"], asn["fecha_fin"])
         else:
             # Planta sin contrato PPA de venta (remanente/bolsa): generación del
             # mes completo, sin escalar.
-            row_mwh = gen_cache.get(p.sub_project)
+            _mid = _mon_id(p)
+            row_mwh = gen_cache.get(_mid)
             row_proy = (
-                round((gen_cache.get(p.sub_project) or 0) + (avg_cache_sim.get(p.sub_project) or 0) * dias_restantes, 3)
-                if es_mes_actual and avg_cache_sim.get(p.sub_project) is not None
-                else gen_cache.get(p.sub_project)
+                round((gen_cache.get(_mid) or 0) + (avg_cache_sim.get(_mid) or 0) * dias_restantes, 3)
+                if es_mes_actual and avg_cache_sim.get(_mid) is not None
+                else gen_cache.get(_mid)
             )
         plantas_out.append({
             "id": p.id,
@@ -1146,6 +1194,7 @@ def get_simulador(
             "contrato_id": asn["contrato_id"] if asn else None,
             "pct_despacho": asn["pct_despacho"] if asn else 1.0,
             "es_duplicado": False,
+            "uso_del_recurso": asn["uso_del_recurso"] if asn else False,
             "comprado_por_unergy": p.id in compra_proyecto_ids,
             "contrato_compra_nombre": compra_nombre_map.get(p.id),
             # Subdivisión del remanente (mismo criterio que /plantas-contratos): solo para
@@ -1160,7 +1209,7 @@ def get_simulador(
         if not p:
             continue
         # Escalada a la vigencia de esta asignación (igual que la fila primaria).
-        dup_mwh, dup_proy = _scoped_gen(p.sub_project, dup["fecha_inicio"], dup["fecha_fin"])
+        dup_mwh, dup_proy = _scoped_gen(_mon_id(p), dup["fecha_inicio"], dup["fecha_fin"])
         plantas_out.append({
             "id": f"{p.id}_dup_{dup['contrato_id']}",
             "nombre": p.nombre_comercial,
@@ -1174,6 +1223,7 @@ def get_simulador(
             # es_duplicado real del registro: True para duplicado (compra en bolsa),
             # False para una segunda asignación primaria (despacho partido entre contratos).
             "es_duplicado": dup["es_duplicado"],
+            "uso_del_recurso": dup["uso_del_recurso"],
             # Misma lógica que la fila primaria: si Unergy compra la planta vía un
             # contrato de compra, la etiqueta es "comprado por Unergy" aunque la fila
             # sea duplicado de un contrato de venta (ej. GD Astrolumen La Garita en
@@ -1230,7 +1280,13 @@ def get_plantas_contratos(
         .filter(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.sub_project.isnot(None),
+            # Entra a Cumplimiento si YA tiene fecha de inicio de comercialización
+            # (primer día con generación real, autoderivada) O si tiene sub_project
+            # (comportamiento previo). Aditivo: no saca ninguna planta que ya salía.
+            or_(
+                Proyecto.fecha_inicio_comercializacion.isnot(None),
+                Proyecto.sub_project.isnot(None),
+            ),
             # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
             # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
             Proyecto.srv_representacion.is_(True),
@@ -1263,7 +1319,7 @@ def get_plantas_contratos(
                         "fecha_fin": asic.fecha_fin.isoformat() if asic.fecha_fin else None,
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
                         "es_duplicado": bool(asic.es_duplicado),
-                        "uso_del_recurso": bool(asic.uso_del_recurso),
+                        "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
                     })
         venta_out.append({
             "id": c.id,
@@ -1392,6 +1448,7 @@ def get_plantas_contratos(
         if p.id in assigned_plant_ids:
             continue
         piscina, asic = _clasificar_remanente_bolsa(db, p.id, first_day, last_day)
+        fin_efectivo = _fin_efectivo_asic(db, asic, last_day) if asic else None
         entry = {
             "id": p.id,
             "nombre": p.nombre_comercial,
@@ -1399,6 +1456,10 @@ def get_plantas_contratos(
             "piscina": piscina,
             "codigo_sic": asic.codigo_sic_contrato if asic else None,
             "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
+            # ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
+            # (recortado por relevos). Nulos para la piscina libre.
+            "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
+            "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
         }
         bolsa_plantas.append(entry)
         (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
@@ -1422,6 +1483,37 @@ def get_plantas_contratos(
     from app.services.clasificacion_energia import derivar_pools
     out.update(derivar_pools(out))
     return out
+
+
+@router.post("/backfill-comercializacion")
+def post_backfill_comercializacion(
+    dry_run: bool = Query(True, description="Si es true (default) no escribe, solo reporta lo que haría."),
+    force: bool = Query(False, description="Recalcula también proyectos que ya tienen fecha (respeta los editados a mano)."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Deriva y persiste la fecha de inicio de comercialización (primer día con
+    generación real) para los proyectos que la necesitan.
+
+    Idempotente. Sin ``force`` solo toca los que tienen la fecha en NULL y no
+    fueron editados a mano. Devuelve el detalle de lo actualizado + las listas de
+    diagnóstico (sin generación / sin identificador de monitoreo).
+    """
+    from app.services.comercializacion import backfill_comercializacion
+    return backfill_comercializacion(db, force=force, dry_run=dry_run)
+
+
+@router.get("/sin-fecha-comercializacion")
+def get_sin_fecha_comercializacion(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Proyectos (no autoconsumo) que aún NO tienen fecha de inicio de
+    comercialización, con el motivo probable. Es el reporte final que pide el
+    negocio para saber qué plantas faltan por entrar a Cumplimiento."""
+    from app.services.comercializacion import proyectos_sin_fecha_comercializacion
+    filas = proyectos_sin_fecha_comercializacion(db)
+    return {"total": len(filas), "proyectos": filas}
 
 
 @router.get("/energia-transada")
@@ -1476,7 +1568,13 @@ def get_energia_transada(
         .filter(
             Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
             Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.sub_project.isnot(None),
+            # Entra a Cumplimiento si YA tiene fecha de inicio de comercialización
+            # (primer día con generación real, autoderivada) O si tiene sub_project
+            # (comportamiento previo). Aditivo: no saca ninguna planta que ya salía.
+            or_(
+                Proyecto.fecha_inicio_comercializacion.isnot(None),
+                Proyecto.sub_project.isnot(None),
+            ),
             # Solo plantas con servicio de representación activo (flag de Proyectos → Servicios).
             # Es la fuente correcta (la que edita el usuario), no contratos_servicio.
             Proyecto.srv_representacion.is_(True),
@@ -1519,7 +1617,10 @@ def get_energia_transada(
     # Plantas con GESCON que no entraron en el filtro inicial (1 query extra solo si hace falta)
     missing_ids = set(asignaciones) - set(plantas_by_id)
     if missing_ids:
-        extra = db.query(Proyecto).filter(Proyecto.id.in_(missing_ids), Proyecto.sub_project.isnot(None)).all()
+        extra = db.query(Proyecto).filter(
+            Proyecto.id.in_(missing_ids),
+            or_(Proyecto.fecha_inicio_comercializacion.isnot(None), Proyecto.sub_project.isnot(None)),
+        ).all()
         for p in extra:
             plantas_by_id[p.id] = p
         plantas_db = sorted(plantas_by_id.values(), key=lambda p: p.nombre_comercial or "")
@@ -1530,14 +1631,14 @@ def get_energia_transada(
     # Matriz y Generación solar), no se prorratea el total del período.
     need_range: set = set()
     for pid, asigs in asignaciones.items():
-        sp_p = plantas_by_id[pid].sub_project if pid in plantas_by_id else None
+        sp_p = _mon_id(plantas_by_id[pid]) if pid in plantas_by_id else None
         if not sp_p:
             continue
         for a in asigs:
             if 0 < a["dias_activos"] < dia_corte:
                 need_range.add((sp_p, a["eff_start"], a["eff_end"]))
 
-    sp_set = {p.sub_project for p in plantas_db if p.sub_project}
+    sp_set = {_mon_id(p) for p in plantas_db if _mon_id(p)}
     gen_cache: dict[str, dict] = {}
     range_cache: dict = {}
     warning = None
@@ -1571,7 +1672,7 @@ def get_energia_transada(
     plantas_out = []
     total_gen = total_ppa = total_bolsa = 0.0
     for p in plantas_db:
-        gd = gen_cache.get(p.sub_project, {"mwh": None, "ultimo_dia": None})
+        gd = gen_cache.get(_mon_id(p), {"mwh": None, "ultimo_dia": None})
         gen = gd.get("mwh")
         asigs = asignaciones.get(p.id, [])
         contratos_planta = [
@@ -1603,7 +1704,7 @@ def get_energia_transada(
         for a in asigs:
             if a["es_duplicado"]:
                 continue
-            range_gen = range_cache.get((p.sub_project, a["eff_start"], a["eff_end"]), {}).get("mwh")
+            range_gen = range_cache.get((_mon_id(p), a["eff_start"], a["eff_end"]), {}).get("mwh")
             gv = _gen_vigencia_mwh(a["eff_start"], a["eff_end"], dia_corte, gen, range_gen)
             if gv is not None:
                 ppa += gv * a["pct"]
@@ -1762,12 +1863,16 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
                 "gen_planta_mwh": gp,
                 "gen_contrato_mwh": gen_contrato,
                 "es_duplicado": is_dup,
+                # getattr: los tests de endpoints usan fakes sin el atributo nuevo
+                "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
             })
 
             # Accumulate per-project valor_mwh (preliminary: gen_contrato for past/future)
             key = (pid, sp or "", nombre)
             if key not in proyectos_acc:
-                proyectos_acc[key] = {"pct": pct, "is_dup": is_dup, "meses": [None] * 12}
+                proyectos_acc[key] = {"pct": pct, "is_dup": is_dup,
+                                      "is_ur": bool(getattr(asic, "uso_del_recurso", False)),
+                                      "meses": [None] * 12}
             proyectos_acc[key]["pct"] = pct  # last seen
             proyectos_acc[key]["meses"][m - 1] = gen_contrato  # will be overwritten for current month below
 
@@ -1887,6 +1992,7 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
                 "valor_mwh": acc["meses"][idx],
                 "pct_despacho": acc["pct"],
                 "es_duplicado": acc["is_dup"],
+                "uso_del_recurso": acc.get("is_ur", False),
             })
         proyectos.append({
             "id": pid,

@@ -71,6 +71,20 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_soporte ON panel_soporte (proyecto_id, periodo, tipo, grupo, concepto)",
     "CREATE INDEX IF NOT EXISTS ix_panel_soporte_lookup ON panel_soporte (proyecto_id, periodo, tipo)",
+    # excepciones de tasa de impuesto por (cliente, servicio[, proyecto])
+    """CREATE TABLE IF NOT EXISTS cliente_tasa_servicio (
+        id BIGSERIAL PRIMARY KEY,
+        cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+        servicio VARCHAR(30) NOT NULL,
+        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE CASCADE,
+        iva_pct NUMERIC(5,2),
+        retencion_pct NUMERIC(5,2),
+        reteiva_pct NUMERIC(5,2),
+        reteica_pct NUMERIC(5,2),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_tasa_servicio ON cliente_tasa_servicio (cliente_id, servicio, COALESCE(proyecto_id, 0))",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

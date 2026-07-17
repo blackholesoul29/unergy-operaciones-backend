@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
-from app.models.clientes import Cliente
+from app.models.clientes import Cliente, ClienteTasaServicio
 import json
 
 from app.models.panel_contable import (
@@ -35,7 +35,7 @@ from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
-from app.utils.impuestos_factura import impuestos_de_factura
+from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
 
 logger = logging.getLogger(__name__)
 
@@ -675,9 +675,10 @@ def listar(
     }
     rates_por_pi: dict = {}
     if pi_ids:
-        for pi_id, iva, ret, rei, ica in (
+        for pi_id, cli_id, iva, ret, rei, ica in (
             db.query(
                 ProyectoInversionista.id,
+                ProyectoInversionista.cliente_id,
                 Cliente.iva_pct, Cliente.retencion_pct,
                 Cliente.reteiva_pct, Cliente.reteica_pct,
             )
@@ -685,23 +686,42 @@ def listar(
             .filter(ProyectoInversionista.id.in_(pi_ids)).all()
         ):
             rates_por_pi[pi_id] = {
+                "cliente_id": cli_id,
                 "iva_pct": float(iva) if iva is not None else None,
                 "retencion_pct": float(ret) if ret is not None else None,
                 "reteiva_pct": float(rei) if rei is not None else None,
                 "reteica_pct": float(ica) if ica is not None else None,
             }
+    overrides = _overrides_tasa_servicio(db, {r["cliente_id"] for r in rates_por_pi.values()})
 
     return {
         "periodo": periodo_norm,
         "tipo": tipo,
-        "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi) for p in paneles],
+        "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi, overrides) for p in paneles],
     }
 
 
+def _overrides_tasa_servicio(db, cliente_ids) -> dict:
+    """{(cliente_id, servicio): {proyecto_id_or_None: {rates}}} desde cliente_tasa_servicio."""
+    ids = {c for c in (cliente_ids or set()) if c}
+    out: dict = {}
+    if not ids:
+        return out
+    for row in db.query(ClienteTasaServicio).filter(ClienteTasaServicio.cliente_id.in_(ids)).all():
+        out.setdefault((row.cliente_id, row.servicio), {})[row.proyecto_id] = {
+            "iva_pct": float(row.iva_pct) if row.iva_pct is not None else None,
+            "retencion_pct": float(row.retencion_pct) if row.retencion_pct is not None else None,
+            "reteiva_pct": float(row.reteiva_pct) if row.reteiva_pct is not None else None,
+            "reteica_pct": float(row.reteica_pct) if row.reteica_pct is not None else None,
+        }
+    return out
+
+
 def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None,
-                      rates_por_pi: dict | None = None) -> dict:
+                      rates_por_pi: dict | None = None, overrides: dict | None = None) -> dict:
     sop_map = sop_map or {}
     rates_por_pi = rates_por_pi or {}
+    overrides = overrides or {}
     def _sop(grupo, concepto):
         return sop_map.get((p.proyecto_id, grupo, concepto))
     # Agrupar líneas por inversionista.
@@ -729,9 +749,11 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
             "orden": ln.orden,
             "soporte": _sop(ln.grupo, ln.concepto),
         })
-        # Desglose de impuestos de la factura de servicio (tiempo de lectura).
-        for imp in impuestos_de_factura(ln.concepto, base_val,
-                                        rates_por_pi.get(ln.proyecto_inversionista_id)):
+        # Desglose de impuestos de la factura de servicio (tiempo de lectura),
+        # con excepción por servicio/proyecto si existe.
+        _r = rates_por_pi.get(ln.proyecto_inversionista_id) or {}
+        _eff = tasas_efectivas(_r, overrides.get((_r.get("cliente_id"), ln.concepto)), p.proyecto_id)
+        for imp in impuestos_de_factura(ln.concepto, base_val, _eff):
             inv_map[key]["lineas"].append({
                 "id": None, "grupo": "facturas", "concepto": imp["concepto"],
                 "valor_cop": imp["valor"], "comprobante_contable": None,

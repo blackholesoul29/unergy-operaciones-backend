@@ -41,7 +41,32 @@ def test_nombre_archivo_diario_sin_dia_lanza():
 
 
 def test_tipos_enriquecibles_y_columna():
-    assert TIPOS_ENRIQUECIBLES == {"grip", "arrpas", "tgrl", "cxcsb"}
+    # tgrl NO es enriquecible por SIC (columnas CODIGO/AGENTE, sin código de
+    # planta); se filtra por agente. Solo grip/arrpas/cxcsb tienen PLANTA/SUBMERCADO.
+    assert TIPOS_ENRIQUECIBLES == {"grip", "arrpas", "cxcsb"}
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["grip"] == "PLANTA"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["arrpas"] == "SUBMERCADO"
     assert COLUMNA_CODIGO_ENRIQUECIMIENTO["cxcsb"] == "SUBMERCADO"
+    assert "tgrl" not in TIPOS_ENRIQUECIBLES
+    assert "tgrl" not in COLUMNA_CODIGO_ENRIQUECIMIENTO
+
+
+def test_tgrl_se_filtra_por_agente():
+    from app.services.xm.tipos import TIPOS_FILTRO_AGENTE, TIPOS_FILTRABLES
+    assert "tgrl" in TIPOS_FILTRO_AGENTE
+    # el checkbox aplica tanto a los enriquecibles por SIC como a tgrl
+    assert TIPOS_FILTRABLES == {"grip", "arrpas", "cxcsb", "tgrl"}
+
+
+def test_tserv_es_publico_y_mensual():
+    validar_tipo("tserv")
+    assert ruta_directorio("tserv", 2026, 5) == "/INFORMACION_XM/PUBLICOK/SIC/COMERCIA/2026-05"
+    assert es_mensual("tserv") is True
+    assert nombre_archivo("tserv", "txf", 2026, 5) == "tserv05.txf"
+
+
+def test_afac_es_publico_y_mensual():
+    validar_tipo("afac")
+    assert ruta_directorio("afac", 2026, 5) == "/INFORMACION_XM/PUBLICOK/SIC/COMERCIA/2026-05"
+    assert es_mensual("afac") is True
+    assert nombre_archivo("afac", "txf", 2026, 5) == "afac05.txf"

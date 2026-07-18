@@ -226,7 +226,7 @@ def send_reset_password_email(*, to_email: str, token: str) -> None:
 
 def send_informe_email(
     *,
-    to_email: str,
+    to_emails: list[str],
     cc: list[str] | None = None,
     proyecto_nombre: str,
     periodo_display: str,
@@ -278,20 +278,20 @@ def send_informe_email(
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_FROM
-    msg["To"] = to_email
+    msg["To"] = ", ".join(to_emails)
     if cc:
         msg["Cc"] = ", ".join(cc)
     msg.attach(MIMEText(body_html, "html", "utf-8"))
 
-    recipients = [to_email]
+    recipients = list(to_emails)
     if cc:
         recipients.extend(cc)
 
     try:
         _smtp_send(msg, recipients)
-        _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=True)
+        _log_send(to_email=to_emails[0], cc=cc, subject=subject, tipo="informe", success=True)
     except Exception as exc:
-        _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=False, error_msg=str(exc))
+        _log_send(to_email=to_emails[0], cc=cc, subject=subject, tipo="informe", success=False, error_msg=str(exc))
         raise
 
 
@@ -617,10 +617,15 @@ def send_reporte_cgm_email(
 
     msg.attach(cuerpo)
 
-    adjunto = MIMEBase("application", "octet-stream")
+    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     adjunto.set_payload(excel_bytes)
     encoders.encode_base64(adjunto)
-    adjunto.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+    # filename como parámetro aparte (no interpolado en el string) -- así
+    # Python aplica la codificación RFC 2231 si el nombre tiene tildes/ñ
+    # (ej. "COX ENERGY GENERACIÓN...", "CGM Ingeniería"). Interpolado a mano
+    # como antes, Gmail no lo interpretaba y mostraba el adjunto sin nombre
+    # ni ícono ("noname").
+    adjunto.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(adjunto)
 
     # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de

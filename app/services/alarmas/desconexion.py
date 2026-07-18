@@ -166,11 +166,10 @@ def evaluar_desconexiones():
         ).all()
         _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
 
-        # Resolver medidor (match por nombre, sin red) y traer snapshots en paralelo
+        # Resolver medidor (vínculo directo en BD, sin red) y traer snapshots en paralelo
         node_pairs = {}
         for p in proyectos:
             node_pairs[p.id] = find_gaia_node_pair(
-                p.nombre_comercial or "", p.alias_monitoreo or "", p.nombre_bitacora or "",
                 proyecto_id=p.id, db_proyecto_frt_map=_db_proyecto_frt_map,
             )
 

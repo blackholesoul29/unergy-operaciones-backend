@@ -21,11 +21,12 @@ def add_columns():
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_bitacora VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_clientes VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS srv_operacion BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_inicio_comercializacion DATE",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_comercializacion_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
-        "ALTER TABLE proyectos ALTER COLUMN cliente_id DROP NOT NULL",
         # liquidaciones detalle
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS estado_resultados_url VARCHAR(1000)",
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS informe_html TEXT",
@@ -45,6 +46,13 @@ def add_columns():
         # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.
         "ALTER TABLE ppa_compromisos_energia ALTER COLUMN cantidad_proyectos SET DEFAULT 0",
         "UPDATE ppa_compromisos_energia SET cantidad_proyectos = 0 WHERE cantidad_proyectos IS NULL",
+        # Figura "Uso del recurso" (spec 2026-07-06): cliente en bolsa, planta usada
+        # en contrato; Unergy le paga a precio bolsa. Clasifica doble (a+c).
+        "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE clasificacion_energia_mensual ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
+        # Panel de fronteras pendientes de Quoia (migracion 043) -- respaldo por
+        # si alembic no llega a aplicarla (ver incidente de la migracion 035).
+        "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_border_id INTEGER",
     ]
     for s in stmts:
         try:

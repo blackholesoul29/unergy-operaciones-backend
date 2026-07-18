@@ -56,7 +56,7 @@ def upgrade() -> None:
         for email in correos:
             conn.execute(sa.text("""
                 INSERT INTO operadores_red_contactos (operador_red_id, email)
-                SELECT :operador_id, :email
+                SELECT CAST(:operador_id AS BIGINT), CAST(:email AS VARCHAR)
                 WHERE NOT EXISTS (
                     SELECT 1 FROM operadores_red_contactos
                     WHERE operador_red_id = :operador_id AND email = :email

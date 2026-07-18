@@ -51,6 +51,10 @@ class AsicSolicitud(Base):
     link_archivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reemplaza_anterior: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     es_duplicado: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Figura "Uso del recurso": el cliente de la planta está en bolsa; Unergy la usa
+    # para cumplir este contrato y le paga su generación a precio de bolsa.
+    # Mutuamente excluyente con es_duplicado (compra real en bolsa).
+    uso_del_recurso: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     fecha_envio_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_respuesta_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     numero_radicado: Mapped[str | None] = mapped_column(String(100), nullable=True)

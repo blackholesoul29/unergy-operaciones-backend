@@ -8,8 +8,10 @@ from app.models import Proyecto
 from app.services.tsf_sync import _core
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoGrupoPanel, ProyectoInversor, ProyectoContacto,
+    ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
 )
+from app.models.contactos import ProyectoAreaContacto
+from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut,
@@ -17,9 +19,13 @@ from app.schemas.proyectos import (
     ProyectoInfoTecnicaCreate, ProyectoInfoTecnicaOut,
     ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
-    ProyectoContactoCreate, ProyectoContactoUpdate, ProyectoContactoOut,
+    ProyectoAreaContactoSet, ProyectoAreaContactoOut,
+    ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
 )
 from app.schemas.common import PaginatedResponse
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.operadores_red_sync import sincronizar_operador_red
+from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -32,7 +38,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.info_tecnica),
             selectinload(Proyecto.grupos_panel),
             selectinload(Proyecto.inversores),
-            selectinload(Proyecto.contactos),
+            selectinload(Proyecto.area_contactos),
             selectinload(Proyecto.servicio_representacion),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         )
@@ -73,7 +79,7 @@ def list_proyectos(
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.inversores),
-        selectinload(Proyecto.contactos),
+        selectinload(Proyecto.area_contactos),
         selectinload(Proyecto.servicio_representacion),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
     )
@@ -162,9 +168,169 @@ def create_proyecto(
     return _get_proyecto_or_404(proyecto.id, db)
 
 
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+# Deben ir antes de /{id} para no chocar -- aunque acá no aplica porque son
+# rutas de 2+ segmentos, se deja el mismo orden por consistencia con el resto.
+
+@router.get("/pendientes", response_model=list[ProyectoPendienteOut])
+def listar_proyectos_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Candidatos de Sun Factory/Quoia/Solenium sin reflejar en `proyectos`,
+    o ya existentes pero con estado/fase desincronizados. Nunca se escriben
+    solos -- ver /pendientes/{clave}/confirmar."""
+    return resolver_pendientes(db)
+
+
+@router.post("/pendientes/{clave}/confirmar", response_model=ProyectoOut, status_code=201)
+def confirmar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteConfirmar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    pendientes = resolver_pendientes(db)
+    item = next((p for p in pendientes if p["clave"] == clave), None)
+    if not item:
+        raise HTTPException(404, "Ese candidato ya no aparece como pendiente (puede que ya se haya resuelto).")
+
+    overrides = body.model_dump(exclude_unset=True)
+    potencia_ac_kw = overrides.get("potencia_ac_kw", item.get("potencia_ac_kw"))
+    capacidad_instalada_kwp = overrides.get("capacidad_instalada_kwp", item.get("capacidad_instalada_kwp"))
+
+    if item["tipo_sugerencia"] == "crear":
+        payload = {
+            "nombre_comercial": overrides.get("nombre_comercial") or item["nombre_sugerido"],
+            "tipo_proyecto": overrides.get("tipo_proyecto") or item.get("tipo_proyecto_sugerido"),
+            "estado": item.get("estado_sugerido") or "en_desarrollo",
+            "municipio": overrides.get("municipio") or item.get("municipio"),
+            "departamento": overrides.get("departamento") or item.get("departamento"),
+            "latitud": item.get("latitud"),
+            "longitud": item.get("longitud"),
+            "fase_construccion": item.get("fase_construccion_sugerida"),
+            "origina_code": item.get("origina_code"),
+            "codigo_tsf": item.get("codigo_tsf"),
+            "sunfactory_project_id": item.get("sunfactory_project_id"),
+            "sub_project": item.get("sub_project"),
+            "project_id_solenium": item.get("project_id_solenium"),
+            "origen": "pendientes",
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        proyecto = Proyecto(**payload)
+        db.add(proyecto)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "No se pudo crear: algún código/ID único ya está en uso por otro proyecto.")
+        db.refresh(proyecto)
+        proyecto_id = proyecto.id
+    else:
+        proyecto = db.query(Proyecto).filter(Proyecto.id == item["proyecto_id"]).first()
+        if not proyecto:
+            raise HTTPException(404, "El proyecto vinculado ya no existe")
+        if item.get("estado_sugerido") and proyecto.estado != "en_operacion" and item["estado_sugerido"] == "en_operacion":
+            proyecto.estado = "en_operacion"
+        if item.get("fase_construccion_sugerida"):
+            proyecto.fase_construccion = item["fase_construccion_sugerida"]
+        # Backfill de vínculos y ubicación -- solo si el proyecto todavía no los tenía.
+        for campo in (
+            "origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project",
+            "project_id_solenium", "municipio", "departamento", "latitud", "longitud",
+        ):
+            if getattr(proyecto, campo) is None and item.get(campo) is not None:
+                setattr(proyecto, campo, item[campo])
+        db.commit()
+        proyecto_id = proyecto.id
+
+    if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
+        it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()
+        if not it:
+            it = ProyectoInfoTecnica(proyecto_id=proyecto_id)
+            db.add(it)
+        if it.potencia_ac_kw is None and potencia_ac_kw is not None:
+            it.potencia_ac_kw = potencia_ac_kw
+        if it.capacidad_instalada_kwp is None and capacidad_instalada_kwp is not None:
+            it.capacidad_instalada_kwp = capacidad_instalada_kwp
+        db.commit()
+
+    return _get_proyecto_or_404(proyecto_id, db)
+
+
+@router.post("/pendientes/{clave}/ignorar", status_code=204)
+def ignorar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteIgnorar,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
+):
+    if db.query(ProyectoPendienteIgnorado).filter(ProyectoPendienteIgnorado.clave == clave).first():
+        return
+    db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.commit()
+
+
+@router.post("/backfill-ubicacion")
+def backfill_ubicacion_proyectos(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Completa latitud/longitud/municipio/departamento en proyectos existentes
+    que les falte ese dato, cruzando contra Sun Factory y Solenium. Idempotente
+    y nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
+    return backfill_ubicacion(db, dry_run=dry_run)
+
+
 @router.get("/{id}", response_model=ProyectoOut)
 def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
+
+
+@router.get("/{id}/debug-generacion")
+def debug_generacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)) -> dict:
+    """Diagnóstico de solo lectura: ¿la(s) frontera(s) de generación de este
+    proyecto tienen generación REAL hoy en Quoia? Usa el mismo método por nodo
+    (no por frt_code -- ya sabemos que ese da 400 para algunos borders) que
+    Proyectos pendientes, cacheado 1h. Sirve para verificar si un proyecto
+    marcado `en_operacion` de verdad está comercializando energía."""
+    fronteras = (
+        db.query(Frontera)
+        .filter(
+            Frontera.proyecto_id == id,
+            Frontera.deleted_at.is_(None),
+            Frontera.tipo_frontera.in_(["generacion", "generacion_consumo"]),
+        )
+        .all()
+    )
+    if not fronteras:
+        return {"tiene_frontera": False, "detalle": "Este proyecto no tiene frontera de generación registrada."}
+
+    gaia = GaiaClient()
+    if not gaia.enabled:
+        raise HTTPException(status_code=502, detail="Credenciales de Quoia no configuradas.")
+    try:
+        borders = gaia.get_all_borders()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar Quoia: {exc}")
+    generacion_real = _generacion_real_por_frt(gaia, borders)
+
+    borders_by_code = {}
+    for b in borders:
+        gen = b.get("frt_generation") or {}
+        code = (gen.get("frt_code") or "").strip().lower()
+        if code:
+            borders_by_code[code] = gen
+
+    resultado = []
+    for f in fronteras:
+        codigo = (f.codigo_frontera or "").strip().lower()
+        info = borders_by_code.get(codigo, {})
+        resultado.append({
+            "codigo_frontera": f.codigo_frontera,
+            "tipo_frontera": f.tipo_frontera,
+            "last_report_date": info.get("last_report_date"),
+            "generacion_real_hoy": generacion_real.get(codigo, False),
+        })
+    return {"tiene_frontera": True, "fronteras": resultado}
 
 
 # Columnas con restricción UNIQUE en el modelo Proyecto. Si se intenta asignar a un
@@ -207,6 +373,12 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     payload = data.model_dump(exclude_unset=True)
     _verificar_unicos(db, payload, excluir_id=id)
 
+    # Si el usuario edita la fecha de inicio de comercialización a mano, marca el
+    # flag para que el backfill/job diario no la vuelva a pisar (salvo que él mismo
+    # mande el flag explícito en el payload).
+    if "fecha_inicio_comercializacion" in payload and "fecha_comercializacion_editada_manual" not in payload:
+        p.fecha_comercializacion_editada_manual = True
+
     for k, v in payload.items():
         setattr(p, k, v)
     try:
@@ -219,6 +391,9 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
             "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
             "ya está en uso por otro proyecto.",
         )
+    if "operador_red_id" in payload:
+        sincronizar_operador_red(db, p)
+        db.commit()
     return _get_proyecto_or_404(id, db)
 
 
@@ -271,7 +446,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
     db.query(ProyectoInversionista).filter_by(proyecto_id=id).delete()
     db.query(ProyectoGrupoPanel).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInversor).filter_by(proyecto_id=id).delete()
-    db.query(ProyectoContacto).filter_by(proyecto_id=id).delete()
+    db.query(ProyectoAreaContacto).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).delete()
 
     db.delete(p)
@@ -291,7 +466,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 # project_id_solenium) se copian del perdedor al ganador solo si el ganador los tiene
 # vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
 _MERGE_SIMPLE = [
-    "proyecto_grupos_panel", "proyecto_inversores", "proyecto_contactos",
+    "proyecto_grupos_panel", "proyecto_inversores",
     "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
     "contratos_servicio", "asic_solicitudes",
     "rec_procesos", "costos_variables", "garantias",
@@ -306,12 +481,19 @@ _MERGE_COMPOSITE = [
     ("mapeo_celda_concepto", ["concepto"]),
     ("alias_fuente_ingreso", ["columna_origen"]),
     ("ppa_contrato_proyectos", ["contrato_id"]),
+    # proyecto_area_contacto tiene UNIQUE (proyecto_id, tipo) -- si el ganador
+    # ya tiene un puntero para ese tipo, se descarta el del perdedor.
+    ("proyecto_area_contacto", ["tipo"]),
 ]
 _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
     "proyecto_inicio_operacion",
 ]
-_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium"]
+_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium", "sunfactory_project_id"]
+# Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el
+# valor del perdedor (a diferencia de _MERGE_SCALAR_UNIQUE, no hace falta
+# liberarlos en el perdedor antes de copiar: no hay constraint que choque).
+_MERGE_SCALAR_FILL_IF_EMPTY = ["municipio", "departamento", "latitud", "longitud", "codigo_tsf"]
 
 
 def _scalar(db, sql, params):
@@ -382,9 +564,9 @@ def merge_proyectos(
     if n_subp:
         movimientos.append({"tabla": "proyectos (subproyectos)", "a_mover": n_subp, "descartadas_por_colision": 0})
 
-    # Campos escalares únicos: qué se copiaría al ganador
+    # Campos escalares vacíos en el ganador: qué se copiaría del perdedor
     campos_copiados = []
-    for f in _MERGE_SCALAR_UNIQUE:
+    for f in _MERGE_SCALAR_UNIQUE + _MERGE_SCALAR_FILL_IF_EMPTY:
         val_keeper = getattr(ganador, f, None)
         val_loser = getattr(perdedor, f, None)
         if (val_keeper in (None, "")) and (val_loser not in (None, "")):
@@ -686,42 +868,50 @@ def backfill_minigranja_inversores(
     return backfill_inversores_minigranjas(db, solo_minigranja=solo_minigranja, dry_run=dry_run)
 
 
-# ── Contactos ─────────────────────────────────────────────────────────────────
+# ── Puntero de contactos por área ──────────────────────────────────────────────
+# Para cada tipo (operacional/cgm/liquidacion), este proyecto
+# puede apuntar a un Cliente específico -- ver app/services/contactos.py.
+# Sin fila para un tipo = usa los contactos de los inversionistas vigentes.
 
-@router.get("/{id}/contactos", response_model=list[ProyectoContactoOut])
-def list_contactos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+@router.get("/{id}/area-contactos", response_model=list[ProyectoAreaContactoOut])
+def list_area_contactos(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    return db.query(ProyectoContacto).filter_by(proyecto_id=id).all()
+    rows = (
+        db.query(ProyectoAreaContacto, Cliente.razon_social_nombre)
+        .join(Cliente, Cliente.id == ProyectoAreaContacto.cliente_id)
+        .filter(ProyectoAreaContacto.proyecto_id == id)
+        .all()
+    )
+    out = []
+    for area, nombre in rows:
+        area.cliente_nombre = nombre
+        out.append(area)
+    return out
 
 
-@router.post("/{id}/contactos", response_model=ProyectoContactoOut, status_code=201)
-def add_contacto(id: int, data: ProyectoContactoCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+@router.put("/{id}/area-contactos/{tipo}", response_model=ProyectoAreaContactoOut)
+def set_area_contacto(id: int, tipo: str, data: ProyectoAreaContactoSet, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _get_proyecto_or_404(id, db)
-    c = ProyectoContacto(proyecto_id=id, **data.model_dump())
-    db.add(c)
+    if not db.query(Cliente).filter(Cliente.id == data.cliente_id).first():
+        raise HTTPException(404, "Cliente no encontrado")
+    area = db.query(ProyectoAreaContacto).filter_by(proyecto_id=id, tipo=tipo).first()
+    if area:
+        area.cliente_id = data.cliente_id
+    else:
+        area = ProyectoAreaContacto(proyecto_id=id, tipo=tipo, cliente_id=data.cliente_id)
+        db.add(area)
     db.commit()
-    db.refresh(c)
-    return c
+    db.refresh(area)
+    area.cliente_nombre = db.query(Cliente.razon_social_nombre).filter(Cliente.id == data.cliente_id).scalar()
+    return area
 
 
-@router.patch("/{id}/contactos/{c_id}", response_model=ProyectoContactoOut)
-def update_contacto(id: int, c_id: int, data: ProyectoContactoUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
-    if not c:
-        raise HTTPException(404, "Contacto no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
-        setattr(c, k, v)
-    db.commit()
-    db.refresh(c)
-    return c
-
-
-@router.delete("/{id}/contactos/{c_id}", status_code=204)
-def delete_contacto(id: int, c_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    c = db.query(ProyectoContacto).filter_by(id=c_id, proyecto_id=id).first()
-    if not c:
-        raise HTTPException(404, "Contacto no encontrado")
-    db.delete(c)
+@router.delete("/{id}/area-contactos/{tipo}", status_code=204)
+def clear_area_contacto(id: int, tipo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    area = db.query(ProyectoAreaContacto).filter_by(proyecto_id=id, tipo=tipo).first()
+    if not area:
+        raise HTTPException(404, "Este proyecto no tiene un puntero para ese tipo")
+    db.delete(area)
     db.commit()
 
 

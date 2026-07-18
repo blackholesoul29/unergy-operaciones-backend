@@ -83,6 +83,20 @@ def _validar_fecha_fin_vs_ppa(db: Session, solicitud: AsicSolicitud) -> None:
         )
 
 
+def _validar_flags_exclusivos(es_duplicado: bool, uso_del_recurso: bool) -> None:
+    """'Compra en bolsa' (es_duplicado) y 'Uso del recurso' son figuras distintas:
+    la primera es compra real en el mercado spot; la segunda, compromiso de pagarle
+    al cliente a precio bolsa una planta que entra al contrato. No pueden coexistir."""
+    if es_duplicado and uso_del_recurso:
+        raise HTTPException(
+            422,
+            "Un registro no puede ser 'Compra en bolsa' y 'Uso del recurso' a la vez. "
+            "Marca 'Compra en bolsa' si la planta coexiste en otro contrato con origen "
+            "bolsa, o 'Uso del recurso' si el cliente está en bolsa y Unergy usa la "
+            "planta para cumplir este contrato.",
+        )
+
+
 def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
     d = AsicSolicitudOut.model_validate(s)
     if s.proyecto:
@@ -200,6 +214,7 @@ def patch_solicitud(
         raise HTTPException(404, "No encontrado")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
+    _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
     _validar_fecha_fin_vs_ppa(db, s)
     _auto_terminate(db, s)
     db.commit()
@@ -215,6 +230,7 @@ def create_solicitud(
     _=Depends(get_current_user),
 ):
     s = AsicSolicitud(**data.model_dump())
+    _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
     db.add(s)
     db.flush()
     _validar_fecha_fin_vs_ppa(db, s)

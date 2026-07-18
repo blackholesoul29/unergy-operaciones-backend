@@ -6,13 +6,13 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente
 from app.models.fronteras import Frontera
-from app.models.proyectos import Proyecto
 from app.models.operadores_red import OperadorRed
 from app.schemas.reporte_cgm import (
     EnviarReporteCGMRequest, EnviarReporteCGMResponse, EnvioResultado,
 )
 from app.services import email_service
 from app.services import reporte_cgm as svc
+from app.services.contactos import get_contactos, get_proyecto_ids_por_contacto_cliente
 from app.services.mgs.gaia_client import GaiaClient
 
 router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
@@ -27,10 +27,15 @@ def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
 
 
 def _fronteras_de_cliente(db: Session, cliente_id: int) -> list[Frontera]:
+    """Fronteras de los proyectos donde este cliente es la fuente del contacto
+    CGM (por puntero de área, o por ser inversionista vigente) -- no depende
+    de quién sea el titular del proyecto."""
+    proyecto_ids = get_proyecto_ids_por_contacto_cliente(db, "cgm", cliente_id)
+    if not proyecto_ids:
+        return []
     return (
         db.query(Frontera)
-        .join(Proyecto, Frontera.proyecto_id == Proyecto.id)
-        .filter(Proyecto.cliente_id == cliente_id, Frontera.deleted_at.is_(None))
+        .filter(Frontera.proyecto_id.in_(proyecto_ids), Frontera.deleted_at.is_(None))
         .all()
     )
 
@@ -72,8 +77,15 @@ def enviar_reporte_cgm(
                 items.append({"dest": dest, "nombre": f"Cliente #{dest.id}", "correos": [], "fronteras": []})
                 continue
             fronteras = _fronteras_de_cliente(db, dest.id)
-            correos = cliente.correos_cgm or []
+            correos = get_contactos(db, "cgm", cliente_id=dest.id)
             nombre = cliente.razon_social_nombre
+
+        # Filtro opcional a proyectos puntuales dentro de este destinatario --
+        # el frontend siempre manda la selección explícita (nunca None), pero
+        # se respeta None por si algún otro consumidor de la API no lo manda.
+        if dest.proyectos is not None:
+            proyectos_ids = set(dest.proyectos)
+            fronteras = [f for f in fronteras if f.proyecto_id in proyectos_ids]
 
         items.append({"dest": dest, "nombre": nombre, "correos": correos, "fronteras": fronteras})
 
@@ -91,6 +103,14 @@ def enviar_reporte_cgm(
         borders = svc.resolver_borders(gaia, frt_codes)
         for frt_code in frt_codes:
             meta = borders.get(frt_code.lower())
+            if meta is None:
+                # No aparece en el listado de Quoia (caso real 2026-07-10:
+                # Bayunca/San Onofre registrados ahí bajo otra compañía) --
+                # no hay nombre ni dato real que reportar, así que no se
+                # incluye ninguna fila para este frt_code. Distinto del caso
+                # "sí está en Quoia pero no reportó este día" (eso sí se deja
+                # como "Sin reporte" dentro de fetch_filas).
+                continue
             filas_por_frt[frt_code] = [
                 fila
                 for dia in dias

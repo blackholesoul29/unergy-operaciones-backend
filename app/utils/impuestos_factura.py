@@ -17,6 +17,21 @@ Efecto neto en valor a pagar = base + IVA − retenciones (confirmado con la usu
 
 SERVICIOS_FACTURA = ("Representación", "CGM", "Administración")
 _ABBR = {"Representación": "Rep", "CGM": "CGM", "Administración": "Adm"}
+RATE_KEYS = ("iva_pct", "retencion_pct", "reteiva_pct", "reteica_pct")
+
+
+def tasas_efectivas(base_rates: dict | None, overrides_serv: dict | None,
+                    proyecto_id) -> dict:
+    """Combina las tasas generales del cliente (base_rates) con la excepción por
+    servicio (overrides_serv). overrides_serv: {proyecto_id_or_None: {rates}} para
+    un (cliente, servicio). Precedencia: excepción del proyecto > excepción global
+    (proyecto_id None) > tasa general. Un _pct null en la excepción hereda la general.
+    """
+    base_rates = base_rates or {}
+    spec = {}
+    if overrides_serv:
+        spec = overrides_serv.get(proyecto_id) or overrides_serv.get(None) or {}
+    return {k: (spec[k] if spec.get(k) is not None else base_rates.get(k)) for k in RATE_KEYS}
 
 
 def _pct(v) -> float:

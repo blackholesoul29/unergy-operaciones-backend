@@ -78,6 +78,7 @@ class OMSeleccionItem(BaseModel):
     contrato_id:  int
     incluido:     bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None   # #6: requerido por la UI al excluir uno que aplica
 
 
 class OMSeleccionGuardar(BaseModel):
@@ -91,6 +92,7 @@ class OMSeleccionOut(BaseModel):
     incluido:    bool
     facturado:    bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None
     updated_at:   datetime
     model_config = {"from_attributes": True}
 

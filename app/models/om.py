@@ -34,6 +34,7 @@ class OMSeleccion(Base):
     facturado:   Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     valor_manual: Mapped[float | None] = mapped_column(Numeric(14, 0), nullable=True)  # override del valor a facturar; NULL = usar calculado
     valor_facturado_congelado: Mapped[float | None] = mapped_column(Numeric(14, 0), nullable=True)  # #4: valor fijado al facturar (no se recalcula)
+    motivo_exclusion: Mapped[str | None] = mapped_column(String(500), nullable=True)  # #6: por qué se excluyó del mes (si incluido=False)
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

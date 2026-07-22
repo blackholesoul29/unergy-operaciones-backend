@@ -219,6 +219,7 @@ def calcular_proyecto(
     incluido: bool = True,
     facturado: bool = False,
     valor_manual: float | None = None,
+    valor_congelado: int | None = None,
     periodicidad: str | None = None,
 ) -> dict:
     """
@@ -280,6 +281,8 @@ def calcular_proyecto(
     valor_calculado = _redondear(valor_mes_completo * prorrateo_factor)
     editado_manual = valor_manual is not None
     valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
+    if valor_congelado is not None:
+        valor_a_facturar = int(valor_congelado)   # #4: mes ya facturado → valor congelado
     # #6: el override quedó desactualizado si ya no coincide con el valor recalculado
     # (p.ej. tras corregir la tasa IPC del año). El override se sigue respetando.
     valor_manual_desactualizado = editado_manual and _redondear(float(valor_manual)) != valor_calculado
@@ -304,6 +307,7 @@ def calcular_proyecto(
         "valor_manual_desactualizado": valor_manual_desactualizado,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
+        "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
         "aplica_este_mes":        aplica_este_mes,
         "ipc_incompleto":         ipc_incompleto(aniversarios, ipc_tasas),
     }

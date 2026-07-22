@@ -139,6 +139,8 @@ def calcular_periodo(
             incluido=incluido,
             facturado=facturado,
             valor_manual=valor_manual,
+            valor_congelado=(int(sel.valor_facturado_congelado)
+                             if sel and sel.valor_facturado_congelado is not None else None),
             periodicidad=c.periodicidad_pago,
         )
         fila_data["documento_disponible"] = c.id in documentos_nombre
@@ -217,8 +219,26 @@ def toggle_facturado(
     if not sel:
         sel = OMSeleccion(contrato_id=contrato_id, periodo=periodo, incluido=True, facturado=True)
         db.add(sel)
+        nuevo_estado = True
     else:
         sel.facturado = not sel.facturado
+        nuevo_estado = sel.facturado
+
+    # #4: al pasar a facturado, congelar el valor calculado en ese momento.
+    if nuevo_estado and sel.valor_facturado_congelado is None:
+        c = db.get(ContratoServicio, contrato_id)
+        if c is not None:
+            ipc = {r.año: float(r.tasa) for r in db.query(IPCTasa).all()}
+            nombre = (c.proyecto.nombre_comercial if c.proyecto
+                      else c.prestador_nombre or f"Contrato #{c.id}")
+            fila = calcular_proyecto(
+                contrato_id=c.id, nombre_proyecto=nombre,
+                fecha_firma_contrato=c.fecha_firma_contrato, fecha_inicio_om=c.fecha_inicio_om,
+                valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
+                periodo=periodo, ipc_tasas=ipc,
+                valor_manual=float(sel.valor_manual) if sel.valor_manual is not None else None,
+            )
+            sel.valor_facturado_congelado = fila["valor_a_facturar"]
 
     db.commit()
     db.refresh(sel)

@@ -209,3 +209,33 @@ def test_reupload_borra_sin_match_viejos_del_periodo(db, tmp_path, monkeypatch):
     assert len(pendientes) == 1
     assert pendientes[0].pagina == 1
     assert pendientes[0].origen == "upload"
+
+
+def test_reupload_elimina_documentos_huerfanos_del_periodo(db, tmp_path, monkeypatch):
+    """Al re-subir, un OMDocumentoProyecto de un contrato que ya no aparece en el
+    split nuevo debe eliminarse (no quedar descargable como si fuera vigente)."""
+    monkeypatch.setattr(api, "_UPLOADS_DIR", tmp_path / "uploads_om")
+    a = _crear_contrato(db, prestador_nombre="Uruaco")
+    b = _crear_contrato(db, prestador_nombre="Baraya")
+    # Documento de A de una subida anterior que sí lo matcheó.
+    db.add(OMDocumentoProyecto(contrato_id=a.id, periodo=PERIODO,
+                               nombre_archivo="viejo_A.pdf", ruta_local="x"))
+    db.flush()
+
+    # El split nuevo solo procesa B; A ya no aparece.
+    monkeypatch.setattr(api, "dividir_pdf", lambda *a_, **k_: {
+        "procesados": [{
+            "contrato_id": b.id, "archivo": "nuevo_B.pdf", "ruta_local": "y",
+            "numero_factura": None, "total_sin_impuestos": None, "iva": None,
+            "total_pagar": None, "fecha_facturacion": None, "cufe": None,
+        }],
+        "sin_match": [], "detalle": [],
+    })
+
+    fake_file = _FakeUploadFile("factura.pdf", _pdf_con_texto(["Baraya"]))
+    asyncio.run(api.upload_factura_mensual(PERIODO, file=fake_file, db=db, _=ADMIN))
+
+    ids = {d.contrato_id for d in
+           db.query(OMDocumentoProyecto).filter(OMDocumentoProyecto.periodo == PERIODO).all()}
+    assert b.id in ids          # el documento del split nuevo existe
+    assert a.id not in ids      # el huérfano (A) se eliminó

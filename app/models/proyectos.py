@@ -140,6 +140,13 @@ class Proyecto(Base):
     p99_mensual_kwh = mapped_column(JSONB, nullable=True)
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # ── IDs de liquidación ──────────────────────────────────────────────────────
+    # Códigos SIC que identifican al proyecto en las liquidaciones (generación y
+    # consumo). Texto libre a nivel de proyecto, editables desde la pestaña
+    # "ID liquidaciones" del detalle.
+    codigo_sic_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    codigo_sic_consumo: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # ── Pipeline TSF / próximos a energizarse ───────────────────────────────────
     # Correlación con originabotdb.minifarm_project.name / base_name de Sun Factory.
     origina_code: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)

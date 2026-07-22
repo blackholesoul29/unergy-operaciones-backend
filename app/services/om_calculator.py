@@ -254,6 +254,9 @@ def calcular_proyecto(
     valor_calculado = _redondear(valor_mes_completo * prorrateo_factor)
     editado_manual = valor_manual is not None
     valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
+    # #6: el override quedó desactualizado si ya no coincide con el valor recalculado
+    # (p.ej. tras corregir la tasa IPC del año). El override se sigue respetando.
+    valor_manual_desactualizado = editado_manual and _redondear(float(valor_manual)) != valor_calculado
 
     return {
         "contrato_id":          contrato_id,
@@ -272,6 +275,7 @@ def calcular_proyecto(
         "prorrateo_factor":     prorrateo_factor,
         "valor_calculado":      valor_calculado,
         "editado_manual":       editado_manual,
+        "valor_manual_desactualizado": valor_manual_desactualizado,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
     }

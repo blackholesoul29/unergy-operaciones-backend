@@ -57,6 +57,7 @@ class OMCalculoFila(BaseModel):
     valor_a_facturar:       Optional[int]
     valor_calculado:        Optional[int]
     editado_manual:         bool
+    valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str
     ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada
     documento_disponible:   bool = False   # PDF individual disponible para este proyecto

@@ -91,6 +91,25 @@ class OMSeleccionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Páginas sin match (asignación manual) ───────────────────────────────────
+
+class OMPaginaSinMatchOut(BaseModel):
+    id:              int
+    periodo:         str
+    pagina:          int
+    nombre_extraido: Optional[str] = None
+    estrategia:      Optional[str] = None
+    razon:           str
+    numero_factura:  Optional[str] = None
+    muestra_texto:   Optional[str] = None
+    origen:          str
+    model_config = {"from_attributes": True}
+
+
+class OMSinMatchAsignar(BaseModel):
+    contrato_id: int
+
+
 # ── Notificaciones IPC ───────────────────────────────────────────────────────
 
 class OMNotificacionIPC(BaseModel):

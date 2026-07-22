@@ -10,23 +10,26 @@ Endpoints:
   GET  /om/ipc                                    → lista tasas IPC
   PUT  /om/ipc/{año}                             → crea/actualiza tasa IPC
   GET  /om/ipc/pendiente                          → tasa sugerida (Banrep fallback)
+  PATCH /om/factura/{periodo}/sin-match/{id}/asignar  → asigna manualmente una página sin match a un contrato
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
-from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
+from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto, OMPaginaSinMatch
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
     OMContratoOut, OMCalculoFila, OMCalculoResponse,
     OMSeleccionGuardar, OMSeleccionOut,
+    OMSinMatchAsignar,
 )
 from app.services.om_calculator import calcular_proyecto
-from app.services.om_pdf_splitter import dividir_pdf
+from app.services.om_pdf_splitter import dividir_pdf, extraer_pagina_datos, escribir_o_anexar_pagina, safe_filename
 
 router = APIRouter(prefix="/om", tags=["OM Mensual"])
 
@@ -269,9 +272,15 @@ def get_factura_mensual(
     factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
     if not factura:
         return {"periodo": periodo, "nombre_archivo": None, "enlace_pdf": None,
-                "tiene_archivo": False, "subido_en": None}
+                "tiene_archivo": False, "subido_en": None, "sin_match_pendientes": []}
     tiene_archivo = bool(
         factura.ruta_local and _Path(factura.ruta_local).exists()
+    )
+    sin_match_pendientes = (
+        db.query(OMPaginaSinMatch)
+        .filter(OMPaginaSinMatch.periodo == periodo, OMPaginaSinMatch.resuelto == False)  # noqa: E712
+        .order_by(OMPaginaSinMatch.pagina)
+        .all()
     )
     return {
         "periodo":        periodo,
@@ -279,6 +288,13 @@ def get_factura_mensual(
         "enlace_pdf":     factura.enlace_pdf,
         "tiene_archivo":  tiene_archivo,
         "subido_en":      factura.subido_en,
+        "sin_match_pendientes": [
+            {
+                "id": s.id, "pagina": s.pagina, "nombre_extraido": s.nombre_extraido,
+                "razon": s.razon, "numero_factura": s.numero_factura, "origen": s.origen,
+            }
+            for s in sin_match_pendientes
+        ],
     }
 
 
@@ -318,6 +334,7 @@ async def upload_factura_mensual(
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .order_by(ContratoServicio.id)
         .all()
     )
     contratos_lista = [
@@ -376,7 +393,23 @@ async def upload_factura_mensual(
                 cufe=item.get("cufe"),
             )
             db.add(doc)
-    db.commit()  # commit único para factura + documentos
+
+    # Una resubida invalida la numeración de página de los sin_match anteriores
+    # de este período — se reemplazan por los que salen del split actual.
+    db.query(OMPaginaSinMatch).filter(OMPaginaSinMatch.periodo == periodo).delete()
+    for item in splitting_result["sin_match"]:
+        db.add(OMPaginaSinMatch(
+            periodo=periodo,
+            pagina=item["pagina"],
+            nombre_extraido=item.get("nombre_extraido"),
+            estrategia=item.get("estrategia"),
+            razon=item["razon"],
+            numero_factura=item.get("numero_factura"),
+            muestra_texto=item.get("muestra_texto"),
+            origen="upload",
+        ))
+
+    db.commit()  # commit único para factura + documentos + sin_match
 
     return {
         "ok": True,
@@ -387,6 +420,95 @@ async def upload_factura_mensual(
             "sin_match": splitting_result["sin_match"],
             "detalle": splitting_result["procesados"],
         },
+    }
+
+
+@router.patch("/factura/{periodo}/sin-match/{sin_match_id}/asignar")
+def asignar_sin_match(
+    periodo: str,
+    sin_match_id: int,
+    payload: OMSinMatchAsignar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Asigna manualmente una página que no se pudo emparejar automáticamente
+    (`OMPaginaSinMatch`) a un contrato de mantenimiento: extrae esa página del
+    PDF consolidado original y la anexa al documento individual del contrato
+    para ese período (creándolo si no existía).
+    """
+    sin_match = db.query(OMPaginaSinMatch).filter(
+        OMPaginaSinMatch.id == sin_match_id,
+        OMPaginaSinMatch.periodo == periodo,
+    ).first()
+    if not sin_match:
+        raise HTTPException(404, "No existe esa página sin match para este período")
+    if sin_match.resuelto:
+        raise HTTPException(400, "Esta página ya fue asignada")
+
+    factura = db.query(OMFacturaMensual).filter(OMFacturaMensual.periodo == periodo).first()
+    if not factura or not factura.ruta_local or not _Path(factura.ruta_local).exists():
+        raise HTTPException(404, "No hay PDF consolidado original disponible para este período")
+
+    contrato = db.query(ContratoServicio).filter(
+        ContratoServicio.id == payload.contrato_id,
+        ContratoServicio.servicio_aplica == "mantenimiento",
+    ).first()
+    if not contrato:
+        raise HTTPException(404, "El contrato indicado no es un contrato de mantenimiento válido")
+
+    nombre_proyecto = (
+        contrato.proyecto.nombre_comercial if contrato.proyecto
+        else contrato.prestador_nombre or f"Contrato #{contrato.id}"
+    )
+
+    ruta_pdf_origen = _Path(factura.ruta_local)
+    datos = extraer_pagina_datos(ruta_pdf_origen, sin_match.pagina)
+
+    directorio_docs = _UPLOADS_DIR / "documentos" / periodo
+    nombre_archivo = f"SOFV_{safe_filename(nombre_proyecto)}_{periodo}_mantenimiento.pdf"
+    ruta_salida = directorio_docs / nombre_archivo
+    escribir_o_anexar_pagina(ruta_pdf_origen, sin_match.pagina, ruta_salida)
+
+    doc = db.query(OMDocumentoProyecto).filter(
+        OMDocumentoProyecto.contrato_id == contrato.id,
+        OMDocumentoProyecto.periodo == periodo,
+    ).first()
+    if doc:
+        doc.nombre_archivo      = nombre_archivo
+        doc.ruta_local          = str(ruta_salida)
+        doc.numero_factura      = datos.get("numero_factura") or doc.numero_factura
+        doc.total_sin_impuestos = datos.get("total_sin_impuestos") or doc.total_sin_impuestos
+        doc.iva                 = datos.get("iva") or doc.iva
+        doc.total_pagar         = datos.get("total_pagar") or doc.total_pagar
+        doc.fecha_facturacion   = datos.get("fecha_facturacion") or doc.fecha_facturacion
+        doc.cufe                = datos.get("cufe") or doc.cufe
+    else:
+        doc = OMDocumentoProyecto(
+            contrato_id=contrato.id,
+            periodo=periodo,
+            nombre_archivo=nombre_archivo,
+            ruta_local=str(ruta_salida),
+            numero_factura=datos.get("numero_factura"),
+            total_sin_impuestos=datos.get("total_sin_impuestos"),
+            iva=datos.get("iva"),
+            total_pagar=datos.get("total_pagar"),
+            fecha_facturacion=datos.get("fecha_facturacion"),
+            cufe=datos.get("cufe"),
+        )
+        db.add(doc)
+
+    sin_match.resuelto             = True
+    sin_match.contrato_id_asignado = contrato.id
+    sin_match.asignado_en          = func.now()
+
+    db.commit()
+    db.refresh(doc)
+    return {
+        "ok": True,
+        "contrato_id": contrato.id,
+        "nombre_proyecto": nombre_proyecto,
+        "documento_nombre": doc.nombre_archivo,
     }
 
 

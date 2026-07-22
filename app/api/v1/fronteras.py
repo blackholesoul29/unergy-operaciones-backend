@@ -395,7 +395,10 @@ def _iter_borders_frt(gaia: GaiaClient):
             if not frt:
                 continue
             frt_code = (frt.get("frt_code") or "").strip()
-            if not frt_code:
+            # Placeholder tipo "N/A" que a veces carga Quoia cuando el border no
+            # tiene codigo real todavia -- no es un frt_code utilizable (y la
+            # barra rompe la ruta al confirmar, ya que frt_code va en la URL).
+            if not frt_code or "/" in frt_code:
                 continue
             yield frt_code.lower(), categoria, nombre, frt
 

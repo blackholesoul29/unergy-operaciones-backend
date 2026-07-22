@@ -122,6 +122,11 @@ def _n_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> in
 
 # ── Historial de indexaciones ────────────────────────────────────────────────
 
+def ipc_incompleto(aniversarios: list[date], ipc_tasas: dict[int, float]) -> bool:
+    """True si algún aniversario cumplido cae en un año sin tasa IPC cargada."""
+    return any(f.year not in ipc_tasas for f in aniversarios)
+
+
 def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> str:
     """
     String legible del historial de IPC aplicados, con la fecha de cada aniversario.
@@ -131,15 +136,21 @@ def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]
     """
     pasos = []
     factor = 1.0
+    falta = False
     for fecha_aniv in aniversarios:
         tasa = ipc_tasas.get(fecha_aniv.year)
         if tasa is None:
+            falta = True
+            pasos.append(f"⚠ IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): sin tasa cargada")
             continue
         factor *= (1.0 + tasa)
         pasos.append(f"IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): {tasa * 100:.2f}%")
     if not pasos:
         return "Sin indexación (aún no cumple un año)"
-    return " → ".join(pasos) + f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    resumen = f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    if falta:
+        resumen += " (parcial: falta tasa IPC)"
+    return " → ".join(pasos) + resumen
 
 
 # ── Prorrateo primer mes ──────────────────────────────────────────────────────
@@ -274,6 +285,7 @@ def calcular_proyecto(
         "editado_manual":       editado_manual,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
+        "ipc_incompleto":         ipc_incompleto(aniversarios, ipc_tasas),
     }
 
 

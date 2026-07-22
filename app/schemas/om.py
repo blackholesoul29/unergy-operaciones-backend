@@ -58,6 +58,7 @@ class OMCalculoFila(BaseModel):
     valor_calculado:        Optional[int]
     editado_manual:         bool
     historial_indexaciones: str
+    ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada
     documento_disponible:   bool = False   # PDF individual disponible para este proyecto
     documento_nombre:       Optional[str] = None   # nombre del archivo renombrado
 

@@ -19,7 +19,7 @@ from app.schemas.fronteras import (
     FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps, _mgs_number, get_frt_meter_info
+from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
 
@@ -180,7 +180,6 @@ def fronteras_resumen(
 @router.get("", response_model=list[FronteraOut])
 def list_fronteras(
     proyecto_id: int | None = Query(None),
-    estado_operacional: str | None = Query(None, description="Filter by estado_operacional"),
     tipo_frontera: str | None = Query(None, description="Filter by tipo_frontera"),
     estado: str | None = Query(None, description="Filter by estado (activa, en_registro, cancelada, en_falla)"),
     skip: int = Query(0, ge=0),
@@ -195,8 +194,6 @@ def list_fronteras(
     )
     if proyecto_id:
         q = q.filter(Frontera.proyecto_id == proyecto_id)
-    if estado_operacional:
-        q = q.filter(Frontera.estado_operacional == estado_operacional)
     if tipo_frontera:
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
@@ -466,8 +463,6 @@ def confirmar_frontera_quoia(
         raise HTTPException(404, "Ese frt_code ya no aparece en Quoia")
     categoria, nombre_quoia, frt = match
 
-    maps = _get_dynamic_maps(gaia) or {}
-    node_principal, _node_respaldo = (maps.get("frt") or {}).get(frt_code.lower(), (None, None))
     info_ppal, info_resp = get_frt_meter_info(gaia, frt_code)
 
     nombre_base = body.nombre_frontera or nombre_quoia or frt_code
@@ -481,7 +476,6 @@ def confirmar_frontera_quoia(
         tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
         estado="activa",
         quoia_border_id=frt.get("id"),
-        quoia_meter_id=node_principal,
     )
     if info_ppal:
         obj.marca_med_ppal = info_ppal.get("marca")

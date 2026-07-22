@@ -21,6 +21,7 @@ from sqlalchemy.sql import func
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
+from app.models.proyectos import Proyecto
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto, OMPaginaSinMatch
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
@@ -29,6 +30,12 @@ from app.schemas.om import (
     OMSinMatchAsignar,
 )
 from app.services.om_calculator import calcular_proyecto
+from app.utils.periodo import periodo_valido, anio_valido, ANIO_MIN, ANIO_MAX
+
+
+def _check_periodo(periodo: str) -> None:
+    if not periodo_valido(periodo):
+        raise HTTPException(400, "periodo debe tener formato YYYY-MM (mes 01-12)")
 from app.services.om_pdf_splitter import dividir_pdf, extraer_pagina_datos, escribir_o_anexar_pagina, safe_filename
 
 router = APIRouter(prefix="/om", tags=["OM Mensual"])
@@ -44,7 +51,9 @@ def listar_contratos_om(
     """Lista todos los contratos de mantenimiento."""
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -78,11 +87,7 @@ def calcular_periodo(
     Calcula valores O&M para todos los contratos en el período dado.
     periodo formato: YYYY-MM (e.g. "2026-06")
     """
-    try:
-        año, mes = periodo.split("-")
-        assert 1 <= int(mes) <= 12
-    except Exception:
-        raise HTTPException(400, "periodo debe tener formato YYYY-MM")
+    _check_periodo(periodo)
 
     tasas_rows = db.query(IPCTasa).all()
     ipc_tasas = {r.año: float(r.tasa) for r in tasas_rows}
@@ -102,7 +107,9 @@ def calcular_periodo(
 
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -134,6 +141,7 @@ def calcular_periodo(
             valor_manual=valor_manual,
             valor_congelado=(int(sel.valor_facturado_congelado)
                              if sel and sel.valor_facturado_congelado is not None else None),
+            periodicidad=c.periodicidad_pago,
         )
         fila_data["documento_disponible"] = c.id in documentos_nombre
         fila_data["documento_nombre"]     = documentos_nombre.get(c.id)
@@ -154,6 +162,7 @@ def obtener_seleccion(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    _check_periodo(periodo)
     return db.query(OMSeleccion).filter(OMSeleccion.periodo == periodo).all()
 
 
@@ -165,6 +174,7 @@ def guardar_seleccion(
     _=Depends(get_current_user),
 ):
     """Guarda / actualiza la selección de contratos para el período (upsert)."""
+    _check_periodo(periodo)
     resultados = []
     for item in payload.items:
         sel = db.query(OMSeleccion).filter(
@@ -200,6 +210,7 @@ def toggle_facturado(
     _=Depends(get_current_user),
 ):
     """Marca/desmarca un contrato como facturado para el período."""
+    _check_periodo(periodo)
     sel = db.query(OMSeleccion).filter(
         OMSeleccion.contrato_id == contrato_id,
         OMSeleccion.periodo == periodo,
@@ -249,6 +260,8 @@ def upsert_ipc(
     _=Depends(get_current_user),
 ):
     """Crea o actualiza la tasa IPC de un año."""
+    if not anio_valido(año):
+        raise HTTPException(400, f"año fuera de rango permitido ({ANIO_MIN}-{ANIO_MAX})")
     tasa = db.query(IPCTasa).filter(IPCTasa.año == año).first()
     if tasa:
         tasa.tasa       = payload.tasa
@@ -351,6 +364,9 @@ async def upload_factura_mensual(
     db.flush()  # persiste en transacción sin commit aún
 
     # ── División por proyecto ────────────────────────────────────────────────
+    # El splitter empareja páginas contra TODOS los contratos de mantenimiento
+    # (no se filtra por estado del proyecto: una factura puede incluir proyectos
+    # en cualquier estado; el filtro por 'en_operacion' es solo para el panel).
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")
@@ -413,6 +429,16 @@ async def upload_factura_mensual(
                 cufe=item.get("cufe"),
             )
             db.add(doc)
+
+    # #9: eliminar documentos huérfanos — contratos que tenían documento en este
+    # período pero que ya NO aparecen en el split nuevo. Solo si el split procesó
+    # algo (si procesó 0, no se borra nada para no perder datos por una subida mala).
+    contratos_nuevos = {item["contrato_id"] for item in splitting_result["procesados"]}
+    if contratos_nuevos:
+        db.query(OMDocumentoProyecto).filter(
+            OMDocumentoProyecto.periodo == periodo,
+            OMDocumentoProyecto.contrato_id.notin_(contratos_nuevos),
+        ).delete(synchronize_session=False)
 
     # Una resubida invalida la numeración de página de los sin_match anteriores
     # de este período — se reemplazan por los que salen del split actual.

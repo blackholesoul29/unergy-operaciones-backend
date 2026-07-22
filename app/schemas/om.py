@@ -1,6 +1,6 @@
 """Schemas Pydantic para el panel O&M."""
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date, datetime
 
@@ -19,7 +19,7 @@ class IPCTasaOut(BaseModel):
 
 
 class IPCTasaUpsert(BaseModel):
-    tasa:       float
+    tasa:       float = Field(ge=-1.0, le=1.0)   # fracción: -100%..100% (tope de sanidad)
     confirmado: bool = False
     fuente:     Optional[str] = None
 
@@ -58,7 +58,10 @@ class OMCalculoFila(BaseModel):
     valor_calculado:        Optional[int]
     editado_manual:         bool
     valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
+    aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
+    valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str
+    ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada
     documento_disponible:   bool = False   # PDF individual disponible para este proyecto
     documento_nombre:       Optional[str] = None   # nombre del archivo renombrado
 

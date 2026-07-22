@@ -71,6 +71,18 @@ def _ultimo_dia_mes(año: int, mes: int) -> int:
     return calendar.monthrange(año, mes)[1]
 
 
+_MESES_PERIODO = {"mensual": 1, "bimestral": 2, "trimestral": 3, "semestral": 6, "anual": 12}
+
+
+def corresponde_cobro_este_mes(periodicidad, fecha_base: date, periodo: str) -> bool:
+    """True si al mes `periodo` (YYYY-MM) le toca cobro según la periodicidad,
+    contando ciclos desde el mes de `fecha_base`. Meses previos al inicio → False."""
+    paso = _MESES_PERIODO.get((periodicidad or "mensual").lower(), 1)
+    año_p, mes_p = _parse_periodo(periodo)
+    meses = (año_p - fecha_base.year) * 12 + (mes_p - fecha_base.month)
+    return meses >= 0 and meses % paso == 0
+
+
 # ── Aniversarios del contrato ─────────────────────────────────────────────────
 
 def _fecha_aniversario(fecha_base: date, k: int) -> date:
@@ -122,6 +134,11 @@ def _n_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> in
 
 # ── Historial de indexaciones ────────────────────────────────────────────────
 
+def ipc_incompleto(aniversarios: list[date], ipc_tasas: dict[int, float]) -> bool:
+    """True si algún aniversario cumplido cae en un año sin tasa IPC cargada."""
+    return any(f.year not in ipc_tasas for f in aniversarios)
+
+
 def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> str:
     """
     String legible del historial de IPC aplicados, con la fecha de cada aniversario.
@@ -131,15 +148,21 @@ def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]
     """
     pasos = []
     factor = 1.0
+    falta = False
     for fecha_aniv in aniversarios:
         tasa = ipc_tasas.get(fecha_aniv.year)
         if tasa is None:
+            falta = True
+            pasos.append(f"⚠ IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): sin tasa cargada")
             continue
         factor *= (1.0 + tasa)
         pasos.append(f"IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): {tasa * 100:.2f}%")
     if not pasos:
         return "Sin indexación (aún no cumple un año)"
-    return " → ".join(pasos) + f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    resumen = f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    if falta:
+        resumen += " (parcial: falta tasa IPC)"
+    return " → ".join(pasos) + resumen
 
 
 # ── Prorrateo primer mes ──────────────────────────────────────────────────────
@@ -197,6 +220,7 @@ def calcular_proyecto(
     facturado: bool = False,
     valor_manual: float | None = None,
     valor_congelado: int | None = None,
+    periodicidad: str | None = None,
 ) -> dict:
     """
     Calcula todos los campos de la fila O&M para un contrato en un período.
@@ -241,6 +265,8 @@ def calcular_proyecto(
     else:
         fecha_base = fecha_firma_contrato
 
+    aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
+
     aniversarios = _aniversarios_cumplidos(fecha_base, año_periodo, mes_periodo)
     factor = factor_acumulado(aniversarios, ipc_tasas)
     n_idx = _n_indexaciones(aniversarios, ipc_tasas)
@@ -257,6 +283,9 @@ def calcular_proyecto(
     valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
     if valor_congelado is not None:
         valor_a_facturar = int(valor_congelado)   # #4: mes ya facturado → valor congelado
+    # #6: el override quedó desactualizado si ya no coincide con el valor recalculado
+    # (p.ej. tras corregir la tasa IPC del año). El override se sigue respetando.
+    valor_manual_desactualizado = editado_manual and _redondear(float(valor_manual)) != valor_calculado
 
     return {
         "contrato_id":          contrato_id,
@@ -275,9 +304,12 @@ def calcular_proyecto(
         "prorrateo_factor":     prorrateo_factor,
         "valor_calculado":      valor_calculado,
         "editado_manual":       editado_manual,
+        "valor_manual_desactualizado": valor_manual_desactualizado,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
         "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
+        "aplica_este_mes":        aplica_este_mes,
+        "ipc_incompleto":         ipc_incompleto(aniversarios, ipc_tasas),
     }
 
 

@@ -196,6 +196,7 @@ def calcular_proyecto(
     incluido: bool = True,
     facturado: bool = False,
     valor_manual: float | None = None,
+    valor_congelado: int | None = None,
 ) -> dict:
     """
     Calcula todos los campos de la fila O&M para un contrato en un período.
@@ -254,6 +255,8 @@ def calcular_proyecto(
     valor_calculado = _redondear(valor_mes_completo * prorrateo_factor)
     editado_manual = valor_manual is not None
     valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
+    if valor_congelado is not None:
+        valor_a_facturar = int(valor_congelado)   # #4: mes ya facturado → valor congelado
 
     return {
         "contrato_id":          contrato_id,
@@ -274,6 +277,7 @@ def calcular_proyecto(
         "editado_manual":       editado_manual,
         "valor_a_facturar":     valor_a_facturar,
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
+        "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
     }
 
 

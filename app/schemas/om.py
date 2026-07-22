@@ -57,6 +57,7 @@ class OMCalculoFila(BaseModel):
     valor_a_facturar:       Optional[int]
     valor_calculado:        Optional[int]
     editado_manual:         bool
+    valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
     aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
     valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str

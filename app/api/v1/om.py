@@ -21,6 +21,7 @@ from sqlalchemy.sql import func
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
+from app.models.proyectos import Proyecto
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto, OMPaginaSinMatch
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
@@ -50,7 +51,9 @@ def listar_contratos_om(
     """Lista todos los contratos de mantenimiento."""
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -104,7 +107,9 @@ def calcular_periodo(
 
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -338,6 +343,9 @@ async def upload_factura_mensual(
     db.flush()  # persiste en transacción sin commit aún
 
     # ── División por proyecto ────────────────────────────────────────────────
+    # El splitter empareja páginas contra TODOS los contratos de mantenimiento
+    # (no se filtra por estado del proyecto: una factura puede incluir proyectos
+    # en cualquier estado; el filtro por 'en_operacion' es solo para el panel).
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")

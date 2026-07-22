@@ -45,9 +45,10 @@ def db():
 
 
 def test_enum_terminal_renombrado():
-    # 'fin' ya no existe; el estado terminal es servicio_operativo.
+    # 'fin' y 'servicio_operativo' ya no existen; el estado terminal es 'operando'.
     assert not hasattr(EstadoOportunidadEnum, "fin")
-    assert EstadoOportunidadEnum.servicio_operativo.value == "servicio_operativo"
+    assert not hasattr(EstadoOportunidadEnum, "servicio_operativo")
+    assert EstadoOportunidadEnum.operando.value == "operando"
 
 
 def test_crear_oferta_ligada(db):

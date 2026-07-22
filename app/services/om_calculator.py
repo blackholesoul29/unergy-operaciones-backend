@@ -2,15 +2,16 @@
 Lógica de cálculo O&M — pura, sin dependencias de DB ni FastAPI.
 Todas las funciones son deterministas dado el mismo input.
 
-Indexación IPC (regla vigente):
-- La tabla IPC se indexa por AÑO DE APLICACIÓN directo: ipc_tasas = {año: tasa}.
-  La tasa del año N se aplica a la facturación del año N.
+Indexación IPC (regla vigente — por ANIVERSARIO REAL del contrato):
 - fecha_base = max(fecha_firma_contrato, fecha_inicio_om) si hay inicio de operación;
   si no, fecha_firma_contrato.
-- añoBase = fecha_base.year, salvo la excepción de primer aniversario.
-- factor = ∏ (1 + tasa) para cada año IPC tal que añoBase < año <= añoFacturación.
-- Excepción primer aniversario: si fecha_firma_contrato > 1-ene-añoFacturación
-  el contrato aún no cumple un año → añoBase = añoFacturación → factor = 1.0.
+- Cada aniversario de fecha_base (mismo mes/día, año fecha_base.year + k, con clamp a
+  28-feb si fecha_base cae en 29-feb y el año del aniversario no es bisiesto) activa la
+  tasa IPC del AÑO CALENDARIO en que cae ese aniversario — no la del 1-enero.
+- Un aniversario solo cuenta si ya ocurrió al último día del período que se factura.
+- factor = ∏ (1 + tasa[año_aniversario]) para cada aniversario cumplido con tasa cargada.
+- Si el contrato aún no cumple su primer aniversario en el período → sin aniversarios
+  cumplidos → factor = 1.0 (sale naturalmente del cálculo, sin caso especial).
 """
 from __future__ import annotations
 import calendar
@@ -70,52 +71,86 @@ def _ultimo_dia_mes(año: int, mes: int) -> int:
     return calendar.monthrange(año, mes)[1]
 
 
+# ── Aniversarios del contrato ─────────────────────────────────────────────────
+
+def _fecha_aniversario(fecha_base: date, k: int) -> date:
+    """k-ésimo aniversario de fecha_base (mismo mes/día; clamp 29-feb → 28-feb)."""
+    año = fecha_base.year + k
+    mes = fecha_base.month
+    dia = min(fecha_base.day, _ultimo_dia_mes(año, mes))
+    return date(año, mes, dia)
+
+
+def _aniversarios_cumplidos(
+    fecha_base: date,
+    año_periodo: int,
+    mes_periodo: int,
+) -> list[date]:
+    """Fechas de aniversario (fecha_base + k años) ya alcanzadas al último día del período."""
+    ultimo_dia_periodo = date(año_periodo, mes_periodo, _ultimo_dia_mes(año_periodo, mes_periodo))
+    aniversarios: list[date] = []
+    k = 1
+    while True:
+        fecha_aniv = _fecha_aniversario(fecha_base, k)
+        if fecha_aniv > ultimo_dia_periodo:
+            return aniversarios
+        aniversarios.append(fecha_aniv)
+        k += 1
+
+
 # ── Factor acumulado IPC ──────────────────────────────────────────────────────
 
-def factor_acumulado(
-    año_base: int,
-    año_periodo: int,
-    ipc_tasas: dict[int, float],
-) -> float:
+def factor_acumulado(aniversarios: list[date], ipc_tasas: dict[int, float]) -> float:
     """
-    Producto de (1 + tasa) para cada año IPC tal que año_base < año <= año_periodo.
+    Producto de (1 + tasa) para cada aniversario cumplido cuyo año tenga tasa cargada.
 
-    Las tasas se indexan por AÑO DE APLICACIÓN directo (no por año DANE - 1).
-    Ejemplo — año_base 2023, periodo 2026, tasas {2024: 0.0928, 2025: 0.052, 2026: 0.051}:
-      años aplicables: 2024, 2025, 2026
-      factor = 1.0928 × 1.052 × 1.051 = 1.208257
-    Si año_base >= año_periodo → no hay años aplicables → factor = 1.0.
+    Las tasas se indexan por AÑO DE APLICACIÓN directo (no por año DANE - 1): la tasa
+    del año en que cae el aniversario es la que se aplica desde ese aniversario.
+    Si `aniversarios` está vacío (contrato aún no cumple un año) → factor = 1.0.
     """
     factor = 1.0
-    for año, tasa in ipc_tasas.items():
-        if año_base < año <= año_periodo:
+    for fecha_aniv in aniversarios:
+        tasa = ipc_tasas.get(fecha_aniv.year)
+        if tasa is not None:
             factor *= (1.0 + tasa)
     return factor
 
 
-def _n_indexaciones(año_base: int, año_periodo: int, ipc_tasas: dict[int, float]) -> int:
-    return sum(1 for año in ipc_tasas if año_base < año <= año_periodo)
+def _n_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> int:
+    return sum(1 for f in aniversarios if f.year in ipc_tasas)
 
 
 # ── Historial de indexaciones ────────────────────────────────────────────────
 
-def historial_indexaciones(
-    año_base: int,
-    año_periodo: int,
-    ipc_tasas: dict[int, float],
-) -> str:
-    """
-    String legible del historial de IPC aplicados.
+def ipc_incompleto(aniversarios: list[date], ipc_tasas: dict[int, float]) -> bool:
+    """True si algún aniversario cumplido cae en un año sin tasa IPC cargada."""
+    return any(f.year not in ipc_tasas for f in aniversarios)
 
-    Ejemplo: "IPC 2025: 5.20% → IPC 2026: 5.10% | Acum: 10.57%"
+
+def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]) -> str:
+    """
+    String legible del historial de IPC aplicados, con la fecha de cada aniversario.
+
+    Ejemplo: "IPC 2025 (15-nov): 5.20% → IPC 2026 (15-nov): 5.10% | Acum: 10.57%"
     Si no hay indexación: "Sin indexación (aún no cumple un año)"
     """
-    años = sorted(a for a in ipc_tasas if año_base < a <= año_periodo)
-    if not años:
+    pasos = []
+    factor = 1.0
+    falta = False
+    for fecha_aniv in aniversarios:
+        tasa = ipc_tasas.get(fecha_aniv.year)
+        if tasa is None:
+            falta = True
+            pasos.append(f"⚠ IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): sin tasa cargada")
+            continue
+        factor *= (1.0 + tasa)
+        pasos.append(f"IPC {fecha_aniv.year} ({fecha_aniv.strftime('%d-%b')}): {tasa * 100:.2f}%")
+    if not pasos:
         return "Sin indexación (aún no cumple un año)"
-    pasos = [f"IPC {a}: {ipc_tasas[a] * 100:.2f}%" for a in años]
-    factor = factor_acumulado(año_base, año_periodo, ipc_tasas)
-    return " → ".join(pasos) + f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    resumen = f" | Acum: {(factor - 1.0) * 100:.2f}%"
+    if falta:
+        resumen += " (parcial: falta tasa IPC)"
+    return " → ".join(pasos) + resumen
 
 
 # ── Prorrateo primer mes ──────────────────────────────────────────────────────
@@ -216,14 +251,9 @@ def calcular_proyecto(
     else:
         fecha_base = fecha_firma_contrato
 
-    # Excepción primer aniversario: si la firma es posterior al 1-ene del año de
-    # facturación, el contrato aún no cumple un año → no se indexa este año.
-    primer_dia_año = date(año_periodo, 1, 1)
-    no_ha_cumplido_un_año = fecha_firma_contrato > primer_dia_año
-    año_base = año_periodo if no_ha_cumplido_un_año else fecha_base.year
-
-    factor = factor_acumulado(año_base, año_periodo, ipc_tasas)
-    n_idx = _n_indexaciones(año_base, año_periodo, ipc_tasas)
+    aniversarios = _aniversarios_cumplidos(fecha_base, año_periodo, mes_periodo)
+    factor = factor_acumulado(aniversarios, ipc_tasas)
+    n_idx = _n_indexaciones(aniversarios, ipc_tasas)
 
     valor_anual_indexado = valor_base_anual * factor
     valor_mes_completo = valor_anual_indexado / 12
@@ -235,6 +265,9 @@ def calcular_proyecto(
     valor_calculado = _redondear(valor_mes_completo * prorrateo_factor)
     editado_manual = valor_manual is not None
     valor_a_facturar = _redondear(float(valor_manual)) if editado_manual else valor_calculado
+    # #6: el override quedó desactualizado si ya no coincide con el valor recalculado
+    # (p.ej. tras corregir la tasa IPC del año). El override se sigue respetando.
+    valor_manual_desactualizado = editado_manual and _redondear(float(valor_manual)) != valor_calculado
 
     return {
         "contrato_id":          contrato_id,
@@ -253,8 +286,10 @@ def calcular_proyecto(
         "prorrateo_factor":     prorrateo_factor,
         "valor_calculado":      valor_calculado,
         "editado_manual":       editado_manual,
+        "valor_manual_desactualizado": valor_manual_desactualizado,
         "valor_a_facturar":     valor_a_facturar,
-        "historial_indexaciones": historial_indexaciones(año_base, año_periodo, ipc_tasas),
+        "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
+        "ipc_incompleto":         ipc_incompleto(aniversarios, ipc_tasas),
     }
 
 

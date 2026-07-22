@@ -1085,6 +1085,15 @@ _PENDING_DDLS = [
     # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
     "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
     "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    # migration — drop fronteras.estado_operacional: campo manual sin ninguna
+    # sincronizacion automatica, nunca reflejaba el estado real y quedaba
+    # desactualizado; el estado real de operacion vive en Proyecto.estado (2026-07-22)
+    "ALTER TABLE fronteras DROP COLUMN IF EXISTS estado_operacional",
+    "DROP TYPE IF EXISTS estado_operacional_enum",
+    # migration — drop fronteras.quoia_meter_id: nunca lo leyo ningun servicio
+    # del backend, solo se mostraba/editaba en el frontend; el campo que si
+    # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
+    "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
     # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",

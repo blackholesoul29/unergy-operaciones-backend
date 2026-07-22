@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
-from app.services.tsf_sync import _core
+from app.utils.nombre_matching import mejor_candidato
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
@@ -98,28 +98,32 @@ def list_proyectos(
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
 
 
-def _buscar_duplicado_por_nombre(db: Session, nombre_comercial: str | None) -> Proyecto | None:
-    """Busca un proyecto existente cuyo "nombre de lugar" (sin tildes/mayúsculas,
-    sin prefijos MGS/Minigranja/GD ni números) esté contenido en el nuevo nombre
-    o viceversa -- p. ej. "monterrubio" SÍ coincide con
-    "Minigranja 0029 - Monterrubio".
+def _buscar_duplicado_por_nombre(
+    db: Session, nombre_comercial: str | None, tipo_proyecto: str | None = None,
+) -> Proyecto | None:
+    """Busca un proyecto existente con nombre parecido, via solapamiento de
+    tokens + similitud de texto (mismo algoritmo de app/utils/nombre_matching.py
+    que se usa para reconciliar Quoia/Solenium/GESCON) -- detecta parecidos
+    aunque no sea un caso de "un nombre contenido en el otro" (p. ej. "AGGE
+    Extractora Monterrey" vs "AGGE Frontera Monterrey").
+
+    Si se pasa tipo_proyecto, solo compara contra proyectos del mismo tipo --
+    reduce falsos positivos entre proyectos de naturaleza distinta que
+    comparten palabras en el nombre.
 
     Esto es deliberadamente permisivo (puede marcar como "parecidos" dos fases
     reales distintas de un mismo desarrollo, p. ej. "Chinú Sur" y "Chinú Sur 2"):
     es aceptable porque el aviso no bloquea -- la persona puede confirmar
-    "crear de todos modos" con un clic si de verdad es un proyecto distinto. Un
-    match exacto (sin este margen) dejaba pasar duplicados obvios sin avisar.
+    "crear de todos modos" con un clic si de verdad es un proyecto distinto.
     """
-    objetivo = _core(nombre_comercial)
-    if len(objetivo) < 4:
+    if not nombre_comercial:
         return None
-    for c in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all():
-        n = _core(c.nombre_comercial)
-        if len(n) < 4:
-            continue
-        if objetivo in n or n in objetivo:
-            return c
-    return None
+    q = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
+    if tipo_proyecto:
+        q = q.filter(Proyecto.tipo_proyecto == tipo_proyecto)
+    candidatos = [(c, [c.nombre_comercial]) for c in q.all()]
+    item, _score = mejor_candidato(nombre_comercial, candidatos)
+    return item
 
 
 @router.post("", response_model=ProyectoOut, status_code=201)
@@ -133,7 +137,7 @@ def create_proyecto(
     _verificar_unicos(db, payload)
 
     if not forzar:
-        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"))
+        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"), payload.get("tipo_proyecto"))
         if duplicado:
             # detail estructurado (no un string plano como los demás 409 de este
             # archivo): el frontend lo usa para ofrecer "crear de todos modos"

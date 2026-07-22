@@ -22,6 +22,7 @@ from app.services.mgs.quoia_client import QuoiaClient
 from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
+from app.services.tsf_sync import _core
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
@@ -203,9 +204,27 @@ def list_fronteras(
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
+def _buscar_duplicado_frontera(db: Session, nombre_frontera: str | None) -> Frontera | None:
+    """Busca una frontera existente cuyo "nombre de lugar" (via _core, mismo
+    criterio que _buscar_duplicado_por_nombre en proyectos) esté contenido en
+    el nuevo nombre o viceversa. Deliberadamente permisivo -- no bloquea, solo
+    avisa (se puede forzar la creación con forzar=true)."""
+    objetivo = _core(nombre_frontera)
+    if len(objetivo) < 4:
+        return None
+    for f in db.query(Frontera).filter(Frontera.deleted_at.is_(None)).all():
+        n = _core(f.nombre_frontera)
+        if len(n) < 4:
+            continue
+        if objetivo in n or n in objetivo:
+            return f
+    return None
+
+
 @router.post("", response_model=FronteraOut, status_code=201)
 def create_frontera(
     body: FronteraCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista una frontera con nombre muy parecido"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -218,6 +237,23 @@ def create_frontera(
             _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             db.refresh(existing)
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
+
+    if not forzar:
+        duplicado = _buscar_duplicado_frontera(db, body.nombre_frontera)
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe una frontera con un nombre muy parecido: "
+                        f"'{duplicado.nombre_frontera}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_frontera,
+                },
+            )
+
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()

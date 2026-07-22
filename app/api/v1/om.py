@@ -394,6 +394,16 @@ async def upload_factura_mensual(
             )
             db.add(doc)
 
+    # #9: eliminar documentos huérfanos — contratos que tenían documento en este
+    # período pero que ya NO aparecen en el split nuevo. Solo si el split procesó
+    # algo (si procesó 0, no se borra nada para no perder datos por una subida mala).
+    contratos_nuevos = {item["contrato_id"] for item in splitting_result["procesados"]}
+    if contratos_nuevos:
+        db.query(OMDocumentoProyecto).filter(
+            OMDocumentoProyecto.periodo == periodo,
+            OMDocumentoProyecto.contrato_id.notin_(contratos_nuevos),
+        ).delete(synchronize_session=False)
+
     # Una resubida invalida la numeración de página de los sin_match anteriores
     # de este período — se reemplazan por los que salen del split actual.
     db.query(OMPaginaSinMatch).filter(OMPaginaSinMatch.periodo == periodo).delete()

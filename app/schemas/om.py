@@ -57,6 +57,7 @@ class OMCalculoFila(BaseModel):
     valor_a_facturar:       Optional[int]
     valor_calculado:        Optional[int]
     editado_manual:         bool
+    aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
     historial_indexaciones: str
     documento_disponible:   bool = False   # PDF individual disponible para este proyecto
     documento_nombre:       Optional[str] = None   # nombre del archivo renombrado

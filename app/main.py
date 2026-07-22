@@ -1085,6 +1085,9 @@ _PENDING_DDLS = [
     # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
     "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
     "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
 ]
 
 

@@ -22,7 +22,7 @@ from app.services.mgs.quoia_client import QuoiaClient
 from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
-from app.services.tsf_sync import _core
+from app.utils.nombre_matching import mejor_candidato
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
@@ -204,21 +204,29 @@ def list_fronteras(
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-def _buscar_duplicado_frontera(db: Session, nombre_frontera: str | None) -> Frontera | None:
-    """Busca una frontera existente cuyo "nombre de lugar" (via _core, mismo
-    criterio que _buscar_duplicado_por_nombre en proyectos) esté contenido en
-    el nuevo nombre o viceversa. Deliberadamente permisivo -- no bloquea, solo
-    avisa (se puede forzar la creación con forzar=true)."""
-    objetivo = _core(nombre_frontera)
-    if len(objetivo) < 4:
+def _buscar_duplicado_frontera(
+    db: Session, nombre_frontera: str | None, tipo_frontera: str | None = None,
+) -> Frontera | None:
+    """Busca una frontera existente con nombre parecido, via solapamiento de
+    tokens + similitud de texto (mismo algoritmo que _buscar_duplicado_por_nombre
+    en proyectos, ver app/utils/nombre_matching.py) -- detecta parecidos aunque
+    no sea un caso de "un nombre contenido en el otro" (p. ej. "AGGE Extractora
+    Monterrey" vs "AGGE Frontera Monterrey").
+
+    Si se pasa tipo_frontera, solo compara contra fronteras del mismo tipo --
+    reduce falsos positivos entre fronteras de naturaleza distinta (generación
+    vs consumo) que comparten palabras en el nombre.
+
+    Deliberadamente permisivo -- no bloquea, solo avisa (se puede forzar la
+    creación con forzar=true)."""
+    if not nombre_frontera:
         return None
-    for f in db.query(Frontera).filter(Frontera.deleted_at.is_(None)).all():
-        n = _core(f.nombre_frontera)
-        if len(n) < 4:
-            continue
-        if objetivo in n or n in objetivo:
-            return f
-    return None
+    q = db.query(Frontera).filter(Frontera.deleted_at.is_(None))
+    if tipo_frontera:
+        q = q.filter(Frontera.tipo_frontera == tipo_frontera)
+    candidatos = [(f, [f.nombre_frontera]) for f in q.all()]
+    item, _score = mejor_candidato(nombre_frontera, candidatos)
+    return item
 
 
 @router.post("", response_model=FronteraOut, status_code=201)
@@ -239,7 +247,7 @@ def create_frontera(
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
 
     if not forzar:
-        duplicado = _buscar_duplicado_frontera(db, body.nombre_frontera)
+        duplicado = _buscar_duplicado_frontera(db, body.nombre_frontera, body.tipo_frontera)
         if duplicado:
             raise HTTPException(
                 409,

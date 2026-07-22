@@ -183,6 +183,7 @@ def guardar_seleccion(
         if sel:
             sel.incluido = item.incluido
             sel.valor_manual = item.valor_manual
+            sel.motivo_exclusion = item.motivo_exclusion
         else:
             sel = OMSeleccion(
                 contrato_id=item.contrato_id,
@@ -190,6 +191,7 @@ def guardar_seleccion(
                 incluido=item.incluido,
                 facturado=False,
                 valor_manual=item.valor_manual,
+                motivo_exclusion=item.motivo_exclusion,
             )
             db.add(sel)
         resultados.append(sel)

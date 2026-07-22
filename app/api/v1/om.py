@@ -139,6 +139,7 @@ def calcular_periodo(
             incluido=incluido,
             facturado=facturado,
             valor_manual=valor_manual,
+            periodicidad=c.periodicidad_pago,
         )
         fila_data["documento_disponible"] = c.id in documentos_nombre
         fila_data["documento_nombre"]     = documentos_nombre.get(c.id)

@@ -29,6 +29,12 @@ from app.schemas.om import (
     OMSinMatchAsignar,
 )
 from app.services.om_calculator import calcular_proyecto
+from app.utils.periodo import periodo_valido, anio_valido, ANIO_MIN, ANIO_MAX
+
+
+def _check_periodo(periodo: str) -> None:
+    if not periodo_valido(periodo):
+        raise HTTPException(400, "periodo debe tener formato YYYY-MM (mes 01-12)")
 from app.services.om_pdf_splitter import dividir_pdf, extraer_pagina_datos, escribir_o_anexar_pagina, safe_filename
 
 router = APIRouter(prefix="/om", tags=["OM Mensual"])
@@ -78,11 +84,7 @@ def calcular_periodo(
     Calcula valores O&M para todos los contratos en el período dado.
     periodo formato: YYYY-MM (e.g. "2026-06")
     """
-    try:
-        año, mes = periodo.split("-")
-        assert 1 <= int(mes) <= 12
-    except Exception:
-        raise HTTPException(400, "periodo debe tener formato YYYY-MM")
+    _check_periodo(periodo)
 
     tasas_rows = db.query(IPCTasa).all()
     ipc_tasas = {r.año: float(r.tasa) for r in tasas_rows}
@@ -152,6 +154,7 @@ def obtener_seleccion(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    _check_periodo(periodo)
     return db.query(OMSeleccion).filter(OMSeleccion.periodo == periodo).all()
 
 
@@ -163,6 +166,7 @@ def guardar_seleccion(
     _=Depends(get_current_user),
 ):
     """Guarda / actualiza la selección de contratos para el período (upsert)."""
+    _check_periodo(periodo)
     resultados = []
     for item in payload.items:
         sel = db.query(OMSeleccion).filter(
@@ -198,6 +202,7 @@ def toggle_facturado(
     _=Depends(get_current_user),
 ):
     """Marca/desmarca un contrato como facturado para el período."""
+    _check_periodo(periodo)
     sel = db.query(OMSeleccion).filter(
         OMSeleccion.contrato_id == contrato_id,
         OMSeleccion.periodo == periodo,
@@ -229,6 +234,8 @@ def upsert_ipc(
     _=Depends(get_current_user),
 ):
     """Crea o actualiza la tasa IPC de un año."""
+    if not anio_valido(año):
+        raise HTTPException(400, f"año fuera de rango permitido ({ANIO_MIN}-{ANIO_MAX})")
     tasa = db.query(IPCTasa).filter(IPCTasa.año == año).first()
     if tasa:
         tasa.tasa       = payload.tasa

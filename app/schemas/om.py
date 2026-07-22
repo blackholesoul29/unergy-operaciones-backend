@@ -1,6 +1,6 @@
 """Schemas Pydantic para el panel O&M."""
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date, datetime
 
@@ -19,7 +19,7 @@ class IPCTasaOut(BaseModel):
 
 
 class IPCTasaUpsert(BaseModel):
-    tasa:       float
+    tasa:       float = Field(ge=-1.0, le=1.0)   # fracción: -100%..100% (tope de sanidad)
     confirmado: bool = False
     fuente:     Optional[str] = None
 

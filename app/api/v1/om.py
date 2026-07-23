@@ -153,7 +153,9 @@ def calcular_periodo(
             contrato_id=c.id,
             nombre_proyecto=p.nombre_comercial or c.prestador_nombre or f"Contrato #{c.id}",
             fecha_firma_contrato=c.fecha_firma_contrato,
-            fecha_inicio_om=c.fecha_inicio_om,
+            # Fecha base de indexación = inicio O&M: la columna dedicada o, si falta,
+            # la "Fecha de inicio O&M" que edita el diálogo (c.fecha_inicio).
+            fecha_inicio_om=c.fecha_inicio_om or c.fecha_inicio,
             valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
             periodo=periodo,
             ipc_tasas=ipc_tasas,
@@ -259,7 +261,8 @@ def toggle_facturado(
                       else c.prestador_nombre or f"Contrato #{c.id}")
             fila = calcular_proyecto(
                 contrato_id=c.id, nombre_proyecto=nombre,
-                fecha_firma_contrato=c.fecha_firma_contrato, fecha_inicio_om=c.fecha_inicio_om,
+                fecha_firma_contrato=c.fecha_firma_contrato,
+                fecha_inicio_om=c.fecha_inicio_om or c.fecha_inicio,
                 valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
                 periodo=periodo, ipc_tasas=ipc,
                 valor_manual=float(sel.valor_manual) if sel.valor_manual is not None else None,

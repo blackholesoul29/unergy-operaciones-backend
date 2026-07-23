@@ -75,6 +75,25 @@ def test_panel_incluye_sin_contrato_y_marca_estado(db):
     assert charlie.habilitado is False   # sin contrato → no facturable
 
 
+def test_sin_firma_pero_con_fecha_inicio_del_dialogo_habilita(db):
+    """La 'Fecha de inicio O&M' del diálogo vive en fecha_inicio; sin firma pero
+    con esa fecha, la fila queda HABILITADA (om.py usa fecha_inicio_om or fecha_inicio)."""
+    p = Proyecto(nombre_comercial="SinFirma", estado="en_operacion", tipo_proyecto="minigranja")
+    db.add(p); db.flush()
+    c = ContratoServicio(
+        servicio_aplica="mantenimiento", proyecto_id=p.id, estado="vigente",
+        tarifa_base=12_000_000, fecha_firma_contrato=None,
+        fecha_inicio_om=None, fecha_inicio=date(2020, 1, 1),
+        periodicidad_pago="mensual",
+    )
+    db.add(c); db.flush()
+
+    resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)
+    fila = next(f for f in resp.filas if f.nombre_proyecto == "SinFirma")
+    assert fila.habilitado is True
+    assert fila.historial_indexaciones != "Sin fecha de suscripción"
+
+
 def test_fila_incluye_tipo_proyecto(db):
     """Cada fila lleva el tipo_proyecto para agrupar el panel (como en Proyectos)."""
     mg = Proyecto(nombre_comercial="Mini", estado="en_operacion", tipo_proyecto="minigranja")

@@ -2438,8 +2438,9 @@ def _run_om_seed() -> None:
 
     NO crea contratos ni huérfanos: actualiza los contratos de mantenimiento que
     YA existen, emparejándolos por nombre. Política no destructiva sobre datos del
-    equipo: fecha_firma_contrato y tarifa_base solo se rellenan si están NULL;
-    fecha_inicio_om (campo solo-seed) se fija al valor de la tabla.
+    equipo: fecha_firma_contrato, tarifa_base y fecha_inicio_om solo se rellenan
+    si están NULL. Además hace un backfill idempotente fecha_inicio → fecha_inicio_om
+    (unificación de la "Fecha de inicio O&M" en una sola columna).
     """
     from datetime import date
     from sqlalchemy.orm import sessionmaker
@@ -2491,9 +2492,20 @@ def _run_om_seed() -> None:
             if cambio:
                 actualizados += 1
 
+        # ── Unificación de columnas O&M (idempotente, no destructiva) ─────────
+        # La "Fecha de inicio O&M" pasa a vivir SOLO en fecha_inicio_om. Antes el
+        # diálogo la guardaba en fecha_inicio; copiamos ese valor donde aún no haya
+        # fecha_inicio_om. Solo rellena NULLs → nunca cambia una fecha ya existente
+        # (por tanto no altera ninguna indexación).
+        backfill = 0
+        for c in contratos:
+            if c.fecha_inicio_om is None and c.fecha_inicio is not None:
+                c.fecha_inicio_om = c.fecha_inicio
+                backfill += 1
+
         db.commit()
         faltantes = [it["nombre"] for it, _ in seed_keys if it["nombre"] not in usados]
-        print(f"[om_seed] {actualizados} contratos actualizados; sin match: {faltantes}")
+        print(f"[om_seed] {actualizados} contratos actualizados; backfill inicio_om={backfill}; sin match: {faltantes}")
 
     except Exception as e:
         db.rollback()

@@ -60,6 +60,7 @@ class ContratoServicioCreate(BaseModel):
     prestador_nit: Optional[str] = None
     numero_contrato: Optional[str] = None
     fecha_inicio: Optional[date] = None
+    fecha_inicio_om: Optional[date] = None   # Fecha de inicio O&M (base de indexación)
     fecha_fin: Optional[date] = None
     tarifa_base: Optional[float] = None
     tarifa_mensual: Optional[float] = None
@@ -106,6 +107,7 @@ class ContratoServicioUpdate(BaseModel):
     prestador_nit: Optional[str] = None
     numero_contrato: Optional[str] = None
     fecha_inicio: Optional[date] = None
+    fecha_inicio_om: Optional[date] = None   # Fecha de inicio O&M (base de indexación)
     fecha_fin: Optional[date] = None
     tarifa_base: Optional[float] = None
     periodicidad_pago: Optional[str] = None
@@ -154,6 +156,7 @@ class ContratoServicioOut(BaseModel):
     prestador_nit: Optional[str] = None
     numero_contrato: Optional[str] = None
     fecha_inicio: Optional[date] = None
+    fecha_inicio_om: Optional[date] = None   # Fecha de inicio O&M (base de indexación)
     fecha_fin: Optional[date] = None
     tarifa_base: Optional[float] = None
     tarifa_mensual: Optional[float] = None

@@ -166,6 +166,49 @@ def historial_indexaciones(aniversarios: list[date], ipc_tasas: dict[int, float]
     return " → ".join(pasos) + resumen
 
 
+# ── Serie de indexación (para la vista de Proyectos>Servicios>Operación) ──────
+
+def serie_indexacion(
+    fecha_base: date | None,
+    valor_base_anual: float | None,
+    ipc_tasas: dict[int, float],
+    año_hasta: int,
+    mes_hasta: int,
+) -> list[dict]:
+    """Serie anual de indexación por aniversario cumplido hasta (año_hasta, mes_hasta).
+
+    Misma regla que el panel de Costos: solo cuenta aniversarios YA cumplidos y
+    aplica la tasa IPC del año de cada aniversario, acumulando. Devuelve una fila
+    por año (año base + cada aniversario cumplido):
+        {anio, ipc_aplicado (%|None), valor_anual (int), valor_mensual (int)}
+    Lista vacía si falta la fecha base o el valor base.
+    """
+    if fecha_base is None or not valor_base_anual or valor_base_anual <= 0:
+        return []
+
+    filas = [{
+        "anio": fecha_base.year,
+        "ipc_aplicado": None,
+        "valor_anual": _redondear(valor_base_anual),
+        "valor_mensual": _redondear(valor_base_anual / 12),
+    }]
+    factor = 1.0
+    for fecha_aniv in _aniversarios_cumplidos(fecha_base, año_hasta, mes_hasta):
+        tasa = ipc_tasas.get(fecha_aniv.year)
+        ipc_pct = None
+        if tasa is not None:
+            factor *= (1.0 + tasa)
+            ipc_pct = round(tasa * 100, 2)
+        valor_anual = valor_base_anual * factor
+        filas.append({
+            "anio": fecha_aniv.year,
+            "ipc_aplicado": ipc_pct,
+            "valor_anual": _redondear(valor_anual),
+            "valor_mensual": _redondear(valor_anual / 12),
+        })
+    return filas
+
+
 # ── Prorrateo primer mes ──────────────────────────────────────────────────────
 
 def calcular_prorrateo(

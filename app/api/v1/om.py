@@ -28,8 +28,10 @@ from app.schemas.om import (
     OMContratoOut, OMCalculoFila, OMCalculoResponse,
     OMSeleccionGuardar, OMSeleccionOut,
     OMSinMatchAsignar,
+    OMIndexacionFila, OMIndexacionResponse,
 )
-from app.services.om_calculator import calcular_proyecto
+from app.services.om_calculator import calcular_proyecto, serie_indexacion
+from datetime import date
 from app.utils.periodo import periodo_valido, anio_valido, ANIO_MIN, ANIO_MAX
 
 
@@ -178,6 +180,34 @@ def calcular_periodo(
             total += fila.valor_a_facturar
 
     return OMCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
+
+
+@router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
+def indexacion_contrato(
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Serie de indexación (anual y mensual) de un contrato de mantenimiento,
+    calculada automáticamente con el mismo motor que el panel de Costos —
+    aniversario desde la Fecha de inicio O&M + IPC por año, solo aniversarios
+    cumplidos a hoy."""
+    c = db.get(ContratoServicio, contrato_id)
+    if c is None or c.servicio_aplica != "mantenimiento":
+        raise HTTPException(404, "Contrato de mantenimiento no encontrado")
+
+    ipc_tasas = {r.año: float(r.tasa) for r in db.query(IPCTasa).all()}
+    fecha_base = c.fecha_inicio_om or c.fecha_inicio
+    valor_base = float(c.tarifa_base) if c.tarifa_base else None
+
+    hoy = date.today()
+    serie = serie_indexacion(fecha_base, valor_base, ipc_tasas, hoy.year, hoy.month)
+
+    anual = [OMIndexacionFila(anio=f["anio"], ipc_aplicado=f["ipc_aplicado"], valor=f["valor_anual"])
+             for f in serie]
+    mensual = [OMIndexacionFila(anio=f["anio"], ipc_aplicado=f["ipc_aplicado"], valor=f["valor_mensual"])
+               for f in serie]
+    return OMIndexacionResponse(anual=anual, mensual=mensual)
 
 
 # ── Selección mensual ────────────────────────────────────────────────────────

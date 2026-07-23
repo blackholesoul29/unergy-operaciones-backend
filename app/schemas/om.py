@@ -75,6 +75,19 @@ class OMCalculoResponse(BaseModel):
     total_seleccionado: int
 
 
+# ── Serie de indexación (Proyecto>Servicios>Operación) ───────────────────────
+
+class OMIndexacionFila(BaseModel):
+    anio:         int
+    ipc_aplicado: Optional[float] = None   # % aplicado ese año (None = año base / sin tasa)
+    valor:        int
+
+
+class OMIndexacionResponse(BaseModel):
+    anual:   list[OMIndexacionFila]
+    mensual: list[OMIndexacionFila]
+
+
 # ── Selección mensual ────────────────────────────────────────────────────────
 
 class OMSeleccionItem(BaseModel):

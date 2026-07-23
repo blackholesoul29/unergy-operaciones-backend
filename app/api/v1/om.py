@@ -281,6 +281,10 @@ def toggle_facturado(
     else:
         sel.facturado = not sel.facturado
         nuevo_estado = sel.facturado
+        # Al desmarcar, se descongela: si no, un valor congelado por error (p.ej.
+        # capturado antes de un arreglo de indexación) quedaría pegado para siempre.
+        if not nuevo_estado:
+            sel.valor_facturado_congelado = None
 
     # #4: al pasar a facturado, congelar el valor calculado en ese momento.
     if nuevo_estado and sel.valor_facturado_congelado is None:

@@ -105,24 +105,44 @@ def calcular_periodo(
             .all()
     }
 
-    contratos = (
-        db.query(ContratoServicio)
-        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
-                Proyecto.estado == "en_operacion")
-        .order_by(ContratoServicio.id)
+    # Todos los proyectos EN OPERACIÓN (tengan o no contrato de mantenimiento).
+    proyectos = (
+        db.query(Proyecto)
+        .filter(Proyecto.estado == "en_operacion")
+        .order_by(Proyecto.nombre_comercial)
         .all()
     )
+    # Contrato de mantenimiento por proyecto (el primero si hubiera varios).
+    contrato_por_proyecto: dict[int, ContratoServicio] = {}
+    for c in (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                ContratoServicio.proyecto_id.isnot(None))
+        .order_by(ContratoServicio.id)
+        .all()
+    ):
+        contrato_por_proyecto.setdefault(c.proyecto_id, c)
 
     filas = []
     total = 0
 
-    for c in contratos:
-        nombre = (
-            c.proyecto.nombre_comercial
-            if c.proyecto else
-            c.prestador_nombre or f"Contrato #{c.id}"
-        )
+    for p in proyectos:
+        c = contrato_por_proyecto.get(p.id)
+
+        if c is None:
+            # En operación pero SIN contrato de mantenimiento → solo visible, no facturable.
+            fila_data = calcular_proyecto(
+                contrato_id=-p.id,   # id sintético (negativo) para la key del front; no se persiste
+                nombre_proyecto=p.nombre_comercial or f"Proyecto #{p.id}",
+                fecha_firma_contrato=None, fecha_inicio_om=None, valor_base_anual=None,
+                periodo=periodo, ipc_tasas=ipc_tasas,
+            )
+            fila_data["estado_contrato"] = "sin_contrato"
+            fila_data["aplica_este_mes"] = False
+            filas.append(OMCalculoFila(**fila_data))
+            continue
+
+        estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
         sel = selecciones.get(c.id)
         incluido = sel.incluido if sel else True
         facturado = sel.facturado if sel else False
@@ -130,7 +150,7 @@ def calcular_periodo(
 
         fila_data = calcular_proyecto(
             contrato_id=c.id,
-            nombre_proyecto=nombre,
+            nombre_proyecto=p.nombre_comercial or c.prestador_nombre or f"Contrato #{c.id}",
             fecha_firma_contrato=c.fecha_firma_contrato,
             fecha_inicio_om=c.fecha_inicio_om,
             valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
@@ -143,12 +163,14 @@ def calcular_periodo(
                              if sel and sel.valor_facturado_congelado is not None else None),
             periodicidad=c.periodicidad_pago,
         )
+        fila_data["estado_contrato"]      = estado_contrato
         fila_data["documento_disponible"] = c.id in documentos_nombre
         fila_data["documento_nombre"]     = documentos_nombre.get(c.id)
         fila = OMCalculoFila(**fila_data)
         filas.append(fila)
 
-        if fila.incluido and fila.habilitado and fila.valor_a_facturar:
+        # Solo se factura si el contrato está vigente ("con contrato").
+        if estado_contrato == "con_contrato" and fila.incluido and fila.habilitado and fila.valor_a_facturar:
             total += fila.valor_a_facturar
 
     return OMCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)

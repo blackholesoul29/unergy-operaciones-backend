@@ -99,13 +99,15 @@ def calcular_periodo(
         for s in db.query(OMSeleccion).filter(OMSeleccion.periodo == periodo).all()
     }
 
-    # Documentos por proyecto para este período: contrato_id → nombre_archivo
-    documentos_nombre = {
-        d.contrato_id: d.nombre_archivo
-        for d in db.query(OMDocumentoProyecto)
-            .filter(OMDocumentoProyecto.periodo == periodo)
-            .all()
-    }
+    # Documentos por proyecto para este período: contrato_id → nombre_archivo.
+    # Solo se marca disponible si el archivo EXISTE físicamente: el registro en BD
+    # puede quedar apuntando a un archivo perdido (p.ej. subido antes del volumen
+    # persistente), y en ese caso el ícono de descarga no debe aparecer.
+    documentos_nombre = {}
+    for d in (db.query(OMDocumentoProyecto)
+                .filter(OMDocumentoProyecto.periodo == periodo).all()):
+        if d.ruta_local and _Path(d.ruta_local).exists():
+            documentos_nombre[d.contrato_id] = d.nombre_archivo
 
     # Todos los proyectos EN OPERACIÓN (tengan o no contrato de mantenimiento).
     proyectos = (

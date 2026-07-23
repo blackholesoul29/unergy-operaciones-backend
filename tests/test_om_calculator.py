@@ -1,6 +1,6 @@
 """
 Tests del calculador O&M:
-- Algoritmo del factor IPC (fecha_base = max(firma, om), indexación por ANIVERSARIO REAL
+- Algoritmo del factor IPC (fecha_base = inicio O&M; firma solo de respaldo), por ANIVERSARIO REAL
   del contrato — no por año calendario —, IPC por año de aplicación directo).
 - Helpers de aniversario (_fecha_aniversario, _aniversarios_cumplidos), incl. clamp 29-feb.
 - Verificación contra la tabla esperada de Junio 2026 (22 proyectos) y el total.
@@ -79,14 +79,20 @@ TABLA_JUNIO_2026 = [
     # (antes 2, porque la regla vieja indexaba desde 1-enero-2026 sin esperar
     # a que llegara agosto).
     ("Perijá",             "2024-08-23", None,         48_000_000, 4_208_000),
-    ("El Molino",          "2024-08-23", "2024-02-20", 48_000_000, 4_208_000),
+    # El Molino: O&M (2024-02-20) es ANTERIOR a la firma. fecha_base = om →
+    # aniversarios 2025-02-20 y 2026-02-20 ya cumplidos en jun-2026 → 2 indexaciones
+    # (antes 1, porque la regla vieja usaba max(firma, om) = firma 2024-08-23).
+    ("El Molino",          "2024-08-23", "2024-02-20", 48_000_000, 4_422_608),
     ("La Paz Verso",       "2024-08-23", "2024-09-30", 48_000_000, 4_208_000),
     ("Esmeralda",          "2024-08-23", "2025-02-26", 48_000_000, 4_204_000),
     ("La Puya",            "2024-08-23", "2025-02-19", 48_000_000, 4_204_000),
     # Villanueva: fecha_base = om (2025-07-25). Su aniversario real es 2026-07-25,
     # todavía no llegó en el período de junio → 0 indexaciones (antes 1).
     ("Villanueva",         "2024-08-23", "2025-07-25", 48_000_000, 4_000_000),
-    ("Merengue",           "2026-03-18", "2025-04-16", 54_000_000, 4_500_000),
+    # Merengue: fecha_base = om (2025-04-16), no la firma (2026-03-18). Su
+    # aniversario 2026-04-16 ya llegó en jun-2026 → 1 indexación (antes 0, porque
+    # la regla vieja usaba la firma, cuyo primer aniversario es 2027).
+    ("Merengue",           "2026-03-18", "2025-04-16", 54_000_000, 4_729_500),
     ("La Reserva",         "2025-05-10", "2025-04-25", 36_880_000, 3_230_073),
     # Nestlé: fecha_base = firma (2025-12-09). Aniversario real 2026-12-09, muy
     # posterior a junio-2026 → 0 indexaciones (antes 1, indexaba desde enero).
@@ -106,7 +112,7 @@ TABLA_JUNIO_2026 = [
     ("Copey",              "2025-01-01", "2026-03-05", 48_000_000, 4_000_000),
 ]
 
-TOTAL_ESPERADO = 99_765_579
+TOTAL_ESPERADO = 100_209_687
 
 
 def test_tabla_completa_junio_2026():
@@ -131,10 +137,11 @@ def test_uruaco_usa_om_dos_aniversarios():
     assert f["valor_calculado"] == 4_598_502
 
 
-def test_la_paz_vallenata_usa_firma_un_aniversario():
-    # firma(2024-08-23) > om(2024-08-13) → fecha_base = firma. Su aniversario
-    # 2025-08-23 ya llegó, pero el de 2026-08-23 todavía no (agosto es
-    # posterior a junio) → 1 indexación, no 2.
+def test_la_paz_vallenata_usa_om_un_aniversario():
+    # fecha_base = om (2024-08-13). Su aniversario 2025-08-13 ya llegó, pero el de
+    # 2026-08-13 todavía no (agosto es posterior a junio) → 1 indexación. La firma
+    # (2024-08-23) ya no interviene; el resultado es el mismo porque ambos
+    # aniversarios caen en 2025.
     f = _calc(firma="2024-08-23", om="2024-08-13", base=48_000_000)
     assert f["n_indexaciones"] == 1
     assert f["valor_calculado"] == 4_208_000
@@ -159,13 +166,14 @@ def test_san_diego_sur_aun_no_llega_su_aniversario():
     assert f["valor_calculado"] == 4_500_000
 
 
-def test_merengue_primer_aniversario_factor_uno():
-    # firma 2026-03-18 → su primer aniversario (2027-03-18) es muy posterior
-    # a cualquier período de 2026 → sin aniversarios cumplidos → factor 1.0.
+def test_merengue_indexa_por_om_no_por_firma():
+    # La indexación usa el inicio O&M (2025-04-16), NO la firma (2026-03-18). El
+    # aniversario 2026-04-16 ya llegó en jun-2026 → 1 indexación (IPC 2026 = 5,10%).
+    # Con la regla vieja (firma) habría dado 0 indexaciones y 4.500.000.
     f = _calc(firma="2026-03-18", om="2025-04-16", base=54_000_000)
-    assert f["n_indexaciones"] == 0
-    assert f["factor_acumulado"] == 1.0
-    assert f["valor_calculado"] == 4_500_000
+    assert f["n_indexaciones"] == 1
+    assert round(f["factor_acumulado"], 4) == 1.0510
+    assert f["valor_calculado"] == 4_729_500
 
 
 def test_la_reserva_usa_firma_un_ipc():
@@ -193,12 +201,28 @@ def test_sin_valor_base_deshabilitada():
     assert f["historial_indexaciones"] == "Sin valor base"
 
 
-def test_sin_firma_deshabilitada():
-    # El Son: tiene om pero no firma → no se puede indexar → advertencia
+def test_sin_firma_pero_con_om_habilitada():
+    # El Son: tiene inicio O&M aunque no tenga firma → SÍ se indexa (por O&M).
+    # La suscripción ya no es obligatoria para el cálculo.
     f = _calc(firma=None, om="2025-02-16", base=48_000_000)
+    assert f["habilitado"] is True
+    assert f["n_indexaciones"] == 1           # aniversario 2026-02-16 ya llegó
+    assert f["valor_calculado"] == 4_204_000
+
+
+def test_sin_ninguna_fecha_deshabilitada():
+    # Sin inicio O&M y sin firma → no hay fecha base → no se puede indexar.
+    f = _calc(firma=None, om=None, base=48_000_000)
     assert f["habilitado"] is False
     assert f["valor_a_facturar"] is None
-    assert f["historial_indexaciones"] == "Sin fecha de suscripción"
+    assert f["historial_indexaciones"] == "Sin fecha de inicio O&M"
+
+
+def test_solo_firma_sin_om_usa_firma_de_respaldo():
+    # Compatibilidad: si solo hay firma (sin inicio O&M), se usa como respaldo.
+    f = _calc(firma="2024-08-23", om=None, base=48_000_000)
+    assert f["habilitado"] is True
+    assert f["n_indexaciones"] == 1
 
 
 # ── Override manual ──────────────────────────────────────────────────────────

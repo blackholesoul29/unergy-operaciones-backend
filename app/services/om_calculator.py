@@ -3,8 +3,9 @@ Lógica de cálculo O&M — pura, sin dependencias de DB ni FastAPI.
 Todas las funciones son deterministas dado el mismo input.
 
 Indexación IPC (regla vigente — por ANIVERSARIO REAL del contrato):
-- fecha_base = max(fecha_firma_contrato, fecha_inicio_om) si hay inicio de operación;
-  si no, fecha_firma_contrato.
+- fecha_base = fecha_inicio_om (fecha de inicio O&M); si no hay, fecha_firma_contrato
+  como respaldo. La fecha de suscripción NO indexa: solo es informativa cuando existe
+  un inicio O&M.
 - Cada aniversario de fecha_base (mismo mes/día, año fecha_base.year + k, con clamp a
   28-feb si fecha_base cae en 29-feb y el año del aniversario no es bisiesto) activa la
   tasa IPC del AÑO CALENDARIO en que cae ese aniversario — no la del 1-enero.
@@ -225,8 +226,9 @@ def calcular_proyecto(
     """
     Calcula todos los campos de la fila O&M para un contrato en un período.
 
-    Requiere `valor_base_anual` y `fecha_firma_contrato`; si falta alguno, la fila
-    se marca deshabilitada (advertencia en UI) y no se factura.
+    Requiere `valor_base_anual` y una fecha base de indexación (`fecha_inicio_om`,
+    o `fecha_firma_contrato` como respaldo); si falta alguno, la fila se marca
+    deshabilitada (advertencia en UI) y no se factura.
     """
     año_periodo, mes_periodo = _parse_periodo(periodo)
     mes_label = _mes_nombre(mes_periodo)
@@ -256,14 +258,13 @@ def calcular_proyecto(
     tiene_valor = bool(valor_base_anual and valor_base_anual > 0)
     if not tiene_valor:
         return _deshabilitada("Sin valor base")
-    if fecha_firma_contrato is None:
-        return _deshabilitada("Sin fecha de suscripción")
 
-    # ── Fecha base ────────────────────────────────────────────────────────────
-    if fecha_inicio_om is not None:
-        fecha_base = max(fecha_firma_contrato, fecha_inicio_om)
-    else:
-        fecha_base = fecha_firma_contrato
+    # ── Fecha base = inicio O&M (respaldo: fecha de suscripción) ───────────────
+    # La indexación se cuenta desde el inicio de operación (O&M). La suscripción
+    # solo se usa como respaldo cuando no hay inicio O&M cargado.
+    fecha_base = fecha_inicio_om if fecha_inicio_om is not None else fecha_firma_contrato
+    if fecha_base is None:
+        return _deshabilitada("Sin fecha de inicio O&M")
 
     aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
 

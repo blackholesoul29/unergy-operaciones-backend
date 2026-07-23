@@ -2397,10 +2397,10 @@ _OM_IPC_SEED = [
 ]
 
 # Política del seed (no destructiva sobre datos del equipo):
-#   - fecha_firma_contrato y tarifa_base: campos editables en la UI → SOLO se
-#     rellenan si están NULL; nunca se sobreescribe un valor ya cargado.
-#   - fecha_inicio_om: campo gestionado solo por el seed (no hay input en el wizard)
-#     → se fija al valor de esta tabla (puede corregir un valor previo del seed).
+#   - fecha_firma_contrato, tarifa_base y fecha_inicio_om: SOLO se rellenan si
+#     están NULL; nunca se sobreescribe un valor ya cargado. Sirve de respaldo
+#     inicial (p.ej. BD nueva); la fuente de verdad son los campos de la UI
+#     (Proyecto>Detalle>Servicios>Operación>Mantenimiento).
 _OM_PROYECTOS_SEED = [
     {"nombre": "Minigranja Solar Uruaco",            "fecha_firma": "2022-09-10", "fecha_inicio_om": "2023-11-15", "valor_base_anual": 48000000},
     {"nombre": "Minigranja Solar Baraya",             "fecha_firma": None,         "fecha_inicio_om": None,         "valor_base_anual": None},
@@ -2485,7 +2485,7 @@ def _run_om_seed() -> None:
             if base is not None and c.tarifa_base is None:
                 c.tarifa_base = base
                 cambio = True
-            if inicio_om is not None and c.fecha_inicio_om != inicio_om:
+            if inicio_om is not None and c.fecha_inicio_om is None:
                 c.fecha_inicio_om = inicio_om
                 cambio = True
             if cambio:

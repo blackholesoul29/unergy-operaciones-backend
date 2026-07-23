@@ -75,3 +75,21 @@ def test_toggle_facturado_congela_el_valor(db):
     assert sel.facturado is True
     assert sel.valor_facturado_congelado is not None
     assert int(sel.valor_facturado_congelado) == 1_000_000   # 12.000.000 / 12, sin IPC
+
+
+def test_desmarcar_facturado_descongela_el_valor(db):
+    """Al desmarcar facturado se limpia el congelado para que vuelva a recalcularse
+    (si no, un valor congelado por error queda pegado para siempre)."""
+    c = ContratoServicio(servicio_aplica="mantenimiento", prestador_nombre="P",
+                         tarifa_base=12_000_000, fecha_firma_contrato=date(2020, 1, 1))
+    db.add(c)
+    db.flush()
+
+    api.toggle_facturado(PERIODO, c.id, db=db, _=ADMIN)          # marca → congela
+    sel = api.toggle_facturado(PERIODO, c.id, db=db, _=ADMIN)    # desmarca → descongela
+    assert sel.facturado is False
+    assert sel.valor_facturado_congelado is None
+
+    sel2 = api.toggle_facturado(PERIODO, c.id, db=db, _=ADMIN)   # vuelve a marcar → recongela al valor actual
+    assert sel2.facturado is True
+    assert int(sel2.valor_facturado_congelado) == 1_000_000

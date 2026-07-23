@@ -283,6 +283,10 @@ class ProyectoCreate(BaseModel):
     # IDs de liquidación (códigos SIC de generación y consumo)
     codigo_sic_generacion: Optional[str] = None
     codigo_sic_consumo: Optional[str] = None
+    # IDs de Quoia (reportes de generación/consumo y nodo)
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: Optional[bool] = None
     srv_representacion: Optional[bool] = None
     srv_cgm: Optional[bool] = None
@@ -363,6 +367,9 @@ class ProyectoOut(BaseModel):
     codigo_tsf: Optional[str] = None
     codigo_sic_generacion: Optional[str] = None
     codigo_sic_consumo: Optional[str] = None
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool

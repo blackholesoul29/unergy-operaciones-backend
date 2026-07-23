@@ -1097,6 +1097,10 @@ _PENDING_DDLS = [
     # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
+    # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
 ]
 
 

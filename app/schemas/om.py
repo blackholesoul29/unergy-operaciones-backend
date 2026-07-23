@@ -59,6 +59,7 @@ class OMCalculoFila(BaseModel):
     editado_manual:         bool
     valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
     aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
+    periodicidad:           Optional[str] = None   # mensual/bimestral/trimestral/semestral/anual
     valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str
     ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada

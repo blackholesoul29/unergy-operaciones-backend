@@ -309,6 +309,7 @@ def calcular_proyecto(
         "historial_indexaciones": historial_indexaciones(aniversarios, ipc_tasas),
         "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
         "aplica_este_mes":        aplica_este_mes,
+        "periodicidad":           periodicidad,
         "ipc_incompleto":         ipc_incompleto(aniversarios, ipc_tasas),
     }
 

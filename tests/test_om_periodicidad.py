@@ -45,3 +45,7 @@ def _calc(periodo, periodicidad):
 def test_calcular_proyecto_incluye_aplica_este_mes():
     assert _calc("2026-04", "trimestral")["aplica_este_mes"] is True
     assert _calc("2026-02", "trimestral")["aplica_este_mes"] is False
+
+
+def test_calcular_proyecto_expone_periodicidad():
+    assert _calc("2026-04", "trimestral")["periodicidad"] == "trimestral"

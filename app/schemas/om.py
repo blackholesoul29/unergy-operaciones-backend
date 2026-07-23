@@ -57,6 +57,8 @@ class OMCalculoFila(BaseModel):
     valor_a_facturar:       Optional[int]
     valor_calculado:        Optional[int]
     editado_manual:         bool
+    valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
+    aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
     valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str
     ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada
@@ -76,6 +78,7 @@ class OMSeleccionItem(BaseModel):
     contrato_id:  int
     incluido:     bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None   # #6: requerido por la UI al excluir uno que aplica
 
 
 class OMSeleccionGuardar(BaseModel):
@@ -89,6 +92,7 @@ class OMSeleccionOut(BaseModel):
     incluido:    bool
     facturado:    bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None
     updated_at:   datetime
     model_config = {"from_attributes": True}
 

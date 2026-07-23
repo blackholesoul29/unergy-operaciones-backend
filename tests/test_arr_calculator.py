@@ -58,3 +58,36 @@ def test_deshabilitada_redondea_canon_archivo():
     assert f["habilitado"] is False
     assert f["canon_archivo"] == 1024604
     assert isinstance(f["canon_archivo"], int)
+
+
+# ── Indexación por ANIVERSARIO real del contrato (fix 2026-07) ────────────────
+# Antes se indexaba por año calendario (incremento cada enero). Ahora el
+# incremento se aplica en el aniversario del contrato, preservando la
+# convención DANE: en el aniversario del año Y se aplica ipc[Y-1].
+
+def test_firma_marzo_no_indexa_antes_del_aniversario():
+    # Firmado 2024-03-15; en enero-2025 aún NO cumple el primer año → sin indexar.
+    f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2025-01",
+           ipc_tasas={2024: 0.10})
+    assert f["n_indexaciones"] == 0
+    assert f["factor_acumulado"] == 1.0
+    assert f["canon_calculado"] == 1_000_000
+
+
+def test_firma_marzo_indexa_desde_el_aniversario():
+    # Mismo contrato; en junio-2025 ya pasó el aniversario (marzo) → 1 indexación
+    # con ipc[2024] (DANE: año anterior al aniversario 2025).
+    f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2025-06",
+           ipc_tasas={2024: 0.10})
+    assert f["n_indexaciones"] == 1
+    assert f["factor_acumulado"] == 1.10
+    assert f["canon_calculado"] == 1_100_000
+
+
+def test_firma_marzo_segundo_aniversario_aun_no_cumplido():
+    # En enero-2026 solo se cumplió UN aniversario (marzo-2025); el de marzo-2026
+    # todavía no → 1 indexación (ipc[2024]), no 2.
+    f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2026-01",
+           ipc_tasas={2024: 0.0520, 2025: 0.0510})
+    assert f["n_indexaciones"] == 1
+    assert round(f["factor_acumulado"], 6) == 1.052

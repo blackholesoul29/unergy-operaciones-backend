@@ -21,6 +21,7 @@ from sqlalchemy.sql import func
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.contratos import ContratoServicio
+from app.models.proyectos import Proyecto
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto, OMPaginaSinMatch
 from app.schemas.om import (
     IPCTasaOut, IPCTasaUpsert,
@@ -50,7 +51,9 @@ def listar_contratos_om(
     """Lista todos los contratos de mantenimiento."""
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -104,7 +107,9 @@ def calcular_periodo(
 
     contratos = (
         db.query(ContratoServicio)
-        .filter(ContratoServicio.servicio_aplica == "mantenimiento")
+        .join(Proyecto, ContratoServicio.proyecto_id == Proyecto.id)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                Proyecto.estado == "en_operacion")
         .order_by(ContratoServicio.id)
         .all()
     )
@@ -134,6 +139,9 @@ def calcular_periodo(
             incluido=incluido,
             facturado=facturado,
             valor_manual=valor_manual,
+            valor_congelado=(int(sel.valor_facturado_congelado)
+                             if sel and sel.valor_facturado_congelado is not None else None),
+            periodicidad=c.periodicidad_pago,
         )
         fila_data["documento_disponible"] = c.id in documentos_nombre
         fila_data["documento_nombre"]     = documentos_nombre.get(c.id)
@@ -177,6 +185,7 @@ def guardar_seleccion(
         if sel:
             sel.incluido = item.incluido
             sel.valor_manual = item.valor_manual
+            sel.motivo_exclusion = item.motivo_exclusion
         else:
             sel = OMSeleccion(
                 contrato_id=item.contrato_id,
@@ -184,6 +193,7 @@ def guardar_seleccion(
                 incluido=item.incluido,
                 facturado=False,
                 valor_manual=item.valor_manual,
+                motivo_exclusion=item.motivo_exclusion,
             )
             db.add(sel)
         resultados.append(sel)
@@ -211,8 +221,26 @@ def toggle_facturado(
     if not sel:
         sel = OMSeleccion(contrato_id=contrato_id, periodo=periodo, incluido=True, facturado=True)
         db.add(sel)
+        nuevo_estado = True
     else:
         sel.facturado = not sel.facturado
+        nuevo_estado = sel.facturado
+
+    # #4: al pasar a facturado, congelar el valor calculado en ese momento.
+    if nuevo_estado and sel.valor_facturado_congelado is None:
+        c = db.get(ContratoServicio, contrato_id)
+        if c is not None:
+            ipc = {r.año: float(r.tasa) for r in db.query(IPCTasa).all()}
+            nombre = (c.proyecto.nombre_comercial if c.proyecto
+                      else c.prestador_nombre or f"Contrato #{c.id}")
+            fila = calcular_proyecto(
+                contrato_id=c.id, nombre_proyecto=nombre,
+                fecha_firma_contrato=c.fecha_firma_contrato, fecha_inicio_om=c.fecha_inicio_om,
+                valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
+                periodo=periodo, ipc_tasas=ipc,
+                valor_manual=float(sel.valor_manual) if sel.valor_manual is not None else None,
+            )
+            sel.valor_facturado_congelado = fila["valor_a_facturar"]
 
     db.commit()
     db.refresh(sel)
@@ -338,6 +366,9 @@ async def upload_factura_mensual(
     db.flush()  # persiste en transacción sin commit aún
 
     # ── División por proyecto ────────────────────────────────────────────────
+    # El splitter empareja páginas contra TODOS los contratos de mantenimiento
+    # (no se filtra por estado del proyecto: una factura puede incluir proyectos
+    # en cualquier estado; el filtro por 'en_operacion' es solo para el panel).
     contratos = (
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "mantenimiento")

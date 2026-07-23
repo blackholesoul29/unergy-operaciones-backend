@@ -73,3 +73,15 @@ def test_panel_incluye_sin_contrato_y_marca_estado(db):
     }
     charlie = next(f for f in resp.filas if f.nombre_proyecto == "Charlie")
     assert charlie.habilitado is False   # sin contrato → no facturable
+
+
+def test_fila_incluye_tipo_proyecto(db):
+    """Cada fila lleva el tipo_proyecto para agrupar el panel (como en Proyectos)."""
+    mg = Proyecto(nombre_comercial="Mini", estado="en_operacion", tipo_proyecto="minigranja")
+    db.add(mg); db.flush(); _contrato(db, mg, "vigente")
+    ac = Proyecto(nombre_comercial="Auto", estado="en_operacion", tipo_proyecto="autoconsumo")
+    db.add(ac); db.flush()   # sin contrato
+
+    resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)
+    tipos = {f.nombre_proyecto: f.tipo_proyecto for f in resp.filas}
+    assert tipos == {"Mini": "minigranja", "Auto": "autoconsumo"}

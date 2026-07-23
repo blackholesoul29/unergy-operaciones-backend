@@ -60,6 +60,7 @@ class OMCalculoFila(BaseModel):
     valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
     aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
     estado_contrato:        str = "con_contrato"   # con_contrato | en_tramite | sin_contrato
+    tipo_proyecto:          Optional[str] = None   # minigranja | autoconsumo | gd | ... (para agrupar el panel)
     periodicidad:           Optional[str] = None   # mensual/bimestral/trimestral/semestral/anual
     valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str

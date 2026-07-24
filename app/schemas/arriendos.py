@@ -51,6 +51,8 @@ class ArrCalculoFila(BaseModel):
     ipc_incompleto: bool = False
     aplica_este_mes: bool = True
     periodicidad: Optional[str] = None
+    tipo_proyecto: Optional[str] = None
+    estado_contrato: str = "con_contrato"
     motivo_exclusion: Optional[str] = None
     historial_texto: str
     historial_detalle: str

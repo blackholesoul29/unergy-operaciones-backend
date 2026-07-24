@@ -40,30 +40,71 @@ def _safe_segment(nombre: str) -> str:
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _validar_periodo(periodo)
+    """Los datos de facturación (valor, fecha inicio O&M, periodicidad, estado, tipo)
+    salen del contrato de arriendo en Operación (ContratoServicio servicio_aplica=
+    'arriendo' ligado al Proyecto). ArrProyecto se mantiene como llave de la fila
+    (selección/documentos) y como respaldo si aún no hay contrato. canon_archivo
+    (override) se conserva."""
+    from app.services.om_calculator import om_keys, om_match_seed
+
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     selecciones = {s.arr_proyecto_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
-    proyectos = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
+
+    # Emparejar cada ArrProyecto con su Proyecto (difuso) y el contrato de arriendo.
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    arr_to_proy = {}
+    for p in db.query(Proyecto).all():
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is not None and a.id not in arr_to_proy:
+            arr_to_proy[a.id] = p
+    contrato_por_proy = {}
+    for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all():
+        contrato_por_proy.setdefault(c.proyecto_id, c)
 
     filas, total = [], 0
-    for p in proyectos:
-        sel = selecciones.get(p.id)
+    for a in arr:
+        sel = selecciones.get(a.id)
+        p = arr_to_proy.get(a.id)
+        c = contrato_por_proy.get(p.id) if p else None
+
+        if c is not None:   # fuente de verdad: el contrato en Operación
+            valor_base = float(c.tarifa_base) if c.tarifa_base is not None else None
+            fecha_firma = c.fecha_firma_contrato
+            fecha_inicio_om = c.fecha_inicio_om
+            periodicidad = c.periodicidad_pago
+            estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
+        else:               # sin contrato aún: respaldo a los datos del ArrProyecto
+            valor_base = float(a.valor_base) if a.valor_base is not None else None
+            fecha_firma = a.fecha_firma_contrato
+            fecha_inicio_om = None
+            periodicidad = None
+            estado_contrato = "sin_contrato"
+
         data = calcular_arriendo(
-            proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
-            fecha_firma_contrato=p.fecha_firma_contrato,
-            valor_base=float(p.valor_base) if p.valor_base is not None else None,
-            canon_archivo=float(p.canon_archivo) if p.canon_archivo is not None else None,
+            proyecto_id=a.id, nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
+            fecha_firma_contrato=fecha_firma,
+            valor_base=valor_base,
+            canon_archivo=float(a.canon_archivo) if a.canon_archivo is not None else None,
             periodo=periodo, ipc_tasas=ipc_tasas,
             incluido=(sel.incluido if sel else True),
             facturado=(sel.facturado if sel else False),
             valor_congelado=(int(sel.valor_facturado_congelado)
                              if sel and sel.valor_facturado_congelado is not None else None),
+            fecha_inicio_om=fecha_inicio_om,
+            periodicidad=periodicidad,
         )
         data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
+        data["tipo_proyecto"] = p.tipo_proyecto if p else None
+        data["estado_contrato"] = estado_contrato
         fila = ArrCalculoFila(**data)
         filas.append(fila)
-        if fila.incluido and fila.habilitado and fila.canon_a_facturar:
+        # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
+        if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
+                and fila.aplica_este_mes and fila.canon_a_facturar):
             total += fila.canon_a_facturar
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+from app.services.om_calculator import corresponde_cobro_este_mes
 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -56,6 +57,8 @@ def calcular_arriendo(
     incluido: bool = True,
     facturado: bool = False,
     valor_congelado: int | None = None,
+    fecha_inicio_om: date | None = None,
+    periodicidad: str | None = None,
 ) -> dict:
     año_periodo = int(periodo.split("-")[0])
     mes = int(periodo.split("-")[1])
@@ -73,23 +76,29 @@ def calcular_arriendo(
             "difiere_archivo": False,
             "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
             "ipc_incompleto": False,
+            "aplica_este_mes": True,
+            "periodicidad": periodicidad,
             "historial_texto": historial, "historial_detalle": historial,
         }
 
     if not (valor_base and valor_base > 0):
         return deshabilitada("Sin valor base")
-    if fecha_firma_contrato is None:
-        return deshabilitada("Sin fecha de firma")
+    # Base de indexación = inicio O&M; si falta, la firma como respaldo (así los
+    # contratos migrados sin inicio O&M dan las mismas cifras que hoy).
+    fecha_base = fecha_inicio_om if fecha_inicio_om is not None else fecha_firma_contrato
+    if fecha_base is None:
+        return deshabilitada("Sin fecha de inicio O&M ni de firma")
 
-    año_firma = fecha_firma_contrato.year
+    aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
+
     factor = 1.0
     n = 0
     pasos = []
     ipc_incompleto = False
-    detalle = [f"Base {año_firma}: {valor_base}"]
+    detalle = [f"Base {fecha_base.year}: {valor_base}"]
     # Indexar en cada aniversario cumplido del contrato (no cada enero calendario).
     # Convención DANE: en el aniversario del año Y se aplica ipc[Y-1].
-    for fecha_aniv in _aniversarios_cumplidos(fecha_firma_contrato, año_periodo, mes):
+    for fecha_aniv in _aniversarios_cumplidos(fecha_base, año_periodo, mes):
         año_aniv = fecha_aniv.year
         ipc = ipc_tasas.get(año_aniv - 1)
         if ipc is None:
@@ -125,6 +134,8 @@ def calcular_arriendo(
         "difiere_archivo": difiere,
         "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
         "ipc_incompleto": ipc_incompleto,
+        "aplica_este_mes": aplica_este_mes,
+        "periodicidad": periodicidad,
         "historial_texto": " → ".join(pasos) if pasos else f"Sin indexaciones (base: {valor_base})",
         "historial_detalle": "\n".join(detalle),
     }

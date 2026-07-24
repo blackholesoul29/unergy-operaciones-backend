@@ -49,6 +49,8 @@ class ArrCalculoFila(BaseModel):
     difiere_archivo: bool
     valor_facturado_congelado: Optional[int] = None
     ipc_incompleto: bool = False
+    aplica_este_mes: bool = True
+    periodicidad: Optional[str] = None
     motivo_exclusion: Optional[str] = None
     historial_texto: str
     historial_detalle: str

@@ -27,4 +27,5 @@ class ArchivosERResponse(BaseModel):
     total_filtrados: int      # los que pasan los filtros (antes de recortar por limite)
     truncado: bool            # True si se recortó la lista por `limite`
     periodos: list[PeriodoER]
+    versiones: list[str] = []  # versiones presentes en el tipo consultado (txf, tx3…tx8)
     archivos: list[ArchivoER]

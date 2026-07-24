@@ -13,7 +13,10 @@ import json
 import os
 import re
 import time
-from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import BytesIO
+from threading import Lock, local
+from zipfile import ZIP_DEFLATED, ZipFile
 
 # La carpeta "Prod" de estados de resultados vive en un shared drive DISTINTO al
 # `DRIVE_ROOT_FOLDER_ID` de fallas.py, por eso se configura aparte.
@@ -174,6 +177,100 @@ def listar_carpeta(folder_id: str, usar_cache: bool = True) -> list[dict]:
     with _cache_lock:
         _cache[folder_id] = (ahora, archivos)
     return archivos
+
+
+def filtrar_archivos(
+    archivos: list[dict],
+    tipo: str | None = None,
+    mes: int | None = None,
+    anio: int | None = None,
+    version: str | None = None,
+    q: str | None = None,
+) -> list[dict]:
+    """Aplica los filtros del listado. Función pura: no muta `archivos`.
+
+    La usan el listado y la descarga masiva, para que el ZIP traiga exactamente
+    los archivos que el usuario está viendo en la tabla.
+    """
+    res = list(archivos)
+    if tipo:
+        res = [a for a in res if a.get("tipo") == tipo]
+    if mes is not None:
+        res = [a for a in res if a.get("mes") == mes]
+    if anio is not None:
+        res = [a for a in res if a.get("anio") == anio]
+    if version:
+        v = version.strip().lower()
+        res = [a for a in res if (a.get("version") or "").lower() == v]
+    if q:
+        needle = q.strip().lower()
+        res = [a for a in res if needle in (a.get("name") or "").lower()]
+    return res
+
+
+# ── Descarga ─────────────────────────────────────────────────────────────────────
+# Los objetos service de googleapiclient NO son thread-safe, así que cada hilo del
+# pool construye el suyo.
+_local = local()
+
+
+def _service_del_hilo():
+    if not hasattr(_local, "service"):
+        _local.service = get_drive_service()
+    return _local.service
+
+
+def descargar_archivo(file_id: str) -> bytes:
+    """Contenido binario del archivo. Los ER son .xlsx reales (no Sheets nativos),
+    así que se bajan con get_media y no hace falta exportar."""
+    from googleapiclient.errors import HttpError
+
+    try:
+        return _service_del_hilo().files().get_media(fileId=file_id).execute()
+    except HttpError as e:
+        if e.resp.status in (403, 404):
+            raise DriveSinAcceso(f"sin acceso al archivo {file_id}") from e
+        raise
+
+
+def construir_zip(archivos: list[dict], max_workers: int = 8) -> bytes:
+    """ZIP en memoria con los archivos dados (cada dict con 'id' y 'name').
+
+    Cabe en memoria de sobra: los ER pesan ~9 KB y la carpeta completa ~16 MB.
+    Se baja en paralelo porque el costo es latencia de red, no CPU. Un archivo que
+    falle no tumba el ZIP: se omite y se reporta en `_errores.txt`.
+    """
+    buf = BytesIO()
+    fallidos: list[str] = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futuros = {pool.submit(descargar_archivo, a["id"]): a for a in archivos}
+        contenidos: list[tuple[str, bytes]] = []
+        for fut in as_completed(futuros):
+            a = futuros[fut]
+            try:
+                contenidos.append((a.get("name") or a["id"], fut.result()))
+            except Exception as e:  # noqa: BLE001 — un archivo roto no invalida el resto
+                fallidos.append(f"{a.get('name') or a['id']}: {e}")
+
+    with ZipFile(buf, "w", ZIP_DEFLATED) as z:
+        usados: dict[str, int] = {}
+        for nombre, data in sorted(contenidos, key=lambda c: c[0]):
+            # La carpeta tiene nombres repetidos (p. ej. 14 "Cruce facturas 1 2026
+            # txf.xlsx"); dentro del ZIP hay que desambiguarlos o se sobreescriben.
+            n = usados.get(nombre, 0)
+            usados[nombre] = n + 1
+            final = nombre if n == 0 else _sufijar(nombre, n + 1)
+            z.writestr(final, data)
+        if fallidos:
+            z.writestr("_errores.txt", "\n".join(fallidos))
+
+    return buf.getvalue()
+
+
+def _sufijar(nombre: str, n: int) -> str:
+    base, punto, ext = nombre.rpartition(".")
+    return f"{base} ({n}).{ext}" if punto else f"{nombre} ({n})"
 
 
 def invalidar_cache(folder_id: str | None = None) -> None:

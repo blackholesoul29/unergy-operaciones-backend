@@ -58,9 +58,14 @@ def listar_archivos(
         if f.get("mimeType") != "application/vnd.google-apps.folder"
     ]
 
+    # El filtro de tipo se aplica ANTES de contar los períodos: el selector del
+    # frontend muestra esos totales, y contarlos sobre todos los tipos haría que
+    # prometiera más archivos de los que la tabla puede mostrar.
+    del_tipo = [a for a in archivos if a["tipo"] == tipo] if tipo else archivos
+
     # Períodos disponibles (para poblar los selectores del frontend), más recientes primero.
     conteo: dict[tuple[int, int], int] = {}
-    for a in archivos:
+    for a in del_tipo:
         if a["mes"] and a["anio"]:
             conteo[(a["anio"], a["mes"])] = conteo.get((a["anio"], a["mes"]), 0) + 1
     periodos = [
@@ -68,9 +73,7 @@ def listar_archivos(
         for (y, m), n in sorted(conteo.items(), reverse=True)
     ]
 
-    filtrados = archivos
-    if tipo:
-        filtrados = [a for a in filtrados if a["tipo"] == tipo]
+    filtrados = del_tipo
     if mes is not None:
         filtrados = [a for a in filtrados if a["mes"] == mes]
     if anio is not None:

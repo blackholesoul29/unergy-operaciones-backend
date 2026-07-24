@@ -12,6 +12,7 @@ from app.models.base import Base
 import app.models  # noqa: F401
 from app.models.arriendos import ArrProyecto, ArrSeleccion, ArrIPCTasa
 from app.api.v1 import arriendos as api
+from app.schemas.arriendos import ArrSeleccionGuardar, ArrSeleccionItem
 
 
 @compiles(JSONB, "sqlite")
@@ -65,3 +66,17 @@ def test_calculo_usa_valor_congelado(db):
     resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
     fila = next(f for f in resp.filas if f.id == p.id)
     assert fila.canon_a_facturar == 555_000
+
+
+def test_motivo_exclusion_se_guarda_y_se_expone(db):
+    p = _proy(db)
+    api.guardar_seleccion(PERIODO, ArrSeleccionGuardar(items=[
+        ArrSeleccionItem(proyecto_id=p.id, incluido=False, motivo_exclusion="en disputa"),
+    ]), db=db, _=ADMIN)
+
+    sel = db.query(ArrSeleccion).filter(ArrSeleccion.arr_proyecto_id == p.id).first()
+    assert sel.incluido is False and sel.motivo_exclusion == "en disputa"
+
+    resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
+    fila = next(f for f in resp.filas if f.id == p.id)
+    assert fila.motivo_exclusion == "en disputa"

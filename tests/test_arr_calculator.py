@@ -45,6 +45,24 @@ def test_sin_base_deshabilitada():
     assert f["historial_texto"] == "Sin valor base"
 
 
+def test_valor_congelado_tiene_prioridad():
+    # Fase A: canon congelado al facturar gana sobre el calculado/archivo.
+    f = _c(valor_congelado=777_000)
+    assert f["canon_a_facturar"] == 777_000
+    assert f["valor_facturado_congelado"] == 777_000
+
+
+def test_ipc_incompleto_marca_flag():
+    # Falta la tasa de un año intermedio → ipc_incompleto True (no cambia el monto).
+    f = _c(periodo="2026-06", ipc_tasas={2023: 0.0928})   # faltan 2024 y 2025
+    assert f["ipc_incompleto"] is True
+
+
+def test_ipc_completo_no_marca_flag():
+    f = _c(periodo="2026-06", ipc_tasas=IPC)
+    assert f["ipc_incompleto"] is False
+
+
 def test_sin_firma_deshabilitada():
     f = _c(fecha_firma_contrato=None)
     assert f["habilitado"] is False

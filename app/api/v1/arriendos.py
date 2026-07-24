@@ -30,6 +30,12 @@ def _validar_periodo(periodo: str):
         raise HTTPException(400, "periodo debe tener formato YYYY-MM")
 
 
+def _safe_segment(nombre: str) -> str:
+    """Sanea un componente de ruta: sin separadores ni '..' (evita path traversal)."""
+    limpio = "".join(c for c in (nombre or "") if c not in '/\\:*?"<>|').replace("..", "").strip()
+    return limpio or "sin_codigo"
+
+
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
     _validar_periodo(periodo)
@@ -49,6 +55,8 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             periodo=periodo, ipc_tasas=ipc_tasas,
             incluido=(sel.incluido if sel else True),
             facturado=(sel.facturado if sel else False),
+            valor_congelado=(int(sel.valor_facturado_congelado)
+                             if sel and sel.valor_facturado_congelado is not None else None),
         ))
         filas.append(fila)
         if fila.incluido and fila.habilitado and fila.canon_a_facturar:
@@ -114,8 +122,28 @@ def toggle_facturado(periodo: str, proyecto_id: int, db: Session = Depends(get_d
     if not sel:
         sel = ArrSeleccion(arr_proyecto_id=proyecto_id, periodo=periodo, incluido=True, facturado=True)
         db.add(sel)
+        nuevo_estado = True
     else:
         sel.facturado = not sel.facturado
+        nuevo_estado = sel.facturado
+        # Al desmarcar, se descongela: si no, un canon congelado por error queda pegado.
+        if not nuevo_estado:
+            sel.valor_facturado_congelado = None
+
+    # Al marcar como facturado, congelar el canon calculado en ese momento.
+    if nuevo_estado and sel.valor_facturado_congelado is None:
+        p = db.query(ArrProyecto).filter(ArrProyecto.id == proyecto_id).first()
+        if p is not None:
+            ipc = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
+            fila = calcular_arriendo(
+                proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
+                fecha_firma_contrato=p.fecha_firma_contrato,
+                valor_base=float(p.valor_base) if p.valor_base is not None else None,
+                canon_archivo=float(p.canon_archivo) if p.canon_archivo is not None else None,
+                periodo=periodo, ipc_tasas=ipc,
+            )
+            sel.valor_facturado_congelado = fila["canon_a_facturar"]
+
     db.commit(); db.refresh(sel)
     return sel
 
@@ -188,12 +216,12 @@ async def upload_documento(
     """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
     _validar_periodo(periodo)
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Guardar archivo principal
     ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
-    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante
+    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante + ext_principal
     ruta_principal = directorio / nombre_archivo
     ruta_principal.write_bytes(await file.read())
 
@@ -269,7 +297,7 @@ async def upload_cuenta_cobro(
     except Exception:
         raise HTTPException(400, "predios debe ser un JSON array no vacío")
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Leer el archivo principal una sola vez (se copia por cada predio)

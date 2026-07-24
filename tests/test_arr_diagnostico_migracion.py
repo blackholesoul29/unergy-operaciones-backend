@@ -53,5 +53,6 @@ def test_diagnostico_cuenta_con_sin_contrato_y_sin_match(db):
     r = api.diagnostico_migracion(db=db, _=ADMIN)
     assert r["total_arr_proyectos"] == 3
     assert r["con_contrato_arriendo"] == 1
-    assert r["sin_contrato_arriendo"] == 1 and "Bravo" in r["ejemplos_sin_contrato"]
+    assert r["sin_contrato_arriendo"] == 1
+    assert any("Bravo" in x for x in r["ejemplos_sin_contrato"])
     assert r["sin_match_de_proyecto"] == 1 and "Charlie" in r["ejemplos_sin_match"]

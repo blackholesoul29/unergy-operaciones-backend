@@ -71,14 +71,13 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
 @router.get("/diagnostico-migracion")
 def diagnostico_migracion(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Read-only: dimensiona la migración de ArrProyecto → contrato de arriendo.
-    Cuenta cuántos ArrProyecto activos ya tienen un ContratoServicio(arriendo) en
-    su proyecto (match por nombre) y cuántos habría que crear. No modifica nada."""
-    def norm(s: str | None) -> str:
-        return (s or "").strip().lower()
+    Empareja cada ArrProyecto con su Proyecto de forma DIFUSA (misma lógica del
+    seed O&M: ignora el código MGS y compara tokens). No modifica nada."""
+    from app.services.om_calculator import om_keys, om_match_seed
 
     arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
-    proy_por_nombre = {norm(p.nombre_comercial): p
-                       for p in db.query(Proyecto).all()}
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
     proy_con_contrato_arr = {
         c.proyecto_id
         for c in db.query(ContratoServicio).filter(
@@ -86,23 +85,27 @@ def diagnostico_migracion(db: Session = Depends(get_db), _=Depends(get_current_u
             ContratoServicio.proyecto_id.isnot(None)).all()
     }
 
-    con_contrato, sin_contrato, sin_match = 0, [], []
-    for a in arr:
-        p = proy_por_nombre.get(norm(a.nombre))
-        if p is None:
-            sin_match.append(a.nombre)
-        elif p.id in proy_con_contrato_arr:
+    matched_ids = set()
+    con_contrato, sin_contrato = 0, []
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None or a.id in matched_ids:
+            continue
+        matched_ids.add(a.id)
+        if p.id in proy_con_contrato_arr:
             con_contrato += 1
         else:
-            sin_contrato.append(a.nombre)
+            sin_contrato.append(f"{a.nombre} → {p.nombre_comercial}")
+
+    sin_match = [a.nombre for a in arr if a.id not in matched_ids]
 
     return {
         "total_arr_proyectos":     len(arr),
         "con_contrato_arriendo":   con_contrato,
         "sin_contrato_arriendo":   len(sin_contrato),
         "sin_match_de_proyecto":   len(sin_match),
-        "ejemplos_sin_contrato":   sin_contrato[:20],
-        "ejemplos_sin_match":      sin_match[:20],
+        "ejemplos_sin_contrato":   sin_contrato[:30],
+        "ejemplos_sin_match":      sin_match[:30],
     }
 
 

@@ -172,6 +172,7 @@ def calcular_periodo(
         )
         fila_data["estado_contrato"]      = estado_contrato
         fila_data["tipo_proyecto"]        = p.tipo_proyecto
+        fila_data["motivo_exclusion"]     = sel.motivo_exclusion if sel else None
         fila_data["documento_disponible"] = c.id in documentos_nombre
         fila_data["documento_nombre"]     = documentos_nombre.get(c.id)
         fila = OMCalculoFila(**fila_data)

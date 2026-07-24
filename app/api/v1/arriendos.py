@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+from app.models.proyectos import Proyecto
+from app.models.contratos import ContratoServicio
 
 _UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "arriendos"
 from app.schemas.arriendos import (
@@ -64,6 +66,44 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
         if fila.incluido and fila.habilitado and fila.canon_a_facturar:
             total += fila.canon_a_facturar
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
+
+
+@router.get("/diagnostico-migracion")
+def diagnostico_migracion(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Read-only: dimensiona la migración de ArrProyecto → contrato de arriendo.
+    Cuenta cuántos ArrProyecto activos ya tienen un ContratoServicio(arriendo) en
+    su proyecto (match por nombre) y cuántos habría que crear. No modifica nada."""
+    def norm(s: str | None) -> str:
+        return (s or "").strip().lower()
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    proy_por_nombre = {norm(p.nombre_comercial): p
+                       for p in db.query(Proyecto).all()}
+    proy_con_contrato_arr = {
+        c.proyecto_id
+        for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).all()
+    }
+
+    con_contrato, sin_contrato, sin_match = 0, [], []
+    for a in arr:
+        p = proy_por_nombre.get(norm(a.nombre))
+        if p is None:
+            sin_match.append(a.nombre)
+        elif p.id in proy_con_contrato_arr:
+            con_contrato += 1
+        else:
+            sin_contrato.append(a.nombre)
+
+    return {
+        "total_arr_proyectos":     len(arr),
+        "con_contrato_arriendo":   con_contrato,
+        "sin_contrato_arriendo":   len(sin_contrato),
+        "sin_match_de_proyecto":   len(sin_match),
+        "ejemplos_sin_contrato":   sin_contrato[:20],
+        "ejemplos_sin_match":      sin_match[:20],
+    }
 
 
 @router.get("/proyectos", response_model=list[ArrProyectoOut])

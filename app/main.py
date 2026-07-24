@@ -2660,6 +2660,53 @@ def _run_fallas_tipo_backfill() -> None:
         db.close()
 
 
+def _run_arr_backfill_contratos() -> None:
+    """Crea el contrato de arriendo (ContratoServicio servicio_aplica='arriendo') en
+    cada proyecto que tenga un ArrProyecto emparejado (match difuso, ignora el código
+    MGS) y aún no tenga contrato de arriendo. Copia valor_base→tarifa_base y la fecha
+    de suscripción. Idempotente y NO destructivo: nunca pisa un contrato existente.
+    Con esto la info de arriendos vive en Proyecto>Detalle>Servicios>Operación."""
+    from sqlalchemy.orm import sessionmaker
+    from app.models.arriendos import ArrProyecto
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+        arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+        con_arr = {c.proyecto_id for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).all()}
+
+        creados, usados = 0, set()
+        for p in db.query(Proyecto).all():
+            a = om_match_seed(p.nombre_comercial or "", arr_keys)
+            if a is None or a.id in usados:
+                continue
+            usados.add(a.id)
+            if p.id in con_arr:
+                continue   # ya tiene contrato de arriendo → no se toca
+            db.add(ContratoServicio(
+                proyecto_id=p.id,
+                servicio_aplica="arriendo",
+                estado="vigente",
+                periodicidad_pago="mensual",
+                tarifa_base=a.valor_base,
+                fecha_firma_contrato=a.fecha_firma_contrato,
+            ))
+            creados += 1
+        db.commit()
+        print(f"[arr_backfill] {creados} contratos de arriendo creados desde ArrProyecto")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -2763,6 +2810,7 @@ def _deferred_init():
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
+        ("arr_backfill_contratos", _run_arr_backfill_contratos),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:

@@ -47,6 +47,8 @@ class ArrCalculoFila(BaseModel):
     canon_archivo: Optional[int]
     canon_a_facturar: Optional[int]
     difiere_archivo: bool
+    valor_facturado_congelado: Optional[int] = None
+    ipc_incompleto: bool = False
     historial_texto: str
     historial_detalle: str
 
@@ -72,5 +74,6 @@ class ArrSeleccionOut(BaseModel):
     periodo: str
     incluido: bool
     facturado: bool
+    valor_facturado_congelado: Optional[int] = None
     updated_at: datetime
     model_config = {"from_attributes": True}

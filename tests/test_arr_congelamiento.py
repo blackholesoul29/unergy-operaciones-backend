@@ -1,0 +1,67 @@
+"""Arriendos Fase A: al facturar se congela el canon; al desmarcar se descongela."""
+import types
+from datetime import date
+
+import pytest
+from sqlalchemy import create_engine, BigInteger
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+
+from app.models.base import Base
+import app.models  # noqa: F401
+from app.models.arriendos import ArrProyecto, ArrSeleccion, ArrIPCTasa
+from app.api.v1 import arriendos as api
+
+
+@compiles(JSONB, "sqlite")
+def _j(e, c, **k):
+    return "TEXT"
+
+
+@compiles(BigInteger, "sqlite")
+def _b(e, c, **k):
+    return "INTEGER"
+
+
+ADMIN = types.SimpleNamespace(id=1)
+PERIODO = "2026-06"
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[
+        ArrProyecto.__table__, ArrSeleccion.__table__, ArrIPCTasa.__table__,
+    ])
+    s = sessionmaker(bind=engine)()
+    yield s
+    s.close()
+
+
+def _proy(db):
+    p = ArrProyecto(nombre="Predio", codigo="C1", valor_base=1_000_000,
+                    fecha_firma_contrato=date(2020, 1, 1), activo=True)
+    db.add(p); db.flush()
+    return p
+
+
+def test_facturar_congela_y_desmarcar_descongela(db):
+    p = _proy(db)
+    sel = api.toggle_facturado(PERIODO, p.id, db=db, _=ADMIN)   # marca → congela
+    assert sel.facturado is True
+    assert sel.valor_facturado_congelado is not None
+
+    sel = api.toggle_facturado(PERIODO, p.id, db=db, _=ADMIN)   # desmarca → descongela
+    assert sel.facturado is False
+    assert sel.valor_facturado_congelado is None
+
+
+def test_calculo_usa_valor_congelado(db):
+    p = _proy(db)
+    db.add(ArrSeleccion(arr_proyecto_id=p.id, periodo=PERIODO, incluido=True,
+                        facturado=True, valor_facturado_congelado=555_000))
+    db.flush()
+    resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
+    fila = next(f for f in resp.filas if f.id == p.id)
+    assert fila.canon_a_facturar == 555_000

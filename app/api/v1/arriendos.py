@@ -47,7 +47,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
     filas, total = [], 0
     for p in proyectos:
         sel = selecciones.get(p.id)
-        fila = ArrCalculoFila(**calcular_arriendo(
+        data = calcular_arriendo(
             proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
             fecha_firma_contrato=p.fecha_firma_contrato,
             valor_base=float(p.valor_base) if p.valor_base is not None else None,
@@ -57,7 +57,9 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             facturado=(sel.facturado if sel else False),
             valor_congelado=(int(sel.valor_facturado_congelado)
                              if sel and sel.valor_facturado_congelado is not None else None),
-        ))
+        )
+        data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
+        fila = ArrCalculoFila(**data)
         filas.append(fila)
         if fila.incluido and fila.habilitado and fila.canon_a_facturar:
             total += fila.canon_a_facturar
@@ -103,9 +105,11 @@ def guardar_seleccion(periodo: str, payload: ArrSeleccionGuardar, db: Session = 
         ).first()
         if sel:
             sel.incluido = item.incluido
+            sel.motivo_exclusion = item.motivo_exclusion
         else:
             sel = ArrSeleccion(arr_proyecto_id=item.proyecto_id, periodo=periodo,
-                               incluido=item.incluido, facturado=False)
+                               incluido=item.incluido, facturado=False,
+                               motivo_exclusion=item.motivo_exclusion)
             db.add(sel)
         res.append(sel)
     db.commit()

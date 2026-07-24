@@ -49,6 +49,7 @@ class ArrCalculoFila(BaseModel):
     difiere_archivo: bool
     valor_facturado_congelado: Optional[int] = None
     ipc_incompleto: bool = False
+    motivo_exclusion: Optional[str] = None
     historial_texto: str
     historial_detalle: str
 
@@ -62,6 +63,7 @@ class ArrCalculoResponse(BaseModel):
 class ArrSeleccionItem(BaseModel):
     proyecto_id: int
     incluido: bool
+    motivo_exclusion: Optional[str] = None
 
 
 class ArrSeleccionGuardar(BaseModel):
@@ -75,5 +77,6 @@ class ArrSeleccionOut(BaseModel):
     incluido: bool
     facturado: bool
     valor_facturado_congelado: Optional[int] = None
+    motivo_exclusion: Optional[str] = None
     updated_at: datetime
     model_config = {"from_attributes": True}

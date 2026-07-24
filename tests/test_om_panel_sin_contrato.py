@@ -94,6 +94,20 @@ def test_sin_firma_pero_con_fecha_inicio_del_dialogo_habilita(db):
     assert fila.historial_indexaciones != "Sin fecha de suscripción"
 
 
+def test_calculo_expone_motivo_exclusion(db):
+    """La fila trae el motivo_exclusion guardado para mostrarlo en el panel (tooltip)."""
+    p = Proyecto(nombre_comercial="Excl", estado="en_operacion", tipo_proyecto="minigranja")
+    db.add(p); db.flush()
+    c = _contrato(db, p, "vigente")
+    db.add(OMSeleccion(contrato_id=c.id, periodo="2026-06",
+                       incluido=False, motivo_exclusion="en disputa con el cliente"))
+    db.flush()
+
+    resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)
+    fila = next(f for f in resp.filas if f.contrato_id == c.id)
+    assert fila.motivo_exclusion == "en disputa con el cliente"
+
+
 def test_fila_incluye_tipo_proyecto(db):
     """Cada fila lleva el tipo_proyecto para agrupar el panel (como en Proyectos)."""
     mg = Proyecto(nombre_comercial="Mini", estado="en_operacion", tipo_proyecto="minigranja")

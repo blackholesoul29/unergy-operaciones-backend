@@ -61,6 +61,7 @@ class OMCalculoFila(BaseModel):
     aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
     estado_contrato:        str = "con_contrato"   # con_contrato | en_tramite | sin_contrato
     tipo_proyecto:          Optional[str] = None   # minigranja | autoconsumo | gd | ... (para agrupar el panel)
+    motivo_exclusion:       Optional[str] = None   # #6: por qué se excluyó este mes (si está excluido)
     periodicidad:           Optional[str] = None   # mensual/bimestral/trimestral/semestral/anual
     valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str

@@ -129,6 +129,10 @@ def test_alerta_roja_notifica_a_usuarios():
     assert len(notifs) == 2
     assert resumen == {"procesadas": 1, "alertas": 1, "errores": 0}
     m_mail.assert_called_once()
+    # anti-fabricación: la alerta debe divulgar que la cifra es provisional
+    for n in notifs:
+        assert "estimación provisional" in n.mensaje
+        assert "requerido estimado" in n.mensaje
 
 
 def test_cobertura_extrema_se_persiste_sin_overflow():

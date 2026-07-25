@@ -12,7 +12,7 @@ Create Date: 2026-07-14
 from alembic import op
 
 revision = "056"
-down_revision = "047"
+down_revision = "055"
 branch_labels = None
 depends_on = None
 

@@ -4,10 +4,12 @@ Revision ID: 054
 Revises: 053
 Create Date: 2026-07-06
 
-Relinealizada de 036→037 (nightwatch): el build original forkeó de master (head
-035) y reclamó "036", colisionando con 036_contrato_servicio_detail_fields.py
-(otra rama pendiente que también forkeó de 035). Dos revisiones "036" rompen
-`alembic upgrade head` al mergear la segunda. Aquí encadena tras contratos (036).
+Relinealizada dos veces: el build original forkeó de master (head 035) y
+reclamó "036", colisionando con la migración de contratos-servicio (otra rama
+que también forkeó de 035) — dos revisiones con el mismo id rompen
+`alembic upgrade head` al mergear la segunda. Tras el avance de master a
+049/050 (07-24) la cola completa se re-encadenó: esta quedó como 054 y cuelga
+de 053 (contrato_servicio_detail_fields, en esta misma rama).
 """
 from alembic import op
 

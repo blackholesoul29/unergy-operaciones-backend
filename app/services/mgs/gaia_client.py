@@ -606,15 +606,27 @@ class GaiaClient:
             _prev_t = t
 
         # AP tiene prioridad (es la medición real de potencia instantánea);
-        # eae rellena cualquier hueco de tiempo sin AP -- al inicio, en medio
+        # eae rellena huecos LARGOS de tiempo sin AP -- al inicio, en medio
         # (ej. se cae la conexión y se recupera más tarde) o al final. No basta
         # con rellenar solo la cola: si AP se cae y luego se recupera, el hueco
         # queda en medio del día, no al final. La comparación es por cercanía
-        # en el tiempo (±10 min), no por texto exacto: ap y eae no siempre
-        # comparten el mismo segundo exacto de lectura aunque sean del mismo
-        # intervalo (ej. 16:00:00 vs 16:00:01), y comparar el string tal cual
-        # dejaba pasar "huecos" falsos que no eran huecos reales.
-        _GAP_TOLERANCE_SEC = 600  # 10 min
+        # en el tiempo, no por texto exacto: ap y eae no siempre comparten el
+        # mismo segundo exacto de lectura aunque sean del mismo intervalo
+        # (ej. 16:00:00 vs 16:00:01), y comparar el string tal cual dejaba
+        # pasar "huecos" falsos que no eran huecos reales.
+        #
+        # El umbral era 10 min, pensado para el caso real que motivó esto
+        # (Perijá, 2026-07-02: AP caído por horas completas). Pero con un
+        # umbral tan chico, un medidor con huecos de AP cortos y frecuentes
+        # (típico del medidor de Respaldo, que reporta más intermitente) queda
+        # relleno de puntos derivados de eae por todos lados -- y como eae se
+        # reporta en intervalos más largos que AP, cada relleno promedia
+        # potencia sobre una ventana de tiempo distinta a la de sus vecinos
+        # reales, produciendo un diente de sierra en la curva (caso real: MGS
+        # 0007 La Paz Vallenata, 2026-07-14). Subir el umbral a 30 min sigue
+        # cubriendo caídas largas tipo Perijá sin intervenir en huecos cortos,
+        # que `spanGaps` en el frontend ya conecta con una línea recta.
+        _GAP_TOLERANCE_SEC = 1800  # 30 min
         try:
             _ap_dt = sorted(_parse_t(pt["time"]) for pt in ap_series)
         except Exception:

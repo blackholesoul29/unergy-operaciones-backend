@@ -13,6 +13,9 @@ class XMDescargaRequest(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     enriquecer: bool = False
+    # Para tipos que se filtran por agente (tgrl): UNGG (generador) o UNGC
+    # (comercializador). Se ignora para los tipos que filtran por planta.
+    agente_filtro: str = "UNGG"
 
 
 class XMJobResponse(BaseModel):

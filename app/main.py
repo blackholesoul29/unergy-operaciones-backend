@@ -2,9 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, SessionLocal
@@ -44,15 +42,6 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_fecha ON generacion_diaria (fecha)",
-    """CREATE TABLE IF NOT EXISTS monitoreo_verificaciones (
-        id BIGSERIAL PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        codigo VARCHAR(6) NOT NULL,
-        usado BOOLEAN NOT NULL DEFAULT FALSE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_monitoreo_ver_email ON monitoreo_verificaciones (email)",
     # migration 004 — P50/P90 monthly simulation per project (JSON arrays of 12 values)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p90_mensual_kwh JSONB",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p50_mensual_kwh JSONB",
@@ -63,6 +52,39 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
+    # impuestos por cliente — reteiva (retención de IVA), separada de reteica
+    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
+    # soportes/comprobantes (archivo Drive) por transacción del panel contable
+    """CREATE TABLE IF NOT EXISTS panel_soporte (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        periodo VARCHAR(7) NOT NULL,
+        tipo VARCHAR(20) NOT NULL,
+        grupo VARCHAR(20) NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        archivo_url VARCHAR(1000) NOT NULL,
+        archivo_nombre VARCHAR(300),
+        drive_file_id VARCHAR(120),
+        created_by_id BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_soporte ON panel_soporte (proyecto_id, periodo, tipo, grupo, concepto)",
+    "CREATE INDEX IF NOT EXISTS ix_panel_soporte_lookup ON panel_soporte (proyecto_id, periodo, tipo)",
+    # excepciones de tasa de impuesto por (cliente, servicio[, proyecto])
+    """CREATE TABLE IF NOT EXISTS cliente_tasa_servicio (
+        id BIGSERIAL PRIMARY KEY,
+        cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+        servicio VARCHAR(30) NOT NULL,
+        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE CASCADE,
+        iva_pct NUMERIC(5,2),
+        retencion_pct NUMERIC(5,2),
+        reteiva_pct NUMERIC(5,2),
+        reteica_pct NUMERIC(5,2),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_tasa_servicio ON cliente_tasa_servicio (cliente_id, servicio, COALESCE(proyecto_id, 0))",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,
@@ -113,6 +135,7 @@ _PENDING_DDLS = [
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'rut'",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'certificado_bancario'",
+    "ALTER TYPE periodicidad_enum ADD VALUE IF NOT EXISTS 'semestral'",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'camara_comercio'",
     # migration 010 — liquidaciones module columns
     "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS estado_resultados_url VARCHAR(1000)",
@@ -1032,6 +1055,14 @@ _PENDING_DDLS = [
     # -- antes solo existía en fronteras, y sin forma de editarlo desde la API.
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_operador_red_id ON proyectos (operador_red_id)",
+    # Rediseño Mantenimiento: valor congelado al facturar (#4).
+    "ALTER TABLE om_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_facturado_congelado NUMERIC(14,0)",
+    # Rediseño Mantenimiento: motivo de exclusión del mes (#6).
+    "ALTER TABLE om_seleccion_mensual ADD COLUMN IF NOT EXISTS motivo_exclusion VARCHAR(500)",
+    # Arriendos Fase A: canon congelado al facturar (paridad con O&M).
+    "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_facturado_congelado BIGINT",
+    # Arriendos Fase B: motivo de exclusión del mes.
+    "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS motivo_exclusion VARCHAR(500)",
     # migration — módulo CRM comercial (2026-07-10)
     # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
     "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",
@@ -1048,6 +1079,37 @@ _PENDING_DDLS = [
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'fin' TO 'servicio_operativo'",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
+    # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
+    # migration — CRM: pipeline de 6 estados a nivel oportunidad (2026-07-15)
+    # RENAME VALUE migra los datos in-place (sin UPDATE) y es idempotente por
+    # tolerancia (si ya se renombró, lanza y _run_column_migrations lo salta).
+    # ADD VALUE va al bloque autocommit (debe correr fuera de transacción).
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'oferta' TO 'envio_oferta'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion' TO 'negociacion_contrato'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'servicio_operativo' TO 'operando'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'firmado'",
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'declinado'",
+    # Estandariza el prefijo del código de seguimiento OF→OP (oferta y oportunidad).
+    # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
+    "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
+    # migration — drop fronteras.estado_operacional: campo manual sin ninguna
+    # sincronizacion automatica, nunca reflejaba el estado real y quedaba
+    # desactualizado; el estado real de operacion vive en Proyecto.estado (2026-07-22)
+    "ALTER TABLE fronteras DROP COLUMN IF EXISTS estado_operacional",
+    "DROP TYPE IF EXISTS estado_operacional_enum",
+    # migration — drop fronteras.quoia_meter_id: nunca lo leyo ningun servicio
+    # del backend, solo se mostraba/editaba en el frontend; el campo que si
+    # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
+    "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
+    # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
+    # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
 ]
 
 
@@ -2339,10 +2401,10 @@ _OM_IPC_SEED = [
 ]
 
 # Política del seed (no destructiva sobre datos del equipo):
-#   - fecha_firma_contrato y tarifa_base: campos editables en la UI → SOLO se
-#     rellenan si están NULL; nunca se sobreescribe un valor ya cargado.
-#   - fecha_inicio_om: campo gestionado solo por el seed (no hay input en el wizard)
-#     → se fija al valor de esta tabla (puede corregir un valor previo del seed).
+#   - fecha_firma_contrato, tarifa_base y fecha_inicio_om: SOLO se rellenan si
+#     están NULL; nunca se sobreescribe un valor ya cargado. Sirve de respaldo
+#     inicial (p.ej. BD nueva); la fuente de verdad son los campos de la UI
+#     (Proyecto>Detalle>Servicios>Operación>Mantenimiento).
 _OM_PROYECTOS_SEED = [
     {"nombre": "Minigranja Solar Uruaco",            "fecha_firma": "2022-09-10", "fecha_inicio_om": "2023-11-15", "valor_base_anual": 48000000},
     {"nombre": "Minigranja Solar Baraya",             "fecha_firma": None,         "fecha_inicio_om": None,         "valor_base_anual": None},
@@ -2380,8 +2442,9 @@ def _run_om_seed() -> None:
 
     NO crea contratos ni huérfanos: actualiza los contratos de mantenimiento que
     YA existen, emparejándolos por nombre. Política no destructiva sobre datos del
-    equipo: fecha_firma_contrato y tarifa_base solo se rellenan si están NULL;
-    fecha_inicio_om (campo solo-seed) se fija al valor de la tabla.
+    equipo: fecha_firma_contrato, tarifa_base y fecha_inicio_om solo se rellenan
+    si están NULL. Además hace un backfill idempotente fecha_inicio → fecha_inicio_om
+    (unificación de la "Fecha de inicio O&M" en una sola columna).
     """
     from datetime import date
     from sqlalchemy.orm import sessionmaker
@@ -2427,15 +2490,26 @@ def _run_om_seed() -> None:
             if base is not None and c.tarifa_base is None:
                 c.tarifa_base = base
                 cambio = True
-            if inicio_om is not None and c.fecha_inicio_om != inicio_om:
+            if inicio_om is not None and c.fecha_inicio_om is None:
                 c.fecha_inicio_om = inicio_om
                 cambio = True
             if cambio:
                 actualizados += 1
 
+        # ── Unificación de columnas O&M (idempotente, no destructiva) ─────────
+        # La "Fecha de inicio O&M" pasa a vivir SOLO en fecha_inicio_om. Antes el
+        # diálogo la guardaba en fecha_inicio; copiamos ese valor donde aún no haya
+        # fecha_inicio_om. Solo rellena NULLs → nunca cambia una fecha ya existente
+        # (por tanto no altera ninguna indexación).
+        backfill = 0
+        for c in contratos:
+            if c.fecha_inicio_om is None and c.fecha_inicio is not None:
+                c.fecha_inicio_om = c.fecha_inicio
+                backfill += 1
+
         db.commit()
         faltantes = [it["nombre"] for it, _ in seed_keys if it["nombre"] not in usados]
-        print(f"[om_seed] {actualizados} contratos actualizados; sin match: {faltantes}")
+        print(f"[om_seed] {actualizados} contratos actualizados; backfill inicio_om={backfill}; sin match: {faltantes}")
 
     except Exception as e:
         db.rollback()
@@ -2586,6 +2660,53 @@ def _run_fallas_tipo_backfill() -> None:
         db.close()
 
 
+def _run_arr_backfill_contratos() -> None:
+    """Crea el contrato de arriendo (ContratoServicio servicio_aplica='arriendo') en
+    cada proyecto que tenga un ArrProyecto emparejado (match difuso, ignora el código
+    MGS) y aún no tenga contrato de arriendo. Copia valor_base→tarifa_base y la fecha
+    de suscripción. Idempotente y NO destructivo: nunca pisa un contrato existente.
+    Con esto la info de arriendos vive en Proyecto>Detalle>Servicios>Operación."""
+    from sqlalchemy.orm import sessionmaker
+    from app.models.arriendos import ArrProyecto
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+        arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+        con_arr = {c.proyecto_id for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).all()}
+
+        creados, usados = 0, set()
+        for p in db.query(Proyecto).all():
+            a = om_match_seed(p.nombre_comercial or "", arr_keys)
+            if a is None or a.id in usados:
+                continue
+            usados.add(a.id)
+            if p.id in con_arr:
+                continue   # ya tiene contrato de arriendo → no se toca
+            db.add(ContratoServicio(
+                proyecto_id=p.id,
+                servicio_aplica="arriendo",
+                estado="vigente",
+                periodicidad_pago="mensual",
+                tarifa_base=a.valor_base,
+                fecha_firma_contrato=a.fecha_firma_contrato,
+            ))
+            creados += 1
+        db.commit()
+        print(f"[arr_backfill] {creados} contratos de arriendo creados desde ArrProyecto")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -2619,10 +2740,13 @@ def _run_comercial_import() -> None:
     db = SessionLocal()
     try:
         from app.models.comercial import OportunidadOferta
-        # One-shot: si ya hay ofertas cargadas, no volver a tocar (evita recrear
-        # filas que el equipo pudo borrar). Para recargar, usar el endpoint admin.
-        if db.query(OportunidadOferta.id).first() is not None:
-            print("[startup] comercial_import: ya hay ofertas, se omite")
+        hay_ofertas = db.query(OportunidadOferta.id).first() is not None
+        hay_detalle = (db.query(OportunidadOferta.id)
+                       .filter(OportunidadOferta.detalle.isnot(None)).first() is not None)
+        if hay_ofertas and hay_detalle:
+            # Ya cargado y enriquecido (la señal se apaga porque las filas de
+            # servicios sí reciben `detalle`). No tocar (evita recrear borradas).
+            print("[startup] comercial_import: ya cargado y enriquecido, se omite")
             return
         admin_id = None
         try:
@@ -2632,9 +2756,37 @@ def _run_comercial_import() -> None:
         except Exception:
             admin_id = None
         current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
-        res = importar_hojas(dry_run=False, db=db, current=current)
-        print(f"[startup] comercial_import: clientes={res['clientes']} "
-              f"ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+        # 0 ofertas → carga completa. Ya hay ofertas pero sin detalle → solo
+        # enriquecer (rellena detalle/precio/etc. sin crear ni resucitar borradas).
+        crear = not hay_ofertas
+        res = importar_hojas(dry_run=False, crear_faltantes=crear, db=db, current=current)
+        print(f"[startup] comercial_import (crear_faltantes={crear}): "
+              f"clientes={res['clientes']} ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+    finally:
+        db.close()
+
+
+def _run_comercial_dedup() -> None:
+    """Fusiona clientes-prospecto que el import creó por duplicado cuando ya
+    existía el cliente operativo (match por planta→dueño o nombre exacto).
+    Conservador + soft-delete (reversible) + idempotente. Corre tras el import."""
+    from types import SimpleNamespace
+    from app.core.database import SessionLocal
+    from app.api.v1.comercial import dedup_clientes
+
+    db = SessionLocal()
+    try:
+        admin_id = None
+        try:
+            from app.models.usuarios import Usuario
+            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
+            admin_id = adm.id if adm else None
+        except Exception:
+            admin_id = None
+        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
+        res = dedup_clientes(dry_run=False, umbral=0.85, db=db, current=current)
+        print(f"[startup] comercial_dedup: prospectos={res['prospectos']} "
+              f"fusionados={res['fusionados']} sin_canonico={res['sin_canonico']}")
     finally:
         db.close()
 
@@ -2649,6 +2801,7 @@ def _deferred_init():
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
         ("comercial_import", _run_comercial_import),
+        ("comercial_dedup", _run_comercial_dedup),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
@@ -2657,6 +2810,7 @@ def _deferred_init():
         ("cgm_seed", _run_cgm_seed),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
+        ("arr_backfill_contratos", _run_arr_backfill_contratos),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
@@ -2816,23 +2970,6 @@ _uploads_path = Path("uploads")
 _uploads_path.mkdir(exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=str(_uploads_path)), name="uploads")
 
-# ── monitoreo: servir fallas-unergy como SPA ─────────────────────────────────
-_monitoreo_path = Path("static/monitoreo")
-_monitoreo_path.mkdir(parents=True, exist_ok=True)
-
-_monitoreo_index = _monitoreo_path / "index.html"
-
-
-@app.get("/monitoreo", include_in_schema=False)
-@app.get("/monitoreo/", include_in_schema=False)
-async def serve_monitoreo():
-    if _monitoreo_index.exists():
-        return FileResponse(str(_monitoreo_index), media_type="text/html")
-    return {"error": "Monitoreo no desplegado aún. Ejecuta scripts/patch_monitoreo.py"}
-
-
-if _monitoreo_path.exists() and any(_monitoreo_path.iterdir()):
-    app.mount("/monitoreo/static", StaticFiles(directory=str(_monitoreo_path)), name="monitoreo_static")
 
 
 @app.get("/health")

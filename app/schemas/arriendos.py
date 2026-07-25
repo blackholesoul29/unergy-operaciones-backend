@@ -47,6 +47,13 @@ class ArrCalculoFila(BaseModel):
     canon_archivo: Optional[int]
     canon_a_facturar: Optional[int]
     difiere_archivo: bool
+    valor_facturado_congelado: Optional[int] = None
+    ipc_incompleto: bool = False
+    aplica_este_mes: bool = True
+    periodicidad: Optional[str] = None
+    tipo_proyecto: Optional[str] = None
+    estado_contrato: str = "con_contrato"
+    motivo_exclusion: Optional[str] = None
     historial_texto: str
     historial_detalle: str
 
@@ -60,6 +67,7 @@ class ArrCalculoResponse(BaseModel):
 class ArrSeleccionItem(BaseModel):
     proyecto_id: int
     incluido: bool
+    motivo_exclusion: Optional[str] = None
 
 
 class ArrSeleccionGuardar(BaseModel):
@@ -72,5 +80,7 @@ class ArrSeleccionOut(BaseModel):
     periodo: str
     incluido: bool
     facturado: bool
+    valor_facturado_congelado: Optional[int] = None
+    motivo_exclusion: Optional[str] = None
     updated_at: datetime
     model_config = {"from_attributes": True}

@@ -1,9 +1,10 @@
 """Lógica pura del CRM comercial (testeable sin BD)."""
 from datetime import datetime, timedelta, timezone
 
-# Estados donde aplica la alerta de días sin respuesta. `fin` queda por fuera
-# a propósito: es cierre comercial y los históricos migrados viven ahí.
-ESTADOS_CON_ALERTA = frozenset({"prospeccion", "oferta", "negociacion"})
+# Estados donde aplica la alerta de días sin respuesta. Los estados de cierre
+# (firmado/operando) y el negativo (declinado) quedan por fuera a propósito:
+# no requieren seguimiento comercial y los históricos migrados viven en 'operando'.
+ESTADOS_CON_ALERTA = frozenset({"prospeccion", "envio_oferta", "negociacion_contrato"})
 
 
 def col_now() -> datetime:

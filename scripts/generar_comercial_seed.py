@@ -47,6 +47,7 @@ def generar(xlsx_path: str) -> list[dict]:
             "empresa": emp, "planta_nombre": clean(r[3]) if len(r) > 3 else None,
             "servicios_buscados": clean(r[4]) if len(r) > 4 else None,
             "etapa_texto": clean(r[5]) if len(r) > 5 else None,
+            "fpo": clean(r[6]) if len(r) > 6 else None,
             "numero_oferta": clean(r[1]) if len(r) > 1 else None,
             "precio_detalle": clean(r[7]) if len(r) > 7 else None,
             "contrato_firmado": clean(r[8]) if len(r) > 8 else None,

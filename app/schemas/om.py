@@ -1,6 +1,6 @@
 """Schemas Pydantic para el panel O&M."""
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date, datetime
 
@@ -19,7 +19,7 @@ class IPCTasaOut(BaseModel):
 
 
 class IPCTasaUpsert(BaseModel):
-    tasa:       float
+    tasa:       float = Field(ge=-1.0, le=1.0)   # fracción: -100%..100% (tope de sanidad)
     confirmado: bool = False
     fuente:     Optional[str] = None
 
@@ -57,7 +57,15 @@ class OMCalculoFila(BaseModel):
     valor_a_facturar:       Optional[int]
     valor_calculado:        Optional[int]
     editado_manual:         bool
+    valor_facturado_congelado: Optional[int] = None   # #4: valor fijo cuando el mes está facturado
+    aplica_este_mes:        bool = True   # False = no le toca cobro este mes (por periodicidad)
+    estado_contrato:        str = "con_contrato"   # con_contrato | en_tramite | sin_contrato
+    tipo_proyecto:          Optional[str] = None   # minigranja | autoconsumo | gd | ... (para agrupar el panel)
+    motivo_exclusion:       Optional[str] = None   # #6: por qué se excluyó este mes (si está excluido)
+    periodicidad:           Optional[str] = None   # mensual/bimestral/trimestral/semestral/anual
+    valor_manual_desactualizado: bool = False   # el override ya no coincide con el valor recalculado
     historial_indexaciones: str
+    ipc_incompleto:         bool = False   # algún aniversario cayó en un año sin tasa IPC cargada
     documento_disponible:   bool = False   # PDF individual disponible para este proyecto
     documento_nombre:       Optional[str] = None   # nombre del archivo renombrado
 
@@ -68,12 +76,26 @@ class OMCalculoResponse(BaseModel):
     total_seleccionado: int
 
 
+# ── Serie de indexación (Proyecto>Servicios>Operación) ───────────────────────
+
+class OMIndexacionFila(BaseModel):
+    anio:         int
+    ipc_aplicado: Optional[float] = None   # % aplicado ese año (None = año base / sin tasa)
+    valor:        int
+
+
+class OMIndexacionResponse(BaseModel):
+    anual:   list[OMIndexacionFila]
+    mensual: list[OMIndexacionFila]
+
+
 # ── Selección mensual ────────────────────────────────────────────────────────
 
 class OMSeleccionItem(BaseModel):
     contrato_id:  int
     incluido:     bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None   # #6: requerido por la UI al excluir uno que aplica
 
 
 class OMSeleccionGuardar(BaseModel):
@@ -87,8 +109,28 @@ class OMSeleccionOut(BaseModel):
     incluido:    bool
     facturado:    bool
     valor_manual: Optional[float] = None
+    motivo_exclusion: Optional[str] = None
     updated_at:   datetime
     model_config = {"from_attributes": True}
+
+
+# ── Páginas sin match (asignación manual) ───────────────────────────────────
+
+class OMPaginaSinMatchOut(BaseModel):
+    id:              int
+    periodo:         str
+    pagina:          int
+    nombre_extraido: Optional[str] = None
+    estrategia:      Optional[str] = None
+    razon:           str
+    numero_factura:  Optional[str] = None
+    muestra_texto:   Optional[str] = None
+    origen:          str
+    model_config = {"from_attributes": True}
+
+
+class OMSinMatchAsignar(BaseModel):
+    contrato_id: int
 
 
 # ── Notificaciones IPC ───────────────────────────────────────────────────────

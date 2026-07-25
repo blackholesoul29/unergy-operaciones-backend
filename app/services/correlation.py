@@ -321,30 +321,25 @@ def correlate_investments(db: Session) -> dict:
 
     Matching strategy (in priority order):
     1. NIT/RUT: cliente.nit_cedula == investment.rut or investment.business_registry
-    2. Email: cliente.correo_electronico == investment.email
-    3. Name: fuzzy substring match between cliente.razon_social_nombre and investment.name
+    2. Name: fuzzy substring match between cliente.razon_social_nombre and investment.name
     """
     investments = fetch_origina_investments()
     if not investments:
         return {"matched": 0, "investments": 0, "details": []}
 
     rows = db.execute(text(
-        "SELECT id, razon_social_nombre, nit_cedula, correo_electronico, origina_investment_id "
+        "SELECT id, razon_social_nombre, nit_cedula, origina_investment_id "
         "FROM clientes WHERE deleted_at IS NULL ORDER BY razon_social_nombre"
     )).mappings().all()
     clients = [dict(r) for r in rows]
 
     # Build lookup indexes for clients
     clients_by_nit: dict[str, dict] = {}
-    clients_by_email: dict[str, dict] = {}
     clients_by_norm_name: dict[str, dict] = {}
     for c in clients:
         nit = (c.get("nit_cedula") or "").strip()
         if nit:
             clients_by_nit[nit] = c
-        email = (c.get("correo_electronico") or "").strip().lower()
-        if email:
-            clients_by_email[email] = c
         name = (c.get("razon_social_nombre") or "").strip()
         norm = _normalize(name)
         if norm:
@@ -357,7 +352,6 @@ def correlate_investments(db: Session) -> dict:
         inv_id = inv["id"]
         inv_rut = (inv.get("rut") or "").strip()
         inv_biz_reg = (inv.get("business_registry") or "").strip()
-        inv_email = (inv.get("email") or "").strip().lower()
         inv_name = (inv.get("name") or "").strip()
         inv_norm = _normalize(inv_name)
 
@@ -372,12 +366,7 @@ def correlate_investments(db: Session) -> dict:
             match_client = clients_by_nit[inv_biz_reg]
             match_method = "business_registry"
 
-        # 2. Match by email
-        if not match_client and inv_email and inv_email in clients_by_email:
-            match_client = clients_by_email[inv_email]
-            match_method = "email"
-
-        # 3. Fuzzy name match
+        # 2. Fuzzy name match
         if not match_client and inv_norm:
             for cn, cc in clients_by_norm_name.items():
                 if inv_norm and (inv_norm in cn or cn in inv_norm):

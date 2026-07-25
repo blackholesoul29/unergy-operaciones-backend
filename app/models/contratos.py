@@ -39,6 +39,7 @@ class PeriodicidadEnum(str, enum.Enum):
     mensual = "mensual"
     bimestral = "bimestral"
     trimestral = "trimestral"
+    semestral = "semestral"
     anual = "anual"
 
 

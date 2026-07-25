@@ -38,6 +38,21 @@ class ContactoParaClienteCreate(BaseModel):
         return v
 
 
+class TasaServicioUpsert(BaseModel):
+    servicio: str  # Representación | CGM | Administración
+    proyecto_id: Optional[int] = None  # None = todos los proyectos del cliente
+    iva_pct: Optional[float] = None
+    retencion_pct: Optional[float] = None
+    reteiva_pct: Optional[float] = None
+    reteica_pct: Optional[float] = None
+
+
+class TasaServicioOut(TasaServicioUpsert):
+    id: int
+    cliente_id: int
+    model_config = {"from_attributes": True}
+
+
 class ClienteServicioCreate(BaseModel):
     tipo: str
     fecha_inicio: Optional[date] = None

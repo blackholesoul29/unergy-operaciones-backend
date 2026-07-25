@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+from app.models.proyectos import Proyecto
+from app.models.contratos import ContratoServicio
 
 _UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "arriendos"
 from app.schemas.arriendos import (
@@ -30,30 +32,122 @@ def _validar_periodo(periodo: str):
         raise HTTPException(400, "periodo debe tener formato YYYY-MM")
 
 
+def _safe_segment(nombre: str) -> str:
+    """Sanea un componente de ruta: sin separadores ni '..' (evita path traversal)."""
+    limpio = "".join(c for c in (nombre or "") if c not in '/\\:*?"<>|').replace("..", "").strip()
+    return limpio or "sin_codigo"
+
+
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _validar_periodo(periodo)
+    """Los datos de facturación (valor, fecha inicio O&M, periodicidad, estado, tipo)
+    salen del contrato de arriendo en Operación (ContratoServicio servicio_aplica=
+    'arriendo' ligado al Proyecto). ArrProyecto se mantiene como llave de la fila
+    (selección/documentos) y como respaldo si aún no hay contrato. canon_archivo
+    (override) se conserva."""
+    from app.services.om_calculator import om_keys, om_match_seed
+
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     selecciones = {s.arr_proyecto_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
-    proyectos = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
+
+    # Emparejar cada ArrProyecto con su Proyecto (difuso) y el contrato de arriendo.
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    arr_to_proy = {}
+    for p in db.query(Proyecto).all():
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is not None and a.id not in arr_to_proy:
+            arr_to_proy[a.id] = p
+    contrato_por_proy = {}
+    for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all():
+        contrato_por_proy.setdefault(c.proyecto_id, c)
 
     filas, total = [], 0
-    for p in proyectos:
-        sel = selecciones.get(p.id)
-        fila = ArrCalculoFila(**calcular_arriendo(
-            proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
-            fecha_firma_contrato=p.fecha_firma_contrato,
-            valor_base=float(p.valor_base) if p.valor_base is not None else None,
-            canon_archivo=float(p.canon_archivo) if p.canon_archivo is not None else None,
+    for a in arr:
+        sel = selecciones.get(a.id)
+        p = arr_to_proy.get(a.id)
+        c = contrato_por_proy.get(p.id) if p else None
+
+        if c is not None:   # fuente de verdad: el contrato en Operación
+            valor_base = float(c.tarifa_base) if c.tarifa_base is not None else None
+            fecha_firma = c.fecha_firma_contrato
+            fecha_inicio_om = c.fecha_inicio_om
+            periodicidad = c.periodicidad_pago
+            estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
+        else:               # sin contrato aún: respaldo a los datos del ArrProyecto
+            valor_base = float(a.valor_base) if a.valor_base is not None else None
+            fecha_firma = a.fecha_firma_contrato
+            fecha_inicio_om = None
+            periodicidad = None
+            estado_contrato = "sin_contrato"
+
+        data = calcular_arriendo(
+            proyecto_id=a.id, nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
+            fecha_firma_contrato=fecha_firma,
+            valor_base=valor_base,
+            canon_archivo=float(a.canon_archivo) if a.canon_archivo is not None else None,
             periodo=periodo, ipc_tasas=ipc_tasas,
             incluido=(sel.incluido if sel else True),
             facturado=(sel.facturado if sel else False),
-        ))
+            valor_congelado=(int(sel.valor_facturado_congelado)
+                             if sel and sel.valor_facturado_congelado is not None else None),
+            fecha_inicio_om=fecha_inicio_om,
+            periodicidad=periodicidad,
+        )
+        data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
+        data["tipo_proyecto"] = p.tipo_proyecto if p else None
+        data["estado_contrato"] = estado_contrato
+        fila = ArrCalculoFila(**data)
         filas.append(fila)
-        if fila.incluido and fila.habilitado and fila.canon_a_facturar:
+        # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
+        if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
+                and fila.aplica_este_mes and fila.canon_a_facturar):
             total += fila.canon_a_facturar
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
+
+
+@router.get("/diagnostico-migracion")
+def diagnostico_migracion(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Read-only: dimensiona la migración de ArrProyecto → contrato de arriendo.
+    Empareja cada ArrProyecto con su Proyecto de forma DIFUSA (misma lógica del
+    seed O&M: ignora el código MGS y compara tokens). No modifica nada."""
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
+    proy_con_contrato_arr = {
+        c.proyecto_id
+        for c in db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id.isnot(None)).all()
+    }
+
+    matched_ids = set()
+    con_contrato, sin_contrato = 0, []
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None or a.id in matched_ids:
+            continue
+        matched_ids.add(a.id)
+        if p.id in proy_con_contrato_arr:
+            con_contrato += 1
+        else:
+            sin_contrato.append(f"{a.nombre} → {p.nombre_comercial}")
+
+    sin_match = [a.nombre for a in arr if a.id not in matched_ids]
+
+    return {
+        "total_arr_proyectos":     len(arr),
+        "con_contrato_arriendo":   con_contrato,
+        "sin_contrato_arriendo":   len(sin_contrato),
+        "sin_match_de_proyecto":   len(sin_match),
+        "ejemplos_sin_contrato":   sin_contrato[:30],
+        "ejemplos_sin_match":      sin_match[:30],
+    }
 
 
 @router.get("/proyectos", response_model=list[ArrProyectoOut])
@@ -95,9 +189,11 @@ def guardar_seleccion(periodo: str, payload: ArrSeleccionGuardar, db: Session = 
         ).first()
         if sel:
             sel.incluido = item.incluido
+            sel.motivo_exclusion = item.motivo_exclusion
         else:
             sel = ArrSeleccion(arr_proyecto_id=item.proyecto_id, periodo=periodo,
-                               incluido=item.incluido, facturado=False)
+                               incluido=item.incluido, facturado=False,
+                               motivo_exclusion=item.motivo_exclusion)
             db.add(sel)
         res.append(sel)
     db.commit()
@@ -114,8 +210,28 @@ def toggle_facturado(periodo: str, proyecto_id: int, db: Session = Depends(get_d
     if not sel:
         sel = ArrSeleccion(arr_proyecto_id=proyecto_id, periodo=periodo, incluido=True, facturado=True)
         db.add(sel)
+        nuevo_estado = True
     else:
         sel.facturado = not sel.facturado
+        nuevo_estado = sel.facturado
+        # Al desmarcar, se descongela: si no, un canon congelado por error queda pegado.
+        if not nuevo_estado:
+            sel.valor_facturado_congelado = None
+
+    # Al marcar como facturado, congelar el canon calculado en ese momento.
+    if nuevo_estado and sel.valor_facturado_congelado is None:
+        p = db.query(ArrProyecto).filter(ArrProyecto.id == proyecto_id).first()
+        if p is not None:
+            ipc = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
+            fila = calcular_arriendo(
+                proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
+                fecha_firma_contrato=p.fecha_firma_contrato,
+                valor_base=float(p.valor_base) if p.valor_base is not None else None,
+                canon_archivo=float(p.canon_archivo) if p.canon_archivo is not None else None,
+                periodo=periodo, ipc_tasas=ipc,
+            )
+            sel.valor_facturado_congelado = fila["canon_a_facturar"]
+
     db.commit(); db.refresh(sel)
     return sel
 
@@ -188,12 +304,12 @@ async def upload_documento(
     """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
     _validar_periodo(periodo)
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Guardar archivo principal
     ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
-    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante
+    nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante + ext_principal
     ruta_principal = directorio / nombre_archivo
     ruta_principal.write_bytes(await file.read())
 
@@ -269,7 +385,7 @@ async def upload_cuenta_cobro(
     except Exception:
         raise HTTPException(400, "predios debe ser un JSON array no vacío")
 
-    directorio = _UPLOADS_DIR / periodo / codigo_contrato
+    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Leer el archivo principal una sola vez (se copia por cada predio)

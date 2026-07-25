@@ -10,11 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models.clientes import ClienteTasaServicio
 from app.models.contactos import Contacto, ProyectoAreaContacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
     ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
+    TasaServicioUpsert, TasaServicioOut,
 )
 from app.schemas.proyectos import ContactoCreate, ContactoUpdate, ContactoOut
 from app.schemas.common import PaginatedResponse
@@ -221,6 +223,54 @@ def test_correo_operacional(
         return {"ok": True, "enviado_a": email}
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
+
+
+# ── Excepciones de tasa de impuesto por servicio ──────────────────────────────
+@router.get("/{id}/tasas-servicio", response_model=list[TasaServicioOut])
+def listar_tasas_servicio(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_cliente_or_404(id, db)
+    return (
+        db.query(ClienteTasaServicio)
+        .filter(ClienteTasaServicio.cliente_id == id)
+        .order_by(ClienteTasaServicio.servicio, ClienteTasaServicio.proyecto_id).all()
+    )
+
+
+@router.put("/{id}/tasa-servicio", response_model=TasaServicioOut)
+def upsert_tasa_servicio(id: int, data: TasaServicioUpsert,
+                         db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Crea/actualiza una excepción de tasa por (cliente, servicio[, proyecto]).
+    Cada _pct null hereda la tasa general del cliente."""
+    _get_cliente_or_404(id, db)
+    row = (
+        db.query(ClienteTasaServicio)
+        .filter(
+            ClienteTasaServicio.cliente_id == id,
+            ClienteTasaServicio.servicio == data.servicio,
+            ClienteTasaServicio.proyecto_id.is_(data.proyecto_id) if data.proyecto_id is None
+            else ClienteTasaServicio.proyecto_id == data.proyecto_id,
+        ).first()
+    )
+    if row is None:
+        row = ClienteTasaServicio(cliente_id=id, servicio=data.servicio, proyecto_id=data.proyecto_id)
+        db.add(row)
+    row.iva_pct = data.iva_pct
+    row.retencion_pct = data.retencion_pct
+    row.reteiva_pct = data.reteiva_pct
+    row.reteica_pct = data.reteica_pct
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/{id}/tasa-servicio/{tasa_id}")
+def eliminar_tasa_servicio(id: int, tasa_id: int,
+                           db: Session = Depends(get_db), _=Depends(get_current_user)):
+    db.query(ClienteTasaServicio).filter(
+        ClienteTasaServicio.id == tasa_id, ClienteTasaServicio.cliente_id == id
+    ).delete()
+    db.commit()
+    return {"ok": True}
 
 
 # ── Servicios ────────────────────────────────────────────────────────────────

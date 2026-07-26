@@ -16,6 +16,10 @@ Mapeo:
   e. bolsa_venta_ungg ← remanente sin SIC vigente ("bolsa_libre")
   f. bolsa_venta_ungc ← remanente con SIC vigente comprador UNGC
                         ("bolsa_comercializador")
+
+El remanente e/f se calcula por DÍAS, no por plantas: una planta que salió de su
+contrato a mitad de mes aporta un tramo a la bolsa y sigue listada en (a) con su
+ventana. Por eso una misma planta puede tener varias filas en un mes.
   g. ppa_compra_externa ← PPAs de compra directa a terceros SIN registro GESCON
                         (plantas externas, "compra_externa"). Solo piscina de
                         vista: NO se materializa en el snapshot a-f de BD porque
@@ -61,14 +65,29 @@ def derivar_pools(data: dict) -> dict:
         # (g) plantas externas: solo vista, no entra a _filas_desde_pools (fuera del MEM)
         "ppa_compra_externa": data.get("compra_externa") or [],
     }
-    counts = {
-        key: (sum(len(ct.get("plantas") or []) for ct in items)
-              if key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg",
-                         "ppa_compra_externa")
-              else len(items))
-        for key, items in pools.items()
+    def _plantas(key, items):
+        if key in ("ppa_venta_ungg", "ppa_compra_ungc", "bolsa_compra_ungg",
+                   "ppa_compra_externa"):
+            return [p for ct in items for p in (ct.get("plantas") or [])]
+        return items
+
+    # counts = TODAS las filas listadas (incluye el historial del mes: tramos que
+    # ya terminaron). counts_vigentes = solo las que siguen vivas a la fecha de
+    # corte — es lo que muestran los chips de la vista. `counts` conserva su
+    # semántica original para no romper a los consumidores de la API.
+    counts, counts_vigentes, counts_terminados = {}, {}, {}
+    for key, items in pools.items():
+        ps = _plantas(key, items)
+        counts[key] = len(ps)
+        # Sin `estado` (payloads viejos / llamadas directas) se asume vigente.
+        counts_vigentes[key] = sum(1 for p in ps if p.get("estado", "vigente") == "vigente")
+        counts_terminados[key] = sum(1 for p in ps if p.get("estado") == "terminado")
+    return {
+        "pools": pools,
+        "counts": counts,
+        "counts_vigentes": counts_vigentes,
+        "counts_terminados": counts_terminados,
     }
-    return {"pools": pools, "counts": counts}
 
 
 def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEnergiaMensual]:
@@ -80,8 +99,10 @@ def _filas_desde_pools(pools: dict, anio: int, mes: int) -> list[ClasificacionEn
             proyecto_id=planta["id"],
             contrato_ppa_id=contrato_id,
             codigo_sic=planta.get("codigo_sic"),
-            fecha_inicio=_iso(planta.get("fecha_inicio")),
-            fecha_fin=_iso(planta.get("fecha_fin")),
+            # Para los tramos de bolsa libre no hay registro SIC: la ventana real
+            # es el propio tramo del mes (segmento_*).
+            fecha_inicio=_iso(planta.get("fecha_inicio") or planta.get("segmento_inicio")),
+            fecha_fin=_iso(planta.get("fecha_fin") or planta.get("segmento_fin")),
             uso_del_recurso=bool(planta.get("uso_del_recurso")),
         )
 

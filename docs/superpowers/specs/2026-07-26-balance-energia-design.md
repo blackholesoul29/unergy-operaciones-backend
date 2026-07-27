@@ -134,6 +134,10 @@ Respuesta:
       "metodo",        // Registrado | Duplicado | Uso del recurso | Compra externa
       "contrato", "contrato_id", "codigo_sic", "pct",
       "desde", "hasta", "dias",
+      // Generación del tramo ANTES de aplicar el %: el multiplicando. Sin él el
+      // desglose muestra el resultado pero no permite reconstruirlo.
+      "gen_tramo_real", "gen_tramo_proyectado",
+      "estimado",      // la generación real del tramo se estimó con el promedio diario
       "mwh_real", "mwh_proyectado", "mwh_total"
   } ],
   "advertencias": {
@@ -170,8 +174,13 @@ de error).
 - **Inventario**: tabla plana, una fila por tramo, con buscador por frontera,
   filtro por categoría y export a Excel con el mismo estilo de marca que
   `exportarResumenPlantasContratos` (`xlsx-js-style`).
-- **Filtro cruzado**: click en una línea del libro mayor filtra el inventario a
-  esas filas; segundo click limpia.
+- **Desglose por capa**: click en una línea del libro mayor abre un modal con
+  las plantas que componen esa cifra y la aritmética visible — generación del
+  tramo × porcentaje = aporte, fila por fila, con un total que reconcilia con
+  la línea. Incluye los tramos marcados como estimados y, al pie, las plantas
+  que quedaron fuera del cálculo y por qué.
+- **Filtro cruzado**: el botón "Ver en la tabla" dentro del desglose filtra el
+  inventario a esa categoría. Abrir el desglose y filtrar no comparten click.
 - **Toggle** "excluir plantas de compra externa" que recarga con el parámetro.
 
 ## Errores

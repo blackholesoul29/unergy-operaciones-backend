@@ -1579,6 +1579,37 @@ def get_plantas_contratos(
     return out
 
 
+@router.get("/balance-energia")
+def get_balance_energia(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    excluir_compra_externa: bool = Query(
+        False,
+        description="Saca del balance las plantas con PPA de compra externa (piscina g). "
+                    "Su energía está comprada fuera de GESCON, así que contarlas en el "
+                    "residuo de bolsa infla la venta en bolsa UNGG.",
+    ),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Balance mensual de energía en bolsa (MWh), real + proyección al cierre.
+
+    Responde "este mes, ¿cuánto compro o compraré en bolsa?". Netea DENTRO de
+    cada agente: la venta en bolsa de UNGG se contrarresta con sus compras
+    (duplicados + uso del recurso); la venta por UNGC va aparte porque es otro
+    agente y solo acarrea cartera.
+
+    Cruza los DOS ejes que hasta ahora se calculaban por separado: los días de
+    cada tramo (historial intra-mes) y el % de despacho. Lo que no está
+    contratado en un tramo se vende en bolsa por UNGG.
+    """
+    from app.services.balance_energia import calcular_balance
+
+    return calcular_balance(
+        db, year, month, excluir_compra_externa=excluir_compra_externa
+    )
+
+
 @router.post("/backfill-comercializacion")
 def post_backfill_comercializacion(
     dry_run: bool = Query(True, description="Si es true (default) no escribe, solo reporta lo que haría."),

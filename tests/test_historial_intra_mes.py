@@ -230,6 +230,61 @@ def test_tramo_liberado_con_sic_ungc_cae_en_f_no_en_e(db):
     assert ungc[0]["codigo_sic"] == "9999"
 
 
+def test_dos_tramos_libres_en_el_mismo_mes(db):
+    """Contrato solo del 10 al 20 → la planta queda con DOS filas en (e), una
+    antes y otra después. El front las distingue por (id, segmento_inicio)."""
+    p = _planta(db, "MGS Dos Tramos")
+    c = _contrato_venta(db, "Terpel D", "TPL-D")
+    _sol(db, proyecto_id=p.id, codigo_sic_contrato="7785", contrato_interno="TPL-D",
+         codigo_sic_vendedor="UNGG", codigo_sic_comprador="TERP", contrato_ppa_id=c.id,
+         fecha_inicio=date(2026, 7, 10), fecha_fin=date(2026, 7, 20))
+    db.commit()
+
+    out = get_plantas_contratos(year=2026, month=7, db=db, _=None)
+    tramos = [x for x in out["pools"]["bolsa_venta_ungg"] if x["id"] == p.id]
+    assert [(t["segmento_inicio"], t["segmento_fin"]) for t in tramos] == [
+        ("2026-07-01", "2026-07-09"),
+        ("2026-07-21", "2026-07-31"),
+    ]
+    claves = {(t["id"], t["segmento_inicio"]) for t in tramos}
+    assert len(claves) == 2, "las dos filas deben ser distinguibles por clave"
+    # y el contrato conserva su propio tramo
+    assert _fila_en_contrato(out, "ppa_venta_ungg", p.id)["segmento_fin"] == "2026-07-20"
+
+
+def test_planta_relevada_a_mitad_de_mes_pasa_a_bolsa(db):
+    """Si otra planta la releva en el SIC el 26-feb, la saliente no desaparece:
+    queda en (a) hasta el 25 y en bolsa del 26 en adelante."""
+    saliente = _planta(db, "MGS Saliente")
+    entrante = _planta(db, "MGS Entrante Relevo")
+    c = _contrato_venta(db, "Terpel R", "TPL-R")
+    # arranca antes del mes: el único tramo libre debe ser el posterior al relevo
+    _sol(db, proyecto_id=saliente.id, codigo_sic_contrato="7786", contrato_interno="TPL-R",
+         codigo_sic_vendedor="UNGG", codigo_sic_comprador="TERP", contrato_ppa_id=c.id,
+         fecha_inicio=date(2025, 1, 1), fecha_fin=date(2039, 12, 31))
+    _sol(db, proyecto_id=entrante.id, codigo_sic_contrato="7786", contrato_interno="TPL-R",
+         codigo_sic_vendedor="UNGG", codigo_sic_comprador="TERP", contrato_ppa_id=c.id,
+         tipo_solicitud=TipoSolicitudAsicEnum.modificacion,
+         fecha_inicio=date(2026, 2, 26), fecha_fin=date(2039, 12, 31))
+    db.commit()
+
+    out = get_plantas_contratos(year=2026, month=2, db=db, _=None)
+    fila = _fila_en_contrato(out, "ppa_venta_ungg", saliente.id)
+    assert fila["segmento_fin"] == "2026-02-25", "recortada por el relevo"
+    assert fila["estado"] == "terminado"
+    libres = [x for x in out["pools"]["bolsa_venta_ungg"] if x["id"] == saliente.id]
+    assert [(t["segmento_inicio"], t["segmento_fin"]) for t in libres] == [
+        ("2026-02-26", "2026-02-28")
+    ]
+    # Simétrico: la entrante tampoco estaba en contrato antes del relevo, así que
+    # su tramo del 1 al 25 aparece en bolsa marcado como terminado.
+    entrantes = [x for x in out["pools"]["bolsa_venta_ungg"] if x["id"] == entrante.id]
+    assert [(t["segmento_inicio"], t["segmento_fin"], t["estado"]) for t in entrantes] == [
+        ("2026-02-01", "2026-02-25", "terminado")
+    ]
+    assert _fila_en_contrato(out, "ppa_venta_ungg", entrante.id)["estado"] == "vigente"
+
+
 # ── Contadores ───────────────────────────────────────────────────────────────
 
 def test_contadores_solo_cuentan_vigentes(db):

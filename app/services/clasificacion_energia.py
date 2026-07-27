@@ -25,11 +25,29 @@ ventana. Por eso una misma planta puede tener varias filas en un mes.
                         vista: NO se materializa en el snapshot a-f de BD porque
                         esas plantas están fuera del MEM.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual
+
+# Momento en que cambió la LÓGICA de clasificación. El snapshot de un mes se
+# materializa y se reutiliza, así que un mes ya calculado seguiría sirviendo
+# filas viejas para siempre tras un cambio de reglas. Los snapshots anteriores a
+# esta marca se recalculan solos la próxima vez que se consultan.
+# Subir esta fecha al cambiar las reglas de derivación de piscinas.
+#   2026-07-26 → la bolsa pasó a calcularse por días (historial intra-mes).
+LOGICA_ACTUALIZADA_EN = datetime(2026, 7, 26, tzinfo=timezone.utc)
+
+
+def snapshot_obsoleto(fila) -> bool:
+    """True si la fila se calculó con una versión anterior de las reglas."""
+    if fila is None or fila.calculado_en is None:
+        return True
+    calc = fila.calculado_en
+    if calc.tzinfo is None:  # SQLite devuelve naive
+        calc = calc.replace(tzinfo=timezone.utc)
+    return calc < LOGICA_ACTUALIZADA_EN
 
 
 def derivar_pools(data: dict) -> dict:

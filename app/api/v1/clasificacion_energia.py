@@ -21,7 +21,7 @@ from app.models.clasificacion_energia import (
     CATEGORIAS_KEYS,
     ClasificacionEnergiaMensual,
 )
-from app.services.clasificacion_energia import recalcular_clasificacion
+from app.services.clasificacion_energia import recalcular_clasificacion, snapshot_obsoleto
 
 router = APIRouter(prefix="/clasificacion-energia", tags=["Clasificación energía"])
 
@@ -63,7 +63,10 @@ def get_clasificacion(
         ClasificacionEnergiaMensual.anio == year,
         ClasificacionEnergiaMensual.mes == month,
     )
-    if refresh or base.first() is None:
+    # Se recalcula si el mes no tiene snapshot, si lo piden explícitamente, o si
+    # el snapshot quedó con reglas viejas (ver LOGICA_ACTUALIZADA_EN): sin esto
+    # un mes ya materializado seguiría contradiciendo a la vista de Cumplimiento.
+    if refresh or snapshot_obsoleto(base.first()):
         recalcular_clasificacion(db, year, month)
 
     q = db.query(ClasificacionEnergiaMensual).filter(

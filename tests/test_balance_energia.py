@@ -481,3 +481,51 @@ def test_sin_identificador_de_monitoreo_no_contamina_el_balance(monkeypatch):
 
     assert out["balance"]["ungg"]["venta_bolsa"]["total"] == 0.0
     assert out["advertencias"]["sin_datos"][0]["motivo"] == "sin identificador de monitoreo"
+
+
+def test_inventario_expone_la_generacion_base_para_auditar_el_calculo():
+    """El desglose por capa tiene que mostrar el multiplicando, no solo el
+    resultado: gen del tramo × % = aporte."""
+    data = {
+        "venta": [
+            _contrato(1, "Terpel 1", [_planta(10, "Uruaco", 1.0)]),
+            _contrato(2, "Klik", [_planta(10, "Uruaco", 0.8, es_duplicado=True)]),
+        ],
+        "bolsa": [],
+    }
+    plantas = construir_tramos(data, PRIMERO, ULTIMO)["plantas"]
+    filas = construir_inventario(plantas, {10: {0: (100.0, 20.0)}}, {})
+    (fila,) = [f for f in filas if f["categoria"] == "c"]
+    assert fila["gen_tramo_real"] == 100.0
+    assert fila["gen_tramo_proyectado"] == 20.0
+    assert fila["pct"] == 0.8
+    assert fila["mwh_real"] == 80.0
+    assert fila["mwh_total"] == 96.0
+    assert fila["estimado"] is False
+
+
+def test_inventario_marca_los_tramos_estimados():
+    data = {"venta": [], "bolsa": [
+        {"id": 10, "nombre": "Garza", "piscina": "libre",
+         "segmento_inicio": "2026-07-01", "segmento_fin": "2026-07-31"},
+    ]}
+    plantas = construir_tramos(data, PRIMERO, ULTIMO)["plantas"]
+    (fila,) = construir_inventario(plantas, {10: {0: (100.0, 0.0)}}, {}, {(10, 0)})
+    assert fila["estimado"] is True
+
+
+def test_calcular_balance_marca_estimado_en_la_fila_correspondiente(monkeypatch):
+    from app.services.balance_energia import calcular_balance
+
+    payload = {
+        "venta": [], "compra": [], "compra_externa": [],
+        "bolsa": [{"id": 10, "nombre": "Garza", "piscina": "libre",
+                   "segmento_inicio": "2026-07-10", "segmento_fin": "2026-07-31"}],
+    }
+    _patch_orquestacion(monkeypatch, payload, {"garza": 310.0}, rangos={})
+
+    out = calcular_balance(_FakeDB([_P(10, "garza")]), 2026, 7, hoy=date(2026, 7, 31))
+
+    (fila,) = [f for f in out["inventario"] if f["categoria"] == "e"]
+    assert fila["estimado"] is True
+    assert fila["gen_tramo_real"] == 220.0

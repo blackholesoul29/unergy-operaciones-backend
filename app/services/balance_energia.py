@@ -287,9 +287,16 @@ def agregar_balance(plantas: dict, energia: dict) -> dict:
     }
 
 
-def construir_inventario(plantas: dict, energia: dict, fronteras: dict) -> list:
+def construir_inventario(plantas: dict, energia: dict, fronteras: dict,
+                         estimados: set | None = None) -> list:
     """Tabla plana: una fila por (planta, tramo, rol). Es el Excel de Juan,
-    automatizado y con las fechas y los MWh que el Excel no tenía."""
+    automatizado y con las fechas y los MWh que el Excel no tenía.
+
+    Cada fila lleva también la generación BASE del tramo (`gen_tramo_*`), que es
+    lo que el % multiplica. Sin ese dato el desglose no es auditable: se ve el
+    aporte pero no de dónde sale.
+    """
+    estimados = estimados or set()
     filas = []
     for pid, planta in plantas.items():
         por_tramo = energia.get(pid) or {}
@@ -308,6 +315,10 @@ def construir_inventario(plantas: dict, energia: dict, fronteras: dict) -> list:
                     "hasta": t["fin"].isoformat(),
                     "dias": t["dias"],
                     "pct": round(pct, 6),
+                    # Generación del tramo antes de aplicar el %: el multiplicando.
+                    "gen_tramo_real": None if sin_datos else round(real, 3),
+                    "gen_tramo_proyectado": None if sin_datos else round(proy, 3),
+                    "estimado": (pid, idx) in estimados,
                     "mwh_real": None if sin_datos else round(real * pct, 3),
                     "mwh_proyectado": None if sin_datos else round(proy * pct, 3),
                     "mwh_total": None if sin_datos else round((real + proy) * pct, 3),
@@ -507,6 +518,7 @@ def calcular_balance(db, year: int, month: int,
     energia: dict[int, dict] = {}
     sin_datos: list[dict] = []
     tramos_estimados: list[dict] = []
+    claves_estimadas: set = set()
 
     for pid, planta in plantas.items():
         sp = sub_projects.get(pid)
@@ -542,6 +554,7 @@ def calcular_balance(db, year: int, month: int,
                         "proyecto_id": pid, "planta": planta["nombre"],
                         "desde": ventana[0].isoformat(), "hasta": ventana[1].isoformat(),
                     })
+                    claves_estimadas.add((pid, idx))
             futuro = _interseccion(t["ini"], t["fin"], corte + timedelta(days=1), last_day)
             dias_futuros = ((futuro[1] - futuro[0]).days + 1) if futuro else 0
             por_tramo[idx] = (real, promedio_diario * dias_futuros)
@@ -549,7 +562,7 @@ def calcular_balance(db, year: int, month: int,
 
     fronteras = _nombre_frontera(db, list(plantas))
     balance = agregar_balance(plantas, energia)
-    inventario = construir_inventario(plantas, energia, fronteras)
+    inventario = construir_inventario(plantas, energia, fronteras, claves_estimadas)
 
     # (g) Plantas externas: informativas. No entran al balance de bolsa porque su
     # energía está comprada por PPA fuera de GESCON.

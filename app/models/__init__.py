@@ -44,6 +44,7 @@ from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoPro
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
 from app.models.verificacion_costos import VerificacionCosto
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -75,6 +76,7 @@ __all__ = [
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
     "VerificacionCosto",
+    "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (

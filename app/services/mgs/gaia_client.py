@@ -419,6 +419,37 @@ class GaiaClient:
                 break
         return results
 
+    def post_report(self, border_id: int, main_readings: list[float], backup_readings: list[float]) -> bool:
+        """Envía el reporte de 24 horas (CGM) de una frontera a Quoia/ASIC.
+
+        POST /api/cgm/v1/report_/{border_id}/ -- mismo endpoint que
+        get_border_report_status()/report_historic lee, ahora escribiendo.
+        main_readings/backup_readings: listas de 24 floats (kWh por hora).
+
+        ADVERTENCIA: esto envía datos reales al reporte regulatorio ASIC --
+        no probado en vivo todavía contra una frontera real. Verificar con
+        un envío controlado (y el visto bueno del equipo de Operaciones)
+        antes de usar en producción.
+        """
+        self._ensure_token()
+        if not self._access_token:
+            return False
+        url = f"{self._base}/api/cgm/v1/report_/{border_id}/"
+        payload = {"main_readings": main_readings, "backup_readings": backup_readings}
+        try:
+            resp = self._http.post(url, headers=self._headers(), json=payload)
+            if resp.status_code == 401:
+                self._access_token = None
+                self._authenticate()
+                if not self._access_token:
+                    return False
+                resp = self._http.post(url, headers=self._headers(), json=payload)
+            resp.raise_for_status()
+            return True
+        except Exception as exc:
+            logger.error("gaia post_report failed border_id=%s: %s", border_id, exc)
+            return False
+
     def get_all_nodes(self) -> list[dict]:
         """Fetch all monitoring nodes from /api/node/retailer/ (paginated).
 

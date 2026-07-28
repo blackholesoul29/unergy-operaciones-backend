@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroHito, RegistroTransicion,
@@ -64,6 +64,18 @@ def crear_registro(db: Session, proyecto_id: int, **campos) -> RegistroConexion:
     db.commit()
     db.refresh(registro)
     return registro
+
+
+def get_or_create_registro(db: Session, proyecto_id: int) -> RegistroConexion:
+    """Devuelve el registro del proyecto, creandolo (con etapas + hitos) si no existe.
+
+    Materializa el seguimiento la primera vez que se abre un proyecto. Lanza ValueError
+    si el proyecto no existe.
+    """
+    reg = db.query(RegistroConexion).filter_by(proyecto_id=proyecto_id).first()
+    if reg is not None:
+        return reg
+    return crear_registro(db, proyecto_id)
 
 
 # ---------------------------------------------------------------------------
@@ -167,8 +179,15 @@ def construir_resumen(db: Session, registro: RegistroConexion) -> dict:
         "fecha_entrada_operacion": getattr(proyecto, "fecha_entrada_operacion", None),
         "numero_expediente": registro.numero_expediente,
         "id_requerimiento_or": registro.id_requerimiento_or,
+        "numero_solicitud_appweb": registro.numero_solicitud_appweb,
         "fecha_conexion_estimada": registro.fecha_conexion_estimada,
         "vigencia_aprobacion_conexion": registro.vigencia_aprobacion_conexion,
+        "fecha_visita_protecciones": registro.fecha_visita_protecciones,
+        "tipo_visita_protecciones": registro.tipo_visita_protecciones,
+        "exporta": registro.exporta,
+        "comercializador_es_or": registro.comercializador_es_or,
+        "punto_conexion_texto": registro.punto_conexion_texto,
+        "notas": registro.notas,
         "avance_pct": calcular_avance_pct(hitos_av),
         "total_pct": suma_pesos(hitos_av),
         "por_etapa": por_etapa,
@@ -205,7 +224,52 @@ def resumen_ligero(db: Session, registro: RegistroConexion) -> dict:
         "siguiente_paso": r["siguiente_paso"],
         "alertas_pendientes": len(r["alertas_pendientes"]),
         "bloqueos": len(r["bloqueos"]),
+        "tiene_registro": True,
     }
+
+
+def _fila_bare(proyecto: Proyecto) -> dict:
+    """Fila de lista para un Proyecto que aun NO tiene registro de conexion:
+    avance 0, todos los hitos pendientes, siguiente paso = 1a."""
+    operador = getattr(proyecto, "operador", None)
+    or_nombre = (operador.nombre_comercial or operador.nombre_legal) if operador else None
+    h0 = HITOS[0]  # "1a"
+    return {
+        "id": None,  # aun no hay registro
+        "proyecto_id": proyecto.id,
+        "nombre_comercial": proyecto.nombre_comercial,
+        "codigo_cnd": getattr(proyecto, "codigo_cnd", None),
+        "clasificacion_regulatoria": _enum_val(getattr(proyecto, "clasificacion_regulatoria", None)),
+        "tecnologia": _enum_val(getattr(proyecto, "tipo_tecnologia", None)),
+        "operador_red": or_nombre,
+        "avance_pct": 0.0,
+        "siguiente_paso": {
+            "hito": h0["key"],
+            "codigo": h0["key"],
+            "descripcion": h0["descripcion"],
+            "etapa": h0["etapa"],
+            "etiqueta_etapa": ETIQUETAS_ETAPA[h0["etapa"]],
+            "responsable": "PROMOTOR",
+        },
+        "alertas_pendientes": 0,
+        "bloqueos": 0,
+        "tiene_registro": False,
+    }
+
+
+def listar_todos(db: Session) -> list[dict]:
+    """Una fila por CADA proyecto de la plataforma (no solo los que ya tienen registro).
+    Los que ya tienen registro muestran su avance real; el resto, 0% / pendiente."""
+    registros = {r.proyecto_id: r for r in db.query(RegistroConexion).all()}
+    query = db.query(Proyecto).options(joinedload(Proyecto.operador))
+    if hasattr(Proyecto, "deleted_at"):
+        query = query.filter(Proyecto.deleted_at.is_(None))
+    proyectos = query.order_by(Proyecto.nombre_comercial.asc()).all()
+    filas = []
+    for p in proyectos:
+        reg = registros.get(p.id)
+        filas.append(resumen_ligero(db, reg) if reg is not None else _fila_bare(p))
+    return filas
 
 
 # ---------------------------------------------------------------------------

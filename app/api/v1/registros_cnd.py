@@ -92,9 +92,26 @@ def proyectos_disponibles(
 # ---------------------------------------------------------------------------
 @router.get("")
 def listar(db: Session = Depends(get_db), current: Usuario = Depends(get_current_user)):
+    """Una fila por CADA proyecto de la plataforma (con avance real si ya tiene
+    registro, o 0%/pendiente si aun no). Asi se puede ir llenando cada uno."""
     _check_operaciones(current)
-    registros = db.query(RegistroConexion).all()
-    return [service.resumen_ligero(db, r) for r in registros]
+    return service.listar_todos(db)
+
+
+@router.post("/por-proyecto/{proyecto_id}")
+def obtener_o_crear_por_proyecto(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Materializa (crea si no existe) el registro del proyecto y devuelve su resumen.
+    Lo usa el detalle al abrir un proyecto."""
+    _check_operaciones(current)
+    try:
+        reg = service.get_or_create_registro(db, proyecto_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return service.construir_resumen(db, reg)
 
 
 @router.post("", status_code=201)

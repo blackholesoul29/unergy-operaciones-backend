@@ -74,13 +74,11 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
         if c is not None:   # fuente de verdad: el contrato en Operación
             valor_base = float(c.tarifa_base) if c.tarifa_base is not None else None
             fecha_firma = c.fecha_firma_contrato
-            fecha_inicio_om = c.fecha_inicio_om
             periodicidad = c.periodicidad_pago
             estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
         else:               # sin contrato aún: respaldo a los datos del ArrProyecto
             valor_base = float(a.valor_base) if a.valor_base is not None else None
             fecha_firma = a.fecha_firma_contrato
-            fecha_inicio_om = None
             periodicidad = None
             estado_contrato = "sin_contrato"
 
@@ -94,7 +92,6 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             facturado=(sel.facturado if sel else False),
             valor_congelado=(int(sel.valor_facturado_congelado)
                              if sel and sel.valor_facturado_congelado is not None else None),
-            fecha_inicio_om=fecha_inicio_om,
             periodicidad=periodicidad,
         )
         data["motivo_exclusion"] = sel.motivo_exclusion if sel else None

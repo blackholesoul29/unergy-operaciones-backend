@@ -57,7 +57,6 @@ def calcular_arriendo(
     incluido: bool = True,
     facturado: bool = False,
     valor_congelado: int | None = None,
-    fecha_inicio_om: date | None = None,
     periodicidad: str | None = None,
 ) -> dict:
     año_periodo = int(periodo.split("-")[0])
@@ -83,11 +82,12 @@ def calcular_arriendo(
 
     if not (valor_base and valor_base > 0):
         return deshabilitada("Sin valor base")
-    # Base de indexación = inicio O&M; si falta, la firma como respaldo (así los
-    # contratos migrados sin inicio O&M dan las mismas cifras que hoy).
-    fecha_base = fecha_inicio_om if fecha_inicio_om is not None else fecha_firma_contrato
+    # Base de indexación = fecha_firma_contrato (fecha de contrato), sin fallback
+    # a otra fecha: Arriendos siempre indexa por la fecha de firma del contrato
+    # (a diferencia de Mantenimiento, que usa una fecha de inicio distinta).
+    fecha_base = fecha_firma_contrato
     if fecha_base is None:
-        return deshabilitada("Sin fecha de inicio O&M ni de firma")
+        return deshabilitada("Sin fecha de contrato")
 
     aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
 

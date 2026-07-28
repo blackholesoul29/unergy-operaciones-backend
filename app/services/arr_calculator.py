@@ -3,7 +3,7 @@ Cálculo de Arriendos — puro, sin DB ni FastAPI. Base mensual indexada por IPC
 con convención DANE (ipc[año-1]), aplicada por AÑO CALENDARIO: el incremento se
 aplica cada 1 de enero, usando solo el AÑO de fecha_firma_contrato (no el mes/día
 de la firma). En enero del año Y se aplica ipc[Y-1].
-Canon mostrado = canon_archivo ?? calculado.
+Canon mostrado = siempre el calculado (o el congelado, si aplica).
 """
 from __future__ import annotations
 from datetime import date
@@ -25,7 +25,6 @@ def calcular_arriendo(
     codigo: str | None,
     fecha_firma_contrato: date | None,
     valor_base: float | None,
-    canon_archivo: float | None,
     periodo: str,
     ipc_tasas: dict[int, float],
     incluido: bool = True,
@@ -44,9 +43,7 @@ def calcular_arriendo(
             "habilitado": False, "incluido": False, "facturado": facturado,
             "valor_base": valor_base, "n_indexaciones": 0, "factor_acumulado": 1.0,
             "valor_anual_indexado": None, "canon_calculado": None,
-            "canon_archivo": _redondear(float(canon_archivo)) if canon_archivo is not None else None,
             "canon_a_facturar": None,
-            "difiere_archivo": False,
             "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
             "ipc_incompleto": False,
             "aplica_este_mes": True,
@@ -85,13 +82,9 @@ def calcular_arriendo(
         detalle.append(f"Ene {añoC} (IPC dic {añoC - 1}: {ipc * 100:.2f}%)")
 
     canon_calculado = _redondear(valor_base * factor)
-    canon_a_facturar = _redondear(float(canon_archivo)) if canon_archivo is not None else canon_calculado
+    canon_a_facturar = canon_calculado
     if valor_congelado is not None:
         canon_a_facturar = int(valor_congelado)   # mes ya facturado → canon congelado
-    difiere = (
-        canon_archivo is not None
-        and abs(canon_calculado - float(canon_archivo)) / max(abs(float(canon_archivo)), 1) > 0.001
-    )
 
     return {
         "id": proyecto_id, "proyecto": nombre, "codigo": codigo,
@@ -101,9 +94,7 @@ def calcular_arriendo(
         "factor_acumulado": round(factor, 6),
         "valor_anual_indexado": _redondear(canon_calculado * 12),
         "canon_calculado": canon_calculado,
-        "canon_archivo": _redondear(float(canon_archivo)) if canon_archivo is not None else None,
         "canon_a_facturar": canon_a_facturar,
-        "difiere_archivo": difiere,
         "valor_facturado_congelado": int(valor_congelado) if valor_congelado is not None else None,
         "ipc_incompleto": ipc_incompleto,
         "aplica_este_mes": aplica_este_mes,

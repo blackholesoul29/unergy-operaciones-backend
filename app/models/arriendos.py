@@ -15,7 +15,6 @@ class ArrProyecto(Base):
     nombre:      Mapped[str]        = mapped_column(String(255), nullable=False)
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     valor_base:    Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
-    canon_archivo: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     activo:      Mapped[bool]       = mapped_column(Boolean, default=True, nullable=False)
     created_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

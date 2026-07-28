@@ -2642,8 +2642,6 @@ def _run_arr_seed() -> None:
                     ya.fecha_firma_contrato = firma; cambio = True
                 if ya.valor_base is None and it["valor_base"] is not None:
                     ya.valor_base = it["valor_base"]; cambio = True
-                if ya.canon_archivo is None and it["canon"] is not None:
-                    ya.canon_archivo = it["canon"]; cambio = True
                 if cambio:
                     actualizados += 1
                 continue
@@ -2651,7 +2649,7 @@ def _run_arr_seed() -> None:
             db.add(ArrProyecto(
                 codigo=it["codigo"], nombre=it["nombre"],
                 fecha_firma_contrato=firma, valor_base=it["valor_base"],
-                canon_archivo=it["canon"], activo=True,
+                activo=True,
             ))
             insertados += 1
         db.commit()
@@ -2660,6 +2658,30 @@ def _run_arr_seed() -> None:
     except Exception as e:
         db.rollback()
         print(f"[arr_seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
+def _run_arr_limpiar_canon_archivo() -> None:
+    """Limpia el residual del mecanismo canon_archivo (override manual, ya eliminado
+    de la lógica de cálculo): pone en NULL cualquier valor guardado en arr_proyectos
+    para que Costos>Arriendos siempre muestre el canon calculado. Idempotente
+    (el WHERE hace que no repita el UPDATE una vez ya está todo en NULL)."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        res = db.execute(text(
+            "UPDATE arr_proyectos SET canon_archivo = NULL WHERE canon_archivo IS NOT NULL"
+        ))
+        db.commit()
+        if res.rowcount:
+            print(f"[arr_limpiar_canon_archivo] {res.rowcount} filas limpiadas")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_limpiar_canon_archivo] ERROR: {e}")
     finally:
         db.close()
 
@@ -2833,6 +2855,7 @@ def _deferred_init():
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
         ("arr_backfill_contratos", _run_arr_backfill_contratos),
+        ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:

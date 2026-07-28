@@ -45,8 +45,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
     """Los datos de facturación (valor, fecha inicio O&M, periodicidad, estado, tipo)
     salen del contrato de arriendo en Operación (ContratoServicio servicio_aplica=
     'arriendo' ligado al Proyecto). ArrProyecto se mantiene como llave de la fila
-    (selección/documentos) y como respaldo si aún no hay contrato. canon_archivo
-    (override) se conserva."""
+    (selección/documentos) y como respaldo si aún no hay contrato."""
     from app.services.om_calculator import om_keys, om_match_seed
 
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
@@ -88,7 +87,6 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             proyecto_id=a.id, nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
             fecha_firma_contrato=fecha_firma,
             valor_base=valor_base,
-            canon_archivo=float(a.canon_archivo) if a.canon_archivo is not None else None,
             periodo=periodo, ipc_tasas=ipc_tasas,
             incluido=(sel.incluido if sel else True),
             facturado=(sel.facturado if sel else False),
@@ -253,7 +251,6 @@ def toggle_facturado(periodo: str, proyecto_id: int, db: Session = Depends(get_d
                 proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
                 fecha_firma_contrato=p.fecha_firma_contrato,
                 valor_base=float(p.valor_base) if p.valor_base is not None else None,
-                canon_archivo=float(p.canon_archivo) if p.canon_archivo is not None else None,
                 periodo=periodo, ipc_tasas=ipc,
             )
             sel.valor_facturado_congelado = fila["canon_a_facturar"]

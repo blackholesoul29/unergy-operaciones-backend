@@ -6,10 +6,15 @@ Quoia y mapear por nombre (mapeo.py), itera las fronteras YA registradas en
 la base de datos de Operaciones (fuente de verdad: fronteras.proyecto_id +
 proyectos.project_id_solenium, ya reconciliados por el equipo).
 
-v1: fronteras con tipo 'generacion_consumo', 'consumo_auxiliar' o
-'consumo_propio' se omiten (se reportan pero no se clasifican) -- el árbol
-de Casos portado asume una frontera de un solo tipo (generación O consumo).
-Confirmar con el equipo si hace falta cubrir esos tipos.
+Solo se procesan fronteras de proyectos con el servicio de CGM contratado
+(Proyecto.srv_cgm) -- son las únicas que de verdad reportan al ASIC;
+confirmado con el equipo 2026-07-28 (104 de 139 fronteras activas).
+
+'consumo_auxiliar' y 'consumo_propio' se tratan igual que 'consumo' -- en
+los datos reales no existe ninguna frontera con el tipo 'consumo' puro,
+todo el consumo activo está bajo esos dos. 'generacion_consumo' (frontera
+híbrida) sigue sin soportarse -- el árbol de Casos portado asume un solo
+tipo por frontera.
 """
 from __future__ import annotations
 
@@ -26,7 +31,8 @@ from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
 from app.services.reporte_energia.utils import curva_a_lista
 
-TIPOS_SOPORTADOS = {TipoFronteraEnum.generacion, TipoFronteraEnum.consumo}
+TIPOS_GENERACION = {TipoFronteraEnum.generacion}
+TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
 
 
 def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
@@ -50,8 +56,9 @@ def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
 
 
 def _fronteras_activas(db: Session) -> list[tuple[Frontera, str | None]]:
-    """(Frontera, project_id_solenium) de todas las fronteras activas con
-    tipo soportado."""
+    """(Frontera, project_id_solenium) de las fronteras activas, con tipo
+    soportado, de proyectos con el servicio de CGM contratado -- son las
+    únicas que reportan al ASIC."""
     filas = db.execute(
         select(Frontera, Proyecto.project_id_solenium)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
@@ -59,6 +66,7 @@ def _fronteras_activas(db: Session) -> list[tuple[Frontera, str | None]]:
             Frontera.estado == EstadoFronteraEnum.activa,
             Frontera.codigo_frontera.is_not(None),
             Frontera.deleted_at.is_(None),
+            Proyecto.srv_cgm.is_(True),
         )
     ).all()
     return [(f, sid) for f, sid in filas]
@@ -153,7 +161,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
 
-        if frontera.tipo_frontera == TipoFronteraEnum.generacion:
+        if frontera.tipo_frontera in TIPOS_GENERACION:
             resultado = clasificador.clasificar_generacion(
                 db, gaia, sol, frontera.id, frt_code, border_meta, pid_solenium, mapa_medidor_nodo, fecha,
             )
@@ -161,7 +169,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             clave = str(resultado["caso"])
             resumen_gen[clave] = resumen_gen.get(clave, 0) + 1
 
-        elif frontera.tipo_frontera == TipoFronteraEnum.consumo:
+        elif frontera.tipo_frontera in TIPOS_CONSUMO:
             resultado = clasificador_consumo.clasificar_consumo(
                 db, gaia, frontera.id, frt_code, border_meta, mapa_medidor_nodo, fecha,
             )

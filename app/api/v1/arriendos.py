@@ -1,6 +1,7 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
 import json
+from datetime import date
 from pathlib import Path as _Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -19,7 +20,9 @@ from app.schemas.arriendos import (
     ArrCalculoFila, ArrCalculoResponse,
     ArrSeleccionGuardar, ArrSeleccionOut,
 )
+from app.schemas.om import OMIndexacionFila, OMIndexacionResponse
 from app.services.arr_calculator import calcular_arriendo
+from app.services.om_calculator import serie_indexacion
 
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
@@ -104,6 +107,33 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
                 and fila.aplica_este_mes and fila.canon_a_facturar):
             total += fila.canon_a_facturar
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
+
+
+@router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
+def indexacion_contrato(
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Serie de indexación (anual y mensual) de un contrato de arriendo, calculada
+    automáticamente con el mismo motor que el panel de Costos — aniversario desde
+    la Fecha de contrato (fecha_firma_contrato), solo aniversarios cumplidos a hoy."""
+    c = db.get(ContratoServicio, contrato_id)
+    if c is None or c.servicio_aplica != "arriendo":
+        raise HTTPException(404, "Contrato de arriendo no encontrado")
+
+    ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
+    fecha_base = c.fecha_firma_contrato
+    valor_base = float(c.tarifa_base) if c.tarifa_base else None
+
+    hoy = date.today()
+    serie = serie_indexacion(fecha_base, valor_base, ipc_tasas, hoy.year, hoy.month)
+
+    anual = [OMIndexacionFila(anio=f["anio"], ipc_aplicado=f["ipc_aplicado"], valor=f["valor_anual"])
+             for f in serie]
+    mensual = [OMIndexacionFila(anio=f["anio"], ipc_aplicado=f["ipc_aplicado"], valor=f["valor_mensual"])
+               for f in serie]
+    return OMIndexacionResponse(anual=anual, mensual=mensual)
 
 
 @router.get("/diagnostico-migracion")

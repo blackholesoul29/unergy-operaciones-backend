@@ -30,6 +30,8 @@ from app.services.reporte_energia.utils import curva_a_lista
 TIPOS_SOPORTADOS = {TipoFronteraEnum.generacion, TipoFronteraEnum.consumo}
 
 logger = logging.getLogger("reporte_energia.orquestador")
+logger.setLevel(logging.INFO)  # el nivel raíz por defecto es WARNING -- sin esto,
+# el log de éxito de ejecutar_dia_background() nunca aparece en los logs de Railway.
 
 
 def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:

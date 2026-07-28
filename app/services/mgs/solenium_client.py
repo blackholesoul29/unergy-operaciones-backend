@@ -30,7 +30,7 @@ class SoleniumClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0
-        self._http = httpx.Client(timeout=TIMEOUT)
+        self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
 
     @property
     def enabled(self) -> bool:

@@ -87,7 +87,10 @@ def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
     fila = next(f for f in resp.filas if f.proyecto == "Baraya")
     assert fila.estado_contrato == "con_contrato"
     assert fila.tipo_proyecto == "minigranja"
-    assert fila.valor_base == 9_000_000        # del contrato, NO del ArrProyecto (1.000.000)
+    # tarifa_base del contrato es ANUAL (9.000.000); el motor de cálculo espera
+    # valor_base MENSUAL, así que el router divide entre 12 -> 750.000.
+    # Confirma que sale del contrato (750.000), NO del ArrProyecto (1.000.000).
+    assert fila.valor_base == 750_000
 
 
 def test_arrproyecto_sin_contrato_queda_sin_contrato(db):

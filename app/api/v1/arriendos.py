@@ -74,7 +74,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
         c = contrato_por_proy.get(p.id) if p else None
 
         if c is not None:   # fuente de verdad: el contrato en Operación
-            valor_base = float(c.tarifa_base) if c.tarifa_base is not None else None
+            valor_base = float(c.tarifa_base) / 12 if c.tarifa_base is not None else None
             fecha_firma = c.fecha_firma_contrato
             periodicidad = c.periodicidad_pago
             estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
@@ -123,7 +123,7 @@ def indexacion_contrato(
 
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     fecha_base = c.fecha_firma_contrato
-    valor_base = float(c.tarifa_base) if c.tarifa_base else None
+    valor_base = float(c.tarifa_base) / 12 if c.tarifa_base else None
 
     hoy = date.today()
     serie = serie_indexacion(fecha_base, valor_base, ipc_tasas, hoy.year, hoy.month)

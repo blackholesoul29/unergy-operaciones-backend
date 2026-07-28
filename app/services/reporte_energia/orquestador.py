@@ -55,10 +55,11 @@ def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
     return mapa
 
 
-def _fronteras_activas(db: Session) -> list[tuple[Frontera, str | None]]:
-    """(Frontera, project_id_solenium) de las fronteras activas, con tipo
-    soportado, de proyectos con el servicio de CGM contratado -- son las
-    únicas que reportan al ASIC."""
+def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
+    """(Frontera, project_id_solenium) de las fronteras que de verdad
+    reportan al ASIC -- 'activa' es solo el estado; el servicio de CGM
+    (Proyecto.srv_cgm) es el filtro aparte que decide si esa frontera
+    reporta o no (confirmado con el equipo 2026-07-28)."""
     filas = db.execute(
         select(Frontera, Proyecto.project_id_solenium)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
@@ -153,7 +154,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     resumen_con: dict[str, int] = {}
     omitidas: list[str] = []
 
-    fronteras = _fronteras_activas(db)
+    fronteras = _fronteras_con_reporte(db)
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
 
     for i, (frontera, project_id_solenium) in enumerate(fronteras, start=1):

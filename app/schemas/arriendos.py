@@ -21,7 +21,6 @@ class ArrProyectoIn(BaseModel):
     codigo: Optional[str] = None
     fecha_firma_contrato: Optional[date] = None
     valor_base: Optional[float] = None
-    canon_archivo: Optional[float] = None
     activo: bool = True
 
 
@@ -44,9 +43,7 @@ class ArrCalculoFila(BaseModel):
     factor_acumulado: float
     valor_anual_indexado: Optional[int]
     canon_calculado: Optional[int]
-    canon_archivo: Optional[int]
     canon_a_facturar: Optional[int]
-    difiere_archivo: bool
     valor_facturado_congelado: Optional[int] = None
     ipc_incompleto: bool = False
     aplica_este_mes: bool = True

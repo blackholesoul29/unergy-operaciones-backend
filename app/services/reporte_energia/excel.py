@@ -18,7 +18,7 @@ from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaC
 
 COLUMNAS = [
     "nombre_proyecto", "Hora", "Consumo_Principal", "Generación_Principal",
-    "Consumo_Respaldo", "Generación_Respaldo", "Inversores", "Gen dif", "Con DIF", "Medidor Usado",
+    "Consumo_Respaldo", "Generación_Respaldo",
 ]
 
 
@@ -67,10 +67,6 @@ def generar_excel_dia(db: Session, fecha: date) -> bytes:
                 valor_con, valor_gen,
                 f"=C{fila_excel}*(1+(RAND()*0.02-0.01))",
                 f"=D{fila_excel}*(1+(RAND()*0.02-0.01))",
-                None,  # Inversores -- se deja vacío en este v1 (no se persiste la curva de Solenium)
-                f'=IF(AND(D{fila_excel}=0,F{fila_excel}=0),0,IF(OR(D{fila_excel}=0,F{fila_excel}=0),"ALERTA",(D{fila_excel}-F{fila_excel})/D{fila_excel}))',
-                f'=IF(AND(C{fila_excel}=0,E{fila_excel}=0),0,IF(OR(C{fila_excel}=0,E{fila_excel}=0),"Uno es 0",(C{fila_excel}-E{fila_excel})/C{fila_excel}))',
-                rep_gen.medidor_usado,
             ])
             fila_excel += 1
 

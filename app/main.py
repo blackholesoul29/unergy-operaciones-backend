@@ -94,6 +94,19 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipp_mensual_periodo ON ipp_mensual (año, mes)",
+    # energía mensual por contrato XM (ingesta del despacho) — insumo facturación v2
+    """CREATE TABLE IF NOT EXISTS despacho_contrato_mensual (
+        id BIGSERIAL PRIMARY KEY,
+        periodo VARCHAR(7) NOT NULL,
+        codigo_sic_contrato VARCHAR(40) NOT NULL,
+        vendedor VARCHAR(40),
+        comprador VARCHAR(40),
+        tipo VARCHAR(20),
+        kwh NUMERIC(18,4) NOT NULL DEFAULT 0,
+        archivo VARCHAR(200),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

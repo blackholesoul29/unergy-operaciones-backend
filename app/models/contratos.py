@@ -180,6 +180,30 @@ class IppMensual(Base):
     )
 
 
+class DespachoContratoMensual(Base):
+    """Energía mensual por contrato XM, ingerida del archivo de despachos de XM
+    (dspcttos_txf_MM.xlsx). Un registro por (período, contrato). kwh = suma de las
+    24 horas de todos los días del mes para ese contrato. Es el insumo de energía
+    de la facturación v2 (el único dato externo)."""
+    __tablename__ = "despacho_contrato_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # "YYYY-MM"
+    codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False)
+    vendedor: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    comprador: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    archivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("periodo", "codigo_sic_contrato", name="uq_despacho_periodo_contrato"),
+    )
+
+
 class PPATarifa(Base):
     __tablename__ = "ppa_tarifas"
 

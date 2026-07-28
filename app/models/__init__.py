@@ -83,3 +83,7 @@ from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
     EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
 )
+from app.models.registros_cnd import (
+    RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
+    RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
+)

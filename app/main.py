@@ -85,6 +85,15 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_tasa_servicio ON cliente_tasa_servicio (cliente_id, servicio, COALESCE(proyecto_id, 0))",
+    # IPP mensual global (numerador de la indexación de PPAs de energía) — fuente DANE
+    """CREATE TABLE IF NOT EXISTS ipp_mensual (
+        id BIGSERIAL PRIMARY KEY,
+        año INT NOT NULL,
+        mes INT NOT NULL,
+        valor NUMERIC(12,4) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipp_mensual_periodo ON ipp_mensual (año, mes)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

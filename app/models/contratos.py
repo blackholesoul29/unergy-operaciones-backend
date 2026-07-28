@@ -159,6 +159,27 @@ class PPAContrato(Base):
     compromisos_energia: Mapped[list["PPACompromisoEnergia"]] = relationship("PPACompromisoEnergia", back_populates="contrato", cascade="all, delete-orphan")
 
 
+class IppMensual(Base):
+    """Índice IPP publicado (global) por mes. Numerador de la indexación de PPAs:
+    tarifa_indexada = tarifa_base × (IPP_del_mes / valor_indexacion_base_del_PPA).
+    Es un solo valor por período (mismo para todos los contratos), a diferencia del
+    IPP base que es por PPA. Fuente: DANE (IPP)."""
+    __tablename__ = "ipp_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("mes >= 1 AND mes <= 12", name="ck_ipp_mensual_mes_rango"),
+        UniqueConstraint("año", "mes", name="uq_ipp_mensual_periodo"),
+    )
+
+
 class PPATarifa(Base):
     __tablename__ = "ppa_tarifas"
 

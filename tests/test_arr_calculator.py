@@ -90,34 +90,39 @@ def test_deshabilitada_redondea_canon_archivo():
     assert isinstance(f["canon_archivo"], int)
 
 
-# ── Indexación por ANIVERSARIO real del contrato (fix 2026-07) ────────────────
-# Antes se indexaba por año calendario (incremento cada enero). Ahora el
-# incremento se aplica en el aniversario del contrato, preservando la
-# convención DANE: en el aniversario del año Y se aplica ipc[Y-1].
+# ── Indexación por AÑO CALENDARIO (decisión de negocio, revierte fix aniversario) ──
+# El incremento se aplica cada 1 de enero, usando solo el AÑO de
+# fecha_firma_contrato (no el mes/día de la firma). Convención DANE: en enero
+# del año Y se aplica ipc[Y-1].
 
-def test_firma_marzo_no_indexa_antes_del_aniversario():
-    # Firmado 2024-03-15; en enero-2025 aún NO cumple el primer año → sin indexar.
+def test_firma_marzo_indexa_en_enero_siguiente_sin_esperar_aniversario():
+    # Firmado 2024-03-15; en enero-2025 YA indexa (año calendario), aunque
+    # el aniversario real (marzo) todavía no haya llegado.
     f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2025-01",
-           ipc_tasas={2024: 0.10})
-    assert f["n_indexaciones"] == 0
-    assert f["factor_acumulado"] == 1.0
-    assert f["canon_calculado"] == 1_000_000
-
-
-def test_firma_marzo_indexa_desde_el_aniversario():
-    # Mismo contrato; en junio-2025 ya pasó el aniversario (marzo) → 1 indexación
-    # con ipc[2024] (DANE: año anterior al aniversario 2025).
-    f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2025-06",
            ipc_tasas={2024: 0.10})
     assert f["n_indexaciones"] == 1
     assert f["factor_acumulado"] == 1.10
     assert f["canon_calculado"] == 1_100_000
 
 
-def test_firma_marzo_segundo_aniversario_aun_no_cumplido():
-    # En enero-2026 solo se cumplió UN aniversario (marzo-2025); el de marzo-2026
-    # todavía no → 1 indexación (ipc[2024]), no 2.
-    f = _c(fecha_firma_contrato=date(2024, 3, 15), periodo="2026-01",
-           ipc_tasas={2024: 0.0520, 2025: 0.0510})
-    assert f["n_indexaciones"] == 1
-    assert round(f["factor_acumulado"], 6) == 1.052
+def test_tres_incrementos_a_julio_del_tercer_anio():
+    # Firmado 2023-09-01; a julio-2026 ya pasaron 3 1-eneros: 2024, 2025, 2026.
+    ipc = {2023: 0.0928, 2024: 0.0520, 2025: 0.0510}
+    f = _c(fecha_firma_contrato=date(2023, 9, 1), periodo="2026-07",
+           valor_base=4_300_000, ipc_tasas=ipc)
+    assert f["n_indexaciones"] == 3
+    assert round(f["factor_acumulado"], 6) == round(1.0928 * 1.0520 * 1.0510, 6)
+    assert f["canon_calculado"] == round(4_300_000 * 1.0928 * 1.0520 * 1.0510)
+
+
+def test_serie_indexacion_coincide_con_calcular_arriendo():
+    from app.services.arr_calculator import calcular_arriendo, serie_indexacion
+    ipc = {2023: 0.0928, 2024: 0.0520, 2025: 0.0510}
+    fila = calcular_arriendo(
+        proyecto_id=1, nombre="X", codigo=None,
+        fecha_firma_contrato=date(2023, 9, 1),
+        valor_base=4_300_000, canon_archivo=None,
+        periodo="2026-07", ipc_tasas=ipc,
+    )
+    serie = serie_indexacion(date(2023, 9, 1), 4_300_000, ipc, 2026, 7)
+    assert serie[-1]["valor_mensual"] == fila["canon_calculado"]

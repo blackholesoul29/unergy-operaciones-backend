@@ -21,8 +21,7 @@ from app.schemas.arriendos import (
     ArrSeleccionGuardar, ArrSeleccionOut,
 )
 from app.schemas.om import OMIndexacionFila, OMIndexacionResponse
-from app.services.arr_calculator import calcular_arriendo
-from app.services.om_calculator import serie_indexacion
+from app.services.arr_calculator import calcular_arriendo, serie_indexacion
 
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
@@ -116,8 +115,8 @@ def indexacion_contrato(
     _=Depends(get_current_user),
 ):
     """Serie de indexación (anual y mensual) de un contrato de arriendo, calculada
-    automáticamente con el mismo motor que el panel de Costos — aniversario desde
-    la Fecha de contrato (fecha_firma_contrato), solo aniversarios cumplidos a hoy."""
+    automáticamente con el mismo motor que el panel de Costos — año calendario
+    (1-enero), usando solo el año de fecha_firma_contrato."""
     c = db.get(ContratoServicio, contrato_id)
     if c is None or c.servicio_aplica != "arriendo":
         raise HTTPException(404, "Contrato de arriendo no encontrado")

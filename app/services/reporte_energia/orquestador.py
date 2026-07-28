@@ -13,7 +13,6 @@ Confirmar con el equipo si hace falta cubrir esos tipos.
 """
 from __future__ import annotations
 
-import logging
 from datetime import date
 
 from sqlalchemy import select
@@ -28,10 +27,6 @@ from app.services.reporte_energia import curvas, clasificador, clasificador_cons
 from app.services.reporte_energia.utils import curva_a_lista
 
 TIPOS_SOPORTADOS = {TipoFronteraEnum.generacion, TipoFronteraEnum.consumo}
-
-logger = logging.getLogger("reporte_energia.orquestador")
-logger.setLevel(logging.INFO)  # el nivel raíz por defecto es WARNING -- sin esto,
-# el log de éxito de ejecutar_dia_background() nunca aparece en los logs de Railway.
 
 
 def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
@@ -190,14 +185,22 @@ def ejecutar_dia_background(fecha: date) -> None:
     """
     from app.core.database import SessionLocal
 
+    import traceback
+
     db = SessionLocal()
     try:
         resultado = ejecutar_dia(db, fecha)
-        logger.info(
-            "ejecutar_dia_background fecha=%s generacion=%s consumo=%s omitidas=%d",
-            fecha, resultado["generacion"], resultado["consumo"], len(resultado["omitidas"]),
+        # print() en vez de logging -- en este contenedor los logs de nivel
+        # INFO del módulo logging no se están capturando (solo llega un
+        # WARNING+ vía el handler de último recurso), igual que el patrón
+        # "[startup] ..." que ya usa el resto del backend con print().
+        print(
+            f"[reporte_energia] ejecutar_dia_background fecha={fecha} "
+            f"generacion={resultado['generacion']} consumo={resultado['consumo']} "
+            f"omitidas={len(resultado['omitidas'])}"
         )
     except Exception:
-        logger.exception("ejecutar_dia_background fecha=%s falló", fecha)
+        print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} FALLÓ:")
+        print(traceback.format_exc())
     finally:
         db.close()

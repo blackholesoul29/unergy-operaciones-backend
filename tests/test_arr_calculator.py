@@ -64,19 +64,10 @@ def test_ipc_completo_no_marca_flag():
 
 
 def test_sin_ninguna_fecha_deshabilitada():
-    # Sin firma y sin inicio O&M → no hay fecha base → deshabilitada.
+    # Sin fecha de firma de contrato → no hay fecha base → deshabilitada.
     f = _c(fecha_firma_contrato=None)
     assert f["habilitado"] is False
-    assert f["historial_texto"] == "Sin fecha de inicio O&M ni de firma"
-
-
-def test_indexa_desde_inicio_om_si_existe():
-    # Con inicio O&M anterior a la firma, indexa desde el inicio O&M (más antiguo).
-    from datetime import date as _d
-    f = _c(fecha_firma_contrato=_d(2025, 1, 1), fecha_inicio_om=_d(2023, 1, 1),
-           periodo="2026-06", ipc_tasas=IPC)
-    # base 2023 → aniversarios 2024, 2025, 2026 (DANE ipc[año-1])
-    assert f["n_indexaciones"] == 3
+    assert f["historial_texto"] == "Sin fecha de contrato"
 
 
 def test_periodicidad_trimestral_no_aplica_algunos_meses():

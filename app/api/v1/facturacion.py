@@ -12,6 +12,8 @@ Fuentes:
 """
 import io
 import logging
+from calendar import monthrange
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import delete
@@ -20,6 +22,8 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
 from app.models.contratos import DespachoContratoMensual, IppMensual
+from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
+from app.utils.gescon_vigencia import resolver_vigencias
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/facturacion", tags=["Facturación"])
@@ -132,14 +136,29 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     ipp_row = db.query(IppMensual).filter(IppMensual.año == año, IppMensual.mes == mes).first()
     ipp = float(ipp_row.valor) if ipp_row else None
 
-    # contrato XM → solicitud asic vigente
+    # contrato XM → solicitud asic VIGENTE al fin del período (resolver_vigencias
+    # corre sobre el universo publicado, igual que la vista de asic).
+    last_day = date(año, mes, monthrange(año, mes)[1])
+    universo = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.estado_solicitud == EstadoSolicitudAsicEnum.publicado,
+            AsicSolicitud.tipo_solicitud != TipoSolicitudAsicEnum.desistimiento,
+        )
+        .order_by(
+            AsicSolicitud.fecha_inicio.asc().nullsfirst(),
+            AsicSolicitud.fecha_solicitud.asc().nullsfirst(),
+            AsicSolicitud.created_at.asc(),
+        ).all()
+    )
+    vig = resolver_vigencias(universo, hasta=last_day)
     sol: dict = {}
-    for s in db.query(AsicSolicitud).all():
-        c = (s.codigo_sic_contrato or "").strip()
-        if not c:
-            continue
-        if c not in sol or s.es_version_vigente:
-            sol[c] = s
+    for s in universo:
+        v = vig.get(s.id)
+        if v is not None and v.vigente:
+            c = (s.codigo_sic_contrato or "").strip()
+            if c:
+                sol[c] = s
     ppas = {p.id: p for p in db.query(PPAContrato).all()}
     tarifas: dict = {}
     for t in db.query(PPATarifa).filter(PPATarifa.año == año, PPATarifa.mes == mes).all():

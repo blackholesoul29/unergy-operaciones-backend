@@ -6,7 +6,8 @@ from app.api.v1.auth import get_current_user
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
 from app.models.fronteras import Frontera
 from app.schemas.operadores_red import (
-    OperadorRedOut, OperadorRedContactoOut, OperadorRedContactoCreate, OperadorRedContactoUpdate,
+    OperadorRedOut, OperadorRedCreate, OperadorRedUpdate,
+    OperadorRedContactoOut, OperadorRedContactoCreate, OperadorRedContactoUpdate,
 )
 
 router = APIRouter(prefix="/operadores-red", tags=["Operadores de Red"])
@@ -29,6 +30,58 @@ def list_operadores(db: Session = Depends(get_db), _=Depends(get_current_user)):
         d.fronteras_vinculadas = conteos.get(op.id, 0)
         resultado.append(d)
     return resultado
+
+
+@router.post("", response_model=OperadorRedOut, status_code=201)
+def create_operador(
+    data: OperadorRedCreate, db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    existente = (
+        db.query(OperadorRed)
+        .filter(func.lower(OperadorRed.nombre_legal) == data.nombre_legal.strip().lower())
+        .first()
+    )
+    if existente:
+        raise HTTPException(409, f"Ya existe un operador de red con ese nombre legal (ID {existente.id})")
+
+    op = OperadorRed(**data.model_dump())
+    db.add(op)
+    db.commit()
+    db.refresh(op)
+    d = OperadorRedOut.model_validate(op)
+    d.fronteras_vinculadas = 0
+    return d
+
+
+@router.patch("/{operador_id}", response_model=OperadorRedOut)
+def update_operador(
+    operador_id: int, data: OperadorRedUpdate,
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    op = _get_operador_or_404(operador_id, db)
+    cambios = data.model_dump(exclude_unset=True)
+    if "nombre_legal" in cambios and cambios["nombre_legal"]:
+        duplicado = (
+            db.query(OperadorRed)
+            .filter(
+                func.lower(OperadorRed.nombre_legal) == cambios["nombre_legal"].strip().lower(),
+                OperadorRed.id != operador_id,
+            )
+            .first()
+        )
+        if duplicado:
+            raise HTTPException(409, f"Ya existe otro operador de red con ese nombre legal (ID {duplicado.id})")
+    for k, v in cambios.items():
+        setattr(op, k, v)
+    db.commit()
+    db.refresh(op)
+    d = OperadorRedOut.model_validate(op)
+    d.fronteras_vinculadas = (
+        db.query(func.count(Frontera.id))
+        .filter(Frontera.operador_red_id == operador_id, Frontera.deleted_at.is_(None))
+        .scalar() or 0
+    )
+    return d
 
 
 @router.get("/{operador_id}", response_model=OperadorRedOut)

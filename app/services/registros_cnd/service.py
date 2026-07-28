@@ -264,6 +264,10 @@ def listar_todos(db: Session) -> list[dict]:
     query = db.query(Proyecto).options(joinedload(Proyecto.operador))
     if hasattr(Proyecto, "deleted_at"):
         query = query.filter(Proyecto.deleted_at.is_(None))
+    # El proceso de conexion/frontera aplica solo a proyectos que Unergy representa
+    # (servicio de representacion). Excluye autoconsumo y demas.
+    if hasattr(Proyecto, "srv_representacion"):
+        query = query.filter(Proyecto.srv_representacion.is_(True))
     proyectos = query.order_by(Proyecto.nombre_comercial.asc()).all()
     filas = []
     for p in proyectos:

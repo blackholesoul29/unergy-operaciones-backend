@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
@@ -9,6 +9,7 @@ from app.schemas.operadores_red import (
     OperadorRedOut, OperadorRedCreate, OperadorRedUpdate,
     OperadorRedContactoOut, OperadorRedContactoCreate, OperadorRedContactoUpdate,
 )
+from app.utils.nombre_matching import mejor_candidato
 
 router = APIRouter(prefix="/operadores-red", tags=["Operadores de Red"])
 
@@ -32,9 +33,26 @@ def list_operadores(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return resultado
 
 
+def _buscar_duplicado_parecido(db: Session, nombre: str, excluir_id: int | None = None) -> OperadorRed | None:
+    """Nombre parecido (no necesariamente exacto) a un operador ya existente --
+    mismo algoritmo que Fronteras/Proyectos (app/utils/nombre_matching.py).
+    Deliberadamente permisivo: no bloquea, solo avisa (forzar=true lo salta)."""
+    q = db.query(OperadorRed)
+    if excluir_id is not None:
+        q = q.filter(OperadorRed.id != excluir_id)
+    candidatos = [
+        (op, [n for n in (op.nombre_legal, op.nombre_comercial) if n])
+        for op in q.all()
+    ]
+    item, _score = mejor_candidato(nombre, candidatos)
+    return item
+
+
 @router.post("", response_model=OperadorRedOut, status_code=201)
 def create_operador(
-    data: OperadorRedCreate, db: Session = Depends(get_db), _=Depends(get_current_user),
+    data: OperadorRedCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un operador con nombre muy parecido"),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
     existente = (
         db.query(OperadorRed)
@@ -43,6 +61,22 @@ def create_operador(
     )
     if existente:
         raise HTTPException(409, f"Ya existe un operador de red con ese nombre legal (ID {existente.id})")
+
+    if not forzar:
+        parecido = _buscar_duplicado_parecido(db, data.nombre_comercial or data.nombre_legal)
+        if parecido:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un operador con un nombre muy parecido: "
+                        f"'{parecido.nombre_comercial or parecido.nombre_legal}' (ID {parecido.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": parecido.id,
+                    "candidato_nombre": parecido.nombre_comercial or parecido.nombre_legal,
+                },
+            )
 
     op = OperadorRed(**data.model_dump())
     db.add(op)

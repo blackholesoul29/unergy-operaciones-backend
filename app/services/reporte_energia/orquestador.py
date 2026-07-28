@@ -145,7 +145,10 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     resumen_con: dict[str, int] = {}
     omitidas: list[str] = []
 
-    for frontera, project_id_solenium in _fronteras_activas(db):
+    fronteras = _fronteras_activas(db)
+    print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
+
+    for i, (frontera, project_id_solenium) in enumerate(fronteras, start=1):
         frt_code = frontera.codigo_frontera.strip().lower()
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
@@ -168,6 +171,11 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
 
         else:
             omitidas.append(f"{frontera.nombre_frontera} ({frontera.tipo_frontera})")
+            continue
+
+        print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> caso {clave}")
+        if i % 5 == 0:
+            db.commit()  # avance visible en /fronteras mientras el resto sigue corriendo
 
     db.commit()
     return {"generacion": resumen_gen, "consumo": resumen_con, "omitidas": omitidas, "fecha": str(fecha)}
@@ -187,6 +195,7 @@ def ejecutar_dia_background(fecha: date) -> None:
 
     import traceback
 
+    print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} ARRANCÓ")
     db = SessionLocal()
     try:
         resultado = ejecutar_dia(db, fecha)

@@ -240,6 +240,7 @@ class FronteraOut(FronteraBase):
     updated_at: datetime
 
     proyecto_nombre: Optional[str] = None
+    proyecto_fecha_inicio_comercializacion: Optional[date] = None
     operador_comercial: Optional[str] = None
     operador_correos: list[str] = []
     # Uno por cada cliente que sea fuente del contacto CGM de este proyecto

@@ -91,6 +91,7 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
+        d.proyecto_fecha_inicio_comercializacion = f.proyecto.fecha_inicio_comercializacion
         d.clientes_cgm = [
             {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
             for c in get_clientes_contacto(db, "cgm", f.proyecto_id)

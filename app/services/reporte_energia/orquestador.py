@@ -13,6 +13,7 @@ Confirmar con el equipo si hace falta cubrir esos tipos.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from sqlalchemy import select
@@ -27,6 +28,8 @@ from app.services.reporte_energia import curvas, clasificador, clasificador_cons
 from app.services.reporte_energia.utils import curva_a_lista
 
 TIPOS_SOPORTADOS = {TipoFronteraEnum.generacion, TipoFronteraEnum.consumo}
+
+logger = logging.getLogger("reporte_energia.orquestador")
 
 
 def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
@@ -171,3 +174,28 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
 
     db.commit()
     return {"generacion": resumen_gen, "consumo": resumen_con, "omitidas": omitidas, "fecha": str(fecha)}
+
+
+def ejecutar_dia_background(fecha: date) -> None:
+    """Igual que ejecutar_dia(), pero abre su propia sesión de BD y corre en
+    un hilo aparte -- pensada para que el endpoint /ejecutar responda de
+    inmediato en vez de bloquear el request.
+
+    Con ~50 fronteras (varias llamadas a Quoia/Solenium cada una, más hasta
+    90s de recuperación activa por medidor incompleto) una corrida completa
+    puede tardar varios minutos -- más que el timeout fijo del proxy externo
+    de Vercel (~30s), así que no puede devolverse en el mismo request.
+    """
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        resultado = ejecutar_dia(db, fecha)
+        logger.info(
+            "ejecutar_dia_background fecha=%s generacion=%s consumo=%s omitidas=%d",
+            fecha, resultado["generacion"], resultado["consumo"], len(resultado["omitidas"]),
+        )
+    except Exception:
+        logger.exception("ejecutar_dia_background fecha=%s falló", fecha)
+    finally:
+        db.close()

@@ -245,14 +245,16 @@ def descargar_excel(fecha: date = Query(...), db: Session = Depends(get_db), _=D
 
 
 @router.post("/ejecutar", response_model=EjecutarDiaResponse)
-def ejecutar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Corre (o re-corre) la clasificación de un día. Filas ya editadas a
-    mano no se pisan (ver orquestador._upsert_*)."""
-    resultado = orquestador.ejecutar_dia(db, fecha)
-    return EjecutarDiaResponse(
-        fecha=fecha, generacion=resultado["generacion"], consumo=resultado["consumo"],
-        omitidas=resultado["omitidas"],
-    )
+def ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
+    """Dispara (o re-dispara) la clasificación de un día en un hilo aparte y
+    responde de inmediato -- con ~50 fronteras (más recuperación activa de
+    medidor cuando aplica) una corrida completa tarda varios minutos, más
+    que el timeout fijo del proxy externo que usa el frontend. Filas ya
+    editadas a mano no se pisan (ver orquestador._upsert_*)."""
+    import threading
+
+    threading.Thread(target=orquestador.ejecutar_dia_background, args=(fecha,), daemon=True).start()
+    return EjecutarDiaResponse(fecha=fecha, status="iniciado")
 
 
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)

@@ -81,10 +81,10 @@ class ValidarResponse(BaseModel):
 
 
 class EjecutarDiaResponse(BaseModel):
+    """La clasificación corre en segundo plano (ver orquestador.ejecutar_dia_background)
+    -- este response solo confirma que arrancó, no incluye los conteos finales."""
     fecha: date
-    generacion: dict[str, int]
-    consumo: dict[str, int]
-    omitidas: list[str]
+    status: str
 
 
 class EnviarReporteEnergiaResponse(BaseModel):

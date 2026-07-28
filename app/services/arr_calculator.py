@@ -1,12 +1,11 @@
 """
 Cálculo de Arriendos — puro, sin DB ni FastAPI. Base mensual indexada por IPC
-con convención DANE (ipc[año-1]), aplicada en el ANIVERSARIO real del contrato
-(no cada enero calendario): en el aniversario del año Y se aplica ipc[Y-1], y un
-aniversario solo cuenta si ya ocurrió al último día del período facturado.
+con convención DANE (ipc[año-1]), aplicada por AÑO CALENDARIO: el incremento se
+aplica cada 1 de enero, usando solo el AÑO de fecha_firma_contrato (no el mes/día
+de la firma). En enero del año Y se aplica ipc[Y-1].
 Canon mostrado = canon_archivo ?? calculado.
 """
 from __future__ import annotations
-import calendar
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from app.services.om_calculator import corresponde_cobro_este_mes
@@ -17,31 +16,6 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
 
 def _redondear(v: float) -> int:
     return int(Decimal(str(v)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-def _ultimo_dia_mes(año: int, mes: int) -> int:
-    return calendar.monthrange(año, mes)[1]
-
-
-def _fecha_aniversario(fecha_base: date, k: int) -> date:
-    """k-ésimo aniversario de fecha_base (mismo mes/día; clamp 29-feb → 28-feb)."""
-    año = fecha_base.year + k
-    mes = fecha_base.month
-    dia = min(fecha_base.day, _ultimo_dia_mes(año, mes))
-    return date(año, mes, dia)
-
-
-def _aniversarios_cumplidos(fecha_base: date, año_periodo: int, mes_periodo: int) -> list[date]:
-    """Aniversarios (fecha_base + k años) ya alcanzados al último día del período."""
-    ultimo_dia_periodo = date(año_periodo, mes_periodo, _ultimo_dia_mes(año_periodo, mes_periodo))
-    aniversarios: list[date] = []
-    k = 1
-    while True:
-        fecha_aniv = _fecha_aniversario(fecha_base, k)
-        if fecha_aniv > ultimo_dia_periodo:
-            return aniversarios
-        aniversarios.append(fecha_aniv)
-        k += 1
 
 
 def calcular_arriendo(
@@ -89,28 +63,26 @@ def calcular_arriendo(
     if fecha_base is None:
         return deshabilitada("Sin fecha de contrato")
 
+    año_firma = fecha_base.year
     aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
 
     factor = 1.0
     n = 0
     pasos = []
     ipc_incompleto = False
-    detalle = [f"Base {fecha_base.year}: {valor_base}"]
-    # Indexar en cada aniversario cumplido del contrato (no cada enero calendario).
-    # Convención DANE: en el aniversario del año Y se aplica ipc[Y-1].
-    for fecha_aniv in _aniversarios_cumplidos(fecha_base, año_periodo, mes):
-        año_aniv = fecha_aniv.year
-        ipc = ipc_tasas.get(año_aniv - 1)
+    detalle = [f"Base {año_firma}: {valor_base}"]
+    # Indexar cada 1-enero (año calendario), usando solo el año de fecha_firma_contrato.
+    # Convención DANE: en enero del año Y se aplica ipc[Y-1].
+    for añoC in range(año_firma + 1, año_periodo + 1):
+        ipc = ipc_tasas.get(añoC - 1)
         if ipc is None:
-            # Falta la tasa de ese año: se marca la fila como incompleta (aviso en UI).
-            # Se detiene aquí para no aplicar años posteriores sin la tasa intermedia.
             ipc_incompleto = True
-            detalle.append(f"Aniversario {año_aniv}: IPC dic {año_aniv - 1} no disponible")
+            detalle.append(f"Ene {añoC}: IPC dic {añoC - 1} no disponible")
             break
         factor *= (1.0 + ipc)
         n += 1
-        pasos.append(f"IPC dic {año_aniv - 1}: {ipc * 100:.2f}%")
-        detalle.append(f"Aniversario {fecha_aniv.isoformat()} (IPC dic {año_aniv - 1}: {ipc * 100:.2f}%)")
+        pasos.append(f"IPC dic {añoC - 1}: {ipc * 100:.2f}%")
+        detalle.append(f"Ene {añoC} (IPC dic {añoC - 1}: {ipc * 100:.2f}%)")
 
     canon_calculado = _redondear(valor_base * factor)
     canon_a_facturar = _redondear(float(canon_archivo)) if canon_archivo is not None else canon_calculado
@@ -139,3 +111,41 @@ def calcular_arriendo(
         "historial_texto": " → ".join(pasos) if pasos else f"Sin indexaciones (base: {valor_base})",
         "historial_detalle": "\n".join(detalle),
     }
+
+
+def serie_indexacion(
+    fecha_base: date | None,
+    valor_base: float | None,
+    ipc_tasas: dict[int, float],
+    año_hasta: int,
+    mes_hasta: int,
+) -> list[dict]:
+    """Serie de indexación de arriendo por año calendario (1-enero), con la misma
+    convención DANE que calcular_arriendo (ipc[año-1]). Solo se usa el AÑO de
+    fecha_base, no el mes/día. valor_base es el canon MENSUAL base (misma
+    semántica que calcular_arriendo). Lista vacía si falta la fecha o el valor."""
+    if fecha_base is None or not valor_base or valor_base <= 0:
+        return []
+
+    año_firma = fecha_base.year
+    filas = [{
+        "anio": año_firma,
+        "ipc_aplicado": None,
+        "valor_mensual": _redondear(valor_base),
+        "valor_anual": _redondear(valor_base * 12),
+    }]
+    factor = 1.0
+    for añoC in range(año_firma + 1, año_hasta + 1):
+        tasa = ipc_tasas.get(añoC - 1)
+        ipc_pct = None
+        if tasa is not None:
+            factor *= (1.0 + tasa)
+            ipc_pct = round(tasa * 100, 2)
+        valor_mensual = valor_base * factor
+        filas.append({
+            "anio": añoC,
+            "ipc_aplicado": ipc_pct,
+            "valor_mensual": _redondear(valor_mensual),
+            "valor_anual": _redondear(valor_mensual * 12),
+        })
+    return filas

@@ -10,14 +10,14 @@ la conversión vive en app/services/cumplimiento_service.py).
 Guardas de existencia: estas columnas también las crea el DDL de arranque de
 main.py, que es el camino real de deploy — la migración tiene que ser idempotente.
 
-Revision ID: 055
+Revision ID: 059
 Revises: 047
 Create Date: 2026-07-14
 """
 from alembic import op
 
-revision = "055"
-down_revision = "051"
+revision = "059"
+down_revision = "058"
 branch_labels = None
 depends_on = None
 

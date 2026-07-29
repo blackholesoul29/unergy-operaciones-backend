@@ -70,7 +70,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             # facturable (id sintético negativo, no se persiste selección real).
             data = calcular_arriendo(
                 proyecto_id=-p.id, nombre=p.nombre_comercial or f"Proyecto #{p.id}",
-                codigo=None, fecha_firma_contrato=None, valor_base=None,
+                codigo=p.codigo_tsf, fecha_firma_contrato=None, valor_base=None,
                 periodo=periodo, ipc_tasas=ipc_tasas,
             )
             data["iva_calculado"] = None
@@ -101,7 +101,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
 
             data = calcular_arriendo(
                 proyecto_id=arrendador.id,
-                nombre=p.nombre_comercial, codigo=None,
+                nombre=p.nombre_comercial, codigo=p.codigo_tsf,
                 fecha_firma_contrato=fecha_firma,
                 valor_base=valor_base,
                 periodo=periodo, ipc_tasas=ipc_tasas,

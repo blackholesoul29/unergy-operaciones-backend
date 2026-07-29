@@ -1,7 +1,7 @@
 """Tabla precio_bolsa (módulo Riesgos de Bolsa)
 
-Revision ID: 054
-Revises: 053
+Revision ID: 062
+Revises: 061
 Create Date: 2026-07-06
 
 Relinealizada dos veces: el build original forkeó de master (head 035) y
@@ -13,8 +13,8 @@ de 053 (contrato_servicio_detail_fields, en esta misma rama).
 """
 from alembic import op
 
-revision = "054"
-down_revision = "053"
+revision = "062"
+down_revision = "061"
 branch_labels = None
 depends_on = None
 

@@ -13,8 +13,8 @@ cierra el contrato front↔back.
 ADD COLUMN IF NOT EXISTS en cada paso para que reintentar la migración desde
 cero sea seguro si un deploy se corta a medias (mismo criterio que 034).
 
-Revision ID: 053
-Revises: 052 (garantia_coverage_monitoring — vive en la rama garantias de la
+Revision ID: 061
+Revises: 060 (garantia_coverage_monitoring — vive en la rama garantias de la
 cola re-linealizada 07-24; esa rama se mergea ANTES que esta)
 Create Date: 2026-07-06
 """
@@ -23,8 +23,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "053"
-down_revision = "052"
+revision = "061"
+down_revision = "060"
 branch_labels = None
 depends_on = None
 

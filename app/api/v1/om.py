@@ -109,10 +109,11 @@ def calcular_periodo(
         if d.ruta_local and _Path(d.ruta_local).exists():
             documentos_nombre[d.contrato_id] = d.nombre_archivo
 
-    # Todos los proyectos EN OPERACIÓN (tengan o no contrato de mantenimiento).
+    # Todos los proyectos EN OPERACIÓN con el servicio de Operación contratado
+    # (Proyecto.srv_operacion) — tengan o no contrato de mantenimiento.
     proyectos = (
         db.query(Proyecto)
-        .filter(Proyecto.estado == "en_operacion")
+        .filter(Proyecto.estado == "en_operacion", Proyecto.srv_operacion == True)  # noqa: E712
         .order_by(Proyecto.nombre_comercial)
         .all()
     )

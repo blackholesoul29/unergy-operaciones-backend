@@ -46,7 +46,7 @@ def db():
 def _proy(db):
     """Proyecto en operación + contrato de arriendo + 1 arrendador (arquitectura
     actual: calcular_periodo ya no depende de ArrProyecto)."""
-    p = Proyecto(nombre_comercial="Predio", estado="en_operacion")
+    p = Proyecto(nombre_comercial="Predio", estado="en_operacion", srv_operacion=True)
     db.add(p); db.flush()
     c = ContratoServicio(servicio_aplica="arriendo", proyecto_id=p.id, estado="vigente",
                          fecha_firma_contrato=date(2020, 1, 1), periodicidad_pago="mensual")
@@ -85,7 +85,7 @@ def test_calculo_usa_valor_congelado(db):
 def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
     """El valor/estado/tipo salen del contrato de arriendo en Operación (fuente de
     verdad), no del ArrProyecto (que queda solo como llave/respaldo)."""
-    p = Proyecto(nombre_comercial="Baraya", estado="en_operacion", tipo_proyecto="minigranja")
+    p = Proyecto(nombre_comercial="Baraya", estado="en_operacion", srv_operacion=True, tipo_proyecto="minigranja")
     db.add(p); db.flush()
     c = ContratoServicio(servicio_aplica="arriendo", proyecto_id=p.id, estado="vigente",
                          tarifa_base=9_000_000, fecha_firma_contrato=date(2020, 1, 1),
@@ -109,7 +109,7 @@ def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
 def test_proyecto_en_operacion_sin_contrato_queda_sin_contrato(db):
     """Un proyecto en operación SIN contrato de arriendo aún debe seguir viéndose
     en Costos (solo visible, no facturable) — mismo patrón que Mantenimiento."""
-    db.add(Proyecto(nombre_comercial="Predio Suelto", estado="en_operacion"))
+    db.add(Proyecto(nombre_comercial="Predio Suelto", estado="en_operacion", srv_operacion=True))
     db.flush()
     resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)
     fila = next(f for f in resp.filas if f.proyecto == "Predio Suelto")

@@ -43,7 +43,7 @@ def db():
 
 
 def _proy(db, nombre, estado="en_operacion"):
-    p = Proyecto(nombre_comercial=nombre, estado=estado)
+    p = Proyecto(nombre_comercial=nombre, estado=estado, srv_operacion=True)
     db.add(p)
     db.flush()
     return p
@@ -78,7 +78,7 @@ def test_panel_incluye_sin_contrato_y_marca_estado(db):
 def test_sin_firma_pero_con_fecha_inicio_del_dialogo_habilita(db):
     """La 'Fecha de inicio O&M' del diálogo vive en fecha_inicio; sin firma pero
     con esa fecha, la fila queda HABILITADA (om.py usa fecha_inicio_om or fecha_inicio)."""
-    p = Proyecto(nombre_comercial="SinFirma", estado="en_operacion", tipo_proyecto="minigranja")
+    p = Proyecto(nombre_comercial="SinFirma", estado="en_operacion", srv_operacion=True, tipo_proyecto="minigranja")
     db.add(p); db.flush()
     c = ContratoServicio(
         servicio_aplica="mantenimiento", proyecto_id=p.id, estado="vigente",
@@ -96,7 +96,7 @@ def test_sin_firma_pero_con_fecha_inicio_del_dialogo_habilita(db):
 
 def test_calculo_expone_motivo_exclusion(db):
     """La fila trae el motivo_exclusion guardado para mostrarlo en el panel (tooltip)."""
-    p = Proyecto(nombre_comercial="Excl", estado="en_operacion", tipo_proyecto="minigranja")
+    p = Proyecto(nombre_comercial="Excl", estado="en_operacion", srv_operacion=True, tipo_proyecto="minigranja")
     db.add(p); db.flush()
     c = _contrato(db, p, "vigente")
     db.add(OMSeleccion(contrato_id=c.id, periodo="2026-06",
@@ -110,9 +110,9 @@ def test_calculo_expone_motivo_exclusion(db):
 
 def test_fila_incluye_tipo_proyecto(db):
     """Cada fila lleva el tipo_proyecto para agrupar el panel (como en Proyectos)."""
-    mg = Proyecto(nombre_comercial="Mini", estado="en_operacion", tipo_proyecto="minigranja")
+    mg = Proyecto(nombre_comercial="Mini", estado="en_operacion", srv_operacion=True, tipo_proyecto="minigranja")
     db.add(mg); db.flush(); _contrato(db, mg, "vigente")
-    ac = Proyecto(nombre_comercial="Auto", estado="en_operacion", tipo_proyecto="autoconsumo")
+    ac = Proyecto(nombre_comercial="Auto", estado="en_operacion", srv_operacion=True, tipo_proyecto="autoconsumo")
     db.add(ac); db.flush()   # sin contrato
 
     resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)

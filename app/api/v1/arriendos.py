@@ -52,7 +52,8 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
     selecciones = {s.arr_arrendador_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
 
-    proyectos = (db.query(Proyecto).filter(Proyecto.estado == "en_operacion")
+    proyectos = (db.query(Proyecto)
+                 .filter(Proyecto.estado == "en_operacion", Proyecto.srv_operacion == True)  # noqa: E712
                  .order_by(Proyecto.nombre_comercial).all())
     contrato_por_proyecto: dict[int, ContratoServicio] = {}
     for c in (db.query(ContratoServicio)

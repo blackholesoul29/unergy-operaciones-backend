@@ -1048,6 +1048,10 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS responsable_iva BOOLEAN NOT NULL DEFAULT false",
+    # arr_arrendador_id en ArrSeleccion/ArrDocumento (2026-07): enlaza selección y
+    # documentos a un arrendador específico del contrato de arriendo (varios arrendadores).
+    "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
     # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
@@ -2791,6 +2795,76 @@ def _run_arr_arrendador_backfill() -> None:
         db.close()
 
 
+def _backfill_arr_arrendador_id(db) -> int:
+    """Núcleo testeable: para cada ArrSeleccion/ArrDocumento con
+    arr_arrendador_id IS NULL, resuelve vía arr_proyecto_id → ArrProyecto →
+    match difuso → Proyecto → ContratoServicio(arriendo) → primer ArrArrendador
+    de ese contrato, y lo asigna. Fill-if-null, nunca pisa lo ya enlazado."""
+    from app.models.arriendos import ArrProyecto, ArrArrendador, ArrSeleccion, ArrDocumento
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
+
+    arrendador_por_arr_proyecto: dict[int, int] = {}
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None:
+            continue
+        contrato = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id == p.id,
+        ).first()
+        if contrato is None:
+            continue
+        arrendador = db.query(ArrArrendador).filter(
+            ArrArrendador.contrato_id == contrato.id,
+        ).first()
+        if arrendador is None:
+            continue
+        arrendador_por_arr_proyecto[a.id] = arrendador.id
+
+    actualizados = 0
+    for sel in db.query(ArrSeleccion).filter(ArrSeleccion.arr_arrendador_id.is_(None)).all():
+        arrendador_id = arrendador_por_arr_proyecto.get(sel.arr_proyecto_id)
+        if arrendador_id is None:
+            continue
+        sel.arr_arrendador_id = arrendador_id
+        actualizados += 1
+
+    for doc in db.query(ArrDocumento).filter(ArrDocumento.arr_arrendador_id.is_(None)).all():
+        if doc.arr_proyecto_id is None:
+            continue
+        arrendador_id = arrendador_por_arr_proyecto.get(doc.arr_proyecto_id)
+        if arrendador_id is None:
+            continue
+        doc.arr_arrendador_id = arrendador_id
+        actualizados += 1
+
+    db.commit()
+    return actualizados
+
+
+def _run_arr_arrendador_id_backfill() -> None:
+    """Enlaza ArrSeleccion/ArrDocumento existentes (sin arr_arrendador_id) al
+    arrendador correspondiente del contrato de arriendo del proyecto emparejado.
+    Idempotente, fill-if-null."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        actualizados = _backfill_arr_arrendador_id(db)
+        print(f"[arr_arrendador_id_backfill] {actualizados} registros enlazados a arrendador")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_arrendador_id_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -2896,6 +2970,7 @@ def _deferred_init():
         ("arr_seed", _run_arr_seed),
         ("arr_backfill_contratos", _run_arr_backfill_contratos),
         ("arr_arrendador_backfill", _run_arr_arrendador_backfill),
+        ("arr_arrendador_id_backfill", _run_arr_arrendador_id_backfill),
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),

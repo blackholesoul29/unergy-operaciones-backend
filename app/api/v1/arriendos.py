@@ -126,19 +126,28 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
 @router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
 def indexacion_contrato(
     contrato_id: int,
+    arrendador_id: int | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Serie de indexación (anual y mensual) de un contrato de arriendo, calculada
     automáticamente con el mismo motor que el panel de Costos — año calendario
-    (1-enero), usando solo el año de fecha_firma_contrato."""
+    (1-enero), usando solo el año de fecha_firma_contrato. La fecha base y la
+    periodicidad son del contrato (compartidas); si se pasa arrendador_id, el
+    valor base es el de ESE arrendador en vez de tarifa_base del contrato."""
     c = db.get(ContratoServicio, contrato_id)
     if c is None or c.servicio_aplica != "arriendo":
         raise HTTPException(404, "Contrato de arriendo no encontrado")
 
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     fecha_base = c.fecha_firma_contrato
-    valor_base = float(c.tarifa_base) / 12 if c.tarifa_base else None
+    if arrendador_id is not None:
+        arrendador = db.get(ArrArrendador, arrendador_id)
+        if arrendador is None or arrendador.contrato_id != contrato_id:
+            raise HTTPException(404, "Arrendador no encontrado para este contrato")
+        valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base else None
+    else:
+        valor_base = float(c.tarifa_base) / 12 if c.tarifa_base else None
 
     hoy = date.today()
     serie = serie_indexacion(fecha_base, valor_base, ipc_tasas, hoy.year, hoy.month)

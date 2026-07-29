@@ -34,7 +34,7 @@ def test_gestion_reciente_reinicia_contador():
 
 def test_gestion_anterior_al_cambio_de_estado_no_cuenta():
     # La gestión es más vieja que la entrada al estado → manda estado_desde.
-    dias, alerta = calcular_alerta("oferta", _hace(7), _hace(30), 5, AHORA)
+    dias, alerta = calcular_alerta("envio_oferta", _hace(7), _hace(30), 5, AHORA)
     assert (dias, alerta) == (7, True)
 
 
@@ -45,7 +45,7 @@ def test_fin_nunca_alerta():
 
 
 def test_estados_con_alerta_son_los_tres_activos():
-    assert ESTADOS_CON_ALERTA == frozenset({"prospeccion", "oferta", "negociacion"})
+    assert ESTADOS_CON_ALERTA == frozenset({"prospeccion", "envio_oferta", "negociacion_contrato"})
 
 
 def test_umbral_configurable():

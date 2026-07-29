@@ -581,6 +581,76 @@ def _fin_efectivo_asic(db: Session, asic: AsicSolicitud, last_day: date) -> date
     return v.fecha_fin_efectiva if v else asic.fecha_fin
 
 
+# ── Historial intra-mes ───────────────────────────────────────────────────────
+# El tab Proyectos muestra el HISTORIAL del mes, no una foto: una planta que
+# cambió de modalidad a mitad de mes aparece en todas las piscinas por las que
+# pasó, cada una con su ventana de días. Estos helpers son aritmética de fechas
+# pura (sin BD) para poder probarlos sueltos.
+
+def _fecha_corte(year: int, month: int, hoy: date | None = None) -> date:
+    """Fecha contra la que se decide si una ventana sigue vigente.
+
+    Mes en curso → HOY: una planta cuyo contrato termina el 30 sigue vigente el
+    26. Mes pasado → último día del mes (foto de cierre). Mes futuro → último
+    día del mes (proyección).
+    """
+    hoy = hoy or date.today()
+    if (year, month) == (hoy.year, hoy.month):
+        return hoy
+    return date(year, month, calendar.monthrange(year, month)[1])
+
+
+def _recortar(ini: date | None, fin: date | None, lo: date, hi: date):
+    """Intersección de [ini, fin] con [lo, hi]. Bordes nulos = abiertos.
+    Devuelve None si no se tocan."""
+    a = max(ini, lo) if ini else lo
+    b = min(fin, hi) if fin else hi
+    return (a, b) if a <= b else None
+
+
+def _restar_intervalos(base, ocupados: list) -> list:
+    """Días de `base` (par (ini, fin)) que NO cubre ninguno de `ocupados`.
+
+    Es lo que convierte la bolsa de "plantas sin contrato" a "días sin
+    contrato": el residuo de una planta liberada el 23-jul es [24-jul, 31-jul].
+    """
+    if base is None:
+        return []
+    libres = [base]
+    for oi, of in sorted(ocupados):
+        nuevos = []
+        for li, lf in libres:
+            if of < li or oi > lf:  # sin solape: el tramo sobrevive entero
+                nuevos.append((li, lf))
+                continue
+            if li < oi:
+                nuevos.append((li, oi - timedelta(days=1)))
+            if lf > of:
+                nuevos.append((of + timedelta(days=1), lf))
+        libres = nuevos
+    return libres
+
+
+def _estado_segmento(ini: date, fin: date, corte: date) -> str:
+    """'terminado' (se acabó antes del corte) | 'futuro' (aún no empieza) |
+    'vigente'. Los contadores de la vista solo cuentan 'vigente'."""
+    if fin < corte:
+        return "terminado"
+    if ini > corte:
+        return "futuro"
+    return "vigente"
+
+
+def _con_segmento(entry: dict, ini: date | None, fin: date | None,
+                  first_day: date, last_day: date, corte: date) -> dict:
+    """Añade a una fila de planta su ventana recortada al mes y su estado."""
+    seg = _recortar(ini, fin, first_day, last_day) or (first_day, last_day)
+    entry["segmento_inicio"] = seg[0].isoformat()
+    entry["segmento_fin"] = seg[1].isoformat()
+    entry["estado"] = _estado_segmento(seg[0], seg[1], corte)
+    return entry
+
+
 # ── Impacto de mantenimiento ──────────────────────────────────────────────────
 
 def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) -> dict[int, float]:
@@ -1300,18 +1370,24 @@ def get_plantas_contratos(
     plantas_map = {p.id: p for p in plantas_db}
 
     contratos_venta = _query_contratos_venta(db, year, month)
+    corte = _fecha_corte(year, month)
 
     # --- VENTA: use GESCON to resolve plant assignments ---
     venta_out = []
-    assigned_plant_ids: set[int] = set()
+    # Días del mes que cada planta pasó asignada a un contrato de venta. La
+    # bolsa es el RESIDUO de esto (ver más abajo), no el complemento del set de
+    # plantas: así una planta liberada a mitad de mes aparece en las dos.
+    assigned_windows: dict[int, list] = defaultdict(list)
     for c in contratos_venta:
         plantas_list = []
         if c.numero_codigo_contrato:
             for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
                 if asic.proyecto_id and asic.proyecto_id in plantas_map:
                     p = plantas_map[asic.proyecto_id]
-                    assigned_plant_ids.add(p.id)
-                    plantas_list.append({
+                    seg = _recortar(asic.fecha_inicio, asic.fecha_fin, first_day, last_day)
+                    if seg:
+                        assigned_windows[p.id].append(seg)
+                    plantas_list.append(_con_segmento({
                         "id": p.id,
                         "nombre": p.nombre_comercial,
                         "codigo_sic": asic.codigo_sic_contrato,
@@ -1320,7 +1396,7 @@ def get_plantas_contratos(
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
                         "es_duplicado": bool(asic.es_duplicado),
                         "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
-                    })
+                    }, asic.fecha_inicio, asic.fecha_fin, first_day, last_day, corte))
         venta_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
@@ -1396,14 +1472,15 @@ def get_plantas_contratos(
                 card["contrato_ppa_id"] = r.contrato_ppa_id
                 card["id"] = r.contrato_ppa_id
             if r.proyecto_id:
-                card["plantas"].append({
+                fin_mostrado = fin_ef or r.fecha_fin
+                card["plantas"].append(_con_segmento({
                     "id": r.proyecto_id,
                     "nombre": r.proyecto.nombre_comercial if r.proyecto else f"Proyecto {r.proyecto_id}",
                     "codigo_sic": r.codigo_sic_contrato,
                     "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
                     # fin EFECTIVO (recortado por relevos), no la fecha cruda
-                    "fecha_fin": fin_ef.isoformat() if fin_ef else (r.fecha_fin.isoformat() if r.fecha_fin else None),
-                })
+                    "fecha_fin": fin_mostrado.isoformat() if fin_mostrado else None,
+                }, r.fecha_inicio, fin_mostrado, first_day, last_day, corte))
         compra_out = sorted(por_contrato.values(), key=lambda c: c["nombre"])
 
     # --- COMPRA EXTERNA (g. ppa_compra_externa): PPAs de compra FUERA de GESCON ---
@@ -1429,44 +1506,61 @@ def get_plantas_contratos(
             # Plantas externas vinculadas al PPA (no exigen representación ni
             # estado en_operacion: no son plantas del portafolio Unergy).
             "plantas": [
-                {
+                _con_segmento({
                     "id": p.id,
                     "nombre": p.nombre_comercial,
                     "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
                     "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
-                }
+                }, c.fecha_inicio, c.fecha_fin, first_day, last_day, corte)
                 for p in c.proyectos
             ],
         })
 
-    # --- BOLSA: remanente sin contrato PPA, subdividido en comercializador (UNGC) / libre ---
-    # Paso POSTERIOR que NO altera la lógica de contratos: solo subdivide el remanente.
+    # --- BOLSA: DÍAS del mes sin contrato PPA, subdivididos en comercializador (UNGC) / libre ---
+    # Paso POSTERIOR que NO altera la lógica de contratos: solo reparte el residuo.
+    # Antes esto era "plantas no asignadas"; con eso una planta liberada el 23-jul
+    # quedaba en (a) los 31 días y (e) salía vacía. Ahora se restan los días ya
+    # cubiertos por contratos y CADA tramo libre genera su propia fila.
     bolsa_plantas = []
     bolsa_comercializador = []
     bolsa_libre = []
     for p in plantas_db:
-        if p.id in assigned_plant_ids:
-            continue
-        piscina, asic = _clasificar_remanente_bolsa(db, p.id, first_day, last_day)
-        fin_efectivo = _fin_efectivo_asic(db, asic, last_day) if asic else None
-        entry = {
-            "id": p.id,
-            "nombre": p.nombre_comercial,
-            # "comercializador" (registro SIC vigente con comprador UNGC) | "libre" (sin SIC vigente)
-            "piscina": piscina,
-            "codigo_sic": asic.codigo_sic_contrato if asic else None,
-            "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
-            # ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
-            # (recortado por relevos). Nulos para la piscina libre.
-            "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
-            "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
-        }
-        bolsa_plantas.append(entry)
-        (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
+        # Ventana operativa dentro del mes: no inventamos días en bolsa antes de
+        # que la planta empiece a comercializar ni después de que termine su
+        # representación. Ambos campos suelen ser NULL → mes completo.
+        operativa = _recortar(
+            p.fecha_inicio_comercializacion, p.fecha_fin_representacion, first_day, last_day
+        )
+        for seg_ini, seg_fin in _restar_intervalos(operativa, assigned_windows.get(p.id) or []):
+            # La modalidad se evalúa SOBRE EL TRAMO, no sobre el mes: una planta
+            # que salió de contrato el 23 se juzga por lo que tenga del 24 al 31.
+            piscina, asic = _clasificar_remanente_bolsa(db, p.id, seg_ini, seg_fin)
+            fin_efectivo = _fin_efectivo_asic(db, asic, seg_fin) if asic else None
+            entry = {
+                "id": p.id,
+                "nombre": p.nombre_comercial,
+                # "comercializador" (registro SIC vigente con comprador UNGC) | "libre" (sin SIC vigente)
+                "piscina": piscina,
+                "codigo_sic": asic.codigo_sic_contrato if asic else None,
+                "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
+                # ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
+                # (recortado por relevos). Nulos para la piscina libre — ahí la
+                # ventana que importa es el propio tramo (segmento_*).
+                "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
+                "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
+                "segmento_inicio": seg_ini.isoformat(),
+                "segmento_fin": seg_fin.isoformat(),
+                "estado": _estado_segmento(seg_ini, seg_fin, corte),
+            }
+            bolsa_plantas.append(entry)
+            (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
     out = {
         "year": year,
         "month": month,
+        # Fecha contra la que se evalúa "vigente" (hoy si el mes es el actual,
+        # fin de mes si no). El front la usa para explicar los contadores.
+        "fecha_corte": corte.isoformat(),
         "venta": venta_out,
         "compra": compra_out,
         # Compatibilidad con el frontend: "bolsa" sigue siendo la lista COMPLETA del remanente,
@@ -1483,6 +1577,37 @@ def get_plantas_contratos(
     from app.services.clasificacion_energia import derivar_pools
     out.update(derivar_pools(out))
     return out
+
+
+@router.get("/balance-energia")
+def get_balance_energia(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    excluir_compra_externa: bool = Query(
+        False,
+        description="Saca del balance las plantas con PPA de compra externa (piscina g). "
+                    "Su energía está comprada fuera de GESCON, así que contarlas en el "
+                    "residuo de bolsa infla la venta en bolsa UNGG.",
+    ),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Balance mensual de energía en bolsa (MWh), real + proyección al cierre.
+
+    Responde "este mes, ¿cuánto compro o compraré en bolsa?". Netea DENTRO de
+    cada agente: la venta en bolsa de UNGG se contrarresta con sus compras
+    (duplicados + uso del recurso); la venta por UNGC va aparte porque es otro
+    agente y solo acarrea cartera.
+
+    Cruza los DOS ejes que hasta ahora se calculaban por separado: los días de
+    cada tramo (historial intra-mes) y el % de despacho. Lo que no está
+    contratado en un tramo se vende en bolsa por UNGG.
+    """
+    from app.services.balance_energia import calcular_balance
+
+    return calcular_balance(
+        db, year, month, excluir_compra_externa=excluir_compra_externa
+    )
 
 
 @router.post("/backfill-comercializacion")

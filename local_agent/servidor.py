@@ -73,13 +73,16 @@ def iniciar_descarga(body: XMDescargaRequest):
         raise HTTPException(400, f"Extensión no soportada: {body.extension}")
     if body.fecha_fin < body.fecha_inicio:
         raise HTTPException(400, "fecha_fin no puede ser anterior a fecha_inicio")
+    if body.agente_filtro not in tipos.AGENTES_VALIDOS:
+        raise HTTPException(400, f"Agente no soportado: {body.agente_filtro}")
 
     job_id = jobs.crear_job()
     ftp_params = {"host": body.ftp_host, "usuario": body.ftp_usuario, "clave": body.ftp_clave}
 
     hilo = threading.Thread(
         target=ejecutar_job,
-        args=(job_id, ftp_params, body.tipo, body.extension, body.fecha_inicio, body.fecha_fin, body.enriquecer),
+        args=(job_id, ftp_params, body.tipo, body.extension, body.fecha_inicio,
+              body.fecha_fin, body.enriquecer, body.agente_filtro),
         daemon=True,
     )
     hilo.start()

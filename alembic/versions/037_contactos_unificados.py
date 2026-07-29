@@ -29,13 +29,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE TYPE tipo_contacto_enum AS ENUM "
-        "('operacional', 'cgm', 'liquidacion', 'soporte', 'monitoreo')"
-    )
+    # CREATE TYPE no soporta IF NOT EXISTS en Postgres -- si un intento de
+    # deploy anterior murio a medio camino (tipo creado, migracion sin marcar
+    # como aplicada), el proximo intento debe poder re-ejecutar esto sin tronar.
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE tipo_contacto_enum AS ENUM
+                ('operacional', 'cgm', 'liquidacion', 'soporte', 'monitoreo');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
 
     op.execute("""
-        CREATE TABLE contactos (
+        CREATE TABLE IF NOT EXISTS contactos (
             id BIGSERIAL PRIMARY KEY,
             cliente_id BIGINT NOT NULL REFERENCES clientes(id),
             nombre VARCHAR(255),
@@ -47,10 +53,10 @@ def upgrade() -> None:
             CONSTRAINT uq_contacto_cliente_email_tipo UNIQUE (cliente_id, email, tipo)
         )
     """)
-    op.execute("CREATE INDEX ix_contactos_cliente_id ON contactos (cliente_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_contactos_cliente_id ON contactos (cliente_id)")
 
     op.execute("""
-        CREATE TABLE proyecto_area_contacto (
+        CREATE TABLE IF NOT EXISTS proyecto_area_contacto (
             id BIGSERIAL PRIMARY KEY,
             proyecto_id BIGINT NOT NULL REFERENCES proyectos(id),
             tipo tipo_contacto_enum NOT NULL,
@@ -60,8 +66,8 @@ def upgrade() -> None:
             CONSTRAINT uq_proyecto_area_contacto_tipo UNIQUE (proyecto_id, tipo)
         )
     """)
-    op.execute("CREATE INDEX ix_proyecto_area_contacto_proyecto_id ON proyecto_area_contacto (proyecto_id)")
-    op.execute("CREATE INDEX ix_proyecto_area_contacto_cliente_id ON proyecto_area_contacto (cliente_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_proyecto_area_contacto_proyecto_id ON proyecto_area_contacto (proyecto_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_proyecto_area_contacto_cliente_id ON proyecto_area_contacto (cliente_id)")
 
     # ── Backfill desde clientes ─────────────────────────────────────────────
     # Campos escalares → una fila por cliente si tienen valor.

@@ -17,7 +17,7 @@ class QuoiaClient:
     def __init__(self):
         self._base_url = settings.QUOIA_BASE_URL.rstrip("/")
         self._token = settings.QUOIA_API_TOKEN
-        self._http = httpx.Client(timeout=TIMEOUT)
+        self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
 
     @property
     def enabled(self) -> bool:

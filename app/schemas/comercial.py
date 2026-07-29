@@ -3,8 +3,12 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 OrigenClienteLiteral = Literal["prospeccion_propia", "recomendacion", "referido", "otro"]
-EstadoOportunidadLiteral = Literal["prospeccion", "oferta", "negociacion", "fin"]
+EstadoOportunidadLiteral = Literal[
+    "prospeccion", "envio_oferta", "negociacion_contrato", "firmado", "operando", "declinado"
+]
 TipoServicioLiteral = Literal["representacion", "comunidad_energetica"]
+TipoOfertaLiteral = Literal["servicios_operacionales", "compra_energia", "comunidad_energetica"]
+ResultadoOfertaLiteral = Literal["pendiente", "aceptado", "declinado"]
 TipoGestionLiteral = Literal["llamada", "correo", "reunion", "whatsapp", "nota"]
 # Tipos válidos del modelo Contacto existente (TipoContactoEnum).
 TipoContactoLiteral = Literal["liquidacion", "operacional", "comercial", "cgm", "contable"]
@@ -39,6 +43,9 @@ class OportunidadCreate(BaseModel):
     nombre: Optional[str] = None
     tipo_servicio: Optional[TipoServicioLiteral] = None
     notas: Optional[str] = None
+    forzar_cliente_duplicado: bool = Field(
+        False, description="true: crear cliente_nuevo igual aunque exista uno con nombre muy parecido"
+    )
 
     @model_validator(mode="after")
     def exactamente_un_cliente(self):
@@ -55,6 +62,36 @@ class OportunidadUpdate(BaseModel):
     fecha_tentativa_inicio_representacion: Optional[date] = None
     fecha_tentativa_inicio_compra_energia: Optional[date] = None
     fecha_estimada_firma: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class OfertaCreate(BaseModel):
+    tipo: TipoOfertaLiteral
+    planta_nombre: Optional[str] = None
+    proyecto_id: Optional[int] = None
+    numero_oferta: Optional[str] = None
+    precio_detalle: Optional[str] = None
+    resultado: ResultadoOfertaLiteral = "pendiente"
+    etapa_texto: Optional[str] = None
+    fecha_oferta: Optional[date] = None
+    fecha_tentativa_inicio: Optional[date] = None
+    contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
+    notas: Optional[str] = None
+
+
+class OfertaUpdate(BaseModel):
+    tipo: Optional[TipoOfertaLiteral] = None
+    planta_nombre: Optional[str] = None
+    proyecto_id: Optional[int] = None
+    numero_oferta: Optional[str] = None
+    precio_detalle: Optional[str] = None
+    resultado: Optional[ResultadoOfertaLiteral] = None
+    etapa_texto: Optional[str] = None
+    fecha_oferta: Optional[date] = None
+    fecha_tentativa_inicio: Optional[date] = None
+    contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
     notas: Optional[str] = None
 
 

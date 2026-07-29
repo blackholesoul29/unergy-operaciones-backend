@@ -126,6 +126,12 @@ def _parse_iso_date(raw: str | None) -> date | None:
         return None
 
 
+
+# Siglas que .title() rompería (p. ej. "AGGE" -> "Agge"); se restauran a
+# mayúscula tras el title-case.
+_SIGLAS_MAYUSCULA = {"AGGE", "AGPE"}
+
+
 def _derive_commercial_name(code: str) -> str:
     """Nombre legible derivado del código de proyecto de origina.
 
@@ -140,7 +146,13 @@ def _derive_commercial_name(code: str) -> str:
     is_code_prefix = bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
     readable = (parts[1] if len(parts) > 1 and is_code_prefix else code)
     readable = re.sub(r"[_-]+", " ", readable).strip()
-    return readable.title() if readable else code
+    if not readable:
+        return code
+    titled = readable.title()
+    return " ".join(
+        w.upper() if w.upper() in _SIGLAS_MAYUSCULA else w
+        for w in titled.split(" ")
+    )
 
 
 def _parece_codigo(nombre: str | None) -> bool:

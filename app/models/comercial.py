@@ -1,22 +1,41 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import (BigInteger, String, Boolean, Date, DateTime,
+from sqlalchemy import (BigInteger, Integer, String, Boolean, Date, DateTime,
                         ForeignKey, Enum as SAEnum, Text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
 
 
 class EstadoOportunidadEnum(str, enum.Enum):
+    # Pipeline de 6 estados (2026-07-15). Los 4 anteriores se renombraron in-place:
+    # oferta→envio_oferta, negociacion→negociacion_contrato, servicio_operativo→operando
+    # (que a su vez venía de 'fin'). firmado y declinado son nuevos.
     prospeccion = "prospeccion"
-    oferta = "oferta"
-    negociacion = "negociacion"
-    fin = "fin"
+    envio_oferta = "envio_oferta"
+    negociacion_contrato = "negociacion_contrato"
+    firmado = "firmado"
+    operando = "operando"
+    declinado = "declinado"
 
 
 class TipoServicioOportunidadEnum(str, enum.Enum):
     representacion = "representacion"
     comunidad_energetica = "comunidad_energetica"
+
+
+class TipoOfertaComercialEnum(str, enum.Enum):
+    """Tipo de sub-oferta dentro de una oportunidad-cliente."""
+    servicios_operacionales = "servicios_operacionales"
+    compra_energia = "compra_energia"
+    comunidad_energetica = "comunidad_energetica"
+
+
+class ResultadoOfertaEnum(str, enum.Enum):
+    pendiente = "pendiente"
+    aceptado = "aceptado"
+    declinado = "declinado"
 
 
 class TipoGestionEnum(str, enum.Enum):
@@ -73,6 +92,9 @@ class Oportunidad(Base):
         "ClienteDocumentoComercial",
         primaryjoin="ClienteDocumentoComercial.oportunidad_id == Oportunidad.id",
         foreign_keys="ClienteDocumentoComercial.oportunidad_id", uselist=True, viewonly=True)
+    ofertas: Mapped[list["OportunidadOferta"]] = relationship(
+        "OportunidadOferta", back_populates="oportunidad",
+        cascade="all, delete-orphan", order_by="OportunidadOferta.id")
 
 
 class OportunidadEstadoHistorial(Base):
@@ -106,3 +128,42 @@ class OportunidadGestion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     oportunidad: Mapped["Oportunidad"] = relationship("Oportunidad", back_populates="gestiones")
+
+
+class OportunidadOferta(Base):
+    """Sub-oferta = una planta × un tipo de servicio dentro de la oportunidad-cliente.
+    Cada fila de las hojas de prospección (Servicios / Energía / Comunidad) es una
+    de estas. La oportunidad es del cliente; sus ofertas cuelgan aquí con su propio
+    consecutivo, precio y resultado (aceptado/declinado)."""
+
+    __tablename__ = "oportunidad_ofertas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    oportunidad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(SAEnum(TipoOfertaComercialEnum, name="tipo_oferta_comercial_enum"), nullable=False)
+    planta_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
+    numero_oferta: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    precio_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resultado: Mapped[str] = mapped_column(
+        SAEnum(ResultadoOfertaEnum, name="resultado_oferta_enum"),
+        nullable=False, default="pendiente", server_default="pendiente")
+    etapa_texto: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fecha_oferta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_tentativa_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contrato_firmado: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
+    # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.
+    detalle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Envío de la oferta (2026-07-28). fecha_oferta (arriba) es el PRIMER envío;
+    # aquí van los toques posteriores y la respuesta del cliente. Que
+    # fecha_ultima_respuesta sea NULL significa que el cliente NUNCA respondió,
+    # que es la señal fuerte del tablero (Los Apóstoles: 6 toques, 0 respuestas).
+    seguimientos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    fecha_ultima_respuesta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    documento_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    oportunidad: Mapped["Oportunidad"] = relationship("Oportunidad", back_populates="ofertas")

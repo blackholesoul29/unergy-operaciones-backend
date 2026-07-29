@@ -6,6 +6,8 @@ from pydantic import BaseModel
 class DestinatarioSeleccionado(BaseModel):
     tipo: Literal["operador", "cliente"]
     id: int
+    proyectos: Optional[list[int]] = None  # None = todas las fronteras del destinatario;
+    # lista (incluso vacía) = filtrar solo a esos proyecto_id
 
 
 class EnviarReporteCGMRequest(BaseModel):

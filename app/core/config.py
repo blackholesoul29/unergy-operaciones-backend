@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Cobertura ASIC: días que un PPA activo puede llevar con su registro GESCON
     # radicado pero sin publicar antes de que la alerta se vuelva crítica.
     ASIC_ALERTA_DIAS: int = 15
+    # La actualización comercial de julio 2026 se aplica UNA vez y se marca sola
+    # (ver app/services/comercial_actualizacion.MARCA_VERSION). Poner esto en
+    # true fuerza a reaplicarla, pisando lo que se haya cambiado a mano después.
+    COMERCIAL_REAPLICAR_ACTUALIZACION: bool = False
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod

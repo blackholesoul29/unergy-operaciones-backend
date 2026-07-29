@@ -43,7 +43,7 @@ def db():
 
 
 def _setup(db):
-    p = Proyecto(nombre_comercial="Alpha", estado="en_operacion", tipo_proyecto="minigranja")
+    p = Proyecto(nombre_comercial="Alpha", estado="en_operacion", srv_operacion=True, tipo_proyecto="minigranja")
     db.add(p); db.flush()
     c = ContratoServicio(servicio_aplica="mantenimiento", proyecto_id=p.id, estado="vigente",
                          tarifa_base=12_000_000, fecha_inicio_om=date(2020, 1, 1),

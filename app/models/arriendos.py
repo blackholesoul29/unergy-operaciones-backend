@@ -20,6 +20,22 @@ class ArrProyecto(Base):
     updated_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ArrArrendador(Base):
+    """Un arrendador (persona/entidad que recibe el pago) dentro de un contrato
+    de arriendo. Todo contrato de arriendo tiene siempre >=1 arrendador (tras el
+    backfill de arranque)."""
+    __tablename__ = "arr_arrendador"
+
+    id:              Mapped[int]         = mapped_column(BigInteger, primary_key=True)
+    contrato_id:     Mapped[int]         = mapped_column(BigInteger, ForeignKey("contratos_servicio.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre:          Mapped[str]         = mapped_column(String(255), nullable=False)
+    valor_base:      Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # canon ANUAL (misma semántica que tarifa_base)
+    responsable_iva: Mapped[bool]        = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    activo:          Mapped[bool]        = mapped_column(Boolean, default=True, nullable=False)
+    created_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ArrIPCTasa(Base):
     __tablename__ = "arr_ipc_tasas"
 

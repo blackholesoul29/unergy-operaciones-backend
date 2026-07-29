@@ -2752,6 +2752,45 @@ def _run_arr_backfill_contratos() -> None:
         db.close()
 
 
+def _backfill_arr_arrendador(db) -> int:
+    """Núcleo testeable: crea 1 ArrArrendador para cada contrato de arriendo
+    que aún no tenga ninguno. Idempotente (fill-if-missing)."""
+    from app.models.arriendos import ArrArrendador
+    from app.models.contratos import ContratoServicio
+    contratos = db.query(ContratoServicio).filter(ContratoServicio.servicio_aplica == "arriendo").all()
+    creados = 0
+    for c in contratos:
+        existe = db.query(ArrArrendador).filter(ArrArrendador.contrato_id == c.id).first()
+        if existe:
+            continue
+        db.add(ArrArrendador(
+            contrato_id=c.id,
+            nombre=c.prestador_nombre or "Arrendador",
+            valor_base=c.tarifa_base,
+            responsable_iva=c.responsable_iva,
+        ))
+        creados += 1
+    db.commit()
+    return creados
+
+
+def _run_arr_arrendador_backfill() -> None:
+    """Crea el arrendador automático (nombre=prestador, valor=tarifa_base,
+    responsable_iva=el del contrato) para todo ContratoServicio(arriendo) que
+    aún no tenga ninguno. Idempotente."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        creados = _backfill_arr_arrendador(db)
+        print(f"[arr_arrendador_backfill] {creados} arrendadores creados")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_arrendador_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -2856,6 +2895,7 @@ def _deferred_init():
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
         ("arr_backfill_contratos", _run_arr_backfill_contratos),
+        ("arr_arrendador_backfill", _run_arr_arrendador_backfill),
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),

@@ -81,6 +81,18 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
                              .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
                              .order_by(ArrArrendador.id).all())
             es_respaldo = False
+            if not arrendadores:
+                # Defensivo: un contrato de arriendo SIEMPRE debe tener >=1 arrendador
+                # (backfill de arranque), pero si por cualquier razón no lo tiene
+                # (carrera en el despliegue, dato borde), no debe desaparecer de la
+                # tabla — se usa el propio contrato como arrendador implícito.
+                # c.tarifa_base es ANUAL (igual semántica que ArrArrendador.valor_base),
+                # así que NO se marca como es_respaldo (eso es solo para el caso legado
+                # de ArrProyecto sin contrato, cuyo valor ya es mensual).
+                arrendadores = [types.SimpleNamespace(
+                    id=None, nombre=c.prestador_nombre or "Arrendador",
+                    valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
+                )]
         else:               # sin contrato aún: respaldo a los datos del ArrProyecto (1 arrendador
                              # implícito, usando el propio id de ArrProyecto como llave de selección
                              # — mismo comportamiento que hoy, solo que envuelto en el loop).

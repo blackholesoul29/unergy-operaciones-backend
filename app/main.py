@@ -107,6 +107,14 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
+    # agrupación manual de proyectos en facturas con nombre (dividir un PPA)
+    """CREATE TABLE IF NOT EXISTS factura_agrupacion (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        nombre VARCHAR(120) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_proyecto ON factura_agrupacion (proyecto_id)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

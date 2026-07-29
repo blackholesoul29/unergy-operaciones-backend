@@ -182,17 +182,16 @@ class IppMensual(Base):
 
 
 class FacturaAgrupacion(Base):
-    """Agrupación manual de proyectos en una factura con nombre (ej. dividir el PPA
-    'Terpel 2' en 'Terpel 2 PA' y 'Terpel 2 Sol de la Sierra'). Es fija: se define
-    una vez y aplica cada mes. Un proyecto pertenece a lo sumo a una factura; los
-    proyectos sin asignación agrupan por su PPA (default). La tarifa NO cambia (sale
-    del PPA); esto solo reagrupa para la vista/emisión de facturas."""
+    """Agrupación manual de CONTRATOS (código SIC) en una factura con nombre (ej.
+    dividir 'Terpel 2' en 'Terpel 2 PA' y 'Terpel 2 Sol de la Sierra'). Se llavea por
+    CONTRATO —no por proyecto— porque un proyecto puede tener varios contratos con
+    tarifas distintas (transición de comercializador). Fija: se define una vez y
+    aplica cada mes. Contrato sin asignación agrupa por su PPA (default). La tarifa
+    NO cambia (sale del PPA); esto solo reagrupa para la emisión de facturas."""
     __tablename__ = "factura_agrupacion"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
+    codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

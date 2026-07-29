@@ -165,8 +165,8 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     for t in db.query(PPATarifa).filter(PPATarifa.año == año, PPATarifa.mes == mes).all():
         tarifas[t.contrato_id] = float(t.tarifa) if t.tarifa is not None else None
     proy_nombre = {pid: nom for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).all()}
-    # Agrupación manual de facturas: proyecto_id → nombre de factura (fija).
-    agrup = {a.proyecto_id: a.nombre for a in db.query(FacturaAgrupacion).all()}
+    # Agrupación manual de facturas: codigo_sic_contrato → nombre de factura (fija).
+    agrup = {a.codigo_sic_contrato: a.nombre for a in db.query(FacturaAgrupacion).all()}
 
     lineas = []
     for d in despacho:
@@ -199,8 +199,8 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             "proyecto_id": proyid,
             "proyecto": proy_nombre.get(proyid) if proyid else None,
             "ppa": ppa_nom,
-            # Nombre de la factura: agrupación manual si existe, si no el PPA (default).
-            "factura": (agrup.get(proyid) if proyid and agrup.get(proyid) else ppa_nom),
+            # Nombre de la factura: agrupación manual del CONTRATO si existe, si no el PPA.
+            "factura": (agrup.get(c) if agrup.get(c) else ppa_nom),
             "kwh": kwh,
             "tarifa_base": base,
             "ipp_base": ipp_base,
@@ -233,17 +233,25 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             "factura": k, "ppa": l["ppa"], "comprador": l["comprador"], "contratos": 0,
             "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
             "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
-            "personalizada": bool(l["proyecto_id"] and agrup.get(l["proyecto_id"])),
-            "proyectos": [],
+            "personalizada": bool(agrup.get(l["contrato"])),
+            "_tarifas": set(), "proyectos": [],
         })
         g["kwh"] += l["kwh"]; g["facturacion"] += l["facturacion"]; g["contratos"] += 1
+        if l["tarifa_indexada"] is not None:
+            g["_tarifas"].add(l["tarifa_indexada"])
         g["proyectos"].append({
             "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
-            "contrato": l["contrato"], "ppa": l["ppa"], "kwh": l["kwh"],
-            "facturacion": l["facturacion"], "asignada": bool(l["proyecto_id"] and agrup.get(l["proyecto_id"])),
+            "contrato": l["contrato"], "ppa": l["ppa"], "tarifa_indexada": l["tarifa_indexada"],
+            "kwh": l["kwh"], "facturacion": l["facturacion"], "asignada": bool(agrup.get(l["contrato"])),
         })
     for g in por_factura.values():
         g["kwh"] = round(g["kwh"], 2); g["facturacion"] = round(g["facturacion"], 2)
+        # Si la factura mezcla contratos de PPAs con tarifas distintas, no hay una
+        # sola tarifa: se marca "mixta" (la UI muestra 'varía').
+        g["tarifa_mixta"] = len(g["_tarifas"]) > 1
+        if g["tarifa_mixta"]:
+            g["tarifa_indexada"] = None
+        g.pop("_tarifas", None)
 
     return {
         "periodo": per,
@@ -268,31 +276,34 @@ def facturacion(periodo: str = Query(...), db: Session = Depends(get_db), _=Depe
 
 # ── Agrupación manual de facturas (dividir un PPA en sub-facturas) ─────────────
 class AgrupacionIn(BaseModel):
-    proyecto_id: int
+    codigo_sic_contrato: str
     nombre: str | None = None   # None/"" = quitar la asignación (vuelve al PPA)
 
 
 @router.get("/agrupaciones")
 def listar_agrupaciones(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return [{"proyecto_id": a.proyecto_id, "nombre": a.nombre}
+    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
 
 
 @router.put("/agrupaciones")
 def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Asigna proyectos a una factura con nombre (upsert por proyecto). nombre vacío
-    quita la asignación (el proyecto vuelve a agrupar por su PPA)."""
+    """Asigna CONTRATOS (código SIC) a una factura con nombre (upsert por contrato).
+    nombre vacío quita la asignación (el contrato vuelve a agrupar por su PPA)."""
     for r in rows:
-        obj = db.query(FacturaAgrupacion).filter(FacturaAgrupacion.proyecto_id == r.proyecto_id).first()
+        c = (r.codigo_sic_contrato or "").strip()
+        if not c:
+            continue
+        obj = db.query(FacturaAgrupacion).filter(FacturaAgrupacion.codigo_sic_contrato == c).first()
         nombre = (r.nombre or "").strip()
         if not nombre:
             if obj:
                 db.delete(obj)
             continue
         if obj is None:
-            db.add(FacturaAgrupacion(proyecto_id=r.proyecto_id, nombre=nombre))
+            db.add(FacturaAgrupacion(codigo_sic_contrato=c, nombre=nombre))
         else:
             obj.nombre = nombre
     db.commit()
-    return [{"proyecto_id": a.proyecto_id, "nombre": a.nombre}
+    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]

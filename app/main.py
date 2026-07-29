@@ -107,14 +107,20 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
-    # agrupación manual de proyectos en facturas con nombre (dividir un PPA)
+    # agrupación manual de CONTRATOS en facturas con nombre (dividir un PPA)
     """CREATE TABLE IF NOT EXISTS factura_agrupacion (
         id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        codigo_sic_contrato VARCHAR(40),
         nombre VARCHAR(120) NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_proyecto ON factura_agrupacion (proyecto_id)",
+    # migración: la primera versión llaveaba por proyecto_id (un proyecto puede tener
+    # varios contratos con tarifas distintas). Se pasa a codigo_sic_contrato.
+    "ALTER TABLE factura_agrupacion ADD COLUMN IF NOT EXISTS codigo_sic_contrato VARCHAR(40)",
+    "ALTER TABLE factura_agrupacion ALTER COLUMN proyecto_id DROP NOT NULL",
+    "DELETE FROM factura_agrupacion WHERE codigo_sic_contrato IS NULL",
+    "DROP INDEX IF EXISTS uq_factura_agrupacion_proyecto",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_contrato ON factura_agrupacion (codigo_sic_contrato)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

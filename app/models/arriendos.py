@@ -83,7 +83,7 @@ class ArrSeleccion(Base):
     )
 
     id:              Mapped[int]  = mapped_column(BigInteger, primary_key=True)
-    arr_proyecto_id: Mapped[int]  = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=False, index=True)
+    arr_proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
     arr_arrendador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_arrendador.id", ondelete="CASCADE"), nullable=True, index=True)
     periodo:         Mapped[str]  = mapped_column(String(7), nullable=False, index=True)
     incluido:        Mapped[bool] = mapped_column(Boolean, default=True,  nullable=False)

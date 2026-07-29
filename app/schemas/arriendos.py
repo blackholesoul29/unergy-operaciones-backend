@@ -89,7 +89,7 @@ class ArrSeleccionGuardar(BaseModel):
 
 class ArrSeleccionOut(BaseModel):
     id: int
-    arr_proyecto_id: int
+    arr_proyecto_id: Optional[int] = None
     periodo: str
     incluido: bool
     facturado: bool

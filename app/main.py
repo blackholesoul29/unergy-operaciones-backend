@@ -1052,6 +1052,10 @@ _PENDING_DDLS = [
     # documentos a un arrendador específico del contrato de arriendo (varios arrendadores).
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
+    # calcular_periodo ahora genera una fila por arrendador (no por ArrProyecto):
+    # una ArrSeleccion puede no tener un ArrProyecto real detrás, así que
+    # arr_proyecto_id deja de ser NOT NULL (2026-07).
+    "ALTER TABLE arr_seleccion_mensual ALTER COLUMN arr_proyecto_id DROP NOT NULL",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
     # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el

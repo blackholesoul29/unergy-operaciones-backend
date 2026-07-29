@@ -59,6 +59,7 @@ class ArrDocumento(Base):
     # nullable: los predios SIN match en BD se guardan igual (para revisión manual)
     arr_proyecto_id:   Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
     arr_arrendador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_arrendador.id", ondelete="CASCADE"), nullable=True, index=True)
+    proyecto_id:       Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
     periodo:           Mapped[str]        = mapped_column(String(7), nullable=False, index=True)
     pago_id:           Mapped[int]        = mapped_column(Integer, nullable=False)
     codigo_contrato:   Mapped[str]        = mapped_column(String(120), nullable=False)

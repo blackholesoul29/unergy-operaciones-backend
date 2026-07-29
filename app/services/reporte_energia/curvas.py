@@ -7,6 +7,7 @@ el GaiaClient ya existente del backend en vez de un cliente propio.
 from __future__ import annotations
 
 import logging
+import time
 
 import pandas as pd
 
@@ -16,6 +17,20 @@ from app.services.reporte_energia import recuperacion
 logger = logging.getLogger("reporte_energia.curvas")
 
 HORAS = list(range(24))
+
+# Cachés cortas (mismo patrón que gaia_client._get_dynamic_maps, TTL más
+# corto) para el mapa medidor->nodo y borders->frt_code -- sin esto, cada
+# clic en el detalle de una frontera (solo para mostrar la curva de
+# referencia) volvía a traer el catálogo COMPLETO de Quoia (todos los nodos,
+# todos los borders), no solo el de esa frontera. El reporte real
+# (orquestador.ejecutar_dia) corre una vez al día y no necesita el TTL --
+# esto es sobre todo para la vista de detalle, que se abre repetidas veces
+# en la misma sesión.
+_CACHE_TTL = 300  # segundos
+_mapa_medidor_nodo_cache: dict[int, int] | None = None
+_mapa_medidor_nodo_ts = 0.0
+_mapa_borders_cache: dict[str, dict] | None = None
+_mapa_borders_ts = 0.0
 
 UMBRAL_GENERACION_KWH = 0.5   # kWh por hora mínimo para considerar la hora "generando"
 HORA_MINIMA_CIERRE    = 18    # el medidor debe seguir reportando al menos hasta esta hora
@@ -31,14 +46,23 @@ _CAMPOS_POR_VAR = {
 }
 
 
-def construir_mapa_medidor_nodo(gaia: GaiaClient) -> dict[int, int]:
+def construir_mapa_medidor_nodo(gaia: GaiaClient, usar_cache: bool = True) -> dict[int, int]:
     """meter_id -> node_id, desde /api/node/retailer/ (gaia.get_all_nodes()).
 
     main_meter/backup_meter de un border de Quoia son IDs administrativos de
     medidor; el endpoint de mediciones usa node_id, un espacio de IDs
     distinto -- este mapa es la conversión, igual que
     process/src/internals/nodos_quoia.py en Reporte-Energia.
+
+    Cacheado _CACHE_TTL segundos (usar_cache=False fuerza traerlo de nuevo --
+    la corrida real del día usa esto una sola vez, así que no le hace falta,
+    pero no le molesta tampoco).
     """
+    global _mapa_medidor_nodo_cache, _mapa_medidor_nodo_ts
+    now = time.monotonic()
+    if usar_cache and _mapa_medidor_nodo_cache is not None and (now - _mapa_medidor_nodo_ts) < _CACHE_TTL:
+        return _mapa_medidor_nodo_cache
+
     mapa: dict[int, int] = {}
     for node in gaia.get_all_nodes():
         meter = node.get("meter") or {}
@@ -46,6 +70,38 @@ def construir_mapa_medidor_nodo(gaia: GaiaClient) -> dict[int, int]:
         mid = meter.get("id") if isinstance(meter, dict) else None
         if mid is not None and nid is not None:
             mapa[int(mid)] = int(nid)
+
+    _mapa_medidor_nodo_cache = mapa
+    _mapa_medidor_nodo_ts = now
+    return mapa
+
+
+def construir_mapa_borders(gaia: GaiaClient, usar_cache: bool = True) -> dict[str, dict]:
+    """frt_code (lowercase) -> {border_id, main_meter, backup_meter} desde
+    /api/cgm/v1/border/ (gaia.get_all_borders()). Cacheado igual que
+    construir_mapa_medidor_nodo()."""
+    global _mapa_borders_cache, _mapa_borders_ts
+    now = time.monotonic()
+    if usar_cache and _mapa_borders_cache is not None and (now - _mapa_borders_ts) < _CACHE_TTL:
+        return _mapa_borders_cache
+
+    mapa: dict[str, dict] = {}
+    for proyecto in gaia.get_all_borders():
+        for key in ("frt_generation", "frt_consumption"):
+            frt = proyecto.get(key)
+            if not frt:
+                continue
+            frt_code = (frt.get("frt_code") or "").strip().lower()
+            if not frt_code:
+                continue
+            mapa[frt_code] = {
+                "border_id": frt.get("id"),
+                "main_meter": frt.get("main_meter"),
+                "backup_meter": frt.get("backup_meter"),
+            }
+
+    _mapa_borders_cache = mapa
+    _mapa_borders_ts = now
     return mapa
 
 

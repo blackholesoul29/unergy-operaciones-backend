@@ -137,18 +137,18 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_ppal = curva_medidor_resp = curva_sol = None
     try:
         gaia = GaiaClient()
+        # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
+        # veces por sesión solo para mostrar curvas de referencia, no hace
+        # falta traer el catálogo completo de Quoia en cada clic.
         mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
-        borders = {}
-        for p in gaia.get_all_borders():
-            for key in ("frt_generation", "frt_consumption"):
-                frt = p.get(key)
-                if frt and frt.get("frt_code"):
-                    borders[frt["frt_code"].strip().lower()] = frt
+        borders = curvas.construir_mapa_borders(gaia)
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if meta:
             c = curvas.curvas_de_frontera(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
                 str(fecha), front.codigo_frontera,
+                recuperar=False,  # esto es solo para mostrar una curva de referencia --
+                                  # no tiene sentido interrogar el medidor (hasta 90s) por eso
             )
             curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
             curva_medidor_resp = curva_a_lista(c["curva_resp"])

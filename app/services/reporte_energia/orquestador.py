@@ -35,26 +35,6 @@ TIPOS_GENERACION = {TipoFronteraEnum.generacion}
 TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
 
 
-def _construir_mapa_borders(gaia: GaiaClient) -> dict[str, dict]:
-    """frt_code (lowercase) -> {border_id, main_meter, backup_meter} desde
-    /api/cgm/v1/border/ (gaia.get_all_borders())."""
-    mapa: dict[str, dict] = {}
-    for proyecto in gaia.get_all_borders():
-        for key in ("frt_generation", "frt_consumption"):
-            frt = proyecto.get(key)
-            if not frt:
-                continue
-            frt_code = (frt.get("frt_code") or "").strip().lower()
-            if not frt_code:
-                continue
-            mapa[frt_code] = {
-                "border_id": frt.get("id"),
-                "main_meter": frt.get("main_meter"),
-                "backup_meter": frt.get("backup_meter"),
-            }
-    return mapa
-
-
 def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
     """(Frontera, project_id_solenium) de las fronteras que de verdad
     reportan al ASIC -- 'activa' es solo el estado; el servicio de CGM
@@ -147,7 +127,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     gaia = GaiaClient()
     sol = SoleniumClient()
 
-    bordes = _construir_mapa_borders(gaia)
+    bordes = curvas.construir_mapa_borders(gaia)
     mapa_medidor_nodo = curvas.construir_mapa_medidor_nodo(gaia)
 
     resumen_gen: dict[str, int] = {}

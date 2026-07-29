@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
-from app.models.proyectos import Proyecto
+from app.models.proyectos import Proyecto, EstadoProyectoEnum
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
@@ -37,9 +37,9 @@ TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, Ti
 
 def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
     """(Frontera, project_id_solenium) de las fronteras que de verdad
-    reportan al ASIC -- 'activa' es solo el estado; el servicio de CGM
-    (Proyecto.srv_cgm) es el filtro aparte que decide si esa frontera
-    reporta o no (confirmado con el equipo 2026-07-28)."""
+    reportan al ASIC -- 'activa' es solo el estado de la FRONTERA; hace
+    falta ADEMÁS que el PROYECTO esté en operación y tenga el servicio de
+    CGM contratado (confirmado con el equipo 2026-07-28/29)."""
     filas = db.execute(
         select(Frontera, Proyecto.project_id_solenium)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
@@ -47,6 +47,7 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
             Frontera.estado == EstadoFronteraEnum.activa,
             Frontera.codigo_frontera.is_not(None),
             Frontera.deleted_at.is_(None),
+            Proyecto.estado == EstadoProyectoEnum.en_operacion,
             Proyecto.srv_cgm.is_(True),
         )
     ).all()

@@ -280,12 +280,22 @@ class ProyectoCreate(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
+    # IDs de liquidación (códigos SIC de generación y consumo)
+    codigo_sic_generacion: Optional[str] = None
+    codigo_sic_consumo: Optional[str] = None
+    # IDs de Quoia (reportes de generación/consumo y nodo)
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: Optional[bool] = None
     srv_representacion: Optional[bool] = None
     srv_cgm: Optional[bool] = None
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: Optional[bool] = None
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
@@ -355,12 +365,20 @@ class ProyectoOut(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
+    codigo_sic_generacion: Optional[str] = None
+    codigo_sic_consumo: Optional[str] = None
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: bool = False
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None

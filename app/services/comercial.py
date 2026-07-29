@@ -1,9 +1,10 @@
 """Lógica pura del CRM comercial (testeable sin BD)."""
 from datetime import datetime, timedelta, timezone
 
-# Estados donde aplica la alerta de días sin respuesta. `fin` queda por fuera
-# a propósito: es cierre comercial y los históricos migrados viven ahí.
-ESTADOS_CON_ALERTA = frozenset({"prospeccion", "oferta", "negociacion"})
+# Estados donde aplica la alerta de días sin respuesta. Los estados de cierre
+# (firmado/operando) y el negativo (declinado) quedan por fuera a propósito:
+# no requieren seguimiento comercial y los históricos migrados viven en 'operando'.
+ESTADOS_CON_ALERTA = frozenset({"prospeccion", "envio_oferta", "negociacion_contrato"})
 
 
 def col_now() -> datetime:
@@ -24,6 +25,15 @@ def calcular_alerta(
     última gestión de bitácora. Alerta solo con MÁS de `umbral_dias` días
     (5 días exactos NO alertan) y solo en ESTADOS_CON_ALERTA.
     """
+    # Defensivo: si algún datetime viene naive (p.ej. roundtrip por un backend
+    # sin timezone), se alinea al tz de `ahora` para no romper la resta.
+    def _com(dt):
+        if dt is not None and dt.tzinfo is None and ahora.tzinfo is not None:
+            return dt.replace(tzinfo=ahora.tzinfo)
+        return dt
+
+    estado_desde = _com(estado_desde)
+    ultima_gestion = _com(ultima_gestion)
     referencia = estado_desde
     if ultima_gestion is not None and ultima_gestion > referencia:
         referencia = ultima_gestion

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
@@ -6,8 +6,10 @@ from app.api.v1.auth import get_current_user
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
 from app.models.fronteras import Frontera
 from app.schemas.operadores_red import (
-    OperadorRedOut, OperadorRedContactoOut, OperadorRedContactoCreate, OperadorRedContactoUpdate,
+    OperadorRedOut, OperadorRedCreate, OperadorRedUpdate,
+    OperadorRedContactoOut, OperadorRedContactoCreate, OperadorRedContactoUpdate,
 )
+from app.utils.nombre_matching import mejor_candidato
 
 router = APIRouter(prefix="/operadores-red", tags=["Operadores de Red"])
 
@@ -29,6 +31,91 @@ def list_operadores(db: Session = Depends(get_db), _=Depends(get_current_user)):
         d.fronteras_vinculadas = conteos.get(op.id, 0)
         resultado.append(d)
     return resultado
+
+
+def _buscar_duplicado_parecido(db: Session, nombre: str, excluir_id: int | None = None) -> OperadorRed | None:
+    """Nombre parecido (no necesariamente exacto) a un operador ya existente --
+    mismo algoritmo que Fronteras/Proyectos (app/utils/nombre_matching.py).
+    Deliberadamente permisivo: no bloquea, solo avisa (forzar=true lo salta)."""
+    q = db.query(OperadorRed)
+    if excluir_id is not None:
+        q = q.filter(OperadorRed.id != excluir_id)
+    candidatos = [
+        (op, [n for n in (op.nombre_legal, op.nombre_comercial) if n])
+        for op in q.all()
+    ]
+    item, _score = mejor_candidato(nombre, candidatos)
+    return item
+
+
+@router.post("", response_model=OperadorRedOut, status_code=201)
+def create_operador(
+    data: OperadorRedCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un operador con nombre muy parecido"),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    existente = (
+        db.query(OperadorRed)
+        .filter(func.lower(OperadorRed.nombre_legal) == data.nombre_legal.strip().lower())
+        .first()
+    )
+    if existente:
+        raise HTTPException(409, f"Ya existe un operador de red con ese nombre legal (ID {existente.id})")
+
+    if not forzar:
+        parecido = _buscar_duplicado_parecido(db, data.nombre_comercial or data.nombre_legal)
+        if parecido:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un operador con un nombre muy parecido: "
+                        f"'{parecido.nombre_comercial or parecido.nombre_legal}' (ID {parecido.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": parecido.id,
+                    "candidato_nombre": parecido.nombre_comercial or parecido.nombre_legal,
+                },
+            )
+
+    op = OperadorRed(**data.model_dump())
+    db.add(op)
+    db.commit()
+    db.refresh(op)
+    d = OperadorRedOut.model_validate(op)
+    d.fronteras_vinculadas = 0
+    return d
+
+
+@router.patch("/{operador_id}", response_model=OperadorRedOut)
+def update_operador(
+    operador_id: int, data: OperadorRedUpdate,
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    op = _get_operador_or_404(operador_id, db)
+    cambios = data.model_dump(exclude_unset=True)
+    if "nombre_legal" in cambios and cambios["nombre_legal"]:
+        duplicado = (
+            db.query(OperadorRed)
+            .filter(
+                func.lower(OperadorRed.nombre_legal) == cambios["nombre_legal"].strip().lower(),
+                OperadorRed.id != operador_id,
+            )
+            .first()
+        )
+        if duplicado:
+            raise HTTPException(409, f"Ya existe otro operador de red con ese nombre legal (ID {duplicado.id})")
+    for k, v in cambios.items():
+        setattr(op, k, v)
+    db.commit()
+    db.refresh(op)
+    d = OperadorRedOut.model_validate(op)
+    d.fronteras_vinculadas = (
+        db.query(func.count(Frontera.id))
+        .filter(Frontera.operador_red_id == operador_id, Frontera.deleted_at.is_(None))
+        .scalar() or 0
+    )
+    return d
 
 
 @router.get("/{operador_id}", response_model=OperadorRedOut)

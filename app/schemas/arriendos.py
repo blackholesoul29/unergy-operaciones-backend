@@ -66,6 +66,7 @@ class ArrCalculoFila(BaseModel):
     tipo_proyecto: Optional[str] = None
     estado_contrato: str = "con_contrato"
     motivo_exclusion: Optional[str] = None
+    proyecto_id: Optional[int] = None
     historial_texto: str
     historial_detalle: str
 

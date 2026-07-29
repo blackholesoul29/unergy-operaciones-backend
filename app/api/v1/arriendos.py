@@ -44,74 +44,64 @@ def _safe_segment(nombre: str) -> str:
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Los datos de facturación (valor, fecha inicio O&M, periodicidad, estado, tipo)
-    salen del contrato de arriendo en Operación (ContratoServicio servicio_aplica=
-    'arriendo' ligado al Proyecto). ArrProyecto se mantiene como llave de la fila
-    (selección/documentos) y como respaldo si aún no hay contrato."""
-    from app.services.om_calculator import om_keys, om_match_seed
-
+    """Itera Proyecto (en_operacion) + ContratoServicio(arriendo) directo — sin
+    tabla intermedia (mismo patrón que om.py para Mantenimiento). Todo proyecto
+    en operación aparece, tenga o no contrato de arriendo aún (sin_contrato =
+    solo visible, no facturable, para configurarlo manualmente en Operación)."""
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     selecciones = {s.arr_arrendador_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
-    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
 
-    # Emparejar cada ArrProyecto con su Proyecto (difuso) y el contrato de arriendo.
-    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
-    arr_to_proy = {}
-    for p in db.query(Proyecto).all():
-        a = om_match_seed(p.nombre_comercial or "", arr_keys)
-        if a is not None and a.id not in arr_to_proy:
-            arr_to_proy[a.id] = p
-    contrato_por_proy = {}
-    for c in db.query(ContratoServicio).filter(
-            ContratoServicio.servicio_aplica == "arriendo",
-            ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all():
-        contrato_por_proy.setdefault(c.proyecto_id, c)
+    proyectos = (db.query(Proyecto).filter(Proyecto.estado == "en_operacion")
+                 .order_by(Proyecto.nombre_comercial).all())
+    contrato_por_proyecto: dict[int, ContratoServicio] = {}
+    for c in (db.query(ContratoServicio)
+              .filter(ContratoServicio.servicio_aplica == "arriendo",
+                      ContratoServicio.proyecto_id.isnot(None))
+              .order_by(ContratoServicio.id).all()):
+        contrato_por_proyecto.setdefault(c.proyecto_id, c)
 
     filas, total = [], 0
-    for a in arr:
-        p = arr_to_proy.get(a.id)
-        c = contrato_por_proy.get(p.id) if p else None
+    for p in proyectos:
+        c = contrato_por_proyecto.get(p.id)
 
-        if c is not None:   # fuente de verdad: el contrato en Operación
-            fecha_firma = c.fecha_firma_contrato
-            periodicidad = c.periodicidad_pago
-            estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
-            arrendadores = (db.query(ArrArrendador)
-                             .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
-                             .order_by(ArrArrendador.id).all())
-            es_respaldo = False
-            if not arrendadores:
-                # Defensivo: un contrato de arriendo SIEMPRE debe tener >=1 arrendador
-                # (backfill de arranque), pero si por cualquier razón no lo tiene
-                # (carrera en el despliegue, dato borde), no debe desaparecer de la
-                # tabla — se usa el propio contrato como arrendador implícito.
-                # c.tarifa_base es ANUAL (igual semántica que ArrArrendador.valor_base),
-                # así que NO se marca como es_respaldo (eso es solo para el caso legado
-                # de ArrProyecto sin contrato, cuyo valor ya es mensual).
-                arrendadores = [types.SimpleNamespace(
-                    id=None, nombre=c.prestador_nombre or "Arrendador",
-                    valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
-                )]
-        else:               # sin contrato aún: respaldo a los datos del ArrProyecto (1 arrendador
-                             # implícito, usando el propio id de ArrProyecto como llave de selección
-                             # — mismo comportamiento que hoy, solo que envuelto en el loop).
-            fecha_firma = a.fecha_firma_contrato
-            periodicidad = None
-            estado_contrato = "sin_contrato"
-            arrendadores = [types.SimpleNamespace(id=a.id, nombre=a.nombre, valor_base=a.valor_base, responsable_iva=False)]
-            es_respaldo = True
+        if c is None:
+            # En operación pero SIN contrato de arriendo → solo visible, no
+            # facturable (id sintético negativo, no se persiste selección real).
+            data = calcular_arriendo(
+                proyecto_id=-p.id, nombre=p.nombre_comercial or f"Proyecto #{p.id}",
+                codigo=p.codigo_tsf, fecha_firma_contrato=None, valor_base=None,
+                periodo=periodo, ipc_tasas=ipc_tasas,
+            )
+            data["iva_calculado"] = None
+            data["nombre_arrendador"] = None
+            data["motivo_exclusion"] = None
+            data["tipo_proyecto"] = p.tipo_proyecto
+            data["estado_contrato"] = "sin_contrato"
+            data["aplica_este_mes"] = False
+            data["proyecto_id"] = p.id
+            filas.append(ArrCalculoFila(**data))
+            continue
+
+        fecha_firma = c.fecha_firma_contrato
+        periodicidad = c.periodicidad_pago
+        estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
+        arrendadores = (db.query(ArrArrendador)
+                         .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
+                         .order_by(ArrArrendador.id).all())
+        if not arrendadores:
+            arrendadores = [types.SimpleNamespace(
+                id=None, nombre=c.prestador_nombre or "Arrendador",
+                valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
+            )]
 
         for arrendador in arrendadores:
             sel = selecciones.get(arrendador.id)
-            if es_respaldo:
-                valor_base = float(arrendador.valor_base) if arrendador.valor_base is not None else None
-            else:
-                valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
+            valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
 
             data = calcular_arriendo(
                 proyecto_id=arrendador.id,
-                nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
+                nombre=p.nombre_comercial, codigo=p.codigo_tsf,
                 fecha_firma_contrato=fecha_firma,
                 valor_base=valor_base,
                 periodo=periodo, ipc_tasas=ipc_tasas,
@@ -124,11 +114,11 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             data["iva_calculado"] = calcular_iva(data["canon_a_facturar"], arrendador.responsable_iva)
             data["nombre_arrendador"] = arrendador.nombre
             data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
-            data["tipo_proyecto"] = p.tipo_proyecto if p else None
+            data["tipo_proyecto"] = p.tipo_proyecto
             data["estado_contrato"] = estado_contrato
+            data["proyecto_id"] = c.proyecto_id
             fila = ArrCalculoFila(**data)
             filas.append(fila)
-            # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
             if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
                     and fila.aplica_este_mes and fila.canon_a_facturar):
                 total += fila.canon_a_facturar
@@ -374,6 +364,7 @@ def listar_documentos_periodo(
         {
             "id":                 d.id,
             "arr_proyecto_id":    d.arr_proyecto_id,
+            "proyecto_id":        d.proyecto_id,
             "periodo":            d.periodo,
             "pago_id":            d.pago_id,
             "codigo_contrato":    d.codigo_contrato,
@@ -398,6 +389,7 @@ async def upload_documento(
     codigo_contrato:  str = Form(...),
     tipo_documento:   str = Form(...),
     nombre_resultante:str = Form(...),
+    proyecto_id:      int | None = Form(None),
     file:             UploadFile = File(...),
     file_secundario:  UploadFile | None = File(None),
     db: Session = Depends(get_db),
@@ -439,9 +431,12 @@ async def upload_documento(
         doc.ruta_local        = str(ruta_principal)
         doc.nombre_secundario = nombre_sec
         doc.ruta_secundario   = ruta_sec
+        if proyecto_id is not None:
+            doc.proyecto_id = proyecto_id
     else:
         doc = ArrDocumento(
             arr_proyecto_id=arr_proyecto_id,
+            proyecto_id=proyecto_id,
             periodo=periodo,
             pago_id=pago_id,
             codigo_contrato=codigo_contrato,
@@ -464,7 +459,7 @@ async def upload_cuenta_cobro(
     pago_id:             int = Form(...),
     codigo_contrato:     str = Form(...),
     tipo_documento:      str = Form(...),
-    predios:             str = Form(...),   # JSON: [{arr_proyecto_id|null, codigo_predio, valor_individual, nombre_resultante}]
+    predios:             str = Form(...),   # JSON: [{arr_proyecto_id|null, proyecto_id|null, codigo_predio, valor_individual, nombre_resultante}]
     numero_cuenta_cobro: str | None = Form(None),
     nombre_arrendatario: str | None = Form(None),
     file:                UploadFile = File(...),
@@ -478,6 +473,10 @@ async def upload_cuenta_cobro(
     propio ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) y se crea/actualiza una
     fila ArrDocumento. Los predios sin match (arr_proyecto_id null) también se guardan
     para revisión manual. El archivo original se conserva una sola vez como referencia.
+
+    Cada predio puede traer `proyecto_id` directo (preferido) o solo `arr_proyecto_id`
+    (retrocompatible), en cuyo caso se resuelve el proyecto_id vía el mismo match difuso
+    ArrProyecto→Proyecto usado en el resto del módulo (om_keys/om_match_seed).
     """
     _validar_periodo(periodo)
 
@@ -513,6 +512,26 @@ async def upload_cuenta_cobro(
         limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
         return limpio or f"documento_pago{pago_id}.pdf"
 
+    # Match difuso ArrProyecto → Proyecto, calculado una sola vez por request y
+    # reutilizado por cada predio que no traiga proyecto_id directo (mismo patrón
+    # que _backfill_arr_documento_proyecto_id en app/main.py).
+    _proyecto_por_arr_proyecto: dict[int, int] | None = None
+
+    def _resolver_proyecto_id(arr_proyecto_id: int | None) -> int | None:
+        nonlocal _proyecto_por_arr_proyecto
+        if arr_proyecto_id is None:
+            return None
+        if _proyecto_por_arr_proyecto is None:
+            from app.services.om_calculator import om_keys, om_match_seed
+            arr_activos = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+            arr_keys = [(a, om_keys(a.nombre)) for a in arr_activos]
+            _proyecto_por_arr_proyecto = {}
+            for p in db.query(Proyecto).all():
+                a = om_match_seed(p.nombre_comercial or "", arr_keys)
+                if a is not None:
+                    _proyecto_por_arr_proyecto[a.id] = p.id
+        return _proyecto_por_arr_proyecto.get(arr_proyecto_id)
+
     asociados = 0
     sin_match = 0
     for p in lista_predios:
@@ -526,13 +545,22 @@ async def upload_cuenta_cobro(
             arr_arrendador_id = int(p["arr_arrendador_id"]) if p.get("arr_arrendador_id") is not None else None
         except (TypeError, ValueError):
             arr_arrendador_id = None
+        try:
+            proyecto_id = int(p["proyecto_id"]) if p.get("proyecto_id") is not None else None
+        except (TypeError, ValueError):
+            proyecto_id = None
+        if proyecto_id is None and arr_proyecto_id is not None:
+            proyecto_id = _resolver_proyecto_id(arr_proyecto_id)
 
         # Nombre de archivo: usar el que envía el front; si falta, construirlo completo
         # ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) desde BD como respaldo.
         nombre_resultante = p.get("nombre_resultante")
         if not nombre_resultante:
             proy_nombre = None
-            if arr_proyecto_id is not None:
+            if proyecto_id is not None:
+                proyecto = db.get(Proyecto, proyecto_id)
+                proy_nombre = proyecto.nombre_comercial if proyecto else None
+            elif arr_proyecto_id is not None:
                 ap = db.query(ArrProyecto).filter(ArrProyecto.id == arr_proyecto_id).first()
                 proy_nombre = ap.nombre if ap else None
             partes = [codigo_predio or "predio", periodo]
@@ -563,6 +591,8 @@ async def upload_cuenta_cobro(
             db.add(doc)
 
         doc.arr_arrendador_id   = arr_arrendador_id
+        if proyecto_id is not None:
+            doc.proyecto_id = proyecto_id
         doc.codigo_contrato     = codigo_contrato
         doc.tipo_documento      = tipo_documento
         doc.nombre_archivo      = nombre_arch

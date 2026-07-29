@@ -1052,6 +1052,9 @@ _PENDING_DDLS = [
     # documentos a un arrendador específico del contrato de arriendo (varios arrendadores).
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
     "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
+    # proyecto_id en ArrDocumento (2026-07, Despliegue 1 de eliminar ArrProyecto):
+    # enlaza el documento directamente al Proyecto, sin pasar por ArrProyecto.
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE CASCADE",
     # calcular_periodo ahora genera una fila por arrendador (no por ArrProyecto):
     # una ArrSeleccion puede no tener un ArrProyecto real detrás, así que
     # arr_proyecto_id deja de ser NOT NULL (2026-07).
@@ -2875,6 +2878,55 @@ def _run_arr_arrendador_id_backfill() -> None:
         db.close()
 
 
+def _backfill_arr_documento_proyecto_id(db) -> int:
+    """Núcleo testeable: para cada ArrDocumento con proyecto_id IS NULL, resuelve
+    vía arr_proyecto_id → ArrProyecto → match difuso → Proyecto, y lo asigna.
+    Fill-if-null, nunca pisa lo ya enlazado."""
+    from app.models.arriendos import ArrProyecto, ArrDocumento
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
+
+    proyecto_por_arr_proyecto: dict[int, int] = {}
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None:
+            continue
+        proyecto_por_arr_proyecto[a.id] = p.id
+
+    actualizados = 0
+    for doc in db.query(ArrDocumento).filter(ArrDocumento.proyecto_id.is_(None)).all():
+        if doc.arr_proyecto_id is None:
+            continue
+        proyecto_id = proyecto_por_arr_proyecto.get(doc.arr_proyecto_id)
+        if proyecto_id is None:
+            continue
+        doc.proyecto_id = proyecto_id
+        actualizados += 1
+
+    db.commit()
+    return actualizados
+
+
+def _run_arr_documento_proyecto_id_backfill() -> None:
+    """Enlaza ArrDocumento existentes (sin proyecto_id) al Proyecto correspondiente
+    vía el ArrProyecto emparejado. Idempotente, fill-if-null."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        actualizados = _backfill_arr_documento_proyecto_id(db)
+        print(f"[arr_documento_proyecto_id_backfill] {actualizados} registros enlazados a proyecto")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_documento_proyecto_id_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
 def _run_inversores_minigranja_seed() -> None:
     """Siembra idempotente: cada minigranja (tipo_proyecto='minigranja') que no
     tenga inversores recibe la config típica (inversores 1,2,3 de 300 kW, 4 de 50 kW,
@@ -3032,6 +3084,7 @@ def _deferred_init():
         ("arr_backfill_contratos", _run_arr_backfill_contratos),
         ("arr_arrendador_backfill", _run_arr_arrendador_backfill),
         ("arr_arrendador_id_backfill", _run_arr_arrendador_id_backfill),
+        ("arr_documento_proyecto_id_backfill", _run_arr_documento_proyecto_id_backfill),
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),

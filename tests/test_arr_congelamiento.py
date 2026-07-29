@@ -44,10 +44,16 @@ def db():
 
 
 def _proy(db):
-    p = ArrProyecto(nombre="Predio", codigo="C1", valor_base=1_000_000,
-                    fecha_firma_contrato=date(2020, 1, 1), activo=True)
+    """Proyecto en operación + contrato de arriendo + 1 arrendador (arquitectura
+    actual: calcular_periodo ya no depende de ArrProyecto)."""
+    p = Proyecto(nombre_comercial="Predio", estado="en_operacion")
     db.add(p); db.flush()
-    return p
+    c = ContratoServicio(servicio_aplica="arriendo", proyecto_id=p.id, estado="vigente",
+                         fecha_firma_contrato=date(2020, 1, 1), periodicidad_pago="mensual")
+    db.add(c); db.flush()
+    arrendador = ArrArrendador(contrato_id=c.id, nombre="Prestador", valor_base=12_000_000)
+    db.add(arrendador); db.flush()
+    return arrendador
 
 
 def test_facturar_congela_y_desmarcar_descongela(db):
@@ -67,13 +73,12 @@ def test_facturar_congela_y_desmarcar_descongela(db):
 
 
 def test_calculo_usa_valor_congelado(db):
-    p = _proy(db)
-    # Sin contrato: el arrendador "implícito" usa el propio id del ArrProyecto como llave.
-    db.add(ArrSeleccion(arr_arrendador_id=p.id, arr_proyecto_id=None, periodo=PERIODO, incluido=True,
-                        facturado=True, valor_facturado_congelado=555_000))
+    arrendador = _proy(db)
+    db.add(ArrSeleccion(arr_arrendador_id=arrendador.id, arr_proyecto_id=None, periodo=PERIODO,
+                        incluido=True, facturado=True, valor_facturado_congelado=555_000))
     db.flush()
     resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
-    fila = next(f for f in resp.filas if f.id == p.id)
+    fila = next(f for f in resp.filas if f.id == arrendador.id)
     assert fila.canon_a_facturar == 555_000
 
 
@@ -101,25 +106,27 @@ def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
     assert fila.valor_base == 750_000
 
 
-def test_arrproyecto_sin_contrato_queda_sin_contrato(db):
-    db.add(ArrProyecto(nombre="Predio Suelto", codigo="Z", valor_base=2_000_000,
-                       fecha_firma_contrato=date(2020, 1, 1), activo=True))
+def test_proyecto_en_operacion_sin_contrato_queda_sin_contrato(db):
+    """Un proyecto en operación SIN contrato de arriendo aún debe seguir viéndose
+    en Costos (solo visible, no facturable) — mismo patrón que Mantenimiento."""
+    db.add(Proyecto(nombre_comercial="Predio Suelto", estado="en_operacion"))
     db.flush()
     resp = api.calcular_periodo("2026-06", db=db, _=ADMIN)
     fila = next(f for f in resp.filas if f.proyecto == "Predio Suelto")
     assert fila.estado_contrato == "sin_contrato"
-    assert fila.valor_base == 2_000_000        # respaldo al ArrProyecto
+    assert fila.habilitado is False
+    assert fila.valor_base is None
 
 
 def test_motivo_exclusion_se_guarda_y_se_expone(db):
-    p = _proy(db)
+    arrendador = _proy(db)
     api.guardar_seleccion(PERIODO, ArrSeleccionGuardar(items=[
-        ArrSeleccionItem(proyecto_id=p.id, incluido=False, motivo_exclusion="en disputa"),
+        ArrSeleccionItem(proyecto_id=arrendador.id, incluido=False, motivo_exclusion="en disputa"),
     ]), db=db, _=ADMIN)
 
-    sel = db.query(ArrSeleccion).filter(ArrSeleccion.arr_arrendador_id == p.id).first()
+    sel = db.query(ArrSeleccion).filter(ArrSeleccion.arr_arrendador_id == arrendador.id).first()
     assert sel.incluido is False and sel.motivo_exclusion == "en disputa"
 
     resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
-    fila = next(f for f in resp.filas if f.id == p.id)
+    fila = next(f for f in resp.filas if f.id == arrendador.id)
     assert fila.motivo_exclusion == "en disputa"

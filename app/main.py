@@ -1133,6 +1133,12 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
+    # migration — Comercial: envío de la oferta (2026-07-28). fecha_oferta ya
+    # existía y guarda el PRIMER envío; aquí viven los toques posteriores, la
+    # respuesta del cliente (NULL = nunca respondió) y el PDF en Drive.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS seguimientos INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_ultima_respuesta DATE",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS documento_url VARCHAR(1000)",
 ]
 
 
@@ -2836,6 +2842,56 @@ def _run_comercial_dedup() -> None:
         db.close()
 
 
+def _run_comercial_actualizacion() -> None:
+    """Aplica la actualización comercial de julio 2026: fechas de envío sacadas
+    de los correos de Alejandro y los estados que reportó en la reunión del 28.
+
+    Corre SIEMPRE en seco primero y deja el reporte en los logs. Es one-shot:
+    la señal de "ya aplicado" es la marca que llevan todas las gestiones que
+    inserta, así que un deploy posterior no vuelve a pisar el trabajo que el
+    equipo comercial haga a mano. COMERCIAL_REAPLICAR_ACTUALIZACION fuerza
+    volver a aplicarla.
+    """
+    import json
+
+    from app.api.v1.comercial import ruta_actualizacion
+    from app.core.database import SessionLocal
+    from app.services.comercial_actualizacion import aplicar, validar, ya_aplicado
+
+    ruta = ruta_actualizacion()
+    if not ruta.exists():
+        print("[startup] comercial_actualizacion: no hay archivo, se omite")
+        return
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+
+    problemas = validar(datos)
+    if problemas:
+        print(f"[startup] comercial_actualizacion ABORTA — archivo invalido: {problemas[:10]}")
+        return
+
+    db = SessionLocal()
+    try:
+        if ya_aplicado(db) and not settings.COMERCIAL_REAPLICAR_ACTUALIZACION:
+            print("[startup] comercial_actualizacion: ya aplicada, se omite")
+            return
+        seco = aplicar(db, datos, dry_run=True)
+        print(f"[startup] comercial_actualizacion DRY-RUN: "
+              f"envios={seco['envios']} estados={seco['estados']} "
+              f"correcciones={seco['correcciones']} creadas={seco['creadas']} "
+              f"eliminadas={seco['eliminadas']} fusiones={seco['fusiones']}")
+        if seco["no_encontrados"]:
+            print(f"[startup] comercial_actualizacion NO ENCONTRADOS: {seco['no_encontrados']}")
+        if seco["sin_resolver"]:
+            print(f"[startup] comercial_actualizacion SIN RESOLVER: {seco['sin_resolver']}")
+        real = aplicar(db, datos, dry_run=False)
+        print(f"[startup] comercial_actualizacion APLICADO: "
+              f"envios={real['envios']} estados={real['estados']} "
+              f"correcciones={real['correcciones']} creadas={real['creadas']} "
+              f"eliminadas={real['eliminadas']} fusiones={real['fusiones']}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2847,6 +2903,7 @@ def _deferred_init():
         ("column_migrations", _run_column_migrations),
         ("comercial_import", _run_comercial_import),
         ("comercial_dedup", _run_comercial_dedup),
+        ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),

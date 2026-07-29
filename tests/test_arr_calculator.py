@@ -10,7 +10,7 @@ def _c(**kw):
     base = dict(
         proyecto_id=1, nombre="Demo", codigo="X",
         fecha_firma_contrato=date(2023, 1, 1),
-        valor_base=1_000_000, canon_archivo=None,
+        valor_base=1_000_000,
         periodo="2024-06", ipc_tasas={2023: 0.10},
     )
     base.update(kw)
@@ -29,13 +29,6 @@ def test_tres_ipcs_convencion_dane():
     f = _c(periodo="2026-06", ipc_tasas=IPC)
     assert f["n_indexaciones"] == 3
     assert round(f["factor_acumulado"], 6) == round(1.0928 * 1.0520 * 1.0510, 6)
-
-
-def test_canon_archivo_gana():
-    f = _c(canon_archivo=900_000)
-    assert f["canon_a_facturar"] == 900_000
-    assert f["canon_calculado"] == 1_100_000
-    assert f["difiere_archivo"] is True
 
 
 def test_sin_base_deshabilitada():
@@ -81,15 +74,6 @@ def test_periodicidad_trimestral_no_aplica_algunos_meses():
     assert f2["aplica_este_mes"] is True
 
 
-def test_deshabilitada_redondea_canon_archivo():
-    # Ibirico: sin firma pero con canon_archivo fraccional → debe redondear a int
-    # (si no, Pydantic Optional[int] revienta el endpoint /calculo).
-    f = _c(fecha_firma_contrato=None, canon_archivo=1024604.167)
-    assert f["habilitado"] is False
-    assert f["canon_archivo"] == 1024604
-    assert isinstance(f["canon_archivo"], int)
-
-
 # ── Indexación por AÑO CALENDARIO (decisión de negocio, revierte fix aniversario) ──
 # El incremento se aplica cada 1 de enero, usando solo el AÑO de
 # fecha_firma_contrato (no el mes/día de la firma). Convención DANE: en enero
@@ -121,8 +105,39 @@ def test_serie_indexacion_coincide_con_calcular_arriendo():
     fila = calcular_arriendo(
         proyecto_id=1, nombre="X", codigo=None,
         fecha_firma_contrato=date(2023, 9, 1),
-        valor_base=4_300_000, canon_archivo=None,
+        valor_base=4_300_000,
         periodo="2026-07", ipc_tasas=ipc,
     )
     serie = serie_indexacion(date(2023, 9, 1), 4_300_000, ipc, 2026, 7)
     assert serie[-1]["valor_mensual"] == fila["canon_calculado"]
+
+
+# ── Anticipo (desde/hasta) ─────────────────────────────────────────────────
+
+def test_anticipo_mes_desde_cobra_normal():
+    # Olimpo: anticipo enero-diciembre 2026. Enero (=desde) cobra normal.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-01",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is True
+
+
+def test_anticipo_meses_intermedios_no_cobran():
+    # Diciembre (=hasta) NO cobra — dentro del rango cubierto.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-12",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is False
+
+
+def test_anticipo_mes_despues_de_hasta_cobra_normal():
+    # Enero-2027 (después de hasta) vuelve a cobrar normal.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2027-01",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is True
+
+
+def test_sin_anticipo_no_cambia_nada():
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-06", periodicidad="mensual", ipc_tasas={})
+    assert f["aplica_este_mes"] is True

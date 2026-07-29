@@ -1055,6 +1055,18 @@ _PENDING_DDLS = [
     "ALTER TABLE contactos ADD COLUMN IF NOT EXISTS telefono VARCHAR(100)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_indexacion DATE",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS responsable_iva BOOLEAN NOT NULL DEFAULT false",
+    # arr_arrendador_id en ArrSeleccion/ArrDocumento (2026-07): enlaza selección y
+    # documentos a un arrendador específico del contrato de arriendo (varios arrendadores).
+    "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS arr_arrendador_id BIGINT REFERENCES arr_arrendador(id) ON DELETE CASCADE",
+    # proyecto_id en ArrDocumento (2026-07, Despliegue 1 de eliminar ArrProyecto):
+    # enlaza el documento directamente al Proyecto, sin pasar por ArrProyecto.
+    "ALTER TABLE arr_documento ADD COLUMN IF NOT EXISTS proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE CASCADE",
+    # calcular_periodo ahora genera una fila por arrendador (no por ArrProyecto):
+    # una ArrSeleccion puede no tener un ArrProyecto real detrás, así que
+    # arr_proyecto_id deja de ser NOT NULL (2026-07).
+    "ALTER TABLE arr_seleccion_mensual ALTER COLUMN arr_proyecto_id DROP NOT NULL",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS renovacion_automatica BOOLEAN",
     # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
     # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
@@ -1093,6 +1105,11 @@ _PENDING_DDLS = [
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_facturado_congelado BIGINT",
     # Arriendos Fase B: motivo de exclusión del mes.
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS motivo_exclusion VARCHAR(500)",
+    # Arriendos: rango de anticipo pagado (desde/hasta) y observaciones libres
+    # por arrendador (2026-07).
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS anticipo_pagado_desde DATE",
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS anticipo_pagado_hasta DATE",
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS observaciones VARCHAR(1000)",
     # migration — módulo CRM comercial (2026-07-10)
     # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
     "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",
@@ -1140,6 +1157,12 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
+    # migration — Comercial: envío de la oferta (2026-07-28). fecha_oferta ya
+    # existía y guarda el PRIMER envío; aquí viven los toques posteriores, la
+    # respuesta del cliente (NULL = nunca respondió) y el PDF en Drive.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS seguimientos INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_ultima_respuesta DATE",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS documento_url VARCHAR(1000)",
 ]
 
 
@@ -2650,8 +2673,6 @@ def _run_arr_seed() -> None:
                     ya.fecha_firma_contrato = firma; cambio = True
                 if ya.valor_base is None and it["valor_base"] is not None:
                     ya.valor_base = it["valor_base"]; cambio = True
-                if ya.canon_archivo is None and it["canon"] is not None:
-                    ya.canon_archivo = it["canon"]; cambio = True
                 if cambio:
                     actualizados += 1
                 continue
@@ -2659,7 +2680,7 @@ def _run_arr_seed() -> None:
             db.add(ArrProyecto(
                 codigo=it["codigo"], nombre=it["nombre"],
                 fecha_firma_contrato=firma, valor_base=it["valor_base"],
-                canon_archivo=it["canon"], activo=True,
+                activo=True,
             ))
             insertados += 1
         db.commit()
@@ -2668,6 +2689,30 @@ def _run_arr_seed() -> None:
     except Exception as e:
         db.rollback()
         print(f"[arr_seed] ERROR: {e}")
+    finally:
+        db.close()
+
+
+def _run_arr_limpiar_canon_archivo() -> None:
+    """Limpia el residual del mecanismo canon_archivo (override manual, ya eliminado
+    de la lógica de cálculo): pone en NULL cualquier valor guardado en arr_proyectos
+    para que Costos>Arriendos siempre muestre el canon calculado. Idempotente
+    (el WHERE hace que no repita el UPDATE una vez ya está todo en NULL)."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        res = db.execute(text(
+            "UPDATE arr_proyectos SET canon_archivo = NULL WHERE canon_archivo IS NOT NULL"
+        ))
+        db.commit()
+        if res.rowcount:
+            print(f"[arr_limpiar_canon_archivo] {res.rowcount} filas limpiadas")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_limpiar_canon_archivo] ERROR: {e}")
     finally:
         db.close()
 
@@ -2733,6 +2778,164 @@ def _run_arr_backfill_contratos() -> None:
     except Exception as e:
         db.rollback()
         print(f"[arr_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
+def _backfill_arr_arrendador(db) -> int:
+    """Núcleo testeable: crea 1 ArrArrendador para cada contrato de arriendo
+    que aún no tenga ninguno. Idempotente (fill-if-missing)."""
+    from app.models.arriendos import ArrArrendador
+    from app.models.contratos import ContratoServicio
+    contratos = db.query(ContratoServicio).filter(ContratoServicio.servicio_aplica == "arriendo").all()
+    creados = 0
+    for c in contratos:
+        existe = db.query(ArrArrendador).filter(ArrArrendador.contrato_id == c.id).first()
+        if existe:
+            continue
+        db.add(ArrArrendador(
+            contrato_id=c.id,
+            nombre=c.prestador_nombre or "Arrendador",
+            valor_base=c.tarifa_base,
+            responsable_iva=c.responsable_iva,
+        ))
+        creados += 1
+    db.commit()
+    return creados
+
+
+def _run_arr_arrendador_backfill() -> None:
+    """Crea el arrendador automático (nombre=prestador, valor=tarifa_base,
+    responsable_iva=el del contrato) para todo ContratoServicio(arriendo) que
+    aún no tenga ninguno. Idempotente."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        creados = _backfill_arr_arrendador(db)
+        print(f"[arr_arrendador_backfill] {creados} arrendadores creados")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_arrendador_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
+def _backfill_arr_arrendador_id(db) -> int:
+    """Núcleo testeable: para cada ArrSeleccion/ArrDocumento con
+    arr_arrendador_id IS NULL, resuelve vía arr_proyecto_id → ArrProyecto →
+    match difuso → Proyecto → ContratoServicio(arriendo) → primer ArrArrendador
+    de ese contrato, y lo asigna. Fill-if-null, nunca pisa lo ya enlazado."""
+    from app.models.arriendos import ArrProyecto, ArrArrendador, ArrSeleccion, ArrDocumento
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
+
+    arrendador_por_arr_proyecto: dict[int, int] = {}
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None:
+            continue
+        contrato = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "arriendo",
+            ContratoServicio.proyecto_id == p.id,
+        ).first()
+        if contrato is None:
+            continue
+        arrendador = db.query(ArrArrendador).filter(
+            ArrArrendador.contrato_id == contrato.id,
+        ).first()
+        if arrendador is None:
+            continue
+        arrendador_por_arr_proyecto[a.id] = arrendador.id
+
+    actualizados = 0
+    for sel in db.query(ArrSeleccion).filter(ArrSeleccion.arr_arrendador_id.is_(None)).all():
+        arrendador_id = arrendador_por_arr_proyecto.get(sel.arr_proyecto_id)
+        if arrendador_id is None:
+            continue
+        sel.arr_arrendador_id = arrendador_id
+        actualizados += 1
+
+    for doc in db.query(ArrDocumento).filter(ArrDocumento.arr_arrendador_id.is_(None)).all():
+        if doc.arr_proyecto_id is None:
+            continue
+        arrendador_id = arrendador_por_arr_proyecto.get(doc.arr_proyecto_id)
+        if arrendador_id is None:
+            continue
+        doc.arr_arrendador_id = arrendador_id
+        actualizados += 1
+
+    db.commit()
+    return actualizados
+
+
+def _run_arr_arrendador_id_backfill() -> None:
+    """Enlaza ArrSeleccion/ArrDocumento existentes (sin arr_arrendador_id) al
+    arrendador correspondiente del contrato de arriendo del proyecto emparejado.
+    Idempotente, fill-if-null."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        actualizados = _backfill_arr_arrendador_id(db)
+        print(f"[arr_arrendador_id_backfill] {actualizados} registros enlazados a arrendador")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_arrendador_id_backfill] FAILED: {e}")
+    finally:
+        db.close()
+
+
+def _backfill_arr_documento_proyecto_id(db) -> int:
+    """Núcleo testeable: para cada ArrDocumento con proyecto_id IS NULL, resuelve
+    vía arr_proyecto_id → ArrProyecto → match difuso → Proyecto, y lo asigna.
+    Fill-if-null, nunca pisa lo ya enlazado."""
+    from app.models.arriendos import ArrProyecto, ArrDocumento
+    from app.models.proyectos import Proyecto
+    from app.services.om_calculator import om_keys, om_match_seed
+
+    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
+    proyectos = db.query(Proyecto).all()
+
+    proyecto_por_arr_proyecto: dict[int, int] = {}
+    for p in proyectos:
+        a = om_match_seed(p.nombre_comercial or "", arr_keys)
+        if a is None:
+            continue
+        proyecto_por_arr_proyecto[a.id] = p.id
+
+    actualizados = 0
+    for doc in db.query(ArrDocumento).filter(ArrDocumento.proyecto_id.is_(None)).all():
+        if doc.arr_proyecto_id is None:
+            continue
+        proyecto_id = proyecto_por_arr_proyecto.get(doc.arr_proyecto_id)
+        if proyecto_id is None:
+            continue
+        doc.proyecto_id = proyecto_id
+        actualizados += 1
+
+    db.commit()
+    return actualizados
+
+
+def _run_arr_documento_proyecto_id_backfill() -> None:
+    """Enlaza ArrDocumento existentes (sin proyecto_id) al Proyecto correspondiente
+    vía el ArrProyecto emparejado. Idempotente, fill-if-null."""
+    from sqlalchemy.orm import sessionmaker
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        actualizados = _backfill_arr_documento_proyecto_id(db)
+        print(f"[arr_documento_proyecto_id_backfill] {actualizados} registros enlazados a proyecto")
+    except Exception as e:
+        db.rollback()
+        print(f"[arr_documento_proyecto_id_backfill] FAILED: {e}")
     finally:
         db.close()
 
@@ -2821,6 +3024,56 @@ def _run_comercial_dedup() -> None:
         db.close()
 
 
+def _run_comercial_actualizacion() -> None:
+    """Aplica la actualización comercial de julio 2026: fechas de envío sacadas
+    de los correos de Alejandro y los estados que reportó en la reunión del 28.
+
+    Corre SIEMPRE en seco primero y deja el reporte en los logs. Es one-shot:
+    la señal de "ya aplicado" es la marca que llevan todas las gestiones que
+    inserta, así que un deploy posterior no vuelve a pisar el trabajo que el
+    equipo comercial haga a mano. COMERCIAL_REAPLICAR_ACTUALIZACION fuerza
+    volver a aplicarla.
+    """
+    import json
+
+    from app.api.v1.comercial import ruta_actualizacion
+    from app.core.database import SessionLocal
+    from app.services.comercial_actualizacion import aplicar, validar, ya_aplicado
+
+    ruta = ruta_actualizacion()
+    if not ruta.exists():
+        print("[startup] comercial_actualizacion: no hay archivo, se omite")
+        return
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+
+    problemas = validar(datos)
+    if problemas:
+        print(f"[startup] comercial_actualizacion ABORTA — archivo invalido: {problemas[:10]}")
+        return
+
+    db = SessionLocal()
+    try:
+        if ya_aplicado(db) and not settings.COMERCIAL_REAPLICAR_ACTUALIZACION:
+            print("[startup] comercial_actualizacion: ya aplicada, se omite")
+            return
+        seco = aplicar(db, datos, dry_run=True)
+        print(f"[startup] comercial_actualizacion DRY-RUN: "
+              f"envios={seco['envios']} estados={seco['estados']} "
+              f"correcciones={seco['correcciones']} creadas={seco['creadas']} "
+              f"eliminadas={seco['eliminadas']} fusiones={seco['fusiones']}")
+        if seco["no_encontrados"]:
+            print(f"[startup] comercial_actualizacion NO ENCONTRADOS: {seco['no_encontrados']}")
+        if seco["sin_resolver"]:
+            print(f"[startup] comercial_actualizacion SIN RESOLVER: {seco['sin_resolver']}")
+        real = aplicar(db, datos, dry_run=False)
+        print(f"[startup] comercial_actualizacion APLICADO: "
+              f"envios={real['envios']} estados={real['estados']} "
+              f"correcciones={real['correcciones']} creadas={real['creadas']} "
+              f"eliminadas={real['eliminadas']} fusiones={real['fusiones']}")
+    finally:
+        db.close()
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -2832,6 +3085,7 @@ def _deferred_init():
         ("column_migrations", _run_column_migrations),
         ("comercial_import", _run_comercial_import),
         ("comercial_dedup", _run_comercial_dedup),
+        ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
@@ -2841,6 +3095,10 @@ def _deferred_init():
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
         ("arr_backfill_contratos", _run_arr_backfill_contratos),
+        ("arr_arrendador_backfill", _run_arr_arrendador_backfill),
+        ("arr_arrendador_id_backfill", _run_arr_arrendador_id_backfill),
+        ("arr_documento_proyecto_id_backfill", _run_arr_documento_proyecto_id_backfill),
+        ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:

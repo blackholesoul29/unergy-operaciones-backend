@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import (BigInteger, String, Boolean, Date, DateTime,
+from sqlalchemy import (BigInteger, Integer, String, Boolean, Date, DateTime,
                         ForeignKey, Enum as SAEnum, Text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -155,6 +155,13 @@ class OportunidadOferta(Base):
     # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
     # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.
     detalle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Envío de la oferta (2026-07-28). fecha_oferta (arriba) es el PRIMER envío;
+    # aquí van los toques posteriores y la respuesta del cliente. Que
+    # fecha_ultima_respuesta sea NULL significa que el cliente NUNCA respondió,
+    # que es la señal fuerte del tablero (Los Apóstoles: 6 toques, 0 respuestas).
+    seguimientos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    fecha_ultima_respuesta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    documento_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

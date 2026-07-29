@@ -44,20 +44,45 @@ def _safe_segment(nombre: str) -> str:
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Itera ContratoServicio(arriendo) + Proyecto directo — sin tabla intermedia
-    (ArrProyecto ya no es necesaria para que un arriendo aparezca en Costos)."""
+    """Itera Proyecto (en_operacion) + ContratoServicio(arriendo) directo — sin
+    tabla intermedia (mismo patrón que om.py para Mantenimiento). Todo proyecto
+    en operación aparece, tenga o no contrato de arriendo aún (sin_contrato =
+    solo visible, no facturable, para configurarlo manualmente en Operación)."""
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     selecciones = {s.arr_arrendador_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
-    proyecto_por_id = {p.id: p for p in db.query(Proyecto).all()}
 
-    contratos = db.query(ContratoServicio).filter(
-        ContratoServicio.servicio_aplica == "arriendo",
-        ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all()
+    proyectos = (db.query(Proyecto).filter(Proyecto.estado == "en_operacion")
+                 .order_by(Proyecto.nombre_comercial).all())
+    contrato_por_proyecto: dict[int, ContratoServicio] = {}
+    for c in (db.query(ContratoServicio)
+              .filter(ContratoServicio.servicio_aplica == "arriendo",
+                      ContratoServicio.proyecto_id.isnot(None))
+              .order_by(ContratoServicio.id).all()):
+        contrato_por_proyecto.setdefault(c.proyecto_id, c)
 
     filas, total = [], 0
-    for c in contratos:
-        p = proyecto_por_id.get(c.proyecto_id)
+    for p in proyectos:
+        c = contrato_por_proyecto.get(p.id)
+
+        if c is None:
+            # En operación pero SIN contrato de arriendo → solo visible, no
+            # facturable (id sintético negativo, no se persiste selección real).
+            data = calcular_arriendo(
+                proyecto_id=-p.id, nombre=p.nombre_comercial or f"Proyecto #{p.id}",
+                codigo=None, fecha_firma_contrato=None, valor_base=None,
+                periodo=periodo, ipc_tasas=ipc_tasas,
+            )
+            data["iva_calculado"] = None
+            data["nombre_arrendador"] = None
+            data["motivo_exclusion"] = None
+            data["tipo_proyecto"] = p.tipo_proyecto
+            data["estado_contrato"] = "sin_contrato"
+            data["aplica_este_mes"] = False
+            data["proyecto_id"] = p.id
+            filas.append(ArrCalculoFila(**data))
+            continue
+
         fecha_firma = c.fecha_firma_contrato
         periodicidad = c.periodicidad_pago
         estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
@@ -76,7 +101,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
 
             data = calcular_arriendo(
                 proyecto_id=arrendador.id,
-                nombre=(p.nombre_comercial if p else "—"), codigo=None,
+                nombre=p.nombre_comercial, codigo=None,
                 fecha_firma_contrato=fecha_firma,
                 valor_base=valor_base,
                 periodo=periodo, ipc_tasas=ipc_tasas,
@@ -89,7 +114,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             data["iva_calculado"] = calcular_iva(data["canon_a_facturar"], arrendador.responsable_iva)
             data["nombre_arrendador"] = arrendador.nombre
             data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
-            data["tipo_proyecto"] = p.tipo_proyecto if p else None
+            data["tipo_proyecto"] = p.tipo_proyecto
             data["estado_contrato"] = estado_contrato
             data["proyecto_id"] = c.proyecto_id
             fila = ArrCalculoFila(**data)

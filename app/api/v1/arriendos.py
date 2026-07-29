@@ -68,6 +68,12 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all():
         contrato_por_proy.setdefault(c.proyecto_id, c)
 
+    # proyecto_id -> Proyecto, para poder mostrar contratos de arriendo cuyo
+    # proyecto NO tiene un ArrProyecto legado emparejado (arriendos creados solo
+    # en Operación, sin historial en el Excel viejo de Arriendos).
+    proyecto_por_id = {p.id: p for p in db.query(Proyecto).all()}
+    proyectos_cubiertos = {p.id for p in arr_to_proy.values()}
+
     filas, total = [], 0
     for a in arr:
         p = arr_to_proy.get(a.id)
@@ -132,6 +138,53 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
                     and fila.aplica_este_mes and fila.canon_a_facturar):
                 total += fila.canon_a_facturar
+
+    # Contratos de arriendo cuyo proyecto NO tiene un ArrProyecto legado emparejado
+    # (arriendos creados solo en Operación, sin historial del Excel viejo de
+    # Arriendos) — sin este bloque, desaparecían por completo de Costos.
+    for proyecto_id, c in contrato_por_proy.items():
+        if proyecto_id in proyectos_cubiertos:
+            continue
+        p = proyecto_por_id.get(proyecto_id)
+        fecha_firma = c.fecha_firma_contrato
+        periodicidad = c.periodicidad_pago
+        estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
+        arrendadores = (db.query(ArrArrendador)
+                         .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
+                         .order_by(ArrArrendador.id).all())
+        if not arrendadores:
+            arrendadores = [types.SimpleNamespace(
+                id=None, nombre=c.prestador_nombre or "Arrendador",
+                valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
+            )]
+
+        for arrendador in arrendadores:
+            sel = selecciones.get(arrendador.id)
+            valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
+
+            data = calcular_arriendo(
+                proyecto_id=arrendador.id,
+                nombre=(p.nombre_comercial if p else "—"), codigo=None,
+                fecha_firma_contrato=fecha_firma,
+                valor_base=valor_base,
+                periodo=periodo, ipc_tasas=ipc_tasas,
+                incluido=(sel.incluido if sel else True),
+                facturado=(sel.facturado if sel else False),
+                valor_congelado=(int(sel.valor_facturado_congelado)
+                                 if sel and sel.valor_facturado_congelado is not None else None),
+                periodicidad=periodicidad,
+            )
+            data["iva_calculado"] = calcular_iva(data["canon_a_facturar"], arrendador.responsable_iva)
+            data["nombre_arrendador"] = arrendador.nombre
+            data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
+            data["tipo_proyecto"] = p.tipo_proyecto if p else None
+            data["estado_contrato"] = estado_contrato
+            fila = ArrCalculoFila(**data)
+            filas.append(fila)
+            if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
+                    and fila.aplica_este_mes and fila.canon_a_facturar):
+                total += fila.canon_a_facturar
+
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
 
 

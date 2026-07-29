@@ -26,6 +26,7 @@ from app.schemas.common import PaginatedResponse
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.operadores_red_sync import sincronizar_operador_red
 from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
+from app.services.proyectos_backfill_unergy import asignar_sub_project_unergy_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -169,6 +170,7 @@ def create_proyecto(
             "ID de Solenium o de Sun Factory) ya está en uso por otro proyecto.",
         )
     db.refresh(proyecto)
+    asignar_sub_project_unergy_si_aplica(proyecto, db)
     return _get_proyecto_or_404(proyecto.id, db)
 
 
@@ -244,6 +246,8 @@ def confirmar_proyecto_pendiente(
                 setattr(proyecto, campo, item[campo])
         db.commit()
         proyecto_id = proyecto.id
+
+    asignar_sub_project_unergy_si_aplica(proyecto, db)
 
     if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
         it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()

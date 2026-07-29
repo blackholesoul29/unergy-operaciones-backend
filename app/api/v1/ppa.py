@@ -10,7 +10,8 @@ from app.models.cumplimiento import CumplimientoMensual
 
 logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
-from app.models.contratos import ppa_contrato_proyectos_table
+from app.models.contratos import ppa_contrato_proyectos_table, IppMensual
+from pydantic import BaseModel
 from app.schemas.ppa import (
     PPAContratoCreate, PPAContratoUpdate, PPAContratoOut,
     PPATarifaIn, PPATarifaOut,
@@ -390,3 +391,30 @@ def replace_compromisos(
         .order_by(PPACompromisoEnergia.año, PPACompromisoEnergia.mes)
         .all()
     )
+
+
+# ── IPP mensual global (numerador de la indexación de energía) ────────────────
+class IppMensualIn(BaseModel):
+    año: int
+    mes: int
+    valor: float
+
+
+@router.get("/ipp/mensual")
+def list_ipp_mensual(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    rows = db.query(IppMensual).order_by(IppMensual.año, IppMensual.mes).all()
+    return [{"año": r.año, "mes": r.mes, "valor": float(r.valor)} for r in rows]
+
+
+@router.put("/ipp/mensual")
+def upsert_ipp_mensual(rows: list[IppMensualIn], db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Upsert de valores IPP por (año, mes). No borra los demás períodos."""
+    for r in rows:
+        obj = db.query(IppMensual).filter(IppMensual.año == r.año, IppMensual.mes == r.mes).first()
+        if obj is None:
+            db.add(IppMensual(año=r.año, mes=r.mes, valor=r.valor))
+        else:
+            obj.valor = r.valor
+    db.commit()
+    out = db.query(IppMensual).order_by(IppMensual.año, IppMensual.mes).all()
+    return [{"año": o.año, "mes": o.mes, "valor": float(o.valor)} for o in out]

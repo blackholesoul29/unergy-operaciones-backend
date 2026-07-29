@@ -91,6 +91,7 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
+        d.proyecto_fecha_inicio_comercializacion = f.proyecto.fecha_inicio_comercializacion
         d.clientes_cgm = [
             {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
             for c in get_clientes_contacto(db, "cgm", f.proyecto_id)
@@ -515,6 +516,14 @@ def confirmar_frontera_quoia(
     nombre_base = body.nombre_frontera or nombre_quoia or frt_code
     nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
 
+    fecha_registro_asic = None
+    init_date = frt.get("init_date")
+    if init_date:
+        try:
+            fecha_registro_asic = date.fromisoformat(init_date)
+        except ValueError:
+            pass
+
     obj = Frontera(
         proyecto_id=body.proyecto_id,
         codigo_frontera=frt_code,
@@ -523,6 +532,7 @@ def confirmar_frontera_quoia(
         tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
         estado="activa",
         quoia_border_id=frt.get("id"),
+        fecha_registro_asic=fecha_registro_asic,
     )
     if info_ppal:
         obj.marca_med_ppal = info_ppal.get("marca")

@@ -441,7 +441,7 @@ def generacion_hoy(
                 gen = gen["results"]
             gen_kwh_map = gen.get("generation_kwh") or {}
             kwh = sum(
-                float(v) for k, v in gen_kwh_map.items()
+                float(v or 0) for k, v in gen_kwh_map.items()
                 if str(k).startswith(today_str)
             )
             if kwh > 0:

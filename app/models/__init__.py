@@ -45,6 +45,7 @@ from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocum
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
 from app.models.verificacion_costos import VerificacionCosto
 from app.models.riesgos_bolsa import PrecioBolsa
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -77,9 +78,14 @@ __all__ = [
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
     "VerificacionCosto",
     "PrecioBolsa",
+    "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
     EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
+)
+from app.models.registros_cnd import (
+    RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
+    RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )

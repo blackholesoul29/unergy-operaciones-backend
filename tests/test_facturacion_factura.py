@@ -137,6 +137,42 @@ def test_sin_ipp_base_no_inventa_indexacion():
     assert "Tarifa Actualizada: —" in m
 
 
+def test_periodo_ipp_base_sin_guion_no_revienta():
+    """`periodo_indexacion_base` deberia ser YYYY-MM, pero en la BD hay PPAs con
+    "202606" (sin guion) y con "2025-6" (mes sin cero). Reventar aqui tumba el
+    endpoint completo de facturacion, no solo ese mensaje."""
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="2026-07", kwh=1, contratos_sic=["1"],
+        tarifa_base=100, ipp_base=187.43, periodo_ipp_base="202606", ipp_mes=190,
+    )
+    assert "IPP Base junio 2026 Provisional:" in m
+
+
+def test_periodo_ipp_base_con_mes_de_un_digito():
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="2026-07", kwh=1, contratos_sic=["1"],
+        tarifa_base=100, ipp_base=100, periodo_ipp_base="2025-6", ipp_mes=100,
+    )
+    assert "IPP Base junio 2025 Provisional:" in m
+
+
+def test_periodo_ipp_base_ilegible_no_revienta():
+    """Basura en el campo: se muestra sin etiqueta, pero el mensaje sale."""
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="2026-07", kwh=1, contratos_sic=["1"],
+        tarifa_base=100, ipp_base=100, periodo_ipp_base="junio", ipp_mes=100,
+    )
+    assert "IPP Base — Provisional:" in m
+
+
+def test_periodo_del_mensaje_tolera_formato_sin_guion():
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="202607", kwh=1, contratos_sic=["1"],
+        tarifa_base=100, ipp_base=100, periodo_ipp_base="2025-06", ipp_mes=100,
+    )
+    assert "Periodo: 01/7/2026 a 31/7/2026" in m
+
+
 def test_mes_del_ipp_base_en_espanol():
     m = construir_mensaje(
         numeros_contrato=["X"], periodo="2026-06", kwh=1, contratos_sic=["1"],

@@ -46,9 +46,28 @@ def contribuciones(agrup, ppa_nombre: str) -> list[tuple[str, float, float | Non
     return [(nombre, fr, pct), (ppa_nombre, 1 - fr, round(100 - pct, 6))]
 
 
-def _mes_anio(periodo: str) -> tuple[int, int]:
-    y, m = str(periodo).split("-")[:2]
-    return int(y), int(m)
+def _mes_anio(periodo) -> tuple[int, int] | None:
+    """(año, mes) de un período. Devuelve None si no se puede leer.
+
+    El campo `periodo_indexacion_base` de los PPAs deberia ser "YYYY-MM", pero en
+    la BD hay "202606" (sin guion) y "2025-6" (mes sin cero). Reventar aqui tumba
+    el endpoint de facturacion completo, no solo un mensaje, asi que se toleran
+    los tres formatos y cualquier otra cosa se reporta como desconocida.
+    """
+    s = str(periodo or "").strip()
+    if not s:
+        return None
+    partes = s.split("-")
+    try:
+        if len(partes) >= 2:
+            año, mes = int(partes[0]), int(partes[1])
+        elif len(s) == 6 and s.isdigit():
+            año, mes = int(s[:4]), int(s[4:])
+        else:
+            return None
+    except ValueError:
+        return None
+    return (año, mes) if 1 <= mes <= 12 else None
 
 
 def _plata(v: float | None) -> str:
@@ -70,7 +89,10 @@ def construir_mensaje(
     ipp_mes: float | None,
 ) -> str:
     """Mensaje para copiar en la factura. Ver el test para el formato exacto."""
-    año, mes = _mes_anio(periodo)
+    p = _mes_anio(periodo)
+    if p is None:
+        raise ValueError(f"periodo ilegible: {periodo!r}")
+    año, mes = p
     ultimo = monthrange(año, mes)[1]
 
     if ipp_base and ipp_mes:
@@ -82,11 +104,8 @@ def construir_mensaje(
         indexacion = "—"
         actualizada = "—"
 
-    if periodo_ipp_base:
-        y_b, m_b = _mes_anio(periodo_ipp_base)
-        etiqueta_base = f"{_MESES[m_b - 1]} {y_b}"
-    else:
-        etiqueta_base = "—"
+    base = _mes_anio(periodo_ipp_base)
+    etiqueta_base = f"{_MESES[base[1] - 1]} {base[0]}" if base else "—"
 
     return "\n".join([
         ", ".join(numeros_contrato) or "—",

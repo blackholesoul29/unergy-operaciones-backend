@@ -116,6 +116,9 @@ def _oferta_out(o: OportunidadOferta) -> dict:
         "etapa_texto": o.etapa_texto, "fecha_oferta": o.fecha_oferta,
         "fecha_tentativa_inicio": o.fecha_tentativa_inicio,
         "contrato_firmado": o.contrato_firmado, "detalle": o.detalle, "notas": o.notas,
+        "seguimientos": o.seguimientos or 0,
+        "fecha_ultima_respuesta": o.fecha_ultima_respuesta,
+        "documento_url": o.documento_url,
         "created_at": o.created_at, "updated_at": o.updated_at,
     }
 
@@ -610,6 +613,22 @@ def update_oferta(
     return {"ok": True, "id": o.id}
 
 
+@router.post("/ofertas/{oferta_id}/seguimiento")
+def registrar_seguimiento(oferta_id: int, db: Session = Depends(get_db),
+                          current: Usuario = Depends(get_current_user)):
+    """Un click: suma un toque a la oferta. Es lo que permite mantener el dato
+    al día sin volver a exportar correos. NO toca fecha_oferta: el toque de hoy
+    no es el primer envío."""
+    _check_comercial(current)
+    o = db.query(OportunidadOferta).filter(OportunidadOferta.id == oferta_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+    o.seguimientos = (o.seguimientos or 0) + 1
+    db.commit()
+    db.refresh(o)
+    return _oferta_out(o)
+
+
 @router.delete("/ofertas/{oferta_id}", status_code=204)
 def delete_oferta(oferta_id: int, db: Session = Depends(get_db), current: Usuario = Depends(get_current_user)):
     _check_comercial(current)
@@ -1041,3 +1060,39 @@ def dedup_clientes(
     if not dry_run:
         db.commit()
     return res
+
+
+ARCHIVO_ACTUALIZACION = "comercial_actualizacion_2026-07.json"
+
+
+def ruta_actualizacion() -> Path:
+    """data/comercial_actualizacion_2026-07.json, desde la raíz del repo
+    (app/api/v1/comercial.py → tres niveles arriba de `app`)."""
+    return Path(__file__).resolve().parents[3] / "data" / ARCHIVO_ACTUALIZACION
+
+
+@router.post("/aplicar-actualizacion")
+def aplicar_actualizacion(
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Aplica data/comercial_actualizacion_2026-07.json (envíos de oferta y
+    estados reportados por Alejandro). Admin. dry_run por defecto: devuelve el
+    reporte sin escribir nada."""
+    from app.services.comercial_actualizacion import aplicar, validar, ya_aplicado
+
+    rol = current.rol if isinstance(current.rol, str) else current.rol.value
+    if rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin")
+    ruta = ruta_actualizacion()
+    if not ruta.exists():
+        raise HTTPException(status_code=404, detail="Archivo de actualización no encontrado")
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    problemas = validar(datos)
+    if problemas and not dry_run:
+        raise HTTPException(status_code=422, detail={"problemas_del_archivo": problemas})
+    rep = aplicar(db, datos, dry_run=dry_run)
+    rep["problemas_del_archivo"] = problemas
+    rep["ya_aplicado"] = ya_aplicado(db)
+    return rep

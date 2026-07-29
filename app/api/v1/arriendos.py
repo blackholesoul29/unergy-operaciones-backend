@@ -364,6 +364,7 @@ def listar_documentos_periodo(
         {
             "id":                 d.id,
             "arr_proyecto_id":    d.arr_proyecto_id,
+            "proyecto_id":        d.proyecto_id,
             "periodo":            d.periodo,
             "pago_id":            d.pago_id,
             "codigo_contrato":    d.codigo_contrato,
@@ -388,6 +389,7 @@ async def upload_documento(
     codigo_contrato:  str = Form(...),
     tipo_documento:   str = Form(...),
     nombre_resultante:str = Form(...),
+    proyecto_id:      int | None = Form(None),
     file:             UploadFile = File(...),
     file_secundario:  UploadFile | None = File(None),
     db: Session = Depends(get_db),
@@ -429,9 +431,12 @@ async def upload_documento(
         doc.ruta_local        = str(ruta_principal)
         doc.nombre_secundario = nombre_sec
         doc.ruta_secundario   = ruta_sec
+        if proyecto_id is not None:
+            doc.proyecto_id = proyecto_id
     else:
         doc = ArrDocumento(
             arr_proyecto_id=arr_proyecto_id,
+            proyecto_id=proyecto_id,
             periodo=periodo,
             pago_id=pago_id,
             codigo_contrato=codigo_contrato,
@@ -454,7 +459,7 @@ async def upload_cuenta_cobro(
     pago_id:             int = Form(...),
     codigo_contrato:     str = Form(...),
     tipo_documento:      str = Form(...),
-    predios:             str = Form(...),   # JSON: [{arr_proyecto_id|null, codigo_predio, valor_individual, nombre_resultante}]
+    predios:             str = Form(...),   # JSON: [{arr_proyecto_id|null, proyecto_id|null, codigo_predio, valor_individual, nombre_resultante}]
     numero_cuenta_cobro: str | None = Form(None),
     nombre_arrendatario: str | None = Form(None),
     file:                UploadFile = File(...),
@@ -468,6 +473,10 @@ async def upload_cuenta_cobro(
     propio ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) y se crea/actualiza una
     fila ArrDocumento. Los predios sin match (arr_proyecto_id null) también se guardan
     para revisión manual. El archivo original se conserva una sola vez como referencia.
+
+    Cada predio puede traer `proyecto_id` directo (preferido) o solo `arr_proyecto_id`
+    (retrocompatible), en cuyo caso se resuelve el proyecto_id vía el mismo match difuso
+    ArrProyecto→Proyecto usado en el resto del módulo (om_keys/om_match_seed).
     """
     _validar_periodo(periodo)
 
@@ -503,6 +512,26 @@ async def upload_cuenta_cobro(
         limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
         return limpio or f"documento_pago{pago_id}.pdf"
 
+    # Match difuso ArrProyecto → Proyecto, calculado una sola vez por request y
+    # reutilizado por cada predio que no traiga proyecto_id directo (mismo patrón
+    # que _backfill_arr_documento_proyecto_id en app/main.py).
+    _proyecto_por_arr_proyecto: dict[int, int] | None = None
+
+    def _resolver_proyecto_id(arr_proyecto_id: int | None) -> int | None:
+        nonlocal _proyecto_por_arr_proyecto
+        if arr_proyecto_id is None:
+            return None
+        if _proyecto_por_arr_proyecto is None:
+            from app.services.om_calculator import om_keys, om_match_seed
+            arr_activos = db.query(ArrProyecto).filter(ArrProyecto.activo == True).all()  # noqa: E712
+            arr_keys = [(a, om_keys(a.nombre)) for a in arr_activos]
+            _proyecto_por_arr_proyecto = {}
+            for p in db.query(Proyecto).all():
+                a = om_match_seed(p.nombre_comercial or "", arr_keys)
+                if a is not None:
+                    _proyecto_por_arr_proyecto[a.id] = p.id
+        return _proyecto_por_arr_proyecto.get(arr_proyecto_id)
+
     asociados = 0
     sin_match = 0
     for p in lista_predios:
@@ -516,13 +545,22 @@ async def upload_cuenta_cobro(
             arr_arrendador_id = int(p["arr_arrendador_id"]) if p.get("arr_arrendador_id") is not None else None
         except (TypeError, ValueError):
             arr_arrendador_id = None
+        try:
+            proyecto_id = int(p["proyecto_id"]) if p.get("proyecto_id") is not None else None
+        except (TypeError, ValueError):
+            proyecto_id = None
+        if proyecto_id is None and arr_proyecto_id is not None:
+            proyecto_id = _resolver_proyecto_id(arr_proyecto_id)
 
         # Nombre de archivo: usar el que envía el front; si falta, construirlo completo
         # ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) desde BD como respaldo.
         nombre_resultante = p.get("nombre_resultante")
         if not nombre_resultante:
             proy_nombre = None
-            if arr_proyecto_id is not None:
+            if proyecto_id is not None:
+                proyecto = db.get(Proyecto, proyecto_id)
+                proy_nombre = proyecto.nombre_comercial if proyecto else None
+            elif arr_proyecto_id is not None:
                 ap = db.query(ArrProyecto).filter(ArrProyecto.id == arr_proyecto_id).first()
                 proy_nombre = ap.nombre if ap else None
             partes = [codigo_predio or "predio", periodo]
@@ -553,6 +591,8 @@ async def upload_cuenta_cobro(
             db.add(doc)
 
         doc.arr_arrendador_id   = arr_arrendador_id
+        if proyecto_id is not None:
+            doc.proyecto_id = proyecto_id
         doc.codigo_contrato     = codigo_contrato
         doc.tipo_documento      = tipo_documento
         doc.nombre_archivo      = nombre_arch

@@ -1,6 +1,7 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
 import json
+import types
 from datetime import date
 from pathlib import Path as _Path
 
@@ -10,13 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
-from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
+from app.models.arriendos import ArrProyecto, ArrArrendador, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.proyectos import Proyecto
 from app.models.contratos import ContratoServicio
 
 _UPLOADS_DIR = _Path(__file__).parent.parent.parent.parent / "uploads" / "arriendos"
 from app.schemas.arriendos import (
     ArrIPCOut, ArrIPCUpsert, ArrProyectoIn, ArrProyectoOut,
+    ArrArrendadorIn, ArrArrendadorOut,
     ArrCalculoFila, ArrCalculoResponse,
     ArrSeleccionGuardar, ArrSeleccionOut,
 )
@@ -49,7 +51,7 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
     from app.services.om_calculator import om_keys, om_match_seed
 
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
-    selecciones = {s.arr_proyecto_id: s
+    selecciones = {s.arr_arrendador_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
     arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
 
@@ -68,64 +70,84 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
 
     filas, total = [], 0
     for a in arr:
-        sel = selecciones.get(a.id)
         p = arr_to_proy.get(a.id)
         c = contrato_por_proy.get(p.id) if p else None
 
         if c is not None:   # fuente de verdad: el contrato en Operación
-            valor_base = float(c.tarifa_base) / 12 if c.tarifa_base is not None else None
             fecha_firma = c.fecha_firma_contrato
             periodicidad = c.periodicidad_pago
             estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
-        else:               # sin contrato aún: respaldo a los datos del ArrProyecto
-            valor_base = float(a.valor_base) if a.valor_base is not None else None
+            arrendadores = (db.query(ArrArrendador)
+                             .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
+                             .order_by(ArrArrendador.id).all())
+            es_respaldo = False
+        else:               # sin contrato aún: respaldo a los datos del ArrProyecto (1 arrendador
+                             # implícito, usando el propio id de ArrProyecto como llave de selección
+                             # — mismo comportamiento que hoy, solo que envuelto en el loop).
             fecha_firma = a.fecha_firma_contrato
             periodicidad = None
             estado_contrato = "sin_contrato"
+            arrendadores = [types.SimpleNamespace(id=a.id, nombre=a.nombre, valor_base=a.valor_base, responsable_iva=False)]
+            es_respaldo = True
 
-        data = calcular_arriendo(
-            proyecto_id=a.id, nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
-            fecha_firma_contrato=fecha_firma,
-            valor_base=valor_base,
-            periodo=periodo, ipc_tasas=ipc_tasas,
-            incluido=(sel.incluido if sel else True),
-            facturado=(sel.facturado if sel else False),
-            valor_congelado=(int(sel.valor_facturado_congelado)
-                             if sel and sel.valor_facturado_congelado is not None else None),
-            periodicidad=periodicidad,
-        )
-        data["iva_calculado"] = calcular_iva(
-            data["canon_a_facturar"],
-            c.responsable_iva if c is not None else False,
-        )
-        data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
-        data["tipo_proyecto"] = p.tipo_proyecto if p else None
-        data["estado_contrato"] = estado_contrato
-        fila = ArrCalculoFila(**data)
-        filas.append(fila)
-        # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
-        if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
-                and fila.aplica_este_mes and fila.canon_a_facturar):
-            total += fila.canon_a_facturar
+        for arrendador in arrendadores:
+            sel = selecciones.get(arrendador.id)
+            if es_respaldo:
+                valor_base = float(arrendador.valor_base) if arrendador.valor_base is not None else None
+            else:
+                valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
+
+            data = calcular_arriendo(
+                proyecto_id=arrendador.id,
+                nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
+                fecha_firma_contrato=fecha_firma,
+                valor_base=valor_base,
+                periodo=periodo, ipc_tasas=ipc_tasas,
+                incluido=(sel.incluido if sel else True),
+                facturado=(sel.facturado if sel else False),
+                valor_congelado=(int(sel.valor_facturado_congelado)
+                                 if sel and sel.valor_facturado_congelado is not None else None),
+                periodicidad=periodicidad,
+            )
+            data["iva_calculado"] = calcular_iva(data["canon_a_facturar"], arrendador.responsable_iva)
+            data["nombre_arrendador"] = arrendador.nombre
+            data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
+            data["tipo_proyecto"] = p.tipo_proyecto if p else None
+            data["estado_contrato"] = estado_contrato
+            fila = ArrCalculoFila(**data)
+            filas.append(fila)
+            # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
+            if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
+                    and fila.aplica_este_mes and fila.canon_a_facturar):
+                total += fila.canon_a_facturar
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
 
 
 @router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
 def indexacion_contrato(
     contrato_id: int,
+    arrendador_id: int | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Serie de indexación (anual y mensual) de un contrato de arriendo, calculada
     automáticamente con el mismo motor que el panel de Costos — año calendario
-    (1-enero), usando solo el año de fecha_firma_contrato."""
+    (1-enero), usando solo el año de fecha_firma_contrato. La fecha base y la
+    periodicidad son del contrato (compartidas); si se pasa arrendador_id, el
+    valor base es el de ESE arrendador en vez de tarifa_base del contrato."""
     c = db.get(ContratoServicio, contrato_id)
     if c is None or c.servicio_aplica != "arriendo":
         raise HTTPException(404, "Contrato de arriendo no encontrado")
 
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     fecha_base = c.fecha_firma_contrato
-    valor_base = float(c.tarifa_base) / 12 if c.tarifa_base else None
+    if arrendador_id is not None:
+        arrendador = db.get(ArrArrendador, arrendador_id)
+        if arrendador is None or arrendador.contrato_id != contrato_id:
+            raise HTTPException(404, "Arrendador no encontrado para este contrato")
+        valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base else None
+    else:
+        valor_base = float(c.tarifa_base) / 12 if c.tarifa_base else None
 
     hoy = date.today()
     serie = serie_indexacion(fecha_base, valor_base, ipc_tasas, hoy.year, hoy.month)
@@ -201,6 +223,44 @@ def editar_proyecto(proyecto_id: int, payload: ArrProyectoIn, db: Session = Depe
     return p
 
 
+@router.get("/contratos/{contrato_id}/arrendadores", response_model=list[ArrArrendadorOut])
+def listar_arrendadores(contrato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    return db.query(ArrArrendador).filter(ArrArrendador.contrato_id == contrato_id).order_by(ArrArrendador.id).all()
+
+
+@router.post("/contratos/{contrato_id}/arrendadores", response_model=ArrArrendadorOut)
+def crear_arrendador(contrato_id: int, payload: ArrArrendadorIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    c = db.get(ContratoServicio, contrato_id)
+    if c is None or c.servicio_aplica != "arriendo":
+        raise HTTPException(404, "Contrato de arriendo no encontrado")
+    a = ArrArrendador(contrato_id=contrato_id, **payload.model_dump())
+    db.add(a); db.commit(); db.refresh(a)
+    return a
+
+
+@router.put("/arrendadores/{arrendador_id}", response_model=ArrArrendadorOut)
+def editar_arrendador(arrendador_id: int, payload: ArrArrendadorIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    a = db.get(ArrArrendador, arrendador_id)
+    if a is None:
+        raise HTTPException(404, "Arrendador no encontrado")
+    for k, v in payload.model_dump().items():
+        setattr(a, k, v)
+    db.commit(); db.refresh(a)
+    return a
+
+
+@router.delete("/arrendadores/{arrendador_id}")
+def eliminar_arrendador(arrendador_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    a = db.get(ArrArrendador, arrendador_id)
+    if a is None:
+        raise HTTPException(404, "Arrendador no encontrado")
+    total = db.query(ArrArrendador).filter(ArrArrendador.contrato_id == a.contrato_id).count()
+    if total <= 1:
+        raise HTTPException(400, "El contrato debe tener al menos un arrendador")
+    db.delete(a); db.commit()
+    return {"ok": True}
+
+
 @router.get("/seleccion/{periodo}", response_model=list[ArrSeleccionOut])
 def obtener_seleccion(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()
@@ -211,15 +271,16 @@ def guardar_seleccion(periodo: str, payload: ArrSeleccionGuardar, db: Session = 
     _validar_periodo(periodo)
     res = []
     for item in payload.items:
+        arrendador_id = item.arr_arrendador_id if item.arr_arrendador_id is not None else item.proyecto_id
         sel = db.query(ArrSeleccion).filter(
-            ArrSeleccion.arr_proyecto_id == item.proyecto_id,
+            ArrSeleccion.arr_arrendador_id == arrendador_id,
             ArrSeleccion.periodo == periodo,
         ).first()
         if sel:
             sel.incluido = item.incluido
             sel.motivo_exclusion = item.motivo_exclusion
         else:
-            sel = ArrSeleccion(arr_proyecto_id=item.proyecto_id, periodo=periodo,
+            sel = ArrSeleccion(arr_arrendador_id=arrendador_id, arr_proyecto_id=None, periodo=periodo,
                                incluido=item.incluido, facturado=False,
                                motivo_exclusion=item.motivo_exclusion)
             db.add(sel)
@@ -230,13 +291,13 @@ def guardar_seleccion(periodo: str, payload: ArrSeleccionGuardar, db: Session = 
     return res
 
 
-@router.patch("/seleccion/{periodo}/{proyecto_id}/facturado", response_model=ArrSeleccionOut)
-def toggle_facturado(periodo: str, proyecto_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+@router.patch("/seleccion/{periodo}/{arrendador_id}/facturado", response_model=ArrSeleccionOut)
+def toggle_facturado(periodo: str, arrendador_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     sel = db.query(ArrSeleccion).filter(
-        ArrSeleccion.arr_proyecto_id == proyecto_id, ArrSeleccion.periodo == periodo,
+        ArrSeleccion.arr_arrendador_id == arrendador_id, ArrSeleccion.periodo == periodo,
     ).first()
     if not sel:
-        sel = ArrSeleccion(arr_proyecto_id=proyecto_id, periodo=periodo, incluido=True, facturado=True)
+        sel = ArrSeleccion(arr_arrendador_id=arrendador_id, arr_proyecto_id=None, periodo=periodo, incluido=True, facturado=True)
         db.add(sel)
         nuevo_estado = True
     else:
@@ -248,14 +309,16 @@ def toggle_facturado(periodo: str, proyecto_id: int, db: Session = Depends(get_d
 
     # Al marcar como facturado, congelar el canon calculado en ese momento.
     if nuevo_estado and sel.valor_facturado_congelado is None:
-        p = db.query(ArrProyecto).filter(ArrProyecto.id == proyecto_id).first()
-        if p is not None:
+        arrendador = db.get(ArrArrendador, arrendador_id)
+        if arrendador is not None:
             ipc = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
+            contrato = db.get(ContratoServicio, arrendador.contrato_id)
             fila = calcular_arriendo(
-                proyecto_id=p.id, nombre=p.nombre, codigo=p.codigo,
-                fecha_firma_contrato=p.fecha_firma_contrato,
-                valor_base=float(p.valor_base) if p.valor_base is not None else None,
+                proyecto_id=arrendador.id, nombre=arrendador.nombre, codigo=None,
+                fecha_firma_contrato=contrato.fecha_firma_contrato if contrato else None,
+                valor_base=float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None,
                 periodo=periodo, ipc_tasas=ipc,
+                periodicidad=contrato.periodicidad_pago if contrato else None,
             )
             sel.valor_facturado_congelado = fila["canon_a_facturar"]
 
@@ -447,6 +510,10 @@ async def upload_cuenta_cobro(
             arr_proyecto_id = int(p["arr_proyecto_id"]) if p.get("arr_proyecto_id") is not None else None
         except (TypeError, ValueError):
             arr_proyecto_id = None
+        try:
+            arr_arrendador_id = int(p["arr_arrendador_id"]) if p.get("arr_arrendador_id") is not None else None
+        except (TypeError, ValueError):
+            arr_arrendador_id = None
 
         # Nombre de archivo: usar el que envía el front; si falta, construirlo completo
         # ([PREDIO]_[YYYY-MM]_[Arrendatario]_[Proyecto].pdf) desde BD como respaldo.
@@ -467,18 +534,23 @@ async def upload_cuenta_cobro(
         ruta_copia = directorio / nombre_arch
         ruta_copia.write_bytes(contenido)
 
-        # Predios con match: upsert por (proyecto, período, pago). Sin match: siempre insert.
+        # Predios con match: upsert por (proyecto, período, pago[, arrendador]). Sin match: siempre insert.
         doc = None
         if arr_proyecto_id is not None:
-            doc = db.query(ArrDocumento).filter(
+            query = db.query(ArrDocumento).filter(
                 ArrDocumento.arr_proyecto_id == arr_proyecto_id,
                 ArrDocumento.periodo         == periodo,
                 ArrDocumento.pago_id         == pago_id,
-            ).first()
+            )
+            if arr_arrendador_id is not None:
+                query = query.filter(ArrDocumento.arr_arrendador_id == arr_arrendador_id)
+            doc = query.first()
         if not doc:
-            doc = ArrDocumento(arr_proyecto_id=arr_proyecto_id, periodo=periodo, pago_id=pago_id)
+            doc = ArrDocumento(arr_proyecto_id=arr_proyecto_id, arr_arrendador_id=arr_arrendador_id,
+                                periodo=periodo, pago_id=pago_id)
             db.add(doc)
 
+        doc.arr_arrendador_id   = arr_arrendador_id
         doc.codigo_contrato     = codigo_contrato
         doc.tipo_documento      = tipo_documento
         doc.nombre_archivo      = nombre_arch

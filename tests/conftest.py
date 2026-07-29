@@ -15,6 +15,11 @@ if ROOT not in sys.path:
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-qa-0123456789")
 
+from fastapi import APIRouter
+
 _auth_stub = types.ModuleType("app.api.v1.auth")
 _auth_stub.get_current_user = lambda: None
+_auth_stub._require_admin = lambda *a, **k: None
+_auth_stub.router = APIRouter()
+_auth_stub.usuarios_router = APIRouter()
 sys.modules["app.api.v1.auth"] = _auth_stub

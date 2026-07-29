@@ -10,7 +10,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
 import app.models  # noqa: F401
-from app.models.arriendos import ArrProyecto, ArrSeleccion, ArrIPCTasa
+from app.models.arriendos import ArrProyecto, ArrArrendador, ArrSeleccion, ArrIPCTasa
 from app.models.proyectos import Proyecto
 from app.models.contratos import ContratoServicio
 from app.api.v1 import arriendos as api
@@ -35,7 +35,7 @@ PERIODO = "2026-06"
 def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        ArrProyecto.__table__, ArrSeleccion.__table__, ArrIPCTasa.__table__,
+        ArrProyecto.__table__, ArrArrendador.__table__, ArrSeleccion.__table__, ArrIPCTasa.__table__,
         Proyecto.__table__, ContratoServicio.__table__,
     ])
     s = sessionmaker(bind=engine)()
@@ -51,19 +51,25 @@ def _proy(db):
 
 
 def test_facturar_congela_y_desmarcar_descongela(db):
-    p = _proy(db)
-    sel = api.toggle_facturado(PERIODO, p.id, db=db, _=ADMIN)   # marca → congela
+    c = ContratoServicio(servicio_aplica="arriendo", estado="vigente",
+                         fecha_firma_contrato=date(2020, 1, 1), periodicidad_pago="mensual")
+    db.add(c); db.flush()
+    arrendador = ArrArrendador(contrato_id=c.id, nombre="Prestador", valor_base=12_000_000)
+    db.add(arrendador); db.flush()
+
+    sel = api.toggle_facturado(PERIODO, arrendador.id, db=db, _=ADMIN)   # marca → congela
     assert sel.facturado is True
     assert sel.valor_facturado_congelado is not None
 
-    sel = api.toggle_facturado(PERIODO, p.id, db=db, _=ADMIN)   # desmarca → descongela
+    sel = api.toggle_facturado(PERIODO, arrendador.id, db=db, _=ADMIN)   # desmarca → descongela
     assert sel.facturado is False
     assert sel.valor_facturado_congelado is None
 
 
 def test_calculo_usa_valor_congelado(db):
     p = _proy(db)
-    db.add(ArrSeleccion(arr_proyecto_id=p.id, periodo=PERIODO, incluido=True,
+    # Sin contrato: el arrendador "implícito" usa el propio id del ArrProyecto como llave.
+    db.add(ArrSeleccion(arr_arrendador_id=p.id, arr_proyecto_id=None, periodo=PERIODO, incluido=True,
                         facturado=True, valor_facturado_congelado=555_000))
     db.flush()
     resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)
@@ -76,9 +82,11 @@ def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
     verdad), no del ArrProyecto (que queda solo como llave/respaldo)."""
     p = Proyecto(nombre_comercial="Baraya", estado="en_operacion", tipo_proyecto="minigranja")
     db.add(p); db.flush()
-    db.add(ContratoServicio(servicio_aplica="arriendo", proyecto_id=p.id, estado="vigente",
-                            tarifa_base=9_000_000, fecha_firma_contrato=date(2020, 1, 1),
-                            periodicidad_pago="mensual"))
+    c = ContratoServicio(servicio_aplica="arriendo", proyecto_id=p.id, estado="vigente",
+                         tarifa_base=9_000_000, fecha_firma_contrato=date(2020, 1, 1),
+                         periodicidad_pago="mensual")
+    db.add(c); db.flush()
+    db.add(ArrArrendador(contrato_id=c.id, nombre="Prestador", valor_base=9_000_000))
     db.add(ArrProyecto(nombre="Minigranja Solar Baraya", codigo="C1", valor_base=1_000_000,
                        fecha_firma_contrato=date(2019, 1, 1), activo=True))
     db.flush()
@@ -87,9 +95,9 @@ def test_calculo_toma_datos_del_contrato_no_de_arrproyecto(db):
     fila = next(f for f in resp.filas if f.proyecto == "Baraya")
     assert fila.estado_contrato == "con_contrato"
     assert fila.tipo_proyecto == "minigranja"
-    # tarifa_base del contrato es ANUAL (9.000.000); el motor de cálculo espera
-    # valor_base MENSUAL, así que el router divide entre 12 -> 750.000.
-    # Confirma que sale del contrato (750.000), NO del ArrProyecto (1.000.000).
+    # tarifa_base/valor_base del arrendador es ANUAL (9.000.000); el motor de cálculo
+    # espera valor_base MENSUAL, así que el router divide entre 12 -> 750.000.
+    # Confirma que sale del contrato/arrendador (750.000), NO del ArrProyecto (1.000.000).
     assert fila.valor_base == 750_000
 
 
@@ -109,7 +117,7 @@ def test_motivo_exclusion_se_guarda_y_se_expone(db):
         ArrSeleccionItem(proyecto_id=p.id, incluido=False, motivo_exclusion="en disputa"),
     ]), db=db, _=ADMIN)
 
-    sel = db.query(ArrSeleccion).filter(ArrSeleccion.arr_proyecto_id == p.id).first()
+    sel = db.query(ArrSeleccion).filter(ArrSeleccion.arr_arrendador_id == p.id).first()
     assert sel.incluido is False and sel.motivo_exclusion == "en disputa"
 
     resp = api.calcular_periodo(PERIODO, db=db, _=ADMIN)

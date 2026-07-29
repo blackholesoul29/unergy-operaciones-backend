@@ -21,7 +21,7 @@ from app.schemas.arriendos import (
     ArrSeleccionGuardar, ArrSeleccionOut,
 )
 from app.schemas.om import OMIndexacionFila, OMIndexacionResponse
-from app.services.arr_calculator import calcular_arriendo, serie_indexacion
+from app.services.arr_calculator import calcular_arriendo, calcular_iva, serie_indexacion
 
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
@@ -93,6 +93,10 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             valor_congelado=(int(sel.valor_facturado_congelado)
                              if sel and sel.valor_facturado_congelado is not None else None),
             periodicidad=periodicidad,
+        )
+        data["iva_calculado"] = calcular_iva(
+            data["canon_a_facturar"],
+            c.responsable_iva if c is not None else False,
         )
         data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
         data["tipo_proyecto"] = p.tipo_proyecto if p else None

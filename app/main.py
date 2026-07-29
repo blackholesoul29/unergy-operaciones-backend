@@ -121,6 +121,22 @@ _PENDING_DDLS = [
     "DELETE FROM factura_agrupacion WHERE codigo_sic_contrato IS NULL",
     "DROP INDEX IF EXISTS uq_factura_agrupacion_proyecto",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_contrato ON factura_agrupacion (codigo_sic_contrato)",
+    "ALTER TABLE factura_agrupacion ADD COLUMN IF NOT EXISTS porcentaje NUMERIC(9,6)",
+    # Orden manual (fijo) y marca de emitida (por período) de las facturas de energía.
+    """CREATE TABLE IF NOT EXISTS factura_orden (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL UNIQUE,
+        orden INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS factura_emitida (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL,
+        periodo VARCHAR(7) NOT NULL,
+        emitida_por VARCHAR(120),
+        emitida_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_emitida_nombre_periodo ON factura_emitida (nombre, periodo)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,

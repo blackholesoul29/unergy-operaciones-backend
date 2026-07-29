@@ -21,8 +21,11 @@ from sqlalchemy import delete
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
-from app.models.contratos import DespachoContratoMensual, IppMensual, FacturaAgrupacion
+from app.models.contratos import (
+    DespachoContratoMensual, IppMensual, FacturaAgrupacion, FacturaOrden, FacturaEmitida,
+)
 from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
+from app.services.facturacion_factura import construir_mensaje, contribuciones
 from app.utils.gescon_vigencia import resolver_vigencias
 from pydantic import BaseModel
 
@@ -165,8 +168,13 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     for t in db.query(PPATarifa).filter(PPATarifa.año == año, PPATarifa.mes == mes).all():
         tarifas[t.contrato_id] = float(t.tarifa) if t.tarifa is not None else None
     proy_nombre = {pid: nom for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).all()}
-    # Agrupación manual de facturas: codigo_sic_contrato → nombre de factura (fija).
-    agrup = {a.codigo_sic_contrato: a.nombre for a in db.query(FacturaAgrupacion).all()}
+    # Agrupación manual de facturas: codigo_sic_contrato → (nombre, porcentaje). El
+    # porcentaje se lee acá porque `contribuciones` lo necesita para partir el
+    # contrato; cargarlo solo como nombre reventaba el reparto.
+    agrup = {
+        a.codigo_sic_contrato: (a.nombre, float(a.porcentaje) if a.porcentaje is not None else None)
+        for a in db.query(FacturaAgrupacion).all()
+    }
 
     lineas = []
     for d in despacho:
@@ -193,6 +201,7 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             tarifa_idx = round(base * ipp / ipp_base, 2)   # redondeo idéntico al Excel
             fact = round(kwh * tarifa_idx, 2)
         ppa_nom = (ppa.nombre_interno or ppa.numero_codigo_contrato) if ppa else None
+        ag = agrup.get(c)
         lineas.append({
             "contrato": c,
             "comprador": d.comprador,
@@ -200,7 +209,10 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             "proyecto": proy_nombre.get(proyid) if proyid else None,
             "ppa": ppa_nom,
             # Nombre de la factura: agrupación manual del CONTRATO si existe, si no el PPA.
-            "factura": (agrup.get(c) if agrup.get(c) else ppa_nom),
+            "factura": (ag[0] if ag and ag[0] else ppa_nom),
+            # Datos del contrato para el mensaje que se pega en la factura.
+            "numero_contrato": ppa.numero_codigo_contrato if ppa else None,
+            "periodo_ipp_base": ppa.periodo_indexacion_base if ppa else None,
             "kwh": kwh,
             "tarifa_base": base,
             "ipp_base": ipp_base,
@@ -223,27 +235,48 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     for g in por_sic.values():
         g["kwh"] = round(g["kwh"], 2); g["facturacion"] = round(g["facturacion"], 2)
 
-    # Agrupación por FACTURA (agrupación manual si existe, si no el PPA) — replica la
-    # hoja "Facturación" del Excel: una fila por factura con su tarifa y total, y la
-    # lista de proyectos que la componen (para dividir/reasignar desde la UI).
+    # Agrupación por FACTURA — replica la hoja "Facturación" del Excel. Una fila por
+    # factura (agrupación manual si existe, si no el PPA). Un contrato con agrupación
+    # PARCIAL (porcentaje) reparte su kWh/valor: el % va a la factura nombrada y el
+    # resto (100-%) queda en el PPA. Misma tarifa en ambas partes.
     por_factura: dict = {}
     for l in facturables:
-        k = l["factura"] or "—"
-        g = por_factura.setdefault(k, {
-            "factura": k, "ppa": l["ppa"], "comprador": l["comprador"], "contratos": 0,
-            "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
-            "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
-            "personalizada": bool(agrup.get(l["contrato"])),
-            "_tarifas": set(), "proyectos": [],
-        })
-        g["kwh"] += l["kwh"]; g["facturacion"] += l["facturacion"]; g["contratos"] += 1
-        if l["tarifa_indexada"] is not None:
-            g["_tarifas"].add(l["tarifa_indexada"])
-        g["proyectos"].append({
-            "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
-            "contrato": l["contrato"], "ppa": l["ppa"], "tarifa_indexada": l["tarifa_indexada"],
-            "kwh": l["kwh"], "facturacion": l["facturacion"], "asignada": bool(agrup.get(l["contrato"])),
-        })
+        a = agrup.get(l["contrato"])           # (nombre, porcentaje) | None
+        ppa_nom = l["ppa"] or "—"
+        contribs = contribuciones(a, ppa_nom)
+        for (fname, fr, pct) in contribs:
+            es_custom = bool(a and a[0] and fname == a[0])
+            g = por_factura.setdefault(fname, {
+                "factura": fname, "ppa": ppa_nom, "comprador": l["comprador"], "contratos": 0,
+                "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
+                "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
+                "personalizada": False, "_tarifas": set(), "proyectos": [],
+                "periodo_ipp_base": l["periodo_ipp_base"],
+                "_numeros": [], "_sic": [],
+            })
+            if l["numero_contrato"] and l["numero_contrato"] not in g["_numeros"]:
+                g["_numeros"].append(l["numero_contrato"])
+            if l["contrato"] and l["contrato"] not in g["_sic"]:
+                g["_sic"].append(l["contrato"])
+            kwh_p = round(l["kwh"] * fr, 2); fact_p = round(l["facturacion"] * fr, 2)
+            g["kwh"] += kwh_p; g["facturacion"] += fact_p; g["contratos"] += 1
+            if es_custom:
+                g["personalizada"] = True
+            if l["tarifa_indexada"] is not None:
+                g["_tarifas"].add(l["tarifa_indexada"])
+            g["proyectos"].append({
+                "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
+                "contrato": l["contrato"], "ppa": l["ppa"], "tarifa_indexada": l["tarifa_indexada"],
+                "kwh": kwh_p, "facturacion": fact_p, "porcentaje": pct,
+                "asignada": es_custom,
+            })
+    # Orden manual (fijo) y marca de emitida (del período).
+    orden_manual = {o.nombre: o.orden for o in db.query(FacturaOrden).all()}
+    emitidas = {
+        e.nombre: {"por": e.emitida_por, "at": e.emitida_at.isoformat() if e.emitida_at else None}
+        for e in db.query(FacturaEmitida).filter(FacturaEmitida.periodo == per).all()
+    }
+
     for g in por_factura.values():
         g["kwh"] = round(g["kwh"], 2); g["facturacion"] = round(g["facturacion"], 2)
         # Si la factura mezcla contratos de PPAs con tarifas distintas, no hay una
@@ -252,6 +285,34 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         if g["tarifa_mixta"]:
             g["tarifa_indexada"] = None
         g.pop("_tarifas", None)
+
+        em = emitidas.get(g["factura"])
+        g["emitida"] = em is not None
+        g["emitida_por"] = em["por"] if em else None
+        g["emitida_at"] = em["at"] if em else None
+        g["orden"] = orden_manual.get(g["factura"])
+        g["numeros_contrato"] = g.pop("_numeros")
+        g["contratos_sic"] = g.pop("_sic")
+        # El mensaje se arma acá (no en el frontend) para que el formato viva en un
+        # solo lugar, fijado por test. La tarifa base del grupo puede ser mixta; en
+        # ese caso el mensaje igual sale y la UI avisa que revise.
+        g["mensaje"] = construir_mensaje(
+            numeros_contrato=g["numeros_contrato"],
+            periodo=per,
+            kwh=g["kwh"],
+            contratos_sic=g["contratos_sic"],
+            tarifa_base=g["tarifa_base"],
+            ipp_base=g["ipp_base"],
+            periodo_ipp_base=g["periodo_ipp_base"],
+            ipp_mes=ipp,
+        )
+
+    # Las que tienen orden manual van primero (por ese orden); el resto por valor.
+    facturas = sorted(
+        por_factura.values(),
+        key=lambda x: (x["orden"] is None, x["orden"] if x["orden"] is not None else 0,
+                       -x["facturacion"]),
+    )
 
     return {
         "periodo": per,
@@ -262,10 +323,12 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             "sin_ppa": sum(1 for l in lineas if l["estado"] == "sin_ppa"),
             "kwh_total": round(sum(l["kwh"] for l in facturables), 2),
             "facturacion_total": _suma(facturables),
+            "emitidas": sum(1 for g in por_factura.values() if g["emitida"]),
+            "facturas": len(por_factura),
         },
         "lineas": lineas,
         "por_codigo_sic": sorted(por_sic.values(), key=lambda x: -x["facturacion"]),
-        "por_factura": sorted(por_factura.values(), key=lambda x: -x["facturacion"]),
+        "por_factura": facturas,
     }
 
 
@@ -278,11 +341,22 @@ def facturacion(periodo: str = Query(...), db: Session = Depends(get_db), _=Depe
 class AgrupacionIn(BaseModel):
     codigo_sic_contrato: str
     nombre: str | None = None   # None/"" = quitar la asignación (vuelve al PPA)
+    # % del contrato que va a esta factura; el resto queda en el PPA. None = todo.
+    # Ej. Uruaco 78596 → 22.8066% a "Terpel 1 Suno", 77.1934% en Terpel 1.
+    porcentaje: float | None = None
+
+
+def _agrup_out(a: FacturaAgrupacion) -> dict:
+    return {
+        "codigo_sic_contrato": a.codigo_sic_contrato,
+        "nombre": a.nombre,
+        "porcentaje": float(a.porcentaje) if a.porcentaje is not None else None,
+    }
 
 
 @router.get("/agrupaciones")
 def listar_agrupaciones(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
+    return [_agrup_out(a)
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
 
 
@@ -294,6 +368,9 @@ def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db)
         c = (r.codigo_sic_contrato or "").strip()
         if not c:
             continue
+        pct = r.porcentaje
+        if pct is not None and not 0 < pct <= 100:
+            raise HTTPException(422, f"El porcentaje de {c} debe estar entre 0 y 100 (llegó {pct})")
         obj = db.query(FacturaAgrupacion).filter(FacturaAgrupacion.codigo_sic_contrato == c).first()
         nombre = (r.nombre or "").strip()
         if not nombre:
@@ -301,9 +378,65 @@ def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db)
                 db.delete(obj)
             continue
         if obj is None:
-            db.add(FacturaAgrupacion(codigo_sic_contrato=c, nombre=nombre))
+            db.add(FacturaAgrupacion(codigo_sic_contrato=c, nombre=nombre, porcentaje=pct))
         else:
             obj.nombre = nombre
+            obj.porcentaje = pct
     db.commit()
-    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
+    return [_agrup_out(a)
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
+
+
+# ── Orden manual de las facturas (fijo, aplica cada mes) ───────────────────────
+class OrdenIn(BaseModel):
+    nombres: list[str]   # en el orden deseado; las que no vengan quedan al final
+
+
+@router.put("/orden")
+def guardar_orden(data: OrdenIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Fija el orden de las facturas. Se reemplaza completo: llega la lista ordenada
+    y se reescribe, así no quedan huecos ni posiciones viejas."""
+    db.execute(delete(FacturaOrden))
+    for i, nombre in enumerate(data.nombres):
+        n = (nombre or "").strip()
+        if n:
+            db.add(FacturaOrden(nombre=n, orden=i))
+    db.commit()
+    return {"guardadas": len([n for n in data.nombres if (n or "").strip()])}
+
+
+@router.delete("/orden")
+def limpiar_orden(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Vuelve al orden por valor (descendente)."""
+    db.execute(delete(FacturaOrden))
+    db.commit()
+    return {"ok": True}
+
+
+# ── Marca de "ya se facturó" (por período) ─────────────────────────────────────
+class EmitidaIn(BaseModel):
+    nombre: str
+    periodo: str
+    emitida: bool
+
+
+@router.put("/emitida")
+def marcar_emitida(data: EmitidaIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    per = _norm_periodo(data.periodo)
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(422, "Falta el nombre de la factura")
+    obj = (
+        db.query(FacturaEmitida)
+        .filter(FacturaEmitida.nombre == nombre, FacturaEmitida.periodo == per)
+        .first()
+    )
+    if data.emitida and obj is None:
+        db.add(FacturaEmitida(
+            nombre=nombre, periodo=per,
+            emitida_por=getattr(user, "nombre", None) or getattr(user, "email", None),
+        ))
+    elif not data.emitida and obj is not None:
+        db.delete(obj)
+    db.commit()
+    return {"nombre": nombre, "periodo": per, "emitida": data.emitida}

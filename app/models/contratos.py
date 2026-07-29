@@ -193,8 +193,46 @@ class FacturaAgrupacion(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    # % del contrato que va a esta factura; el resto (100-%) queda en el PPA default.
+    # NULL = 100% (el contrato entero se mueve). Ej. Uruaco 78596: 22.8066% → "Terpel 1
+    # Suno", 77.1934% queda en Terpel 1. Misma tarifa (solo reparte kWh/valor).
+    porcentaje: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FacturaOrden(Base):
+    """Orden manual de las facturas en la vista de emisión. Se llavea por NOMBRE de
+    factura (no hay id: la factura es el resultado de agrupar contratos), y es fijo:
+    se define una vez y aplica cada mes, como la agrupación. Una factura sin fila
+    aquí va al final, ordenada por valor como antes."""
+    __tablename__ = "factura_orden"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    orden: Mapped[int] = mapped_column(sa_Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FacturaEmitida(Base):
+    """Marca de "ya se facturó", por factura y PERÍODO (a diferencia del orden y la
+    agrupación, que son fijos). La presencia de la fila es la marca; se borra al
+    desmarcar. Guarda quién y cuándo para tener rastro."""
+    __tablename__ = "factura_emitida"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    emitida_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    emitida_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("nombre", "periodo", name="uq_factura_emitida_nombre_periodo"),
     )
 
 

@@ -87,6 +87,7 @@ class ContratoServicio(Base):
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fecha_indexacion: Mapped[date | None] = mapped_column(Date, nullable=True)  # fecha de indexación de tarifas
+    responsable_iva: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)

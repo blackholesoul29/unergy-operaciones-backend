@@ -5,14 +5,14 @@ Añade a ``cumplimiento_mensual`` el origen del cálculo ('manual' vs.
 ``liquidacion_xm_datos`` el enlace al snapshot de cumplimiento que generó cada
 dato XM (para poder regenerarlos de forma idempotente y rastrear su origen).
 
-Revision ID: 051
-Revises: 047
+Revision ID: 058
+Revises: 055
 Create Date: 2026-07-12
 """
 from alembic import op
 
-revision = "051"
-down_revision = "050"
+revision = "058"
+down_revision = "055"
 branch_labels = None
 depends_on = None
 

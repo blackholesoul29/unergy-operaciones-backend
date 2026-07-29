@@ -34,6 +34,9 @@ class ArrArrendadorIn(BaseModel):
     valor_base: Optional[float] = None
     responsable_iva: bool = False
     activo: bool = True
+    anticipo_pagado_desde: Optional[date] = None
+    anticipo_pagado_hasta: Optional[date] = None
+    observaciones: Optional[str] = None
 
 
 class ArrArrendadorOut(ArrArrendadorIn):
@@ -67,6 +70,9 @@ class ArrCalculoFila(BaseModel):
     estado_contrato: str = "con_contrato"
     motivo_exclusion: Optional[str] = None
     proyecto_id: Optional[int] = None
+    anticipo_pagado_desde: Optional[date] = None
+    anticipo_pagado_hasta: Optional[date] = None
+    observaciones_arrendador: Optional[str] = None
     historial_texto: str
     historial_detalle: str
 

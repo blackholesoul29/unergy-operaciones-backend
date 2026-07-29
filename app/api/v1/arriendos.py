@@ -110,6 +110,8 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
                 valor_congelado=(int(sel.valor_facturado_congelado)
                                  if sel and sel.valor_facturado_congelado is not None else None),
                 periodicidad=periodicidad,
+                anticipo_pagado_desde=getattr(arrendador, "anticipo_pagado_desde", None),
+                anticipo_pagado_hasta=getattr(arrendador, "anticipo_pagado_hasta", None),
             )
             data["iva_calculado"] = calcular_iva(data["canon_a_facturar"], arrendador.responsable_iva)
             data["nombre_arrendador"] = arrendador.nombre
@@ -117,6 +119,9 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             data["tipo_proyecto"] = p.tipo_proyecto
             data["estado_contrato"] = estado_contrato
             data["proyecto_id"] = c.proyecto_id
+            data["anticipo_pagado_desde"] = getattr(arrendador, "anticipo_pagado_desde", None)
+            data["anticipo_pagado_hasta"] = getattr(arrendador, "anticipo_pagado_hasta", None)
+            data["observaciones_arrendador"] = getattr(arrendador, "observaciones", None)
             fila = ArrCalculoFila(**data)
             filas.append(fila)
             if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado

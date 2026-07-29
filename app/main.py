@@ -1097,6 +1097,11 @@ _PENDING_DDLS = [
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_facturado_congelado BIGINT",
     # Arriendos Fase B: motivo de exclusión del mes.
     "ALTER TABLE arr_seleccion_mensual ADD COLUMN IF NOT EXISTS motivo_exclusion VARCHAR(500)",
+    # Arriendos: rango de anticipo pagado (desde/hasta) y observaciones libres
+    # por arrendador (2026-07).
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS anticipo_pagado_desde DATE",
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS anticipo_pagado_hasta DATE",
+    "ALTER TABLE arr_arrendador ADD COLUMN IF NOT EXISTS observaciones VARCHAR(1000)",
     # migration — módulo CRM comercial (2026-07-10)
     # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
     "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",

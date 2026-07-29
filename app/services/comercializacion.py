@@ -63,6 +63,32 @@ def unergy_token() -> str:
         return data.get("access") or data.get("token") or data.get("key") or ""
 
 
+def fetch_unergy_projects(token: str) -> list[dict]:
+    """Lista completa de proyectos registrados en la plataforma Unergy original
+    (no Quoia ni Solenium) -- cada item trae ``nombre_topico`` (= el valor que
+    va en ``Proyecto.sub_project``), ``nombre_proyecto`` y ``nombre_corto``.
+
+    Usado para emparejar por nombre los proyectos locales que todavía no
+    tienen ``sub_project`` asignado (ver /proyectos/pendientes-unergy) --
+    reemplaza la carga manual que antes hacia scripts/cargar_topics_tsf.py
+    desde un JSON exportado a mano."""
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(
+                f"{settings.UNERGY_API_URL}/api/admin/operations/project/",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "PostmanRuntime/7.50.0",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else []
+    except Exception as exc:
+        logger.warning("comercializacion: error listando proyectos Unergy: %s", exc)
+        return []
+
+
 def _fetch_readings(token: str, identificador: str, gte: date, lte: date) -> list[dict]:
     """Lecturas crudas del contador acumulado entre [gte, lte] (inclusive).
 

@@ -3,7 +3,9 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 OrigenClienteLiteral = Literal["prospeccion_propia", "recomendacion", "referido", "otro"]
-EstadoOportunidadLiteral = Literal["prospeccion", "oferta", "negociacion", "servicio_operativo"]
+EstadoOportunidadLiteral = Literal[
+    "prospeccion", "envio_oferta", "negociacion_contrato", "firmado", "operando", "declinado"
+]
 TipoServicioLiteral = Literal["representacion", "comunidad_energetica"]
 TipoOfertaLiteral = Literal["servicios_operacionales", "compra_energia", "comunidad_energetica"]
 ResultadoOfertaLiteral = Literal["pendiente", "aceptado", "declinado"]
@@ -41,6 +43,9 @@ class OportunidadCreate(BaseModel):
     nombre: Optional[str] = None
     tipo_servicio: Optional[TipoServicioLiteral] = None
     notas: Optional[str] = None
+    forzar_cliente_duplicado: bool = Field(
+        False, description="true: crear cliente_nuevo igual aunque exista uno con nombre muy parecido"
+    )
 
     @model_validator(mode="after")
     def exactamente_un_cliente(self):
@@ -71,6 +76,7 @@ class OfertaCreate(BaseModel):
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
     notas: Optional[str] = None
 
 
@@ -85,6 +91,7 @@ class OfertaUpdate(BaseModel):
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    detalle: Optional[dict] = None
     notas: Optional[str] = None
 
 

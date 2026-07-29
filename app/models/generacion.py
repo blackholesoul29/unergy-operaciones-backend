@@ -26,15 +26,3 @@ class GeneracionDiaria(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="generaciones")
-
-
-class MonitoreoVerificacion(Base):
-    """Códigos de 6 dígitos para acceso de clientes externos al módulo de monitoreo."""
-    __tablename__ = "monitoreo_verificaciones"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    codigo: Mapped[str] = mapped_column(String(6), nullable=False)
-    usado: Mapped[bool] = mapped_column(default=False, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -39,6 +39,7 @@ class PeriodicidadEnum(str, enum.Enum):
     mensual = "mensual"
     bimestral = "bimestral"
     trimestral = "trimestral"
+    semestral = "semestral"
     anual = "anual"
 
 
@@ -86,6 +87,7 @@ class ContratoServicio(Base):
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fecha_indexacion: Mapped[date | None] = mapped_column(Date, nullable=True)  # fecha de indexación de tarifas
+    responsable_iva: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -156,6 +158,51 @@ class PPAContrato(Base):
     vendedor: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")
     compromisos_energia: Mapped[list["PPACompromisoEnergia"]] = relationship("PPACompromisoEnergia", back_populates="contrato", cascade="all, delete-orphan")
+
+
+class IppMensual(Base):
+    """Índice IPP publicado (global) por mes. Numerador de la indexación de PPAs:
+    tarifa_indexada = tarifa_base × (IPP_del_mes / valor_indexacion_base_del_PPA).
+    Es un solo valor por período (mismo para todos los contratos), a diferencia del
+    IPP base que es por PPA. Fuente: DANE (IPP)."""
+    __tablename__ = "ipp_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("mes >= 1 AND mes <= 12", name="ck_ipp_mensual_mes_rango"),
+        UniqueConstraint("año", "mes", name="uq_ipp_mensual_periodo"),
+    )
+
+
+class DespachoContratoMensual(Base):
+    """Energía mensual por contrato XM, ingerida del archivo de despachos de XM
+    (dspcttos_txf_MM.xlsx). Un registro por (período, contrato). kwh = suma de las
+    24 horas de todos los días del mes para ese contrato. Es el insumo de energía
+    de la facturación v2 (el único dato externo)."""
+    __tablename__ = "despacho_contrato_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # "YYYY-MM"
+    codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False)
+    vendedor: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    comprador: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    archivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("periodo", "codigo_sic_contrato", name="uq_despacho_periodo_contrato"),
+    )
 
 
 class PPATarifa(Base):

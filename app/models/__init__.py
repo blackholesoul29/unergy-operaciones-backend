@@ -24,7 +24,7 @@ from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
 from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
 from app.models.mantenimientos import Mantenimiento
-from app.models.generacion import GeneracionDiaria, MonitoreoVerificacion
+from app.models.generacion import GeneracionDiaria
 from app.models.gestion import GestionRegistro
 from app.models.garantias import Garantia, GarantiaMovimiento
 from app.models.cumplimiento import CumplimientoMensual
@@ -43,6 +43,8 @@ from app.models.mandatos import (
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
+from app.models.verificacion_costos import VerificacionCosto
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -58,7 +60,7 @@ __all__ = [
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
     "Mantenimiento",
-    "GeneracionDiaria", "MonitoreoVerificacion",
+    "GeneracionDiaria",
     "GestionRegistro",
     "Garantia", "GarantiaMovimiento",
     "CumplimientoMensual",
@@ -73,9 +75,15 @@ __all__ = [
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
+    "VerificacionCosto",
+    "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
     EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
+)
+from app.models.registros_cnd import (
+    RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
+    RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )

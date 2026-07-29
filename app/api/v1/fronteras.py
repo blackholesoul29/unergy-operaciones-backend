@@ -19,9 +19,10 @@ from app.schemas.fronteras import (
     FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps, _mgs_number, get_frt_meter_info
+from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
+from app.utils.nombre_matching import mejor_candidato
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
@@ -90,6 +91,7 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
+        d.proyecto_fecha_inicio_comercializacion = f.proyecto.fecha_inicio_comercializacion
         d.clientes_cgm = [
             {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
             for c in get_clientes_contacto(db, "cgm", f.proyecto_id)
@@ -180,7 +182,6 @@ def fronteras_resumen(
 @router.get("", response_model=list[FronteraOut])
 def list_fronteras(
     proyecto_id: int | None = Query(None),
-    estado_operacional: str | None = Query(None, description="Filter by estado_operacional"),
     tipo_frontera: str | None = Query(None, description="Filter by tipo_frontera"),
     estado: str | None = Query(None, description="Filter by estado (activa, en_registro, cancelada, en_falla)"),
     skip: int = Query(0, ge=0),
@@ -195,8 +196,6 @@ def list_fronteras(
     )
     if proyecto_id:
         q = q.filter(Frontera.proyecto_id == proyecto_id)
-    if estado_operacional:
-        q = q.filter(Frontera.estado_operacional == estado_operacional)
     if tipo_frontera:
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
@@ -206,9 +205,35 @@ def list_fronteras(
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
+def _buscar_duplicado_frontera(
+    db: Session, nombre_frontera: str | None, tipo_frontera: str | None = None,
+) -> Frontera | None:
+    """Busca una frontera existente con nombre parecido, via solapamiento de
+    tokens + similitud de texto (mismo algoritmo que _buscar_duplicado_por_nombre
+    en proyectos, ver app/utils/nombre_matching.py) -- detecta parecidos aunque
+    no sea un caso de "un nombre contenido en el otro" (p. ej. "AGGE Extractora
+    Monterrey" vs "AGGE Frontera Monterrey").
+
+    Si se pasa tipo_frontera, solo compara contra fronteras del mismo tipo --
+    reduce falsos positivos entre fronteras de naturaleza distinta (generación
+    vs consumo) que comparten palabras en el nombre.
+
+    Deliberadamente permisivo -- no bloquea, solo avisa (se puede forzar la
+    creación con forzar=true)."""
+    if not nombre_frontera:
+        return None
+    q = db.query(Frontera).filter(Frontera.deleted_at.is_(None))
+    if tipo_frontera:
+        q = q.filter(Frontera.tipo_frontera == tipo_frontera)
+    candidatos = [(f, [f.nombre_frontera]) for f in q.all()]
+    item, _score = mejor_candidato(nombre_frontera, candidatos)
+    return item
+
+
 @router.post("", response_model=FronteraOut, status_code=201)
 def create_frontera(
     body: FronteraCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista una frontera con nombre muy parecido"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -221,6 +246,23 @@ def create_frontera(
             _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             db.refresh(existing)
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
+
+    if not forzar:
+        duplicado = _buscar_duplicado_frontera(db, body.nombre_frontera, body.tipo_frontera)
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe una frontera con un nombre muy parecido: "
+                        f"'{duplicado.nombre_frontera}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_frontera,
+                },
+            )
+
     obj = Frontera(**body.model_dump())
     db.add(obj)
     db.commit()
@@ -398,7 +440,10 @@ def _iter_borders_frt(gaia: GaiaClient):
             if not frt:
                 continue
             frt_code = (frt.get("frt_code") or "").strip()
-            if not frt_code:
+            # Placeholder tipo "N/A" que a veces carga Quoia cuando el border no
+            # tiene codigo real todavia -- no es un frt_code utilizable (y la
+            # barra rompe la ruta al confirmar, ya que frt_code va en la URL).
+            if not frt_code or "/" in frt_code:
                 continue
             yield frt_code.lower(), categoria, nombre, frt
 
@@ -466,12 +511,18 @@ def confirmar_frontera_quoia(
         raise HTTPException(404, "Ese frt_code ya no aparece en Quoia")
     categoria, nombre_quoia, frt = match
 
-    maps = _get_dynamic_maps(gaia) or {}
-    node_principal, _node_respaldo = (maps.get("frt") or {}).get(frt_code.lower(), (None, None))
     info_ppal, info_resp = get_frt_meter_info(gaia, frt_code)
 
     nombre_base = body.nombre_frontera or nombre_quoia or frt_code
     nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
+
+    fecha_registro_asic = None
+    init_date = frt.get("init_date")
+    if init_date:
+        try:
+            fecha_registro_asic = date.fromisoformat(init_date)
+        except ValueError:
+            pass
 
     obj = Frontera(
         proyecto_id=body.proyecto_id,
@@ -481,7 +532,7 @@ def confirmar_frontera_quoia(
         tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
         estado="activa",
         quoia_border_id=frt.get("id"),
-        quoia_meter_id=node_principal,
+        fecha_registro_asic=fecha_registro_asic,
     )
     if info_ppal:
         obj.marca_med_ppal = info_ppal.get("marca")

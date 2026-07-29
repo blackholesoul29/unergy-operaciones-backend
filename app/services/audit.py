@@ -26,6 +26,8 @@ _AUDITED_TABLES: frozenset[str] = frozenset({
     "fronteras",
     "contratos_servicio",
     "generacion_diaria",
+    "reporte_energia_generacion",
+    "reporte_energia_consumo",
 })
 
 _audit_user: ContextVar[tuple[int | None, str | None]] = ContextVar(

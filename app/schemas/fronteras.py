@@ -10,8 +10,6 @@ class FronteraBase(BaseModel):
     codigo_propio: Optional[str] = None
     tipo_frontera: str
     estado: Optional[str] = "activa"
-    estado_operacional: Optional[str] = "activo"
-    quoia_meter_id: Optional[int] = None
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
@@ -126,8 +124,6 @@ class FronteraUpdate(BaseModel):
     codigo_propio: Optional[str] = None
     tipo_frontera: Optional[str] = None
     estado: Optional[str] = None
-    estado_operacional: Optional[str] = None
-    quoia_meter_id: Optional[int] = None
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
@@ -244,6 +240,7 @@ class FronteraOut(FronteraBase):
     updated_at: datetime
 
     proyecto_nombre: Optional[str] = None
+    proyecto_fecha_inicio_comercializacion: Optional[date] = None
     operador_comercial: Optional[str] = None
     operador_correos: list[str] = []
     # Uno por cada cliente que sea fuente del contacto CGM de este proyecto

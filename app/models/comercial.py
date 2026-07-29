@@ -1,17 +1,23 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import (BigInteger, String, Boolean, Date, DateTime,
+from sqlalchemy import (BigInteger, Integer, String, Boolean, Date, DateTime,
                         ForeignKey, Enum as SAEnum, Text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
 
 
 class EstadoOportunidadEnum(str, enum.Enum):
+    # Pipeline de 6 estados (2026-07-15). Los 4 anteriores se renombraron in-place:
+    # oferta→envio_oferta, negociacion→negociacion_contrato, servicio_operativo→operando
+    # (que a su vez venía de 'fin'). firmado y declinado son nuevos.
     prospeccion = "prospeccion"
-    oferta = "oferta"
-    negociacion = "negociacion"
-    servicio_operativo = "servicio_operativo"   # antes 'fin' (renombrado 2026-07-13)
+    envio_oferta = "envio_oferta"
+    negociacion_contrato = "negociacion_contrato"
+    firmado = "firmado"
+    operando = "operando"
+    declinado = "declinado"
 
 
 class TipoServicioOportunidadEnum(str, enum.Enum):
@@ -146,6 +152,16 @@ class OportunidadOferta(Base):
     fecha_oferta: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_tentativa_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     contrato_firmado: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
+    # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.
+    detalle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Envío de la oferta (2026-07-28). fecha_oferta (arriba) es el PRIMER envío;
+    # aquí van los toques posteriores y la respuesta del cliente. Que
+    # fecha_ultima_respuesta sea NULL significa que el cliente NUNCA respondió,
+    # que es la señal fuerte del tablero (Los Apóstoles: 6 toques, 0 respuestas).
+    seguimientos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    fecha_ultima_respuesta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    documento_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

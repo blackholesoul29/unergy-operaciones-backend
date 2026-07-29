@@ -9,13 +9,13 @@ Agrega la configuración de monitoreo a `garantias` y crea la tabla histórica
 055←051←050. Esta rama se mergea DESPUÉS de liq-xm-ingesta según el orden de
 la cola; si el orden cambia, actualizar down_revision a la head vigente.
 
-Revision ID: 052
+Revision ID: 060
 Revises: 20260615
 Create Date: 2026-07-12
 """
 from alembic import op
 
-revision = "052"
+revision = "060"
 down_revision = "20260615"
 branch_labels = None
 depends_on = None

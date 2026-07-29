@@ -44,74 +44,39 @@ def _safe_segment(nombre: str) -> str:
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
 def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Los datos de facturación (valor, fecha inicio O&M, periodicidad, estado, tipo)
-    salen del contrato de arriendo en Operación (ContratoServicio servicio_aplica=
-    'arriendo' ligado al Proyecto). ArrProyecto se mantiene como llave de la fila
-    (selección/documentos) y como respaldo si aún no hay contrato."""
-    from app.services.om_calculator import om_keys, om_match_seed
-
+    """Itera ContratoServicio(arriendo) + Proyecto directo — sin tabla intermedia
+    (ArrProyecto ya no es necesaria para que un arriendo aparezca en Costos)."""
     ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
     selecciones = {s.arr_arrendador_id: s
                    for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()}
-    arr = db.query(ArrProyecto).filter(ArrProyecto.activo == True).order_by(ArrProyecto.id).all()  # noqa: E712
+    proyecto_por_id = {p.id: p for p in db.query(Proyecto).all()}
 
-    # Emparejar cada ArrProyecto con su Proyecto (difuso) y el contrato de arriendo.
-    arr_keys = [(a, om_keys(a.nombre)) for a in arr]
-    arr_to_proy = {}
-    for p in db.query(Proyecto).all():
-        a = om_match_seed(p.nombre_comercial or "", arr_keys)
-        if a is not None and a.id not in arr_to_proy:
-            arr_to_proy[a.id] = p
-    contrato_por_proy = {}
-    for c in db.query(ContratoServicio).filter(
-            ContratoServicio.servicio_aplica == "arriendo",
-            ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all():
-        contrato_por_proy.setdefault(c.proyecto_id, c)
+    contratos = db.query(ContratoServicio).filter(
+        ContratoServicio.servicio_aplica == "arriendo",
+        ContratoServicio.proyecto_id.isnot(None)).order_by(ContratoServicio.id).all()
 
     filas, total = [], 0
-    for a in arr:
-        p = arr_to_proy.get(a.id)
-        c = contrato_por_proy.get(p.id) if p else None
-
-        if c is not None:   # fuente de verdad: el contrato en Operación
-            fecha_firma = c.fecha_firma_contrato
-            periodicidad = c.periodicidad_pago
-            estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
-            arrendadores = (db.query(ArrArrendador)
-                             .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
-                             .order_by(ArrArrendador.id).all())
-            es_respaldo = False
-            if not arrendadores:
-                # Defensivo: un contrato de arriendo SIEMPRE debe tener >=1 arrendador
-                # (backfill de arranque), pero si por cualquier razón no lo tiene
-                # (carrera en el despliegue, dato borde), no debe desaparecer de la
-                # tabla — se usa el propio contrato como arrendador implícito.
-                # c.tarifa_base es ANUAL (igual semántica que ArrArrendador.valor_base),
-                # así que NO se marca como es_respaldo (eso es solo para el caso legado
-                # de ArrProyecto sin contrato, cuyo valor ya es mensual).
-                arrendadores = [types.SimpleNamespace(
-                    id=None, nombre=c.prestador_nombre or "Arrendador",
-                    valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
-                )]
-        else:               # sin contrato aún: respaldo a los datos del ArrProyecto (1 arrendador
-                             # implícito, usando el propio id de ArrProyecto como llave de selección
-                             # — mismo comportamiento que hoy, solo que envuelto en el loop).
-            fecha_firma = a.fecha_firma_contrato
-            periodicidad = None
-            estado_contrato = "sin_contrato"
-            arrendadores = [types.SimpleNamespace(id=a.id, nombre=a.nombre, valor_base=a.valor_base, responsable_iva=False)]
-            es_respaldo = True
+    for c in contratos:
+        p = proyecto_por_id.get(c.proyecto_id)
+        fecha_firma = c.fecha_firma_contrato
+        periodicidad = c.periodicidad_pago
+        estado_contrato = "con_contrato" if c.estado == "vigente" else "en_tramite"
+        arrendadores = (db.query(ArrArrendador)
+                         .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
+                         .order_by(ArrArrendador.id).all())
+        if not arrendadores:
+            arrendadores = [types.SimpleNamespace(
+                id=None, nombre=c.prestador_nombre or "Arrendador",
+                valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
+            )]
 
         for arrendador in arrendadores:
             sel = selecciones.get(arrendador.id)
-            if es_respaldo:
-                valor_base = float(arrendador.valor_base) if arrendador.valor_base is not None else None
-            else:
-                valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
+            valor_base = float(arrendador.valor_base) / 12 if arrendador.valor_base is not None else None
 
             data = calcular_arriendo(
                 proyecto_id=arrendador.id,
-                nombre=(p.nombre_comercial if p else a.nombre), codigo=a.codigo,
+                nombre=(p.nombre_comercial if p else "—"), codigo=None,
                 fecha_firma_contrato=fecha_firma,
                 valor_base=valor_base,
                 periodo=periodo, ipc_tasas=ipc_tasas,
@@ -126,9 +91,9 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
             data["motivo_exclusion"] = sel.motivo_exclusion if sel else None
             data["tipo_proyecto"] = p.tipo_proyecto if p else None
             data["estado_contrato"] = estado_contrato
+            data["proyecto_id"] = c.proyecto_id
             fila = ArrCalculoFila(**data)
             filas.append(fila)
-            # Solo suma al total lo facturable: con contrato, incluido, habilitado y que aplique este mes.
             if (estado_contrato == "con_contrato" and fila.incluido and fila.habilitado
                     and fila.aplica_este_mes and fila.canon_a_facturar):
                 total += fila.canon_a_facturar

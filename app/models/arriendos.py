@@ -32,6 +32,9 @@ class ArrArrendador(Base):
     valor_base:      Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # canon ANUAL (misma semántica que tarifa_base)
     responsable_iva: Mapped[bool]        = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     activo:          Mapped[bool]        = mapped_column(Boolean, default=True, nullable=False)
+    anticipo_pagado_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    anticipo_pagado_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    observaciones:         Mapped[str | None]  = mapped_column(String(1000), nullable=True)
     created_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

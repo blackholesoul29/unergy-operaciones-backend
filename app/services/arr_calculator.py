@@ -104,6 +104,13 @@ def calcular_arriendo(
     }
 
 
+def calcular_iva(canon_a_facturar: int | None, responsable_iva: bool) -> int | None:
+    """IVA (19%) sobre el canon a facturar, solo si el contrato es responsable de IVA."""
+    if not responsable_iva or canon_a_facturar is None:
+        return None
+    return _redondear(canon_a_facturar * 0.19)
+
+
 def serie_indexacion(
     fecha_base: date | None,
     valor_base: float | None,

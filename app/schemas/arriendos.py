@@ -44,6 +44,7 @@ class ArrCalculoFila(BaseModel):
     valor_anual_indexado: Optional[int]
     canon_calculado: Optional[int]
     canon_a_facturar: Optional[int]
+    iva_calculado: Optional[int] = None
     valor_facturado_congelado: Optional[int] = None
     ipc_incompleto: bool = False
     aplica_este_mes: bool = True

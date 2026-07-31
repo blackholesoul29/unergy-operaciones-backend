@@ -6,12 +6,12 @@ frontera puede estar en varios contratos (ej. operación y representación sobre
 la misma planta), así que el vínculo va en su propia tabla.
 
 Revision ID: 056
-Revises: 047
+Revises: 059
 Create Date: 2026-07-14
 """
 from alembic import op
 
-revision = "056"
+revision = "063"
 down_revision = "059"
 branch_labels = None
 depends_on = None

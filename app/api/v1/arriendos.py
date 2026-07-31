@@ -1,6 +1,7 @@
 """API del panel de Arriendos (mirror de om.py)."""
 from __future__ import annotations
 import json
+import re
 import types
 from datetime import date
 from pathlib import Path as _Path
@@ -28,18 +29,39 @@ from app.services.arr_calculator import calcular_arriendo, calcular_iva, serie_i
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
 
+_PERIODO_RE = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+
+
 def _validar_periodo(periodo: str):
-    try:
-        _, mes = periodo.split("-")
-        assert 1 <= int(mes) <= 12
-    except Exception:
+    # fullmatch estricto: el periodo se usa como segmento de ruta en los uploads,
+    # así que cualquier cosa fuera de YYYY-MM literal (p. ej. "../-01") es traversal.
+    if not isinstance(periodo, str) or not _PERIODO_RE.fullmatch(periodo):
         raise HTTPException(400, "periodo debe tener formato YYYY-MM")
 
 
 def _safe_segment(nombre: str) -> str:
     """Sanea un componente de ruta: sin separadores ni '..' (evita path traversal)."""
-    limpio = "".join(c for c in (nombre or "") if c not in '/\\:*?"<>|').replace("..", "").strip()
+    limpio = "".join(c for c in (nombre or "") if c not in '/\\:*?"<>|' and ord(c) >= 32)
+    limpio = limpio.replace("..", "").strip().lstrip(".")
     return limpio or "sin_codigo"
+
+
+def _sanit_nombre(nombre: str, fallback: str) -> str:
+    """Sanea un nombre de archivo del cliente: basename + sin separadores ni
+    control-chars ni punto inicial. Vacío tras limpiar → fallback."""
+    limpio = _Path(nombre or "").name
+    limpio = "".join(c for c in limpio if c not in '/\\:*?"<>|' and ord(c) >= 32)
+    limpio = limpio.strip().lstrip(".")
+    return limpio or fallback
+
+
+def _dir_seguro(periodo: str, codigo_contrato: str) -> _Path:
+    """Compone el directorio de destino y verifica contención dentro de
+    _UPLOADS_DIR tras resolve() (defensa en profundidad contra traversal)."""
+    directorio = (_UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)).resolve()
+    if not directorio.is_relative_to(_UPLOADS_DIR.resolve()):
+        raise HTTPException(400, "ruta de destino inválida")
+    return directorio
 
 
 @router.get("/calculo/{periodo}", response_model=ArrCalculoResponse)
@@ -404,10 +426,11 @@ async def upload_documento(
     """Sube un documento de arriendo (principal + opcional secundario) y lo registra en BD."""
     _validar_periodo(periodo)
 
-    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
+    directorio = _dir_seguro(periodo, codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
-    # Guardar archivo principal
+    # Guardar archivo principal (nombre saneado: viene del cliente)
+    nombre_resultante = _sanit_nombre(nombre_resultante, f"documento_pago{pago_id}")
     ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
     nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante + ext_principal
     ruta_principal = directorio / nombre_archivo
@@ -492,7 +515,7 @@ async def upload_cuenta_cobro(
     except Exception:
         raise HTTPException(400, "predios debe ser un JSON array no vacío")
 
-    directorio = _UPLOADS_DIR / periodo / _safe_segment(codigo_contrato)
+    directorio = _dir_seguro(periodo, codigo_contrato)
     directorio.mkdir(parents=True, exist_ok=True)
 
     # Leer el archivo principal una sola vez (se copia por cada predio)
@@ -515,8 +538,7 @@ async def upload_cuenta_cobro(
         ruta_sec   = str(ruta_obj)
 
     def _sanit(nombre: str) -> str:
-        limpio = "".join(c for c in nombre if c not in '/\\:*?"<>|').strip()
-        return limpio or f"documento_pago{pago_id}.pdf"
+        return _sanit_nombre(nombre, f"documento_pago{pago_id}.pdf")
 
     # Match difuso ArrProyecto → Proyecto, calculado una sola vez por request y
     # reutilizado por cada predio que no traiga proyecto_id directo (mismo patrón
@@ -637,7 +659,7 @@ def download_documento(
         raise HTTPException(404, "Archivo no disponible")
 
     file_path = _Path(ruta_raw).resolve()
-    if not str(file_path).startswith(str(_UPLOADS_DIR.resolve())):
+    if not file_path.is_relative_to(_UPLOADS_DIR.resolve()):
         raise HTTPException(403, "Acceso denegado")
     if not file_path.exists():
         raise HTTPException(404, "Archivo no encontrado en el servidor")

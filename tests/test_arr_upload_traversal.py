@@ -15,7 +15,8 @@ import app.models  # noqa: F401
 from app.models.arriendos import ArrDocumento
 import app.api.v1.arriendos as arriendos_mod
 from app.api.v1.arriendos import (
-    _validar_periodo, _safe_segment, _sanit_nombre, _dir_seguro, upload_documento,
+    _validar_periodo, _safe_segment, _sanit_nombre, _dir_seguro, _ext_segura,
+    upload_documento,
 )
 
 
@@ -88,6 +89,15 @@ def test_sanit_nombre_neutraliza_traversal():
     assert _sanit_nombre("..\\evil.pdf", "fb") == "evil.pdf"
     assert _sanit_nombre(".oculto.pdf", "fb") == "oculto.pdf"
     assert _sanit_nombre("cuenta enero.pdf", "fb") == "cuenta enero.pdf"
+
+
+def test_ext_segura_filtra_chars_del_filename():
+    assert _ext_segura("doc.pdf") == ".pdf"
+    assert _ext_segura("x.pdf\x00") == ".pdf"          # null byte no llega al filesystem
+    assert _ext_segura("a.b\\..\\evil") == ".evil"     # backslash filtrado: sin separadores
+    assert _ext_segura(None) == ".pdf"
+    assert _ext_segura("sin_extension") == ".pdf"
+    assert _ext_segura("informe.XLSX") == ".XLSX"
 
 
 # ---------- _dir_seguro ----------

@@ -29,7 +29,7 @@ from app.services.arr_calculator import calcular_arriendo, calcular_iva, serie_i
 router = APIRouter(prefix="/arriendos", tags=["Arriendos"])
 
 
-_PERIODO_RE = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+_PERIODO_RE = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
 def _validar_periodo(periodo: str):
@@ -53,6 +53,14 @@ def _sanit_nombre(nombre: str, fallback: str) -> str:
     limpio = "".join(c for c in limpio if c not in '/\\:*?"<>|' and ord(c) >= 32)
     limpio = limpio.strip().lstrip(".")
     return limpio or fallback
+
+
+def _ext_segura(filename: str | None, default: str = ".pdf") -> str:
+    """Extensión desde el filename del cliente, con el mismo filtro de chars
+    (un filename tipo "x.pdf\\x00" o "a.b\\..\\evil" no puede colar chars al nombre)."""
+    ext = _Path(filename or "").suffix
+    ext = "".join(c for c in ext if c not in '/\\:*?"<>|' and ord(c) >= 32)
+    return ext if len(ext) > 1 and ext.startswith(".") else default
 
 
 def _dir_seguro(periodo: str, codigo_contrato: str) -> _Path:
@@ -431,7 +439,7 @@ async def upload_documento(
 
     # Guardar archivo principal (nombre saneado: viene del cliente)
     nombre_resultante = _sanit_nombre(nombre_resultante, f"documento_pago{pago_id}")
-    ext_principal = _Path(file.filename or "doc.pdf").suffix or ".pdf"
+    ext_principal = _ext_segura(file.filename)
     nombre_archivo = nombre_resultante if nombre_resultante.endswith(ext_principal) else nombre_resultante + ext_principal
     ruta_principal = directorio / nombre_archivo
     ruta_principal.write_bytes(await file.read())
@@ -440,7 +448,7 @@ async def upload_documento(
     nombre_sec = None
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
-        ext_sec   = _Path(file_secundario.filename).suffix or ".pdf"
+        ext_sec   = _ext_segura(file_secundario.filename)
         nombre_sec = f"{nombre_resultante.rsplit('.', 1)[0]}_enviada{ext_sec}"
         ruta_obj   = directorio / nombre_sec
         ruta_obj.write_bytes(await file_secundario.read())
@@ -522,7 +530,7 @@ async def upload_cuenta_cobro(
     contenido = await file.read()
 
     # Conservar el original sin renombrar (una sola copia de referencia)
-    ext_orig      = _Path(file.filename or "documento.pdf").suffix or ".pdf"
+    ext_orig      = _ext_segura(file.filename)
     nombre_orig   = f"_original_pago{pago_id}{ext_orig}"
     ruta_original = directorio / nombre_orig
     ruta_original.write_bytes(contenido)
@@ -531,7 +539,7 @@ async def upload_cuenta_cobro(
     nombre_sec = None
     ruta_sec   = None
     if file_secundario and file_secundario.filename:
-        ext_sec    = _Path(file_secundario.filename).suffix or ".pdf"
+        ext_sec    = _ext_segura(file_secundario.filename)
         nombre_sec = f"_enviada_pago{pago_id}{ext_sec}"
         ruta_obj   = directorio / nombre_sec
         ruta_obj.write_bytes(await file_secundario.read())

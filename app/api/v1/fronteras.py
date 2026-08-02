@@ -13,6 +13,7 @@ from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed
 from app.models.proyectos import Proyecto
+from app.models.reporte_energia import ReporteEnergiaGeneracion
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
@@ -87,7 +88,34 @@ def _list_gaia_nodes(gaia: GaiaClient) -> list[dict]:
     return _nodes_cache
 
 
-def _to_out(f: Frontera, db: Session) -> FronteraOut:
+CORRIDAS_VENTANA_GENERANDO = 3
+
+
+def _ultimas_generaciones(db: Session, frontera_ids: list[int]) -> dict[int, list[ReporteEnergiaGeneracion]]:
+    """Últimas corridas (por fecha) de reporte_energia_generacion por
+    frontera, hasta CORRIDAS_VENTANA_GENERANDO. 'genera de verdad' se decide
+    contra esta ventana corta -- no la sola corrida más reciente -- para que
+    un día nublado o una falla puntual de medidor no apague la bandera de una
+    planta que sigue operando. Tampoco es un umbral fijo de días calendario:
+    el pipeline todavía no corre con cadencia diaria estricta (ver memoria de
+    sesión), así que se cuentan corridas disponibles, no días del calendario."""
+    if not frontera_ids:
+        return {}
+    filas = (
+        db.query(ReporteEnergiaGeneracion)
+        .filter(ReporteEnergiaGeneracion.frontera_id.in_(frontera_ids))
+        .order_by(ReporteEnergiaGeneracion.frontera_id, ReporteEnergiaGeneracion.fecha.desc())
+        .all()
+    )
+    ultimas: dict[int, list[ReporteEnergiaGeneracion]] = {}
+    for fila in filas:
+        lista = ultimas.setdefault(fila.frontera_id, [])
+        if len(lista) < CORRIDAS_VENTANA_GENERANDO:
+            lista.append(fila)
+    return ultimas
+
+
+def _to_out(f: Frontera, db: Session, corridas_generacion: list | None = "sin_dato") -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
@@ -100,6 +128,15 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
         d.operador_red_id = f.operador.id
         d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
         d.operador_correos = [c.email for c in f.operador.contactos]
+
+    # "sin_dato" (default) marca que no se pidió este dato en batch para esta
+    # llamada (endpoints de un solo objeto) -- se consulta puntual. Lista
+    # vacía/None explícito (pasado desde list_fronteras) significa "sí se
+    # consultó en batch y esta frontera no tiene ninguna corrida todavía".
+    corridas = _ultimas_generaciones(db, [f.id]).get(f.id, []) if corridas_generacion == "sin_dato" else (corridas_generacion or [])
+    if corridas:
+        d.generando_actual = any(c.energia_final_kwh is not None and c.energia_final_kwh > 0 for c in corridas)
+        d.fecha_ultima_generacion = corridas[0].fecha
     return d
 
 
@@ -200,7 +237,9 @@ def list_fronteras(
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
         q = q.filter(Frontera.estado == estado)
-    return [_to_out(f, db) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
+    fronteras = q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()
+    generaciones = _ultimas_generaciones(db, [f.id for f in fronteras])
+    return [_to_out(f, db, generaciones.get(f.id)) for f in fronteras]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────

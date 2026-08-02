@@ -3,11 +3,12 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -19,6 +20,7 @@ from app.models.usuarios import Usuario
 from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
+    EdicionAuditoria,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
@@ -214,6 +216,33 @@ def editar_curva(
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.get("/fronteras/{frontera_id}/ediciones", response_model=list[EdicionAuditoria])
+def ediciones_frontera(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Historial de correcciones manuales (audit_log) para esta fila
+    puntual -- quién la editó, cuándo, y el diff de qué campos cambiaron.
+    Más reciente primero."""
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    filas = db.execute(
+        text(
+            "SELECT usuario_nombre, created_at, cambios FROM audit_log "
+            "WHERE tabla = :tabla AND registro_id = :registro_id AND accion = 'UPDATE' "
+            "ORDER BY created_at DESC"
+        ),
+        {"tabla": Modelo.__tablename__, "registro_id": rep.id},
+    ).fetchall()
+    return [
+        EdicionAuditoria(
+            usuario_nombre=f.usuario_nombre,
+            created_at=f.created_at,
+            cambios=json.loads(f.cambios) if isinstance(f.cambios, str) else f.cambios,
+        )
+        for f in filas
+    ]
 
 
 @router.post("/fronteras/{frontera_id}/validar", response_model=ValidarResponse)

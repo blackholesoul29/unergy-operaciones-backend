@@ -72,6 +72,14 @@ class EditarCurvaRequest(BaseModel):
     nota: str | None = None
 
 
+class EdicionAuditoria(BaseModel):
+    """Una fila de audit_log para esta frontera+fecha -- quién corrigió la
+    curva manualmente, cuándo, y qué campos cambiaron."""
+    usuario_nombre: str | None
+    created_at: datetime
+    cambios: dict | None  # {campo: {"antes": ..., "despues": ...}}
+
+
 class ValidarResponse(BaseModel):
     frontera_id: int
     fecha: date

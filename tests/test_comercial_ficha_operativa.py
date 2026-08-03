@@ -337,3 +337,153 @@ def test_una_oferta_sin_nada_enlazado_no_rompe(db):
     ctx = contexto_ficha(db, [of])
     assert ctx[of.id] == {"proyecto": None, "ppa": None, "generacion": None,
                           "operador_oferta": None}
+
+
+# ── Task 4: la ficha viaja por la API ────────────────────────────────────────
+
+from fastapi import HTTPException  # noqa: E402
+
+from app.api.v1 import comercial as api  # noqa: E402
+from app.schemas.comercial import (  # noqa: E402
+    FirmarOfertaIn, OfertaCreate, OfertaUpdate, OportunidadCreate,
+)
+
+
+def _listar(db):
+    """Los filtros van explícitos: llamando el endpoint directo, los defaults
+    Query(None) de FastAPI llegarían como objetos Query, no como None."""
+    return api.list_ofertas_todas(tipo=None, estado=None, resultado=None, q=None,
+                                  solo_alerta=False, db=db, current=ADMIN)
+
+
+def test_la_ficha_viaja_en_la_lista_plana_de_ofertas(db):
+    """La lista plana es la fuente de la vista principal de /comercial y es la
+    que el equipo va a consumir por API."""
+    orr = OperadorRed(nombre_legal="AFINIA S.A.S. E.S.P.")
+    db.add(orr); db.flush()
+    cli = Cliente(razon_social_nombre="INVERSIONES TECNI-PLAST S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", planta_nombre="GD Las Margaritas 1",
+        municipio="Sincelejo", departamento="Sucre", operador_red_id=orr.id,
+        energia_promedio_kwh_mes=185000,
+        fecha_tentativa_inicio=dt.date(2026, 10, 1)), db=db, current=ADMIN)
+
+    fila = _listar(db)[0]
+    ficha = fila["ficha"]
+    assert ficha["proyecto_nombre"] == "GD Las Margaritas 1"
+    assert ficha["municipio"] == "Sincelejo"
+    assert ficha["operador_red"] == "AFINIA S.A.S. E.S.P."
+    assert ficha["energia_promedio_kwh_mes"] == 185000.0
+    assert ficha["fecha_inicio_operacion"] == dt.date(2026, 10, 1)
+    assert ficha["fuentes"]["fecha_inicio_operacion"] == "estimada"
+    # y lo declarado en crudo, para que el editor sepa qué es suyo
+    assert fila["municipio"] == "Sincelejo" and fila["operador_red_id"] == orr.id
+
+
+def test_la_ficha_viaja_en_el_detalle_de_la_oportunidad(db):
+    cli = Cliente(razon_social_nombre="FONSAR S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", planta_nombre="Agustín 1", municipio="Sabanalarga"),
+        db=db, current=ADMIN)
+
+    detalle = api.get_oportunidad(op["id"], db=db, current=ADMIN)
+    assert detalle["ofertas"][0]["ficha"]["municipio"] == "Sabanalarga"
+    assert detalle["ofertas"][0]["ficha"]["fuentes"]["municipio"] == "oferta"
+
+
+def test_la_ficha_de_una_oferta_firmada_toma_la_fecha_y_la_duracion_del_ppa(db):
+    cli = Cliente(razon_social_nombre="PELLETCO S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    of = api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", planta_nombre="Catedral"), db=db, current=ADMIN)
+    api.firmar_oferta(of["id"], FirmarOfertaIn(
+        fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31),
+        tarifa_base=308), db=db, current=ADMIN)
+
+    ficha = _listar(db)[0]["ficha"]
+    assert ficha["fecha_inicio_operacion"] == dt.date(2026, 2, 12)
+    assert ficha["fuentes"]["fecha_inicio_operacion"] == "contrato"
+    assert ficha["contrato_compra_meses"] == 83
+    assert ficha["contrato_compra_anios"] == 6.9
+
+
+def test_el_patch_escribe_los_campos_declarados(db):
+    """Si no son editables, el equipo no puede llenarlos nunca."""
+    orr = OperadorRed(nombre_legal="ESSA S.A. E.S.P.")
+    db.add(orr); db.flush()
+    cli = Cliente(razon_social_nombre="RECURSOS AGROPECUARIOS S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    of = api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", planta_nombre="GD Rio Pamplonita"), db=db, current=ADMIN)
+
+    api.update_oferta(of["id"], OfertaUpdate(
+        municipio="Cúcuta", departamento="Norte de Santander",
+        operador_red_id=orr.id, energia_promedio_kwh_mes=95000),
+        db=db, current=ADMIN)
+
+    ficha = _listar(db)[0]["ficha"]
+    assert ficha["municipio"] == "Cúcuta"
+    assert ficha["operador_red"] == "ESSA S.A. E.S.P."
+    assert ficha["energia_promedio_kwh_mes"] == 95000.0
+
+
+def test_un_operador_de_red_inexistente_da_422(db):
+    """Sin esto sería un IntegrityError 500 en producción."""
+    cli = Cliente(razon_social_nombre="SONETEL S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+
+    with pytest.raises(HTTPException) as e:
+        api.create_oferta(op["id"], OfertaCreate(
+            tipo="compra_energia", operador_red_id=9999), db=db, current=ADMIN)
+    assert e.value.status_code == 422
+
+
+def _oferta_completa(db, op_id, i):
+    """Una oferta con proyecto, contrato y generación propios."""
+    proy = Proyecto(nombre_comercial=f"Planta {i}", municipio="Corozal",
+                    mwh_mes_estimado=100 + i)
+    db.add(proy); db.flush()
+    _generacion(db, proy.id, 2026, 7, 31)
+    ppa = PPAContrato(fecha_inicio=dt.date(2026, 1, 1), fecha_fin=dt.date(2030, 12, 31))
+    db.add(ppa); db.flush()
+    of = OportunidadOferta(oportunidad_id=op_id, tipo="compra_energia",
+                           planta_nombre=f"Planta {i}", proyecto_id=proy.id,
+                           ppa_contrato_id=ppa.id)
+    db.add(of); db.commit()
+
+
+def test_la_lista_no_hace_una_consulta_por_oferta(db):
+    """La vista principal carga TODAS las ofertas de una: si la ficha costara una
+    consulta por fila, esto se caería con el volumen real."""
+    cli = Cliente(razon_social_nombre="GRUPO CON MUCHAS PLANTAS S.A.S.")
+    db.add(cli); db.flush()
+    op = Oportunidad(cliente_id=cli.id, estado="oportunidad")
+    db.add(op); db.commit()
+    for i in range(2):
+        _oferta_completa(db, op.id, i)
+
+    consultas = {"n": 0}
+
+    @event.listens_for(db.get_bind(), "after_cursor_execute")
+    def _contar(*args, **kwargs):
+        consultas["n"] += 1
+
+    _listar(db)
+    con_dos = consultas["n"]
+
+    for i in range(2, 8):
+        _oferta_completa(db, op.id, i)
+    consultas["n"] = 0
+    filas = _listar(db)
+    con_ocho = consultas["n"]   # leerlo ANTES de cualquier otra llamada
+
+    assert len(filas) == 8
+    assert con_ocho == con_dos, (
+        f"{con_dos} consultas con 2 ofertas y {con_ocho} con 8: hay N+1")

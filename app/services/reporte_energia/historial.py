@@ -122,9 +122,14 @@ def get_mediana_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[
         .limit(DIAS_VENTANA)
     ).scalars().all()
 
-    if len(totales) < MIN_DIAS_FORMA:
-        return None, len(totales)
-    return float(pd.Series([float(t) for t in totales]).median()), len(totales)
+    # energia_final_kwh puede ser NULL incluso en un Caso "confiable" (ej. un
+    # registro editado a mano a medias, o un dato viejo previo a que el
+    # clasificador siempre lo llenara) -- float(None) tumbaba toda la corrida
+    # del dia (ver ejecutar_dia, sin try/except por frontera).
+    validos = [float(t) for t in totales if t is not None]
+    if len(validos) < MIN_DIAS_FORMA:
+        return None, len(validos)
+    return float(pd.Series(validos).median()), len(validos)
 
 
 def get_forma_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:
@@ -185,9 +190,10 @@ def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[flo
         .limit(DIAS_VENTANA)
     ).scalars().all()
 
-    if len(totales) < MIN_DIAS_CONSUMO:
-        return None, len(totales)
-    return float(pd.Series([float(t) for t in totales]).median()), len(totales)
+    validos = [float(t) for t in totales if t is not None]
+    if len(validos) < MIN_DIAS_CONSUMO:
+        return None, len(validos)
+    return float(pd.Series(validos).median()), len(validos)
 
 
 def get_forma_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:

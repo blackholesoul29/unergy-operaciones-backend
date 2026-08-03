@@ -18,6 +18,7 @@ tipo por frontera.
 """
 from __future__ import annotations
 
+import traceback
 from datetime import date
 
 from sqlalchemy import select
@@ -134,6 +135,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     resumen_gen: dict[str, int] = {}
     resumen_con: dict[str, int] = {}
     omitidas: list[str] = []
+    fallidas: list[str] = []
 
     fronteras = _fronteras_con_reporte(db)
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
@@ -143,24 +145,37 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
 
-        if frontera.tipo_frontera in TIPOS_GENERACION:
-            resultado = clasificador.clasificar_generacion(
-                db, gaia, sol, frontera.id, frt_code, border_meta, pid_solenium, mapa_medidor_nodo, fecha,
-            )
-            _upsert_generacion(db, frontera.id, fecha, resultado)
-            clave = str(resultado["caso"])
-            resumen_gen[clave] = resumen_gen.get(clave, 0) + 1
+        # Una excepcion no manejada en UNA frontera (bug del clasificador,
+        # dato historico corrupto, timeout puntual de Quoia/Solenium) no debe
+        # tumbar la corrida completa de las demas -- se registra, se hace
+        # rollback para dejar la sesion limpia, y se sigue con la siguiente.
+        # Real: 2026-08-02 una sola frontera de Consumo con energia_final_kwh
+        # NULL en su historico mato la corrida entera despues de solo 8/103.
+        try:
+            if frontera.tipo_frontera in TIPOS_GENERACION:
+                resultado = clasificador.clasificar_generacion(
+                    db, gaia, sol, frontera.id, frt_code, border_meta, pid_solenium, mapa_medidor_nodo, fecha,
+                )
+                _upsert_generacion(db, frontera.id, fecha, resultado)
+                clave = str(resultado["caso"])
+                resumen_gen[clave] = resumen_gen.get(clave, 0) + 1
 
-        elif frontera.tipo_frontera in TIPOS_CONSUMO:
-            resultado = clasificador_consumo.clasificar_consumo(
-                db, gaia, frontera.id, frt_code, border_meta, mapa_medidor_nodo, fecha,
-            )
-            _upsert_consumo(db, frontera.id, fecha, resultado)
-            clave = str(resultado["caso"])
-            resumen_con[clave] = resumen_con.get(clave, 0) + 1
+            elif frontera.tipo_frontera in TIPOS_CONSUMO:
+                resultado = clasificador_consumo.clasificar_consumo(
+                    db, gaia, frontera.id, frt_code, border_meta, mapa_medidor_nodo, fecha,
+                )
+                _upsert_consumo(db, frontera.id, fecha, resultado)
+                clave = str(resultado["caso"])
+                resumen_con[clave] = resumen_con.get(clave, 0) + 1
 
-        else:
-            omitidas.append(f"{frontera.nombre_frontera} ({frontera.tipo_frontera})")
+            else:
+                omitidas.append(f"{frontera.nombre_frontera} ({frontera.tipo_frontera})")
+                continue
+        except Exception:
+            db.rollback()
+            fallidas.append(frontera.nombre_frontera)
+            print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> FALLÓ, se sigue con las demás:")
+            print(traceback.format_exc())
             continue
 
         print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> caso {clave}")
@@ -168,7 +183,10 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             db.commit()  # avance visible en /fronteras mientras el resto sigue corriendo
 
     db.commit()
-    return {"generacion": resumen_gen, "consumo": resumen_con, "omitidas": omitidas, "fecha": str(fecha)}
+    return {
+        "generacion": resumen_gen, "consumo": resumen_con,
+        "omitidas": omitidas, "fallidas": fallidas, "fecha": str(fecha),
+    }
 
 
 def ejecutar_dia_background(fecha: date) -> None:
@@ -183,8 +201,6 @@ def ejecutar_dia_background(fecha: date) -> None:
     """
     from app.core.database import SessionLocal
 
-    import traceback
-
     print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} ARRANCÓ")
     db = SessionLocal()
     try:
@@ -196,7 +212,7 @@ def ejecutar_dia_background(fecha: date) -> None:
         print(
             f"[reporte_energia] ejecutar_dia_background fecha={fecha} "
             f"generacion={resultado['generacion']} consumo={resultado['consumo']} "
-            f"omitidas={len(resultado['omitidas'])}"
+            f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']}"
         )
     except Exception:
         print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} FALLÓ:")

@@ -616,6 +616,10 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_email_envios_tipo ON email_envios (tipo)",
     "CREATE INDEX IF NOT EXISTS ix_email_envios_at ON email_envios (enviado_at DESC)",
+    # migration — email_envios: qué proyectos incluyó cada envío (solo reporte_cgm;
+    # NULL para otros tipos y para envíos previos a esta migración)
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos TEXT",
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos_total INTEGER",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

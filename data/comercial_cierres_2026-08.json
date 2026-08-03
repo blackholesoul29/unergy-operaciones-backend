@@ -1,0 +1,236 @@
+{
+  "version": "2026-08",
+  "descripcion": "Siete ofertas cerradas que Juan rectificó el 2026-08-02, con sus condiciones y soportes. Cada una deriva en su contrato PPA (POST /comercial/ofertas/{id}/firmar). Union por codigo de seguimiento normalizado, nunca por nombre.",
+
+  "_notas": {
+    "codigos": "Los codigos ajenos a la convencion se adaptaron a OP.{SEG} No.{NNNN}-{MM}-{AAAA}: OCE-011-2025 -> OP.COM No.0011-11-2025 (mes 11 = inicio del suministro, el codigo original no traia mes). Sonetel conserva OP.COM No.0028-2-2026, que ya cumple la convencion; UNERGY-COM-0024-2026 queda como referencia del documento firmado.",
+    "etapa": "operando si el suministro ya arranco al 2026-08-02, firmado si arranca despues. Las que ya pasaron su fecha_fin las mueve a 'terminado' cerrar_contratos_vencidos() al final de la carga; no se declaran terminadas a mano.",
+    "energia": "cantidad_minima_kwh_mes. Bayunca (400.000) y Sonetel (170.000) venian sin unidad declarada; se asumen mensuales como las otras cinco. PENDIENTE confirmar.",
+    "biosolar_sin_energia": "La oferta de Biosolar no trae cantidad de energia; queda null.",
+    "ficha": "Bloque de la ficha operativa (2026-08-03) con las 4 llaves en null. Los 6 parametros que el equipo consulta por API se resuelven por cascada Proyecto -> declarado en la oferta -> null; ninguna de estas 7 plantas tiene Proyecto todavia, asi que aqui es donde se declaran cuando Juan confirme los datos. energia_promedio_kwh_mes es la generacion mensual ESTIMADA, no el cantidad_minima_kwh_mes del contrato."
+  },
+
+  "cierres": [
+    {
+      "_ref": "1 - Galerazamba / Bayunca",
+      "codigo_actual": "OP.COM No.0058-3-2026",
+      "codigo_nuevo": "OP.COM No.0011-11-2025",
+      "cliente": "PARQUE EÓLICO DE GALERAZAMBA S.A.S.",
+      "planta_nombre": "Bayunca",
+      "etapa": "operando",
+      "contrato": {
+        "fecha_inicio": "2025-11-20",
+        "fecha_fin": "2026-12-31",
+        "tarifa_base": 300,
+        "indice_indexacion": null,
+        "periodo_indexacion_base": null,
+        "cantidad_minima_kwh_mes": 400000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1K6UousIMHIjGqTf09YcgpHcJYn_S1gOC"
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "Juan 2026-08-02: Bayunca tiene UNA sola oferta vigente, la que va hasta el 31-dic-2026. La fila 0058-3-2026 (planta mal escrita 'Byaunca') se reusa para no duplicar."
+    },
+    {
+      "_ref": "2 - Fonsar / Agustin 1",
+      "codigo_actual": null,
+      "codigo_nuevo": "OP.COM No.0010-12-2025",
+      "cliente": "FONSAR S.A.S.",
+      "planta_nombre": "Agustín 1",
+      "etapa": "operando",
+      "crear_si_falta": true,
+      "contrato": {
+        "fecha_inicio": "2026-01-01",
+        "fecha_fin": "2026-03-31",
+        "tarifa_base": 308,
+        "indice_indexacion": null,
+        "periodo_indexacion_base": null,
+        "cantidad_minima_kwh_mes": 180000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1dg7fdAqg90_BeLVZUejgsXl4w0J-HRqv"
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "El periodo de suministro ya termino (31-mar-2026), asi que al cerrar la carga queda en 'terminado' automaticamente."
+    },
+    {
+      "_ref": "3 - Pelletco / Catedral",
+      "codigo_actual": "OP.COM No.0021-1-2026",
+      "codigo_nuevo": null,
+      "cliente": "PELLETCO S.A.S.",
+      "planta_nombre": "Catedral",
+      "etapa": "operando",
+      "contrato": {
+        "fecha_inicio": "2026-02-12",
+        "fecha_fin": "2032-12-31",
+        "tarifa_base": null,
+        "indice_indexacion": "IPP",
+        "periodo_indexacion_base": "2025-10",
+        "cantidad_minima_kwh_mes": 170000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1NvJihPpxoPdhRIGKjdOciLMJbxO0bY20",
+        "precios_anuales": [
+          {"anio": 2026, "precio": 320}, {"anio": 2027, "precio": 305},
+          {"anio": 2028, "precio": 298}, {"anio": 2029, "precio": 291},
+          {"anio": 2030, "precio": 290}, {"anio": 2031, "precio": 288},
+          {"anio": 2032, "precio": 288}
+        ]
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "La oferta esta cargada bajo el cliente falso 'Catedral' (que es su planta). Se reasigna a PELLETCO S.A.S."
+    },
+    {
+      "_ref": "4 - Sonetel",
+      "codigo_actual": "OP.COM No.0028-2-2026",
+      "codigo_nuevo": null,
+      "cliente": "SOLUCIONES DE ENERGIA Y TELECOMUNICACIONES SONETEL S.A.S",
+      "planta_nombre": null,
+      "etapa": "firmado",
+      "contrato": {
+        "fecha_inicio": "2026-10-31",
+        "fecha_fin": "2036-12-31",
+        "tarifa_base": null,
+        "indice_indexacion": "IPP",
+        "periodo_indexacion_base": "2025-10",
+        "cantidad_minima_kwh_mes": 170000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1wavbLNm4cLsiimu0oqV-Z-LDx_rJzKjz",
+        "precios_anuales": [
+          {"anio": 2026, "precio": 320}, {"anio": 2027, "precio": 310},
+          {"anio": 2028, "precio": 300}, {"anio": 2029, "precio": 294},
+          {"anio": 2030, "precio": 292}, {"anio": 2031, "precio": 288},
+          {"anio": 2032, "precio": 285}, {"anio": 2033, "precio": 281},
+          {"anio": 2034, "precio": 278}, {"anio": 2035, "precio": 275},
+          {"anio": 2036, "precio": 267}
+        ]
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "Misma oferta que UNERGY-COM-0024-2026 (Juan 2026-08-02). Se conserva el codigo que ya cumple la convencion. Arranca el 31-oct-2026: las tarifas de 2026 solo cubren oct-dic."
+    },
+    {
+      "_ref": "5 - Inversiones Biosostenibles / Biosolar",
+      "codigo_actual": "OP.COM No.0046-3-2026",
+      "codigo_nuevo": null,
+      "cliente": "INVERSIONES BIOSOSTENIBLES S.A.S.",
+      "planta_nombre": "Biosolar",
+      "etapa": "operando",
+      "contrato": {
+        "fecha_inicio": "2026-03-26",
+        "fecha_fin": "2026-09-30",
+        "tarifa_base": 308,
+        "indice_indexacion": "IPP",
+        "periodo_indexacion_base": "2025-10",
+        "cantidad_minima_kwh_mes": null,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1OgHzaEOnzHOe6KJK4rOpfyJtdg_OKpeO"
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "Juan 2026-08-02: la buena es la 0046-3-2026, la 2027 no existe. Estaba marcada Denegado (fue el tercer intento tras 0024 y 0040, que si se cayeron) y cuelga del cliente falso 'Biosolar'."
+    },
+    {
+      "_ref": "6 - Recursos Agropecuarios / GD Rio Pamplonita",
+      "codigo_actual": "OP.COM No.0056-3-2026",
+      "codigo_nuevo": null,
+      "cliente": "RECURSOS AGROPECUARIOS S.A.S",
+      "planta_nombre": "GD Rio Pamplonita",
+      "etapa": "firmado",
+      "contrato": {
+        "fecha_inicio": "2027-01-01",
+        "fecha_fin": "2040-12-31",
+        "tarifa_base": null,
+        "indice_indexacion": "IPP",
+        "periodo_indexacion_base": "2026-02",
+        "cantidad_minima_kwh_mes": 174000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/1r2PDGSXxAaSErM3nX2JOtV90n7jC77g3",
+        "precios_anuales": [
+          {"anio": 2027, "precio": 310}, {"anio": 2028, "precio": 291},
+          {"anio": 2029, "precio": 278}, {"anio": 2030, "precio": 277},
+          {"anio": 2031, "precio": 274}, {"anio": 2032, "precio": 271},
+          {"anio": 2033, "precio": 267}, {"anio": 2034, "precio": 258},
+          {"anio": 2035, "precio": 254}, {"anio": 2036, "precio": 245},
+          {"anio": 2037, "precio": 241}, {"anio": 2038, "precio": 238},
+          {"anio": 2039, "precio": 236}, {"anio": 2040, "precio": 231}
+        ]
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "La planta GD Rio Pamplonita todavia no existe como proyecto."
+    },
+    {
+      "_ref": "7 - Tecni-plast / GD Las Margaritas 1",
+      "codigo_actual": "OP.COM No.0068-5-2026",
+      "codigo_nuevo": null,
+      "cliente": "INVERSIONES TECNI-PLAST S.A.S.",
+      "planta_nombre": "GD Las Margaritas 1",
+      "etapa": "firmado",
+      "contrato": {
+        "fecha_inicio": "2026-10-01",
+        "fecha_fin": "2036-12-31",
+        "tarifa_base": null,
+        "indice_indexacion": "IPP",
+        "periodo_indexacion_base": "2026-03",
+        "cantidad_minima_kwh_mes": 160000,
+        "carpeta_link": "https://drive.google.com/drive/u/0/folders/13ahLl6RjpSZ0X9r33cDM7WL7XhiNT63H",
+        "precios_anuales": [
+          {"anio": 2026, "precio": 320}, {"anio": 2027, "precio": 318},
+          {"anio": 2028, "precio": 318}, {"anio": 2029, "precio": 306},
+          {"anio": 2030, "precio": 290}, {"anio": 2031, "precio": 290},
+          {"anio": 2032, "precio": 284}, {"anio": 2033, "precio": 284},
+          {"anio": 2034, "precio": 278}, {"anio": 2035, "precio": 278},
+          {"anio": 2036, "precio": 268}
+        ]
+      },
+      "ficha": {
+        "municipio": null,
+        "departamento": null,
+        "operador_red_id": null,
+        "energia_promedio_kwh_mes": null
+      },
+      "nota": "La planta GD Las Margaritas 1 todavia no existe como proyecto. En la carga vieja el nombre quedo como 'GD Las Margaritas 1 - '."
+    }
+  ],
+
+  "clientes_basura": [
+    {"falso": "Biosolar", "real": "INVERSIONES BIOSOSTENIBLES S.A.S.",
+     "motivo": "es la planta de Biosostenibles, no una empresa"},
+    {"falso": "Catedral", "real": "PELLETCO S.A.S.",
+     "motivo": "es la planta de Pelletco"},
+    {"falso": "Yuan Solar", "real": "FEM ENERGÍA S.A.S.",
+     "motivo": "es la planta de FEM Energia"},
+    {"falso": "GD Rio pamplonita", "real": "RECURSOS AGROPECUARIOS S.A.S",
+     "motivo": "es la planta de Recursos Agropecuarios"},
+    {"falso": "San Pelayo", "real": "SAMBA SOLAR S.A.S.",
+     "motivo": "es la planta de Samba Solar"},
+    {"falso": "Sirius", "real": "QUANTUM ENERGY INGENIERÍA SA.S.",
+     "motivo": "es la planta de Quantum Energy"},
+    {"falso": "Agustin1,2, y3", "real": "FONSAR S.A.S.",
+     "motivo": "son las plantas Agustin de Fonsar"},
+    {"falso": "Agustín 123", "real": "FONSAR S.A.S.",
+     "motivo": "son las plantas Agustin de Fonsar"},
+    {"falso": "Agustín 2 años", "real": "FONSAR S.A.S.",
+     "motivo": "son las plantas Agustin de Fonsar"}
+  ]
+}

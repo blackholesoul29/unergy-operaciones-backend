@@ -5,7 +5,7 @@
   "_notas": {
     "codigos": "Los codigos ajenos a la convencion se adaptaron a OP.{SEG} No.{NNNN}-{MM}-{AAAA}: OCE-011-2025 -> OP.COM No.0011-11-2025 (mes 11 = inicio del suministro, el codigo original no traia mes). Sonetel conserva OP.COM No.0028-2-2026, que ya cumple la convencion; UNERGY-COM-0024-2026 queda como referencia del documento firmado.",
     "etapa": "operando si el suministro ya arranco al 2026-08-02, firmado si arranca despues. Las que ya pasaron su fecha_fin las mueve a 'terminado' cerrar_contratos_vencidos() al final de la carga; no se declaran terminadas a mano.",
-    "energia": "cantidad_minima_kwh_mes. Bayunca (400.000) y Sonetel (170.000) venian sin unidad declarada; se asumen mensuales como las otras cinco. PENDIENTE confirmar.",
+    "energia": "cantidad_minima_kwh_mes. Bayunca (400.000) y Sonetel (170.000) venian sin unidad declarada. CONFIRMADO por Juan el 2026-08-03: son kWh/mes, como las otras cinco.",
     "biosolar_sin_energia": "La oferta de Biosolar no trae cantidad de energia; queda null.",
     "ficha": "Bloque de la ficha operativa (2026-08-03) con las 4 llaves en null. Los 6 parametros que el equipo consulta por API se resuelven por cascada Proyecto -> declarado en la oferta -> null; ninguna de estas 7 plantas tiene Proyecto todavia, asi que aqui es donde se declaran cuando Juan confirme los datos. energia_promedio_kwh_mes es la generacion mensual ESTIMADA, no el cantidad_minima_kwh_mes del contrato."
   },

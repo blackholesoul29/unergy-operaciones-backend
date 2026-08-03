@@ -445,6 +445,29 @@ def test_un_operador_de_red_inexistente_da_422(db):
     assert e.value.status_code == 422
 
 
+def test_toda_lectura_de_una_oferta_trae_su_ficha(db):
+    """La forma de la respuesta no puede depender del endpoint: si un consumidor
+    lee ficha.municipio en la lista, tiene que poder leerlo en cualquier otra
+    respuesta que devuelva una oferta."""
+    cli = Cliente(razon_social_nombre="SAMBA SOLAR S.A.S.")
+    db.add(cli); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    creada = api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", planta_nombre="San Pelayo", municipio="Sincelejo"),
+        db=db, current=ADMIN)
+
+    respuestas = {
+        "create": creada,
+        "lista_plana": _listar(db)[0],
+        "lista_del_cliente": api.list_ofertas(op["id"], db=db, current=ADMIN)[0],
+        "detalle": api.get_oportunidad(op["id"], db=db, current=ADMIN)["ofertas"][0],
+        "seguimiento": api.registrar_seguimiento(creada["id"], db=db, current=ADMIN),
+    }
+    for donde, r in respuestas.items():
+        assert r["ficha"] is not None, f"{donde} no trae ficha"
+        assert r["ficha"]["municipio"] == "Sincelejo", donde
+
+
 def _oferta_completa(db, op_id, i):
     """Una oferta con proyecto, contrato y generación propios."""
     proy = Proyecto(nombre_comercial=f"Planta {i}", municipio="Corozal",

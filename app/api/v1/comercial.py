@@ -846,7 +846,7 @@ def registrar_seguimiento(oferta_id: int, db: Session = Depends(get_db),
     o.seguimientos = (o.seguimientos or 0) + 1
     db.commit()
     db.refresh(o)
-    return _oferta_out(o)
+    return _oferta_out(o, _fichas(db, [o])[o.id])
 
 
 @router.delete("/ofertas/{oferta_id}", status_code=204)

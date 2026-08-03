@@ -620,6 +620,17 @@ _PENDING_DDLS = [
     # NULL para otros tipos y para envíos previos a esta migración)
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos TEXT",
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos_total INTEGER",
+    # migration — reporte_energia_{generacion,consumo}: fila-placeholder cuando
+    # el clasificador falla (error_clasificacion) + resultado del envío a
+    # Quoia/ASIC (enviado_quoia_*)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

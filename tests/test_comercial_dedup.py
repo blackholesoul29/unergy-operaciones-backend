@@ -47,7 +47,7 @@ def _prospecto(db, razon, planta):
     c = Cliente(razon_social_nombre=razon, origen_tipo=None)
     db.add(c)
     db.flush()
-    op = Oportunidad(cliente_id=c.id, estado="prospeccion", es_migrada=True)
+    op = Oportunidad(cliente_id=c.id, estado="oportunidad", es_migrada=True)
     db.add(op)
     db.flush()
     db.add(OportunidadOferta(oportunidad_id=op.id, tipo="servicios_operacionales", planta_nombre=planta))

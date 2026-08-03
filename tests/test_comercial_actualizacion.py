@@ -41,19 +41,21 @@ def _sembrar(db):
     otro = Cliente(razon_social_nombre="ECOSUN")
     db.add_all([c, otro])
     db.flush()
-    op = Oportunidad(cliente_id=c.id, estado="prospeccion",
-                     estado_desde=dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc))
-    op2 = Oportunidad(cliente_id=otro.id, estado="prospeccion",
-                      estado_desde=dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc))
+    hace_rato = dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+    op = Oportunidad(cliente_id=c.id, estado="oportunidad", estado_desde=hace_rato)
+    op2 = Oportunidad(cliente_id=otro.id, estado="oportunidad", estado_desde=hace_rato)
     db.add_all([op, op2])
     db.flush()
     # Prefijo OF. a proposito: en produccion es OP. y debe dar igual.
     db.add(OportunidadOferta(oportunidad_id=op.id, tipo="compra_energia",
-                             numero_oferta="OF.COM No.0103-6-2026"))
+                             numero_oferta="OF.COM No.0103-6-2026",
+                             estado="oportunidad", estado_desde=hace_rato))
     db.add(OportunidadOferta(oportunidad_id=op.id, tipo="servicios_operacionales",
-                             numero_oferta="OP.REPCGM No.0153-06-2027"))
+                             numero_oferta="OP.REPCGM No.0153-06-2027",
+                             estado="oportunidad", estado_desde=hace_rato))
     db.add(OportunidadOferta(oportunidad_id=op2.id, tipo="servicios_operacionales",
-                             numero_oferta="OP.REPCGM No.0157-06-2026"))
+                             numero_oferta="OP.REPCGM No.0157-06-2026",
+                             estado="oportunidad", estado_desde=hace_rato))
     db.commit()
 
 
@@ -118,7 +120,7 @@ def test_es_idempotente(db):
 
 # ── estados y bitacora ───────────────────────────────────────────────────────
 
-def test_estado_mueve_oportunidad_oferta_y_deja_gestion(db):
+def test_estado_mueve_la_oferta_y_deja_gestion(db):
     datos = {"estados": [{"codigo": "No.0103-6-2026",
                           "estado_oportunidad": "declinado",
                           "resultado_oferta": "declinado",
@@ -126,17 +128,29 @@ def test_estado_mueve_oportunidad_oferta_y_deja_gestion(db):
     rep = aplicar(db, datos, dry_run=False)
     o = indexar_por_codigo(db)[(103, 6, 2026)]
     assert rep["estados"] == 1
-    assert o.resultado == "declinado" and o.oportunidad.estado == "declinado"
+    assert o.estado == "declinado" and o.resultado == "declinado"
     g = db.query(OportunidadGestion).all()
     assert len(g) == 1 and "otro comercializador" in g[0].descripcion
 
 
+def test_solo_mueve_la_oferta_nombrada_no_sus_hermanas(db):
+    """El punto de mudar la etapa a la oferta: 0103 se declina y la 0153 del
+    mismo cliente sigue viva."""
+    aplicar(db, {"estados": [{"codigo": "No.0103-6-2026",
+                              "estado_oportunidad": "declinado",
+                              "resultado_oferta": "declinado",
+                              "gestion": "Se cayo."}]}, dry_run=False)
+    idx = indexar_por_codigo(db)
+    assert idx[(103, 6, 2026)].estado == "declinado"
+    assert idx[(153, 6, 2027)].estado == "oportunidad"
+
+
 def test_estado_actualiza_estado_desde_para_reiniciar_la_alerta(db):
-    previo = indexar_por_codigo(db)[(103, 6, 2026)].oportunidad.estado_desde
+    previo = indexar_por_codigo(db)[(103, 6, 2026)].estado_desde
     aplicar(db, {"estados": [{"codigo": "No.0103-6-2026",
                               "estado_oportunidad": "envio_oferta",
                               "gestion": "Vigente."}]}, dry_run=False)
-    assert indexar_por_codigo(db)[(103, 6, 2026)].oportunidad.estado_desde > previo
+    assert indexar_por_codigo(db)[(103, 6, 2026)].estado_desde > previo
 
 
 def test_no_duplica_la_gestion_al_reaplicar(db):

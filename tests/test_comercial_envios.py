@@ -40,11 +40,11 @@ def _oferta(db):
     c = Cliente(razon_social_nombre="ACME")
     db.add(c)
     db.flush()
-    op = Oportunidad(cliente_id=c.id, estado="envio_oferta")
+    op = Oportunidad(cliente_id=c.id, estado="oferta")
     db.add(op)
     db.flush()
     o = OportunidadOferta(oportunidad_id=op.id, tipo="compra_energia",
-                          numero_oferta="OP.COM No.0103-6-2026")
+                          numero_oferta="OP.COM No.0103-6-2026", estado="oferta")
     db.add(o)
     db.commit()
     return o

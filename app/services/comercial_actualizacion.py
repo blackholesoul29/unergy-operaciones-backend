@@ -16,6 +16,7 @@ from app.models.clientes import Cliente
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion, OportunidadOferta,
 )
+from app.services.comercial import estado_a_resultado
 from app.utils.correos_hilo import codigo_partes
 
 
@@ -119,10 +120,44 @@ def _aplicar_envios(db, idx, items, dry_run, rep):
             o.planta_nombre = it["planta_nombre"]
 
 
+# El archivo de julio se escribió con el vocabulario anterior. Se traduce al
+# leerlo para que siga aplicándose tal cual está en disco.
+_ETAPAS_VIEJAS = {
+    "prospeccion": "oportunidad",
+    "envio_oferta": "oferta",
+    "negociacion_contrato": "contrato",
+}
+
+
+def _etapa(valor: str | None) -> str | None:
+    return _ETAPAS_VIEJAS.get(valor, valor)
+
+
+def _etapa_de_oferta(etapa_cliente: str | None, resultado: str | None) -> str | None:
+    """Etapa de UNA oferta a partir de lo que el archivo dice del negocio.
+
+    El archivo se escribió cuando la etapa era del cliente y el detalle por
+    oferta vivía en `resultado_oferta`; el caso que lo justifica es Los
+    Apóstoles, donde repre/CGM cerró y la compra de energía sigue abierta. El
+    resultado manda porque es el dato fino: si la oferta se aceptó queda
+    firmada (u operando, si el negocio ya arrancó) y si se declinó, declinada.
+    """
+    etapa = _etapa(etapa_cliente)
+    if resultado == "aceptado":
+        return "operando" if etapa == "operando" else "firmado"
+    if resultado == "declinado":
+        return "declinado"
+    if resultado == "pendiente" and etapa in ("firmado", "operando"):
+        # El cliente cerró por otra oferta; esta sigue viva.
+        return "oferta"
+    return etapa
+
+
 def _aplicar_estados(db, idx, items, dry_run, rep):
-    """Mueve el estado de la oportunidad, el resultado de la oferta y deja la
-    frase de Alejandro en la bitácora. La gestión no se duplica al reaplicar:
-    se busca una idéntica en la misma oportunidad."""
+    """Mueve la etapa de la OFERTA (desde 2026-08-02 el estado es suyo, no del
+    cliente), su resultado derivado, y deja la frase de Alejandro en la bitácora.
+    La gestión no se duplica al reaplicar: se busca una idéntica en la misma
+    oportunidad."""
     ahora = datetime.now(timezone.utc)
     for it in items:
         partes = codigo_partes(it["codigo"])
@@ -134,14 +169,16 @@ def _aplicar_estados(db, idx, items, dry_run, rep):
         if dry_run:
             continue
         op = o.oportunidad
-        nuevo = it.get("estado_oportunidad")
-        if nuevo and op.estado != nuevo:
+        # `estado_oportunidad` conserva el nombre de la llave del archivo, pero
+        # ahora aterriza en la oferta que nombra el código, no en el cliente.
+        nuevo = _etapa_de_oferta(it.get("estado_oportunidad"), it.get("resultado_oferta"))
+        if nuevo and o.estado != nuevo:
             db.add(OportunidadEstadoHistorial(
-                oportunidad_id=op.id, estado_anterior=op.estado, estado_nuevo=nuevo))
-            op.estado = nuevo
-            op.estado_desde = ahora
-        if it.get("resultado_oferta"):
-            o.resultado = it["resultado_oferta"]
+                oportunidad_id=op.id, oferta_id=o.id,
+                estado_anterior=o.estado, estado_nuevo=nuevo))
+            o.estado = nuevo
+            o.estado_desde = ahora
+            o.resultado = estado_a_resultado(nuevo)
         if it.get("planta_nombre") and not o.planta_nombre:
             o.planta_nombre = it["planta_nombre"]
         texto = it.get("gestion")
@@ -203,12 +240,13 @@ def _aplicar_ofertas_nuevas(db, idx, items, dry_run, rep, clientes_disponibles=f
               .filter(Oportunidad.cliente_id == cli.id, Oportunidad.deleted_at.is_(None))
               .order_by(Oportunidad.id).first())
         if not op:
-            op = Oportunidad(cliente_id=cli.id, estado="envio_oferta")
+            op = Oportunidad(cliente_id=cli.id, estado="oferta")
             db.add(op)
             db.flush()
         db.add(OportunidadOferta(
             oportunidad_id=op.id, tipo=it["tipo"], numero_oferta=it["codigo"],
             planta_nombre=it.get("planta_nombre"),
+            estado="oferta", resultado="pendiente",
             fecha_oferta=_fecha(it.get("fecha_oferta")),
             seguimientos=it.get("seguimientos") or 0,
             fecha_ultima_respuesta=_fecha(it.get("fecha_ultima_respuesta")),
@@ -258,7 +296,7 @@ def _aplicar_fusiones(db, items, dry_run, rep):
                            Oportunidad.deleted_at.is_(None))
                    .order_by(Oportunidad.id).first())
         if not destino:
-            destino = Oportunidad(cliente_id=ganador.id, estado="envio_oferta")
+            destino = Oportunidad(cliente_id=ganador.id, estado="oferta")
             db.add(destino)
             db.flush()
         for op in db.query(Oportunidad).filter(Oportunidad.cliente_id == perdedor.id).all():

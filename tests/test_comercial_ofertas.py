@@ -55,7 +55,7 @@ def test_crear_oferta_ligada(db):
     cli = Cliente(razon_social_nombre="ACME S.A.S.")
     db.add(cli)
     db.flush()
-    op = Oportunidad(cliente_id=cli.id, estado="prospeccion")
+    op = Oportunidad(cliente_id=cli.id, estado="oportunidad")
     db.add(op)
     db.flush()
     of = OportunidadOferta(

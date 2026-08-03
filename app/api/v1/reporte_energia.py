@@ -187,6 +187,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
 
 

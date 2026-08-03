@@ -32,6 +32,8 @@ SPLITS: dict[str, tuple[str, str]] = {
     "VALENCIA OR":                ("Valencia 1", "Valencia 2"),
     "GANDALF Y CANAHUATE":        ("Gandalf",    "Cañahuate"),
     "GANDALF Y CAÑAHUATE":        ("Gandalf",    "Cañahuate"),
+    "CHIMA 1 Y 2":                ("Chima 1",    "Chima 2"),
+    "CHIMÁ 1 Y 2":                ("Chima 1",    "Chima 2"),
 }
 
 # Posiciones X de columnas en el PDF

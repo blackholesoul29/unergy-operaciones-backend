@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import re
+import unicodedata
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal, TypedDict
@@ -33,7 +34,6 @@ SPLITS: dict[str, tuple[str, str]] = {
     "GANDALF Y CANAHUATE":        ("Gandalf",    "Cañahuate"),
     "GANDALF Y CAÑAHUATE":        ("Gandalf",    "Cañahuate"),
     "CHIMA 1 Y 2":                ("Chima 1",    "Chima 2"),
-    "CHIMÁ 1 Y 2":                ("Chima 1",    "Chima 2"),
 }
 
 # Posiciones X de columnas en el PDF
@@ -307,10 +307,16 @@ def _construir_item(buf: dict) -> ItemDetalle | None:
 
 # ── Tabla Agrupado ────────────────────────────────────────────────────────────
 
+def _fold(s: str) -> str:
+    """Mayúsculas y sin tildes, para que el match de SPLITS no dependa de listar
+    cada variante acentuada (ej. 'Chimá' y 'Chima' deben matchear la misma clave)."""
+    return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode().upper()
+
+
 def _match_split(descripcion: str) -> tuple[str, str] | None:
-    desc_up = descripcion.upper()
+    desc_up = _fold(descripcion)
     for key, pair in SPLITS.items():
-        if key.upper() in desc_up:
+        if _fold(key) in desc_up:
             return pair
     return None
 

@@ -154,8 +154,18 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
                 recuperar=False,  # esto es solo para mostrar una curva de referencia --
                                   # no tiene sentido interrogar el medidor (hasta 90s) por eso
             )
-            curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
-            curva_medidor_resp = curva_a_lista(c["curva_resp"])
+            # curvas_de_frontera() siempre trae ambas variables del medidor --
+            # eae (curva_ppal/curva_resp, generación) e iae (consumo_ppal/
+            # consumo_resp) -- hay que elegir la que corresponde al tipo de
+            # frontera, si no la de Consumo termina mostrando la curva de
+            # generación del mismo medidor (bug real: 2026-08-03, El Joropo
+            # Consumo mostraba una curva con forma solar de mediodía).
+            if es_generacion:
+                curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
+                curva_medidor_resp = curva_a_lista(c["curva_resp"])
+            else:
+                curva_medidor_ppal = curva_a_lista(c["consumo_ppal"])
+                curva_medidor_resp = curva_a_lista(c["consumo_resp"])
         if es_generacion and front.proyecto_id:
             proyecto = db.get(Proyecto, front.proyecto_id)
             if proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit():

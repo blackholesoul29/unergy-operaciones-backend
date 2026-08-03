@@ -273,7 +273,7 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
                 "factura": fname, "ppa": ppa_nom, "comprador": l["comprador"], "contratos": 0,
                 "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
                 "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
-                "personalizada": False, "_tarifas": set(), "proyectos": [],
+                "personalizada": False, "sin_ppa": False, "_tarifas": set(), "proyectos": [],
                 "periodo_ipp_base": l["periodo_ipp_base"],
                 "_numeros": [], "_sic": [], "_dias": set(), "_fmin": None, "_fmax": None,
             })
@@ -299,6 +299,36 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
                 "kwh": kwh_p, "facturacion": fact_p, "porcentaje": pct,
                 "asignada": es_custom,
             })
+    # Contratos SIN PPA (ej. UNGC / bolsa): XM SÍ los factura, así que se muestran
+    # como factura agrupada por comprador para que la energía total coincida con XM.
+    # No tienen tarifa PPA → la facturación queda pendiente ($0); solo cuenta la energía.
+    for l in lineas:
+        if l["estado"] != "sin_ppa":
+            continue
+        fname = f"{l['comprador'] or 'Sin PPA'} (sin PPA)"
+        g = por_factura.setdefault(fname, {
+            "factura": fname, "ppa": None, "comprador": l["comprador"], "contratos": 0,
+            "kwh": 0.0, "tarifa_base": None, "ipp_base": None,
+            "tarifa_indexada": None, "facturacion": 0.0,
+            "personalizada": False, "sin_ppa": True, "_tarifas": set(), "proyectos": [],
+            "periodo_ipp_base": None,
+            "_numeros": [], "_sic": [], "_dias": set(), "_fmin": None, "_fmax": None,
+        })
+        if l.get("dias"):
+            g["_dias"].add(l["dias"])
+        if l.get("fecha_min"):
+            g["_fmin"] = l["fecha_min"] if g["_fmin"] is None else min(g["_fmin"], l["fecha_min"])
+        if l.get("fecha_max"):
+            g["_fmax"] = l["fecha_max"] if g["_fmax"] is None else max(g["_fmax"], l["fecha_max"])
+        if l["contrato"] and l["contrato"] not in g["_sic"]:
+            g["_sic"].append(l["contrato"])
+        g["kwh"] += l["kwh"]; g["contratos"] += 1
+        g["proyectos"].append({
+            "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
+            "contrato": l["contrato"], "ppa": None, "tarifa_indexada": None,
+            "kwh": l["kwh"], "facturacion": 0.0, "porcentaje": None, "asignada": False,
+        })
+
     # Orden manual (fijo) y marca de emitida (del período).
     orden_manual = {o.nombre: o.orden for o in db.query(FacturaOrden).all()}
     emitidas = {

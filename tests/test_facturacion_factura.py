@@ -87,6 +87,19 @@ def test_mensaje_replica_el_formato_de_terpel_4():
     ) == MENSAJE_TERPEL_4
 
 
+def test_contratos_con_energia_por_contrato():
+    """Con contratos_detalle, la línea de contratos muestra la energía de cada uno
+    (útil en Nitro, que tiene varios). Sin detalle, solo los códigos."""
+    m = construir_mensaje(
+        numeros_contrato=["NEC-S-597-25"], periodo="2026-06", kwh=180412.4,
+        contratos_sic=["88747", "88750"], tarifa_base=342, ipp_base=182.7,
+        periodo_ipp_base="2025-06", ipp_mes=187.43,
+        contratos_detalle=[{"contrato": "88747", "kwh": 138380.4},
+                           {"contrato": "88750", "kwh": 42032.0}],
+    )
+    assert "Contrato: 88747 (138,380.40 kWh), 88750 (42,032.00 kWh)" in m
+
+
 def test_dias_y_rango_real_del_despacho():
     """Si vienen días y rango del despacho, el mensaje usa el rango real y agrega
     'Días facturados: N' (para meses parciales)."""

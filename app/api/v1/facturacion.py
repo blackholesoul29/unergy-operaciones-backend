@@ -375,11 +375,18 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         # El mensaje se arma acá (no en el frontend) para que el formato viva en un
         # solo lugar, fijado por test. La tarifa base del grupo puede ser mixta; en
         # ese caso el mensaje igual sale y la UI avisa que revise.
+        # Energía por contrato (para desglosar en el mensaje). Agrega por si un
+        # contrato aparece en varias líneas de la factura.
+        _det: dict = {}
+        for p in g["proyectos"]:
+            _det[p["contrato"]] = round(_det.get(p["contrato"], 0.0) + (p["kwh"] or 0.0), 2)
+        contratos_detalle = [{"contrato": c, "kwh": k} for c, k in _det.items()]
         g["mensaje"] = construir_mensaje(
             numeros_contrato=g["numeros_contrato"],
             periodo=per,
             kwh=g["kwh"],
             contratos_sic=g["contratos_sic"],
+            contratos_detalle=contratos_detalle,
             tarifa_base=g["tarifa_base"],
             ipp_base=g["ipp_base"],
             periodo_ipp_base=g["periodo_ipp_base"],

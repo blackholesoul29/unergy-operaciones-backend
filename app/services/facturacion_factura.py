@@ -101,6 +101,7 @@ def construir_mensaje(
     dias: int | None = None,
     fecha_min: str | None = None,
     fecha_max: str | None = None,
+    contratos_detalle: list[dict] | None = None,
 ) -> str:
     """Mensaje para copiar en la factura. Ver el test para el formato exacto.
 
@@ -135,6 +136,14 @@ def construir_mensaje(
     if dias is not None:
         lineas_periodo.append(f"Días facturados: {dias}")
 
+    # Línea de contratos: con energía por contrato si viene el detalle, si no solo
+    # los códigos (comportamiento original / test).
+    if contratos_detalle:
+        partes = [f"{d['contrato']} ({d.get('kwh', 0):,.2f} kWh)" for d in contratos_detalle]
+        contrato_line = f"Contrato: {', '.join(partes)}"
+    else:
+        contrato_line = f"Contrato: {', '.join(contratos_sic)}"
+
     return "\n".join([
         ", ".join(numeros_contrato) or "—",
         *lineas_periodo,
@@ -143,7 +152,7 @@ def construir_mensaje(
         "",
         "La información utilizada para la facturación de la energía fue extraída "
         "de los archivos TXF.",
-        f"Contrato: {', '.join(contratos_sic)}",
+        contrato_line,
         "",
         f"Tarifa Base: {_plata(tarifa_base)}",
         f"IPP Base {etiqueta_base} Provisional: {_plata(ipp_base)}",

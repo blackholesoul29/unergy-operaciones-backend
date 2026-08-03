@@ -236,3 +236,104 @@ def test_una_oferta_vacia_devuelve_nulls_y_fuentes_en_null():
                   "fecha_inicio_operacion", "contrato_compra_meses"):
         assert f[campo] is None, campo
         assert f["fuentes"][campo] is None, campo
+
+
+# ── Task 3: precarga por lotes ───────────────────────────────────────────────
+
+from app.services.comercial import contexto_ficha  # noqa: E402
+
+
+def _cliente_con_oferta(db, nombre="PELLETCO S.A.S.", **kw_oferta):
+    cli = Cliente(razon_social_nombre=nombre)
+    db.add(cli); db.flush()
+    op = Oportunidad(cliente_id=cli.id, estado="oportunidad")
+    db.add(op); db.flush()
+    of = OportunidadOferta(oportunidad_id=op.id, tipo="compra_energia", **kw_oferta)
+    db.add(of); db.flush()
+    return op, of
+
+
+def _generacion(db, proyecto_id, anio, mes, dias, kwh_dia=1000):
+    for d in range(1, dias + 1):
+        db.add(GeneracionDiaria(proyecto_id=proyecto_id, fecha=dt.date(anio, mes, d),
+                                kwh_real=kwh_dia))
+    db.flush()
+
+
+def test_el_contexto_trae_proyecto_ppa_y_operador_declarado(db):
+    orr = OperadorRed(nombre_legal="CENS S.A. E.S.P.")
+    db.add(orr); db.flush()
+    proy = Proyecto(nombre_comercial="GD Catedral", municipio="Corozal")
+    db.add(proy); db.flush()
+    ppa = PPAContrato(fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31))
+    db.add(ppa); db.flush()
+    _, of = _cliente_con_oferta(db, proyecto_id=proy.id, ppa_contrato_id=ppa.id,
+                                operador_red_id=orr.id)
+    db.commit()
+
+    ctx = contexto_ficha(db, [of])
+    assert ctx[of.id]["proyecto"].id == proy.id
+    assert ctx[of.id]["ppa"].id == ppa.id
+    assert ctx[of.id]["operador_oferta"] == "CENS S.A. E.S.P."
+    assert ctx[of.id]["generacion"] is None   # la planta no ha generado
+
+
+def test_la_energia_real_es_la_del_ultimo_mes_cerrado(db):
+    proy = Proyecto(nombre_comercial="Bayunca")
+    db.add(proy); db.flush()
+    _generacion(db, proy.id, 2026, 6, 30, kwh_dia=900)
+    _generacion(db, proy.id, 2026, 7, 31, kwh_dia=1000)
+    _, of = _cliente_con_oferta(db, proyecto_id=proy.id)
+    db.commit()
+
+    ctx = contexto_ficha(db, [of], hoy=dt.date(2026, 8, 3))
+    assert ctx[of.id]["generacion"] == ("2026-07", 31000.0)
+
+
+def test_el_mes_en_curso_no_cuenta(db):
+    """Tres días de agosto no son la energía del mes."""
+    proy = Proyecto(nombre_comercial="Bayunca")
+    db.add(proy); db.flush()
+    _generacion(db, proy.id, 2026, 8, 3)
+    _, of = _cliente_con_oferta(db, proyecto_id=proy.id)
+    db.commit()
+
+    assert contexto_ficha(db, [of], hoy=dt.date(2026, 8, 3))[of.id]["generacion"] is None
+
+
+def test_un_mes_con_lecturas_a_medias_tampoco_cuenta(db):
+    """20 de 31 días reportados darían un número 35% bajo, presentado como real."""
+    proy = Proyecto(nombre_comercial="Bayunca")
+    db.add(proy); db.flush()
+    _generacion(db, proy.id, 2026, 7, 20)
+    _, of = _cliente_con_oferta(db, proyecto_id=proy.id)
+    db.commit()
+
+    assert contexto_ficha(db, [of], hoy=dt.date(2026, 8, 3))[of.id]["generacion"] is None
+
+
+def test_lo_borrado_no_alimenta_la_ficha(db):
+    """Un contrato o un proyecto con deleted_at ya no son la verdad de nadie."""
+    proy = Proyecto(nombre_comercial="Planta borrada",
+                    deleted_at=dt.datetime(2026, 7, 1))
+    db.add(proy); db.flush()
+    ppa = PPAContrato(fecha_inicio=dt.date(2026, 1, 1), fecha_fin=dt.date(2030, 12, 31),
+                      deleted_at=dt.datetime(2026, 7, 1))
+    db.add(ppa); db.flush()
+    _, of = _cliente_con_oferta(db, proyecto_id=proy.id, ppa_contrato_id=ppa.id)
+    db.commit()
+
+    ctx = contexto_ficha(db, [of])
+    assert ctx[of.id]["proyecto"] is None and ctx[of.id]["ppa"] is None
+
+
+def test_sin_ofertas_el_contexto_es_vacio(db):
+    assert contexto_ficha(db, []) == {}
+
+
+def test_una_oferta_sin_nada_enlazado_no_rompe(db):
+    _, of = _cliente_con_oferta(db, planta_nombre="GD Rio Pamplonita")
+    db.commit()
+    ctx = contexto_ficha(db, [of])
+    assert ctx[of.id] == {"proyecto": None, "ppa": None, "generacion": None,
+                          "operador_oferta": None}

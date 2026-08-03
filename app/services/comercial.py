@@ -252,3 +252,100 @@ def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
         "contrato_fecha_fin": contrato_fin,
         "fuentes": fuentes,
     }
+
+
+def contexto_ficha(db, ofertas, hoy=None) -> dict[int, dict]:
+    """Precarga lo que ficha_operativa() necesita: {oferta_id: kwargs}.
+
+    Un número FIJO de consultas sin importar cuántas ofertas entren. Resolver
+    esto dentro del bucle sería N+1 justo en la vista principal de /comercial,
+    que carga todas las ofertas de una.
+
+    Las llaves de cada valor son los nombres de los parámetros de
+    ficha_operativa, para poder llamarla como ficha_operativa(o, **ctx[o.id]).
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.proyectos import Proyecto
+    from app.models.fronteras import Frontera
+    from app.models.contratos import PPAContrato
+    from app.models.operadores_red import OperadorRed
+
+    ofertas = list(ofertas)
+    if not ofertas:
+        return {}
+
+    proyecto_ids = {o.proyecto_id for o in ofertas if o.proyecto_id}
+    ppa_ids = {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id}
+    operador_ids = {o.operador_red_id for o in ofertas if o.operador_red_id}
+
+    proyectos = {}
+    if proyecto_ids:
+        # operador y fronteras.operador precargados: Proyecto.operador_red_legal
+        # los recorre y sin esto haría dos consultas por proyecto.
+        proyectos = {
+            p.id: p for p in db.query(Proyecto)
+            .options(selectinload(Proyecto.operador),
+                     selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+            .filter(Proyecto.id.in_(proyecto_ids),
+                    Proyecto.deleted_at.is_(None)).all()
+        }
+    ppas = {}
+    if ppa_ids:
+        # Un contrato borrado no alimenta la ficha: la oferta conserva el FK pero
+        # sus fechas ya no son la verdad de nadie.
+        ppas = {c.id: c for c in db.query(PPAContrato)
+                .filter(PPAContrato.id.in_(ppa_ids),
+                        PPAContrato.deleted_at.is_(None)).all()}
+    operadores = {}
+    if operador_ids:
+        operadores = dict(
+            db.query(OperadorRed.id, OperadorRed.nombre_legal)
+            .filter(OperadorRed.id.in_(operador_ids)).all())
+
+    generacion = _ultimo_mes_generacion(db, proyecto_ids, hoy=hoy)
+
+    return {
+        o.id: {
+            "proyecto": proyectos.get(o.proyecto_id),
+            "ppa": ppas.get(o.ppa_contrato_id),
+            "generacion": generacion.get(o.proyecto_id),
+            "operador_oferta": operadores.get(o.operador_red_id),
+        }
+        for o in ofertas
+    }
+
+
+def _ultimo_mes_generacion(db, proyecto_ids, hoy=None) -> dict[int, tuple[str, float]]:
+    """Último mes CERRADO con lecturas por proyecto: {proyecto_id: ('2026-07', kwh)}.
+
+    Dos exclusiones a propósito, las dos por lo mismo — un número parcial
+    presentado como energía real del mes es peor que no dar número:
+      · el mes en curso no cuenta (tres días de agosto no son un mes);
+      · un mes con menos de 28 días de lectura tampoco.
+    Una sola consulta agregada para todos los proyectos.
+    """
+    from sqlalchemy import extract, func as sa_func
+    from app.models.generacion import GeneracionDiaria
+
+    if not proyecto_ids:
+        return {}
+    hoy = hoy or col_now().date()
+    primero_del_mes = hoy.replace(day=1)
+    anio = extract("year", GeneracionDiaria.fecha)
+    mes = extract("month", GeneracionDiaria.fecha)
+    filas = (
+        db.query(GeneracionDiaria.proyecto_id, anio.label("anio"), mes.label("mes"),
+                 sa_func.sum(GeneracionDiaria.kwh_real).label("kwh"))
+        .filter(GeneracionDiaria.proyecto_id.in_(proyecto_ids),
+                GeneracionDiaria.kwh_real.isnot(None),
+                GeneracionDiaria.fecha < primero_del_mes)
+        .group_by(GeneracionDiaria.proyecto_id, anio, mes)
+        .having(sa_func.count(GeneracionDiaria.id) >= 28)
+        .all()
+    )
+    out: dict[int, tuple[str, float]] = {}
+    for proyecto_id, a, m, kwh in filas:
+        periodo = f"{int(a):04d}-{int(m):02d}"
+        if proyecto_id not in out or periodo > out[proyecto_id][0]:
+            out[proyecto_id] = (periodo, float(kwh))
+    return out

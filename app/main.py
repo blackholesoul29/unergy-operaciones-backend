@@ -107,6 +107,15 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
+    # precio de bolsa manual por mes (valoriza la energía sin PPA / UNGC)
+    """CREATE TABLE IF NOT EXISTS precio_bolsa_mensual (
+        id BIGSERIAL PRIMARY KEY,
+        año INT NOT NULL,
+        mes INT NOT NULL,
+        valor NUMERIC(12,4) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_precio_bolsa_periodo ON precio_bolsa_mensual (año, mes)",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_max DATE",

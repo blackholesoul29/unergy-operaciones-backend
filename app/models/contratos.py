@@ -236,6 +236,25 @@ class FacturaEmitida(Base):
     )
 
 
+class PrecioBolsaMensual(Base):
+    """Precio de bolsa ($/kWh) manual por mes para valorizar la energía de los
+    contratos SIN PPA (UNGC / bolsa), que XM factura a precio de bolsa. Si no se
+    fija, se usa el promedio de precios_bolsa_diario como sugerido."""
+    __tablename__ = "precio_bolsa_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("año", "mes", name="uq_precio_bolsa_periodo"),
+    )
+
+
 class DespachoContratoMensual(Base):
     """Energía mensual por contrato XM, ingerida del archivo de despachos de XM
     (dspcttos_txf_MM.xlsx). Un registro por (período, contrato). kwh = suma de las

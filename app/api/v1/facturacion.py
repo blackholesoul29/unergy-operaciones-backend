@@ -23,6 +23,7 @@ from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
 from app.models.contratos import (
     DespachoContratoMensual, IppMensual, FacturaAgrupacion, FacturaOrden, FacturaEmitida,
+    PrecioBolsaMensual,
 )
 from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
 from app.services.facturacion_factura import construir_mensaje, contribuciones
@@ -158,6 +159,18 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     despacho = db.query(DespachoContratoMensual).filter(DespachoContratoMensual.periodo == per).all()
     ipp_row = db.query(IppMensual).filter(IppMensual.año == año, IppMensual.mes == mes).first()
     ipp = float(ipp_row.valor) if ipp_row else None
+
+    # Precio de bolsa para valorizar la energía SIN PPA (UNGC): manual si se fijó,
+    # si no el promedio del mes de precios_bolsa_diario (sugerido).
+    bolsa_row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    bolsa_manual = float(bolsa_row.valor) if bolsa_row else None
+    try:
+        from app.api.v1.cumplimiento import _get_bolsa_avg
+        bolsa_sugerido = _get_bolsa_avg(db, año, mes).get("precio_promedio")
+    except Exception:
+        bolsa_sugerido = None
+    bolsa_precio = bolsa_manual if bolsa_manual is not None else bolsa_sugerido
 
     # contrato XM → solicitud asic VIGENTE al fin del período (resolver_vigencias
     # corre sobre el universo publicado, igual que la vista de asic).
@@ -322,11 +335,14 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             g["_fmax"] = l["fecha_max"] if g["_fmax"] is None else max(g["_fmax"], l["fecha_max"])
         if l["contrato"] and l["contrato"] not in g["_sic"]:
             g["_sic"].append(l["contrato"])
-        g["kwh"] += l["kwh"]; g["contratos"] += 1
+        # Valorización a precio de bolsa (si hay precio).
+        fact_bolsa = round(l["kwh"] * bolsa_precio, 2) if bolsa_precio else 0.0
+        g["tarifa_indexada"] = bolsa_precio        # la "tarifa" de bolsa
+        g["kwh"] += l["kwh"]; g["facturacion"] += fact_bolsa; g["contratos"] += 1
         g["proyectos"].append({
             "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
-            "contrato": l["contrato"], "ppa": None, "tarifa_indexada": None,
-            "kwh": l["kwh"], "facturacion": 0.0, "porcentaje": None, "asignada": False,
+            "contrato": l["contrato"], "ppa": None, "tarifa_indexada": bolsa_precio,
+            "kwh": l["kwh"], "facturacion": fact_bolsa, "porcentaje": None, "asignada": False,
         })
 
     # Orden manual (fijo) y marca de emitida (del período).
@@ -383,15 +399,23 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
                        -x["facturacion"]),
     )
 
+    fact_ppa = _suma(facturables)
+    ingreso_bolsa = round(sum(g["facturacion"] for g in por_factura.values() if g.get("sin_ppa")), 2)
     return {
         "periodo": per,
         "ipp_mes": ipp,
+        "bolsa_precio": bolsa_precio,
+        "bolsa_manual": bolsa_manual,
+        "bolsa_sugerido": bolsa_sugerido,
         "resumen": {
             "contratos": len(lineas),
             "facturables": len(facturables),
             "sin_ppa": sum(1 for l in lineas if l["estado"] == "sin_ppa"),
             "kwh_total": round(sum(l["kwh"] for l in facturables), 2),
-            "facturacion_total": _suma(facturables),
+            "kwh_bolsa": round(sum(l["kwh"] for l in lineas if l["estado"] == "sin_ppa"), 2),
+            "facturacion_total": fact_ppa,
+            "ingreso_bolsa": ingreso_bolsa,
+            "ingreso_total": round(fact_ppa + ingreso_bolsa, 2),
             "emitidas": sum(1 for g in por_factura.values() if g["emitida"]),
             "facturas": len(por_factura),
         },
@@ -454,6 +478,45 @@ def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db)
     db.commit()
     return [_agrup_out(a)
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
+
+
+# ── Precio de bolsa por mes (valoriza la energía sin PPA / UNGC) ───────────────
+class BolsaIn(BaseModel):
+    periodo: str
+    valor: float | None = None   # None/0 = quitar el manual (vuelve al sugerido)
+
+
+@router.get("/bolsa")
+def obtener_bolsa(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    per = _norm_periodo(periodo)
+    año, mes = int(per[:4]), int(per[5:7])
+    row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    try:
+        from app.api.v1.cumplimiento import _get_bolsa_avg
+        sugerido = _get_bolsa_avg(db, año, mes).get("precio_promedio")
+    except Exception:
+        sugerido = None
+    manual = float(row.valor) if row else None
+    return {"periodo": per, "manual": manual, "sugerido": sugerido,
+            "vigente": manual if manual is not None else sugerido}
+
+
+@router.put("/bolsa")
+def guardar_bolsa(data: BolsaIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    per = _norm_periodo(data.periodo)
+    año, mes = int(per[:4]), int(per[5:7])
+    row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    if data.valor is None or data.valor <= 0:
+        if row:
+            db.delete(row)
+    elif row is None:
+        db.add(PrecioBolsaMensual(año=año, mes=mes, valor=data.valor))
+    else:
+        row.valor = data.valor
+    db.commit()
+    return obtener_bolsa(periodo=per, db=db)
 
 
 # ── Orden manual de las facturas (fijo, aplica cada mes) ───────────────────────

@@ -226,12 +226,20 @@ def ediciones_frontera(
 ):
     """Historial de correcciones manuales (audit_log) para esta fila
     puntual -- quién la editó, cuándo, y el diff de qué campos cambiaron.
-    Más reciente primero."""
+    Más reciente primero.
+
+    usuario_id IS NOT NULL filtra las corridas automáticas del clasificador
+    (ejecutar_dia_background corre en un hilo de fondo sin usuario
+    autenticado, así que su UPDATE también queda en audit_log pero con
+    usuario_id/usuario_nombre en NULL) -- sin este filtro, cada re-corrida
+    del clasificador aparecía en este historial como si fuera una edición
+    manual de alguien."""
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     filas = db.execute(
         text(
             "SELECT usuario_nombre, created_at, cambios FROM audit_log "
             "WHERE tabla = :tabla AND registro_id = :registro_id AND accion = 'UPDATE' "
+            "AND usuario_id IS NOT NULL "
             "ORDER BY created_at DESC"
         ),
         {"tabla": Modelo.__tablename__, "registro_id": rep.id},

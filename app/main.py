@@ -1197,6 +1197,10 @@ _PENDING_DDLS = [
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS seguimientos INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_ultima_respuesta DATE",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS documento_url VARCHAR(1000)",
+    # Campos informativos del plan de Internet en ContratoServicio (2026-08-03)
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS plan_datos_gb VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS velocidad_mbps INTEGER",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tipo_conexion VARCHAR(50)",
 ]
 
 

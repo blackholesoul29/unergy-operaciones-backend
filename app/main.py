@@ -1104,15 +1104,68 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
     # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
-    # migration — CRM: pipeline de 6 estados a nivel oportunidad (2026-07-15)
+    # migration — CRM: pipeline de 6 estados (2026-07-15)
     # RENAME VALUE migra los datos in-place (sin UPDATE) y es idempotente por
     # tolerancia (si ya se renombró, lanza y _run_column_migrations lo salta).
     # ADD VALUE va al bloque autocommit (debe correr fuera de transacción).
-    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'oferta' TO 'envio_oferta'",
+    #
+    # OJO: aquí vivía "RENAME VALUE 'oferta' TO 'envio_oferta'". Se ELIMINÓ a
+    # propósito el 2026-08-02. Como esta lista corre en cada arranque, dejarlo
+    # junto al rename inverso de abajo haría que cada deploy revirtiera la
+    # migración. Para las bases viejas que todavía dicen 'oferta', ese valor ya
+    # es el nombre final y no hay nada que renombrar.
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion' TO 'negociacion_contrato'",
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'servicio_operativo' TO 'operando'",
     "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'firmado'",
     "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'declinado'",
+    # Etapa terminal: el contrato corrió y llegó a su fecha_fin (2026-08-02).
+    # La pone el job diario, no una persona.
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'terminado'",
+    # migration — Comercial: el pipeline pasa a ser DE LA OFERTA (2026-08-02)
+    # Decisión de Juan: "el cliente no debe tener estado, son las ofertas".
+    # Vocabulario nuevo: oportunidad → oferta → contrato → firmado → operando →
+    # declinado. Los tres renames convergen desde cualquier base anterior; si el
+    # valor ya no existe, el statement lanza y se salta.
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'envio_oferta' TO 'oferta'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion_contrato' TO 'contrato'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'prospeccion' TO 'oportunidad'",
+    # El estado y su fecha de entrada, ahora por oferta. Se reusa el mismo tipo
+    # PostgreSQL para que las dos columnas no puedan divergir de vocabulario.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS estado estado_oportunidad_enum",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS estado_desde TIMESTAMPTZ",
+    # Backfill una sola vez (solo filas sin estado): la etapa de cada oferta sale
+    # de combinar su propio `resultado` con la etapa que tenía su cliente.
+    # Una oferta pendiente cuyo cliente ya cerró por OTRA oferta vuelve a 'oferta':
+    # sigue viva, no se cerró con él.
+    """UPDATE oportunidad_ofertas o SET
+           estado = (CASE
+               WHEN o.resultado::text = 'declinado' THEN 'declinado'
+               WHEN o.resultado::text = 'aceptado' AND p.estado::text = 'operando' THEN 'operando'
+               WHEN o.resultado::text = 'aceptado' THEN 'firmado'
+               WHEN p.estado::text IN ('firmado', 'operando', 'declinado') THEN 'oferta'
+               ELSE p.estado::text
+           END)::estado_oportunidad_enum,
+           estado_desde = COALESCE(o.estado_desde, p.estado_desde, o.created_at, NOW())
+       FROM oportunidades p
+       WHERE p.id = o.oportunidad_id AND o.estado IS NULL""",
+    # Red de seguridad por si alguna oferta quedó huérfana del UPDATE anterior.
+    "UPDATE oportunidad_ofertas SET estado = 'oportunidad' WHERE estado IS NULL",
+    "UPDATE oportunidad_ofertas SET estado_desde = COALESCE(created_at, NOW()) WHERE estado_desde IS NULL",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado SET DEFAULT 'oportunidad'",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado SET NOT NULL",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado_desde SET DEFAULT NOW()",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado_desde SET NOT NULL",
+    # Qué oferta cambió de etapa; NULL en las filas anteriores a esta migración.
+    "ALTER TABLE oportunidad_estado_historial ADD COLUMN IF NOT EXISTS oferta_id BIGINT REFERENCES oportunidad_ofertas(id) ON DELETE CASCADE",
+    "CREATE INDEX IF NOT EXISTS ix_oport_hist_oferta_id ON oportunidad_estado_historial (oferta_id)",
+    # En qué contrato desembocó la oferta. Las condiciones comerciales (periodo,
+    # tarifa, indexación, energía, carpeta) NO se copian a la oferta: ya viven en
+    # ppa_contratos/ppa_tarifas y contratos_servicio, que es lo que leen
+    # Cumplimiento y Liquidaciones. Copiarlas las desincronizaría.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS ppa_contrato_id BIGINT REFERENCES ppa_contratos(id) ON DELETE SET NULL",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS contrato_servicio_id BIGINT REFERENCES contratos_servicio(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_ppa_contrato ON oportunidad_ofertas (ppa_contrato_id)",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_contrato_servicio ON oportunidad_ofertas (contrato_servicio_id)",
     # Estandariza el prefijo del código de seguimiento OF→OP (oferta y oportunidad).
     # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
     "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
@@ -1139,6 +1192,17 @@ _PENDING_DDLS = [
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS seguimientos INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_ultima_respuesta DATE",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS documento_url VARCHAR(1000)",
+    # migration — Comercial: ficha operativa declarada en la oferta (2026-08-03)
+    # Los 6 parámetros que el equipo consume por API solo existían colgados de
+    # `proyectos`, y las ofertas del pipeline no tienen proyecto. Estas columnas
+    # son el fallback declarado; la API resuelve Proyecto → oferta → null.
+    # energia_promedio_kwh_mes NO duplica a ppa_contratos.cantidad_minima_kwh_mes:
+    # aquella es el compromiso contractual, esta la estimación de generación.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS municipio VARCHAR(100)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS departamento VARCHAR(100)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS energia_promedio_kwh_mes NUMERIC(14,3)",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_operador_red ON oportunidad_ofertas (operador_red_id)",
 ]
 
 
@@ -2233,6 +2297,26 @@ def _scheduled_comercializacion_backfill():
         print(f"[comercializacion_backfill] Failed to get DB session: {e}")
 
 
+def _scheduled_cerrar_contratos_vencidos():
+    """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
+
+    Diario e idempotente. Sin esto la etapa mentiría: nadie va a entrar al CRM
+    el día que vence un contrato a moverlo a mano."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.comercial import cerrar_contratos_vencidos
+            cerradas = cerrar_contratos_vencidos(db)
+            print(f"[comercial_cierres] OK — {len(cerradas)} oferta(s) a terminado"
+                  + (f": {[c['codigo'] for c in cerradas]}" if cerradas else ""))
+        except Exception as e:
+            print(f"[comercial_cierres] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[comercial_cierres] Failed to get DB session: {e}")
+
+
 def _scheduled_tsf_sync():
     """Sincronización periódica del pipeline TSF → tabla proyectos (cada 6 h)."""
     try:
@@ -2996,6 +3080,15 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="comercializacion_backfill",
                 name="Backfill fecha inicio comercializacion",
+            )
+
+            # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del
+            # cambio de dia para que el tablero amanezca correcto.
+            _mgs_scheduler.add_job(
+                _scheduled_cerrar_contratos_vencidos,
+                CronTrigger(hour=0, minute=20, timezone=settings.TIMEZONE),
+                id="comercial_cierres",
+                name="Cerrar ofertas con contrato vencido",
             )
 
             _mgs_scheduler.add_job(

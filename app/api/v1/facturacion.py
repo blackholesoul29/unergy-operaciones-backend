@@ -160,17 +160,14 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     ipp_row = db.query(IppMensual).filter(IppMensual.año == año, IppMensual.mes == mes).first()
     ipp = float(ipp_row.valor) if ipp_row else None
 
-    # Precio de bolsa para valorizar la energía SIN PPA (UNGC): manual si se fijó,
-    # si no el promedio del mes de precios_bolsa_diario (sugerido).
+    # Precio de bolsa para valorizar la energía SIN PPA (UNGC). Lo pone la usuaria
+    # cada mes (es el promedio horario→diario del mes, un cálculo propio que NO
+    # coincide con el promedio simple de precios_bolsa_diario). Sin fallback: si no
+    # está cargado, la energía sin PPA queda sin valorizar hasta que ella lo ponga.
     bolsa_row = db.query(PrecioBolsaMensual).filter(
         PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
     bolsa_manual = float(bolsa_row.valor) if bolsa_row else None
-    try:
-        from app.api.v1.cumplimiento import _get_bolsa_avg
-        bolsa_sugerido = _get_bolsa_avg(db, año, mes).get("precio_promedio")
-    except Exception:
-        bolsa_sugerido = None
-    bolsa_precio = bolsa_manual if bolsa_manual is not None else bolsa_sugerido
+    bolsa_precio = bolsa_manual
 
     # contrato XM → solicitud asic VIGENTE al fin del período (resolver_vigencias
     # corre sobre el universo publicado, igual que la vista de asic).
@@ -406,7 +403,6 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         "ipp_mes": ipp,
         "bolsa_precio": bolsa_precio,
         "bolsa_manual": bolsa_manual,
-        "bolsa_sugerido": bolsa_sugerido,
         "resumen": {
             "contratos": len(lineas),
             "facturables": len(facturables),
@@ -492,14 +488,9 @@ def obtener_bolsa(periodo: str = Query(...), db: Session = Depends(get_db), _=De
     año, mes = int(per[:4]), int(per[5:7])
     row = db.query(PrecioBolsaMensual).filter(
         PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
-    try:
-        from app.api.v1.cumplimiento import _get_bolsa_avg
-        sugerido = _get_bolsa_avg(db, año, mes).get("precio_promedio")
-    except Exception:
-        sugerido = None
     manual = float(row.valor) if row else None
-    return {"periodo": per, "manual": manual, "sugerido": sugerido,
-            "vigente": manual if manual is not None else sugerido}
+    # La usuaria lo pone cada mes (promedio horario→diario). Sin sugerido automático.
+    return {"periodo": per, "manual": manual, "vigente": manual}
 
 
 @router.put("/bolsa")

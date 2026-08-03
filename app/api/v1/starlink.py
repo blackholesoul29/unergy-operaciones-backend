@@ -105,17 +105,17 @@ def obtener_factura(
     )
     pids = {l.proyecto_id for l in lineas_rows if l.proyecto_id is not None}
     nombres = {}
+    tipos = {}
     if pids:
-        nombres = {
-            pid: nombre
-            for pid, nombre in db.query(Proyecto.id, Proyecto.nombre_comercial)
-                                 .filter(Proyecto.id.in_(pids)).all()
-        }
+        proys = db.query(Proyecto.id, Proyecto.nombre_comercial, Proyecto.tipo_proyecto).filter(Proyecto.id.in_(pids)).all()
+        nombres = {pid: nombre for pid, nombre, _tipo in proys}
+        tipos = {pid: _tipo for pid, _nombre, _tipo in proys}
     lineas = [
         {
             "descripcion":      l.descripcion,
             "proyecto_id":      l.proyecto_id,
             "nombre_comercial": nombres.get(l.proyecto_id),
+            "tipo_proyecto":    tipos.get(l.proyecto_id),
             "sin_iva":          float(l.sin_iva),
             "iva":              float(l.iva),
             "monto_total":      float(l.monto_total),

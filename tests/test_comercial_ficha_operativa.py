@@ -97,3 +97,142 @@ def test_los_cuatro_campos_son_opcionales(db):
 
     assert of.municipio is None and of.departamento is None
     assert of.operador_red_id is None and of.energia_promedio_kwh_mes is None
+
+
+# ── Task 2: la cascada Proyecto → oferta → null ──────────────────────────────
+
+from app.services.comercial import ficha_operativa, meses_de_contrato  # noqa: E402
+
+
+def _oferta(**kw):
+    """Oferta mínima para la lógica pura: sin BD, solo los atributos que lee."""
+    base = dict(planta_nombre=None, municipio=None, departamento=None,
+                operador_red_id=None, energia_promedio_kwh_mes=None,
+                fecha_tentativa_inicio=None)
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def _proyecto(**kw):
+    base = dict(nombre_comercial=None, municipio=None, departamento=None,
+                operador_red_id=None, operador_red_legal=None,
+                mwh_mes_estimado=None, p50_mensual_kwh=None)
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_sin_proyecto_la_ficha_sale_de_lo_declarado_en_la_oferta():
+    """El caso GD Rio Pamplonita: la planta no existe como Proyecto y aun así el
+    equipo tiene que poder consultar su lugar por API."""
+    f = ficha_operativa(
+        _oferta(planta_nombre="GD Rio Pamplonita", municipio="Cúcuta",
+                departamento="Norte de Santander", operador_red_id=7),
+        operador_oferta="CENS S.A. E.S.P.")
+
+    assert f["proyecto_nombre"] == "GD Rio Pamplonita"
+    assert f["municipio"] == "Cúcuta" and f["departamento"] == "Norte de Santander"
+    assert f["operador_red"] == "CENS S.A. E.S.P." and f["operador_red_id"] == 7
+    assert f["fuentes"]["municipio"] == "oferta"
+    assert f["fuentes"]["operador_red"] == "oferta"
+
+
+def test_el_proyecto_manda_sobre_lo_declarado():
+    """Cuando la planta ya existe, el Proyecto es la verdad: lo declarado en la
+    oferta fue una foto del momento de la venta y puede haber envejecido."""
+    f = ficha_operativa(
+        _oferta(planta_nombre="Catedral (borrador)", municipio="Sincelejo"),
+        proyecto=_proyecto(nombre_comercial="GD Catedral", municipio="Corozal",
+                           operador_red_legal="AFINIA S.A.S. E.S.P.", operador_red_id=3))
+
+    assert f["proyecto_nombre"] == "GD Catedral"
+    assert f["municipio"] == "Corozal"
+    assert f["operador_red"] == "AFINIA S.A.S. E.S.P." and f["operador_red_id"] == 3
+    assert f["fuentes"]["municipio"] == "proyecto"
+
+
+def test_la_cascada_es_por_campo_no_por_entidad():
+    """Un Proyecto a medio diligenciar no debe borrar lo que la oferta sí sabe."""
+    f = ficha_operativa(
+        _oferta(municipio="Sincelejo", departamento="Sucre"),
+        proyecto=_proyecto(nombre_comercial="GD Catedral", municipio="Corozal"))
+
+    assert f["municipio"] == "Corozal" and f["fuentes"]["municipio"] == "proyecto"
+    assert f["departamento"] == "Sucre" and f["fuentes"]["departamento"] == "oferta"
+
+
+def test_energia_promedio_del_proyecto_se_convierte_de_mwh_a_kwh():
+    """`proyectos.mwh_mes_estimado` está en MWh; el CRM habla en kWh."""
+    f = ficha_operativa(_oferta(), proyecto=_proyecto(mwh_mes_estimado=185.5))
+    assert f["energia_promedio_kwh_mes"] == 185500.0
+    assert f["fuentes"]["energia_promedio_kwh_mes"] == "proyecto"
+
+
+def test_sin_estimado_la_energia_promedio_cae_al_p50():
+    """p50_mensual_kwh son 12 valores mensuales en kWh: el promedio es su media."""
+    f = ficha_operativa(_oferta(), proyecto=_proyecto(p50_mensual_kwh=[100.0] * 11 + [220.0]))
+    assert f["energia_promedio_kwh_mes"] == 110.0
+    assert f["fuentes"]["energia_promedio_kwh_mes"] == "proyecto"
+
+
+def test_sin_proyecto_la_energia_promedio_es_la_declarada():
+    f = ficha_operativa(_oferta(energia_promedio_kwh_mes=170000))
+    assert f["energia_promedio_kwh_mes"] == 170000.0
+    assert f["fuentes"]["energia_promedio_kwh_mes"] == "oferta"
+
+
+def test_la_fecha_de_inicio_de_operacion_es_la_del_contrato():
+    """Decisión de Juan: es el inicio de suministro del PPA, no la entrada en
+    operación de la planta ni el inicio de comercialización."""
+    ppa = types.SimpleNamespace(fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31))
+    f = ficha_operativa(_oferta(fecha_tentativa_inicio=dt.date(2026, 1, 1)), ppa=ppa)
+
+    assert f["fecha_inicio_operacion"] == dt.date(2026, 2, 12)
+    assert f["fuentes"]["fecha_inicio_operacion"] == "contrato"
+
+
+def test_sin_contrato_la_fecha_es_la_tentativa_y_se_marca_estimada():
+    """Una oferta no firmada no tiene PPA. La tentativa sirve, pero el consumidor
+    de la API tiene que poder saber que es una estimación."""
+    f = ficha_operativa(_oferta(fecha_tentativa_inicio=dt.date(2026, 10, 1)))
+    assert f["fecha_inicio_operacion"] == dt.date(2026, 10, 1)
+    assert f["fuentes"]["fecha_inicio_operacion"] == "estimada"
+    assert f["contrato_compra_meses"] is None and f["contrato_compra_anios"] is None
+
+
+def test_duracion_del_contrato_en_meses_calendario():
+    """Se cuenta por mes calendario y no por días porque el PPA se factura por
+    mes: es el mismo conteo que produce /firmar al expandir ppa_tarifas."""
+    assert meses_de_contrato(dt.date(2026, 1, 1), dt.date(2026, 3, 31)) == 3      # Agustín 1
+    assert meses_de_contrato(dt.date(2025, 11, 20), dt.date(2026, 12, 31)) == 14  # Bayunca
+    assert meses_de_contrato(dt.date(2026, 2, 12), dt.date(2032, 12, 31)) == 83   # Catedral
+    assert meses_de_contrato(dt.date(2026, 10, 1), dt.date(2036, 12, 31)) == 123
+    assert meses_de_contrato(None, dt.date(2026, 3, 31)) is None
+    assert meses_de_contrato(dt.date(2026, 3, 31), dt.date(2026, 1, 1)) is None
+
+
+def test_la_duracion_tambien_viaja_en_anios():
+    ppa = types.SimpleNamespace(fecha_inicio=dt.date(2026, 10, 1), fecha_fin=dt.date(2036, 12, 31))
+    f = ficha_operativa(_oferta(), ppa=ppa)
+    assert f["contrato_compra_meses"] == 123
+    assert f["contrato_compra_anios"] == 10.3   # 10.25 redondeado hacia arriba
+    assert f["contrato_fecha_inicio"] == dt.date(2026, 10, 1)
+    assert f["contrato_fecha_fin"] == dt.date(2036, 12, 31)
+
+
+def test_la_energia_real_viaja_con_su_periodo():
+    """Sin el periodo, nadie sabe contra qué mes está comparando."""
+    f = ficha_operativa(_oferta(), generacion=("2026-07", 182350.5))
+    assert f["energia_real_kwh_mes"] == 182350.5
+    assert f["energia_real_periodo"] == "2026-07"
+    assert f["fuentes"]["energia_real_kwh_mes"] == "generacion"
+
+
+def test_una_oferta_vacia_devuelve_nulls_y_fuentes_en_null():
+    """"Todavía no lo sabemos" y "no aplica" tienen que verse distinto: el valor
+    es null en ambos casos, pero `fuentes` dice que nadie lo aportó."""
+    f = ficha_operativa(_oferta())
+    for campo in ("proyecto_nombre", "municipio", "departamento", "operador_red",
+                  "energia_promedio_kwh_mes", "energia_real_kwh_mes",
+                  "fecha_inicio_operacion", "contrato_compra_meses"):
+        assert f[campo] is None, campo
+        assert f["fuentes"][campo] is None, campo

@@ -87,6 +87,30 @@ def test_mensaje_replica_el_formato_de_terpel_4():
     ) == MENSAJE_TERPEL_4
 
 
+def test_dias_y_rango_real_del_despacho():
+    """Si vienen días y rango del despacho, el mensaje usa el rango real y agrega
+    'Días facturados: N' (para meses parciales)."""
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="2026-06", kwh=1000,
+        contratos_sic=["1"], tarifa_base=100, ipp_base=100,
+        periodo_ipp_base="2024-08", ipp_mes=100,
+        dias=15, fecha_min="2026-06-01", fecha_max="2026-06-15",
+    )
+    assert "Periodo: 01/6/2026 a 15/6/2026" in m
+    assert "Días facturados: 15" in m
+
+
+def test_sin_dias_no_agrega_linea_ni_cambia_periodo():
+    """Backward-compat: sin días/rango, mes completo y sin línea de días."""
+    m = construir_mensaje(
+        numeros_contrato=["X"], periodo="2026-06", kwh=1,
+        contratos_sic=["1"], tarifa_base=100, ipp_base=100,
+        periodo_ipp_base="2024-08", ipp_mes=100,
+    )
+    assert "Periodo: 01/6/2026 a 30/6/2026" in m
+    assert "Días facturados" not in m
+
+
 def test_indexacion_y_tarifa_actualizada_se_calculan():
     """No se pasan: se derivan de ipp_mes/ipp_base y tarifa_base, igual que el
     resto del pipeline (indexación a 3 decimales, tarifa a 2)."""

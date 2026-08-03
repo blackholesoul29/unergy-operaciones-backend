@@ -76,6 +76,7 @@ async def cargar_despacho(
     i_ven = _find({"VENDEDOR"})
     i_com = _find({"COMPRADOR"})
     i_tipo = _find({"TIPO"})
+    i_fec = _find({"FECHADOCUMENTO", "FECHA DOCUMENTO", "FECHA"})
     if i_con is None:
         raise HTTPException(400, "No encontré la columna CONTRATO en el archivo")
     horas = [i for i, h in enumerate(header)
@@ -91,8 +92,22 @@ async def cargar_despacho(
             continue
         con = str(int(r[i_con])) if isinstance(r[i_con], float) else str(r[i_con]).strip()
         kwh = sum(r[i] for i in horas if i < len(r) and isinstance(r[i], (int, float)))
-        d = agg.setdefault(con, {"kwh": 0.0, "vendedor": None, "comprador": None, "tipo": None})
+        d = agg.setdefault(con, {"kwh": 0.0, "vendedor": None, "comprador": None, "tipo": None, "fechas": set()})
         d["kwh"] += kwh
+        if i_fec is not None and i_fec < len(r) and r[i_fec] is not None:
+            fv = r[i_fec]
+            fecha = None
+            if hasattr(fv, "date"):          # datetime
+                fecha = fv.date()
+            elif hasattr(fv, "year"):        # date
+                fecha = fv
+            else:
+                try:
+                    fecha = date.fromisoformat(str(fv)[:10])
+                except ValueError:
+                    fecha = None
+            if fecha is not None:
+                d["fechas"].add(fecha)
         if i_ven is not None and i_ven < len(r) and r[i_ven]:
             d["vendedor"] = str(r[i_ven]).strip()
         if i_com is not None and i_com < len(r) and r[i_com]:
@@ -102,9 +117,13 @@ async def cargar_despacho(
 
     db.execute(delete(DespachoContratoMensual).where(DespachoContratoMensual.periodo == per))
     for con, d in agg.items():
+        fechas = d.get("fechas") or set()
         db.add(DespachoContratoMensual(
             periodo=per, codigo_sic_contrato=con, kwh=round(d["kwh"], 4),
             vendedor=d["vendedor"], comprador=d["comprador"], tipo=d["tipo"],
+            dias=(len(fechas) or None),
+            fecha_min=(min(fechas) if fechas else None),
+            fecha_max=(max(fechas) if fechas else None),
             archivo=archivo.filename,
         ))
     db.commit()
@@ -213,6 +232,10 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             # Datos del contrato para el mensaje que se pega en la factura.
             "numero_contrato": ppa.numero_codigo_contrato if ppa else None,
             "periodo_ipp_base": ppa.periodo_indexacion_base if ppa else None,
+            # Días efectivos del despacho (para el mensaje; mes parcial).
+            "dias": d.dias,
+            "fecha_min": d.fecha_min,
+            "fecha_max": d.fecha_max,
             "kwh": kwh,
             "tarifa_base": base,
             "ipp_base": ipp_base,
@@ -252,8 +275,14 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
                 "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
                 "personalizada": False, "_tarifas": set(), "proyectos": [],
                 "periodo_ipp_base": l["periodo_ipp_base"],
-                "_numeros": [], "_sic": [],
+                "_numeros": [], "_sic": [], "_dias": set(), "_fmin": None, "_fmax": None,
             })
+            if l.get("dias"):
+                g["_dias"].add(l["dias"])
+            if l.get("fecha_min"):
+                g["_fmin"] = l["fecha_min"] if g["_fmin"] is None else min(g["_fmin"], l["fecha_min"])
+            if l.get("fecha_max"):
+                g["_fmax"] = l["fecha_max"] if g["_fmax"] is None else max(g["_fmax"], l["fecha_max"])
             if l["numero_contrato"] and l["numero_contrato"] not in g["_numeros"]:
                 g["_numeros"].append(l["numero_contrato"])
             if l["contrato"] and l["contrato"] not in g["_sic"]:
@@ -293,6 +322,13 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         g["orden"] = orden_manual.get(g["factura"])
         g["numeros_contrato"] = g.pop("_numeros")
         g["contratos_sic"] = g.pop("_sic")
+        # Días efectivos del despacho (máx entre los contratos; comparten el archivo).
+        _dias = g.pop("_dias", set())
+        g["dias"] = max(_dias) if _dias else None
+        g["fecha_min"] = g.pop("_fmin", None)
+        g["fecha_max"] = g.pop("_fmax", None)
+        g["fecha_min"] = g["fecha_min"].isoformat() if g["fecha_min"] else None
+        g["fecha_max"] = g["fecha_max"].isoformat() if g["fecha_max"] else None
         # El mensaje se arma acá (no en el frontend) para que el formato viva en un
         # solo lugar, fijado por test. La tarifa base del grupo puede ser mixta; en
         # ese caso el mensaje igual sale y la UI avisa que revise.
@@ -305,6 +341,9 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             ipp_base=g["ipp_base"],
             periodo_ipp_base=g["periodo_ipp_base"],
             ipp_mes=ipp,
+            dias=g["dias"],
+            fecha_min=g["fecha_min"],
+            fecha_max=g["fecha_max"],
         )
 
     # Las que tienen orden manual van primero (por ese orden); el resto por valor.

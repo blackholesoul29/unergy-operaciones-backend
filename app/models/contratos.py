@@ -250,6 +250,11 @@ class DespachoContratoMensual(Base):
     comprador: Mapped[str | None] = mapped_column(String(40), nullable=True)
     tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    # Días efectivamente incluidos en el despacho (para facturas de mes parcial): se
+    # derivan de las fechas del archivo (FechaDocumento), no se hardcodean.
+    dias: Mapped[int | None] = mapped_column(sa_Integer, nullable=True)
+    fecha_min: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_max: Mapped[date | None] = mapped_column(Date, nullable=True)
     archivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

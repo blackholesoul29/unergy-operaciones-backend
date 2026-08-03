@@ -78,6 +78,17 @@ def _plata(v: float | None) -> str:
     return f"$ {v:.0f}" if v == int(v) else f"$ {v:g}"
 
 
+def _dia_mes(iso: str | None) -> tuple[int, int, int] | None:
+    """(día, mes, año) de un ISO 'YYYY-MM-DD'. None si no se puede leer."""
+    s = str(iso or "").strip()
+    if len(s) < 10:
+        return None
+    try:
+        return (int(s[8:10]), int(s[5:7]), int(s[0:4]))
+    except ValueError:
+        return None
+
+
 def construir_mensaje(
     numeros_contrato: list[str],
     periodo: str,
@@ -87,13 +98,26 @@ def construir_mensaje(
     ipp_base: float | None,
     periodo_ipp_base: str | None,
     ipp_mes: float | None,
+    dias: int | None = None,
+    fecha_min: str | None = None,
+    fecha_max: str | None = None,
 ) -> str:
-    """Mensaje para copiar en la factura. Ver el test para el formato exacto."""
+    """Mensaje para copiar en la factura. Ver el test para el formato exacto.
+
+    `dias`/`fecha_min`/`fecha_max` (del despacho) son opcionales: si vienen, el
+    período usa el rango real y se agrega "Días facturados: N" (mes parcial). Si no
+    vienen, se asume el mes completo (comportamiento original)."""
     p = _mes_anio(periodo)
     if p is None:
         raise ValueError(f"periodo ilegible: {periodo!r}")
     año, mes = p
     ultimo = monthrange(año, mes)[1]
+    # Rango del período: real (del despacho) si viene, si no el mes completo.
+    fmin, fmax = _dia_mes(fecha_min), _dia_mes(fecha_max)
+    if fmin and fmax:
+        periodo_txt = f"Periodo: {fmin[0]:02d}/{fmin[1]}/{fmin[2]} a {fmax[0]:02d}/{fmax[1]}/{fmax[2]}"
+    else:
+        periodo_txt = f"Periodo: 01/{mes}/{año} a {ultimo}/{mes}/{año}"
 
     if ipp_base and ipp_mes:
         indexacion = f"{ipp_mes / ipp_base:.3f}"
@@ -107,9 +131,13 @@ def construir_mensaje(
     base = _mes_anio(periodo_ipp_base)
     etiqueta_base = f"{_MESES[base[1] - 1]} {base[0]}" if base else "—"
 
+    lineas_periodo = [periodo_txt]
+    if dias is not None:
+        lineas_periodo.append(f"Días facturados: {dias}")
+
     return "\n".join([
         ", ".join(numeros_contrato) or "—",
-        f"Periodo: 01/{mes}/{año} a {ultimo}/{mes}/{año}",
+        *lineas_periodo,
         f"Energía suministrada: {kwh:,.2f} kWh",
         "",
         "",

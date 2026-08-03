@@ -107,6 +107,9 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_max DATE",
     # agrupación manual de CONTRATOS en facturas con nombre (dividir un PPA)
     """CREATE TABLE IF NOT EXISTS factura_agrupacion (
         id BIGSERIAL PRIMARY KEY,

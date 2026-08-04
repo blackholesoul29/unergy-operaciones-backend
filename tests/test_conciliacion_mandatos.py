@@ -159,6 +159,30 @@ def test_bug1_poliza_y_servicios_publicos():
     assert res["status"] == "ok"
 
 
+# ── Mantenimiento pagado al contratista vía cuenta de Administración ────────
+# (caso real Nestlé/Solenium: el mandato dice "no aparece" pero el monto SÍ
+# está contabilizado, solo que en 28151020/21 con el contratista de Asociado
+# en vez de 28151002/03 con la fiduciaria).
+
+def test_mantenimiento_registrado_en_cuenta_admin_con_otro_asociado():
+    tag = "[10002] PROYECTO-NESTLE"
+    fiduciaria = "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA"
+    lineas = [
+        {"asociado": "SOLENIUM SAS", "acc": "28151020", "accDesc": "COSTOS PARA TERCEROS - ADMINISTRACION DE PROYECTOS",
+         "debe": 6831500, "haber": 0, "etiqueta": "Mantenimiento Preventivo - Nestle", "proj": tag},
+        {"asociado": "SOLENIUM SAS", "acc": "28151021", "accDesc": "IVA ADMINISTRACION DE PROYECTOS - COSTOS PARA TERCEROS",
+         "debe": 1297985, "haber": 0, "etiqueta": "Mantenimiento Preventivo - Nestle", "proj": tag},
+    ]
+    m = {"mandante": fiduciaria, "vals": {"mant": 6831500, "iva_mant": 1297985}, "total": 8129485}
+    res = reconciliar(m, lineas, tag)
+    codes = {f["code"] for f in res["flags"]}
+    assert "FALTANTE" not in codes  # no debe reportarse como ausente...
+    assert "OTRA_CUENTA" in codes   # ...sino como aviso de cuenta/asociado distinto
+    otra = [f for f in res["flags"] if f["code"] == "OTRA_CUENTA"]
+    assert any("28151020" in f["txt"] and "SOLENIUM SAS" in f["txt"] for f in otra)
+    assert res["status"] == "warn"  # no "bad": el dinero sí está, solo mal clasificado
+
+
 # ── BUG 2: abreviatura "PA" (Patrimonio Autónomo) — caso Nestlé ───────────────
 
 def test_bug2_expandir_pa():

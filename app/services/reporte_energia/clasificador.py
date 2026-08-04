@@ -179,6 +179,22 @@ def _decidir_caso(
             resultado["revisar_manualmente"] = True
         return resultado
 
+    # --- Caso 5 (sin CGM): sin inversores Y sin reporte CGM ese día, pero el
+    # medidor sí tiene dato real -- usarlo directo es más preciso que
+    # reconstruir de datos crudos (que dependen de la frecuencia de muestreo
+    # de la API, ver San Pelayo 2026-08-03: crudos a media resolución dio
+    # ~14% menos que el medidor). Solo entra si e_cgm<=0 -- el caso e_cgm>0
+    # ya lo maneja el bloque de arriba. Si el medidor TAMBIÉN está caído, no
+    # se hace nada acá y sigue cayendo a la cadena de crudos de siempre.
+    if e_cgm <= 0:
+        curva = _mejor_medidor(curva_ppal, curva_resp)
+        if _tiene_dato(curva):
+            return {
+                "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                "medidor_usado": "principal_sin_cgm" if curva is curva_ppal else "respaldo_sin_cgm",
+                "revisar_manualmente": True,
+            }
+
     # --- Casos 6/7/8: ni CGM ni medidor ni inversores tienen nada ---
     if e_inv_incompleto:
         return {

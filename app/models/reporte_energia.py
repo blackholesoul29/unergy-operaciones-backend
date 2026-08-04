@@ -90,6 +90,33 @@ class ReporteEnergiaGeneracion(Base):
     validado_por: Mapped["Usuario | None"] = relationship("Usuario")
 
 
+class ReporteEnergiaExclusion(Base):
+    """Ventana de fechas en la que una frontera (Generación o Consumo) no se
+    clasifica en absoluto -- para casos como un CT en falla ya reportado a
+    XM, donde no se quiere reportar ningún número automático mientras se
+    resuelve. Alcance mínimo a propósito (una especie de bandera con
+    trazabilidad): quién, por qué, desde/hasta cuándo -- no depende de
+    Fallas (ese módulo requiere monitoreo/representación, que no todas las
+    fronteras tienen; CGM y representación son servicios separados).
+
+    Real: GD Agustín 2, frontera_id=98, CT en falla reportado a XM
+    (2026-08-04).
+    """
+    __tablename__ = "reporte_energia_exclusiones"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="CASCADE"), nullable=False, index=True)
+    motivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    fecha_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_fin_estimada: Mapped[date | None] = mapped_column(Date, nullable=True)
+    creado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
+    resuelta_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    frontera: Mapped["Frontera"] = relationship("Frontera")
+    creado_por: Mapped["Usuario"] = relationship("Usuario")
+
+
 class ReporteEnergiaConsumo(Base):
     """Un día de reporte para una frontera de Consumo.
 

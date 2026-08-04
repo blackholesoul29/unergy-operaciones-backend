@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
 from app.models.proyectos import Proyecto, EstadoProyectoEnum
-from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
@@ -75,6 +75,21 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
     return [(f, sid) for f, sid in filas]
 
 
+def _exclusion_activa(db: Session, frontera_id: int, fecha: date) -> ReporteEnergiaExclusion | None:
+    """Exclusión temporal vigente para esta frontera+fecha (ej. CT en falla
+    ya reportado a XM) -- ver ReporteEnergiaExclusion. Si existe, el
+    clasificador ni siquiera se llama para esta frontera ese día."""
+    return db.execute(
+        select(ReporteEnergiaExclusion).where(
+            ReporteEnergiaExclusion.frontera_id == frontera_id,
+            ReporteEnergiaExclusion.resuelta_en.is_(None),
+            ReporteEnergiaExclusion.fecha_inicio <= fecha,
+            (ReporteEnergiaExclusion.fecha_fin_estimada.is_(None))
+            | (ReporteEnergiaExclusion.fecha_fin_estimada >= fecha),
+        )
+    ).scalar_one_or_none()
+
+
 def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: dict) -> None:
     existente = db.execute(
         select(ReporteEnergiaGeneracion).where(
@@ -110,6 +125,7 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.energia_medidor_respaldo_kwh = resultado.get("energia_medidor_respaldo_kwh")
     fila.medidor_principal_completo = resultado.get("medidor_principal_completo")
     fila.medidor_respaldo_completo = resultado.get("medidor_respaldo_completo")
+    fila.error_clasificacion = resultado.get("error_clasificacion")
     if existente is None:
         db.add(fila)
 
@@ -135,6 +151,7 @@ def _upsert_consumo(db: Session, frontera_id: int, fecha: date, resultado: dict)
     fila.horas_rellenadas_historico = resultado.get("horas_rellenadas_historico")
     fila.recuperacion_datos = resultado.get("recuperacion_datos")
     fila.revisar_manualmente = bool(resultado.get("revisar_manualmente", False))
+    fila.error_clasificacion = resultado.get("error_clasificacion")
     if existente is None:
         db.add(fila)
 
@@ -213,6 +230,31 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
         frt_code = frontera.codigo_frontera.strip().lower()
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
+
+        excl = _exclusion_activa(db, frontera.id, fecha)
+        if excl is not None:
+            # No se llama al clasificador para nada -- ni CGM, ni medidor,
+            # ni crudos. Ver ReporteEnergiaExclusion (ej. CT en falla ya
+            # reportado a XM, mientras se resuelve no se reporta ningún
+            # número automático).
+            nota = f"Excluida temporalmente -- {excl.motivo}"
+            if frontera.tipo_frontera in TIPOS_GENERACION:
+                resultado = {
+                    "caso": -2, "energia_final_kwh": None, "curva_final": None,
+                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "error_clasificacion": nota,
+                }
+                _upsert_generacion(db, frontera.id, fecha, resultado)
+                resumen_gen["-2"] = resumen_gen.get("-2", 0) + 1
+            elif frontera.tipo_frontera in TIPOS_CONSUMO:
+                resultado = {
+                    "caso": "Excluida", "energia_final_kwh": None, "curva_final": None,
+                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "error_clasificacion": nota,
+                }
+                _upsert_consumo(db, frontera.id, fecha, resultado)
+                resumen_con["Excluida"] = resumen_con.get("Excluida", 0) + 1
+            continue
 
         # Una excepcion no manejada en UNA frontera (bug del clasificador,
         # dato historico corrupto, timeout puntual de Quoia/Solenium) no debe

@@ -16,12 +16,13 @@ from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.proyectos import Proyecto
-from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.models.usuarios import Usuario
 from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
+    CrearExclusionRequest, ExclusionOut,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
@@ -283,6 +284,66 @@ def validar(
         frontera_id=frontera_id, fecha=fecha, revisar_manualmente=False,
         validado_por=usuario.nombre, validado_en=rep.validado_en,
     )
+
+
+def _exclusion_out(db: Session, excl: ReporteEnergiaExclusion) -> ExclusionOut:
+    front = db.get(Frontera, excl.frontera_id)
+    return ExclusionOut(
+        id=excl.id, frontera_id=excl.frontera_id,
+        nombre_frontera=front.nombre_frontera if front else None,
+        motivo=excl.motivo, fecha_inicio=excl.fecha_inicio,
+        fecha_fin_estimada=excl.fecha_fin_estimada,
+        creado_por=excl.creado_por.nombre if excl.creado_por else None,
+        resuelta_en=excl.resuelta_en, created_at=excl.created_at,
+    )
+
+
+@router.get("/fronteras/{frontera_id}/exclusiones", response_model=list[ExclusionOut])
+def listar_exclusiones(
+    frontera_id: int, db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Historial de exclusiones temporales de esta frontera -- activas y
+    resueltas, más recientes primero."""
+    filas = db.execute(
+        select(ReporteEnergiaExclusion)
+        .where(ReporteEnergiaExclusion.frontera_id == frontera_id)
+        .order_by(ReporteEnergiaExclusion.created_at.desc())
+    ).scalars().all()
+    return [_exclusion_out(db, f) for f in filas]
+
+
+@router.post("/fronteras/{frontera_id}/exclusiones", response_model=ExclusionOut)
+def crear_exclusion(
+    frontera_id: int, body: CrearExclusionRequest,
+    db: Session = Depends(get_db), usuario: Usuario = Depends(get_current_user),
+):
+    """Marca una frontera para NO clasificarse en cierto rango de fechas --
+    ver ReporteEnergiaExclusion. No depende de Fallas (requiere monitoreo/
+    representación, que no todas las fronteras tienen)."""
+    if body.frontera_id != frontera_id:
+        raise HTTPException(422, "frontera_id del body no coincide con la URL")
+    excl = ReporteEnergiaExclusion(
+        frontera_id=frontera_id, motivo=body.motivo,
+        fecha_inicio=body.fecha_inicio, fecha_fin_estimada=body.fecha_fin_estimada,
+        creado_por_id=usuario.id,
+    )
+    db.add(excl)
+    db.commit()
+    db.refresh(excl)
+    return _exclusion_out(db, excl)
+
+
+@router.post("/exclusiones/{exclusion_id}/resolver", response_model=ExclusionOut)
+def resolver_exclusion(
+    exclusion_id: int, db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    excl = db.get(ReporteEnergiaExclusion, exclusion_id)
+    if excl is None:
+        raise HTTPException(404, "Exclusión no encontrada")
+    excl.resuelta_en = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(excl)
+    return _exclusion_out(db, excl)
 
 
 @router.get("/excel")

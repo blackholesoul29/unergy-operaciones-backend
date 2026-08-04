@@ -124,3 +124,22 @@ class EstadoCorridaResponse(BaseModel):
 class CancelarCorridaResponse(BaseModel):
     fecha: date
     solicitado: bool
+
+
+class CrearExclusionRequest(BaseModel):
+    frontera_id: int
+    motivo: str
+    fecha_inicio: date
+    fecha_fin_estimada: date | None = None
+
+
+class ExclusionOut(BaseModel):
+    id: int
+    frontera_id: int
+    nombre_frontera: str | None = None
+    motivo: str
+    fecha_inicio: date
+    fecha_fin_estimada: date | None
+    creado_por: str | None
+    resuelta_en: datetime | None
+    created_at: datetime

@@ -188,6 +188,29 @@ def _clasificar_por_medidor_o_historico(
                     "recuperacion_datos": recuperacion_datos,
                 }
         else:
+            # Sin mediana historica para comparar -- si al menos un medidor
+            # trae las 24 horas COMPLETAS (sin huecos que pudieran armar un
+            # pico artificial, ver docstring del modulo), no tiene sentido
+            # descartarlo solo porque no hay con que cruzarlo. Se reporta
+            # igual (mayor valor si ambos estan completos, mismo criterio que
+            # ya usa clasificador.py cuando no hay CGM/inversores), marcado
+            # para revisar a mano porque nadie confirmo que el nivel sea
+            # el correcto.
+            ppal_completo = curva_ppal.notna().all()
+            resp_completo = curva_resp.notna().all()
+            if ppal_completo or resp_completo:
+                if ppal_completo and resp_completo:
+                    usar_ppal = curva_ppal.fillna(0).sum() >= curva_resp.fillna(0).sum()
+                else:
+                    usar_ppal = ppal_completo
+                curva = curva_ppal if usar_ppal else curva_resp
+                medidor_usado = "principal_sin_historico" if usar_ppal else "respaldo_sin_historico"
+                return {
+                    "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                    "medidor_usado": medidor_usado, "revisar_manualmente": True,
+                    "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                    "recuperacion_datos": recuperacion_datos,
+                }
             return {
                 "caso": "Medidor", "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
                 "medidor_usado": "revisar", "revisar_manualmente": True,
@@ -197,6 +220,14 @@ def _clasificar_por_medidor_o_historico(
     elif tiene_ppal or tiene_resp:
         curva = curva_ppal if tiene_ppal else curva_resp
         if mediana is None:
+            if curva.notna().all():
+                return {
+                    "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                    "medidor_usado": "principal_sin_historico" if tiene_ppal else "respaldo_sin_historico",
+                    "revisar_manualmente": True,
+                    "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                    "recuperacion_datos": recuperacion_datos,
+                }
             return {
                 "caso": "Medidor", "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
                 "medidor_usado": "revisar", "revisar_manualmente": True,

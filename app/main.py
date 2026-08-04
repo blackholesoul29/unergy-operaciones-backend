@@ -116,6 +116,17 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_precio_bolsa_periodo ON precio_bolsa_mensual (año, mes)",
+    # energía diaria por contrato (para ver el despacho día a día)
+    """CREATE TABLE IF NOT EXISTS despacho_contrato_dia (
+        id BIGSERIAL PRIMARY KEY,
+        periodo VARCHAR(7) NOT NULL,
+        codigo_sic_contrato VARCHAR(40) NOT NULL,
+        fecha DATE NOT NULL,
+        kwh NUMERIC(18,4) NOT NULL DEFAULT 0
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_dia ON despacho_contrato_dia (periodo, codigo_sic_contrato, fecha)",
+    "ALTER TABLE factura_emitida ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(80)",
+    "CREATE INDEX IF NOT EXISTS ix_despacho_dia_lookup ON despacho_contrato_dia (periodo, codigo_sic_contrato)",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_max DATE",

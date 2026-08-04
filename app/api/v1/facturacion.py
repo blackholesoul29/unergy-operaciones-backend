@@ -23,7 +23,7 @@ from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
 from app.models.contratos import (
     DespachoContratoMensual, IppMensual, FacturaAgrupacion, FacturaOrden, FacturaEmitida,
-    PrecioBolsaMensual,
+    PrecioBolsaMensual, DespachoContratoDia,
 )
 from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
 from app.services.facturacion_factura import construir_mensaje, contribuciones
@@ -88,6 +88,7 @@ async def cargar_despacho(
         raise HTTPException(400, "No encontré columnas de horas (DESP_HORA 01..24)")
 
     agg: dict = {}
+    diario: dict = {}   # (contrato, fecha) → kwh del día
     for r in filas:
         if not r or i_con >= len(r) or r[i_con] is None:
             continue
@@ -109,6 +110,7 @@ async def cargar_despacho(
                     fecha = None
             if fecha is not None:
                 d["fechas"].add(fecha)
+                diario[(con, fecha)] = round(diario.get((con, fecha), 0.0) + kwh, 4)
         if i_ven is not None and i_ven < len(r) and r[i_ven]:
             d["vendedor"] = str(r[i_ven]).strip()
         if i_com is not None and i_com < len(r) and r[i_com]:
@@ -117,6 +119,7 @@ async def cargar_despacho(
             d["tipo"] = str(r[i_tipo]).strip()
 
     db.execute(delete(DespachoContratoMensual).where(DespachoContratoMensual.periodo == per))
+    db.execute(delete(DespachoContratoDia).where(DespachoContratoDia.periodo == per))
     for con, d in agg.items():
         fechas = d.get("fechas") or set()
         db.add(DespachoContratoMensual(
@@ -127,6 +130,8 @@ async def cargar_despacho(
             fecha_max=(max(fechas) if fechas else None),
             archivo=archivo.filename,
         ))
+    for (con, fecha), kwh_dia in diario.items():
+        db.add(DespachoContratoDia(periodo=per, codigo_sic_contrato=con, fecha=fecha, kwh=kwh_dia))
     db.commit()
     total = sum(d["kwh"] for d in agg.values())
     return {"periodo": per, "contratos": len(agg), "kwh_total": round(total, 2), "archivo": archivo.filename}
@@ -145,9 +150,27 @@ def listar_despacho(periodo: str = Query(...), db: Session = Depends(get_db), _=
         "kwh_total": round(sum(float(r.kwh) for r in rows), 2),
         "contratos": [
             {"contrato": r.codigo_sic_contrato, "vendedor": r.vendedor, "comprador": r.comprador,
-             "tipo": r.tipo, "kwh": float(r.kwh)} for r in rows
+             "tipo": r.tipo, "kwh": float(r.kwh), "dias": r.dias} for r in rows
         ],
         "archivo": rows[0].archivo if rows else None,
+    }
+
+
+@router.get("/despacho/dias")
+def despacho_por_dia(periodo: str = Query(...), contrato: str = Query(...),
+                     db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Día a día del despacho de un contrato en el período."""
+    per = _norm_periodo(periodo)
+    rows = (
+        db.query(DespachoContratoDia)
+        .filter(DespachoContratoDia.periodo == per,
+                DespachoContratoDia.codigo_sic_contrato == str(contrato).strip())
+        .order_by(DespachoContratoDia.fecha).all()
+    )
+    return {
+        "periodo": per, "contrato": contrato,
+        "kwh_total": round(sum(float(r.kwh) for r in rows), 2),
+        "dias": [{"fecha": r.fecha.isoformat(), "kwh": float(r.kwh)} for r in rows],
     }
 
 
@@ -345,7 +368,8 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     # Orden manual (fijo) y marca de emitida (del período).
     orden_manual = {o.nombre: o.orden for o in db.query(FacturaOrden).all()}
     emitidas = {
-        e.nombre: {"por": e.emitida_por, "at": e.emitida_at.isoformat() if e.emitida_at else None}
+        e.nombre: {"por": e.emitida_por, "at": e.emitida_at.isoformat() if e.emitida_at else None,
+                   "numero": e.numero_factura}
         for e in db.query(FacturaEmitida).filter(FacturaEmitida.periodo == per).all()
     }
 
@@ -362,6 +386,7 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         g["emitida"] = em is not None
         g["emitida_por"] = em["por"] if em else None
         g["emitida_at"] = em["at"] if em else None
+        g["numero_factura"] = em["numero"] if em else None
         g["orden"] = orden_manual.get(g["factura"])
         g["numeros_contrato"] = g.pop("_numeros")
         g["contratos_sic"] = g.pop("_sic")
@@ -548,6 +573,7 @@ class EmitidaIn(BaseModel):
     nombre: str
     periodo: str
     emitida: bool
+    numero_factura: str | None = None   # código de la factura emitida
 
 
 @router.put("/emitida")
@@ -556,17 +582,21 @@ def marcar_emitida(data: EmitidaIn, db: Session = Depends(get_db), user=Depends(
     nombre = (data.nombre or "").strip()
     if not nombre:
         raise HTTPException(422, "Falta el nombre de la factura")
+    num = (data.numero_factura or "").strip() or None
     obj = (
         db.query(FacturaEmitida)
         .filter(FacturaEmitida.nombre == nombre, FacturaEmitida.periodo == per)
         .first()
     )
-    if data.emitida and obj is None:
-        db.add(FacturaEmitida(
-            nombre=nombre, periodo=per,
-            emitida_por=getattr(user, "nombre", None) or getattr(user, "email", None),
-        ))
-    elif not data.emitida and obj is not None:
+    if data.emitida:
+        if obj is None:
+            db.add(FacturaEmitida(
+                nombre=nombre, periodo=per, numero_factura=num,
+                emitida_por=getattr(user, "nombre", None) or getattr(user, "email", None),
+            ))
+        else:
+            obj.numero_factura = num   # permite editar el código sin desmarcar
+    elif obj is not None:
         db.delete(obj)
     db.commit()
-    return {"nombre": nombre, "periodo": per, "emitida": data.emitida}
+    return {"nombre": nombre, "periodo": per, "emitida": data.emitida, "numero_factura": num}

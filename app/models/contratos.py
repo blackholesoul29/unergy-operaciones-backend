@@ -230,6 +230,7 @@ class FacturaEmitida(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    numero_factura: Mapped[str | None] = mapped_column(String(80), nullable=True)  # código de la factura emitida
     emitida_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
     emitida_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -237,6 +238,23 @@ class FacturaEmitida(Base):
 
     __table_args__ = (
         UniqueConstraint("nombre", "periodo", name="uq_factura_emitida_nombre_periodo"),
+    )
+
+
+class DespachoContratoDia(Base):
+    """Energía diaria por contrato XM (suma de las 24 horas de ese día), ingerida
+    del despacho. Permite ver/filtrar el día a día de un contrato. Se llena al subir
+    el despacho, junto con el agregado mensual."""
+    __tablename__ = "despacho_contrato_dia"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False, index=True)  # "YYYY-MM"
+    codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("periodo", "codigo_sic_contrato", "fecha", name="uq_despacho_dia"),
     )
 
 

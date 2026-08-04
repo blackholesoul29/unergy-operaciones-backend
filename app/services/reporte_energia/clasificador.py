@@ -231,7 +231,18 @@ def _decidir_caso(
                     "curva_final": curva_power, "medidor_usado": "solenium_power",
                     "revisar_manualmente": True,
                 }
-        return {"caso": 6, "energia_final_kwh": 0.0, "curva_final": CURVA_CERO.copy(), "medidor_usado": "ninguno"}
+        # 0 kWh acá es la ausencia de CUALQUIER fuente (CGM, medidor,
+        # inversores, reconectador, Solenium power) -- no una confirmación
+        # real de que el proyecto está apagado. Un proyecto puede seguir
+        # generando y que las 5 fuentes fallen el mismo día (real: San Diego
+        # Sur 2026-08-03, sin medidor propio, solo vive de CGM -- si CGM no
+        # responde ese día, no queda ninguna otra fuente). Marcar para
+        # revisar en vez de reportar 0 con la misma confianza que un
+        # apagado real y confirmado.
+        return {
+            "caso": 6, "energia_final_kwh": 0.0, "curva_final": CURVA_CERO.copy(),
+            "medidor_usado": "ninguno", "revisar_manualmente": True,
+        }
 
     if datos_crudos.datos_completos(crudos):
         total_riemann = datos_crudos.riemann_eae(crudos)

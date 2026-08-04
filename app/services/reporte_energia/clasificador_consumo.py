@@ -13,7 +13,9 @@ validar cruzado (no existe un "inversores" de consumo) -- el árbol es más
 corto, solo dos niveles:
 
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
-                     dato real -- se confía en él a ciegas.
+                     dato real -- se confía en él a ciegas, salvo las
+                     fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (bug
+                     puntual de Quoia, ver comentario ahí).
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO = ±50%) en vez de tomar
@@ -55,9 +57,40 @@ TOLERANCIA_HISTORICO_CONSUMO = 0.50
 # de Torres" -> "MGS 0012 - La Reserva" en el pipeline original).
 VECINO_HISTORICO_CONSUMO: dict[int, int] = {}
 
+# frontera_id (Consumo) donde Quoia tiene un bug intermitente confirmado:
+# reporta el doble de la energía real de Consumo aunque el estado del
+# reporte diga OK/WARNING (Paso Norte, 2026-08-03: CGM=69,23 kWh vs
+# medidor=34,615 kWh, exactamente 2x -- el día anterior CGM y medidor
+# coincidían exacto, confirma que es intermitente, no un offset fijo).
+# Mientras Quoia lo soluciona de su lado, para estas fronteras puntuales SÍ
+# se consulta el medidor aunque CGM parezca válido, para descartar el
+# reporte si no cuadra. No se aplica a todas las fronteras de Consumo para
+# no sumarle una llamada extra a Quoia, todos los días, a las ~40+ que hoy
+# resuelven solo con CGM sin tocar el medidor.
+FRONTERAS_VALIDAR_CGM_VS_MEDIDOR: set[int] = {111}  # Paso Norte Consumo
+
+# %: qué tan lejos puede quedar CGM del medidor antes de dejar de confiar
+# en el reporte automático, para las fronteras de FRONTERAS_VALIDAR_CGM_VS_MEDIDOR.
+# Mismo valor que TOLERANCIA_HISTORICO_CONSUMO (±50%) -- generoso a propósito,
+# CGM y medidor son dos canales físicos distintos y pueden divergir algo por
+# su cuenta; lo que se busca descartar es un error tipo "el doble" (100%),
+# no una diferencia normal entre ambos.
+TOLERANCIA_CGM_VS_MEDIDOR = 0.50
+
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
     return isinstance(curva, pd.Series) and curva.notna().any()
+
+
+def _cgm_confiable(e_cgm: float, curva_ppal: pd.Series, curva_resp: pd.Series) -> bool:
+    """True si no hay medidor con qué cruzar (se confía en CGM como
+    siempre) o si al menos uno de los dos medidores coincide con CGM
+    dentro de tolerancia. False si ambos medidores tienen dato y ninguno
+    se acerca -- ahí no se confía en CGM."""
+    totales = [c.fillna(0).sum() for c in (curva_ppal, curva_resp) if _tiene_dato(c)]
+    if not totales:
+        return True
+    return any(t > 0 and abs(e_cgm - t) / t <= TOLERANCIA_CGM_VS_MEDIDOR for t in totales)
 
 
 def _en_rango_historico(curva: pd.Series, mediana: float) -> bool:
@@ -122,7 +155,15 @@ def clasificar_consumo(
     )
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    if reporte_valido and e_cgm > 0:
+    cgm_ok = reporte_valido and e_cgm > 0
+    if cgm_ok and frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+        main_meter = border_meta.get("main_meter") if border_meta else None
+        backup_meter = border_meta.get("backup_meter") if border_meta else None
+        c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+        if not _cgm_confiable(e_cgm, c["consumo_ppal"], c["consumo_resp"]):
+            cgm_ok = False
+
+    if cgm_ok:
         return {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,

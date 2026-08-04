@@ -202,27 +202,34 @@ def _decidir_caso(
             "fp": None, "fp_calculada": None, "medidor_usado": "revisar", "revisar_manualmente": True,
         }
 
+    # El reconectador se intenta ANTES que datos crudos (no solo como
+    # rescate de un aparente apagado) -- validado dos veces contra un valor
+    # real (Sabana de Torres 2026-07-25: 25 de 27 días entre 1-3% de CGM
+    # real; La Mesa 2026-08-03: 5.431,85 kWh vs medidor 5.434,21 kWh, ~0,04%
+    # de diferencia) mientras que crudos puede tener problemas de
+    # resolución de muestreo (San Pelayo, ~14% por debajo del medidor) o
+    # hasta de escala de unidades (Polaris 1/2, ~1.150x por un nodo que
+    # reporta en W en vez de kW). Se marca 'Revisar Manualmente' siempre
+    # que se use: un proyecto que llega hasta acá no tiene ninguna otra
+    # fuente para confirmar el signo/magnitud del reconectador.
+    if id_solenium is not None:
+        curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str)
+        if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
+            return {
+                "caso": 7, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
+                "curva_final": curva_reconectador, "medidor_usado": "reconectador",
+                "revisar_manualmente": True,
+            }
+
     crudos = datos_crudos.get_datos_crudos(gaia, node_ppal, fecha_str) if node_ppal else pd.DataFrame()
 
     if not datos_crudos.proyecto_generando(crudos):
-        # Antes de confirmar apagado, revisar el reconectador -- puede
-        # seguir midiendo generación real aunque todo el canal de Quoia
-        # esté muerto. Se marca 'Revisar Manualmente' siempre que se use:
-        # un proyecto que llega hasta acá no tiene ninguna otra fuente para
-        # confirmar el signo/magnitud del reconectador.
+        # Ya se intentó el reconectador arriba -- si llegamos acá es porque
+        # no tenía nada (o no hay id_solenium). Último recurso antes de
+        # confirmar apagado: sumar todos los inversores de Solenium /power/
+        # e integrar. Se reporta DIRECTO, sin FP (no es "inversores vs
+        # medidor", es la única lectura de generación disponible).
         if id_solenium is not None:
-            curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str)
-            if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
-                return {
-                    "caso": 7, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
-                    "curva_final": curva_reconectador, "medidor_usado": "reconectador",
-                    "revisar_manualmente": True,
-                }
-
-            # Sin reconectador -- último recurso: sumar todos los
-            # inversores de Solenium /power/ e integrar. Se reporta
-            # DIRECTO, sin FP (no es "inversores vs medidor", es la única
-            # lectura de generación disponible).
             resp_power = sol.get_power(int(id_solenium), fecha_str, fecha_str)
             curva_power, _ = solenium_svc.curva_de_power(resp_power)
             if curva_power.fillna(0).sum() > 0:

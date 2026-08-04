@@ -15,7 +15,9 @@ corto, solo dos niveles:
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
                      dato real -- se confía en él a ciegas, salvo las
                      fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (bug
-                     puntual de Quoia, ver comentario ahí).
+                     puntual de Quoia, se descarta solo si no cuadra) y
+                     FRONTERAS_CONSUMO_IGNORAR_CGM (medidor compartido con
+                     otra frontera, se ignora siempre).
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO = ±50%) en vez de tomar
@@ -76,6 +78,18 @@ FRONTERAS_VALIDAR_CGM_VS_MEDIDOR: set[int] = {111}  # Paso Norte Consumo
 # su cuenta; lo que se busca descartar es un error tipo "el doble" (100%),
 # no una diferencia normal entre ambos.
 TOLERANCIA_CGM_VS_MEDIDOR = 0.50
+
+# frontera_id (Consumo) donde Quoia comparte el mismo medidor físico entre
+# dos fronteras -- confirmado 2026-08-04: MGS 0075 Chiriguaná Norte 2
+# (frontera_id=90) reporta casi siempre el mismo valor de CGM que MGS 0077
+# Chiriguaná Norte 4 (frt_codes distintos, cada uno registrado aparte en
+# Quoia), configuración de Quoia, no un bug del lado de acá (mismo tipo de
+# hallazgo que el medidor compartido entre estas mismas dos fronteras, ya
+# aceptado 2026-07-25). A diferencia de FRONTERAS_VALIDAR_CGM_VS_MEDIDOR
+# (que solo descarta CGM si no cuadra contra el medidor), acá se ignora CGM
+# siempre -- el problema no es que a veces se equivoque mucho, es que el
+# dato en sí no es confiablemente el de esta frontera.
+FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
 
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
@@ -155,7 +169,7 @@ def clasificar_consumo(
     )
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    cgm_ok = reporte_valido and e_cgm > 0
+    cgm_ok = reporte_valido and e_cgm > 0 and frontera_id not in FRONTERAS_CONSUMO_IGNORAR_CGM
     if cgm_ok and frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
         main_meter = border_meta.get("main_meter") if border_meta else None
         backup_meter = border_meta.get("backup_meter") if border_meta else None

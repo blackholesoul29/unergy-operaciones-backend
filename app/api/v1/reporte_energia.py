@@ -21,7 +21,7 @@ from app.models.usuarios import Usuario
 from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
-    EdicionAuditoria, EstadoCorridaResponse,
+    EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
@@ -319,6 +319,15 @@ def estado_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
     if resultado is None:
         return EstadoCorridaResponse(fecha=fecha)
     return EstadoCorridaResponse(fecha=fecha, **resultado)
+
+
+@router.post("/ejecutar/cancelar", response_model=CancelarCorridaResponse)
+def cancelar_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
+    """Pide detener una corrida en curso -- cooperativo, no inmediato: el
+    loop de ejecutar_dia() revisa esta bandera entre frontera y frontera,
+    nunca corta a media frontera."""
+    orquestador.cancelar_corrida(fecha)
+    return CancelarCorridaResponse(fecha=fecha, solicitado=True)
 
 
 def _reporte_ya_valido(rep, es_generacion: bool) -> bool:

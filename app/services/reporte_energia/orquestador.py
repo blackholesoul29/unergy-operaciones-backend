@@ -42,9 +42,18 @@ TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, Ti
 # para poder avisar en el frontend si la corrida terminó con fallidas.
 _ULTIMAS_CORRIDAS: dict[str, dict] = {}
 
+# Bandera cooperativa para "Detener" -- el loop de ejecutar_dia() la revisa
+# entre frontera y frontera (no corta a medio proceso de una, solo entre
+# una y la siguiente). Mismo alcance en memoria que _ULTIMAS_CORRIDAS.
+_CANCELAR: dict[str, bool] = {}
+
 
 def ultima_corrida(fecha: date) -> dict | None:
     return _ULTIMAS_CORRIDAS.get(str(fecha))
+
+
+def cancelar_corrida(fecha: date) -> None:
+    _CANCELAR[str(fecha)] = True
 
 
 def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
@@ -192,7 +201,15 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     fronteras = _fronteras_con_reporte(db)
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
 
+    _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior
+    cancelado = False
+
     for i, (frontera, project_id_solenium) in enumerate(fronteras, start=1):
+        if _CANCELAR.get(str(fecha)):
+            print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
+            cancelado = True
+            break
+
         frt_code = frontera.codigo_frontera.strip().lower()
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
@@ -248,9 +265,11 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             db.commit()  # avance visible en /fronteras mientras el resto sigue corriendo
 
     db.commit()
+    _CANCELAR.pop(str(fecha), None)
     return {
         "generacion": resumen_gen, "consumo": resumen_con,
         "omitidas": omitidas, "fallidas": fallidas, "fecha": str(fecha),
+        "cancelado": cancelado,
     }
 
 
@@ -277,12 +296,14 @@ def ejecutar_dia_background(fecha: date) -> None:
         print(
             f"[reporte_energia] ejecutar_dia_background fecha={fecha} "
             f"generacion={resultado['generacion']} consumo={resultado['consumo']} "
-            f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']}"
+            f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']} "
+            f"cancelado={resultado['cancelado']}"
         )
         _ULTIMAS_CORRIDAS[str(fecha)] = {
             "terminado_en": datetime.now(timezone.utc).isoformat(),
             "fallidas": resultado["fallidas"],
             "omitidas": resultado["omitidas"],
+            "cancelado": resultado["cancelado"],
         }
     except Exception:
         print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} FALLÓ:")

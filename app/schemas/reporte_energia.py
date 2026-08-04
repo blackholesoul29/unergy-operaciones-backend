@@ -118,3 +118,9 @@ class EstadoCorridaResponse(BaseModel):
     fallidas: list[str] = []
     omitidas: list[str] = []
     error_general: str | None = None
+    cancelado: bool = False
+
+
+class CancelarCorridaResponse(BaseModel):
+    fecha: date
+    solicitado: bool

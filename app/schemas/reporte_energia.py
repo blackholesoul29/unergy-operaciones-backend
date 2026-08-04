@@ -138,6 +138,15 @@ class EditarExclusionRequest(BaseModel):
     fecha_fin_estimada: date | None = None
 
 
+class CurvaTipicaResponse(BaseModel):
+    """Mediana x forma horaria de los últimos días confiables (mismo
+    mecanismo que ya alimenta el relleno histórico) -- para el botón
+    "Curva Típica" en Corrección manual."""
+    curva: list[float | None]
+    energia_total_kwh: float
+    dias_usados: int
+
+
 class ExclusionOut(BaseModel):
     id: int
     frontera_id: int

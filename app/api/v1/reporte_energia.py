@@ -22,10 +22,10 @@ from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
-    CrearExclusionRequest, ExclusionOut, EditarExclusionRequest,
+    CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
 )
-from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
-from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
+from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc, historial
+from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
@@ -233,6 +233,37 @@ def editar_curva(
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.get("/fronteras/{frontera_id}/curva-tipica", response_model=CurvaTipicaResponse)
+def curva_tipica(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Mediana x forma horaria de los últimos días confiables -- mismo
+    mecanismo que ya alimenta el relleno histórico automático (ver
+    historial.py), expuesto para el botón "Curva Típica" en Corrección
+    manual. No guarda nada -- solo devuelve la curva para que el usuario
+    la revise/ajuste antes de "Guardar corrección"."""
+    front = db.get(Frontera, frontera_id)
+    if front is None:
+        raise HTTPException(404, "Frontera no encontrada")
+
+    es_generacion = front.tipo_frontera == TipoFronteraEnum.generacion
+    if es_generacion:
+        mediana, dias_usados = historial.get_mediana_generacion(db, frontera_id, fecha)
+        forma, _ = historial.get_forma_generacion(db, frontera_id, fecha)
+    else:
+        mediana, dias_usados = historial.get_mediana_consumo(db, frontera_id, fecha)
+        forma, _ = historial.get_forma_consumo(db, frontera_id, fecha)
+
+    if mediana is None or forma is None:
+        raise HTTPException(404, "No hay suficiente histórico confiable todavía para esta frontera")
+
+    curva = escalar_curva(forma, mediana)
+    return CurvaTipicaResponse(
+        curva=curva_a_lista(curva), energia_total_kwh=float(mediana), dias_usados=dias_usados,
+    )
 
 
 @router.get("/fronteras/{frontera_id}/ediciones", response_model=list[EdicionAuditoria])

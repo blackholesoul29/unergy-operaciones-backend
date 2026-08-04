@@ -631,6 +631,32 @@ _PENDING_DDLS = [
     # NULL para otros tipos y para envíos previos a esta migración)
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos TEXT",
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos_total INTEGER",
+    # migration — reporte_energia_{generacion,consumo}: fila-placeholder cuando
+    # el clasificador falla (error_clasificacion) + resultado del envío a
+    # Quoia/ASIC (enviado_quoia_*)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
+    # migration — reporte_energia_exclusiones: ventana de fechas en la que una
+    # frontera no se clasifica en absoluto (ej. CT en falla ya reportado a
+    # XM) -- no depende de Fallas (requiere monitoreo/representación, que no
+    # todas las fronteras tienen)
+    """CREATE TABLE IF NOT EXISTS reporte_energia_exclusiones (
+        id BIGSERIAL PRIMARY KEY,
+        frontera_id BIGINT NOT NULL REFERENCES fronteras(id) ON DELETE CASCADE,
+        motivo VARCHAR(500) NOT NULL,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin_estimada DATE,
+        creado_por_id BIGINT NOT NULL REFERENCES usuarios(id),
+        resuelta_en TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_reporte_energia_exclusiones_frontera ON reporte_energia_exclusiones (frontera_id)",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

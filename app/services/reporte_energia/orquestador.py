@@ -19,14 +19,14 @@ tipo por frontera.
 from __future__ import annotations
 
 import traceback
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
 from app.models.proyectos import Proyecto, EstadoProyectoEnum
-from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
@@ -34,6 +34,26 @@ from app.services.reporte_energia.utils import curva_a_lista
 
 TIPOS_GENERACION = {TipoFronteraEnum.generacion}
 TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
+
+# Resultado de la última corrida por fecha (en memoria -- se pierde si el
+# proceso reinicia, o no se ve entre workers si hubiera más de uno; suficiente
+# hoy porque el resto de este pipeline ya asume un solo proceso, ver el print()
+# de ejecutar_dia_background). Lo consulta GET /reporte-energia/ejecutar/estado
+# para poder avisar en el frontend si la corrida terminó con fallidas.
+_ULTIMAS_CORRIDAS: dict[str, dict] = {}
+
+# Bandera cooperativa para "Detener" -- el loop de ejecutar_dia() la revisa
+# entre frontera y frontera (no corta a medio proceso de una, solo entre
+# una y la siguiente). Mismo alcance en memoria que _ULTIMAS_CORRIDAS.
+_CANCELAR: dict[str, bool] = {}
+
+
+def ultima_corrida(fecha: date) -> dict | None:
+    return _ULTIMAS_CORRIDAS.get(str(fecha))
+
+
+def cancelar_corrida(fecha: date) -> None:
+    _CANCELAR[str(fecha)] = True
 
 
 def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
@@ -53,6 +73,21 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
         )
     ).all()
     return [(f, sid) for f, sid in filas]
+
+
+def _exclusion_activa(db: Session, frontera_id: int, fecha: date) -> ReporteEnergiaExclusion | None:
+    """Exclusión temporal vigente para esta frontera+fecha (ej. CT en falla
+    ya reportado a XM) -- ver ReporteEnergiaExclusion. Si existe, el
+    clasificador ni siquiera se llama para esta frontera ese día."""
+    return db.execute(
+        select(ReporteEnergiaExclusion).where(
+            ReporteEnergiaExclusion.frontera_id == frontera_id,
+            ReporteEnergiaExclusion.resuelta_en.is_(None),
+            ReporteEnergiaExclusion.fecha_inicio <= fecha,
+            (ReporteEnergiaExclusion.fecha_fin_estimada.is_(None))
+            | (ReporteEnergiaExclusion.fecha_fin_estimada >= fecha),
+        )
+    ).scalar_one_or_none()
 
 
 def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: dict) -> None:
@@ -90,6 +125,7 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.energia_medidor_respaldo_kwh = resultado.get("energia_medidor_respaldo_kwh")
     fila.medidor_principal_completo = resultado.get("medidor_principal_completo")
     fila.medidor_respaldo_completo = resultado.get("medidor_respaldo_completo")
+    fila.error_clasificacion = resultado.get("error_clasificacion")
     if existente is None:
         db.add(fila)
 
@@ -115,8 +151,50 @@ def _upsert_consumo(db: Session, frontera_id: int, fecha: date, resultado: dict)
     fila.horas_rellenadas_historico = resultado.get("horas_rellenadas_historico")
     fila.recuperacion_datos = resultado.get("recuperacion_datos")
     fila.revisar_manualmente = bool(resultado.get("revisar_manualmente", False))
+    fila.error_clasificacion = resultado.get("error_clasificacion")
     if existente is None:
         db.add(fila)
+
+
+def _marcar_error_generacion(db: Session, frontera_id: int, fecha: date, error_msg: str) -> None:
+    """Se llama cuando clasificar_generacion() lanzó una excepción -- deja
+    una fila explícita marcada para revisar en vez de dejar la frontera
+    ausente del reporte del día (ver comentario en el loop de ejecutar_dia)."""
+    existente = db.execute(
+        select(ReporteEnergiaGeneracion).where(
+            ReporteEnergiaGeneracion.frontera_id == frontera_id,
+            ReporteEnergiaGeneracion.fecha == fecha,
+        )
+    ).scalar_one_or_none()
+    if existente is not None:
+        if existente.editado_manualmente:
+            return
+        existente.revisar_manualmente = True
+        existente.error_clasificacion = error_msg[:500]
+        return
+    db.add(ReporteEnergiaGeneracion(
+        frontera_id=frontera_id, fecha=fecha, caso=-1,
+        revisar_manualmente=True, error_clasificacion=error_msg[:500],
+    ))
+
+
+def _marcar_error_consumo(db: Session, frontera_id: int, fecha: date, error_msg: str) -> None:
+    existente = db.execute(
+        select(ReporteEnergiaConsumo).where(
+            ReporteEnergiaConsumo.frontera_id == frontera_id,
+            ReporteEnergiaConsumo.fecha == fecha,
+        )
+    ).scalar_one_or_none()
+    if existente is not None:
+        if existente.editado_manualmente:
+            return
+        existente.revisar_manualmente = True
+        existente.error_clasificacion = error_msg[:500]
+        return
+    db.add(ReporteEnergiaConsumo(
+        frontera_id=frontera_id, fecha=fecha, caso="Error",
+        revisar_manualmente=True, error_clasificacion=error_msg[:500],
+    ))
 
 
 def ejecutar_dia(db: Session, fecha: date) -> dict:
@@ -140,10 +218,43 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     fronteras = _fronteras_con_reporte(db)
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
 
+    _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior
+    cancelado = False
+
     for i, (frontera, project_id_solenium) in enumerate(fronteras, start=1):
+        if _CANCELAR.get(str(fecha)):
+            print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
+            cancelado = True
+            break
+
         frt_code = frontera.codigo_frontera.strip().lower()
         border_meta = bordes.get(frt_code)
         pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
+
+        excl = _exclusion_activa(db, frontera.id, fecha)
+        if excl is not None:
+            # No se llama al clasificador para nada -- ni CGM, ni medidor,
+            # ni crudos. Ver ReporteEnergiaExclusion (ej. CT en falla ya
+            # reportado a XM, mientras se resuelve no se reporta ningún
+            # número automático).
+            nota = f"Excluida temporalmente -- {excl.motivo}"
+            if frontera.tipo_frontera in TIPOS_GENERACION:
+                resultado = {
+                    "caso": -2, "energia_final_kwh": None, "curva_final": None,
+                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "error_clasificacion": nota,
+                }
+                _upsert_generacion(db, frontera.id, fecha, resultado)
+                resumen_gen["-2"] = resumen_gen.get("-2", 0) + 1
+            elif frontera.tipo_frontera in TIPOS_CONSUMO:
+                resultado = {
+                    "caso": "Excluida", "energia_final_kwh": None, "curva_final": None,
+                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "error_clasificacion": nota,
+                }
+                _upsert_consumo(db, frontera.id, fecha, resultado)
+                resumen_con["Excluida"] = resumen_con.get("Excluida", 0) + 1
+            continue
 
         # Una excepcion no manejada en UNA frontera (bug del clasificador,
         # dato historico corrupto, timeout puntual de Quoia/Solenium) no debe
@@ -171,11 +282,24 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             else:
                 omitidas.append(f"{frontera.nombre_frontera} ({frontera.tipo_frontera})")
                 continue
-        except Exception:
+        except Exception as exc:
             db.rollback()
             fallidas.append(frontera.nombre_frontera)
             print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> FALLÓ, se sigue con las demás:")
             print(traceback.format_exc())
+            try:
+                if frontera.tipo_frontera in TIPOS_GENERACION:
+                    _marcar_error_generacion(db, frontera.id, fecha, str(exc))
+                elif frontera.tipo_frontera in TIPOS_CONSUMO:
+                    _marcar_error_consumo(db, frontera.id, fecha, str(exc))
+                db.commit()
+            except Exception:
+                # Si ni siquiera esto se pudo guardar, no vale la pena tumbar
+                # la corrida por eso -- la frontera igual queda en 'fallidas'
+                # para el log/alerta, aunque no aparezca marcada en la BD.
+                db.rollback()
+                print(f"[reporte_energia]   {frt_code} -> tampoco se pudo registrar el error en la BD:")
+                print(traceback.format_exc())
             continue
 
         print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> caso {clave}")
@@ -183,9 +307,11 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             db.commit()  # avance visible en /fronteras mientras el resto sigue corriendo
 
     db.commit()
+    _CANCELAR.pop(str(fecha), None)
     return {
         "generacion": resumen_gen, "consumo": resumen_con,
         "omitidas": omitidas, "fallidas": fallidas, "fecha": str(fecha),
+        "cancelado": cancelado,
     }
 
 
@@ -212,10 +338,22 @@ def ejecutar_dia_background(fecha: date) -> None:
         print(
             f"[reporte_energia] ejecutar_dia_background fecha={fecha} "
             f"generacion={resultado['generacion']} consumo={resultado['consumo']} "
-            f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']}"
+            f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']} "
+            f"cancelado={resultado['cancelado']}"
         )
+        _ULTIMAS_CORRIDAS[str(fecha)] = {
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "fallidas": resultado["fallidas"],
+            "omitidas": resultado["omitidas"],
+            "cancelado": resultado["cancelado"],
+        }
     except Exception:
         print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} FALLÓ:")
         print(traceback.format_exc())
+        _ULTIMAS_CORRIDAS[str(fecha)] = {
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "fallidas": [], "omitidas": [],
+            "error_general": "La corrida se interrumpió por completo -- ver logs.",
+        }
     finally:
         db.close()

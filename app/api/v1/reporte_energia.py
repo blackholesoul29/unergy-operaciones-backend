@@ -4,6 +4,7 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 from __future__ import annotations
 
 import json
+import random
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,15 +16,17 @@ from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.proyectos import Proyecto
-from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.models.usuarios import Usuario
 from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
-    EdicionAuditoria,
+    EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
+    CrearExclusionRequest, ExclusionOut,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
+from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 
@@ -152,8 +155,18 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
                 recuperar=False,  # esto es solo para mostrar una curva de referencia --
                                   # no tiene sentido interrogar el medidor (hasta 90s) por eso
             )
-            curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
-            curva_medidor_resp = curva_a_lista(c["curva_resp"])
+            # curvas_de_frontera() siempre trae ambas variables del medidor --
+            # eae (curva_ppal/curva_resp, generación) e iae (consumo_ppal/
+            # consumo_resp) -- hay que elegir la que corresponde al tipo de
+            # frontera, si no la de Consumo termina mostrando la curva de
+            # generación del mismo medidor (bug real: 2026-08-03, El Joropo
+            # Consumo mostraba una curva con forma solar de mediodía).
+            if es_generacion:
+                curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
+                curva_medidor_resp = curva_a_lista(c["curva_resp"])
+            else:
+                curva_medidor_ppal = curva_a_lista(c["consumo_ppal"])
+                curva_medidor_resp = curva_a_lista(c["consumo_resp"])
         if es_generacion and front.proyecto_id:
             proyecto = db.get(Proyecto, front.proyecto_id)
             if proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit():
@@ -184,6 +197,9 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
         validado_por=rep.validado_por.nombre if rep.validado_por else None,
         validado_en=rep.validado_en,
+        error_clasificacion=rep.error_clasificacion,
+        enviado_quoia_en=rep.enviado_quoia_en, enviado_quoia_ok=rep.enviado_quoia_ok,
+        enviado_quoia_error=rep.enviado_quoia_error,
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
@@ -270,6 +286,66 @@ def validar(
     )
 
 
+def _exclusion_out(db: Session, excl: ReporteEnergiaExclusion) -> ExclusionOut:
+    front = db.get(Frontera, excl.frontera_id)
+    return ExclusionOut(
+        id=excl.id, frontera_id=excl.frontera_id,
+        nombre_frontera=front.nombre_frontera if front else None,
+        motivo=excl.motivo, fecha_inicio=excl.fecha_inicio,
+        fecha_fin_estimada=excl.fecha_fin_estimada,
+        creado_por=excl.creado_por.nombre if excl.creado_por else None,
+        resuelta_en=excl.resuelta_en, created_at=excl.created_at,
+    )
+
+
+@router.get("/fronteras/{frontera_id}/exclusiones", response_model=list[ExclusionOut])
+def listar_exclusiones(
+    frontera_id: int, db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Historial de exclusiones temporales de esta frontera -- activas y
+    resueltas, más recientes primero."""
+    filas = db.execute(
+        select(ReporteEnergiaExclusion)
+        .where(ReporteEnergiaExclusion.frontera_id == frontera_id)
+        .order_by(ReporteEnergiaExclusion.created_at.desc())
+    ).scalars().all()
+    return [_exclusion_out(db, f) for f in filas]
+
+
+@router.post("/fronteras/{frontera_id}/exclusiones", response_model=ExclusionOut)
+def crear_exclusion(
+    frontera_id: int, body: CrearExclusionRequest,
+    db: Session = Depends(get_db), usuario: Usuario = Depends(get_current_user),
+):
+    """Marca una frontera para NO clasificarse en cierto rango de fechas --
+    ver ReporteEnergiaExclusion. No depende de Fallas (requiere monitoreo/
+    representación, que no todas las fronteras tienen)."""
+    if body.frontera_id != frontera_id:
+        raise HTTPException(422, "frontera_id del body no coincide con la URL")
+    excl = ReporteEnergiaExclusion(
+        frontera_id=frontera_id, motivo=body.motivo,
+        fecha_inicio=body.fecha_inicio, fecha_fin_estimada=body.fecha_fin_estimada,
+        creado_por_id=usuario.id,
+    )
+    db.add(excl)
+    db.commit()
+    db.refresh(excl)
+    return _exclusion_out(db, excl)
+
+
+@router.post("/exclusiones/{exclusion_id}/resolver", response_model=ExclusionOut)
+def resolver_exclusion(
+    exclusion_id: int, db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    excl = db.get(ReporteEnergiaExclusion, exclusion_id)
+    if excl is None:
+        raise HTTPException(404, "Exclusión no encontrada")
+    excl.resuelta_en = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(excl)
+    return _exclusion_out(db, excl)
+
+
 @router.get("/excel")
 def descargar_excel(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Excel en el formato manual (hoja "datos") -- disponible siempre, sin
@@ -295,14 +371,41 @@ def ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
     return EjecutarDiaResponse(fecha=fecha, status="iniciado")
 
 
+@router.get("/ejecutar/estado", response_model=EstadoCorridaResponse)
+def estado_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
+    """Resultado de la última corrida de /ejecutar para esta fecha -- el
+    frontend lo consulta cuando el sondeo de filas se estabiliza, para avisar
+    si la corrida terminó con fronteras fallidas (ver sondearResultado())."""
+    resultado = orquestador.ultima_corrida(fecha)
+    if resultado is None:
+        return EstadoCorridaResponse(fecha=fecha)
+    return EstadoCorridaResponse(fecha=fecha, **resultado)
+
+
+@router.post("/ejecutar/cancelar", response_model=CancelarCorridaResponse)
+def cancelar_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
+    """Pide detener una corrida en curso -- cooperativo, no inmediato: el
+    loop de ejecutar_dia() revisa esta bandera entre frontera y frontera,
+    nunca corta a media frontera."""
+    orquestador.cancelar_corrida(fecha)
+    return CancelarCorridaResponse(fecha=fecha, solicitado=True)
+
+
+def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
+    """Mismo criterio que excel.py: si Quoia ya reportó bien por su cuenta,
+    no hace falta corregirlo -- enviar de más sobreescribiría un reporte
+    oficial que ya estaba bien."""
+    return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
+
+
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)
 def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Envía el reporte del día a Quoia -- bloqueado si queda alguna
     frontera con 'Revisar Manualmente' pendiente (huecos sin fuente).
 
-    NOTA: GaiaClient.post_report() todavía no se ha probado contra un envío
-    real -- coordinar con el equipo antes de habilitar este botón en
-    producción.
+    Solo se envían las fronteras donde tuvimos que sustituir el dato de
+    Quoia (medidor_usado != 'cgm' / caso != 'CGM') -- si el CGM de Quoia ya
+    reportó válido por su cuenta, no se toca.
     """
     pendientes_gen = db.execute(
         select(ReporteEnergiaGeneracion.id).where(
@@ -320,4 +423,65 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
             motivo_bloqueo="Quedan fronteras con horas sin fuente (Revisar Manualmente) sin validar.",
         )
 
-    raise HTTPException(501, "Envío real a Quoia pendiente de habilitar -- ver GaiaClient.post_report().")
+    gen_filas = db.execute(
+        select(ReporteEnergiaGeneracion, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha == fecha)
+    ).all()
+    con_filas = db.execute(
+        select(ReporteEnergiaConsumo, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaConsumo.frontera_id)
+        .where(ReporteEnergiaConsumo.fecha == fecha)
+    ).all()
+
+    frt_codes = {f.codigo_frontera for _, f in gen_filas + con_filas if f.codigo_frontera}
+    gaia = GaiaClient()
+    borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
+
+    enviados = 0
+    fallidos: list[str] = []
+
+    def _procesar(rep, front, es_generacion: bool) -> None:
+        nonlocal enviados
+        if _reporte_ya_valido(rep, es_generacion):
+            return  # Quoia ya tiene el dato correcto, no hace falta corregir
+
+        frt_code = (front.codigo_frontera or "").strip().lower()
+        meta = borders.get(frt_code)
+        border_id = meta.get("id") if meta else None
+        rep.enviado_quoia_en = datetime.now(timezone.utc)
+
+        if not border_id:
+            rep.enviado_quoia_ok = False
+            rep.enviado_quoia_error = "Sin border_id en Quoia"
+            fallidos.append(f"{front.nombre_frontera} — sin border_id en Quoia")
+            return
+
+        curva = rep.curva_final or [0.0] * 24
+        main_readings = [float(v) if v is not None else 0.0 for v in curva]
+        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
+        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
+        # vez por hora al momento de enviar, porque la API espera números fijos.
+        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+
+        try:
+            ok = gaia.post_report(border_id, main_readings, backup_readings)
+            motivo = None if ok else "Quoia rechazó el envío"
+        except Exception as exc:
+            ok = False
+            motivo = str(exc)
+
+        rep.enviado_quoia_ok = ok
+        rep.enviado_quoia_error = motivo
+        if ok:
+            enviados += 1
+        else:
+            fallidos.append(f"{front.nombre_frontera} — {motivo}")
+
+    for rep, front in gen_filas:
+        _procesar(rep, front, es_generacion=True)
+    for rep, front in con_filas:
+        _procesar(rep, front, es_generacion=False)
+
+    db.commit()
+    return EnviarReporteEnergiaResponse(fecha=fecha, enviados=enviados, fallidos=fallidos, bloqueado=False)

@@ -69,8 +69,20 @@ def _mejor_medidor(curva_a: pd.Series, curva_b: pd.Series) -> pd.Series:
     """Entre dos curvas de medidor, la de mayor energía total -- cubre a la
     vez "solo una tiene dato" y "ambas reportan, hay que elegir" (convención:
     se prefiere el de mayor valor cuando no hay CGM ni inversores contra qué
-    validar)."""
+    validar). Usada SOLO como referencia para calcular el error vs inversores
+    (Casos 2/3/4) -- ahí sí importa la magnitud, porque decide si el día es
+    Caso 3 o Caso 4. NO usar para decidir qué medidor reportar directamente
+    (ver _principal_o_respaldo)."""
     return curva_a if curva_a.fillna(0).sum() >= curva_b.fillna(0).sum() else curva_b
+
+
+def _principal_o_respaldo(curva_ppal: pd.Series, curva_resp: pd.Series) -> pd.Series:
+    """Para reportar un medidor directo sin nada contra qué validar --
+    prefiere SIEMPRE el principal si tiene dato; el respaldo solo si el
+    principal no tiene nada. No el de mayor valor (decisión del usuario tras
+    ver Sol&Cielo 7 Los Bongos Consumo 2026-08-03, mismo criterio aplicado
+    ahí en clasificador_consumo.py)."""
+    return curva_ppal if _tiene_dato(curva_ppal) else curva_resp
 
 
 def _decidir_caso(
@@ -142,7 +154,7 @@ def _decidir_caso(
         if reporte_valido:
             return {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
 
-        curva = _mejor_medidor(curva_ppal, curva_resp)
+        curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if not _tiene_dato(curva):
             # Medidor totalmente caído -- volver a confiar en CGM sería
             # recaer en la misma fuente que esta rama ya decidió no usar. Si
@@ -187,7 +199,7 @@ def _decidir_caso(
     # ya lo maneja el bloque de arriba. Si el medidor TAMBIÉN está caído, no
     # se hace nada acá y sigue cayendo a la cadena de crudos de siempre.
     if e_cgm <= 0:
-        curva = _mejor_medidor(curva_ppal, curva_resp)
+        curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
             return {
                 "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,

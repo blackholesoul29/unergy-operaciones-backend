@@ -22,7 +22,7 @@ from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
-    CrearExclusionRequest, ExclusionOut,
+    CrearExclusionRequest, ExclusionOut, EditarExclusionRequest,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
@@ -328,6 +328,21 @@ def crear_exclusion(
         creado_por_id=usuario.id,
     )
     db.add(excl)
+    db.commit()
+    db.refresh(excl)
+    return _exclusion_out(db, excl)
+
+
+@router.patch("/exclusiones/{exclusion_id}", response_model=ExclusionOut)
+def editar_exclusion(
+    exclusion_id: int, body: EditarExclusionRequest,
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    excl = db.get(ReporteEnergiaExclusion, exclusion_id)
+    if excl is None:
+        raise HTTPException(404, "Exclusión no encontrada")
+    excl.motivo = body.motivo
+    excl.fecha_fin_estimada = body.fecha_fin_estimada
     db.commit()
     db.refresh(excl)
     return _exclusion_out(db, excl)

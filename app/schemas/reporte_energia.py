@@ -133,6 +133,11 @@ class CrearExclusionRequest(BaseModel):
     fecha_fin_estimada: date | None = None
 
 
+class EditarExclusionRequest(BaseModel):
+    motivo: str
+    fecha_fin_estimada: date | None = None
+
+
 class ExclusionOut(BaseModel):
     id: int
     frontera_id: int

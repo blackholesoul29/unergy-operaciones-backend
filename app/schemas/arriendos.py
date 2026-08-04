@@ -29,10 +29,27 @@ class ArrProyectoOut(ArrProyectoIn):
     model_config = {"from_attributes": True}
 
 
+class ArrArrendadorIn(BaseModel):
+    nombre: str
+    valor_base: Optional[float] = None
+    responsable_iva: bool = False
+    activo: bool = True
+    anticipo_pagado_desde: Optional[date] = None
+    anticipo_pagado_hasta: Optional[date] = None
+    observaciones: Optional[str] = None
+
+
+class ArrArrendadorOut(ArrArrendadorIn):
+    id: int
+    contrato_id: int
+    model_config = {"from_attributes": True}
+
+
 class ArrCalculoFila(BaseModel):
     id: int
     proyecto: str
     codigo: Optional[str] = None
+    nombre_arrendador: Optional[str] = None
     periodo: str
     mes_año: str
     habilitado: bool
@@ -52,6 +69,10 @@ class ArrCalculoFila(BaseModel):
     tipo_proyecto: Optional[str] = None
     estado_contrato: str = "con_contrato"
     motivo_exclusion: Optional[str] = None
+    proyecto_id: Optional[int] = None
+    anticipo_pagado_desde: Optional[date] = None
+    anticipo_pagado_hasta: Optional[date] = None
+    observaciones_arrendador: Optional[str] = None
     historial_texto: str
     historial_detalle: str
 
@@ -66,6 +87,7 @@ class ArrSeleccionItem(BaseModel):
     proyecto_id: int
     incluido: bool
     motivo_exclusion: Optional[str] = None
+    arr_arrendador_id: Optional[int] = None
 
 
 class ArrSeleccionGuardar(BaseModel):
@@ -74,11 +96,12 @@ class ArrSeleccionGuardar(BaseModel):
 
 class ArrSeleccionOut(BaseModel):
     id: int
-    arr_proyecto_id: int
+    arr_proyecto_id: Optional[int] = None
     periodo: str
     incluido: bool
     facturado: bool
     valor_facturado_congelado: Optional[int] = None
     motivo_exclusion: Optional[str] = None
+    arr_arrendador_id: Optional[int] = None
     updated_at: datetime
     model_config = {"from_attributes": True}

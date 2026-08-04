@@ -90,6 +90,8 @@ def _log_send(
     tipo: str,
     success: bool,
     error_msg: str | None = None,
+    proyectos: list[str] | None = None,
+    proyectos_total: int | None = None,
 ) -> None:
     """Log email send to database (fire-and-forget)."""
     try:
@@ -99,8 +101,8 @@ def _log_send(
         try:
             db.execute(sa_text("""
                 INSERT INTO email_envios
-                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at)
-                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts)
+                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total)
+                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total)
             """), {
                 "to": to_email,
                 "cc": ",".join(cc) if cc else None,
@@ -109,6 +111,8 @@ def _log_send(
                 "ok": success,
                 "err": error_msg,
                 "ts": datetime.now(timezone.utc),
+                "proyectos": ",".join(proyectos) if proyectos else None,
+                "proyectos_total": proyectos_total,
             })
             db.commit()
         except Exception as e:
@@ -583,6 +587,8 @@ def send_reporte_cgm_email(
     filename: str,
     fecha_str: str,
     destinatario_nombre: str,
+    proyectos: list[str] | None = None,
+    proyectos_total: int | None = None,
 ) -> None:
     """
     Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
@@ -635,9 +641,15 @@ def send_reporte_cgm_email(
 
     try:
         _smtp_send(msg, sobres)
-        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True)
+        _log_send(
+            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True,
+            proyectos=proyectos, proyectos_total=proyectos_total,
+        )
     except Exception as exc:
-        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False, error_msg=str(exc))
+        _log_send(
+            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False,
+            error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
+        )
         raise RuntimeError(f"No se pudo enviar el reporte CGM: {exc}") from exc
 
 

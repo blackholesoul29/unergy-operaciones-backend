@@ -74,6 +74,9 @@ class ContratoServicioCreate(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
     # CGM
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
@@ -121,6 +124,9 @@ class ContratoServicioUpdate(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
     tiene_cgm: Optional[bool] = None
     cgm_codigo_sic: Optional[str] = None
     cgm_porcentaje_fncer: Optional[float] = None
@@ -172,6 +178,9 @@ class ContratoServicioOut(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
     cgm_porcentaje_fncer: Optional[float] = None

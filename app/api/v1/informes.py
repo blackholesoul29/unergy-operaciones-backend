@@ -303,7 +303,7 @@ def list_envios(
 
     rows = db.execute(
         text(f"""
-            SELECT id, destinatario, cc, asunto, tipo, exitoso, error, enviado_at
+            SELECT id, destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total
             FROM email_envios
             {where_sql}
             ORDER BY enviado_at DESC

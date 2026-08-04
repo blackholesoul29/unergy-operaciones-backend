@@ -60,16 +60,31 @@ class DetalleFronteraReporte(BaseModel):
     editado_manualmente: bool
     validado_por: str | None = None
     validado_en: datetime | None = None
+    error_clasificacion: str | None = None
+    enviado_quoia_en: datetime | None = None
+    enviado_quoia_ok: bool | None = None
+    enviado_quoia_error: str | None = None
     # Curvas de referencia -- siempre presentes cuando existan, sin importar
     # qué Caso ganó (para comparar visualmente).
     curva_medidor_principal: list[float | None] | None = None
     curva_medidor_respaldo: list[float | None] | None = None
     curva_solenium: list[float | None] | None = None
+    # Capacidad efectiva de la frontera (MW) -- referencia visual en el chart
+    # para confirmar que la curva de generación nunca la supera.
+    capacidad_efectiva_mw: float | None = None
 
 
 class EditarCurvaRequest(BaseModel):
     curva_final: list[float | None]
     nota: str | None = None
+
+
+class EdicionAuditoria(BaseModel):
+    """Una fila de audit_log para esta frontera+fecha -- quién corrigió la
+    curva manualmente, cuándo, y qué campos cambiaron."""
+    usuario_nombre: str | None
+    created_at: datetime
+    cambios: dict | None  # {campo: {"antes": ..., "despues": ...}}
 
 
 class ValidarResponse(BaseModel):
@@ -93,3 +108,43 @@ class EnviarReporteEnergiaResponse(BaseModel):
     fallidos: list[str]
     bloqueado: bool
     motivo_bloqueo: str | None = None
+
+
+class EstadoCorridaResponse(BaseModel):
+    """Resultado de la última vez que se corrió /ejecutar para esta fecha --
+    null (terminado_en=None) si nunca se ha corrido o todavía está en curso."""
+    fecha: date
+    terminado_en: datetime | None = None
+    fallidas: list[str] = []
+    omitidas: list[str] = []
+    error_general: str | None = None
+    cancelado: bool = False
+
+
+class CancelarCorridaResponse(BaseModel):
+    fecha: date
+    solicitado: bool
+
+
+class CrearExclusionRequest(BaseModel):
+    frontera_id: int
+    motivo: str
+    fecha_inicio: date
+    fecha_fin_estimada: date | None = None
+
+
+class EditarExclusionRequest(BaseModel):
+    motivo: str
+    fecha_fin_estimada: date | None = None
+
+
+class ExclusionOut(BaseModel):
+    id: int
+    frontera_id: int
+    nombre_frontera: str | None = None
+    motivo: str
+    fecha_inicio: date
+    fecha_fin_estimada: date | None
+    creado_por: str | None
+    resuelta_en: datetime | None
+    created_at: datetime

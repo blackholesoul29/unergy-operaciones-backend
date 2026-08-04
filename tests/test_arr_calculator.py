@@ -110,3 +110,34 @@ def test_serie_indexacion_coincide_con_calcular_arriendo():
     )
     serie = serie_indexacion(date(2023, 9, 1), 4_300_000, ipc, 2026, 7)
     assert serie[-1]["valor_mensual"] == fila["canon_calculado"]
+
+
+# ── Anticipo (desde/hasta) ─────────────────────────────────────────────────
+
+def test_anticipo_mes_desde_cobra_normal():
+    # Olimpo: anticipo enero-diciembre 2026. Enero (=desde) cobra normal.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-01",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is True
+
+
+def test_anticipo_meses_intermedios_no_cobran():
+    # Diciembre (=hasta) NO cobra — dentro del rango cubierto.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-12",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is False
+
+
+def test_anticipo_mes_despues_de_hasta_cobra_normal():
+    # Enero-2027 (después de hasta) vuelve a cobrar normal.
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2027-01",
+           periodicidad="mensual", ipc_tasas={},
+           anticipo_pagado_desde=date(2026, 1, 1), anticipo_pagado_hasta=date(2026, 12, 1))
+    assert f["aplica_este_mes"] is True
+
+
+def test_sin_anticipo_no_cambia_nada():
+    f = _c(fecha_firma_contrato=date(2020, 1, 1), periodo="2026-06", periodicidad="mensual", ipc_tasas={})
+    assert f["aplica_este_mes"] is True

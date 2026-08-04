@@ -31,6 +31,8 @@ def calcular_arriendo(
     facturado: bool = False,
     valor_congelado: int | None = None,
     periodicidad: str | None = None,
+    anticipo_pagado_desde: date | None = None,
+    anticipo_pagado_hasta: date | None = None,
 ) -> dict:
     año_periodo = int(periodo.split("-")[0])
     mes = int(periodo.split("-")[1])
@@ -62,6 +64,13 @@ def calcular_arriendo(
 
     año_firma = fecha_base.year
     aplica_este_mes = corresponde_cobro_este_mes(periodicidad, fecha_base, periodo)
+
+    if anticipo_pagado_desde and anticipo_pagado_hasta:
+        periodo_ym = (año_periodo, mes)
+        desde_ym = (anticipo_pagado_desde.year, anticipo_pagado_desde.month)
+        hasta_ym = (anticipo_pagado_hasta.year, anticipo_pagado_hasta.month)
+        if desde_ym < periodo_ym <= hasta_ym:
+            aplica_este_mes = False
 
     factor = 1.0
     n = 0

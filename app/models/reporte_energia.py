@@ -27,7 +27,8 @@ class ReporteEnergiaGeneracion(Base):
     'caso' es el árbol de decisión 0-8 de clasificador.py (0 = frontera de
     terceros, 1 = CGM válido, 2/3/4 = medidor/inversores según corrija el
     error, 5 = sin inversores, 6 = apagado, 7 = crudos/reconectador
-    completos, 8 = crudos parciales).
+    completos, 8 = crudos parciales) -- o -1 si el clasificador lanzó una
+    excepción para esta frontera ese día (ver orquestador._marcar_error_generacion).
     """
     __tablename__ = "reporte_energia_generacion"
     __table_args__ = (
@@ -72,6 +73,15 @@ class ReporteEnergiaGeneracion(Base):
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     validado_por_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
     validado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Mensaje de la excepción cuando caso=-1 (clasificador falló para esta
+    # frontera+fecha) -- null en cualquier otro caso.
+    error_clasificacion: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Resultado del último intento de envío a Quoia/ASIC (POST /enviar) --
+    # null si nunca se ha intentado enviar esta frontera+fecha.
+    enviado_quoia_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enviado_quoia_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    enviado_quoia_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -80,12 +90,40 @@ class ReporteEnergiaGeneracion(Base):
     validado_por: Mapped["Usuario | None"] = relationship("Usuario")
 
 
+class ReporteEnergiaExclusion(Base):
+    """Ventana de fechas en la que una frontera (Generación o Consumo) no se
+    clasifica en absoluto -- para casos como un CT en falla ya reportado a
+    XM, donde no se quiere reportar ningún número automático mientras se
+    resuelve. Alcance mínimo a propósito (una especie de bandera con
+    trazabilidad): quién, por qué, desde/hasta cuándo -- no depende de
+    Fallas (ese módulo requiere monitoreo/representación, que no todas las
+    fronteras tienen; CGM y representación son servicios separados).
+
+    Real: GD Agustín 2, frontera_id=98, CT en falla reportado a XM
+    (2026-08-04).
+    """
+    __tablename__ = "reporte_energia_exclusiones"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="CASCADE"), nullable=False, index=True)
+    motivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    fecha_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_fin_estimada: Mapped[date | None] = mapped_column(Date, nullable=True)
+    creado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False)
+    resuelta_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    frontera: Mapped["Frontera"] = relationship("Frontera")
+    creado_por: Mapped["Usuario"] = relationship("Usuario")
+
+
 class ReporteEnergiaConsumo(Base):
     """Un día de reporte para una frontera de Consumo.
 
     'caso' es texto ('CGM' / 'Medidor' / 'Histórico' / 'Sin dato') -- árbol
     de clasificador_consumo.py, más corto que el de generación porque no hay
-    inversores contra qué validar cruzado.
+    inversores contra qué validar cruzado -- o 'Error' si el clasificador
+    lanzó una excepción para esta frontera ese día.
     """
     __tablename__ = "reporte_energia_consumo"
     __table_args__ = (
@@ -112,6 +150,11 @@ class ReporteEnergiaConsumo(Base):
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     validado_por_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
     validado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_clasificacion: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    enviado_quoia_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enviado_quoia_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    enviado_quoia_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

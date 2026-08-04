@@ -241,6 +241,13 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     proyecto_fecha_inicio_comercializacion: Optional[date] = None
+    # Basado en las últimas corridas del pipeline Reporte Energía
+    # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
+    # cubre todas las fronteras de generación, no solo las que tienen
+    # identificador de monitoreo Unergy resuelto. None = todavía sin ninguna
+    # corrida para esta frontera (no implica que no genere).
+    generando_actual: Optional[bool] = None
+    fecha_ultima_generacion: Optional[date] = None
     operador_comercial: Optional[str] = None
     operador_correos: list[str] = []
     # Uno por cada cliente que sea fuente del contacto CGM de este proyecto

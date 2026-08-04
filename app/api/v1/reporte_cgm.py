@@ -21,6 +21,7 @@ router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
 def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
     return (
         db.query(Frontera)
+        .options(joinedload(Frontera.proyecto))
         .filter(Frontera.operador_red_id == operador_id, Frontera.deleted_at.is_(None))
         .all()
     )
@@ -35,9 +36,20 @@ def _fronteras_de_cliente(db: Session, cliente_id: int) -> list[Frontera]:
         return []
     return (
         db.query(Frontera)
+        .options(joinedload(Frontera.proyecto))
         .filter(Frontera.proyecto_id.in_(proyecto_ids), Frontera.deleted_at.is_(None))
         .all()
     )
+
+
+def _nombres_proyectos(fronteras: list[Frontera]) -> list[str]:
+    """Nombres únicos de proyecto entre estas fronteras (una misma planta
+    suele tener frontera de Generación y de Consumo por separado)."""
+    vistos: dict[int, str] = {}
+    for f in fronteras:
+        if f.proyecto and f.proyecto_id not in vistos:
+            vistos[f.proyecto_id] = f.proyecto.nombre_comercial
+    return sorted(vistos.values())
 
 
 @router.post("/enviar", response_model=EnviarReporteCGMResponse)
@@ -80,6 +92,8 @@ def enviar_reporte_cgm(
             correos = get_contactos(db, "cgm", cliente_id=dest.id)
             nombre = cliente.razon_social_nombre
 
+        proyectos_total = len(_nombres_proyectos(fronteras))
+
         # Filtro opcional a proyectos puntuales dentro de este destinatario --
         # el frontend siempre manda la selección explícita (nunca None), pero
         # se respeta None por si algún otro consumidor de la API no lo manda.
@@ -87,7 +101,10 @@ def enviar_reporte_cgm(
             proyectos_ids = set(dest.proyectos)
             fronteras = [f for f in fronteras if f.proyecto_id in proyectos_ids]
 
-        items.append({"dest": dest, "nombre": nombre, "correos": correos, "fronteras": fronteras})
+        items.append({
+            "dest": dest, "nombre": nombre, "correos": correos, "fronteras": fronteras,
+            "proyectos_total": proyectos_total,
+        })
 
     # 2. Un solo lote de llamadas a Quoia -- solo los frt_codes que realmente
     #    hacen falta para esta request, dedupeados entre todos los destinatarios.
@@ -121,6 +138,7 @@ def enviar_reporte_cgm(
     resultados = []
     for item in items:
         dest, nombre, correos, fronteras = item["dest"], item["nombre"], item["correos"], item["fronteras"]
+        proyectos_total = item.get("proyectos_total", 0)
 
         if not fronteras:
             resultados.append(EnvioResultado(
@@ -149,6 +167,8 @@ def enviar_reporte_cgm(
                 filename=f"cgm-report-{fecha_archivo}-{slug}.xlsx",
                 fecha_str=fecha_display,
                 destinatario_nombre=nombre,
+                proyectos=_nombres_proyectos(fronteras),
+                proyectos_total=proyectos_total,
             )
             resultados.append(EnvioResultado(
                 tipo=dest.tipo, id=dest.id, nombre=nombre, correos=correos,

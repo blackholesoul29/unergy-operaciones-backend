@@ -430,7 +430,14 @@ def reconciliar(mandato: dict, details: list[dict], tag: str) -> dict:
         inter = len(mand_tok & aset)
         return inter > 0 and (inter == len(mand_tok) or inter == len(aset))
 
-    lines = [d for d in details if d["proj"] == tag and asociado_match(d["asociado"])]
+    tag_lines = [d for d in details if d["proj"] == tag]
+    lines = [d for d in tag_lines if asociado_match(d["asociado"])]
+    matched_ids = {id(d) for d in lines}
+    # Líneas del mismo proyecto que quedaron FUERA de `lines` (cuenta no mapeada
+    # al concepto esperado, o asociado que no calza con el mandante — p. ej. el
+    # mantenimiento pagado directo al contratista vía "Administración de
+    # proyectos" con el contratista como Asociado, en vez de la fiduciaria).
+    unmatched_lines = [d for d in tag_lines if id(d) not in matched_ids]
 
     # Sumar por concepto el DÉBITO de la cuenta de costo (NUNCA el neto debe − haber).
     sums: dict[str, float] = {}
@@ -461,8 +468,15 @@ def reconciliar(mandato: dict, details: list[dict], tag: str) -> dict:
         mv = vals[c] or 0
         av = round((sums.get(c, 0)) * 100) / 100
         if av == 0 and mv > 0:
-            flags.append({"lvl": "bad", "code": "FALTANTE",
-                          "txt": f"{CONCEPTS[c]}: en el mandato ({fmt(mv)}) pero no aparece en el asiento para este mandante/proyecto."})
+            candidatos = [d for d in unmatched_lines if abs(d["debe"] - mv) <= TOL]
+            if candidatos:
+                best = min(candidatos, key=lambda d: abs(d["debe"] - mv))
+                flags.append({"lvl": "warn", "code": "OTRA_CUENTA",
+                              "txt": f"{CONCEPTS[c]}: en el mandato ({fmt(mv)}) — registrado en el asiento pero en otra cuenta/asociado: "
+                                     f"cuenta {best['acc']} ({best['accDesc']}), asociado \"{best['asociado']}\" ({fmt(best['debe'])})."})
+            else:
+                flags.append({"lvl": "bad", "code": "FALTANTE",
+                              "txt": f"{CONCEPTS[c]}: en el mandato ({fmt(mv)}) pero no aparece en el asiento para este mandante/proyecto."})
         elif abs(mv - av) > TOL:
             flags.append({"lvl": "bad", "code": "DIFERENCIA",
                           "txt": f"{CONCEPTS[c]}: mandato {fmt(mv)} vs. asiento {fmt(av)} · diferencia {fmt(abs(mv - av))}."})

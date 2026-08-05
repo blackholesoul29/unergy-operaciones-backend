@@ -313,6 +313,38 @@ def test_bug4c_arriendo_redaccion_responsable_no_responsable_iva():
     assert res["status"] == "ok"
 
 
+def test_bug4d_arriendo_generico_no_responsable_iva_no_se_divide():
+    """Caso real CMU1264/1265/1266: el mandato solo lista "Arriendo" genérico
+    (un único arrendador, que no es responsable de IVA, sin línea de IVA
+    arriendo) y contablemente ese único arrendador cae en la cuenta 28151025.
+    Reclasificar esa cuenta a arr_cc SIEMPRE (como hacía el fix anterior) rompía
+    este caso: el mandato decía "arr" pero el asiento sumaba "arr_cc" — dos
+    claves distintas que nunca coincidían (FALTANTE + SOBRANTE simultáneos).
+    Solo debe dividirse cuando el mandato explícitamente separa (bug4b/4c).
+    """
+    pdf = (
+        "CMU1264\n"
+        "en calidad de mandatario, y SUNO ACTIVOS SOSTENIBLES S.A.S., con NIT. "
+        "900.777.666-2, en calidad de mandante, relacionado con el proyecto "
+        "MINIGRANJA EL SON.\n"
+        "ARRIENDO $ 874,490.00\n"
+        "VALOR A PAGAR $ 874,490.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1264.pdf")
+    assert m["vals"]["arr"] == 874490
+    assert "arr_cc" not in m["vals"]
+    assert "arr_fact" not in m["vals"]
+
+    mand = "SUNO ACTIVOS SOSTENIBLES S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 874490, "haber": 0, "etiqueta": "ARRIENDO JULIO", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr"] == 874490
+    assert "arr_cc" not in res["sums"]
+    assert res["status"] == "ok"
+
+
 # ── BUG 5: Administración / IVA administración ────────────────────────────────
 
 def test_bug5_administracion():

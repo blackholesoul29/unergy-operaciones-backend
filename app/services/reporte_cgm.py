@@ -36,7 +36,7 @@ def dias_del_mes(fecha: date) -> list[str]:
 
 
 def nombre_mes(fecha: date) -> str:
-    return f"{_MESES_ES[fecha.month - 1]} de {fecha.year}"
+    return _MESES_ES[fecha.month - 1]
 
 
 def titulo_hoja_mensual(fecha: date) -> str:

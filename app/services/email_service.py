@@ -613,9 +613,9 @@ def send_reporte_cgm_email(
 
     subject = f"Reporte CGM — {fecha_str} — {destinatario_nombre}"
     fecha_frase = f"al periodo {fecha_str}" if " a " in fecha_str else f"al día {fecha_str}"
-    nota_mensual_texto = f"Adjuntamos también el consolidado mensual de {mes_str}.\n\n" if excel_mensual_bytes else ""
+    nota_mensual_texto = f"Adjuntamos también el consolidado del mes de {mes_str}.\n\n" if excel_mensual_bytes else ""
     nota_mensual_html = (
-        f'<p>Adjuntamos también el consolidado mensual de {mes_str}.</p>' if excel_mensual_bytes else ""
+        f'<p>Adjuntamos también el consolidado del mes de {mes_str}.</p>' if excel_mensual_bytes else ""
     )
 
     msg = MIMEMultipart("mixed")

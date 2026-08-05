@@ -156,7 +156,22 @@ def _decidir_caso(
     # --- Caso 5: tengo medidores pero no inversores ---
     if e_inv == 0 and e_cgm > 0:
         if reporte_valido:
-            return {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+            resultado_cgm = {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+            # Solenium reportó parcial ese día (e_inv_incompleto) -- no se
+            # descarta solo por estar incompleto, se usa igual como chequeo
+            # de plausibilidad: se compara CGM contra inversores SOLO en las
+            # horas que Solenium sí cubrió (no el total del día completo,
+            # que siempre se vería "mal" contra un total parcial). Si
+            # coincide dentro del rango normal, no hace falta Revisar
+            # Manualmente solo porque hubo un hueco en un dato que ni
+            # siquiera se usó para el número reportado (se sigue confiando
+            # en CGM en ambos casos -- esto solo decide la bandera).
+            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
+                curva_cgm_horas_comunes = curva_cgm.where(curva_solenium.notna())
+                error_parcial = _error_con_curva(e_inv_incompleto, curva_cgm_horas_comunes)
+                resultado_cgm["error_final_pct"] = error_parcial
+                resultado_cgm["revisar_manualmente"] = not _en_rango(error_parcial)
+            return resultado_cgm
 
         curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if not _tiene_dato(curva):
@@ -362,9 +377,12 @@ def clasificar_generacion(
     revisar = resultado.get("revisar_manualmente", False)
 
     # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
-    # de recuperarlo como con los medidores) -- excepto Caso 1, que no
-    # depende de Solenium para nada (e_cgm ya avalado por Quoia).
-    if resultado["caso"] != 1 and e_inv_original > 0 and not solenium_completo:
+    # de recuperarlo como con los medidores) -- excepto cuando el resultado
+    # ya confía en CGM (medidor_usado='cgm', Caso 1 o el Caso 5 de arriba):
+    # ese camino no reporta con Solenium, y si viene de la rama de Caso 5
+    # que sí comparó contra el total parcial de inversores, ya decidió su
+    # propia bandera con ese chequeo -- no la pise acá.
+    if resultado.get("medidor_usado") != "cgm" and e_inv_original > 0 and not solenium_completo:
         revisar = True
 
     # --- Relleno horario centralizado ---

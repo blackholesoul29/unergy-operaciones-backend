@@ -189,11 +189,20 @@ def clasificar_consumo(
             cgm_ok = False
 
     if cgm_ok:
-        return {
+        resultado_cgm = {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "horas_rellenadas_historico": None, "recuperacion_datos": None,
         }
+        if frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+            # Paso Norte -- el bug de Quoia es intermitente, así que pasar el
+            # cruce contra medidor un día puntual no lo vuelve confiable en
+            # general. Se sigue reportando con CGM (la mejor fuente que hay),
+            # pero siempre queda para revisar a mano -- y por lo mismo nunca
+            # alimenta el histórico (get_mediana_consumo exige
+            # revisar_manualmente=False).
+            resultado_cgm["revisar_manualmente"] = True
+        return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,

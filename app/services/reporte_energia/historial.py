@@ -176,15 +176,18 @@ def get_forma_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[pd
 
 def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[float | None, int]:
     """Mediana del total diario de los últimos DIAS_VENTANA días de Caso
-    'Medidor' (nunca 'CGM' ni 'Histórico' -- el histórico debe basarse en
-    lectura física real, no en el reporte de un tercero ni en una
-    estimación previa), ANTES de `fecha`."""
+    'Medidor' sin revisión manual (nunca 'CGM' ni 'Histórico' -- el
+    histórico debe basarse en lectura física real, no en el reporte de un
+    tercero ni en una estimación previa; ni en un día sin mediana con qué
+    validarse, que nadie confirmó -- mismo criterio que
+    get_mediana_generacion), ANTES de `fecha`."""
     totales = db.execute(
         select(ReporteEnergiaConsumo.energia_final_kwh)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
             ReporteEnergiaConsumo.caso == "Medidor",
+            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)
@@ -198,13 +201,14 @@ def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[flo
 
 def get_forma_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:
     """Forma horaria típica de Consumo, mismo criterio que get_forma_generacion
-    pero sobre Caso 'Medidor'."""
+    pero sobre Caso 'Medidor' sin revisión manual."""
     curvas = db.execute(
         select(ReporteEnergiaConsumo.curva_final)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
             ReporteEnergiaConsumo.caso == "Medidor",
+            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)

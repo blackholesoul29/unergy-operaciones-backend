@@ -44,10 +44,14 @@ ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy
 # los ids reales contra la BD ("GD Agustín 2" en el pipeline original).
 MEDIDORES_SIN_INVERSOR_SOSPECHOSOS: set[int] = set()
 
-# frontera_id de proyectos cuyo reporte lo hace al ASIC otra empresa
-# distinta a Unergy -- no aplica este árbol de Casos. Confirmar ids reales
-# contra la BD ("Cedillanos Frontera 88864637" en el pipeline original).
-FRONTERAS_TERCEROS: set[int] = set()
+# frontera_id de proyectos cuyo CGM lo hace al ASIC otra empresa distinta a
+# Unergy -- no aplica este árbol de Casos. El medidor de nodo de Quoia no
+# tiene telemetría (confirmado en vivo: energia_medidor_principal/respaldo_kwh
+# siempre 0), así que mientras no se suba el Excel del tercero para el día
+# (POST /fronteras/{id}/cargar-excel-terceros) queda en caso=0/"externo" con
+# revisar_manualmente=True -- ver clasificar_generacion() más abajo.
+# 79 = Complejo Industrial Cedillanos (Frt88292).
+FRONTERAS_TERCEROS: set[int] = {79}
 
 
 def _en_rango(error: float | None) -> bool:

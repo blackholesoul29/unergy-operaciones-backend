@@ -7,7 +7,7 @@ import json
 import random
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -23,8 +23,11 @@ from app.schemas.reporte_energia import (
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
+    CargaExcelTercerosResponse,
 )
 from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc, historial
+from app.services.reporte_energia import excel_terceros
+from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
@@ -203,6 +206,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
 
@@ -233,6 +237,61 @@ def editar_curva(
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.post("/fronteras/{frontera_id}/cargar-excel-terceros", response_model=CargaExcelTercerosResponse)
+async def cargar_excel_terceros(
+    frontera_id: int, archivo: UploadFile = File(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Sube el Excel que envía la empresa tercera que hace el CGM de esta
+    frontera (FRONTERAS_TERCEROS, ej. Cedillanos) -- reemplaza la
+    transcripción manual que hoy se hace directamente en Quoia. Reporta
+    'Primary' como curva_final y 'Backup' (si viene) como
+    curva_respaldo_terceros, para que /enviar use ese respaldo real en vez
+    de la fórmula ±1%."""
+    if frontera_id not in FRONTERAS_TERCEROS:
+        raise HTTPException(400, "Esta frontera no está configurada como frontera de terceros")
+    front = db.get(Frontera, frontera_id)
+    if front is None:
+        raise HTTPException(404, "Frontera no encontrada")
+
+    contenido = await archivo.read()
+    try:
+        por_fecha = excel_terceros.parse_excel_terceros(contenido)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    fechas_cargadas: list[date] = []
+    for fecha, datos in por_fecha.items():
+        principal = datos["principal"]
+        if principal is None:
+            continue  # sin fila 'Primary' para ese día -- nada que reportar
+
+        rep = db.execute(
+            select(ReporteEnergiaGeneracion).where(
+                ReporteEnergiaGeneracion.frontera_id == frontera_id,
+                ReporteEnergiaGeneracion.fecha == fecha,
+            )
+        ).scalar_one_or_none()
+        if rep is None:
+            rep = ReporteEnergiaGeneracion(frontera_id=frontera_id, fecha=fecha, caso=0)
+            db.add(rep)
+
+        rep.caso = 0
+        rep.medidor_usado = "excel_terceros"
+        rep.curva_final = principal
+        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
+        rep.curva_respaldo_terceros = datos["respaldo"]
+        rep.revisar_manualmente = False
+        rep.editado_manualmente = True
+        fechas_cargadas.append(fecha)
+
+    if not fechas_cargadas:
+        raise HTTPException(400, "No encontré ninguna fila 'Primary' con ENERGY TYPE = ENERGIA EXPORTADA ACTIVA")
+
+    db.commit()
+    return CargaExcelTercerosResponse(frontera_id=frontera_id, fechas_cargadas=sorted(fechas_cargadas))
 
 
 @router.get("/fronteras/{frontera_id}/curva-tipica", response_model=CurvaTipicaResponse)
@@ -505,10 +564,16 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
         curva = rep.curva_final or [0.0] * 24
         main_readings = [float(v) if v is not None else 0.0 for v in curva]
-        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
-        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
-        # vez por hora al momento de enviar, porque la API espera números fijos.
-        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+        respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
+        if respaldo_terceros:
+            # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
+            # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
+            backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
+        else:
+            # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
+            # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
+            # vez por hora al momento de enviar, porque la API espera números fijos.
+            backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
 
         try:
             ok = gaia.post_report(border_id, main_readings, backup_readings)

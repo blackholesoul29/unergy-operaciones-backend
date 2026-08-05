@@ -69,6 +69,10 @@ class DetalleFronteraReporte(BaseModel):
     curva_medidor_principal: list[float | None] | None = None
     curva_medidor_respaldo: list[float | None] | None = None
     curva_solenium: list[float | None] | None = None
+    # Curva 'Backup' del Excel de terceros (FRONTERAS_TERCEROS) -- distinta
+    # de curva_medidor_respaldo (esa es telemetría en vivo del medidor de
+    # nodo, que para estas fronteras no existe).
+    curva_respaldo_terceros: list[float | None] | None = None
     # Capacidad efectiva de la frontera (MW) -- referencia visual en el chart
     # para confirmar que la curva de generación nunca la supera.
     capacidad_efectiva_mw: float | None = None
@@ -145,6 +149,13 @@ class CurvaTipicaResponse(BaseModel):
     curva: list[float | None]
     energia_total_kwh: float
     dias_usados: int
+
+
+class CargaExcelTercerosResponse(BaseModel):
+    """Resultado de subir el Excel de una empresa tercera (FRONTERAS_TERCEROS,
+    ej. Cedillanos) -- una fecha por cada día con fila 'Primary' en el archivo."""
+    frontera_id: int
+    fechas_cargadas: list[date]
 
 
 class ExclusionOut(BaseModel):

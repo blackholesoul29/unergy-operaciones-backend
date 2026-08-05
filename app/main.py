@@ -657,6 +657,10 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_reporte_energia_exclusiones_frontera ON reporte_energia_exclusiones (frontera_id)",
+    # migration — reporte_energia_generacion: curva de respaldo real subida
+    # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
+    # null, /enviar sigue usando la fórmula ±1% sobre curva_final
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_respaldo_terceros JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

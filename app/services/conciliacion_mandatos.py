@@ -34,6 +34,12 @@ ACC2CONCEPT: dict[str, str] = {
     "28151010": "iva_int",  "28151016": "iva_int",
     "28150515": "arr",      "28150517": "arr",
     "28150516": "iva_arr",  "28150518": "iva_arr",
+    # Arrendamiento para terceros con arrendador NO responsable de IVA. Se
+    # mapea a "arr" genérico como base: SOLO se reclasifica a arr_cc cuando el
+    # mandato realmente separa el arriendo en dos conceptos (ver reconciliar);
+    # si el mandato solo dice "Arriendo" (un único arrendador, sin IVA, caso
+    # normal), debe seguir cayendo en el mismo 'arr' genérico del mandato.
+    "28151025": "arr",
     # Póliza todo riesgo y lucrocesante (antes sin mapear: el verificador la
     # ignoraba tanto en el asiento como en el mandato).
     "28151004": "poliza",   "28151007": "iva_poliza",
@@ -278,6 +284,11 @@ _MANDATO_CONCEPT_MAP = [
     # divide el arriendo en dos facturas (ej. La Reserva), se guardan como
     # conceptos separados y cada una se verifica contra su etiqueta del asiento.
     ("ARRIENDO CUENTA DE COBRO", "arr_cc"), ("ARRIENDO FACTURA", "arr_fact"),
+    # Redacción nueva del mandato (desde jul-2026): distingue por responsabilidad
+    # de IVA del arrendador en vez de por tipo de soporte (CC/Factura). Debe ir
+    # ANTES del genérico "ARRIENDO": si no, el genérico la captura y la cae el
+    # chequeo "contiene IVA" de más abajo, descartando el valor por completo.
+    ("ARRIENDO NO RESPONSABLE DE IVA", "arr_cc"), ("ARRIENDO RESPONSABLE DE IVA", "arr_fact"),
     ("ARRIENDO", "arr"), ("IVA ARRIENDO", "iva_arr"),
     # 'POLIZA' (sin el resto de la frase) para tolerar variaciones de redacción.
     ("POLIZA", "poliza"), ("IVA POLIZA", "iva_poliza"),
@@ -439,29 +450,39 @@ def reconciliar(mandato: dict, details: list[dict], tag: str) -> dict:
     # proyectos" con el contratista como Asociado, en vez de la fiduciaria).
     unmatched_lines = [d for d in tag_lines if id(d) not in matched_ids]
 
+    vals = mandato.get("vals") or {}
+    # El mandato solo separa arriendo en arr_cc/arr_fact cuando el proyecto tiene
+    # DOS arrendadores (uno responsable de IVA y otro no) y así lo lista. Si el
+    # mandato solo trae el 'arr' genérico (un único arrendador, sea o no
+    # responsable de IVA), NINGUNA cuenta debe reclasificarse: todo cae junto en
+    # 'arr', sin importar si contablemente quedó en 28150517 o en 28151025.
+    arriendo_dividido = "arr_cc" in vals or "arr_fact" in vals
+
     # Sumar por concepto el DÉBITO de la cuenta de costo (NUNCA el neto debe − haber).
     sums: dict[str, float] = {}
     wrong_acc = []
     for d in lines:
         c = ACC2CONCEPT.get(d["acc"])
-        # Si la cuenta es de arriendo genérico, se afina el concepto según la
-        # ETIQUETA del asiento — algunos proyectos (ej. La Reserva) dividen el
-        # arriendo en dos facturas que comparten cuenta contable pero se
-        # distinguen por la etiqueta: "...CC..." (Cuenta de Cobro) o "...FACT..."
-        # (Factura). Si la etiqueta no trae ninguna, se queda como 'arr' genérico
-        # y no rompe los proyectos que no dividen el arriendo.
-        if c == "arr":
-            etq = norm(d.get("etiqueta") or "")
-            if re.search(r"\bCC\b", etq):
+        if c == "arr" and arriendo_dividido:
+            # La cuenta 28151025 es inequívoca (arrendador no responsable de IVA)
+            # → arr_cc directo. Las demás cuentas de arriendo, cuando el mandato
+            # divide, se afinan por la ETIQUETA del asiento ("...CC..."/"...FACT...";
+            # algunos proyectos como La Reserva comparten cuenta pero distinguen
+            # por etiqueta). Si la etiqueta no trae ninguna pista, se asume que es
+            # la contraparte responsable de IVA (arr_fact), ya que 28151025 ya
+            # cubrió el caso "no responsable".
+            if d["acc"] == "28151025":
                 c = "arr_cc"
-            elif re.search(r"\bFACT\b", etq):
-                c = "arr_fact"
+            else:
+                etq = norm(d.get("etiqueta") or "")
+                if re.search(r"\bCC\b", etq):
+                    c = "arr_cc"
+                else:
+                    c = "arr_fact"
         if c:
             sums[c] = sums.get(c, 0) + d["debe"]
         elif d["acc"] in NON_COST_ACCOUNTS and (d["debe"] - d["haber"]) > 0:
             wrong_acc.append(d)
-
-    vals = mandato.get("vals") or {}
 
     # A) Importes por concepto (incluye faltantes)
     for c in vals:

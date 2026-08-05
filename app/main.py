@@ -657,6 +657,10 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_reporte_energia_exclusiones_frontera ON reporte_energia_exclusiones (frontera_id)",
+    # migration — reporte_energia_generacion: curva de respaldo real subida
+    # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
+    # null, /enviar sigue usando la fórmula ±1% sobre curva_final
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_respaldo_terceros JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,
@@ -2400,6 +2404,23 @@ def _scheduled_comercializacion_backfill():
         print(f"[comercializacion_backfill] Failed to get DB session: {e}")
 
 
+def _scheduled_reporte_energia():
+    """Corre el clasificador de Reporte de Energía (Generación + Consumo)
+    para el día anterior, hora Bogotá -- a esa hora el reporte CGM de Quoia
+    ya suele estar asentado (ver hallazgos de sesión: Cedillanos/Baraya/La
+    Puya, el reporte de un día suele llegar completo entre las 9 y las 10am
+    del día siguiente). ejecutar_dia_background ya maneja su propia sesión
+    de BD, logging y registro en _ULTIMAS_CORRIDAS (mismo mecanismo que usa
+    POST /ejecutar) -- no hace falta duplicar nada acá, solo calcular la
+    fecha y llamarla."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from app.services.reporte_energia.orquestador import ejecutar_dia_background
+
+    fecha = (datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(days=1)).date()
+    ejecutar_dia_background(fecha)
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3344,6 +3365,13 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="comercializacion_backfill",
                 name="Backfill fecha inicio comercializacion",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_reporte_energia,
+                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
+                id="reporte_energia_clasificar",
+                name="Reporte de Energía -- clasificar día anterior",
             )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del

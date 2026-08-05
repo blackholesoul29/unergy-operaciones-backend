@@ -7,7 +7,7 @@ import json
 import random
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -22,15 +22,30 @@ from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
-    CrearExclusionRequest, ExclusionOut, EditarExclusionRequest,
+    CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
+    CargaExcelTercerosResponse,
 )
-from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc
-from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva
+from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc, historial
+from app.services.reporte_energia import excel_terceros
+from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
+from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
+
+# Correcciones cosméticas de nombre_frontera SOLO para esta vista -- el
+# campo real en `fronteras` no se toca (puede reflejar el registro tal como
+# quedó cargado, con errores de digitación incluidos, y otras pantallas ya
+# lo muestran así). frontera_id -> nombre a mostrar acá.
+_NOMBRES_CORREGIDOS: dict[int, str] = {
+    6: "MINIGRANJA SOLAR BARAYA SERV AUX",  # BD: "MINIGRANJA SOLAR BRAYA SERV AUX"
+}
+
+
+def _nombre_frontera(front: Frontera) -> str:
+    return _NOMBRES_CORREGIDOS.get(front.id, front.nombre_frontera)
 
 
 def _semaforo(caso, revisar: bool) -> str:
@@ -85,10 +100,10 @@ def listar_fronteras(
         for rep, front, proyecto_id in filas:
             if solo_pendientes and not rep.revisar_manualmente:
                 continue
-            if q and q.lower() not in (front.nombre_frontera or "").lower():
+            if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
             items.append(FronteraReporteItem(
-                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=front.nombre_frontera,
+                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=_nombre_frontera(front),
                 tipo="generacion", caso=str(rep.caso), medidor_usado=rep.medidor_usado,
                 energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
                 revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
@@ -105,10 +120,10 @@ def listar_fronteras(
         for rep, front, proyecto_id in filas:
             if solo_pendientes and not rep.revisar_manualmente:
                 continue
-            if q and q.lower() not in (front.nombre_frontera or "").lower():
+            if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
             items.append(FronteraReporteItem(
-                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=front.nombre_frontera,
+                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=_nombre_frontera(front),
                 tipo="consumo", caso=rep.caso, medidor_usado=rep.medidor_usado,
                 energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
                 revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
@@ -177,7 +192,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
     return DetalleFronteraReporte(
-        frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=front.nombre_frontera,
+        frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
         tipo="generacion" if es_generacion else "consumo", fecha=fecha,
         caso=str(rep.caso), medidor_usado=rep.medidor_usado,
         energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
@@ -203,6 +218,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
 
@@ -233,6 +249,92 @@ def editar_curva(
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.post("/fronteras/{frontera_id}/cargar-excel-terceros", response_model=CargaExcelTercerosResponse)
+async def cargar_excel_terceros(
+    frontera_id: int, archivo: UploadFile = File(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Sube el Excel que envía la empresa tercera que hace el CGM de esta
+    frontera (FRONTERAS_TERCEROS, ej. Cedillanos) -- reemplaza la
+    transcripción manual que hoy se hace directamente en Quoia. Reporta
+    'Primary' como curva_final y 'Backup' (si viene) como
+    curva_respaldo_terceros, para que /enviar use ese respaldo real en vez
+    de la fórmula ±1%."""
+    if frontera_id not in FRONTERAS_TERCEROS:
+        raise HTTPException(400, "Esta frontera no está configurada como frontera de terceros")
+    front = db.get(Frontera, frontera_id)
+    if front is None:
+        raise HTTPException(404, "Frontera no encontrada")
+
+    contenido = await archivo.read()
+    try:
+        por_fecha = excel_terceros.parse_excel_terceros(contenido)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    fechas_cargadas: list[date] = []
+    for fecha, datos in por_fecha.items():
+        principal = datos["principal"]
+        if principal is None:
+            continue  # sin fila 'Primary' para ese día -- nada que reportar
+
+        rep = db.execute(
+            select(ReporteEnergiaGeneracion).where(
+                ReporteEnergiaGeneracion.frontera_id == frontera_id,
+                ReporteEnergiaGeneracion.fecha == fecha,
+            )
+        ).scalar_one_or_none()
+        if rep is None:
+            rep = ReporteEnergiaGeneracion(frontera_id=frontera_id, fecha=fecha, caso=0)
+            db.add(rep)
+
+        rep.caso = 0
+        rep.medidor_usado = "excel_terceros"
+        rep.curva_final = principal
+        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
+        rep.curva_respaldo_terceros = datos["respaldo"]
+        rep.revisar_manualmente = False
+        rep.editado_manualmente = True
+        fechas_cargadas.append(fecha)
+
+    if not fechas_cargadas:
+        raise HTTPException(400, "No encontré ninguna fila 'Primary' con ENERGY TYPE = ENERGIA EXPORTADA ACTIVA")
+
+    db.commit()
+    return CargaExcelTercerosResponse(frontera_id=frontera_id, fechas_cargadas=sorted(fechas_cargadas))
+
+
+@router.get("/fronteras/{frontera_id}/curva-tipica", response_model=CurvaTipicaResponse)
+def curva_tipica(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Mediana x forma horaria de los últimos días confiables -- mismo
+    mecanismo que ya alimenta el relleno histórico automático (ver
+    historial.py), expuesto para el botón "Curva Típica" en Corrección
+    manual. No guarda nada -- solo devuelve la curva para que el usuario
+    la revise/ajuste antes de "Guardar corrección"."""
+    front = db.get(Frontera, frontera_id)
+    if front is None:
+        raise HTTPException(404, "Frontera no encontrada")
+
+    es_generacion = front.tipo_frontera == TipoFronteraEnum.generacion
+    if es_generacion:
+        mediana, dias_usados = historial.get_mediana_generacion(db, frontera_id, fecha)
+        forma, _ = historial.get_forma_generacion(db, frontera_id, fecha)
+    else:
+        mediana, dias_usados = historial.get_mediana_consumo(db, frontera_id, fecha)
+        forma, _ = historial.get_forma_consumo(db, frontera_id, fecha)
+
+    if mediana is None or forma is None:
+        raise HTTPException(404, "No hay suficiente histórico confiable todavía para esta frontera")
+
+    curva = escalar_curva(forma, mediana)
+    return CurvaTipicaResponse(
+        curva=curva_a_lista(curva), energia_total_kwh=float(mediana), dias_usados=dias_usados,
+    )
 
 
 @router.get("/fronteras/{frontera_id}/ediciones", response_model=list[EdicionAuditoria])
@@ -290,7 +392,7 @@ def _exclusion_out(db: Session, excl: ReporteEnergiaExclusion) -> ExclusionOut:
     front = db.get(Frontera, excl.frontera_id)
     return ExclusionOut(
         id=excl.id, frontera_id=excl.frontera_id,
-        nombre_frontera=front.nombre_frontera if front else None,
+        nombre_frontera=_nombre_frontera(front) if front else None,
         motivo=excl.motivo, fecha_inicio=excl.fecha_inicio,
         fecha_fin_estimada=excl.fecha_fin_estimada,
         creado_por=excl.creado_por.nombre if excl.creado_por else None,
@@ -409,7 +511,15 @@ def cancelar_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
 def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
     """Mismo criterio que excel.py: si Quoia ya reportó bien por su cuenta,
     no hace falta corregirlo -- enviar de más sobreescribiría un reporte
-    oficial que ya estaba bien."""
+    oficial que ya estaba bien.
+
+    'excluida' también se salta acá -- curva_final es None mientras dura la
+    exclusión (ver orquestador._exclusion_activa), así que sin este chequeo
+    /enviar mandaría una curva de 0 kWh fabricada a Quoia para una frontera
+    que justamente no debe reportar nada mientras se resuelve lo que la
+    excluyó."""
+    if rep.medidor_usado == "excluida":
+        return True
     return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 
@@ -469,15 +579,21 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
         if not border_id:
             rep.enviado_quoia_ok = False
             rep.enviado_quoia_error = "Sin border_id en Quoia"
-            fallidos.append(f"{front.nombre_frontera} — sin border_id en Quoia")
+            fallidos.append(f"{_nombre_frontera(front)} — sin border_id en Quoia")
             return
 
         curva = rep.curva_final or [0.0] * 24
         main_readings = [float(v) if v is not None else 0.0 for v in curva]
-        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
-        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
-        # vez por hora al momento de enviar, porque la API espera números fijos.
-        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+        respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
+        if respaldo_terceros:
+            # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
+            # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
+            backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
+        else:
+            # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
+            # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
+            # vez por hora al momento de enviar, porque la API espera números fijos.
+            backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
 
         try:
             ok = gaia.post_report(border_id, main_readings, backup_readings)
@@ -491,7 +607,7 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
         if ok:
             enviados += 1
         else:
-            fallidos.append(f"{front.nombre_frontera} — {motivo}")
+            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
 
     for rep, front in gen_filas:
         _procesar(rep, front, es_generacion=True)

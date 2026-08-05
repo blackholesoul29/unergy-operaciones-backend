@@ -6,6 +6,8 @@ catálogo de Quoia -- el llamador decide qué frt_codes pedir.
 """
 from __future__ import annotations
 
+import calendar
+from datetime import date, timedelta
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -15,6 +17,30 @@ from openpyxl.utils import get_column_letter
 from app.services.mgs.gaia_client import GaiaClient
 
 HORAS = list(range(24))
+
+_MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def es_ultimo_dia_del_mes(fecha: date) -> bool:
+    return fecha.day == calendar.monthrange(fecha.year, fecha.month)[1]
+
+
+def dias_del_mes(fecha: date) -> list[str]:
+    """Del día 1 al día `fecha` (inclusive, mismo mes) -- para el consolidado
+    mensual que se adjunta cuando `fecha` es el último día del mes."""
+    inicio = fecha.replace(day=1)
+    return [(inicio + timedelta(days=i)).isoformat() for i in range((fecha - inicio).days + 1)]
+
+
+def nombre_mes(fecha: date) -> str:
+    return _MESES_ES[fecha.month - 1]
+
+
+def titulo_hoja_mensual(fecha: date) -> str:
+    return f"Consolidado {_MESES_ES[fecha.month - 1].capitalize()} {fecha.year}"
 
 ESTADO_QUOIA = {
     "OK": "Exitoso",
@@ -126,43 +152,11 @@ def _escribir_hoja(ws, filas: list[dict]) -> None:
     ws.row_dimensions[1].height = 30
 
 
-def _nombre_hoja(nombre: str, usados: set[str]) -> str:
-    """Nombre de hoja válido para Excel: máx 31 caracteres, sin : \\ / ? * [ ], único."""
-    limpio = "".join(c for c in (nombre or "Sin nombre") if c not in r':\/?*[]') or "Sin nombre"
-    base = limpio[:31]
-    candidato, i = base, 2
-    while candidato in usados:
-        sufijo = f" ({i})"
-        candidato = base[: 31 - len(sufijo)] + sufijo
-        i += 1
-    usados.add(candidato)
-    return candidato
-
-
-# Por encima de este número de días en el reporte, una sola hoja con todos los
-# proyectos mezclados se vuelve difícil de leer -- se separa una hoja por
-# proyecto (agrupando por "border sic code", que ya junta generación+consumo
-# de la misma planta).
-DIAS_UMBRAL_MULTI_HOJA = 14
-
-
-def generar_excel(filas: list[dict], multi_hoja: bool = False) -> bytes:
+def generar_excel(filas: list[dict], titulo_hoja: str = "CGM Report") -> bytes:
     wb = Workbook()
-
-    if not multi_hoja:
-        ws = wb.active
-        ws.title = "CGM Report"
-        _escribir_hoja(ws, filas)
-    else:
-        wb.remove(wb.active)
-        por_proyecto: dict[str, list[dict]] = {}
-        for fila in filas:
-            por_proyecto.setdefault(fila.get("border sic code") or "Sin nombre", []).append(fila)
-
-        usados: set[str] = set()
-        for nombre_proyecto, filas_proyecto in por_proyecto.items():
-            ws = wb.create_sheet(_nombre_hoja(nombre_proyecto, usados))
-            _escribir_hoja(ws, filas_proyecto)
+    ws = wb.active
+    ws.title = titulo_hoja[:31]  # límite de Excel para el nombre de hoja
+    _escribir_hoja(ws, filas)
 
     buf = BytesIO()
     wb.save(buf)

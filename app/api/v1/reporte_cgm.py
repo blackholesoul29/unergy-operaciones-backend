@@ -65,7 +65,6 @@ def enviar_reporte_cgm(
         (body.fecha_inicio + timedelta(days=i)).isoformat()
         for i in range((body.fecha_fin - body.fecha_inicio).days + 1)
     ]
-    multi_hoja = len(dias) > svc.DIAS_UMBRAL_MULTI_HOJA
     fecha_display = dias[0] if len(dias) == 1 else f"{dias[0]} a {dias[-1]}"
     fecha_archivo = dias[0] if len(dias) == 1 else f"{dias[0]}_a_{dias[-1]}"
 
@@ -159,7 +158,7 @@ def enviar_reporte_cgm(
             for fila in filas_por_frt.get(f.codigo_frontera, [])
         ]
         try:
-            excel_bytes = svc.generar_excel(filas, multi_hoja=multi_hoja)
+            excel_bytes = svc.generar_excel(filas)
             slug = "".join(c if c.isalnum() else "_" for c in nombre.lower()).strip("_")
             email_service.send_reporte_cgm_email(
                 to_emails=correos,

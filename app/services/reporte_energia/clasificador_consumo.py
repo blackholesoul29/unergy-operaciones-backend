@@ -91,6 +91,17 @@ TOLERANCIA_CGM_VS_MEDIDOR = 0.50
 # dato en sí no es confiablemente el de esta frontera.
 FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
 
+# %: qué tan lejos puede quedar un medidor del otro (principal vs respaldo)
+# antes de dejar de "preferir siempre el principal" cuando no hay mediana
+# histórica con qué arbitrar. Diferencias chicas (ej. Sol&Cielo 7 Los Bongos
+# 2026-08-03: 22 vs 19,8 kWh, ~10%) no justifican preferir el más alto solo
+# por serlo -- pero diferencias grandes (ej. Baraya AUX 2026-08-03: 18,9 vs
+# 3,3 kWh, ~83%) ya no son "cuál preferir sin razón", sino que uno de los
+# dos medidores probablemente está mal -- ahí se prefiere el de mayor valor
+# (una lectura de más se explica más fácil -- medidor caído/mal ubicado --
+# que una lectura de menos).
+DIFERENCIA_MEDIDORES_ALTA = 0.50
+
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
     return isinstance(curva, pd.Series) and curva.notna().any()
@@ -247,7 +258,27 @@ def _clasificar_por_medidor_o_historico(
             # real solo porque no hay con que cruzarlo, esté completo o no
             # (ver GD Polaris 2 Consumo 2026-08-03: 19 de 24 horas reales,
             # faltaban las últimas 5-6 -- antes se vaciaba la curva entera
-            # por ese hueco parcial). Se prefiere SIEMPRE el principal (ya
+            # por ese hueco parcial).
+            total_ppal = float(curva_ppal.fillna(0).sum())
+            total_resp = float(curva_resp.fillna(0).sum())
+            mayor = max(total_ppal, total_resp)
+            diferencia = abs(total_ppal - total_resp) / mayor if mayor > 0 else 0.0
+
+            if diferencia > DIFERENCIA_MEDIDORES_ALTA:
+                # Diferencia demasiado grande para ser solo ruido -- uno de
+                # los dos medidores probablemente está mal (ver Baraya AUX
+                # 2026-08-03). Sin mediana con qué arbitrar, se prefiere el
+                # de mayor valor.
+                curva = curva_ppal if total_ppal >= total_resp else curva_resp
+                return {
+                    "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                    "medidor_usado": "principal_sin_historico" if curva is curva_ppal else "respaldo_sin_historico",
+                    "revisar_manualmente": True,
+                    "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                    "recuperacion_datos": recuperacion_datos,
+                }
+
+            # Diferencia chica -- se prefiere SIEMPRE el principal (ya
             # sabemos que tiene dato, por estar en este 'if') -- no el de
             # mayor valor: decisión explícita del usuario tras ver Sol&Cielo
             # 7 Los Bongos Consumo 2026-08-03, donde el respaldo (22 kWh)
@@ -255,7 +286,7 @@ def _clasificar_por_medidor_o_historico(
             # preferirlo solo por ser más alto. Marcado para revisar a mano
             # porque nadie confirmó que el nivel sea el correcto.
             return {
-                "caso": "Medidor", "energia_final_kwh": float(curva_ppal.fillna(0).sum()), "curva_final": curva_ppal,
+                "caso": "Medidor", "energia_final_kwh": total_ppal, "curva_final": curva_ppal,
                 "medidor_usado": "principal_sin_historico", "revisar_manualmente": True,
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,

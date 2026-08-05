@@ -404,6 +404,16 @@ def clasificar_generacion(
         if curva_rellenada.isna().any():
             revisar = True
 
+        # medidor_usado='revisar' es el valor "no se pudo construir nada"
+        # que puso _decidir_caso() para una curva vacía -- si el relleno de
+        # arriba SÍ logró llenar horas (aunque no todas), ya no es cierto
+        # que no haya fuente: quedaría diciendo "Sin fuente" con una energía
+        # real y un FP calculado (ver Granja Solar Uruaco 2026-08-03: caso 3,
+        # medidor_usado seguía en 'revisar' con 4.595,53 kWh reconstruidos
+        # vía Solenium × FP en horas_rellenadas_solenium).
+        if resultado.get("medidor_usado") == "revisar" and (horas_reconectador or horas_solenium_h or horas_historico):
+            resultado["medidor_usado"] = "relleno_horario"
+
     resultado["revisar_manualmente"] = revisar
     resultado["horas_rellenadas_reconectador"] = sorted(horas_reconectador) or None
     resultado["horas_rellenadas_solenium"] = sorted(horas_solenium_h) or None

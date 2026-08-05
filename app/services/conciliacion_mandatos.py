@@ -34,6 +34,10 @@ ACC2CONCEPT: dict[str, str] = {
     "28151010": "iva_int",  "28151016": "iva_int",
     "28150515": "arr",      "28150517": "arr",
     "28150516": "iva_arr",  "28150518": "iva_arr",
+    # Arrendamiento para terceros con arrendador NO responsable de IVA. Cuenta
+    # dedicada e inequívoca (nunca lleva IVA) → mapea DIRECTO a arr_cc, sin
+    # depender de la etiqueta del asiento (que cambia de redacción cada mes).
+    "28151025": "arr_cc",
     # Póliza todo riesgo y lucrocesante (antes sin mapear: el verificador la
     # ignoraba tanto en el asiento como en el mandato).
     "28151004": "poliza",   "28151007": "iva_poliza",
@@ -278,6 +282,11 @@ _MANDATO_CONCEPT_MAP = [
     # divide el arriendo en dos facturas (ej. La Reserva), se guardan como
     # conceptos separados y cada una se verifica contra su etiqueta del asiento.
     ("ARRIENDO CUENTA DE COBRO", "arr_cc"), ("ARRIENDO FACTURA", "arr_fact"),
+    # Redacción nueva del mandato (desde jul-2026): distingue por responsabilidad
+    # de IVA del arrendador en vez de por tipo de soporte (CC/Factura). Debe ir
+    # ANTES del genérico "ARRIENDO": si no, el genérico la captura y la cae el
+    # chequeo "contiene IVA" de más abajo, descartando el valor por completo.
+    ("ARRIENDO NO RESPONSABLE DE IVA", "arr_cc"), ("ARRIENDO RESPONSABLE DE IVA", "arr_fact"),
     ("ARRIENDO", "arr"), ("IVA ARRIENDO", "iva_arr"),
     # 'POLIZA' (sin el resto de la frase) para tolerar variaciones de redacción.
     ("POLIZA", "poliza"), ("IVA POLIZA", "iva_poliza"),

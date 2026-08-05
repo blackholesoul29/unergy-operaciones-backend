@@ -248,6 +248,71 @@ def test_bug4_split_arriendo_por_etiqueta():
     assert res["status"] == "ok"
 
 
+def test_bug4b_arriendo_cc_cuenta_nueva_no_responsable_iva():
+    """La cuenta de la CC cambió a 28151025 (arrendador no responsable de IVA);
+    antes no estaba en ACC2CONCEPT y la línea se descartaba en silencio, por lo
+    que el mandato reportaba "FALTANTE" aunque el asiento sí traía el arriendo.
+    """
+    pdf = (
+        "CMU1136\n"
+        "en calidad de mandatario, y STRADA ASOCIADOS S.A.S., con NIT. 900.123.456-7, en "
+        "calidad de mandante, relacionado con el proyecto MINIGRANJA SOLAR LA RESERVA.\n"
+        "ARRIENDO CUENTA DE COBRO $ 79,705.00\n"
+        "ARRIENDO FACTURA ELECTRONICA $ 79,706.00\n"
+        "VALOR A PAGAR $ 159,411.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1136.pdf")
+
+    mand = "STRADA ASOCIADOS S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 79705, "haber": 0, "etiqueta": "ARRIENDO CC JULIO LA RESERVA", "proj": TAG},
+        {"asociado": mand, "acc": "28150517", "accDesc": "", "debe": 79706, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO LA RESERVA", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr_cc"] == 79705
+    assert res["sums"]["arr_fact"] == 79706
+    assert res["status"] == "ok"
+
+
+def test_bug4c_arriendo_redaccion_responsable_no_responsable_iva():
+    """Caso real CMU1284 (jul-2026): el mandato dejó de decir "Cuenta de Cobro"/
+    "Factura Electrónica" y ahora dice "Arriendo No Responsable de IVA" / "Arriendo
+    Responsable de IVA". Antes del fix, el "continue" que evita que "IVA
+    MANTENIMIENTO" caiga en 'mant' también disparaba aquí (la frase nueva contiene
+    la palabra IVA) y AMBOS montos de arriendo se descartaban en silencio — no
+    aparecían ni como OK, ni como FALTANTE, ni como ninguna alerta.
+    """
+    pdf = (
+        "CMU1284\n"
+        "en calidad de mandatario, y SOLENIUM S.A.S., con NIT. 900.999.888-1, en "
+        "calidad de mandante, relacionado con el proyecto Minigranja Solar Sabana de Torres.\n"
+        "Arriendo No Responsable de IVA $ 673,757.00\n"
+        "Arriendo Responsable de IVA $ 673,757.00\n"
+        "Iva Arriendo $ 128,014.00\n"
+        "Servicio de Internet $ 188,236.00\n"
+        "Iva Internet $ 35,765.00\n"
+        "VALOR A PAGAR $ 1,699,529.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1284.pdf")
+    assert m["vals"]["arr_cc"] == 673757
+    assert m["vals"]["arr_fact"] == 673757
+    assert m["vals"]["iva_arr"] == 128014
+    assert "arr" not in m["vals"]
+
+    mand = "SOLENIUM S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 673757, "haber": 0, "etiqueta": "ARRIENDO JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28150517", "accDesc": "", "debe": 673757, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28150518", "accDesc": "", "debe": 128014, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28151009", "accDesc": "", "debe": 188236, "haber": 0, "etiqueta": "INTERNET JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28151010", "accDesc": "", "debe": 35765, "haber": 0, "etiqueta": "INTERNET JULIO", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr_cc"] == 673757
+    assert res["sums"]["arr_fact"] == 673757
+    assert res["status"] == "ok"
+
+
 # ── BUG 5: Administración / IVA administración ────────────────────────────────
 
 def test_bug5_administracion():

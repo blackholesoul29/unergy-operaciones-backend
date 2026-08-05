@@ -6,6 +6,8 @@ catálogo de Quoia -- el llamador decide qué frt_codes pedir.
 """
 from __future__ import annotations
 
+import calendar
+from datetime import date, timedelta
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -15,6 +17,30 @@ from openpyxl.utils import get_column_letter
 from app.services.mgs.gaia_client import GaiaClient
 
 HORAS = list(range(24))
+
+_MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def es_ultimo_dia_del_mes(fecha: date) -> bool:
+    return fecha.day == calendar.monthrange(fecha.year, fecha.month)[1]
+
+
+def dias_del_mes(fecha: date) -> list[str]:
+    """Del día 1 al día `fecha` (inclusive, mismo mes) -- para el consolidado
+    mensual que se adjunta cuando `fecha` es el último día del mes."""
+    inicio = fecha.replace(day=1)
+    return [(inicio + timedelta(days=i)).isoformat() for i in range((fecha - inicio).days + 1)]
+
+
+def nombre_mes(fecha: date) -> str:
+    return f"{_MESES_ES[fecha.month - 1]} de {fecha.year}"
+
+
+def titulo_hoja_mensual(fecha: date) -> str:
+    return f"Consolidado {_MESES_ES[fecha.month - 1].capitalize()} {fecha.year}"
 
 ESTADO_QUOIA = {
     "OK": "Exitoso",
@@ -126,10 +152,10 @@ def _escribir_hoja(ws, filas: list[dict]) -> None:
     ws.row_dimensions[1].height = 30
 
 
-def generar_excel(filas: list[dict]) -> bytes:
+def generar_excel(filas: list[dict], titulo_hoja: str = "CGM Report") -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = "CGM Report"
+    ws.title = titulo_hoja[:31]  # límite de Excel para el nombre de hoja
     _escribir_hoja(ws, filas)
 
     buf = BytesIO()

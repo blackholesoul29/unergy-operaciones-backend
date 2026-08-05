@@ -68,6 +68,13 @@ def enviar_reporte_cgm(
     fecha_display = dias[0] if len(dias) == 1 else f"{dias[0]} a {dias[-1]}"
     fecha_archivo = dias[0] if len(dias) == 1 else f"{dias[0]}_a_{dias[-1]}"
 
+    # Consolidado mensual: cuando el envío es de un solo día Y ese día es el
+    # último del mes, se adjunta ADEMÁS (no en vez de) un segundo Excel con
+    # todo el mes -- solo para Operador de Red por ahora. dias_mes ya incluye
+    # dias[0], así que se pide a Quoia una sola vez (superset).
+    mensual_activo = len(dias) == 1 and svc.es_ultimo_dia_del_mes(body.fecha_inicio)
+    dias_fetch = svc.dias_del_mes(body.fecha_inicio) if mensual_activo else dias
+
     # 1. Resolver, desde la BD, a quién le llega qué (nunca se confía en datos
     #    del frontend más allá de tipo+id).
     items: list[dict] = []
@@ -129,7 +136,7 @@ def enviar_reporte_cgm(
                 continue
             filas_por_frt[frt_code] = [
                 fila
-                for dia in dias
+                for dia in dias_fetch
                 for fila in svc.fetch_filas(gaia, frt_code, meta, dia)
             ]
 
@@ -152,14 +159,28 @@ def enviar_reporte_cgm(
             ))
             continue
 
-        filas = [
+        filas_todas = [
             fila
             for f in fronteras if f.codigo_frontera
             for fila in filas_por_frt.get(f.codigo_frontera, [])
         ]
+        # Cuando mensual_activo, filas_todas trae todo el mes (dias_fetch) --
+        # el Excel diario de siempre se queda solo con el día pedido.
+        dias_set = set(dias)
+        filas = [f for f in filas_todas if f["report date"] in dias_set] if mensual_activo else filas_todas
+
         try:
             excel_bytes = svc.generar_excel(filas)
             slug = "".join(c if c.isalnum() else "_" for c in nombre.lower()).strip("_")
+
+            excel_mensual_bytes = filename_mensual = mes_str = None
+            if mensual_activo and dest.tipo == "operador":
+                excel_mensual_bytes = svc.generar_excel(
+                    filas_todas, titulo_hoja=svc.titulo_hoja_mensual(body.fecha_inicio),
+                )
+                filename_mensual = f"cgm-report-consolidado-{body.fecha_inicio.strftime('%Y-%m')}-{slug}.xlsx"
+                mes_str = svc.nombre_mes(body.fecha_inicio)
+
             email_service.send_reporte_cgm_email(
                 to_emails=correos,
                 excel_bytes=excel_bytes,
@@ -168,6 +189,9 @@ def enviar_reporte_cgm(
                 destinatario_nombre=nombre,
                 proyectos=_nombres_proyectos(fronteras),
                 proyectos_total=proyectos_total,
+                excel_mensual_bytes=excel_mensual_bytes,
+                filename_mensual=filename_mensual,
+                mes_str=mes_str,
             )
             resultados.append(EnvioResultado(
                 tipo=dest.tipo, id=dest.id, nombre=nombre, correos=correos,

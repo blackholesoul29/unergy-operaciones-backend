@@ -511,7 +511,15 @@ def cancelar_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
 def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
     """Mismo criterio que excel.py: si Quoia ya reportó bien por su cuenta,
     no hace falta corregirlo -- enviar de más sobreescribiría un reporte
-    oficial que ya estaba bien."""
+    oficial que ya estaba bien.
+
+    'excluida' también se salta acá -- curva_final es None mientras dura la
+    exclusión (ver orquestador._exclusion_activa), así que sin este chequeo
+    /enviar mandaría una curva de 0 kWh fabricada a Quoia para una frontera
+    que justamente no debe reportar nada mientras se resuelve lo que la
+    excluyó."""
+    if rep.medidor_usado == "excluida":
+        return True
     return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 

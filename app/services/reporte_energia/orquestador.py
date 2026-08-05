@@ -238,10 +238,15 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             # reportado a XM, mientras se resuelve no se reporta ningún
             # número automático).
             nota = f"Excluida temporalmente -- {excl.motivo}"
+            # revisar_manualmente=False a propósito -- el motivo ya está
+            # explicado en error_clasificacion, no hace falta que alguien lo
+            # revise, y dejarlo en True bloquearía /enviar para TODAS las
+            # demás fronteras ese día (el gate de envío revisa cualquier fila
+            # con revisar_manualmente=True, sin importar el caso).
             if frontera.tipo_frontera in TIPOS_GENERACION:
                 resultado = {
                     "caso": -2, "energia_final_kwh": None, "curva_final": None,
-                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "medidor_usado": "excluida", "revisar_manualmente": False,
                     "error_clasificacion": nota,
                 }
                 _upsert_generacion(db, frontera.id, fecha, resultado)
@@ -249,7 +254,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             elif frontera.tipo_frontera in TIPOS_CONSUMO:
                 resultado = {
                     "caso": "Excluida", "energia_final_kwh": None, "curva_final": None,
-                    "medidor_usado": "excluida", "revisar_manualmente": True,
+                    "medidor_usado": "excluida", "revisar_manualmente": False,
                     "error_clasificacion": nota,
                 }
                 _upsert_consumo(db, frontera.id, fecha, resultado)

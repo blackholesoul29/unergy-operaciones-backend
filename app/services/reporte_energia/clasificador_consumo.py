@@ -202,6 +202,19 @@ def clasificar_consumo(
             # alimenta el histórico (get_mediana_consumo exige
             # revisar_manualmente=False).
             resultado_cgm["revisar_manualmente"] = True
+        else:
+            # Blindaje contra outliers no descubiertos todavía (el mismo
+            # motivo por el que Paso Norte necesitó el suyo): 'reporte
+            # automático válido' por sí solo no protege de un CGM que ese
+            # día reportó algo raro en una frontera que nunca habíamos
+            # sospechado. En cuanto hay mediana histórica (aunque se haya
+            # construido con días de CGM, ver CASOS_CONFIABLES_CONSUMO), se
+            # cruza igual que ya se hace para 'Medidor' -- mientras no haya
+            # mediana (arranque desde cero), se sigue confiando solo en el
+            # status de Quoia, como hasta ahora.
+            mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
+            if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
+                resultado_cgm["revisar_manualmente"] = True
         return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(

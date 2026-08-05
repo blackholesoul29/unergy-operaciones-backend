@@ -35,6 +35,18 @@ from app.services.mgs.solenium_client import SoleniumClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
 
+# Correcciones cosméticas de nombre_frontera SOLO para esta vista -- el
+# campo real en `fronteras` no se toca (puede reflejar el registro tal como
+# quedó cargado, con errores de digitación incluidos, y otras pantallas ya
+# lo muestran así). frontera_id -> nombre a mostrar acá.
+_NOMBRES_CORREGIDOS: dict[int, str] = {
+    6: "MINIGRANJA SOLAR BARAYA SERV AUX",  # BD: "MINIGRANJA SOLAR BRAYA SERV AUX"
+}
+
+
+def _nombre_frontera(front: Frontera) -> str:
+    return _NOMBRES_CORREGIDOS.get(front.id, front.nombre_frontera)
+
 
 def _semaforo(caso, revisar: bool) -> str:
     if revisar:
@@ -88,10 +100,10 @@ def listar_fronteras(
         for rep, front, proyecto_id in filas:
             if solo_pendientes and not rep.revisar_manualmente:
                 continue
-            if q and q.lower() not in (front.nombre_frontera or "").lower():
+            if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
             items.append(FronteraReporteItem(
-                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=front.nombre_frontera,
+                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=_nombre_frontera(front),
                 tipo="generacion", caso=str(rep.caso), medidor_usado=rep.medidor_usado,
                 energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
                 revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
@@ -108,10 +120,10 @@ def listar_fronteras(
         for rep, front, proyecto_id in filas:
             if solo_pendientes and not rep.revisar_manualmente:
                 continue
-            if q and q.lower() not in (front.nombre_frontera or "").lower():
+            if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
             items.append(FronteraReporteItem(
-                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=front.nombre_frontera,
+                frontera_id=front.id, proyecto_id=proyecto_id, nombre_proyecto=_nombre_frontera(front),
                 tipo="consumo", caso=rep.caso, medidor_usado=rep.medidor_usado,
                 energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
                 revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
@@ -180,7 +192,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
     return DetalleFronteraReporte(
-        frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=front.nombre_frontera,
+        frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
         tipo="generacion" if es_generacion else "consumo", fecha=fecha,
         caso=str(rep.caso), medidor_usado=rep.medidor_usado,
         energia_final_kwh=float(rep.energia_final_kwh) if rep.energia_final_kwh is not None else None,
@@ -380,7 +392,7 @@ def _exclusion_out(db: Session, excl: ReporteEnergiaExclusion) -> ExclusionOut:
     front = db.get(Frontera, excl.frontera_id)
     return ExclusionOut(
         id=excl.id, frontera_id=excl.frontera_id,
-        nombre_frontera=front.nombre_frontera if front else None,
+        nombre_frontera=_nombre_frontera(front) if front else None,
         motivo=excl.motivo, fecha_inicio=excl.fecha_inicio,
         fecha_fin_estimada=excl.fecha_fin_estimada,
         creado_por=excl.creado_por.nombre if excl.creado_por else None,
@@ -559,7 +571,7 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
         if not border_id:
             rep.enviado_quoia_ok = False
             rep.enviado_quoia_error = "Sin border_id en Quoia"
-            fallidos.append(f"{front.nombre_frontera} — sin border_id en Quoia")
+            fallidos.append(f"{_nombre_frontera(front)} — sin border_id en Quoia")
             return
 
         curva = rep.curva_final or [0.0] * 24
@@ -587,7 +599,7 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
         if ok:
             enviados += 1
         else:
-            fallidos.append(f"{front.nombre_frontera} — {motivo}")
+            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
 
     for rep, front in gen_filas:
         _procesar(rep, front, es_generacion=True)

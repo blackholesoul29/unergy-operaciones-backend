@@ -1320,6 +1320,15 @@ _PENDING_DDLS = [
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS energia_promedio_kwh_mes NUMERIC(14,3)",
     "CREATE INDEX IF NOT EXISTS ix_oferta_operador_red ON oportunidad_ofertas (operador_red_id)",
+    # Campos técnicos del servicio de Internet en ContratoServicio (2026-08-06)
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS linea_servicio VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS id_router VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS numero_kit VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS latencia_ms INTEGER",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_seguridad VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lat NUMERIC(10,6)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lng NUMERIC(10,6)",
 ]
 
 

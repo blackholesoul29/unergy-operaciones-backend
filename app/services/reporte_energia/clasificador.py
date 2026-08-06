@@ -244,6 +244,20 @@ def _decidir_caso(
                 curva_medidor_horas_comunes = curva.where(curva_solenium.notna())
                 error_parcial = _error_con_curva(e_inv_incompleto, curva_medidor_horas_comunes)
 
+                # Si el elegido por defecto (siempre principal, mientras
+                # tenga dato) falla la comparación contra inversores pero el
+                # respaldo sí pasa, se prefiere el respaldo -- ya no tiene
+                # sentido insistir en "siempre principal" si es el respaldo
+                # el que de verdad coincide (ver MGS 0026 Valencia Oriente
+                # 2026-08-05: principal 4.695,6 kWh vs inversores 7.045,4 kWh,
+                # ~33% de diferencia; respaldo 7.054,0 kWh, ~0,1%). Si los dos
+                # YA están dentro de rango, se mantiene principal -- no
+                # cambia solo porque el otro tenga un error un poco menor.
+                if not _en_rango(error_parcial) and curva is curva_ppal and _tiene_dato(curva_resp):
+                    error_resp = _error_con_curva(e_inv_incompleto, curva_resp.where(curva_solenium.notna()))
+                    if error_resp is not None and _en_rango(error_resp):
+                        curva, error_parcial = curva_resp, error_resp
+
                 # Medidor subreporta contra inversores más de lo tolerado --
                 # mismo criterio que Caso 3 (medidores subreportan -> inversores
                 # x FP): confiar en el medidor sería reportar un número que ya

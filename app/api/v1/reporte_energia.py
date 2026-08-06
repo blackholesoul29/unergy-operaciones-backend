@@ -356,6 +356,39 @@ async def cargar_excel_terceros(
     return CargaExcelTercerosResponse(frontera_id=frontera_id, fechas_cargadas=sorted(fechas_cargadas))
 
 
+@router.delete("/fronteras/{frontera_id}/cargar-excel-terceros", response_model=DetalleFronteraReporte)
+def eliminar_excel_terceros(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Quita la carga de Excel de terceros de un día puntual y vuelve a
+    dejar la frontera en 'Esperando Excel de terceros' -- para cuando se
+    subió el archivo equivocado y no basta con re-cargar el correcto (ej. la
+    fecha no debía tener ningún dato). Mismos valores que pone el
+    clasificador cuando nunca se ha subido nada para ese día (ver
+    FRONTERAS_TERCEROS en clasificador.py)."""
+    if frontera_id not in FRONTERAS_TERCEROS:
+        raise HTTPException(400, "Esta frontera no está configurada como frontera de terceros")
+    rep = db.execute(
+        select(ReporteEnergiaGeneracion).where(
+            ReporteEnergiaGeneracion.frontera_id == frontera_id,
+            ReporteEnergiaGeneracion.fecha == fecha,
+        )
+    ).scalar_one_or_none()
+    if rep is None:
+        raise HTTPException(404, "No hay carga para eliminar en esa fecha")
+
+    rep.caso = 0
+    rep.medidor_usado = "externo"
+    rep.curva_final = None
+    rep.energia_final_kwh = None
+    rep.curva_respaldo_terceros = None
+    rep.revisar_manualmente = True
+    rep.editado_manualmente = False
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
+
+
 @router.get("/fronteras/{frontera_id}/curva-tipica", response_model=CurvaTipicaResponse)
 def curva_tipica(
     frontera_id: int, fecha: date = Query(...),

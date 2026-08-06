@@ -39,6 +39,7 @@ HORAS = list(range(24))
 CASOS_CON_RELLENO_HORARIO = {2, 3, 4, 5, 7, 8}
 RANGO_ERROR         = 6.0               # %: error aceptable [-6%, +6%]
 ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy es válido
+HORAS_SOLARES       = range(6, 18)       # 6am a 6pm -- mismo criterio que reporte_cgm.py
 
 # frontera_id de proyectos sin inversores (nunca registrados en Solenium)
 # cuyo medidor de nodo se sabe que sub-reporta crónicamente frente a la
@@ -471,7 +472,13 @@ def clasificar_generacion(
         # Solenium tiene un número limitado de consultas y puede no traer
         # la hora aunque Fusion sí la tenga completa. El histórico propio
         # no depende de ninguna API externa, así que ese no aplica.
-        if horas_reconectador or horas_solenium_h:
+        # Excepción: si las horas rellenadas caen FUERA de la ventana solar
+        # (madrugada/noche), el valor esperado ya es ~0 sin importar la
+        # fuente -- no hay nada real que un dato de respaldo pueda arruinar
+        # (ver MGS 0021 Ibirico 2026-08-05: reconectador rellenó 19h y 23h,
+        # ambas en 0,0 kWh, coincidiendo con medidor/inversores en el resto
+        # del día -- forzar revisión ahí no aporta nada).
+        if any(h in HORAS_SOLARES for h in horas_reconectador | horas_solenium_h):
             revisar = True
         if curva_rellenada.isna().any():
             revisar = True

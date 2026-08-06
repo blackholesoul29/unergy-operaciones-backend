@@ -354,14 +354,7 @@ def clasificar_generacion(
         curva_cgm = CURVA_CERO.copy()
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    # --- Medidor de nodo ---
-    main_meter = border_meta.get("main_meter") if border_meta else None
-    backup_meter = border_meta.get("backup_meter") if border_meta else None
-    c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
-    curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
-    completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]
-
-    # --- Solenium (inversores) ---
+    # --- Solenium (inversores) -- ANTES del medidor a propósito, ver abajo ---
     curva_solenium, solenium_completo = solenium_svc.curva_generacion(sol, project_id_solenium, fecha_str)
     e_inv_original = float(curva_solenium.fillna(0).sum())
 
@@ -377,6 +370,32 @@ def clasificar_generacion(
     if e_inv > 0 and not solenium_completo:
         e_inv_incompleto = e_inv
         e_inv = 0.0
+
+    # --- Medidor de nodo ---
+    # Mismo chequeo de Caso 1 que hace _decidir_caso() más abajo, pero ANTES
+    # de traer el medidor -- Caso 1 no usa el medidor para nada (valida CGM
+    # contra inversores, no contra el medidor). Si ya se sabe que hoy va a
+    # ganar Caso 1, no tiene sentido pagar recuperación activa (hasta 90s
+    # interrogando el dispositivo) sobre un medidor que ni se va a usar para
+    # decidir -- pero SÍ se sigue trayendo la lectura PASIVA (recuperar=False),
+    # porque el histórico de Factor de Pérdida necesita medidor de TODOS los
+    # días con dato, sin importar qué Caso ganó (ver historial.py). Motivado
+    # por Bongos/Paso Norte: la recuperación activa a las 3:30am no siempre
+    # alcanza a estabilizar el dato de todas formas (ver conversación de
+    # sesión), así que gastarla en fronteras que ni la necesitan es puro
+    # costo sin beneficio.
+    es_caso1_seguro = (
+        reporte_valido and e_inv > 0 and e_cgm > 0
+        and _en_rango(_error_con_curva(e_inv, curva_cgm))
+    )
+    main_meter = border_meta.get("main_meter") if border_meta else None
+    backup_meter = border_meta.get("backup_meter") if border_meta else None
+    c = curvas.curvas_de_frontera(
+        gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code,
+        recuperar=not es_caso1_seguro,
+    )
+    curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
+    completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]
 
     resultado = _decidir_caso(
         db, frontera_id, fecha, fecha_str,

@@ -388,11 +388,18 @@ def clasificar_generacion(
         reporte_valido and e_inv > 0 and e_cgm > 0
         and _en_rango(_error_con_curva(e_inv, curva_cgm))
     )
+    # Mediana histórica -- solo como referencia de plausibilidad para la
+    # lectura del medidor (ver mediana_referencia en curvas_de_frontera), no
+    # se usa el FP acá. Solo hace falta pedirla cuando SÍ se va a intentar
+    # recuperación -- si es_caso1_seguro, ni siquiera se consulta.
+    mediana_hist = None
+    if not es_caso1_seguro:
+        mediana_hist, _ = historial.get_mediana_generacion(db, frontera_id, fecha)
     main_meter = border_meta.get("main_meter") if border_meta else None
     backup_meter = border_meta.get("backup_meter") if border_meta else None
     c = curvas.curvas_de_frontera(
         gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code,
-        recuperar=not es_caso1_seguro,
+        recuperar=not es_caso1_seguro, mediana_referencia=mediana_hist,
     )
     curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
     completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]

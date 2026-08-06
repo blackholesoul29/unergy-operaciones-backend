@@ -21,6 +21,12 @@ router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
 
 _TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
 
+# cliente_id -- pedido puntual: un Excel de Cliente (3 hojas) POR PROYECTO en
+# vez de uno combinado, todos adjuntos al mismo correo. 75 = CGM Ingeniería
+# (proyectos: GD San Pelayo, GD La Hormiguita). No requiere cambios en el
+# front -- se decide acá por el id del cliente.
+CLIENTES_EXCEL_POR_PROYECTO: set[int] = {75}
+
 
 def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
     return (
@@ -91,6 +97,38 @@ def _datos_proyectos_para_resumen(
                 datos["main_meter_con"] = meta.get("main_meter")
                 datos["backup_meter_con"] = meta.get("backup_meter")
     return proyectos
+
+
+def _excels_cliente_por_proyecto(
+    db: Session, gaia: GaiaClient, fronteras: list[Frontera], filas_por_frt: dict[str, list[dict]],
+    dias: list[str], dias_mes: list[str], es_ultimo_dia_mes: bool, fecha_inicio, fecha_archivo: str,
+) -> list[tuple[bytes, str]]:
+    """Igual que la rama normal de Cliente (3 hojas: Reporte Acumulado +
+    Resumen Diario + Resumen Mensual si aplica), pero un Excel POR proyecto
+    en vez de uno combinado -- agrupa `fronteras` (ya filtradas a este
+    destinatario) por proyecto_id. Ver CLIENTES_EXCEL_POR_PROYECTO."""
+    por_proyecto: dict[int, list[Frontera]] = {}
+    for f in fronteras:
+        if f.proyecto_id:
+            por_proyecto.setdefault(f.proyecto_id, []).append(f)
+
+    adjuntos: list[tuple[bytes, str]] = []
+    for fronteras_proyecto in por_proyecto.values():
+        proyectos = _datos_proyectos_para_resumen(db, gaia, fronteras_proyecto)
+        filas_todas_proyecto = [
+            fila for f in fronteras_proyecto if f.codigo_frontera for fila in filas_por_frt.get(f.codigo_frontera, [])
+        ]
+        filas_resumen_diario = svc.calcular_resumen_diario(gaia, proyectos, filas_por_frt, dias[0])
+        filas_resumen_mensual = None
+        if es_ultimo_dia_mes:
+            mes_titulo = f"{svc.nombre_mes(fecha_inicio).capitalize()} {fecha_inicio.year}"
+            filas_resumen_mensual = svc.calcular_resumen_mensual(gaia, proyectos, filas_por_frt, dias_mes, mes_titulo)
+        excel_bytes = svc.generar_excel_cliente(filas_todas_proyecto, filas_resumen_diario, filas_resumen_mensual)
+
+        nombre_proyecto = fronteras_proyecto[0].proyecto.nombre_comercial
+        slug_proyecto = "".join(c if c.isalnum() else "_" for c in nombre_proyecto.lower()).strip("_")
+        adjuntos.append((excel_bytes, f"cgm-report-{fecha_archivo}-{slug_proyecto}.xlsx"))
+    return adjuntos
 
 
 def _nombres_proyectos(fronteras: list[Frontera]) -> list[str]:
@@ -234,9 +272,23 @@ def enviar_reporte_cgm(
         try:
             slug = "".join(c if c.isalnum() else "_" for c in nombre.lower()).strip("_")
             excel_mensual_bytes = filename_mensual = mes_str = None
+            adjuntos_extra: list[tuple[bytes, str]] = []
+            filename_principal = f"cgm-report-{fecha_archivo}-{slug}.xlsx"
             fecha_str_envio = fecha_display
 
-            if dest.tipo == "cliente" and es_dia_unico:
+            if dest.tipo == "cliente" and es_dia_unico and dest.id in CLIENTES_EXCEL_POR_PROYECTO:
+                # Pedido puntual (ver CLIENTES_EXCEL_POR_PROYECTO): un Excel
+                # por proyecto en vez de uno combinado, todos en el mismo
+                # correo -- el primero se manda como adjunto principal, el
+                # resto como adjuntos_extra.
+                adjuntos = _excels_cliente_por_proyecto(
+                    db, gaia, fronteras, filas_por_frt, dias, dias_mes, es_ultimo_dia_mes,
+                    body.fecha_inicio, fecha_archivo,
+                )
+                excel_bytes, filename_principal = adjuntos[0]
+                adjuntos_extra = adjuntos[1:]
+                fecha_str_envio = f"{dias_mes[0]} a {dias_mes[-1]}"
+            elif dest.tipo == "cliente" and es_dia_unico:
                 # Cliente: 'Reporte Acumulado' (mes completo hasta hoy) +
                 # 'Resumen Diario' (mismas variables, solo hoy) siempre;
                 # 'Resumen Mensual' (acumulado del mes) solo el último día.
@@ -264,7 +316,7 @@ def enviar_reporte_cgm(
             email_service.send_reporte_cgm_email(
                 to_emails=correos,
                 excel_bytes=excel_bytes,
-                filename=f"cgm-report-{fecha_archivo}-{slug}.xlsx",
+                filename=filename_principal,
                 fecha_str=fecha_str_envio,
                 destinatario_nombre=nombre,
                 proyectos=_nombres_proyectos(fronteras),
@@ -272,6 +324,7 @@ def enviar_reporte_cgm(
                 excel_mensual_bytes=excel_mensual_bytes,
                 filename_mensual=filename_mensual,
                 mes_str=mes_str,
+                adjuntos_extra=adjuntos_extra,
             )
             resultados.append(EnvioResultado(
                 tipo=dest.tipo, id=dest.id, nombre=nombre, correos=correos,

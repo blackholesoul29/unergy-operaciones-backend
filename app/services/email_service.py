@@ -594,6 +594,7 @@ def send_reporte_cgm_email(
     excel_mensual_bytes: bytes | None = None,
     filename_mensual: str | None = None,
     mes_str: str | None = None,
+    adjuntos_extra: list[tuple[bytes, str]] | None = None,
 ) -> None:
     """
     Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
@@ -602,6 +603,11 @@ def send_reporte_cgm_email(
     solo cuando el envío cubre el último día de un mes, para adjuntar
     ADEMÁS el consolidado de todo ese mes (mismo formato, más días). Ver
     reporte_cgm.dias_del_mes()/es_ultimo_dia_del_mes().
+
+    adjuntos_extra: lista de (bytes, filename) adicionales -- para clientes
+    puntuales que piden un Excel separado por proyecto en vez de uno
+    combinado, todos en el mismo correo (ver CLIENTES_EXCEL_POR_PROYECTO en
+    reporte_cgm.py).
 
     Lanza RuntimeError si SMTP no está configurado o falla el envío.
     """
@@ -659,6 +665,13 @@ def send_reporte_cgm_email(
         encoders.encode_base64(adjunto_mensual)
         adjunto_mensual.add_header("Content-Disposition", "attachment", filename=filename_mensual)
         msg.attach(adjunto_mensual)
+
+    for extra_bytes, extra_filename in (adjuntos_extra or []):
+        adjunto_extra = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        adjunto_extra.set_payload(extra_bytes)
+        encoders.encode_base64(adjunto_extra)
+        adjunto_extra.add_header("Content-Disposition", "attachment", filename=extra_filename)
+        msg.attach(adjunto_extra)
 
     # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de
     # seguimiento interno, igual que CORREO_SEGUIMIENTO en el script standalone.

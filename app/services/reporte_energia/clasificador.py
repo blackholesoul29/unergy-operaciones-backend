@@ -30,7 +30,9 @@ from sqlalchemy.orm import Session
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, datos_crudos, solenium as solenium_svc, reconectador, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva, escalar_curva_con_huecos
+from app.services.reporte_energia.utils import (
+    CURVA_CERO, CURVA_VACIA, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
+)
 
 HORAS = list(range(24))
 
@@ -446,6 +448,19 @@ def clasificar_generacion(
     resultado["medidor_principal_completo"] = bool(completo_ppal)
     resultado["medidor_respaldo_completo"] = bool(completo_resp)
     resultado["recuperacion_datos"] = c.get("recuperacion_datos")
+    # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
+    # clasificar -- antes solo se guardaba el total (energia_medidor_..._kwh),
+    # la curva completa se volvía a pedir en vivo cada vez que se abría el
+    # detalle, lo que podía mostrar un valor distinto al que realmente se usó
+    # si Quoia corrige un dato después (ver MGS 0032 El Paso Norte
+    # 2026-08-05: medidor doblado por un glitch de Quoia al momento de
+    # clasificar, ya autocorregido para cuando se revisó -- "Fuente usada"
+    # y "Detalle de las fuentes" mostraban números distintos sin explicación).
+    resultado["curva_medidor_principal"] = curva_a_lista(curva_ppal)
+    resultado["curva_medidor_respaldo"] = curva_a_lista(curva_resp)
+    resultado["curva_solenium_referencia"] = (
+        curva_a_lista(curva_solenium) if isinstance(curva_solenium, pd.Series) else None
+    )
     resultado.setdefault("fp", None)
     resultado.setdefault("fp_calculada", None)
     resultado.setdefault("error_final_pct", None)

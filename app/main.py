@@ -662,6 +662,15 @@ _PENDING_DDLS = [
     # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
     # null, /enviar sigue usando la fórmula ±1% sobre curva_final
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_respaldo_terceros JSONB",
+    # migration — reporte_energia_{generacion,consumo}: curvas de referencia
+    # (medidor/Solenium) tal como estaban al momento de clasificar -- antes
+    # solo se guardaba el total, la curva completa se volvía a pedir en vivo
+    # cada vez que se abría el detalle (ver MGS 0032 El Paso Norte 2026-08-05)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_solenium_referencia JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

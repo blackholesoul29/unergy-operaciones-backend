@@ -46,6 +46,15 @@ ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy
 # los ids reales contra la BD ("GD Agustín 2" en el pipeline original).
 MEDIDORES_SIN_INVERSOR_SOSPECHOSOS: set[int] = set()
 
+# frontera_id con un glitch de telemetría intermitente ya confirmado en vivo
+# (medidor doblado exactamente 2x al momento de clasificar, autocorregido
+# después -- ver MGS 0032 El Paso Norte Generación 2026-08-05, mismo
+# problema ya conocido en su frontera de Consumo homóloga, id=111, via
+# FRONTERAS_VALIDAR_CGM_VS_MEDIDOR en clasificador_consumo.py). Siempre
+# queda revisar_manualmente=True sin importar el Caso ni la fuente usada
+# ese día -- el problema es de la telemetría en sí, no de un Caso puntual.
+FRONTERAS_MEDIDOR_SOSPECHOSO: set[int] = {110}  # MGS 0032 El Paso Norte Generación
+
 # frontera_id de proyectos cuyo CGM lo hace al ASIC otra empresa distinta a
 # Unergy -- no aplica este árbol de Casos. El medidor de nodo de Quoia no
 # tiene telemetría (confirmado en vivo: energia_medidor_principal/respaldo_kwh
@@ -377,6 +386,8 @@ def clasificar_generacion(
         project_id_solenium, c["node_ppal"], gaia, sol,
     )
     revisar = resultado.get("revisar_manualmente", False)
+    if frontera_id in FRONTERAS_MEDIDOR_SOSPECHOSO:
+        revisar = True
 
     # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
     # de recuperarlo como con los medidores) -- excepto cuando el resultado

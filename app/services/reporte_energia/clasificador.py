@@ -252,8 +252,24 @@ def _decidir_caso(
                 resultado_medidor["revisar_manualmente"] = True
             return resultado_medidor
 
-    # --- Casos 6/7/8: ni CGM ni medidor ni inversores tienen nada ---
+    # --- Casos 6/7/8: ni CGM ni medidor tienen nada, inversores solo parcial ---
     if e_inv_incompleto:
+        # Mismo criterio que ya tiene el Caso 5 sin CGM (medidor caído) unas
+        # líneas arriba, y el Caso 8 de datos crudos más abajo: las horas que
+        # Solenium SÍ reportó no están "faltando" -- vaciar la curva entera
+        # las trataba como si lo estuvieran, y el relleno horario centralizado
+        # las volvía a reconstruir con Solenium × FP desde cero (ver MGS 0009
+        # Cañahuate 2026-08-05: "revisar" + relleno 8h-23h, cuando en
+        # realidad solo faltaban 6h y 7h -- el resto ya era dato real).
+        fp_val, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+        if fp_val is not None and isinstance(curva_solenium, pd.Series):
+            e_fp = e_inv_incompleto * fp_val
+            return {
+                "caso": 3, "energia_final_kwh": e_fp,
+                "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                "fp": fp_val, "fp_calculada": fp_calc,
+                "medidor_usado": "inversores", "revisar_manualmente": True,
+            }
         return {
             "caso": 3, "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
             "fp": None, "fp_calculada": None, "medidor_usado": "revisar", "revisar_manualmente": True,

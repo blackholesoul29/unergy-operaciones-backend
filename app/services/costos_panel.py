@@ -68,7 +68,9 @@ def valores_modulo_costos(db: Session, proyecto_id: int, periodo: str) -> dict[s
     v = valor_om_proyecto(db, proyecto_id, periodo)
     if v is not None:
         # Mantenimiento siempre lleva IVA 19% (como el ER): flag `iva` → lo recalcula el merge.
-        out[CONCEPTO_OM] = {"valor": -abs(v), "fuente": "om", "iva": True}
+        # alias: algunos ER lo etiquetan "Fondo de mantenimiento" (es el mismo costo).
+        out[CONCEPTO_OM] = {"valor": -abs(v), "fuente": "om", "iva": True,
+                            "alias": ["Fondo de mantenimiento"]}
 
     r = valor_arriendo_proyecto(db, proyecto_id, periodo)
     if r is not None:
@@ -179,10 +181,26 @@ def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 
           (y si existía una del ER, se elimina). Caso Arriendos: el IVA lo trae el
           módulo por arrendador.
         · en su defecto, `iva`=True ⇒ 19% plano sobre el valor. Caso Mantenimiento.
+    - `alias`: otros nombres con los que el ER pudo traer el MISMO concepto (ej.
+      "Fondo de mantenimiento" = "Mantenimiento"). Se renombran al canónico antes de
+      mezclar, para reemplazar esa línea en vez de duplicarla.
 
     No muta la lista de entrada; devuelve una nueva.
     """
     out = [dict(l) for l in base]
+
+    # Normalizar alias: renombrar al concepto canónico lo que el ER trajo con otro
+    # nombre (concepto y su línea de IVA), así el override lo reemplaza sin duplicar.
+    for concepto, info in mods.items():
+        grupo = info.get("grupo", "costos")
+        for alias in info.get("alias", []):
+            for l in out:
+                if l.get("grupo") != grupo:
+                    continue
+                if l.get("concepto") == alias:
+                    l["concepto"] = concepto
+                elif l.get("concepto") == f"IVA {alias}":
+                    l["concepto"] = f"IVA {concepto}"
 
     def _find(grupo: str, concepto: str) -> int | None:
         for i, l in enumerate(out):

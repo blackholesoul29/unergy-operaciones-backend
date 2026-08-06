@@ -33,6 +33,26 @@ def test_reemplaza_valor_y_marca_fuente():
     assert arr["hoja"] is None and arr["celda"] is None
 
 
+def test_alias_fondo_de_mantenimiento_no_duplica():
+    """El ER trae 'Fondo de mantenimiento' (= Mantenimiento). El override debe
+    reemplazar ESA línea (renombrándola) y su IVA, sin agregar una 'Mantenimiento'
+    aparte que duplicaría el costo."""
+    base = [
+        {"grupo": "ingresos", "concepto": "Ingreso Bruto", "valor": 1000.0},
+        {"grupo": "costos", "concepto": "Fondo de mantenimiento", "valor": -4204000.0, "hoja": "Sheet1", "celda": "G57"},
+        {"grupo": "costos", "concepto": "IVA Fondo de mantenimiento", "valor": -798760.0},
+    ]
+    mods = {"Mantenimiento": {"valor": -2605807.0, "fuente": "om", "iva": True,
+                              "alias": ["Fondo de mantenimiento"]}}
+    out = aplicar_costos_modulo(base, mods)
+    mant = [l for l in out if l["concepto"] == "Mantenimiento"]
+    assert len(mant) == 1 and mant[0]["valor"] == -2605807.0 and mant[0]["fuente"] == "om"
+    # No quedó ninguna línea con el nombre viejo (ni base ni IVA).
+    assert not any("Fondo de mantenimiento" in l["concepto"] for l in out)
+    iva = [l for l in out if l["concepto"] == "IVA Mantenimiento"]
+    assert len(iva) == 1 and iva[0]["valor"] == round(-2605807.0 * 0.19, 2)
+
+
 def test_recalcula_iva_de_mantenimiento():
     mods = {"Mantenimiento": {"valor": -300.0, "fuente": "om", "iva": True}}
     out = aplicar_costos_modulo(_base(), mods, iva=0.19)

@@ -142,7 +142,7 @@ def _horas_en_cero(curva) -> int:
 def columnas_resumen(etiqueta_columna: str) -> list[str]:
     return [
         etiqueta_columna, "Proyecto", "Total Generación (kWh)", "Total Consumo (kWh)",
-        "Producción Específica (kWh/kWp)", "Indisponibilidad Telemedida (%)", "Factor de Planta (%)",
+        "Producción Específica (kWh/kWp)", "Indisponibilidad (%)", "Factor de Planta (%)",
     ]
 
 
@@ -228,7 +228,7 @@ def _calcular_resumen(
             "Total Generación (kWh)": round(total_gen, 3),
             "Total Consumo (kWh)": round(total_con, 3),
             "Producción Específica (kWh/kWp)": round(total_gen / capacidad_dc, 3) if capacidad_dc else None,
-            "Indisponibilidad Telemedida (%)": (
+            "Indisponibilidad (%)": (
                 round(horas_cero_total / horas_solares_total * 100, 2)
                 if horas_cero_total is not None and horas_solares_total else None
             ),

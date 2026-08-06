@@ -173,6 +173,75 @@ def valores_modulo_costos(db: Session, proyecto_id: int, periodo: str) -> dict[s
     return out
 
 
+def _tarifa_indexada_periodo(indexacion, tarifa_base, fecha_firma, periodo: str) -> float | None:
+    """Tarifa ($/kWh) vigente en `periodo` según la indexación por aniversario.
+
+    `indexacion` es la lista JSONB del contrato: [{"año","valor","esBase"?}, ...],
+    un valor por aniversario de firma (IPC anual encadenado, ya pre-calculado). Se
+    elige el aniversario más reciente que ya ocurrió al `periodo` (mes/día de firma).
+    Si el período es anterior a todo aniversario o no hay lista, cae a la base."""
+    try:
+        py, pm = (int(x) for x in str(periodo).split("-")[:2])
+    except Exception:
+        return float(tarifa_base) if tarifa_base is not None else None
+    mes_firma = fecha_firma.month if fecha_firma else 1
+    mejor_val, mejor_key = None, None
+    for e in (indexacion or []):
+        val = e.get("valor")
+        anio = e.get("año", e.get("anio", e.get("anno")))
+        if val is None or anio is None:
+            continue
+        key = (int(anio), mes_firma)          # aniversario (año, mes de firma)
+        if key <= (py, pm) and (mejor_key is None or key > mejor_key):
+            mejor_key, mejor_val = key, float(val)
+    if mejor_val is not None:
+        return mejor_val
+    base = next((e.get("valor") for e in (indexacion or []) if e.get("esBase")), None)
+    if base is not None:
+        return float(base)
+    return float(tarifa_base) if tarifa_base is not None else None
+
+
+def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str, kwh: float | None) -> dict[str, dict]:
+    """Representación y CGM del grupo 'facturas' = tarifa indexada de la app × la
+    energía (kWh) del proyecto en el mes. La energía la pasa el caller (viene del ER,
+    por decisión de negocio: debe cuadrar con la generación del ER).
+
+    Repr y CGM viven en un mismo contrato `servicio_aplica='representacion'`. Solo se
+    devuelve un concepto si el contrato tiene esa tarifa. Valores negativos. Los
+    impuestos NO se calculan aquí: el Panel los deriva por cliente al leer."""
+    from app.models.proyectos import Proyecto
+    from app.models.contratos import ContratoServicio
+
+    if not kwh:
+        return {}
+    proyecto = db.get(Proyecto, proyecto_id)
+    if proyecto is None:
+        return {}
+    c = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "representacion",
+                ContratoServicio.proyecto_id == proyecto_id)
+        .order_by(ContratoServicio.id)
+        .first()
+    )
+    if c is None:
+        return {}
+
+    out: dict[str, dict] = {}
+    t_rep = _tarifa_indexada_periodo(c.indexacion_representacion, c.tarifa_representacion,
+                                     c.fecha_firma_contrato, periodo)
+    if t_rep:
+        out["Representación"] = {"grupo": "facturas", "valor": -abs(round(t_rep * kwh, 2)),
+                                 "fuente": "servicios"}
+    t_cgm = _tarifa_indexada_periodo(c.indexacion_cgm, c.tarifa_cgm,
+                                     c.fecha_firma_contrato, periodo)
+    if t_cgm:
+        out["CGM"] = {"grupo": "facturas", "valor": -abs(round(t_cgm * kwh, 2)),
+                      "fuente": "servicios"}
+    return out
+
+
 def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 0.19) -> list[dict]:
     """Mezcla las líneas base del ER con los valores del módulo (lógica pura).
 
@@ -199,8 +268,9 @@ def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 
     for concepto, info in mods.items():
         valor = info["valor"]
         fuente = info.get("fuente")
-        idx = _find("costos", concepto)
-        linea = {"grupo": "costos", "concepto": concepto, "valor": valor,
+        grupo = info.get("grupo", "costos")     # 'costos' (O&M/arriendo) | 'facturas' (repr/CGM)
+        idx = _find(grupo, concepto)
+        linea = {"grupo": grupo, "concepto": concepto, "valor": valor,
                  "hoja": None, "celda": None, "fuente": fuente}
         if idx is None:
             out.append(linea)
@@ -208,8 +278,10 @@ def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 
         else:
             out[idx].update(linea)
 
-        # Monto de IVA: explícito (lo trae el módulo, caso Arriendos) si viene la
-        # clave `iva_valor`; si no, 19% plano por flag `iva` (caso Mantenimiento).
+        # Monto de IVA guardado como línea derivada: explícito (`iva_valor`, caso
+        # Arriendos) o 19% plano por flag `iva` (Mantenimiento). Los servicios del
+        # grupo 'facturas' (Repr/CGM) NO guardan IVA aquí: el Panel deriva sus
+        # impuestos por cliente en tiempo de lectura, así que nunca traen iva/iva_valor.
         if "iva_valor" in info:
             iva_monto = info["iva_valor"]
         elif info.get("iva"):
@@ -218,12 +290,12 @@ def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 
             iva_monto = None
 
         iva_concepto = f"IVA {concepto}"
-        j = _find("costos", iva_concepto)
+        j = _find(grupo, iva_concepto)
         if iva_monto is None:
             if j is not None:      # el ER traía IVA pero el módulo dice que no lleva
                 out.pop(j)
             continue
-        iva_linea = {"grupo": "costos", "concepto": iva_concepto, "valor": iva_monto,
+        iva_linea = {"grupo": grupo, "concepto": iva_concepto, "valor": iva_monto,
                      "hoja": None, "celda": None, "fuente": fuente}
         if j is None:
             out.insert(idx + 1, iva_linea)   # justo después del concepto, como el ER

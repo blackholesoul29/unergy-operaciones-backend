@@ -36,7 +36,7 @@ from app.utils.er_loader import (
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
 from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
-from app.services.costos_panel import valores_modulo_costos, aplicar_costos_modulo
+from app.services.costos_panel import valores_modulo_costos, valores_facturas_modulo, aplicar_costos_modulo
 
 logger = logging.getLogger(__name__)
 
@@ -488,6 +488,8 @@ def _guardar_panel(
     # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
     try:
         mods = valores_modulo_costos(db, proyecto_id, periodo)
+        # Representación y CGM (grupo 'facturas') = tarifa app × energía del ER (parsed["kwh"]).
+        mods.update(valores_facturas_modulo(db, proyecto_id, periodo, parsed.get("kwh")))
         if mods:
             base = aplicar_costos_modulo(base, mods, iva=IVA)
     except Exception:

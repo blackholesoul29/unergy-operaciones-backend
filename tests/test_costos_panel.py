@@ -4,7 +4,9 @@ El Panel debe tomar Mantenimiento y Arrendamiento del módulo cuando el proyecto
 tiene contrato. Aquí se fija ese reemplazo: valor, marca de fuente, recálculo del
 IVA derivado y el caso de agregar el concepto cuando el ER no lo traía.
 """
-from app.services.costos_panel import aplicar_costos_modulo
+from datetime import date
+
+from app.services.costos_panel import aplicar_costos_modulo, _tarifa_indexada_periodo
 
 
 def _base():
@@ -89,3 +91,68 @@ def test_sin_mods_devuelve_las_mismas_lineas():
     base = _base()
     out = aplicar_costos_modulo(base, {})
     assert out == base
+
+
+# ── Representación / CGM: grupo 'facturas' (tarifa app × kWh del ER) ─────────────
+def _base_facturas():
+    return [
+        {"grupo": "ingresos", "concepto": "Ingreso Bruto", "valor": 1000.0},
+        {"grupo": "facturas", "concepto": "Representación", "valor": -500.0, "hoja": "Sheet1", "celda": "H40"},
+        {"grupo": "facturas", "concepto": "CGM", "valor": -500.0, "hoja": "Sheet1", "celda": "H41"},
+        {"grupo": "facturas", "concepto": "Administración", "valor": -38.0},
+    ]
+
+
+def test_facturas_reemplaza_repr_y_cgm_sin_tocar_admin():
+    mods = {
+        "Representación": {"grupo": "facturas", "valor": -526.0, "fuente": "servicios"},
+        "CGM": {"grupo": "facturas", "valor": -552.83, "fuente": "servicios"},
+    }
+    out = aplicar_costos_modulo(_base_facturas(), mods)
+    rep = next(l for l in out if l["concepto"] == "Representación")
+    cgm = next(l for l in out if l["concepto"] == "CGM")
+    admin = next(l for l in out if l["concepto"] == "Administración")
+    assert rep["valor"] == -526.0 and rep["fuente"] == "servicios" and rep["grupo"] == "facturas"
+    assert cgm["valor"] == -552.83 and cgm["fuente"] == "servicios"
+    assert admin["valor"] == -38.0                 # Admin no se toca (sigue del ER)
+    assert rep["hoja"] is None                     # ya no viene de una celda del ER
+
+
+def test_facturas_no_genera_linea_de_iva_guardada():
+    """Repr/CGM no guardan IVA (el Panel lo deriva por cliente al leer)."""
+    mods = {"Representación": {"grupo": "facturas", "valor": -526.0, "fuente": "servicios"}}
+    out = aplicar_costos_modulo(_base_facturas(), mods)
+    assert not any(l["concepto"] == "IVA Representación" for l in out)
+
+
+# ── Tarifa indexada por aniversario ─────────────────────────────────────────────
+_IDX = [
+    {"año": 2024, "ipc": None, "valor": 5.0, "esBase": True},
+    {"año": 2025, "ipc": 5.2, "valor": 5.26},
+    {"año": 2026, "ipc": 5.1, "valor": 5.52826},
+]
+_FIRMA = date(2024, 10, 11)
+
+
+def test_tarifa_antes_del_aniversario_usa_la_del_ano_anterior():
+    # Junio 2026 es ANTES del aniversario (11 oct) → aplica la tarifa de 2025.
+    assert _tarifa_indexada_periodo(_IDX, 5.0, _FIRMA, "2026-06") == 5.26
+
+
+def test_tarifa_despues_del_aniversario_usa_la_nueva():
+    # Noviembre 2026 ya pasó el aniversario de oct → tarifa 2026.
+    assert _tarifa_indexada_periodo(_IDX, 5.0, _FIRMA, "2026-11") == 5.52826
+
+
+def test_tarifa_en_ano_base_usa_la_base():
+    assert _tarifa_indexada_periodo(_IDX, 5.0, _FIRMA, "2024-12") == 5.0
+
+
+def test_tarifa_sin_indexacion_cae_a_la_base():
+    assert _tarifa_indexada_periodo([], 7.0, _FIRMA, "2026-06") == 7.0
+    assert _tarifa_indexada_periodo(None, 7.0, _FIRMA, "2026-06") == 7.0
+
+
+def test_tarifa_periodo_anterior_a_todo_usa_esbase():
+    # Período anterior incluso al año base → cae a la entrada esBase.
+    assert _tarifa_indexada_periodo(_IDX, None, _FIRMA, "2023-01") == 5.0

@@ -488,8 +488,10 @@ def _guardar_panel(
     # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
     try:
         mods = valores_modulo_costos(db, proyecto_id, periodo)
-        # Representación y CGM (grupo 'facturas') = tarifa app × energía del ER (parsed["kwh"]).
-        mods.update(valores_facturas_modulo(db, proyecto_id, periodo, parsed.get("kwh")))
+        # Representación/CGM = tarifa app × energía del ER; Administración = tarifa_admin
+        # × ingreso del ER. Ambas bases (kWh, ingreso) salen del ER (grupo 'facturas').
+        mods.update(valores_facturas_modulo(
+            db, proyecto_id, periodo, parsed.get("kwh"), parsed.get("total_ingresos")))
         if mods:
             base = aplicar_costos_modulo(base, mods, iva=IVA)
     except Exception:

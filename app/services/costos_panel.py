@@ -232,19 +232,21 @@ def _tarifa_indexada_periodo(indexacion, tarifa_base, fecha_firma, periodo: str)
     return float(tarifa_base) if tarifa_base is not None else None
 
 
-def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str, kwh: float | None) -> dict[str, dict]:
-    """Representación y CGM del grupo 'facturas' = tarifa indexada de la app × la
-    energía (kWh) del proyecto en el mes. La energía la pasa el caller (viene del ER,
-    por decisión de negocio: debe cuadrar con la generación del ER).
+def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str,
+                            kwh: float | None, ingreso: float | None = None) -> dict[str, dict]:
+    """Servicios del grupo 'facturas' desde las tarifas de la app (no del ER):
+    - Representación / CGM = tarifa indexada × energía (kWh) del mes.
+    - Administración = tarifa_admin (%) × ingreso del mes.
 
-    Repr y CGM viven en un mismo contrato `servicio_aplica='representacion'`. Solo se
-    devuelve un concepto si el contrato tiene esa tarifa. Valores negativos. Los
-    impuestos NO se calculan aquí: el Panel los deriva por cliente al leer."""
+    kWh e ingreso los pasa el caller y salen del ER (decisión de negocio: deben
+    cuadrar con el ER). Repr/CGM/Admin viven en un mismo contrato
+    `servicio_aplica='representacion'` (ahí está también `tarifa_admin`; la admin es
+    el fee de operación). Solo se devuelve un concepto si el contrato tiene su tarifa.
+    Valores negativos. Los impuestos NO se calculan aquí: el Panel los deriva por
+    cliente al leer."""
     from app.models.proyectos import Proyecto
     from app.models.contratos import ContratoServicio
 
-    if not kwh:
-        return {}
     proyecto = db.get(Proyecto, proyecto_id)
     if proyecto is None:
         return {}
@@ -259,16 +261,22 @@ def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str, kwh: fl
         return {}
 
     out: dict[str, dict] = {}
-    t_rep = _tarifa_indexada_periodo(c.indexacion_representacion, c.tarifa_representacion,
-                                     c.fecha_firma_contrato, periodo)
-    if t_rep:
-        out["Representación"] = {"grupo": "facturas", "valor": -abs(round(t_rep * kwh, 2)),
-                                 "fuente": "servicios"}
-    t_cgm = _tarifa_indexada_periodo(c.indexacion_cgm, c.tarifa_cgm,
-                                     c.fecha_firma_contrato, periodo)
-    if t_cgm:
-        out["CGM"] = {"grupo": "facturas", "valor": -abs(round(t_cgm * kwh, 2)),
-                      "fuente": "servicios"}
+    if kwh:
+        t_rep = _tarifa_indexada_periodo(c.indexacion_representacion, c.tarifa_representacion,
+                                         c.fecha_firma_contrato, periodo)
+        if t_rep:
+            out["Representación"] = {"grupo": "facturas", "valor": -abs(round(t_rep * kwh, 2)),
+                                     "fuente": "servicios"}
+        t_cgm = _tarifa_indexada_periodo(c.indexacion_cgm, c.tarifa_cgm,
+                                         c.fecha_firma_contrato, periodo)
+        if t_cgm:
+            out["CGM"] = {"grupo": "facturas", "valor": -abs(round(t_cgm * kwh, 2)),
+                          "fuente": "servicios"}
+    # Administración = fee de operación = tarifa_admin (%) × ingreso del mes.
+    if c.tarifa_admin and ingreso:
+        out["Administración"] = {"grupo": "facturas",
+                                 "valor": -abs(round(float(c.tarifa_admin) * float(ingreso), 2)),
+                                 "fuente": "operacion"}
     return out
 
 

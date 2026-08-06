@@ -118,6 +118,14 @@ def test_facturas_reemplaza_repr_y_cgm_sin_tocar_admin():
     assert rep["hoja"] is None                     # ya no viene de una celda del ER
 
 
+def test_facturas_reemplaza_administracion():
+    """Admin viene de tarifa_admin × ingreso (fuente 'operacion'), reemplaza la del ER."""
+    mods = {"Administración": {"grupo": "facturas", "valor": -76.0, "fuente": "operacion"}}
+    out = aplicar_costos_modulo(_base_facturas(), mods)
+    admin = next(l for l in out if l["concepto"] == "Administración")
+    assert admin["valor"] == -76.0 and admin["fuente"] == "operacion"
+
+
 def test_facturas_no_genera_linea_de_iva_guardada():
     """Repr/CGM no guardan IVA (el Panel lo deriva por cliente al leer)."""
     mods = {"Representación": {"grupo": "facturas", "valor": -526.0, "fuente": "servicios"}}

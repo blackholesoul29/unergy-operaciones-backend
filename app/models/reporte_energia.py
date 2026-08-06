@@ -70,6 +70,16 @@ class ReporteEnergiaGeneracion(Base):
     # curva_final cuando esta columna es null.
     curva_respaldo_terceros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
+    # clasificar -- antes solo se guardaba el total (energia_medidor_..._kwh)
+    # y el detalle volvía a consultarlas en vivo cada vez, lo que podía
+    # mostrar un valor distinto si Quoia corrige un dato después (ver MGS
+    # 0032 El Paso Norte 2026-08-05: medidor doblado por un glitch de Quoia
+    # al momento de clasificar, ya autocorregido para cuando se revisó).
+    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_solenium_referencia: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
@@ -148,6 +158,13 @@ class ReporteEnergiaConsumo(Base):
 
     energia_cgm_kwh: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     estado_reporte: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Curvas de medidor de referencia al momento de clasificar -- mismo
+    # motivo que en ReporteEnergiaGeneracion. Quedan en null cuando el caso
+    # fue 'CGM' (esa rama no consulta el medidor, para no sumarle una
+    # llamada a Quoia a los ~40+ fronteras que resuelven solo con CGM).
+    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     recuperacion_datos: Mapped[str | None] = mapped_column(String(255), nullable=True)

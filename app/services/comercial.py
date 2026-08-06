@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.utils.series_mensuales import serie_mensual_kwh
+
 # Pipeline de la oferta, en orden. 'declinado' queda fuera del orden porque no
 # es un avance sino una salida.
 ETAPAS = ("oportunidad", "oferta", "contrato", "firmado", "operando", "terminado")
@@ -198,8 +200,11 @@ def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
     if proyecto is not None:
         if proyecto.mwh_mes_estimado is not None:
             promedio_proyecto = float(proyecto.mwh_mes_estimado) * 1000
-        elif proyecto.p50_mensual_kwh:
-            vals = [float(v) for v in proyecto.p50_mensual_kwh if v is not None]
+        else:
+            # Ojo: el p50 llega como lista o como texto JSON según la antigüedad
+            # de la fila (ver serie_mensual_kwh). Leerlo crudo tumbaba la lista
+            # entera de /comercial/ofertas con un 500.
+            vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
             if vals:
                 promedio_proyecto = sum(vals) / len(vals)
     energia_promedio = _elegir(

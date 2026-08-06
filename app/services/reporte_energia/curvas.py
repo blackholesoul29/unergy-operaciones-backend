@@ -211,6 +211,9 @@ def recuperar_y_releer(
     return curva, completo, exito
 
 
+TOLERANCIA_VALOR_SOSPECHOSO = 0.50  # %: qué tan lejos de mediana_referencia antes de forzar recuperación
+
+
 def curvas_de_frontera(
     gaia: GaiaClient,
     mapa_medidor_nodo: dict[int, int],
@@ -219,6 +222,7 @@ def curvas_de_frontera(
     fecha_str: str,
     frt_code: str,
     recuperar: bool = True,
+    mediana_referencia: float | None = None,
 ) -> dict:
     """Curvas horarias (kWh) de generación (eae) y consumo propio (iae) del
     medidor principal y de respaldo de una frontera, para una fecha.
@@ -233,6 +237,15 @@ def curvas_de_frontera(
     del dispositivo físico sin importar la variable, así que no hace falta
     interrogar dos veces el mismo medidor -- y se vuelven a leer ambas
     curvas (eae e iae) después.
+
+    `mediana_referencia` (opcional, default None -- no cambia nada para
+    quien no lo pasa) agrega un segundo motivo para recuperar: aunque la
+    lectura pasiva venga "completa", si su total se aleja de esta mediana
+    más de TOLERANCIA_VALOR_SOSPECHOSO, se interroga igual -- la
+    completitud no detecta un glitch de telemetría que reporta un valor
+    doblado o partido a la mitad, solo huecos (ver MGS 0032 El Paso Norte /
+    Sol&Cielo 7 Los Bongos: el medidor venía "completo" pero exactamente 2x
+    su valor normal).
     """
     node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
     node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
@@ -242,13 +255,21 @@ def curvas_de_frontera(
     cons_p, cons_comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal/consumo", "iae")
     cons_r, cons_comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo/consumo", "iae")
 
+    def _sospechoso(curva: pd.Series) -> bool:
+        if not mediana_referencia or mediana_referencia <= 0:
+            return False
+        total = float(curva.fillna(0).sum())
+        if total == 0:
+            return False
+        return abs(total - mediana_referencia) / mediana_referencia > TOLERANCIA_VALOR_SOSPECHOSO
+
     intentos: list[str] = []
     if recuperar:
-        if node_p is not None and main_meter_id and not (comp_p and cons_comp_p):
+        if node_p is not None and main_meter_id and (not (comp_p and cons_comp_p) or _sospechoso(curva_p)):
             curva_p, comp_p, exito = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal", "eae")
             cons_p, cons_comp_p, _ = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal/consumo", "iae")
             intentos.append(f"principal: {'éxito' if exito else 'falló'}")
-        if node_r is not None and backup_meter_id and not (comp_r and cons_comp_r):
+        if node_r is not None and backup_meter_id and (not (comp_r and cons_comp_r) or _sospechoso(curva_r)):
             curva_r, comp_r, exito = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo", "eae")
             cons_r, cons_comp_r, _ = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo/consumo", "iae")
             intentos.append(f"respaldo: {'éxito' if exito else 'falló'}")

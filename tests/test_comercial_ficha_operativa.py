@@ -174,6 +174,26 @@ def test_sin_estimado_la_energia_promedio_cae_al_p50():
     assert f["fuentes"]["energia_promedio_kwh_mes"] == "proyecto"
 
 
+def test_el_p50_guardado_como_texto_json_tambien_sirve():
+    """Plantas viejas (Baraya, La Cumbia) tienen el p50 guardado como STRING JSON
+    dentro del JSONB, no como arreglo: son datos anteriores a la migración a
+    JSONB. Recorrer ese string da caracteres y `float('[')` reventaba la lista
+    entera de /comercial/ofertas con un 500."""
+    f = ficha_operativa(_oferta(),
+                        proyecto=_proyecto(p50_mensual_kwh="[100.0, 100.0, 220.0]"))
+    assert f["energia_promedio_kwh_mes"] == 140.0
+    assert f["fuentes"]["energia_promedio_kwh_mes"] == "proyecto"
+
+
+def test_un_p50_ilegible_no_tumba_la_ficha():
+    """Si el dato no se puede leer, la ficha cae al escalón siguiente de la
+    cascada (lo declarado en la oferta). Nunca revienta."""
+    f = ficha_operativa(_oferta(energia_promedio_kwh_mes=170000),
+                        proyecto=_proyecto(p50_mensual_kwh="no es json"))
+    assert f["energia_promedio_kwh_mes"] == 170000.0
+    assert f["fuentes"]["energia_promedio_kwh_mes"] == "oferta"
+
+
 def test_sin_proyecto_la_energia_promedio_es_la_declarada():
     f = ficha_operativa(_oferta(energia_promedio_kwh_mes=170000))
     assert f["energia_promedio_kwh_mes"] == 170000.0

@@ -30,19 +30,31 @@ from sqlalchemy.orm import Session
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, datos_crudos, solenium as solenium_svc, reconectador, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva, escalar_curva_con_huecos
+from app.services.reporte_energia.utils import (
+    CURVA_CERO, CURVA_VACIA, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
+)
 
 HORAS = list(range(24))
 
 CASOS_CON_RELLENO_HORARIO = {2, 3, 4, 5, 7, 8}
 RANGO_ERROR         = 6.0               # %: error aceptable [-6%, +6%]
 ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy es válido
+HORAS_SOLARES       = range(6, 18)       # 6am a 6pm -- mismo criterio que reporte_cgm.py
 
 # frontera_id de proyectos sin inversores (nunca registrados en Solenium)
 # cuyo medidor de nodo se sabe que sub-reporta crónicamente frente a la
 # energía real, sin forma de calcular un factor de corrección. Confirmar
 # los ids reales contra la BD ("GD Agustín 2" en el pipeline original).
 MEDIDORES_SIN_INVERSOR_SOSPECHOSOS: set[int] = set()
+
+# frontera_id con un glitch de telemetría intermitente ya confirmado en vivo
+# (medidor doblado exactamente 2x al momento de clasificar, autocorregido
+# después -- ver MGS 0032 El Paso Norte Generación 2026-08-05, mismo
+# problema ya conocido en su frontera de Consumo homóloga, id=111, via
+# FRONTERAS_VALIDAR_CGM_VS_MEDIDOR en clasificador_consumo.py). Siempre
+# queda revisar_manualmente=True sin importar el Caso ni la fuente usada
+# ese día -- el problema es de la telemetría en sí, no de un Caso puntual.
+FRONTERAS_MEDIDOR_SOSPECHOSO: set[int] = {110}  # MGS 0032 El Paso Norte Generación
 
 # frontera_id de proyectos cuyo CGM lo hace al ASIC otra empresa distinta a
 # Unergy -- no aplica este árbol de Casos. El medidor de nodo de Quoia no
@@ -220,11 +232,26 @@ def _decidir_caso(
     if e_cgm <= 0:
         curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
-            return {
+            resultado_medidor = {
                 "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
                 "medidor_usado": "principal_sin_cgm" if curva is curva_ppal else "respaldo_sin_cgm",
-                "revisar_manualmente": True,
             }
+            # Mismo blindaje que ya tiene el camino de CGM válido más arriba
+            # -- si Solenium reportó parcial ese día, se compara el medidor
+            # contra ese total SOLO en las horas que Solenium sí cubrió (ver
+            # MGS 0025 El Copey Occidente 2026-08-05: medidor 6.861 kWh vs
+            # inversores parciales 6.887,4 kWh en las mismas horas, ~0,4% de
+            # diferencia -- no había motivo para marcar Revisar Manualmente
+            # a ciegas). Sin inversores con qué comparar, se mantiene el
+            # criterio de siempre: queda marcado.
+            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
+                curva_medidor_horas_comunes = curva.where(curva_solenium.notna())
+                error_parcial = _error_con_curva(e_inv_incompleto, curva_medidor_horas_comunes)
+                resultado_medidor["error_final_pct"] = error_parcial
+                resultado_medidor["revisar_manualmente"] = not _en_rango(error_parcial)
+            else:
+                resultado_medidor["revisar_manualmente"] = True
+            return resultado_medidor
 
     # --- Casos 6/7/8: ni CGM ni medidor ni inversores tienen nada ---
     if e_inv_incompleto:
@@ -343,14 +370,7 @@ def clasificar_generacion(
         curva_cgm = CURVA_CERO.copy()
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    # --- Medidor de nodo ---
-    main_meter = border_meta.get("main_meter") if border_meta else None
-    backup_meter = border_meta.get("backup_meter") if border_meta else None
-    c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
-    curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
-    completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]
-
-    # --- Solenium (inversores) ---
+    # --- Solenium (inversores) -- ANTES del medidor a propósito, ver abajo ---
     curva_solenium, solenium_completo = solenium_svc.curva_generacion(sol, project_id_solenium, fecha_str)
     e_inv_original = float(curva_solenium.fillna(0).sum())
 
@@ -367,6 +387,39 @@ def clasificar_generacion(
         e_inv_incompleto = e_inv
         e_inv = 0.0
 
+    # --- Medidor de nodo ---
+    # Mismo chequeo de Caso 1 que hace _decidir_caso() más abajo, pero ANTES
+    # de traer el medidor -- Caso 1 no usa el medidor para nada (valida CGM
+    # contra inversores, no contra el medidor). Si ya se sabe que hoy va a
+    # ganar Caso 1, no tiene sentido pagar recuperación activa (hasta 90s
+    # interrogando el dispositivo) sobre un medidor que ni se va a usar para
+    # decidir -- pero SÍ se sigue trayendo la lectura PASIVA (recuperar=False),
+    # porque el histórico de Factor de Pérdida necesita medidor de TODOS los
+    # días con dato, sin importar qué Caso ganó (ver historial.py). Motivado
+    # por Bongos/Paso Norte: la recuperación activa a las 3:30am no siempre
+    # alcanza a estabilizar el dato de todas formas (ver conversación de
+    # sesión), así que gastarla en fronteras que ni la necesitan es puro
+    # costo sin beneficio.
+    es_caso1_seguro = (
+        reporte_valido and e_inv > 0 and e_cgm > 0
+        and _en_rango(_error_con_curva(e_inv, curva_cgm))
+    )
+    # Mediana histórica -- solo como referencia de plausibilidad para la
+    # lectura del medidor (ver mediana_referencia en curvas_de_frontera), no
+    # se usa el FP acá. Solo hace falta pedirla cuando SÍ se va a intentar
+    # recuperación -- si es_caso1_seguro, ni siquiera se consulta.
+    mediana_hist = None
+    if not es_caso1_seguro:
+        mediana_hist, _ = historial.get_mediana_generacion(db, frontera_id, fecha)
+    main_meter = border_meta.get("main_meter") if border_meta else None
+    backup_meter = border_meta.get("backup_meter") if border_meta else None
+    c = curvas.curvas_de_frontera(
+        gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code,
+        recuperar=not es_caso1_seguro, mediana_referencia=mediana_hist,
+    )
+    curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
+    completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]
+
     resultado = _decidir_caso(
         db, frontera_id, fecha, fecha_str,
         e_cgm, curva_cgm, reporte_valido,
@@ -375,6 +428,8 @@ def clasificar_generacion(
         project_id_solenium, c["node_ppal"], gaia, sol,
     )
     revisar = resultado.get("revisar_manualmente", False)
+    if frontera_id in FRONTERAS_MEDIDOR_SOSPECHOSO:
+        revisar = True
 
     # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
     # de recuperarlo como con los medidores) -- excepto cuando el resultado
@@ -417,7 +472,13 @@ def clasificar_generacion(
         # Solenium tiene un número limitado de consultas y puede no traer
         # la hora aunque Fusion sí la tenga completa. El histórico propio
         # no depende de ninguna API externa, así que ese no aplica.
-        if horas_reconectador or horas_solenium_h:
+        # Excepción: si las horas rellenadas caen FUERA de la ventana solar
+        # (madrugada/noche), el valor esperado ya es ~0 sin importar la
+        # fuente -- no hay nada real que un dato de respaldo pueda arruinar
+        # (ver MGS 0021 Ibirico 2026-08-05: reconectador rellenó 19h y 23h,
+        # ambas en 0,0 kWh, coincidiendo con medidor/inversores en el resto
+        # del día -- forzar revisión ahí no aporta nada).
+        if any(h in HORAS_SOLARES for h in horas_reconectador | horas_solenium_h):
             revisar = True
         if curva_rellenada.isna().any():
             revisar = True
@@ -446,6 +507,19 @@ def clasificar_generacion(
     resultado["medidor_principal_completo"] = bool(completo_ppal)
     resultado["medidor_respaldo_completo"] = bool(completo_resp)
     resultado["recuperacion_datos"] = c.get("recuperacion_datos")
+    # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
+    # clasificar -- antes solo se guardaba el total (energia_medidor_..._kwh),
+    # la curva completa se volvía a pedir en vivo cada vez que se abría el
+    # detalle, lo que podía mostrar un valor distinto al que realmente se usó
+    # si Quoia corrige un dato después (ver MGS 0032 El Paso Norte
+    # 2026-08-05: medidor doblado por un glitch de Quoia al momento de
+    # clasificar, ya autocorregido para cuando se revisó -- "Fuente usada"
+    # y "Detalle de las fuentes" mostraban números distintos sin explicación).
+    resultado["curva_medidor_principal"] = curva_a_lista(curva_ppal)
+    resultado["curva_medidor_respaldo"] = curva_a_lista(curva_resp)
+    resultado["curva_solenium_referencia"] = (
+        curva_a_lista(curva_solenium) if isinstance(curva_solenium, pd.Series) else None
+    )
     resultado.setdefault("fp", None)
     resultado.setdefault("fp_calculada", None)
     resultado.setdefault("error_final_pct", None)

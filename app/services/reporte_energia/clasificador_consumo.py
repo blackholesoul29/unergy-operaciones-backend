@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva
+from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva, curva_a_lista
 
 HORAS = list(range(24))
 ESTADOS_AUTOMATICO = {"OK", "WARNING"}
@@ -189,11 +189,33 @@ def clasificar_consumo(
             cgm_ok = False
 
     if cgm_ok:
-        return {
+        resultado_cgm = {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "horas_rellenadas_historico": None, "recuperacion_datos": None,
         }
+        if frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+            # Paso Norte -- el bug de Quoia es intermitente, así que pasar el
+            # cruce contra medidor un día puntual no lo vuelve confiable en
+            # general. Se sigue reportando con CGM (la mejor fuente que hay),
+            # pero siempre queda para revisar a mano -- y por lo mismo nunca
+            # alimenta el histórico (get_mediana_consumo exige
+            # revisar_manualmente=False).
+            resultado_cgm["revisar_manualmente"] = True
+        else:
+            # Blindaje contra outliers no descubiertos todavía (el mismo
+            # motivo por el que Paso Norte necesitó el suyo): 'reporte
+            # automático válido' por sí solo no protege de un CGM que ese
+            # día reportó algo raro en una frontera que nunca habíamos
+            # sospechado. En cuanto hay mediana histórica (aunque se haya
+            # construido con días de CGM, ver CASOS_CONFIABLES_CONSUMO), se
+            # cruza igual que ya se hace para 'Medidor' -- mientras no haya
+            # mediana (arranque desde cero), se sigue confiando solo en el
+            # status de Quoia, como hasta ahora.
+            mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
+            if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
+                resultado_cgm["revisar_manualmente"] = True
+        return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,
@@ -227,6 +249,19 @@ def _clasificar_por_medidor_o_historico(
     main_meter = border_meta.get("main_meter") if border_meta else None
     backup_meter = border_meta.get("backup_meter") if border_meta else None
     c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+    resultado = _decidir_medidor_o_historico(db, frontera_id, fecha, e_cgm, estado_reporte, c)
+    # Curvas de referencia tal como estaban al momento de clasificar -- ya se
+    # tenían que pedir de todas formas para esta rama, así que persistirlas
+    # no agrega ninguna llamada nueva a Quoia (ver mismo fix en
+    # clasificador.py -- MGS 0032 El Paso Norte 2026-08-05).
+    resultado["curva_medidor_principal"] = curva_a_lista(c["consumo_ppal"])
+    resultado["curva_medidor_respaldo"] = curva_a_lista(c["consumo_resp"])
+    return resultado
+
+
+def _decidir_medidor_o_historico(
+    db: Session, frontera_id: int, fecha: date, e_cgm: float, estado_reporte: str | None, c: dict,
+) -> dict:
     # Para una frontera de Consumo, "generación" (eae) y "consumo" (iae) del
     # mismo medidor son ambos relevantes en teoría, pero lo que interesa acá
     # es la variable iae de ESTE medidor -- ya viene calculada en

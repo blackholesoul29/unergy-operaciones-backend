@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente
-from app.models.fronteras import Frontera
+from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.operadores_red import OperadorRed
+from app.models.proyectos import ProyectoInfoTecnica
 from app.schemas.reporte_cgm import (
     EnviarReporteCGMRequest, EnviarReporteCGMResponse, EnvioResultado,
 )
@@ -14,8 +15,11 @@ from app.services import email_service
 from app.services import reporte_cgm as svc
 from app.services.contactos import get_contactos, get_proyecto_ids_por_contacto_cliente
 from app.services.mgs.gaia_client import GaiaClient
+from app.services.reporte_energia import curvas as curvas_energia
 
 router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
+
+_TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
 
 
 def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
@@ -42,6 +46,53 @@ def _fronteras_de_cliente(db: Session, cliente_id: int) -> list[Frontera]:
     )
 
 
+def _datos_proyectos_para_resumen(
+    db: Session, gaia: GaiaClient, fronteras: list[Frontera],
+) -> dict[int, dict]:
+    """Arma el dict proyecto_id -> {...} que necesita
+    svc.calcular_resumen_mensual() (Hoja 2 de Clientes) -- agrupa las
+    fronteras de ESTE destinatario por proyecto, separando cuál es la de
+    Generación (para medidor/capacidad_efectiva) y cuál la de Consumo."""
+    proyecto_ids = {f.proyecto_id for f in fronteras if f.proyecto_id}
+    if not proyecto_ids:
+        return {}
+
+    capacidad_dc: dict[int, float | None] = dict(db.query(
+        ProyectoInfoTecnica.proyecto_id, ProyectoInfoTecnica.capacidad_instalada_kwp,
+    ).filter(ProyectoInfoTecnica.proyecto_id.in_(proyecto_ids)).all())
+
+    mapa_borders = curvas_energia.construir_mapa_borders(gaia)
+
+    proyectos: dict[int, dict] = {}
+    for f in fronteras:
+        if not f.proyecto_id or not f.proyecto:
+            continue
+        datos = proyectos.setdefault(f.proyecto_id, {
+            "nombre": f.proyecto.nombre_comercial,
+            "frt_gen": None, "frt_con": None,
+            "capacidad_dc_kwp": capacidad_dc.get(f.proyecto_id),
+            "capacidad_efectiva_mw": None,
+            "main_meter_gen": None, "backup_meter_gen": None,
+            "main_meter_con": None, "backup_meter_con": None,
+        })
+        meta = mapa_borders.get(f.codigo_frontera.strip().lower()) if f.codigo_frontera else None
+        if f.tipo_frontera == TipoFronteraEnum.generacion and f.codigo_frontera:
+            datos["frt_gen"] = f.codigo_frontera
+            datos["capacidad_efectiva_mw"] = f.capacidad_efectiva_mw
+            if meta:
+                datos["main_meter_gen"] = meta.get("main_meter")
+                datos["backup_meter_gen"] = meta.get("backup_meter")
+        elif f.tipo_frontera in _TIPOS_CONSUMO and f.codigo_frontera:
+            # consumo_auxiliar/consumo_propio son el autoconsumo de la misma
+            # planta de generación (ej. Sol&Cielo 7 Los Bongos) -- cuentan
+            # igual como "Total Consumo" para este resumen, no solo 'consumo'.
+            datos["frt_con"] = f.codigo_frontera
+            if meta:
+                datos["main_meter_con"] = meta.get("main_meter")
+                datos["backup_meter_con"] = meta.get("backup_meter")
+    return proyectos
+
+
 def _nombres_proyectos(fronteras: list[Frontera]) -> list[str]:
     """Nombres únicos de proyecto entre estas fronteras (una misma planta
     suele tener frontera de Generación y de Consumo por separado)."""
@@ -65,9 +116,24 @@ def enviar_reporte_cgm(
         (body.fecha_inicio + timedelta(days=i)).isoformat()
         for i in range((body.fecha_fin - body.fecha_inicio).days + 1)
     ]
-    multi_hoja = len(dias) > svc.DIAS_UMBRAL_MULTI_HOJA
     fecha_display = dias[0] if len(dias) == 1 else f"{dias[0]} a {dias[-1]}"
     fecha_archivo = dias[0] if len(dias) == 1 else f"{dias[0]}_a_{dias[-1]}"
+
+    # Envío de un solo día -- dispara dos cosas distintas, cada una acotada a
+    # su tipo de destinatario:
+    #  - Operador de Red: SOLO si además ese día es el último del mes, se
+    #    adjunta ADEMÁS (no en vez de) un segundo Excel con todo el mes.
+    #  - Cliente: SIEMPRE (todos los días), el reporte diario mismo pasa a
+    #    ser de dos hojas -- la primera acumulada desde el día 1 del mes
+    #    hasta hoy (no solo el día pedido), la segunda un resumen mensual
+    #    por proyecto. Ver conversación -- Cliente cambia de estructura,
+    #    Operador de Red no.
+    # dias_mes ya incluye dias[0], así que en ambos casos se pide a Quoia una
+    # sola vez (superset) en vez de dos.
+    es_dia_unico = len(dias) == 1
+    dias_mes = svc.dias_del_mes(body.fecha_inicio) if es_dia_unico else []
+    mensual_activo_or = es_dia_unico and svc.es_ultimo_dia_del_mes(body.fecha_inicio)
+    dias_fetch = dias_mes if es_dia_unico else dias
 
     # 1. Resolver, desde la BD, a quién le llega qué (nunca se confía en datos
     #    del frontend más allá de tipo+id).
@@ -114,9 +180,9 @@ def enviar_reporte_cgm(
             if f.codigo_frontera:
                 frt_codes.add(f.codigo_frontera)
 
+    gaia = GaiaClient()
     filas_por_frt: dict[str, list[dict]] = {}
     if frt_codes:
-        gaia = GaiaClient()
         borders = svc.resolver_borders(gaia, frt_codes)
         for frt_code in frt_codes:
             meta = borders.get(frt_code.lower())
@@ -130,7 +196,7 @@ def enviar_reporte_cgm(
                 continue
             filas_por_frt[frt_code] = [
                 fila
-                for dia in dias
+                for dia in dias_fetch
                 for fila in svc.fetch_filas(gaia, frt_code, meta, dia)
             ]
 
@@ -153,22 +219,54 @@ def enviar_reporte_cgm(
             ))
             continue
 
-        filas = [
+        filas_todas = [
             fila
             for f in fronteras if f.codigo_frontera
             for fila in filas_por_frt.get(f.codigo_frontera, [])
         ]
+        # filas_todas trae todo el mes cuando es_dia_unico (dias_fetch =
+        # dias_mes) -- filas_dia se queda solo con el día pedido, que es lo
+        # que usa Operador de Red siempre y Cliente solo si pidió un rango
+        # explícito (no un solo día, ver más abajo).
+        dias_set = set(dias)
+        filas_dia = [f for f in filas_todas if f["report date"] in dias_set] if es_dia_unico else filas_todas
+
         try:
-            excel_bytes = svc.generar_excel(filas, multi_hoja=multi_hoja)
             slug = "".join(c if c.isalnum() else "_" for c in nombre.lower()).strip("_")
+            excel_mensual_bytes = filename_mensual = mes_str = None
+            fecha_str_envio = fecha_display
+
+            if dest.tipo == "cliente" and es_dia_unico:
+                # Cliente: el reporte diario mismo cambia de estructura --
+                # Hoja 1 acumulada del mes completo (no solo el día pedido)
+                # + Hoja 2 con el resumen mensual por proyecto.
+                mes_titulo = f"{svc.nombre_mes(body.fecha_inicio).capitalize()} {body.fecha_inicio.year}"
+                proyectos = _datos_proyectos_para_resumen(db, gaia, fronteras)
+                filas_resumen = svc.calcular_resumen_mensual(
+                    gaia, proyectos, filas_por_frt, dias_mes, mes_titulo,
+                )
+                excel_bytes = svc.generar_excel_cliente(filas_todas, filas_resumen, titulo_hoja_diaria="CGM Report")
+                fecha_str_envio = f"{dias_mes[0]} a {dias_mes[-1]}"
+            else:
+                excel_bytes = svc.generar_excel(filas_dia)
+                if mensual_activo_or and dest.tipo == "operador":
+                    excel_mensual_bytes = svc.generar_excel(
+                        filas_todas, titulo_hoja=svc.titulo_hoja_mensual(body.fecha_inicio),
+                    )
+                    filename_mensual = f"cgm-report-consolidado-{body.fecha_inicio.strftime('%Y-%m')}-{slug}.xlsx"
+                    mes_str = svc.nombre_mes(body.fecha_inicio)
+
             email_service.send_reporte_cgm_email(
                 to_emails=correos,
                 excel_bytes=excel_bytes,
                 filename=f"cgm-report-{fecha_archivo}-{slug}.xlsx",
-                fecha_str=fecha_display,
+                fecha_str=fecha_str_envio,
                 destinatario_nombre=nombre,
                 proyectos=_nombres_proyectos(fronteras),
                 proyectos_total=proyectos_total,
+                excel_mensual_bytes=excel_mensual_bytes,
+                filename_mensual=filename_mensual,
+                mes_str=mes_str,
             )
             resultados.append(EnvioResultado(
                 tipo=dest.tipo, id=dest.id, nombre=nombre, correos=correos,

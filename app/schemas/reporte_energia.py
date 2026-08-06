@@ -69,6 +69,16 @@ class DetalleFronteraReporte(BaseModel):
     curva_medidor_principal: list[float | None] | None = None
     curva_medidor_respaldo: list[float | None] | None = None
     curva_solenium: list[float | None] | None = None
+    # True si el valor EN VIVO de Quoia (medidor o Solenium) ya difiere del
+    # que quedó guardado al momento de clasificar -- señal de que conviene
+    # re-correr el clasificador para este día (ver MGS 0032 El Paso Norte
+    # 2026-08-05). None-safe: si la fila es de antes de este fix (sin curva
+    # persistida), no hay base de comparación y queda en False.
+    medidor_actualizado_en_quoia: bool = False
+    # Total EN VIVO de la fuente que realmente se usó (medidor_usado) --
+    # solo presente cuando medidor_actualizado_en_quoia=True, para el aviso
+    # "X kWh ahora vs Y kWh al momento de clasificar".
+    energia_actual_kwh: float | None = None
     # Curva 'Backup' del Excel de terceros (FRONTERAS_TERCEROS) -- distinta
     # de curva_medidor_respaldo (esa es telemetría en vivo del medidor de
     # nodo, que para estas fronteras no existe).

@@ -22,6 +22,7 @@ _REPORTE_CGM_TEXTO = (
     "Cordial Saludo,\n\n"
     "Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente "
     "{fecha_frase}, reportado al ASIC.\n\n"
+    "{nota_mensual}"
     "Quedamos atentos a cualquier observación al respecto.\n\n"
     "Atentamente,\n\n"
     "--\n"
@@ -44,6 +45,7 @@ _REPORTE_CGM_HTML = """\
   <p>Cordial Saludo,</p>
   <p>Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente
   {fecha_frase}, reportado al ASIC.</p>
+  {nota_mensual}
   <p>Quedamos atentos a cualquier observación al respecto.</p>
   <p>Atentamente,</p>
   <br>
@@ -589,9 +591,18 @@ def send_reporte_cgm_email(
     destinatario_nombre: str,
     proyectos: list[str] | None = None,
     proyectos_total: int | None = None,
+    excel_mensual_bytes: bytes | None = None,
+    filename_mensual: str | None = None,
+    mes_str: str | None = None,
 ) -> None:
     """
     Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
+
+    excel_mensual_bytes/filename_mensual/mes_str son opcionales -- se usan
+    solo cuando el envío cubre el último día de un mes, para adjuntar
+    ADEMÁS el consolidado de todo ese mes (mismo formato, más días). Ver
+    reporte_cgm.dias_del_mes()/es_ultimo_dia_del_mes().
+
     Lanza RuntimeError si SMTP no está configurado o falla el envío.
     """
     if not settings.SMTP_HOST:
@@ -602,6 +613,10 @@ def send_reporte_cgm_email(
 
     subject = f"Reporte CGM — {fecha_str} — {destinatario_nombre}"
     fecha_frase = f"al periodo {fecha_str}" if " a " in fecha_str else f"al día {fecha_str}"
+    nota_mensual_texto = f"Adjuntamos también el consolidado del mes de {mes_str}.\n\n" if excel_mensual_bytes else ""
+    nota_mensual_html = (
+        f'<p>Adjuntamos también el consolidado del mes de {mes_str}.</p>' if excel_mensual_bytes else ""
+    )
 
     msg = MIMEMultipart("mixed")
     msg["From"] = settings.SMTP_FROM
@@ -610,8 +625,12 @@ def send_reporte_cgm_email(
 
     cuerpo = MIMEMultipart("related")
     alternativa = MIMEMultipart("alternative")
-    alternativa.attach(MIMEText(_REPORTE_CGM_TEXTO.format(fecha_frase=fecha_frase), "plain", "utf-8"))
-    alternativa.attach(MIMEText(_REPORTE_CGM_HTML.format(fecha_frase=fecha_frase), "html", "utf-8"))
+    alternativa.attach(MIMEText(
+        _REPORTE_CGM_TEXTO.format(fecha_frase=fecha_frase, nota_mensual=nota_mensual_texto), "plain", "utf-8",
+    ))
+    alternativa.attach(MIMEText(
+        _REPORTE_CGM_HTML.format(fecha_frase=fecha_frase, nota_mensual=nota_mensual_html), "html", "utf-8",
+    ))
     cuerpo.attach(alternativa)
 
     if _LOGO_UNERGY.exists():
@@ -623,16 +642,23 @@ def send_reporte_cgm_email(
 
     msg.attach(cuerpo)
 
-    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    adjunto.set_payload(excel_bytes)
-    encoders.encode_base64(adjunto)
     # filename como parámetro aparte (no interpolado en el string) -- así
     # Python aplica la codificación RFC 2231 si el nombre tiene tildes/ñ
     # (ej. "COX ENERGY GENERACIÓN...", "CGM Ingeniería"). Interpolado a mano
     # como antes, Gmail no lo interpretaba y mostraba el adjunto sin nombre
     # ni ícono ("noname").
+    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    adjunto.set_payload(excel_bytes)
+    encoders.encode_base64(adjunto)
     adjunto.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(adjunto)
+
+    if excel_mensual_bytes:
+        adjunto_mensual = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        adjunto_mensual.set_payload(excel_mensual_bytes)
+        encoders.encode_base64(adjunto_mensual)
+        adjunto_mensual.add_header("Content-Disposition", "attachment", filename=filename_mensual)
+        msg.attach(adjunto_mensual)
 
     # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de
     # seguimiento interno, igual que CORREO_SEGUIMIENTO en el script standalone.

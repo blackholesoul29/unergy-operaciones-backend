@@ -148,13 +148,39 @@ def _fila_por_id(db: Session, frontera_id: int, fecha: date):
     return front, rep, Modelo
 
 
+def _curva_cambio(persistida: list | None, viva: list | None, tolerancia: float = 0.01) -> bool | None:
+    """True si la curva en vivo difiere de la persistida por más del 1% del
+    total del día -- señal de que Quoia corrigió algo desde que se
+    clasificó (ver MGS 0032 El Paso Norte 2026-08-05: medidor doblado al
+    momento de clasificar, ya corregido para cuando se revisó). None si no
+    hay curva persistida con qué comparar (fila anterior a este fix)."""
+    if persistida is None or viva is None:
+        return None
+    total_p = sum(v for v in persistida if v is not None)
+    total_v = sum(v for v in viva if v is not None)
+    base = max(abs(total_p), abs(total_v))
+    if base == 0:
+        return False
+    return abs(total_p - total_v) / base > tolerancia
+
+
 def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFronteraReporte:
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     es_generacion = Modelo is ReporteEnergiaGeneracion
 
-    # Curvas de referencia (medidor, Solenium) siempre en vivo, sin importar
-    # qué Caso ganó -- para que el revisor pueda comparar visualmente.
-    curva_medidor_ppal = curva_medidor_resp = curva_sol = None
+    # Curvas de referencia -- se prefiere lo que quedó GUARDADO al momento de
+    # clasificar (no existía antes de este fix: MGS 0032 El Paso Norte
+    # 2026-08-05, medidor doblado por un glitch de Quoia mostraba un número
+    # arriba y otro distinto en "Detalle de las fuentes", sin explicación).
+    # Se sigue consultando Quoia en vivo IGUAL que antes, pero ahora solo
+    # para detectar si algo cambió desde entonces (medidor_actualizado_en_quoia)
+    # -- si la fila es de antes de este fix (columnas en null), se cae a lo
+    # que ya se hacía: mostrar directo lo que Quoia tiene ahora.
+    curva_medidor_ppal_bd = rep.curva_medidor_principal
+    curva_medidor_resp_bd = rep.curva_medidor_respaldo
+    curva_sol_bd = rep.curva_solenium_referencia if es_generacion else None
+
+    curva_medidor_ppal_viva = curva_medidor_resp_viva = curva_sol_viva = None
     try:
         gaia = GaiaClient()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
@@ -177,19 +203,41 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
             # generación del mismo medidor (bug real: 2026-08-03, El Joropo
             # Consumo mostraba una curva con forma solar de mediodía).
             if es_generacion:
-                curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
-                curva_medidor_resp = curva_a_lista(c["curva_resp"])
+                curva_medidor_ppal_viva = curva_a_lista(c["curva_ppal"])
+                curva_medidor_resp_viva = curva_a_lista(c["curva_resp"])
             else:
-                curva_medidor_ppal = curva_a_lista(c["consumo_ppal"])
-                curva_medidor_resp = curva_a_lista(c["consumo_resp"])
+                curva_medidor_ppal_viva = curva_a_lista(c["consumo_ppal"])
+                curva_medidor_resp_viva = curva_a_lista(c["consumo_resp"])
         if es_generacion and front.proyecto_id:
             proyecto = db.get(Proyecto, front.proyecto_id)
             if proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit():
                 sol = SoleniumClient()
                 curva_s, _ = solenium_svc.curva_generacion(sol, int(proyecto.project_id_solenium), str(fecha))
-                curva_sol = curva_a_lista(curva_s)
+                curva_sol_viva = curva_a_lista(curva_s)
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
+
+    medidor_actualizado_en_quoia = any([
+        _curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva),
+        _curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva),
+        _curva_cambio(curva_sol_bd, curva_sol_viva),
+    ])
+    curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
+    curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
+    curva_sol = curva_sol_bd if curva_sol_bd is not None else curva_sol_viva
+
+    # Total EN VIVO de la fuente que realmente se usó (medidor_usado) --
+    # solo para el aviso "el medidor ya muestra un valor distinto en Quoia"
+    # (curva_medidor_principal/respaldo/solenium ya muestran lo persistido).
+    energia_actual_kwh = None
+    if medidor_actualizado_en_quoia:
+        mu = rep.medidor_usado or ""
+        if mu.startswith("principal") and curva_medidor_ppal_viva is not None:
+            energia_actual_kwh = sum(v for v in curva_medidor_ppal_viva if v is not None)
+        elif mu.startswith("respaldo") and curva_medidor_resp_viva is not None:
+            energia_actual_kwh = sum(v for v in curva_medidor_resp_viva if v is not None)
+        elif mu == "inversores" and curva_sol_viva is not None:
+            energia_actual_kwh = sum(v for v in curva_sol_viva if v is not None)
 
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
@@ -218,6 +266,8 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        medidor_actualizado_en_quoia=medidor_actualizado_en_quoia,
+        energia_actual_kwh=round(energia_actual_kwh, 4) if energia_actual_kwh is not None else None,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
@@ -304,6 +354,39 @@ async def cargar_excel_terceros(
 
     db.commit()
     return CargaExcelTercerosResponse(frontera_id=frontera_id, fechas_cargadas=sorted(fechas_cargadas))
+
+
+@router.delete("/fronteras/{frontera_id}/cargar-excel-terceros", response_model=DetalleFronteraReporte)
+def eliminar_excel_terceros(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Quita la carga de Excel de terceros de un día puntual y vuelve a
+    dejar la frontera en 'Esperando Excel de terceros' -- para cuando se
+    subió el archivo equivocado y no basta con re-cargar el correcto (ej. la
+    fecha no debía tener ningún dato). Mismos valores que pone el
+    clasificador cuando nunca se ha subido nada para ese día (ver
+    FRONTERAS_TERCEROS en clasificador.py)."""
+    if frontera_id not in FRONTERAS_TERCEROS:
+        raise HTTPException(400, "Esta frontera no está configurada como frontera de terceros")
+    rep = db.execute(
+        select(ReporteEnergiaGeneracion).where(
+            ReporteEnergiaGeneracion.frontera_id == frontera_id,
+            ReporteEnergiaGeneracion.fecha == fecha,
+        )
+    ).scalar_one_or_none()
+    if rep is None:
+        raise HTTPException(404, "No hay carga para eliminar en esa fecha")
+
+    rep.caso = 0
+    rep.medidor_usado = "externo"
+    rep.curva_final = None
+    rep.energia_final_kwh = None
+    rep.curva_respaldo_terceros = None
+    rep.revisar_manualmente = True
+    rep.editado_manualmente = False
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
 
 
 @router.get("/fronteras/{frontera_id}/curva-tipica", response_model=CurvaTipicaResponse)
@@ -511,7 +594,15 @@ def cancelar_ejecutar(fecha: date = Query(...), _=Depends(get_current_user)):
 def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
     """Mismo criterio que excel.py: si Quoia ya reportó bien por su cuenta,
     no hace falta corregirlo -- enviar de más sobreescribiría un reporte
-    oficial que ya estaba bien."""
+    oficial que ya estaba bien.
+
+    'excluida' también se salta acá -- curva_final es None mientras dura la
+    exclusión (ver orquestador._exclusion_activa), así que sin este chequeo
+    /enviar mandaría una curva de 0 kWh fabricada a Quoia para una frontera
+    que justamente no debe reportar nada mientras se resuelve lo que la
+    excluyó."""
+    if rep.medidor_usado == "excluida":
+        return True
     return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 

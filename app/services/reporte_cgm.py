@@ -153,11 +153,11 @@ def calcular_resumen_mensual(
     mes_str: str,
 ) -> list[dict]:
     """Una fila por proyecto, acumulado de dias_mes completo (mismo rango que
-    la Hoja 1 de Clientes) -- Total Generación/Consumo salen del mismo
+    la Hoja 1 de Clientes) -- Total Generación sale del mismo
     reported_data_main ya pedido para la Hoja 1 (no se vuelve a consultar
-    Quoia para eso). Indisponibilidad sí necesita una llamada aparte por día
-    -- la curva de MEDIDOR (no CGM), sin recuperación activa (ver
-    _horas_en_cero).
+    Quoia para eso). Total Consumo e Indisponibilidad SÍ necesitan una
+    llamada aparte por día -- la curva de MEDIDOR (no CGM), principal o
+    respaldo el que tenga dato, sin recuperación activa (ver _horas_en_cero).
 
     `proyectos`: proyecto_id -> {
         "nombre": str,
@@ -165,7 +165,8 @@ def calcular_resumen_mensual(
         "frt_con": str | None,        -- codigo_frontera de Consumo
         "capacidad_dc_kwp": float | None,      -- ProyectoInfoTecnica.capacidad_instalada_kwp
         "capacidad_efectiva_mw": float | None, -- Frontera.capacidad_efectiva_mw (Generación)
-        "main_meter": int | None, "backup_meter": int | None,  -- de la frontera de Generación
+        "main_meter_gen": int | None, "backup_meter_gen": int | None,
+        "main_meter_con": int | None, "backup_meter_con": int | None,
     }
     """
     mapa_nodo = curvas_energia.construir_mapa_medidor_nodo(gaia)
@@ -180,20 +181,31 @@ def calcular_resumen_mensual(
         total_gen = sum(
             f["total reported energy"] for f in filas_por_frt.get(frt_gen, []) if f["meter"] == "main"
         ) if frt_gen else 0.0
-        total_con = sum(
-            f["total reported energy"] for f in filas_por_frt.get(frt_con, []) if f["meter"] == "main"
-        ) if frt_con else 0.0
 
-        main_meter, backup_meter = datos.get("main_meter"), datos.get("backup_meter")
+        main_meter_gen, backup_meter_gen = datos.get("main_meter_gen"), datos.get("backup_meter_gen")
         horas_cero_total = None
-        if frt_gen and (main_meter or backup_meter):
+        if frt_gen and (main_meter_gen or backup_meter_gen):
             horas_cero_total = 0
             for dia in dias_mes:
                 c = curvas_energia.curvas_de_frontera(
-                    gaia, mapa_nodo, main_meter, backup_meter, dia, frt_gen, recuperar=False,
+                    gaia, mapa_nodo, main_meter_gen, backup_meter_gen, dia, frt_gen, recuperar=False,
                 )
                 curva = _medidor_con_dato(c["curva_ppal"], c["curva_resp"])
                 horas_cero_total += _horas_en_cero(curva)
+
+        # Total Consumo -- medidor (variable iae, 'consumo_ppal'/'consumo_resp',
+        # mismo criterio que ya usa clasificador_consumo.py para esta misma
+        # frontera), no CGM -- principal si tiene dato, si no respaldo.
+        main_meter_con, backup_meter_con = datos.get("main_meter_con"), datos.get("backup_meter_con")
+        total_con = 0.0
+        if frt_con and (main_meter_con or backup_meter_con):
+            for dia in dias_mes:
+                c = curvas_energia.curvas_de_frontera(
+                    gaia, mapa_nodo, main_meter_con, backup_meter_con, dia, frt_con, recuperar=False,
+                )
+                curva = _medidor_con_dato(c["consumo_ppal"], c["consumo_resp"])
+                if curva is not None:
+                    total_con += float(curva.fillna(0).sum())
 
         capacidad_dc = datos.get("capacidad_dc_kwp")
         capacidad_efectiva_kw = (

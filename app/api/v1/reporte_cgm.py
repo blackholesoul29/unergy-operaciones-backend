@@ -72,20 +72,24 @@ def _datos_proyectos_para_resumen(
             "frt_gen": None, "frt_con": None,
             "capacidad_dc_kwp": capacidad_dc.get(f.proyecto_id),
             "capacidad_efectiva_mw": None,
-            "main_meter": None, "backup_meter": None,
+            "main_meter_gen": None, "backup_meter_gen": None,
+            "main_meter_con": None, "backup_meter_con": None,
         })
+        meta = mapa_borders.get(f.codigo_frontera.strip().lower()) if f.codigo_frontera else None
         if f.tipo_frontera == TipoFronteraEnum.generacion and f.codigo_frontera:
             datos["frt_gen"] = f.codigo_frontera
             datos["capacidad_efectiva_mw"] = f.capacidad_efectiva_mw
-            meta = mapa_borders.get(f.codigo_frontera.strip().lower())
             if meta:
-                datos["main_meter"] = meta.get("main_meter")
-                datos["backup_meter"] = meta.get("backup_meter")
+                datos["main_meter_gen"] = meta.get("main_meter")
+                datos["backup_meter_gen"] = meta.get("backup_meter")
         elif f.tipo_frontera in _TIPOS_CONSUMO and f.codigo_frontera:
             # consumo_auxiliar/consumo_propio son el autoconsumo de la misma
             # planta de generación (ej. Sol&Cielo 7 Los Bongos) -- cuentan
             # igual como "Total Consumo" para este resumen, no solo 'consumo'.
             datos["frt_con"] = f.codigo_frontera
+            if meta:
+                datos["main_meter_con"] = meta.get("main_meter")
+                datos["backup_meter_con"] = meta.get("backup_meter")
     return proyectos
 
 

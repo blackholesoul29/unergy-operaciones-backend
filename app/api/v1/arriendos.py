@@ -131,6 +131,67 @@ def calcular_periodo(periodo: str, db: Session = Depends(get_db), _=Depends(get_
     return ArrCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
 
 
+def valor_arriendo_proyecto(db: Session, proyecto_id: int, periodo: str) -> tuple[float, float] | None:
+    """(canon, iva) mensual de arriendo de UN proyecto, con el MISMO cálculo que
+    `/arriendos/calculo` (suma de arrendadores; IVA por arrendador según responsable_iva).
+    Fuente única para el Panel Contable. None si no hay contrato de arriendo; (0,0) si
+    el contrato no está vigente."""
+    c = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "arriendo",
+                ContratoServicio.proyecto_id == proyecto_id)
+        .order_by(ContratoServicio.id)
+        .first()
+    )
+    if c is None:
+        return None
+    if c.estado != "vigente":
+        return (0.0, 0.0)
+    proyecto = db.query(Proyecto).get(proyecto_id)
+    ipc_tasas = {r.año: float(r.tasa) for r in db.query(ArrIPCTasa).all()}
+    arrendadores = (
+        db.query(ArrArrendador)
+        .filter(ArrArrendador.contrato_id == c.id, ArrArrendador.activo == True)  # noqa: E712
+        .order_by(ArrArrendador.id)
+        .all()
+    )
+    if not arrendadores:
+        arrendadores = [types.SimpleNamespace(
+            id=None, nombre=c.prestador_nombre or "Arrendador",
+            valor_base=c.tarifa_base, responsable_iva=c.responsable_iva,
+            anticipo_pagado_desde=None, anticipo_pagado_hasta=None,
+        )]
+    selecciones = {
+        s.arr_arrendador_id: s
+        for s in db.query(ArrSeleccion).filter(ArrSeleccion.periodo == periodo).all()
+    }
+    total, total_iva = 0.0, 0.0
+    for a in arrendadores:
+        sel = selecciones.get(a.id)
+        valor_base = float(a.valor_base) / 12 if a.valor_base is not None else None
+        data = calcular_arriendo(
+            proyecto_id=a.id,
+            nombre=(proyecto.nombre_comercial if proyecto else None),
+            codigo=getattr(proyecto, "codigo_tsf", None),
+            fecha_firma_contrato=c.fecha_firma_contrato,
+            valor_base=valor_base,
+            periodo=periodo,
+            ipc_tasas=ipc_tasas,
+            incluido=(sel.incluido if sel else True),
+            facturado=(sel.facturado if sel else False),
+            valor_congelado=(int(sel.valor_facturado_congelado)
+                             if sel and sel.valor_facturado_congelado is not None else None),
+            periodicidad=c.periodicidad_pago,
+            anticipo_pagado_desde=getattr(a, "anticipo_pagado_desde", None),
+            anticipo_pagado_hasta=getattr(a, "anticipo_pagado_hasta", None),
+        )
+        if data.get("habilitado") and data.get("incluido") and data.get("aplica_este_mes"):
+            total += float(data.get("canon_a_facturar") or 0)
+            total_iva += float(calcular_iva(data.get("canon_a_facturar"),
+                                            getattr(a, "responsable_iva", False)) or 0)
+    return (total, total_iva)
+
+
 @router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
 def indexacion_contrato(
     contrato_id: int,

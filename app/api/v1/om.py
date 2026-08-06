@@ -190,6 +190,49 @@ def calcular_periodo(
     return OMCalculoResponse(periodo=periodo, filas=filas, total_seleccionado=total)
 
 
+def valor_om_proyecto(db: Session, proyecto_id: int, periodo: str) -> float | None:
+    """Valor mensual O&M de UN proyecto (lo que facturaría el módulo), con el MISMO
+    cálculo que `/om/calculo`. Fuente única para que el Panel Contable no duplique la
+    lógica. Devuelve None si el proyecto no tiene contrato de mantenimiento; 0 si el
+    contrato no está vigente o la fila queda deshabilitada/excluida."""
+    c = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "mantenimiento",
+                ContratoServicio.proyecto_id == proyecto_id)
+        .order_by(ContratoServicio.id)
+        .first()
+    )
+    if c is None:
+        return None
+    if c.estado != "vigente":
+        return 0.0
+    proyecto = db.query(Proyecto).get(proyecto_id)
+    ipc_tasas = {r.año: float(r.tasa) for r in db.query(IPCTasa).all()}
+    sel = (
+        db.query(OMSeleccion)
+        .filter(OMSeleccion.contrato_id == c.id, OMSeleccion.periodo == periodo)
+        .first()
+    )
+    fila = calcular_proyecto(
+        contrato_id=c.id,
+        nombre_proyecto=(proyecto.nombre_comercial if proyecto else None) or "",
+        fecha_firma_contrato=c.fecha_firma_contrato,
+        fecha_inicio_om=c.fecha_inicio_om or c.fecha_inicio,
+        valor_base_anual=float(c.tarifa_base) if c.tarifa_base else None,
+        periodo=periodo,
+        ipc_tasas=ipc_tasas,
+        incluido=(sel.incluido if sel else True),
+        facturado=(sel.facturado if sel else False),
+        valor_manual=(float(sel.valor_manual) if sel and sel.valor_manual is not None else None),
+        valor_congelado=(int(sel.valor_facturado_congelado)
+                         if sel and sel.valor_facturado_congelado is not None else None),
+        periodicidad=c.periodicidad_pago,
+    )
+    if not fila.get("habilitado") or not fila.get("incluido"):
+        return 0.0
+    return float(fila.get("valor_a_facturar") or 0)
+
+
 @router.get("/indexacion/{contrato_id}", response_model=OMIndexacionResponse)
 def indexacion_contrato(
     contrato_id: int,

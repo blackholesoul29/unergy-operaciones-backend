@@ -294,6 +294,12 @@ def editar_curva(
     rep.curva_final = curva_a_lista(curva)
     rep.energia_final_kwh = float(curva.fillna(0).sum())
     rep.editado_manualmente = True
+    # 'Fuente usada' quedaba mostrando lo que el clasificador decidió
+    # originalmente (ej. 'Histórico propio') aunque la persona ya hubiera
+    # reemplazado la curva con otra fuente ('Reportar con otra fuente') --
+    # cualquier guardado manual reemplaza la fuente reportada, así que debe
+    # decir eso, no la decisión automática que ya quedó superada.
+    rep.medidor_usado = "editado_manualmente"
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.

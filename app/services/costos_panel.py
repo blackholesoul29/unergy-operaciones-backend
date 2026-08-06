@@ -26,6 +26,7 @@ from app.services.arr_calculator import calcular_arriendo, calcular_iva
 # `iva` = si el concepto lleva línea de IVA 19% derivada (Mantenimiento sí).
 CONCEPTO_OM = "Mantenimiento"
 CONCEPTO_ARRIENDO = "Arrendamiento"
+CONCEPTO_INTERNET = "Servicio de Internet"
 
 
 def _valor_om(db: Session, proyecto, periodo: str, ipc_tasas: dict[int, float]) -> float | None:
@@ -139,6 +140,28 @@ def _valor_arriendo(db: Session, proyecto, periodo: str, ipc_tasas: dict[int, fl
     return total, total_iva
 
 
+def _valor_internet(db: Session, proyecto, periodo: str) -> float | None:
+    """Tarifa mensual de internet (indexada) del proyecto. None si no tiene contrato
+    de internet o si el contrato no tiene tarifa/indexación para calcular (se conserva
+    el ER); 0 si el contrato no está vigente."""
+    from app.models.contratos import ContratoServicio
+
+    c = (
+        db.query(ContratoServicio)
+        .filter(ContratoServicio.servicio_aplica == "internet",
+                ContratoServicio.proyecto_id == proyecto.id)
+        .order_by(ContratoServicio.id)
+        .first()
+    )
+    if c is None:
+        return None
+    if c.estado != "vigente":
+        return 0.0
+    idx = c.indexacion_anual or c.indexacion_mensual or []
+    t = _tarifa_indexada_periodo(idx, c.tarifa_mensual, c.fecha_firma_contrato, periodo)
+    return float(t) if t is not None else None
+
+
 def valores_modulo_costos(db: Session, proyecto_id: int, periodo: str) -> dict[str, dict]:
     """{concepto: {"valor": <neg>, "fuente": str, "iva": bool}} para los conceptos
     que el módulo controla. Solo incluye un concepto si el proyecto tiene contrato
@@ -170,6 +193,11 @@ def valores_modulo_costos(db: Session, proyecto_id: int, periodo: str) -> dict[s
             "iva_valor": (-abs(iva) if iva else None),
         }
 
+    # Internet: tarifa mensual fija (indexada) del contrato. IVA 19% como el ER.
+    v = _valor_internet(db, proyecto, periodo)
+    if v is not None:
+        out[CONCEPTO_INTERNET] = {"valor": -abs(v), "fuente": "internet", "iva": True}
+
     return out
 
 
@@ -196,7 +224,9 @@ def _tarifa_indexada_periodo(indexacion, tarifa_base, fecha_firma, periodo: str)
             mejor_key, mejor_val = key, float(val)
     if mejor_val is not None:
         return mejor_val
-    base = next((e.get("valor") for e in (indexacion or []) if e.get("esBase")), None)
+    # 'esBase' (repr/CGM) o 'es_base' (internet/O&M): distinto esquema de JSONB.
+    base = next((e.get("valor") for e in (indexacion or [])
+                 if e.get("esBase") or e.get("es_base")), None)
     if base is not None:
         return float(base)
     return float(tarifa_base) if tarifa_base is not None else None

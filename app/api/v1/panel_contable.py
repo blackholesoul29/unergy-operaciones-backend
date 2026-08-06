@@ -36,6 +36,7 @@ from app.utils.er_loader import (
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
 from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
+from app.services.costos_panel import valores_modulo_costos, aplicar_costos_modulo
 
 logger = logging.getLogger(__name__)
 
@@ -482,6 +483,17 @@ def _guardar_panel(
         db.expire(panel, ["lineas"])
 
     base = _construir_lineas_base(parsed)
+    # Costos que el Panel toma de los MÓDULOS (piloto: Mantenimiento y Arrendamiento).
+    # Si el proyecto tiene contrato de ese servicio, el valor del módulo MANDA sobre
+    # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
+    try:
+        mods = valores_modulo_costos(db, proyecto_id, periodo)
+        if mods:
+            base = aplicar_costos_modulo(base, mods, iva=IVA)
+    except Exception:
+        # Un problema calculando el módulo no debe tumbar la carga del ER: se deja
+        # el costo del ER y se sigue.
+        logger.exception("No se pudieron aplicar los costos de módulo (proy=%s, per=%s)", proyecto_id, periodo)
     tiene_costos = any(l["grupo"] == "costos" for l in base)
 
     panel.ingreso_bruto_cop = parsed["ingreso_bruto"]
@@ -517,6 +529,7 @@ def _guardar_panel(
                 valor_cop=round(l["valor"] * frac, 2),
                 hoja=l.get("hoja"),
                 celda=l.get("celda"),
+                fuente=l.get("fuente"),
                 orden=orden,
             ))
             orden += 1
@@ -746,6 +759,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
             "celda": ln.celda,
             # "hoja!celda" listo para mostrar/editar en el frontend (None si es derivado).
             "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
+            "fuente": ln.fuente,     # 'om' | 'arriendos' cuando el valor no viene del ER
             "orden": ln.orden,
             "soporte": _sop(ln.grupo, ln.concepto),
         })
@@ -773,6 +787,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
                 total_100.append({
                     "grupo": l["grupo"], "concepto": l["concepto"], "valor_cop": l["valor_cop"],
                     "hoja": l["hoja"], "celda": l["celda"], "origen": l["origen"],
+                    "fuente": l.get("fuente"),
                     "comprobante_contable": l["comprobante_contable"], "orden": l["orden"],
                     "soporte": l.get("soporte"), "derivada": l.get("derivada", False),
                 })
@@ -924,7 +939,7 @@ def _linea_dict(ln) -> dict:
         "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
         "valor_cop": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
         "grupo": ln.grupo, "concepto": ln.concepto,
-        "hoja": ln.hoja, "celda": ln.celda,
+        "hoja": ln.hoja, "celda": ln.celda, "fuente": ln.fuente,
         "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
     }
 
@@ -947,6 +962,7 @@ def _reconstruir_base(lineas: list[dict]) -> list[dict]:
             bases.append({
                 "grupo": ln["grupo"], "concepto": ln["concepto"],
                 "hoja": ln.get("hoja"), "celda": ln.get("celda"),
+                "fuente": ln.get("fuente"),
                 "comprobante_contable": ln.get("comprobante_contable"),
                 "_sum_val": 0.0, "_sum_frac": 0.0,
             })
@@ -981,7 +997,7 @@ def _redividir_lineas(lineas: list[dict], invs: list[dict]) -> list[dict]:
                 "porcentaje": inv["pct"],
                 "grupo": b["grupo"], "concepto": b["concepto"],
                 "valor_cop": round(b["valor"] * frac, 2),
-                "hoja": b["hoja"], "celda": b["celda"],
+                "hoja": b["hoja"], "celda": b["celda"], "fuente": b.get("fuente"),
                 "comprobante_contable": b["comprobante_contable"],
                 "orden": orden,
             })

@@ -140,6 +140,9 @@ class PanelContableLinea(Base):
     # La comparten todas las líneas del mismo concepto (el origen es del 100%).
     hoja: Mapped[str | None] = mapped_column(String(120), nullable=True)
     celda: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Origen del valor cuando NO viene del ER sino de un módulo: 'om' | 'arriendos'.
+    # NULL = valor del ER (lo normal). El frontend lo muestra como etiqueta.
+    fuente: Mapped[str | None] = mapped_column(String(20), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     panel: Mapped["PanelContable"] = relationship("PanelContable", back_populates="lineas")

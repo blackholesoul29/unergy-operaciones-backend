@@ -126,6 +126,7 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_dia ON despacho_contrato_dia (periodo, codigo_sic_contrato, fecha)",
     "ALTER TABLE factura_emitida ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(80)",
+    "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS fuente VARCHAR(20)",
     "CREATE INDEX IF NOT EXISTS ix_despacho_dia_lookup ON despacho_contrato_dia (periodo, codigo_sic_contrato)",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",

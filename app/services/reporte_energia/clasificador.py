@@ -231,11 +231,26 @@ def _decidir_caso(
     if e_cgm <= 0:
         curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
-            return {
+            resultado_medidor = {
                 "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
                 "medidor_usado": "principal_sin_cgm" if curva is curva_ppal else "respaldo_sin_cgm",
-                "revisar_manualmente": True,
             }
+            # Mismo blindaje que ya tiene el camino de CGM válido más arriba
+            # -- si Solenium reportó parcial ese día, se compara el medidor
+            # contra ese total SOLO en las horas que Solenium sí cubrió (ver
+            # MGS 0025 El Copey Occidente 2026-08-05: medidor 6.861 kWh vs
+            # inversores parciales 6.887,4 kWh en las mismas horas, ~0,4% de
+            # diferencia -- no había motivo para marcar Revisar Manualmente
+            # a ciegas). Sin inversores con qué comparar, se mantiene el
+            # criterio de siempre: queda marcado.
+            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
+                curva_medidor_horas_comunes = curva.where(curva_solenium.notna())
+                error_parcial = _error_con_curva(e_inv_incompleto, curva_medidor_horas_comunes)
+                resultado_medidor["error_final_pct"] = error_parcial
+                resultado_medidor["revisar_manualmente"] = not _en_rango(error_parcial)
+            else:
+                resultado_medidor["revisar_manualmente"] = True
+            return resultado_medidor
 
     # --- Casos 6/7/8: ni CGM ni medidor ni inversores tienen nada ---
     if e_inv_incompleto:

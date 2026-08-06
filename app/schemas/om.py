@@ -43,6 +43,7 @@ class OMCalculoFila(BaseModel):
     contrato_id:            int
     nombre_proyecto:        str
     codigo_tsf:             Optional[str] = None
+    proyecto_id:            Optional[int] = None
     periodo:                str
     mes_año:                str
     habilitado:             bool

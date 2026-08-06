@@ -140,6 +140,7 @@ def calcular_periodo(
                 contrato_id=-p.id,   # id sintético (negativo) para la key del front; no se persiste
                 nombre_proyecto=p.nombre_comercial or f"Proyecto #{p.id}",
                 codigo_tsf=p.codigo_tsf,
+                proyecto_id=p.id,
                 fecha_firma_contrato=None, fecha_inicio_om=None, valor_base_anual=None,
                 periodo=periodo, ipc_tasas=ipc_tasas,
             )
@@ -159,6 +160,7 @@ def calcular_periodo(
             contrato_id=c.id,
             nombre_proyecto=p.nombre_comercial or c.prestador_nombre or f"Contrato #{c.id}",
             codigo_tsf=p.codigo_tsf,
+            proyecto_id=p.id,
             fecha_firma_contrato=c.fecha_firma_contrato,
             # Fecha base de indexación = inicio O&M: la columna dedicada o, si falta,
             # la "Fecha de inicio O&M" que edita el diálogo (c.fecha_inicio).

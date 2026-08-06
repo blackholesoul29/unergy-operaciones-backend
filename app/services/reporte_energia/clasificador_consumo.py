@@ -15,7 +15,9 @@ corto, solo dos niveles:
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
                      dato real -- se confía en él a ciegas, salvo las
                      fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (bug
-                     puntual de Quoia, ver comentario ahí).
+                     puntual de Quoia, se descarta solo si no cuadra) y
+                     FRONTERAS_CONSUMO_IGNORAR_CGM (medidor compartido con
+                     otra frontera, se ignora siempre).
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO = ±50%) en vez de tomar
@@ -76,6 +78,29 @@ FRONTERAS_VALIDAR_CGM_VS_MEDIDOR: set[int] = {111}  # Paso Norte Consumo
 # su cuenta; lo que se busca descartar es un error tipo "el doble" (100%),
 # no una diferencia normal entre ambos.
 TOLERANCIA_CGM_VS_MEDIDOR = 0.50
+
+# frontera_id (Consumo) donde Quoia comparte el mismo medidor físico entre
+# dos fronteras -- confirmado 2026-08-04: MGS 0075 Chiriguaná Norte 2
+# (frontera_id=90) reporta casi siempre el mismo valor de CGM que MGS 0077
+# Chiriguaná Norte 4 (frt_codes distintos, cada uno registrado aparte en
+# Quoia), configuración de Quoia, no un bug del lado de acá (mismo tipo de
+# hallazgo que el medidor compartido entre estas mismas dos fronteras, ya
+# aceptado 2026-07-25). A diferencia de FRONTERAS_VALIDAR_CGM_VS_MEDIDOR
+# (que solo descarta CGM si no cuadra contra el medidor), acá se ignora CGM
+# siempre -- el problema no es que a veces se equivoque mucho, es que el
+# dato en sí no es confiablemente el de esta frontera.
+FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
+
+# %: qué tan lejos puede quedar un medidor del otro (principal vs respaldo)
+# antes de dejar de "preferir siempre el principal" cuando no hay mediana
+# histórica con qué arbitrar. Diferencias chicas (ej. Sol&Cielo 7 Los Bongos
+# 2026-08-03: 22 vs 19,8 kWh, ~10%) no justifican preferir el más alto solo
+# por serlo -- pero diferencias grandes (ej. Baraya AUX 2026-08-03: 18,9 vs
+# 3,3 kWh, ~83%) ya no son "cuál preferir sin razón", sino que uno de los
+# dos medidores probablemente está mal -- ahí se prefiere el de mayor valor
+# (una lectura de más se explica más fácil -- medidor caído/mal ubicado --
+# que una lectura de menos).
+DIFERENCIA_MEDIDORES_ALTA = 0.50
 
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
@@ -155,7 +180,7 @@ def clasificar_consumo(
     )
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    cgm_ok = reporte_valido and e_cgm > 0
+    cgm_ok = reporte_valido and e_cgm > 0 and frontera_id not in FRONTERAS_CONSUMO_IGNORAR_CGM
     if cgm_ok and frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
         main_meter = border_meta.get("main_meter") if border_meta else None
         backup_meter = border_meta.get("backup_meter") if border_meta else None
@@ -164,11 +189,33 @@ def clasificar_consumo(
             cgm_ok = False
 
     if cgm_ok:
-        return {
+        resultado_cgm = {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "horas_rellenadas_historico": None, "recuperacion_datos": None,
         }
+        if frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+            # Paso Norte -- el bug de Quoia es intermitente, así que pasar el
+            # cruce contra medidor un día puntual no lo vuelve confiable en
+            # general. Se sigue reportando con CGM (la mejor fuente que hay),
+            # pero siempre queda para revisar a mano -- y por lo mismo nunca
+            # alimenta el histórico (get_mediana_consumo exige
+            # revisar_manualmente=False).
+            resultado_cgm["revisar_manualmente"] = True
+        else:
+            # Blindaje contra outliers no descubiertos todavía (el mismo
+            # motivo por el que Paso Norte necesitó el suyo): 'reporte
+            # automático válido' por sí solo no protege de un CGM que ese
+            # día reportó algo raro en una frontera que nunca habíamos
+            # sospechado. En cuanto hay mediana histórica (aunque se haya
+            # construido con días de CGM, ver CASOS_CONFIABLES_CONSUMO), se
+            # cruza igual que ya se hace para 'Medidor' -- mientras no haya
+            # mediana (arranque desde cero), se sigue confiando solo en el
+            # status de Quoia, como hasta ahora.
+            mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
+            if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
+                resultado_cgm["revisar_manualmente"] = True
+        return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,
@@ -233,16 +280,36 @@ def _clasificar_por_medidor_o_historico(
             # real solo porque no hay con que cruzarlo, esté completo o no
             # (ver GD Polaris 2 Consumo 2026-08-03: 19 de 24 horas reales,
             # faltaban las últimas 5-6 -- antes se vaciaba la curva entera
-            # por ese hueco parcial). Se usa el de mayor valor entre los dos
-            # (ya sabemos que ambos tienen AL MENOS algo de dato, por estar
-            # en este 'if'), marcado para revisar a mano porque nadie
-            # confirmó que el nivel sea el correcto.
-            usar_ppal = curva_ppal.fillna(0).sum() >= curva_resp.fillna(0).sum()
-            curva = curva_ppal if usar_ppal else curva_resp
-            medidor_usado = "principal_sin_historico" if usar_ppal else "respaldo_sin_historico"
+            # por ese hueco parcial).
+            total_ppal = float(curva_ppal.fillna(0).sum())
+            total_resp = float(curva_resp.fillna(0).sum())
+            mayor = max(total_ppal, total_resp)
+            diferencia = abs(total_ppal - total_resp) / mayor if mayor > 0 else 0.0
+
+            if diferencia > DIFERENCIA_MEDIDORES_ALTA:
+                # Diferencia demasiado grande para ser solo ruido -- uno de
+                # los dos medidores probablemente está mal (ver Baraya AUX
+                # 2026-08-03). Sin mediana con qué arbitrar, se prefiere el
+                # de mayor valor.
+                curva = curva_ppal if total_ppal >= total_resp else curva_resp
+                return {
+                    "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                    "medidor_usado": "principal_sin_historico" if curva is curva_ppal else "respaldo_sin_historico",
+                    "revisar_manualmente": True,
+                    "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                    "recuperacion_datos": recuperacion_datos,
+                }
+
+            # Diferencia chica -- se prefiere SIEMPRE el principal (ya
+            # sabemos que tiene dato, por estar en este 'if') -- no el de
+            # mayor valor: decisión explícita del usuario tras ver Sol&Cielo
+            # 7 Los Bongos Consumo 2026-08-03, donde el respaldo (22 kWh)
+            # superaba al principal (19,8 kWh) sin ninguna razón para
+            # preferirlo solo por ser más alto. Marcado para revisar a mano
+            # porque nadie confirmó que el nivel sea el correcto.
             return {
-                "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
-                "medidor_usado": medidor_usado, "revisar_manualmente": True,
+                "caso": "Medidor", "energia_final_kwh": total_ppal, "curva_final": curva_ppal,
+                "medidor_usado": "principal_sin_historico", "revisar_manualmente": True,
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,
             }

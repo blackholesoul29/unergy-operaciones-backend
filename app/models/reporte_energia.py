@@ -64,6 +64,12 @@ class ReporteEnergiaGeneracion(Base):
     medidor_principal_completo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     medidor_respaldo_completo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
+    # Curva de respaldo real para fronteras de terceros (FRONTERAS_TERCEROS,
+    # ej. Cedillanos) -- viene del rol "Backup" del Excel que sube el
+    # tercero, en vez de la fórmula ±1% que /enviar aplica por defecto sobre
+    # curva_final cuando esta columna es null.
+    curva_respaldo_terceros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)

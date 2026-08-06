@@ -159,6 +159,30 @@ def test_bug1_poliza_y_servicios_publicos():
     assert res["status"] == "ok"
 
 
+# ── Mantenimiento pagado al contratista vía cuenta de Administración ────────
+# (caso real Nestlé/Solenium: el mandato dice "no aparece" pero el monto SÍ
+# está contabilizado, solo que en 28151020/21 con el contratista de Asociado
+# en vez de 28151002/03 con la fiduciaria).
+
+def test_mantenimiento_registrado_en_cuenta_admin_con_otro_asociado():
+    tag = "[10002] PROYECTO-NESTLE"
+    fiduciaria = "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA"
+    lineas = [
+        {"asociado": "SOLENIUM SAS", "acc": "28151020", "accDesc": "COSTOS PARA TERCEROS - ADMINISTRACION DE PROYECTOS",
+         "debe": 6831500, "haber": 0, "etiqueta": "Mantenimiento Preventivo - Nestle", "proj": tag},
+        {"asociado": "SOLENIUM SAS", "acc": "28151021", "accDesc": "IVA ADMINISTRACION DE PROYECTOS - COSTOS PARA TERCEROS",
+         "debe": 1297985, "haber": 0, "etiqueta": "Mantenimiento Preventivo - Nestle", "proj": tag},
+    ]
+    m = {"mandante": fiduciaria, "vals": {"mant": 6831500, "iva_mant": 1297985}, "total": 8129485}
+    res = reconciliar(m, lineas, tag)
+    codes = {f["code"] for f in res["flags"]}
+    assert "FALTANTE" not in codes  # no debe reportarse como ausente...
+    assert "OTRA_CUENTA" in codes   # ...sino como aviso de cuenta/asociado distinto
+    otra = [f for f in res["flags"] if f["code"] == "OTRA_CUENTA"]
+    assert any("28151020" in f["txt"] and "SOLENIUM SAS" in f["txt"] for f in otra)
+    assert res["status"] == "warn"  # no "bad": el dinero sí está, solo mal clasificado
+
+
 # ── BUG 2: abreviatura "PA" (Patrimonio Autónomo) — caso Nestlé ───────────────
 
 def test_bug2_expandir_pa():
@@ -221,6 +245,103 @@ def test_bug4_split_arriendo_por_etiqueta():
     assert res["sums"]["arr_cc"] == 79705  # etiqueta CC
     assert res["sums"]["arr_fact"] == 79706  # etiqueta FACT
     assert "arr" not in res["sums"]
+    assert res["status"] == "ok"
+
+
+def test_bug4b_arriendo_cc_cuenta_nueva_no_responsable_iva():
+    """La cuenta de la CC cambió a 28151025 (arrendador no responsable de IVA);
+    antes no estaba en ACC2CONCEPT y la línea se descartaba en silencio, por lo
+    que el mandato reportaba "FALTANTE" aunque el asiento sí traía el arriendo.
+    """
+    pdf = (
+        "CMU1136\n"
+        "en calidad de mandatario, y STRADA ASOCIADOS S.A.S., con NIT. 900.123.456-7, en "
+        "calidad de mandante, relacionado con el proyecto MINIGRANJA SOLAR LA RESERVA.\n"
+        "ARRIENDO CUENTA DE COBRO $ 79,705.00\n"
+        "ARRIENDO FACTURA ELECTRONICA $ 79,706.00\n"
+        "VALOR A PAGAR $ 159,411.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1136.pdf")
+
+    mand = "STRADA ASOCIADOS S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 79705, "haber": 0, "etiqueta": "ARRIENDO CC JULIO LA RESERVA", "proj": TAG},
+        {"asociado": mand, "acc": "28150517", "accDesc": "", "debe": 79706, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO LA RESERVA", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr_cc"] == 79705
+    assert res["sums"]["arr_fact"] == 79706
+    assert res["status"] == "ok"
+
+
+def test_bug4c_arriendo_redaccion_responsable_no_responsable_iva():
+    """Caso real CMU1284 (jul-2026): el mandato dejó de decir "Cuenta de Cobro"/
+    "Factura Electrónica" y ahora dice "Arriendo No Responsable de IVA" / "Arriendo
+    Responsable de IVA". Antes del fix, el "continue" que evita que "IVA
+    MANTENIMIENTO" caiga en 'mant' también disparaba aquí (la frase nueva contiene
+    la palabra IVA) y AMBOS montos de arriendo se descartaban en silencio — no
+    aparecían ni como OK, ni como FALTANTE, ni como ninguna alerta.
+    """
+    pdf = (
+        "CMU1284\n"
+        "en calidad de mandatario, y SOLENIUM S.A.S., con NIT. 900.999.888-1, en "
+        "calidad de mandante, relacionado con el proyecto Minigranja Solar Sabana de Torres.\n"
+        "Arriendo No Responsable de IVA $ 673,757.00\n"
+        "Arriendo Responsable de IVA $ 673,757.00\n"
+        "Iva Arriendo $ 128,014.00\n"
+        "Servicio de Internet $ 188,236.00\n"
+        "Iva Internet $ 35,765.00\n"
+        "VALOR A PAGAR $ 1,699,529.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1284.pdf")
+    assert m["vals"]["arr_cc"] == 673757
+    assert m["vals"]["arr_fact"] == 673757
+    assert m["vals"]["iva_arr"] == 128014
+    assert "arr" not in m["vals"]
+
+    mand = "SOLENIUM S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 673757, "haber": 0, "etiqueta": "ARRIENDO JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28150517", "accDesc": "", "debe": 673757, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28150518", "accDesc": "", "debe": 128014, "haber": 0, "etiqueta": "ARRIENDO FACT JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28151009", "accDesc": "", "debe": 188236, "haber": 0, "etiqueta": "INTERNET JULIO", "proj": TAG},
+        {"asociado": mand, "acc": "28151010", "accDesc": "", "debe": 35765, "haber": 0, "etiqueta": "INTERNET JULIO", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr_cc"] == 673757
+    assert res["sums"]["arr_fact"] == 673757
+    assert res["status"] == "ok"
+
+
+def test_bug4d_arriendo_generico_no_responsable_iva_no_se_divide():
+    """Caso real CMU1264/1265/1266: el mandato solo lista "Arriendo" genérico
+    (un único arrendador, que no es responsable de IVA, sin línea de IVA
+    arriendo) y contablemente ese único arrendador cae en la cuenta 28151025.
+    Reclasificar esa cuenta a arr_cc SIEMPRE (como hacía el fix anterior) rompía
+    este caso: el mandato decía "arr" pero el asiento sumaba "arr_cc" — dos
+    claves distintas que nunca coincidían (FALTANTE + SOBRANTE simultáneos).
+    Solo debe dividirse cuando el mandato explícitamente separa (bug4b/4c).
+    """
+    pdf = (
+        "CMU1264\n"
+        "en calidad de mandatario, y SUNO ACTIVOS SOSTENIBLES S.A.S., con NIT. "
+        "900.777.666-2, en calidad de mandante, relacionado con el proyecto "
+        "MINIGRANJA EL SON.\n"
+        "ARRIENDO $ 874,490.00\n"
+        "VALOR A PAGAR $ 874,490.00"
+    )
+    m = extract_mandate(pdf, "x-CMU1264.pdf")
+    assert m["vals"]["arr"] == 874490
+    assert "arr_cc" not in m["vals"]
+    assert "arr_fact" not in m["vals"]
+
+    mand = "SUNO ACTIVOS SOSTENIBLES S A S"
+    lineas = [
+        {"asociado": mand, "acc": "28151025", "accDesc": "", "debe": 874490, "haber": 0, "etiqueta": "ARRIENDO JULIO", "proj": TAG},
+    ]
+    res = reconciliar(m, lineas, TAG)
+    assert res["sums"]["arr"] == 874490
+    assert "arr_cc" not in res["sums"]
     assert res["status"] == "ok"
 
 

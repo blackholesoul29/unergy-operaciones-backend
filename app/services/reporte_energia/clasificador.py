@@ -44,10 +44,14 @@ ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy
 # los ids reales contra la BD ("GD Agustín 2" en el pipeline original).
 MEDIDORES_SIN_INVERSOR_SOSPECHOSOS: set[int] = set()
 
-# frontera_id de proyectos cuyo reporte lo hace al ASIC otra empresa
-# distinta a Unergy -- no aplica este árbol de Casos. Confirmar ids reales
-# contra la BD ("Cedillanos Frontera 88864637" en el pipeline original).
-FRONTERAS_TERCEROS: set[int] = set()
+# frontera_id de proyectos cuyo CGM lo hace al ASIC otra empresa distinta a
+# Unergy -- no aplica este árbol de Casos. El medidor de nodo de Quoia no
+# tiene telemetría (confirmado en vivo: energia_medidor_principal/respaldo_kwh
+# siempre 0), así que mientras no se suba el Excel del tercero para el día
+# (POST /fronteras/{id}/cargar-excel-terceros) queda en caso=0/"externo" con
+# revisar_manualmente=True -- ver clasificar_generacion() más abajo.
+# 79 = Complejo Industrial Cedillanos (Frt88292).
+FRONTERAS_TERCEROS: set[int] = {79}
 
 
 def _en_rango(error: float | None) -> bool:
@@ -69,8 +73,20 @@ def _mejor_medidor(curva_a: pd.Series, curva_b: pd.Series) -> pd.Series:
     """Entre dos curvas de medidor, la de mayor energía total -- cubre a la
     vez "solo una tiene dato" y "ambas reportan, hay que elegir" (convención:
     se prefiere el de mayor valor cuando no hay CGM ni inversores contra qué
-    validar)."""
+    validar). Usada SOLO como referencia para calcular el error vs inversores
+    (Casos 2/3/4) -- ahí sí importa la magnitud, porque decide si el día es
+    Caso 3 o Caso 4. NO usar para decidir qué medidor reportar directamente
+    (ver _principal_o_respaldo)."""
     return curva_a if curva_a.fillna(0).sum() >= curva_b.fillna(0).sum() else curva_b
+
+
+def _principal_o_respaldo(curva_ppal: pd.Series, curva_resp: pd.Series) -> pd.Series:
+    """Para reportar un medidor directo sin nada contra qué validar --
+    prefiere SIEMPRE el principal si tiene dato; el respaldo solo si el
+    principal no tiene nada. No el de mayor valor (decisión del usuario tras
+    ver Sol&Cielo 7 Los Bongos Consumo 2026-08-03, mismo criterio aplicado
+    ahí en clasificador_consumo.py)."""
+    return curva_ppal if _tiene_dato(curva_ppal) else curva_resp
 
 
 def _decidir_caso(
@@ -140,9 +156,24 @@ def _decidir_caso(
     # --- Caso 5: tengo medidores pero no inversores ---
     if e_inv == 0 and e_cgm > 0:
         if reporte_valido:
-            return {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+            resultado_cgm = {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+            # Solenium reportó parcial ese día (e_inv_incompleto) -- no se
+            # descarta solo por estar incompleto, se usa igual como chequeo
+            # de plausibilidad: se compara CGM contra inversores SOLO en las
+            # horas que Solenium sí cubrió (no el total del día completo,
+            # que siempre se vería "mal" contra un total parcial). Si
+            # coincide dentro del rango normal, no hace falta Revisar
+            # Manualmente solo porque hubo un hueco en un dato que ni
+            # siquiera se usó para el número reportado (se sigue confiando
+            # en CGM en ambos casos -- esto solo decide la bandera).
+            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
+                curva_cgm_horas_comunes = curva_cgm.where(curva_solenium.notna())
+                error_parcial = _error_con_curva(e_inv_incompleto, curva_cgm_horas_comunes)
+                resultado_cgm["error_final_pct"] = error_parcial
+                resultado_cgm["revisar_manualmente"] = not _en_rango(error_parcial)
+            return resultado_cgm
 
-        curva = _mejor_medidor(curva_ppal, curva_resp)
+        curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if not _tiene_dato(curva):
             # Medidor totalmente caído -- volver a confiar en CGM sería
             # recaer en la misma fuente que esta rama ya decidió no usar. Si
@@ -187,7 +218,7 @@ def _decidir_caso(
     # ya lo maneja el bloque de arriba. Si el medidor TAMBIÉN está caído, no
     # se hace nada acá y sigue cayendo a la cadena de crudos de siempre.
     if e_cgm <= 0:
-        curva = _mejor_medidor(curva_ppal, curva_resp)
+        curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
             return {
                 "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
@@ -346,9 +377,12 @@ def clasificar_generacion(
     revisar = resultado.get("revisar_manualmente", False)
 
     # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
-    # de recuperarlo como con los medidores) -- excepto Caso 1, que no
-    # depende de Solenium para nada (e_cgm ya avalado por Quoia).
-    if resultado["caso"] != 1 and e_inv_original > 0 and not solenium_completo:
+    # de recuperarlo como con los medidores) -- excepto cuando el resultado
+    # ya confía en CGM (medidor_usado='cgm', Caso 1 o el Caso 5 de arriba):
+    # ese camino no reporta con Solenium, y si viene de la rama de Caso 5
+    # que sí comparó contra el total parcial de inversores, ya decidió su
+    # propia bandera con ese chequeo -- no la pise acá.
+    if resultado.get("medidor_usado") != "cgm" and e_inv_original > 0 and not solenium_completo:
         revisar = True
 
     # --- Relleno horario centralizado ---
@@ -387,6 +421,16 @@ def clasificar_generacion(
             revisar = True
         if curva_rellenada.isna().any():
             revisar = True
+
+        # medidor_usado='revisar' es el valor "no se pudo construir nada"
+        # que puso _decidir_caso() para una curva vacía -- si el relleno de
+        # arriba SÍ logró llenar horas (aunque no todas), ya no es cierto
+        # que no haya fuente: quedaría diciendo "Sin fuente" con una energía
+        # real y un FP calculado (ver Granja Solar Uruaco 2026-08-03: caso 3,
+        # medidor_usado seguía en 'revisar' con 4.595,53 kWh reconstruidos
+        # vía Solenium × FP en horas_rellenadas_solenium).
+        if resultado.get("medidor_usado") == "revisar" and (horas_reconectador or horas_solenium_h or horas_historico):
+            resultado["medidor_usado"] = "relleno_horario"
 
     resultado["revisar_manualmente"] = revisar
     resultado["horas_rellenadas_reconectador"] = sorted(horas_reconectador) or None

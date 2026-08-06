@@ -119,20 +119,20 @@ def enviar_reporte_cgm(
     fecha_display = dias[0] if len(dias) == 1 else f"{dias[0]} a {dias[-1]}"
     fecha_archivo = dias[0] if len(dias) == 1 else f"{dias[0]}_a_{dias[-1]}"
 
-    # Envío de un solo día -- dispara dos cosas distintas, cada una acotada a
-    # su tipo de destinatario:
+    # Envío de un solo día -- dispara cosas distintas, cada una acotada a su
+    # tipo de destinatario:
     #  - Operador de Red: SOLO si además ese día es el último del mes, se
     #    adjunta ADEMÁS (no en vez de) un segundo Excel con todo el mes.
-    #  - Cliente: SIEMPRE (todos los días), el reporte diario mismo pasa a
-    #    ser de dos hojas -- la primera acumulada desde el día 1 del mes
-    #    hasta hoy (no solo el día pedido), la segunda un resumen mensual
-    #    por proyecto. Ver conversación -- Cliente cambia de estructura,
-    #    Operador de Red no.
+    #  - Cliente: el reporte diario mismo pasa a tener tres hojas -- 'Diario
+    #    acumulado' (desde el día 1 del mes hasta hoy) y 'Resumen Diario'
+    #    (mismas variables del resumen, solo de hoy) TODOS los días; 'Resumen
+    #    Mensual' (las mismas variables pero acumuladas del mes completo)
+    #    únicamente el último día del mes.
     # dias_mes ya incluye dias[0], así que en ambos casos se pide a Quoia una
     # sola vez (superset) en vez de dos.
     es_dia_unico = len(dias) == 1
     dias_mes = svc.dias_del_mes(body.fecha_inicio) if es_dia_unico else []
-    mensual_activo_or = es_dia_unico and svc.es_ultimo_dia_del_mes(body.fecha_inicio)
+    es_ultimo_dia_mes = es_dia_unico and svc.es_ultimo_dia_del_mes(body.fecha_inicio)
     dias_fetch = dias_mes if es_dia_unico else dias
 
     # 1. Resolver, desde la BD, a quién le llega qué (nunca se confía en datos
@@ -237,19 +237,24 @@ def enviar_reporte_cgm(
             fecha_str_envio = fecha_display
 
             if dest.tipo == "cliente" and es_dia_unico:
-                # Cliente: el reporte diario mismo cambia de estructura --
-                # Hoja 1 acumulada del mes completo (no solo el día pedido)
-                # + Hoja 2 con el resumen mensual por proyecto.
-                mes_titulo = f"{svc.nombre_mes(body.fecha_inicio).capitalize()} {body.fecha_inicio.year}"
+                # Cliente: 'Diario acumulado' (mes completo hasta hoy) +
+                # 'Resumen Diario' (mismas variables, solo hoy) siempre;
+                # 'Resumen Mensual' (acumulado del mes) solo el último día.
                 proyectos = _datos_proyectos_para_resumen(db, gaia, fronteras)
-                filas_resumen = svc.calcular_resumen_mensual(
-                    gaia, proyectos, filas_por_frt, dias_mes, mes_titulo,
+                filas_resumen_diario = svc.calcular_resumen_diario(
+                    gaia, proyectos, filas_por_frt, dias[0],
                 )
-                excel_bytes = svc.generar_excel_cliente(filas_todas, filas_resumen, titulo_hoja_diaria="CGM Report")
+                filas_resumen_mensual = None
+                if es_ultimo_dia_mes:
+                    mes_titulo = f"{svc.nombre_mes(body.fecha_inicio).capitalize()} {body.fecha_inicio.year}"
+                    filas_resumen_mensual = svc.calcular_resumen_mensual(
+                        gaia, proyectos, filas_por_frt, dias_mes, mes_titulo,
+                    )
+                excel_bytes = svc.generar_excel_cliente(filas_todas, filas_resumen_diario, filas_resumen_mensual)
                 fecha_str_envio = f"{dias_mes[0]} a {dias_mes[-1]}"
             else:
                 excel_bytes = svc.generar_excel(filas_dia)
-                if mensual_activo_or and dest.tipo == "operador":
+                if es_ultimo_dia_mes and dest.tipo == "operador":
                     excel_mensual_bytes = svc.generar_excel(
                         filas_todas, titulo_hoja=svc.titulo_hoja_mensual(body.fecha_inicio),
                     )

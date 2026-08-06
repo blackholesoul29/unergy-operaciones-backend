@@ -139,25 +139,31 @@ def _horas_en_cero(curva) -> int:
     return int((ventana == 0).sum())
 
 
-COLUMNAS_RESUMEN = [
-    "Mes", "Proyecto", "Total Generación (kWh)", "Total Consumo (kWh)",
-    "Producción Específica (kWh/kWp)", "Indisponibilidad (%)", "Factor de Planta (%)",
-]
+def columnas_resumen(etiqueta_columna: str) -> list[str]:
+    return [
+        etiqueta_columna, "Proyecto", "Total Generación (kWh)", "Total Consumo (kWh)",
+        "Producción Específica (kWh/kWp)", "Indisponibilidad (%)", "Factor de Planta (%)",
+    ]
 
 
-def calcular_resumen_mensual(
+def _calcular_resumen(
     gaia: GaiaClient,
     proyectos: dict[int, dict],
     filas_por_frt: dict[str, list[dict]],
-    dias_mes: list[str],
-    mes_str: str,
+    dias: list[str],
+    etiqueta_columna: str,
+    etiqueta_valor: str,
 ) -> list[dict]:
-    """Una fila por proyecto, acumulado de dias_mes completo (mismo rango que
-    la Hoja 1 de Clientes) -- Total Generación sale del mismo
-    reported_data_main ya pedido para la Hoja 1 (no se vuelve a consultar
-    Quoia para eso). Total Consumo e Indisponibilidad SÍ necesitan una
-    llamada aparte por día -- la curva de MEDIDOR (no CGM), principal o
-    respaldo el que tenga dato, sin recuperación activa (ver _horas_en_cero).
+    """Una fila por proyecto, acumulado de `dias` -- Total Generación sale del
+    mismo reported_data_main ya pedido para la Hoja 1 (no se vuelve a
+    consultar Quoia para eso), filtrado a estos `dias` puntuales. Total
+    Consumo e Indisponibilidad SÍ necesitan una llamada aparte por día -- la
+    curva de MEDIDOR (no CGM), principal o respaldo el que tenga dato, sin
+    recuperación activa (ver _horas_en_cero).
+
+    Usada tanto para el Resumen Diario (Hoja 2, `dias=[fecha]`, todos los
+    días) como para el Resumen Mensual (Hoja 3, `dias=dias_mes`, solo el
+    último día del mes).
 
     `proyectos`: proyecto_id -> {
         "nombre": str,
@@ -170,7 +176,8 @@ def calcular_resumen_mensual(
     }
     """
     mapa_nodo = curvas_energia.construir_mapa_medidor_nodo(gaia)
-    n_dias = len(dias_mes)
+    dias_set = set(dias)
+    n_dias = len(dias)
     horas_solares_total = len(HORAS_SOLARES) * n_dias
 
     filas_resumen = []
@@ -179,14 +186,16 @@ def calcular_resumen_mensual(
         frt_con = datos.get("frt_con")
 
         total_gen = sum(
-            f["total reported energy"] for f in filas_por_frt.get(frt_gen, []) if f["meter"] == "main"
+            f["total reported energy"]
+            for f in filas_por_frt.get(frt_gen, [])
+            if f["meter"] == "main" and f["report date"] in dias_set
         ) if frt_gen else 0.0
 
         main_meter_gen, backup_meter_gen = datos.get("main_meter_gen"), datos.get("backup_meter_gen")
         horas_cero_total = None
         if frt_gen and (main_meter_gen or backup_meter_gen):
             horas_cero_total = 0
-            for dia in dias_mes:
+            for dia in dias:
                 c = curvas_energia.curvas_de_frontera(
                     gaia, mapa_nodo, main_meter_gen, backup_meter_gen, dia, frt_gen, recuperar=False,
                 )
@@ -199,7 +208,7 @@ def calcular_resumen_mensual(
         main_meter_con, backup_meter_con = datos.get("main_meter_con"), datos.get("backup_meter_con")
         total_con = 0.0
         if frt_con and (main_meter_con or backup_meter_con):
-            for dia in dias_mes:
+            for dia in dias:
                 c = curvas_energia.curvas_de_frontera(
                     gaia, mapa_nodo, main_meter_con, backup_meter_con, dia, frt_con, recuperar=False,
                 )
@@ -214,7 +223,7 @@ def calcular_resumen_mensual(
         gen_max_teorica = capacidad_efectiva_kw * 24 * n_dias if capacidad_efectiva_kw else None
 
         filas_resumen.append({
-            "Mes": mes_str,
+            etiqueta_columna: etiqueta_valor,
             "Proyecto": datos["nombre"],
             "Total Generación (kWh)": round(total_gen, 3),
             "Total Consumo (kWh)": round(total_con, 3),
@@ -226,6 +235,22 @@ def calcular_resumen_mensual(
             "Factor de Planta (%)": round(total_gen / gen_max_teorica * 100, 2) if gen_max_teorica else None,
         })
     return filas_resumen
+
+
+def calcular_resumen_mensual(
+    gaia: GaiaClient, proyectos: dict[int, dict], filas_por_frt: dict[str, list[dict]],
+    dias_mes: list[str], mes_str: str,
+) -> list[dict]:
+    """Hoja 3 -- solo se adjunta el último día del mes, acumulado de todo el mes."""
+    return _calcular_resumen(gaia, proyectos, filas_por_frt, dias_mes, "Mes", mes_str)
+
+
+def calcular_resumen_diario(
+    gaia: GaiaClient, proyectos: dict[int, dict], filas_por_frt: dict[str, list[dict]], fecha_str: str,
+) -> list[dict]:
+    """Hoja 2 -- todos los días, mismas variables que el Resumen Mensual pero
+    de un solo día (n_dias=1)."""
+    return _calcular_resumen(gaia, proyectos, filas_por_frt, [fecha_str], "Fecha", fecha_str)
 
 
 def _estilo_encabezado(cell):
@@ -280,18 +305,31 @@ def generar_excel(filas: list[dict], titulo_hoja: str = "CGM Report") -> bytes:
 
 
 def generar_excel_cliente(
-    filas_acumuladas: list[dict], filas_resumen: list[dict], titulo_hoja_diaria: str,
+    filas_acumuladas: list[dict], filas_resumen_diario: list[dict],
+    filas_resumen_mensual: list[dict] | None = None,
 ) -> bytes:
-    """Excel de dos hojas para destinatarios tipo Cliente: la primera con el
-    detalle horario acumulado del mes (mismo formato/columnas que
-    generar_excel), la segunda con el resumen mensual por proyecto."""
+    """Excel para destinatarios tipo Cliente -- dos hojas todos los días, una
+    tercera solo el último día del mes:
+
+    1. 'Diario acumulado' -- detalle horario acumulado desde el día 1 del
+       mes hasta hoy (mismo formato/columnas que generar_excel).
+    2. 'Resumen Diario' -- las mismas variables del Resumen Mensual, pero
+       calculadas solo para el día del reporte.
+    3. 'Resumen Mensual' -- SOLO si `filas_resumen_mensual` viene con datos
+       (el llamador decide si es el último día del mes) -- las mismas
+       variables acumuladas de todo el mes.
+    """
     wb = Workbook()
     ws1 = wb.active
-    ws1.title = titulo_hoja_diaria[:31]
+    ws1.title = "Diario acumulado"
     _escribir_hoja(ws1, filas_acumuladas)
 
-    ws2 = wb.create_sheet("Resumen Mensual")
-    _escribir_hoja(ws2, filas_resumen, columnas=COLUMNAS_RESUMEN)
+    ws2 = wb.create_sheet("Resumen Diario")
+    _escribir_hoja(ws2, filas_resumen_diario, columnas=columnas_resumen("Fecha"))
+
+    if filas_resumen_mensual:
+        ws3 = wb.create_sheet("Resumen Mensual")
+        _escribir_hoja(ws3, filas_resumen_mensual, columnas=columnas_resumen("Mes"))
 
     buf = BytesIO()
     wb.save(buf)

@@ -5,6 +5,16 @@ import pandas as pd
 
 HORAS = list(range(24))
 
+# Ventanas horarias para el relleno horario centralizado (ver
+# reconectador.rellenar_horas_faltantes) -- fuera de estas horas la
+# generación real esperada es ~0, así que rellenar ahí no aporta nada y solo
+# arriesga meter ruido de telemetría nocturna como si fuera dato real.
+HORAS_SOLARES = range(6, 18)        # 6am a 6pm -- Solenium×FP e histórico
+HORAS_RECONECTADOR = range(7, 17)   # 7am a 5pm -- más angosta: es la primera
+                                     # fuente que se intenta y la menos
+                                     # verificable (dato físico crudo, sin
+                                     # cruzarlo contra nada más en ese momento)
+
 CURVA_CERO: pd.Series = pd.Series({h: 0.0 for h in HORAS}, dtype=float)
 CURVA_VACIA: pd.Series = pd.Series({h: None for h in HORAS}, dtype=float)  # sin dato -- no confundir con "generó 0"
 

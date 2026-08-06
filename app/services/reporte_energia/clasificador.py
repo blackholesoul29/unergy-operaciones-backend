@@ -231,10 +231,6 @@ def _decidir_caso(
     if e_cgm <= 0:
         curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
-            resultado_medidor = {
-                "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
-                "medidor_usado": "principal_sin_cgm" if curva is curva_ppal else "respaldo_sin_cgm",
-            }
             # Mismo blindaje que ya tiene el camino de CGM válido más arriba
             # -- si Solenium reportó parcial ese día, se compara el medidor
             # contra ese total SOLO en las horas que Solenium sí cubrió (ver
@@ -243,17 +239,75 @@ def _decidir_caso(
             # diferencia -- no había motivo para marcar Revisar Manualmente
             # a ciegas). Sin inversores con qué comparar, se mantiene el
             # criterio de siempre: queda marcado.
+            error_parcial = None
             if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
                 curva_medidor_horas_comunes = curva.where(curva_solenium.notna())
                 error_parcial = _error_con_curva(e_inv_incompleto, curva_medidor_horas_comunes)
+
+                # Si el elegido por defecto (siempre principal, mientras
+                # tenga dato) falla la comparación contra inversores pero el
+                # respaldo sí pasa, se prefiere el respaldo -- ya no tiene
+                # sentido insistir en "siempre principal" si es el respaldo
+                # el que de verdad coincide (ver MGS 0026 Valencia Oriente
+                # 2026-08-05: principal 4.695,6 kWh vs inversores 7.045,4 kWh,
+                # ~33% de diferencia; respaldo 7.054,0 kWh, ~0,1%). Si los dos
+                # YA están dentro de rango, se mantiene principal -- no
+                # cambia solo porque el otro tenga un error un poco menor.
+                if not _en_rango(error_parcial) and curva is curva_ppal and _tiene_dato(curva_resp):
+                    error_resp = _error_con_curva(e_inv_incompleto, curva_resp.where(curva_solenium.notna()))
+                    if error_resp is not None and _en_rango(error_resp):
+                        curva, error_parcial = curva_resp, error_resp
+
+                # Medidor subreporta contra inversores más de lo tolerado --
+                # mismo criterio que Caso 3 (medidores subreportan -> inversores
+                # x FP): confiar en el medidor sería reportar un número que ya
+                # se sabe está mal, en vez de corregirlo con la fuente que sí
+                # cruza (ver MGS Gandalf 2026-08-05: medidor ~20% por debajo de
+                # inversores en las horas comunes -- caída puntual a las 11h y
+                # degradación progresiva 14h-16h antes de dejar de reportar).
+                # Si el medidor SOBREreporta en cambio, se deja igual que
+                # siempre (mismo criterio que Caso 4 en otras partes: confiar
+                # en el valor más alto, solo marcado para revisar).
+                if error_parcial is not None and error_parcial > RANGO_ERROR:
+                    fp_val, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+                    if fp_val is not None:
+                        e_fp = e_inv_incompleto * fp_val
+                        return {
+                            "caso": 5, "energia_final_kwh": e_fp,
+                            "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                            "fp": fp_val, "fp_calculada": fp_calc, "error_final_pct": error_parcial,
+                            "medidor_usado": "inversores", "revisar_manualmente": True,
+                        }
+
+            resultado_medidor = {
+                "caso": 5, "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                "medidor_usado": "principal_sin_cgm" if curva is curva_ppal else "respaldo_sin_cgm",
+            }
+            if error_parcial is not None:
                 resultado_medidor["error_final_pct"] = error_parcial
                 resultado_medidor["revisar_manualmente"] = not _en_rango(error_parcial)
             else:
                 resultado_medidor["revisar_manualmente"] = True
             return resultado_medidor
 
-    # --- Casos 6/7/8: ni CGM ni medidor ni inversores tienen nada ---
+    # --- Casos 6/7/8: ni CGM ni medidor tienen nada, inversores solo parcial ---
     if e_inv_incompleto:
+        # Mismo criterio que ya tiene el Caso 5 sin CGM (medidor caído) unas
+        # líneas arriba, y el Caso 8 de datos crudos más abajo: las horas que
+        # Solenium SÍ reportó no están "faltando" -- vaciar la curva entera
+        # las trataba como si lo estuvieran, y el relleno horario centralizado
+        # las volvía a reconstruir con Solenium × FP desde cero (ver MGS 0009
+        # Cañahuate 2026-08-05: "revisar" + relleno 8h-23h, cuando en
+        # realidad solo faltaban 6h y 7h -- el resto ya era dato real).
+        fp_val, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+        if fp_val is not None and isinstance(curva_solenium, pd.Series):
+            e_fp = e_inv_incompleto * fp_val
+            return {
+                "caso": 3, "energia_final_kwh": e_fp,
+                "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                "fp": fp_val, "fp_calculada": fp_calc,
+                "medidor_usado": "inversores", "revisar_manualmente": True,
+            }
         return {
             "caso": 3, "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
             "fp": None, "fp_calculada": None, "medidor_usado": "revisar", "revisar_manualmente": True,

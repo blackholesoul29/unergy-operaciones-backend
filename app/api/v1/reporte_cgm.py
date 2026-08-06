@@ -237,7 +237,7 @@ def enviar_reporte_cgm(
             fecha_str_envio = fecha_display
 
             if dest.tipo == "cliente" and es_dia_unico:
-                # Cliente: 'Diario acumulado' (mes completo hasta hoy) +
+                # Cliente: 'Reporte Acumulado' (mes completo hasta hoy) +
                 # 'Resumen Diario' (mismas variables, solo hoy) siempre;
                 # 'Resumen Mensual' (acumulado del mes) solo el último día.
                 proyectos = _datos_proyectos_para_resumen(db, gaia, fronteras)

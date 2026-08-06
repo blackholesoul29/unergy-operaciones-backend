@@ -142,7 +142,7 @@ def _horas_en_cero(curva) -> int:
 def columnas_resumen(etiqueta_columna: str) -> list[str]:
     return [
         etiqueta_columna, "Proyecto", "Total Generación (kWh)", "Total Consumo (kWh)",
-        "Producción Específica (kWh/kWp)", "Indisponibilidad (%)", "Factor de Planta (%)",
+        "Producción Específica (kWh/kWp)", "Indisponibilidad Telemedida (%)", "Factor de Planta (%)",
     ]
 
 
@@ -228,7 +228,7 @@ def _calcular_resumen(
             "Total Generación (kWh)": round(total_gen, 3),
             "Total Consumo (kWh)": round(total_con, 3),
             "Producción Específica (kWh/kWp)": round(total_gen / capacidad_dc, 3) if capacidad_dc else None,
-            "Indisponibilidad (%)": (
+            "Indisponibilidad Telemedida (%)": (
                 round(horas_cero_total / horas_solares_total * 100, 2)
                 if horas_cero_total is not None and horas_solares_total else None
             ),
@@ -311,7 +311,7 @@ def generar_excel_cliente(
     """Excel para destinatarios tipo Cliente -- dos hojas todos los días, una
     tercera solo el último día del mes:
 
-    1. 'Diario acumulado' -- detalle horario acumulado desde el día 1 del
+    1. 'Reporte Acumulado' -- detalle horario acumulado desde el día 1 del
        mes hasta hoy (mismo formato/columnas que generar_excel).
     2. 'Resumen Diario' -- las mismas variables del Resumen Mensual, pero
        calculadas solo para el día del reporte.
@@ -321,7 +321,7 @@ def generar_excel_cliente(
     """
     wb = Workbook()
     ws1 = wb.active
-    ws1.title = "Diario acumulado"
+    ws1.title = "Reporte Acumulado"
     _escribir_hoja(ws1, filas_acumuladas)
 
     ws2 = wb.create_sheet("Resumen Diario")

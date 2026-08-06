@@ -156,3 +156,15 @@ def test_tarifa_sin_indexacion_cae_a_la_base():
 def test_tarifa_periodo_anterior_a_todo_usa_esbase():
     # Período anterior incluso al año base → cae a la entrada esBase.
     assert _tarifa_indexada_periodo(_IDX, None, _FIRMA, "2023-01") == 5.0
+
+
+def test_tarifa_soporta_esquema_internet_anio_y_es_base():
+    """Internet/O&M usan otro esquema de JSONB: 'anio' (sin ñ) y 'es_base'."""
+    idx = [
+        {"anio": 2024, "ipc_aplicado": None, "valor": 100000.0, "es_base": True},
+        {"anio": 2025, "ipc_aplicado": 5.2, "valor": 105200.0},
+    ]
+    assert _tarifa_indexada_periodo(idx, None, date(2024, 3, 1), "2025-06") == 105200.0
+    assert _tarifa_indexada_periodo(idx, None, date(2024, 3, 1), "2024-06") == 100000.0
+    # Antes del año base → esBase/es_base.
+    assert _tarifa_indexada_periodo(idx, None, date(2024, 3, 1), "2023-01") == 100000.0

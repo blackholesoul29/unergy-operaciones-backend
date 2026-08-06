@@ -31,7 +31,7 @@ from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import curvas, datos_crudos, solenium as solenium_svc, reconectador, historial
 from app.services.reporte_energia.utils import (
-    CURVA_CERO, CURVA_VACIA, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
+    CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
 )
 
 HORAS = list(range(24))
@@ -39,7 +39,6 @@ HORAS = list(range(24))
 CASOS_CON_RELLENO_HORARIO = {2, 3, 4, 5, 7, 8}
 RANGO_ERROR         = 6.0               # %: error aceptable [-6%, +6%]
 ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy es válido
-HORAS_SOLARES       = range(6, 18)       # 6am a 6pm -- mismo criterio que reporte_cgm.py
 
 # frontera_id de proyectos sin inversores (nunca registrados en Solenium)
 # cuyo medidor de nodo se sabe que sub-reporta crónicamente frente a la

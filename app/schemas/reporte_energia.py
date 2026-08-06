@@ -91,6 +91,11 @@ class DetalleFronteraReporte(BaseModel):
 class EditarCurvaRequest(BaseModel):
     curva_final: list[float | None]
     nota: str | None = None
+    # Cuál opción de "Reportar con otra fuente" se usó para llenar el editor
+    # (si alguna) -- para que 'Fuente usada' refleje la fuente real elegida
+    # en vez de un genérico "editado manualmente". None si la persona editó
+    # celdas a mano sin pasar por ese desplegable.
+    fuente: str | None = None
 
 
 class EdicionAuditoria(BaseModel):

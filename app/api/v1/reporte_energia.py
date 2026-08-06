@@ -297,9 +297,13 @@ def editar_curva(
     # 'Fuente usada' quedaba mostrando lo que el clasificador decidió
     # originalmente (ej. 'Histórico propio') aunque la persona ya hubiera
     # reemplazado la curva con otra fuente ('Reportar con otra fuente') --
-    # cualquier guardado manual reemplaza la fuente reportada, así que debe
-    # decir eso, no la decisión automática que ya quedó superada.
-    rep.medidor_usado = "editado_manualmente"
+    # cualquier guardado manual reemplaza la fuente reportada. Si el editor
+    # se llenó desde una de esas opciones, se refleja esa fuente específica
+    # (mismos valores que ya usa ETIQUETAS_FUENTE en el front: 'Medidor
+    # principal'/'respaldo', 'Inversores × FP', 'Histórico propio'); si fue
+    # edición celda por celda sin pasar por ahí, queda el genérico.
+    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico"}
+    rep.medidor_usado = body.fuente if body.fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.

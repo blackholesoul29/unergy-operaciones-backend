@@ -6,13 +6,13 @@ Añade a ``cumplimiento_mensual`` el origen del cálculo ('manual' vs.
 dato XM (para poder regenerarlos de forma idempotente y rastrear su origen).
 
 Revision ID: 058
-Revises: 055
+Revises: 057
 Create Date: 2026-07-12
 """
 from alembic import op
 
 revision = "058"
-down_revision = "056"
+down_revision = "057"
 branch_labels = None
 depends_on = None
 

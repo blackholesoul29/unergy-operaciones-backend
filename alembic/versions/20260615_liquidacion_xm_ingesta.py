@@ -11,7 +11,7 @@ IF NOT EXISTS en cada paso para que reintentar desde cero sea seguro si un deplo
 se corta a medias (mismo criterio que 034_maintenance_impact).
 
 Revision ID: 20260615
-Revises: 038
+Revises: 064
 Create Date: 2026-07-07
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20260615"
-down_revision = "057"
+down_revision = "064"
 branch_labels = None
 depends_on = None
 

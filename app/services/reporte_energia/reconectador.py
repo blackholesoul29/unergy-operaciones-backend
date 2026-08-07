@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.reporte_energia import historial
-from app.services.reporte_energia.utils import escalar_curva
+from app.services.reporte_energia.utils import HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva
 
 HORAS = list(range(24))
 HORA_INICIO_GENERACION = 5   # 5 am
@@ -96,14 +96,18 @@ def rellenar_horas_faltantes(
 ) -> tuple[pd.Series, set[int], set[int], set[int]]:
     """Rellena las horas en NaN de `curva` en tres pasos, en orden:
 
-    1. Reconectador (dato físico directo del punto de generación).
-    2. Curva de Solenium (inversores) del MISMO día × factor de pérdida.
+    1. Curva de Solenium (inversores) del MISMO día × factor de pérdida.
+    2. Reconectador (dato físico directo del punto de generación).
     3. Histórico horario PROPIO de la frontera (último recurso) -- mediana
        del total diario × forma horaria típica de los últimos días
        confiables (ver historial.py).
 
     Las horas que ninguna de las tres fuentes cubre quedan en NaN -- no se
-    inventa un valor.
+    inventa un valor. Cada fuente además solo se acepta dentro de su propia
+    ventana horaria (HORAS_RECONECTADOR/HORAS_SOLARES en utils.py) -- fuera
+    de esas horas la generación real ya se espera en ~0, así que rellenar
+    ahí no protege nada y solo arriesga meter ruido de telemetría nocturna
+    como si fuera dato real (ver MGS 0022 La Cumbia 2026-08-05).
 
     Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico).
     """
@@ -117,23 +121,27 @@ def rellenar_horas_faltantes(
     curva = curva.copy()
     horas_faltantes = set(curva[curva.isna()].index)
 
-    if id_solenium is not None:
-        curva_relay = get_curva_reconectador(sol, int(id_solenium), fecha_str)
-        if curva_relay is not None:
-            for h in list(horas_faltantes):
-                valor = curva_relay.get(h)
-                if pd.notna(valor):
-                    curva[h] = valor
-                    horas_reconectador.add(h)
-            horas_faltantes -= horas_reconectador
-
-    if horas_faltantes and curva_solenium is not None and fp is not None:
+    if curva_solenium is not None and fp is not None:
         for h in list(horas_faltantes):
+            if h not in HORAS_SOLARES:
+                continue
             valor_inv = curva_solenium.get(h) if isinstance(curva_solenium, pd.Series) else None
             if pd.notna(valor_inv):
                 curva[h] = valor_inv * fp
                 horas_solenium.add(h)
         horas_faltantes -= horas_solenium
+
+    if horas_faltantes and id_solenium is not None:
+        curva_relay = get_curva_reconectador(sol, int(id_solenium), fecha_str)
+        if curva_relay is not None:
+            for h in list(horas_faltantes):
+                if h not in HORAS_RECONECTADOR:
+                    continue
+                valor = curva_relay.get(h)
+                if pd.notna(valor):
+                    curva[h] = valor
+                    horas_reconectador.add(h)
+            horas_faltantes -= horas_reconectador
 
     if horas_faltantes and frontera_id is not None:
         fecha = pd.to_datetime(fecha_str).date()
@@ -143,6 +151,8 @@ def rellenar_horas_faltantes(
             if forma is not None:
                 curva_historica = escalar_curva(forma, mediana)
                 for h in list(horas_faltantes):
+                    if h not in HORAS_SOLARES:
+                        continue
                     curva[h] = curva_historica[h]
                     horas_historico.add(h)
 

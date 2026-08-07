@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva
+from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva, curva_a_lista
 
 HORAS = list(range(24))
 ESTADOS_AUTOMATICO = {"OK", "WARNING"}
@@ -249,6 +249,19 @@ def _clasificar_por_medidor_o_historico(
     main_meter = border_meta.get("main_meter") if border_meta else None
     backup_meter = border_meta.get("backup_meter") if border_meta else None
     c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+    resultado = _decidir_medidor_o_historico(db, frontera_id, fecha, e_cgm, estado_reporte, c)
+    # Curvas de referencia tal como estaban al momento de clasificar -- ya se
+    # tenían que pedir de todas formas para esta rama, así que persistirlas
+    # no agrega ninguna llamada nueva a Quoia (ver mismo fix en
+    # clasificador.py -- MGS 0032 El Paso Norte 2026-08-05).
+    resultado["curva_medidor_principal"] = curva_a_lista(c["consumo_ppal"])
+    resultado["curva_medidor_respaldo"] = curva_a_lista(c["consumo_resp"])
+    return resultado
+
+
+def _decidir_medidor_o_historico(
+    db: Session, frontera_id: int, fecha: date, e_cgm: float, estado_reporte: str | None, c: dict,
+) -> dict:
     # Para una frontera de Consumo, "generación" (eae) y "consumo" (iae) del
     # mismo medidor son ambos relevantes en teoría, pero lo que interesa acá
     # es la variable iae de ESTE medidor -- ya viene calculada en

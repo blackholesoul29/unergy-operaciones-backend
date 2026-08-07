@@ -126,6 +126,7 @@ _PENDING_DDLS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_dia ON despacho_contrato_dia (periodo, codigo_sic_contrato, fecha)",
     "ALTER TABLE factura_emitida ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(80)",
+    "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS fuente VARCHAR(20)",
     "CREATE INDEX IF NOT EXISTS ix_despacho_dia_lookup ON despacho_contrato_dia (periodo, codigo_sic_contrato)",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
@@ -661,6 +662,15 @@ _PENDING_DDLS = [
     # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
     # null, /enviar sigue usando la fórmula ±1% sobre curva_final
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_respaldo_terceros JSONB",
+    # migration — reporte_energia_{generacion,consumo}: curvas de referencia
+    # (medidor/Solenium) tal como estaban al momento de clasificar -- antes
+    # solo se guardaba el total, la curva completa se volvía a pedir en vivo
+    # cada vez que se abría el detalle (ver MGS 0032 El Paso Norte 2026-08-05)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_solenium_referencia JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,
@@ -1310,6 +1320,15 @@ _PENDING_DDLS = [
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS energia_promedio_kwh_mes NUMERIC(14,3)",
     "CREATE INDEX IF NOT EXISTS ix_oferta_operador_red ON oportunidad_ofertas (operador_red_id)",
+    # Campos técnicos del servicio de Internet en ContratoServicio (2026-08-06)
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS linea_servicio VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS id_router VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS numero_kit VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS latencia_ms INTEGER",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_seguridad VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lat NUMERIC(10,6)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lng NUMERIC(10,6)",
 ]
 
 

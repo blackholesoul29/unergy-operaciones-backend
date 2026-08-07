@@ -9,6 +9,7 @@ los compromisos de energía (min/max MWh) del contrato PPA.
 
 import calendar
 import logging
+import time as _time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -3404,3 +3405,270 @@ def fix_enlaces(
 
     db.commit()
     return {"status": "ok", "actions": actions}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Panel anual — una sola llamada con todo lo que dibuja la pestaña Cumplimiento
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Existe para consumidores externos (paneles de gerencia) que necesitan replicar
+# la gráfica de /mem/cumplimiento sin reimplementar lógica de negocio.
+#
+# Por qué no basta con los endpoints que ya había:
+#   - /cumplimiento/ppa/{id}/anual devuelve UN contrato. El consolidado obligaba a
+#     llamarlo N veces y sumar del lado del cliente (~60 líneas en el frontend),
+#     con dos consecuencias: N tokens + fetches repetidos de plantas compartidas
+#     entre contratos (los duplicados), y una regla de negocio duplicada que se
+#     desincroniza en cuanto se toca de este lado.
+#   - Este endpoint reusa la maquinaria de /anual-matriz, que deduplica los
+#     fetches a la API de Unergy sobre TODOS los contratos a la vez.
+
+_PANEL_CACHE: dict[str, tuple[float, dict]] = {}   # key → (monotonic_ts, payload)
+PANEL_CACHE_TTL = 900   # 15 min. La generación de meses cerrados no cambia; la del
+                        # mes en curso se refresca en el siguiente ciclo.
+
+
+def _panel_cache_get(key: str) -> dict | None:
+    entry = _PANEL_CACHE.get(key)
+    if entry and (_time.monotonic() - entry[0]) < PANEL_CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _panel_cache_set(key: str, data: dict) -> None:
+    _PANEL_CACHE[key] = (_time.monotonic(), data)
+
+
+def _sumar_opcional(valores: list) -> float | None:
+    """Suma ignorando None. Devuelve None si TODOS son None.
+
+    Distingue "nadie tiene compromiso" (None) de "el compromiso es cero" (0.0).
+    Un contrato sin compromiso cargado no debe arrastrar el consolidado a cero.
+    """
+    presentes = [v for v in valores if v is not None]
+    return round(sum(presentes), 3) if presentes else None
+
+
+def _consolidar_meses(meses_por_contrato: list[list[dict]]) -> list[dict]:
+    """Suma los 12 meses de N contratos en una sola serie consolidada.
+
+    Función pura: recibe las listas de meses ya construidas por
+    `_anual_meses_para_contrato` y no hace I/O.
+
+    Reglas (equivalentes a `loadConsolidado()` del frontend, más los casos que
+    aquél no contempla):
+      - min/max se suman solo entre los contratos que los tienen. Si ninguno
+        tiene, el mes queda en None, no en 0.
+      - El valor que se compara contra el compromiso es `valor_mwh`, que el
+        backend ya resolvió por mes (real / cierre proyectado / proyección).
+        Los meses en que un contrato no está vigente traen valor_mwh=None y por
+        lo tanto no aportan — que es justo lo que corresponde.
+      - `compras_bolsa_mwh` es el déficit DEL CONSOLIDADO (lo que dibuja la
+        gráfica). `suma_compras_bolsa_mwh` es la suma de los déficits de cada
+        contrato, que es el número operativo real: los contratos no se netean
+        entre sí, un excedente en uno no cubre el faltante de otro.
+    """
+    if not meses_por_contrato:
+        return []
+
+    consolidado = []
+    for i in range(12):
+        fila = [c[i] for c in meses_por_contrato if i < len(c)]
+        if not fila:
+            continue
+
+        min_mwh = _sumar_opcional([m.get("min_mwh") for m in fila])
+        max_mwh = _sumar_opcional([m.get("max_mwh") for m in fila])
+        valor   = _sumar_opcional([m.get("valor_mwh") for m in fila])
+        gen     = round(sum(m.get("gen_mwh") or 0 for m in fila), 3)
+
+        estado, compras, excedentes = "sin_compromisos", None, None
+        if min_mwh is not None or max_mwh is not None:
+            if valor is None:
+                estado = "sin_datos"
+            else:
+                efectivo_min = min_mwh if min_mwh is not None else 0.0
+                if valor < efectivo_min:
+                    estado, compras, excedentes = "deficit", round(efectivo_min - valor, 3), 0.0
+                elif max_mwh is not None and valor > max_mwh:
+                    estado, compras, excedentes = "excedente", 0.0, round(valor - max_mwh, 3)
+                else:
+                    estado, compras, excedentes = "ok", 0.0, 0.0
+
+        bolsa_dup = sum(m.get("exposicion_bolsa_duplicados_mwh") or 0 for m in fila)
+        ref = fila[0]
+
+        plantas = []
+        for m in fila:
+            for p in (m.get("plantas") or []):
+                plantas.append({**p, "contrato": m.get("_contrato_label")})
+
+        consolidado.append({
+            "month": i + 1,
+            "min_mwh": min_mwh,
+            "max_mwh": max_mwh,
+            "gen_mwh": gen,
+            "gen_proyectada_mwh": _sumar_opcional([m.get("gen_proyectada_mwh") for m in fila]),
+            "gen_proyectada_cierre": _sumar_opcional([m.get("gen_proyectada_cierre") for m in fila]),
+            "valor_mwh": valor,
+            "estado": estado,
+            "tipo_datos": ref.get("tipo_datos"),
+            "dia_actual": ref.get("dia_actual"),
+            "dias_restantes": ref.get("dias_restantes"),
+            "compras_bolsa_mwh": compras,
+            "excedentes_bolsa_mwh": excedentes,
+            "suma_compras_bolsa_mwh": _sumar_opcional([m.get("compras_bolsa_mwh") for m in fila]),
+            "suma_excedentes_bolsa_mwh": _sumar_opcional([m.get("excedentes_bolsa_mwh") for m in fila]),
+            "exposicion_bolsa_duplicados_mwh": round(bolsa_dup, 3) if bolsa_dup > 0 else None,
+            "n_contratos_con_compromiso": sum(
+                1 for m in fila if m.get("min_mwh") is not None or m.get("max_mwh") is not None
+            ),
+            "plantas": plantas,
+            "n_plantas": len(plantas),
+        })
+    return consolidado
+
+
+def _totales_tabla(meses: list[dict]) -> dict:
+    """Fila de la tabla 'Resumen anual por contrato': mín/máx anual y meses con compromiso."""
+    return {
+        "total_min_mwh": _sumar_opcional([m.get("min_mwh") for m in meses]),
+        "total_max_mwh": _sumar_opcional([m.get("max_mwh") for m in meses]),
+        "meses_con_compromisos": sum(
+            1 for m in meses if m.get("min_mwh") is not None or m.get("max_mwh") is not None
+        ),
+    }
+
+
+@router.get("/panel-anual")
+def get_panel_anual(
+    year: int = Query(..., ge=2020, le=2050, description="Año a consultar"),
+    incluir_plantas: bool = Query(True, description="Incluir el desglose planta por planta de cada mes"),
+    refrescar: bool = Query(False, description="Ignorar la caché y volver a consultar la generación"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Todo lo que dibuja la pestaña Cumplimiento de /mem/cumplimiento, en una llamada.
+
+    Devuelve, para el año pedido:
+      - `consolidado`: los 12 meses con todos los contratos de venta sumados.
+      - `contratos[]`: cada contrato con sus 12 meses y los totales de la tabla resumen.
+
+    Pensado para paneles externos: el valor que se compara contra el compromiso ya
+    viene resuelto en `valor_mwh`, así que el consumidor no reimplementa reglas de
+    negocio y sus números no pueden divergir de los de la plataforma.
+
+    Cacheado 15 minutos en memoria (`?refrescar=true` para saltarla).
+    """
+    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}"
+    if not refrescar:
+        cached = _panel_cache_get(cache_key)
+        if cached is not None:
+            return {**cached, "desde_cache": True}
+
+    today = date.today()
+    contratos = _query_contratos_venta(db, year)
+
+    # GESCON por contrato/mes + compromisos, igual que get_anual_matriz.
+    gpm_por_contrato: dict = {}
+    comp_por_contrato: dict = {}
+    for c in contratos:
+        gpm_por_contrato[c.id] = {
+            m: (_resolve_gescon(db, c.numero_codigo_contrato, year, m) if c.numero_codigo_contrato else [])
+            for m in range(1, 13)
+        }
+        comp_por_contrato[c.id] = {
+            r.mes: r for r in db.query(PPACompromisoEnergia).filter(
+                PPACompromisoEnergia.contrato_id == c.id,
+                PPACompromisoEnergia.año == year,
+            ).all()
+        }
+
+    # Un solo set deduplicado de fetches para TODOS los contratos: una planta que
+    # despacha a tres contratos se consulta una vez, no tres.
+    need_month, need_avg, need_range = _build_fetch_sets(gpm_por_contrato, year, today)
+    month_cache: dict = {}
+    avg_cache: dict = {}
+    range_cache: dict = {}
+
+    if need_month or need_avg or need_range:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in get_panel_anual: %s", exc)
+            token = None
+
+        if token and need_month:
+            def _ft(task):
+                m, sp = task
+                return task, _fetch_month(token, sp, year, m)
+            with ThreadPoolExecutor(max_workers=min(len(need_month), 12)) as pool:
+                for task, res in pool.map(_ft, list(need_month)):
+                    month_cache[task] = res
+
+        if token and need_avg:
+            def _fa(sp):
+                return sp, _fetch_recent_avg(token, sp, n_days=30)
+            with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
+                for sp, res in pool.map(_fa, list(need_avg)):
+                    avg_cache[sp] = res.get("avg_daily_mwh")
+
+        if token and need_range:
+            def _fr(task):
+                sp, start, end = task
+                return task, _fetch_range(token, sp, start, end)
+            with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                for task, res in pool.map(_fr, list(need_range)):
+                    range_cache[task] = res
+
+    out_contratos = []
+    meses_por_contrato = []
+    for c in contratos:
+        meses, _proyectos = _anual_meses_para_contrato(
+            c, year, gpm_por_contrato[c.id], comp_por_contrato[c.id],
+            month_cache, avg_cache, today, range_cache,
+        )
+        etiqueta = c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}"
+        # `_contrato_label` lo consume _consolidar_meses para etiquetar cada planta
+        # con el contrato al que aporta; no se expone en la respuesta.
+        for m in meses:
+            m["_contrato_label"] = etiqueta
+        meses_por_contrato.append(meses)
+
+        limpios = []
+        for m in meses:
+            fila = {k: v for k, v in m.items() if k != "_contrato_label"}
+            if not incluir_plantas:
+                fila.pop("plantas", None)
+            limpios.append(fila)
+
+        out_contratos.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            **_totales_tabla(meses),
+            **_rollup_cumplimiento(meses),
+            "meses": limpios,
+        })
+
+    consolidado_meses = _consolidar_meses(meses_por_contrato)
+    if not incluir_plantas:
+        for m in consolidado_meses:
+            m.pop("plantas", None)
+
+    payload = {
+        "year": year,
+        "generado_en": datetime.now(timezone.utc).isoformat(),
+        "consolidado": {
+            "nombre": "Consolidado (todos)",
+            "n_contratos": len(out_contratos),
+            **_totales_tabla(consolidado_meses),
+            "meses": consolidado_meses,
+        },
+        "contratos": out_contratos,
+    }
+    _panel_cache_set(cache_key, payload)
+    return {**payload, "desde_cache": False}

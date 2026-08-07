@@ -18,7 +18,9 @@ from app.models.comercial import (
     Oportunidad, OportunidadOferta, OportunidadEstadoHistorial, OportunidadGestion,
 )
 from app.api.v1 import comercial as api
-from app.schemas.comercial import OportunidadCreate, OfertaCreate, OfertaUpdate
+from app.schemas.comercial import (
+    OportunidadCreate, OfertaCreate, OfertaUpdate, EstadoChangeIn,
+)
 
 
 @compiles(JSONB, "sqlite")
@@ -59,17 +61,21 @@ def test_crud_ofertas(db):
 
     creada = api.create_oferta(oid, OfertaCreate(
         tipo="servicios_operacionales", planta_nombre="P1",
-        numero_oferta="OF.REPCGM-001", resultado="aceptado"), db=db, current=ADMIN)
+        numero_oferta="OF.REPCGM-001", estado="firmado"), db=db, current=ADMIN)
     ofid = creada["id"]
     assert creada["tipo"] == "servicios_operacionales"
+    assert creada["estado"] == "firmado"
+    # `resultado` ya no se envía: sale de la etapa.
     assert creada["resultado"] == "aceptado"
 
     detalle = api.get_oportunidad(oid, db=db, current=ADMIN)
     assert len(detalle["ofertas"]) == 1
     assert detalle["resumen_ofertas"]["servicios_operacionales"] == 1
 
-    api.update_oferta(ofid, OfertaUpdate(resultado="declinado"), db=db, current=ADMIN)
-    assert api.list_ofertas(oid, db=db, current=ADMIN)[0]["resultado"] == "declinado"
+    api.cambiar_estado_oferta(ofid, EstadoChangeIn(estado="declinado"), db=db, current=ADMIN)
+    fila = api.list_ofertas(oid, db=db, current=ADMIN)[0]
+    assert fila["estado"] == "declinado"
+    assert fila["resultado"] == "declinado"
 
     api.delete_oferta(ofid, db=db, current=ADMIN)
     assert api.list_ofertas(oid, db=db, current=ADMIN) == []

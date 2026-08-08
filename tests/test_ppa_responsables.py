@@ -88,14 +88,36 @@ def test_solo_relevantes_excluye_los_marcados_y_conserva_el_resto(db):
     assert nombres == {"Terpel 8", "Sin clasificar"}
 
 
-def test_por_defecto_no_filtra_nada(db):
-    """Las demás vistas (simulador, plantas-contratos, panel-anual) no deben
-    cambiar de universo por esta feature."""
+def test_el_filtro_es_el_default_en_todo_el_router(db):
+    """Todas las vistas de /mem/cumplimiento ocultan los no relevantes, así que
+    el default de los dos helpers es filtrar."""
     externo = _resp(db, "Externo", incluir=False)
     _contrato(db, "BIA Naos 1", responsable=externo)
+    _contrato(db, "Terpel 8")
     db.commit()
 
-    assert len(cumpl_api._query_contratos_venta(db, 2026)) == 1
+    assert [c.nombre_interno for c in cumpl_api._query_contratos_venta(db, 2026)] == ["Terpel 8"]
+    assert [c.nombre_interno for c in cumpl_api._contratos_vigentes(db, 2026)] == ["Terpel 8"]
+
+
+def test_incluir_todos_los_trae_de_vuelta(db):
+    externo = _resp(db, "Externo", incluir=False)
+    _contrato(db, "BIA Naos 1", responsable=externo)
+    _contrato(db, "Terpel 8")
+    db.commit()
+
+    todos = cumpl_api._contratos_vigentes(db, 2026, solo_relevantes=False)
+    assert {c.nombre_interno for c in todos} == {"BIA Naos 1", "Terpel 8"}
+
+
+def test_sin_responsables_ocultos_no_se_agrega_filtro(db):
+    """Si nadie está marcado como no relevante, la consulta no cambia."""
+    _resp(db, "Unergy", incluir=True)
+    _contrato(db, "Terpel 8")
+    db.commit()
+
+    assert cumpl_api._filtro_responsable_relevante(db) is None
+    assert len(cumpl_api._contratos_vigentes(db, 2026)) == 1
 
 
 def test_sigue_excluyendo_contratos_de_compra(db):
@@ -107,6 +129,19 @@ def test_sigue_excluyendo_contratos_de_compra(db):
     nombres = {c.nombre_interno for c in
                cumpl_api._query_contratos_venta(db, 2026, solo_relevantes=True)}
     assert nombres == {"Terpel 8"}
+
+
+def test_cerrar_periodo_y_descubrimientos_no_filtran(db):
+    """Son los dos call sites que pasan solo_relevantes=False a propósito:
+    cerrar-periodo PERSISTE el cierre mensual (dejar contratos fuera cambiaría el
+    histórico guardado) y descubrimientos existe para destapar exposición.
+    Este test los ancla leyendo el código: si alguien quita el parámetro, falla."""
+    import inspect
+    fuente = inspect.getsource(cumpl_api)
+    assert fuente.count("solo_relevantes=False") == 2
+
+    for fn in (cumpl_api.get_descubrimientos, cumpl_api.cerrar_periodo):
+        assert "incluir_todos" not in inspect.signature(fn).parameters
 
 
 def test_payload_de_fila_expone_el_responsable(db):

@@ -273,7 +273,7 @@ def panel(monkeypatch):
     from app.api.v1 import cumplimiento as C
 
     contratos = [_contrato(1), _contrato(2, "Terpel 8", "UNG-2026-020", "Terpel")]
-    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year: contratos)
+    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year, **kw: contratos)
     monkeypatch.setattr(C, "_resolve_gescon", lambda db, ci, y, m: [])
     monkeypatch.setattr(C, "_unergy_token", lambda: "tok")
     monkeypatch.setattr(C, "_fetch_month", lambda *a, **k: {"mwh": None, "n_records": 0, "ultimo_dia": None})
@@ -283,7 +283,7 @@ def panel(monkeypatch):
     def _call(**kw):
         C._PANEL_CACHE.clear()
         return C.get_panel_anual(year=2026, db=_FakeDB(), **{
-            "incluir_plantas": True, "refrescar": False, **kw, "_": None,
+            "incluir_plantas": True, "refrescar": False, "incluir_todos": False, **kw, "_": None,
         })
 
     return _call
@@ -337,16 +337,16 @@ def test_segunda_llamada_sale_de_cache(monkeypatch):
     from app.api.v1 import cumplimiento as C
 
     contratos = [_contrato(1)]
-    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year: contratos)
+    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year, **kw: contratos)
     monkeypatch.setattr(C, "_resolve_gescon", lambda db, ci, y, m: [])
     monkeypatch.setattr(C, "_unergy_token", lambda: "tok")
     monkeypatch.setattr(C, "_fetch_month", lambda *a, **k: {"mwh": None, "n_records": 0, "ultimo_dia": None})
     monkeypatch.setattr(C, "_fetch_recent_avg", lambda *a, **k: {"avg_daily_mwh": None})
     C._PANEL_CACHE.clear()
 
-    primera = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, db=_FakeDB(), _=None)
-    segunda = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, db=_FakeDB(), _=None)
-    tercera = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=True, db=_FakeDB(), _=None)
+    primera = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, incluir_todos=False, db=_FakeDB(), _=None)
+    segunda = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, incluir_todos=False, db=_FakeDB(), _=None)
+    tercera = C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=True, incluir_todos=False, db=_FakeDB(), _=None)
 
     assert primera["desde_cache"] is False
     assert segunda["desde_cache"] is True
@@ -357,15 +357,15 @@ def test_cache_no_mezcla_incluir_plantas(monkeypatch):
     """Distinto `incluir_plantas` = distinta clave de caché."""
     from app.api.v1 import cumplimiento as C
 
-    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year: [_contrato(1)])
+    monkeypatch.setattr(C, "_query_contratos_venta", lambda db, year, **kw: [_contrato(1)])
     monkeypatch.setattr(C, "_resolve_gescon", lambda db, ci, y, m: [])
     monkeypatch.setattr(C, "_unergy_token", lambda: "tok")
     monkeypatch.setattr(C, "_fetch_month", lambda *a, **k: {"mwh": None, "n_records": 0, "ultimo_dia": None})
     monkeypatch.setattr(C, "_fetch_recent_avg", lambda *a, **k: {"avg_daily_mwh": None})
     C._PANEL_CACHE.clear()
 
-    C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, db=_FakeDB(), _=None)
-    sin_plantas = C.get_panel_anual(year=2026, incluir_plantas=False, refrescar=False, db=_FakeDB(), _=None)
+    C.get_panel_anual(year=2026, incluir_plantas=True, refrescar=False, incluir_todos=False, db=_FakeDB(), _=None)
+    sin_plantas = C.get_panel_anual(year=2026, incluir_plantas=False, refrescar=False, incluir_todos=False, db=_FakeDB(), _=None)
 
     assert sin_plantas["desde_cache"] is False
     assert "plantas" not in sin_plantas["consolidado"]["meses"][0]

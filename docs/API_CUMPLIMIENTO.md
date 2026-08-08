@@ -30,6 +30,38 @@ Con la API Key de la plataforma le alcanza para todo. Está probado: todos los e
 
 ---
 
+## 0. El universo de contratos: empresa responsable
+
+Cada PPA tiene una **empresa responsable** (normalmente Unergy; algunos los gestiona un tercero). Los endpoints la devuelven aplanada en cada fila de contrato:
+
+```json
+{ "id": 12, "nombre_interno": "BIA Naos 1", "comprador_nombre": "…",
+  "responsable_id": 2, "responsable": "Externo", "responsable_relevante": false }
+```
+
+**Todos los endpoints de esta guía omiten por defecto los contratos cuyo responsable tiene `incluir_en_cumplimiento = false`**, igual que la vista `/mem/cumplimiento`. Pase `incluir_todos=true` a cualquiera de ellos para traerlos:
+
+| Endpoint | Filtra por defecto |
+|---|---|
+| `/cumplimiento/ppa`, `/ppa/resumen`, `/ppa/resumen-anual` | sí |
+| `/cumplimiento/simulador`, `/plantas-contratos`, `/energia-transada` | sí |
+| `/cumplimiento/balance-energia` | sí (lo hereda de `plantas-contratos`) |
+| `/cumplimiento/anual-matriz`, `/anual-matriz/contratos` | sí |
+| `/cumplimiento/panel-anual` | sí (`incluir_todos` va en la llave de caché) |
+| `/cumplimiento/ppa/{id}/anual`, `/anual-matriz/contrato/{id}`, `/ppa/{id}` | **no** — son detalle por id, responden para cualquier contrato |
+| `/cumplimiento/descubrimientos`, `POST /cumplimiento/cerrar-periodo` | **no** — a propósito (ver abajo) |
+
+Reglas:
+
+- Un contrato **sin responsable** (`responsable_id: null`) **siempre se incluye**. Nada se esconde por omisión, solo por marca explícita.
+- `cerrar-periodo` no filtra porque **persiste** el cierre mensual: dejar contratos fuera cambiaría el histórico guardado, y marcar un responsable como no relevante borraría su cierre.
+- `descubrimientos` no filtra porque existe para destapar exposición en bolsa, no para esconderla.
+- Si dos endpoints deben cuadrar entre sí, páseles el **mismo** `incluir_todos`; si no, uno suma un universo y el otro, otro.
+
+El catálogo vive en `/ppa/responsables`: `GET` lista con `n_contratos`; `POST` crea; `PATCH /{id}` renombra o cambia `incluir_en_cumplimiento`; `DELETE /{id}` da `409` si aún tiene contratos; `POST /ppa/responsables/asignar` con `{contrato_ids, responsable_id}` asigna en bloque (`responsable_id: null` desasigna). En el contrato, `responsable_id` es un campo más de `POST /ppa` y `PATCH /ppa/{id}`.
+
+---
+
 ## 1. Autenticación
 
 Header `X-API-Key` en cada request:
@@ -212,21 +244,7 @@ Matriz completa contrato × 12 meses (lo que exporta el Excel de la pestaña *Ma
 
 Auxiliares: `GET /cumplimiento/anual-matriz/contratos?year=` (lista liviana) y `GET /cumplimiento/anual-matriz/contrato/{id}?year=` (una fila).
 
-**Ojo con el universo de contratos.** Cada fila trae la empresa responsable del PPA:
-
-```json
-{ "id": 12, "nombre_interno": "BIA Naos 1", "comprador_nombre": "…",
-  "responsable_id": 2, "responsable": "Externo", "responsable_relevante": false }
-```
-
-Por defecto **este endpoint y `/anual-matriz/contratos` omiten los contratos cuyo responsable tiene `incluir_en_cumplimiento = false`** (PPAs que gestiona un tercero). Además de limpiar la vista, evita las llamadas a la API de generación de esos contratos. Pase `incluir_todos=true` para traerlos.
-
-Reglas:
-- Contrato **sin responsable** (`responsable_id: null`) → siempre se incluye. Nada se esconde por omisión, solo por marca explícita.
-- `/anual-matriz/contrato/{id}` **no** filtra: es un detalle por id y responde para cualquier contrato.
-- El resto de endpoints de cumplimiento (`/simulador`, `/plantas-contratos`, `/panel-anual`, …) **no** cambian de universo: siguen viendo todos los contratos de venta.
-
-El catálogo de responsables vive en `/ppa/responsables` (`GET` lista con `n_contratos`; `POST` crea; `PATCH /{id}` renombra o cambia `incluir_en_cumplimiento`; `DELETE /{id}` da 409 si aún tiene contratos; `POST /ppa/responsables/asignar` con `{contrato_ids, responsable_id}` asigna en bloque, `responsable_id: null` desasigna). En el contrato, `responsable_id` es un campo más de `POST /ppa` y `PATCH /ppa/{id}`.
+Ver la sección 0 sobre el universo de contratos: por defecto omite los de responsable no relevante.
 
 ---
 

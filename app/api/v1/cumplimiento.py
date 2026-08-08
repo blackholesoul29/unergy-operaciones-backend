@@ -370,10 +370,59 @@ def _gen_vigencia_mwh(
 
 # ── Contratos vigentes ────────────────────────────────────────────────────────
 
-def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> list:
+INCLUIR_TODOS_DESC = (
+    "Incluye también los contratos cuya empresa responsable está marcada como no "
+    "relevante (incluir_en_cumplimiento=false). Por defecto se omiten en todas las "
+    "vistas de /mem/cumplimiento."
+)
+
+
+def _responsable_payload(contrato) -> dict:
+    """Empresa responsable del PPA, aplanada para las filas de las vistas."""
+    r = contrato.responsable
+    return {
+        "responsable_id": contrato.responsable_id,
+        "responsable": r.nombre if r else None,
+        "responsable_relevante": r.incluir_en_cumplimiento if r else True,
+    }
+
+
+def _ids_responsables_ocultos(db: Session) -> set:
+    """Responsables marcados como NO relevantes: sus contratos los gestiona un
+    tercero y no deben aparecer en las vistas de /mem/cumplimiento."""
+    return {
+        r.id for r in db.query(PPAResponsable)
+        .filter(PPAResponsable.incluir_en_cumplimiento.is_(False)).all()
+    }
+
+
+def _filtro_responsable_relevante(db: Session):
+    """Cláusula SQL reusable: deja pasar los contratos sin responsable y los de un
+    responsable relevante. Devuelve None si no hay ninguno oculto (no filtra)."""
+    ocultos = _ids_responsables_ocultos(db)
+    if not ocultos:
+        return None
+    return or_(
+        PPAContrato.responsable_id.is_(None),
+        PPAContrato.responsable_id.notin_(ocultos),
+    )
+
+
+def _contratos_vigentes(db: Session, year: int, month: int | None = None,
+                        solo_relevantes: bool = True) -> list:
     """
     PPA contracts active during the given period, excluding soft-deleted.
     month=None → any month in the year.
+
+    `solo_relevantes` (default True) además descarta los contratos cuya empresa
+    responsable está marcada con incluir_en_cumplimiento=False. Es el default
+    porque TODAS las vistas de /mem/cumplimiento los ocultan; los endpoints
+    exponen `incluir_todos` para verlos. Contrato SIN responsable = se incluye:
+    nada se esconde por omisión, solo por marca explícita.
+
+    Se pasa False a propósito en /descubrimientos y /cerrar-periodo: no son vistas
+    de esa página y cerrar-periodo además PERSISTE registros mensuales — dejar
+    contratos fuera del cierre cambiaría datos históricos, no solo lo que se ve.
     """
     if month:
         first_day = date(year, month, 1)
@@ -381,7 +430,7 @@ def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> lis
     else:
         first_day = date(year, 1, 1)
         last_day = date(year, 12, 31)
-    return (
+    q = (
         db.query(PPAContrato)
         # el responsable se lee en las filas de la matriz: precargarlo evita N+1
         .options(selectinload(PPAContrato.responsable))
@@ -390,9 +439,12 @@ def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> lis
             or_(PPAContrato.fecha_inicio.is_(None), PPAContrato.fecha_inicio <= last_day),
             or_(PPAContrato.fecha_fin.is_(None), PPAContrato.fecha_fin >= first_day),
         )
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
     )
+    if solo_relevantes:
+        clausula = _filtro_responsable_relevante(db)
+        if clausula is not None:
+            q = q.filter(clausula)
+    return q.order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id).all()
 
 
 def _contrato_vigente_en_mes(contrato, year: int, month: int) -> bool:
@@ -693,14 +745,22 @@ def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/ppa")
-def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def list_ppa(
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
     """Lista todos los contratos PPA para el selector."""
-    rows = (
+    q = (
         db.query(PPAContrato)
+        .options(selectinload(PPAContrato.responsable))
         .filter(PPAContrato.deleted_at.is_(None))
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
     )
+    if not incluir_todos:
+        clausula = _filtro_responsable_relevante(db)
+        if clausula is not None:
+            q = q.filter(clausula)
+    rows = q.order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id).all()
     return [
         {
             "id": r.id,
@@ -709,6 +769,7 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
             "comprador_nombre": r.comprador_nombre,
             "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
             "fecha_fin": r.fecha_fin.isoformat() if r.fecha_fin else None,
+            **_responsable_payload(r),
         }
         for r in rows
     ]
@@ -718,6 +779,7 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
 def get_resumen(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -739,7 +801,7 @@ def get_resumen(
     lost_map = _lost_energy_mwh_por_proyecto(db, first_day, last_day)
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = _contratos_vigentes(db, year, month)
+    contratos = _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
     compromisos_map = {
         c.contrato_id: c
         for c in db.query(PPACompromisoEnergia).filter(
@@ -890,6 +952,7 @@ def get_resumen(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "energia_minima_mwh": min_mwh,
             "energia_maxima_mwh": max_mwh,
             "gen_total_mwh": gen_total_c,
@@ -995,11 +1058,12 @@ def get_resumen(
 @router.get("/ppa/resumen-anual")
 def get_resumen_anual(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Annual commitment totals per contract (DB only, no Unergy API)."""
-    contratos = _contratos_vigentes(db, year)
+    contratos = _contratos_vigentes(db, year, solo_relevantes=not incluir_todos)
     compromisos = (
         db.query(PPACompromisoEnergia)
         .filter(PPACompromisoEnergia.año == year)
@@ -1024,6 +1088,7 @@ def get_resumen_anual(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "total_min_mwh": round(total_min, 1) if rows else None,
@@ -1039,6 +1104,7 @@ def get_resumen_anual(
 def get_simulador(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1071,9 +1137,9 @@ def get_simulador(
         .all()
     )
 
-    contratos_db = _contratos_vigentes(db, year, month)
+    contratos_db = _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
 
-    contratos_venta = _query_contratos_venta(db, year, month)
+    contratos_venta = _query_contratos_venta(db, year, month, solo_relevantes=not incluir_todos)
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     from sqlalchemy.orm import selectinload
@@ -1315,6 +1381,7 @@ def get_simulador(
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
             # Plantas esperadas para el mes (denominador del indicador de cumplimiento de plantas).
@@ -1337,6 +1404,7 @@ def get_simulador(
 def get_plantas_contratos(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1372,7 +1440,7 @@ def get_plantas_contratos(
     )
     plantas_map = {p.id: p for p in plantas_db}
 
-    contratos_venta = _query_contratos_venta(db, year, month)
+    contratos_venta = _query_contratos_venta(db, year, month, solo_relevantes=not incluir_todos)
     corte = _fecha_corte(year, month)
 
     # --- VENTA: use GESCON to resolve plant assignments ---
@@ -1406,6 +1474,7 @@ def get_plantas_contratos(
             # Clave GESCON (contrato_interno en asic_solicitudes) para el detalle
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "plantas": plantas_list,
@@ -1494,13 +1563,14 @@ def get_plantas_contratos(
     # excluye aquí para no duplicarlo.
     gescon_compra_ids = {c["contrato_ppa_id"] for c in compra_out if c.get("contrato_ppa_id")}
     compra_externa_out = []
-    for c in _contratos_vigentes(db, year, month):
+    for c in _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos):
         if (c.tipo_contrato or "venta") != "compra" or c.id in gescon_compra_ids:
             continue
         compra_externa_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "numero_codigo_contrato": c.numero_codigo_contrato,
+            **_responsable_payload(c),
             "vendedor_nombre": c.vendedor_nombre,
             "vendedor_nit": c.vendedor_nit,
             "tarifa_base": float(c.tarifa_base) if c.tarifa_base is not None else None,
@@ -1592,6 +1662,7 @@ def get_balance_energia(
                     "Su energía está comprada fuera de GESCON, así que contarlas en el "
                     "residuo de bolsa infla la venta en bolsa UNGG.",
     ),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1609,7 +1680,8 @@ def get_balance_energia(
     from app.services.balance_energia import calcular_balance
 
     return calcular_balance(
-        db, year, month, excluir_compra_externa=excluir_compra_externa
+        db, year, month, excluir_compra_externa=excluir_compra_externa,
+        incluir_todos=incluir_todos,
     )
 
 
@@ -1648,6 +1720,7 @@ def get_sin_fecha_comercializacion(
 def get_energia_transada(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1716,7 +1789,7 @@ def get_energia_transada(
 
     # ── 2. Asignaciones GESCON de contratos de venta vigentes ─────────────────
     contratos_venta = [
-        c for c in _contratos_vigentes(db, year, month)
+        c for c in _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
         if (getattr(c, "tipo_contrato", None) or "venta") != "compra"
     ]
     asignaciones: dict[int, list[dict]] = defaultdict(list)
@@ -2134,30 +2207,20 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
 
 
 def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None,
-                           solo_relevantes: bool = False):
+                           solo_relevantes: bool = True):
     """Retorna contratos PPA de venta (tipo_contrato != 'compra').
 
     Replica EXACTAMENTE el filtro que usa get_simulador para construir contratos_venta:
     primero obtiene todos los vigentes del año/mes dado, luego excluye compras.
     Si year es None usa el año en curso (para el endpoint anual-matriz).
 
-    `solo_relevantes=True` además descarta los contratos cuya empresa responsable
-    está marcada con incluir_en_cumplimiento=False (PPAs que gestiona un tercero).
-    Default False para no cambiar el universo de las demás vistas —solo la Matriz
-    anual lo pide. Contrato SIN responsable = se incluye.
+    `solo_relevantes` se delega a _contratos_vigentes (ver allí la regla y por qué
+    el default es True).
     """
     if year is None:
         year = date.today().year
-    contratos_db = _contratos_vigentes(db, year, month)
-    out = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
-    if solo_relevantes:
-        ocultos = {
-            r.id for r in db.query(PPAResponsable)
-            .filter(PPAResponsable.incluir_en_cumplimiento.is_(False)).all()
-        }
-        if ocultos:
-            out = [c for c in out if c.responsable_id not in ocultos]
-    return out
+    contratos_db = _contratos_vigentes(db, year, month, solo_relevantes=solo_relevantes)
+    return [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
 
 
 def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
@@ -2200,16 +2263,6 @@ def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
                 else:
                     need_month.add((m, sp))
     return need_month, need_avg, need_range
-
-
-def _responsable_payload(contrato) -> dict:
-    """Empresa responsable del PPA, aplanada para las filas de la matriz."""
-    r = contrato.responsable
-    return {
-        "responsable_id": contrato.responsable_id,
-        "responsable": r.nombre if r else None,
-        "responsable_relevante": r.incluir_en_cumplimiento if r else True,
-    }
 
 
 @router.get("/anual-matriz")
@@ -2778,7 +2831,9 @@ def get_descubrimientos(
     Cruza deltas MWh (cumplimiento) × precio promedio bolsa del mes.
     Solo usa datos de DB — no llama la API de Unergy.
     """
-    contratos = _contratos_vigentes(db, year)
+    # Sin filtro de responsable: /descubrimientos no es una vista de
+    # /mem/cumplimiento y su chamba es destapar exposición, no esconderla.
+    contratos = _contratos_vigentes(db, year, solo_relevantes=False)
 
     meses_data = []
     gran_total_compras_cop = 0.0
@@ -2966,7 +3021,10 @@ def cerrar_periodo(
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = _contratos_vigentes(db, year, month)
+    # Sin filtro de responsable A PROPÓSITO: esto PERSISTE el cierre mensual. Dejar
+    # contratos fuera cambiaría el histórico guardado, no solo lo que se ve en
+    # pantalla — y marcar un responsable como no relevante borraría su cierre.
+    contratos = _contratos_vigentes(db, year, month, solo_relevantes=False)
     if not contratos:
         raise HTTPException(404, "No hay contratos PPA registrados")
 
@@ -3579,6 +3637,7 @@ def get_panel_anual(
     year: int = Query(..., ge=2020, le=2050, description="Año a consultar"),
     incluir_plantas: bool = Query(True, description="Incluir el desglose planta por planta de cada mes"),
     refrescar: bool = Query(False, description="Ignorar la caché y volver a consultar la generación"),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -3594,14 +3653,16 @@ def get_panel_anual(
 
     Cacheado 15 minutos en memoria (`?refrescar=true` para saltarla).
     """
-    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}"
+    # incluir_todos va en la llave: si no, la respuesta filtrada y la completa se
+    # pisarían entre sí en la caché.
+    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}:{int(incluir_todos)}"
     if not refrescar:
         cached = _panel_cache_get(cache_key)
         if cached is not None:
             return {**cached, "desde_cache": True}
 
     today = date.today()
-    contratos = _query_contratos_venta(db, year)
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
 
     # GESCON por contrato/mes + compromisos, igual que get_anual_matriz.
     gpm_por_contrato: dict = {}

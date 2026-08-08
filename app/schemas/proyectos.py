@@ -240,6 +240,21 @@ class ServicioRepresentacionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── PPA asociado (resumen) ────────────────────────────────────────────────────
+# Lo justo para identificar y filtrar por el contrato desde el listado de
+# proyectos. El detalle completo del PPA sigue viviendo en /ppa.
+
+class ProyectoPPAResumenOut(BaseModel):
+    id: int
+    numero_codigo_contrato: Optional[str] = None
+    nombre_interno: Optional[str] = None
+    tipo_contrato: Optional[str] = None
+    comprador_nombre: Optional[str] = None
+    fecha_inicio: Optional[date] = None
+    fecha_fin: Optional[date] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
@@ -388,6 +403,7 @@ class ProyectoOut(BaseModel):
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
     servicio_representacion: Optional[ServicioRepresentacionOut] = None
+    ppa_contratos: list[ProyectoPPAResumenOut] = []
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []
@@ -406,6 +422,17 @@ class ProyectoOut(BaseModel):
         if not isinstance(v, list):
             return list(v) if hasattr(v, "__iter__") else [v]
         return v
+
+    @field_validator("ppa_contratos", mode="before")
+    @classmethod
+    def solo_ppas_vivos(cls, v):
+        """La relación Proyecto.ppa_contratos es un viewonly sobre la tabla
+        puente, así que no conoce el borrado lógico de `ppa_contratos`. Aquí se
+        filtran los eliminados para que no reaparezcan en el listado."""
+        if v is None:
+            return []
+        items = v if isinstance(v, list) else (list(v) if hasattr(v, "__iter__") else [v])
+        return [c for c in items if getattr(c, "deleted_at", None) is None]
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod

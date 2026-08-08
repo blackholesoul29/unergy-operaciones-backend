@@ -41,6 +41,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.area_contactos),
             selectinload(Proyecto.servicio_representacion),
+            selectinload(Proyecto.ppa_contratos),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         )
         .filter(Proyecto.id == id)
@@ -82,6 +83,7 @@ def list_proyectos(
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.area_contactos),
         selectinload(Proyecto.servicio_representacion),
+        selectinload(Proyecto.ppa_contratos),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
     )
     if q:

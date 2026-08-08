@@ -18,7 +18,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
@@ -26,7 +26,7 @@ from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.utils.gescon_vigencia import resolver_vigencias
 from app.services.comercializacion import identificador_monitoreo as _mon_id
-from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
+from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa, PPAResponsable
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
     CumplimientoMensualOut, CerrarPeriodoRequest, CerrarPeriodoResponse,
@@ -383,6 +383,8 @@ def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> lis
         last_day = date(year, 12, 31)
     return (
         db.query(PPAContrato)
+        # el responsable se lee en las filas de la matriz: precargarlo evita N+1
+        .options(selectinload(PPAContrato.responsable))
         .filter(
             PPAContrato.deleted_at.is_(None),
             or_(PPAContrato.fecha_inicio.is_(None), PPAContrato.fecha_inicio <= last_day),
@@ -2131,17 +2133,31 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
     return meses, proyectos
 
 
-def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None):
+def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None,
+                           solo_relevantes: bool = False):
     """Retorna contratos PPA de venta (tipo_contrato != 'compra').
 
     Replica EXACTAMENTE el filtro que usa get_simulador para construir contratos_venta:
     primero obtiene todos los vigentes del año/mes dado, luego excluye compras.
     Si year es None usa el año en curso (para el endpoint anual-matriz).
+
+    `solo_relevantes=True` además descarta los contratos cuya empresa responsable
+    está marcada con incluir_en_cumplimiento=False (PPAs que gestiona un tercero).
+    Default False para no cambiar el universo de las demás vistas —solo la Matriz
+    anual lo pide. Contrato SIN responsable = se incluye.
     """
     if year is None:
         year = date.today().year
     contratos_db = _contratos_vigentes(db, year, month)
-    return [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    out = [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
+    if solo_relevantes:
+        ocultos = {
+            r.id for r in db.query(PPAResponsable)
+            .filter(PPAResponsable.incluir_en_cumplimiento.is_(False)).all()
+        }
+        if ocultos:
+            out = [c for c in out if c.responsable_id not in ocultos]
+    return out
 
 
 def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
@@ -2186,17 +2202,31 @@ def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
     return need_month, need_avg, need_range
 
 
+def _responsable_payload(contrato) -> dict:
+    """Empresa responsable del PPA, aplanada para las filas de la matriz."""
+    r = contrato.responsable
+    return {
+        "responsable_id": contrato.responsable_id,
+        "responsable": r.nombre if r else None,
+        "responsable_relevante": r.incluir_en_cumplimiento if r else True,
+    }
+
+
 @router.get("/anual-matriz")
 def get_anual_matriz(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description="Incluir contratos cuyo responsable está marcado como no relevante"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Matriz anual contrato->proyectos x 12 meses (solo venta). Deduplica fetches a Unergy."""
+    """Matriz anual contrato->proyectos x 12 meses (solo venta). Deduplica fetches a Unergy.
+
+    Por defecto oculta los contratos de responsables no relevantes; además de limpiar
+    la vista, ahorra sus llamadas a la API de Unergy."""
     today = date.today()
 
     # 1. Contratos de venta (mismo universo que el simulador, sin restricción de mes)
-    contratos = _query_contratos_venta(db, year)
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
 
     # 2. GESCON por contrato/mes + compromisos por contrato
     gpm_por_contrato: dict = {}
@@ -2264,6 +2294,7 @@ def get_anual_matriz(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "meses": meses,
             "proyectos": proyectos,
             "n_plantas": n_plantas,
@@ -2326,6 +2357,7 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
         "nombre_interno": contrato.nombre_interno,
         "numero_codigo_contrato": contrato.numero_codigo_contrato,
         "comprador_nombre": contrato.comprador_nombre,
+        **_responsable_payload(contrato),
         "meses": meses,
         "proyectos": proyectos,
         "n_plantas": n_plantas,
@@ -2336,12 +2368,13 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
 @router.get("/anual-matriz/contratos")
 def get_anual_matriz_contratos(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description="Incluir contratos cuyo responsable está marcado como no relevante"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Lista ligera de contratos de venta para la matriz anual (sin generación → carga instantánea).
     El frontend pinta las filas y luego pide el detalle de cada una vía /anual-matriz/contrato/{id}."""
-    contratos = _query_contratos_venta(db, year)
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
     return {
         "year": year,
         "contratos": [
@@ -2350,6 +2383,7 @@ def get_anual_matriz_contratos(
                 "nombre_interno": c.nombre_interno,
                 "numero_codigo_contrato": c.numero_codigo_contrato,
                 "comprador_nombre": c.comprador_nombre,
+                **_responsable_payload(c),
             }
             for c in contratos
         ],

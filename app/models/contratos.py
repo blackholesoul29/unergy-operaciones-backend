@@ -126,12 +126,38 @@ class ContratoServicio(Base):
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
 
 
+class PPAResponsable(Base):
+    """Empresa responsable de un PPA (normalmente Unergy; en algunos contratos es
+    un tercero). Es un catálogo —y no un texto libre en el contrato— para que los
+    filtros de la plataforma trabajen sobre valores consistentes.
+
+    `incluir_en_cumplimiento` marca si los contratos de este responsable son
+    relevantes para nosotros: los que están en False desaparecen de la Matriz
+    anual de /mem/cumplimiento (ver `_query_contratos_venta(solo_relevantes=True)`).
+    Un contrato SIN responsable (responsable_id NULL) siempre se incluye: nada se
+    esconde por omisión, solo por marca explícita."""
+    __tablename__ = "ppa_responsables"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    incluir_en_cumplimiento: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contratos: Mapped[list["PPAContrato"]] = relationship("PPAContrato", back_populates="responsable")
+
+
 class PPAContrato(Base):
     __tablename__ = "ppa_contratos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     numero_codigo_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsable_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ppa_responsables.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     comprador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     comprador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -166,6 +192,7 @@ class PPAContrato(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", secondary=ppa_contrato_proyectos_table)
+    responsable: Mapped[Optional["PPAResponsable"]] = relationship("PPAResponsable", back_populates="contratos")
     comprador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[comprador_id])
     vendedor: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")

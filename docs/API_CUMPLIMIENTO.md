@@ -212,6 +212,22 @@ Matriz completa contrato × 12 meses (lo que exporta el Excel de la pestaña *Ma
 
 Auxiliares: `GET /cumplimiento/anual-matriz/contratos?year=` (lista liviana) y `GET /cumplimiento/anual-matriz/contrato/{id}?year=` (una fila).
 
+**Ojo con el universo de contratos.** Cada fila trae la empresa responsable del PPA:
+
+```json
+{ "id": 12, "nombre_interno": "BIA Naos 1", "comprador_nombre": "…",
+  "responsable_id": 2, "responsable": "Externo", "responsable_relevante": false }
+```
+
+Por defecto **este endpoint y `/anual-matriz/contratos` omiten los contratos cuyo responsable tiene `incluir_en_cumplimiento = false`** (PPAs que gestiona un tercero). Además de limpiar la vista, evita las llamadas a la API de generación de esos contratos. Pase `incluir_todos=true` para traerlos.
+
+Reglas:
+- Contrato **sin responsable** (`responsable_id: null`) → siempre se incluye. Nada se esconde por omisión, solo por marca explícita.
+- `/anual-matriz/contrato/{id}` **no** filtra: es un detalle por id y responde para cualquier contrato.
+- El resto de endpoints de cumplimiento (`/simulador`, `/plantas-contratos`, `/panel-anual`, …) **no** cambian de universo: siguen viendo todos los contratos de venta.
+
+El catálogo de responsables vive en `/ppa/responsables` (`GET` lista con `n_contratos`; `POST` crea; `PATCH /{id}` renombra o cambia `incluir_en_cumplimiento`; `DELETE /{id}` da 409 si aún tiene contratos; `POST /ppa/responsables/asignar` con `{contrato_ids, responsable_id}` asigna en bloque, `responsable_id: null` desasigna). En el contrato, `responsable_id` es un campo más de `POST /ppa` y `PATCH /ppa/{id}`.
+
 ---
 
 ## 5. Generación cruda (si necesita la curva, no el cumplimiento)

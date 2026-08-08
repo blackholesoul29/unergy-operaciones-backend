@@ -261,6 +261,17 @@ _PENDING_DDLS = [
     # migration 013 — PPA linked to clientes as comprador/vendedor
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS comprador_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS vendedor_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
+    # Empresa responsable del PPA (catálogo). incluir_en_cumplimiento=false esconde
+    # sus contratos de la Matriz anual de /mem/cumplimiento.
+    """CREATE TABLE IF NOT EXISTS ppa_responsables (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL UNIQUE,
+        incluir_en_cumplimiento BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS responsable_id BIGINT REFERENCES ppa_responsables(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_ppa_contratos_responsable_id ON ppa_contratos (responsable_id)",
     # Drop stale columns from old schema
     "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS proyecto_id",
     # Create the join table (idempotent)
@@ -3163,6 +3174,27 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _run_ppa_responsables_seed() -> None:
+    """Siembra el catálogo de empresas responsables de PPA (Unergy / Externo) y hace
+    la clasificación inicial de los contratos. Idempotente; la clasificación es
+    ONE-SHOT (ver sembrar_responsables_ppa) para que un redeploy no revierta lo que
+    se cambió a mano desde la UI. Los contratos externos que no casen por nombre
+    quedan en Unergy y salen listados en el log."""
+    from app.core.database import SessionLocal
+    from app.api.v1.ppa import sembrar_responsables_ppa
+
+    db = SessionLocal()
+    try:
+        rep = sembrar_responsables_ppa(db)
+        if rep["clasifico"]:
+            print(f"[startup] ppa_responsables_seed: Unergy={rep['unergy']} Externo={rep['externo']}"
+                  + (f" · SIN MATCH (quedaron en Unergy): {rep['sin_match']}" if rep["sin_match"] else ""))
+        else:
+            print("[startup] ppa_responsables_seed: catálogo ok, clasificación ya hecha (se omite)")
+    finally:
+        db.close()
+
+
 def _run_comercial_import() -> None:
     """Carga idempotente de las hojas de prospección (Servicios + Energía +
     Comunidades) al CRM comercial — mismo patrón que los demás *_seed. Corre en
@@ -3303,6 +3335,7 @@ def _deferred_init():
         ("arr_documento_proyecto_id_backfill", _run_arr_documento_proyecto_id_backfill),
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
+        ("ppa_responsables_seed", _run_ppa_responsables_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:

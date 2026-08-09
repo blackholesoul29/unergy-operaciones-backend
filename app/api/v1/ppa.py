@@ -1,7 +1,8 @@
 import logging
+import unicodedata
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -10,11 +11,13 @@ from app.models.cumplimiento import CumplimientoMensual
 
 logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
-from app.models.contratos import ppa_contrato_proyectos_table
+from app.models.contratos import ppa_contrato_proyectos_table, IppMensual, PPAResponsable
+from pydantic import BaseModel
 from app.schemas.ppa import (
     PPAContratoCreate, PPAContratoUpdate, PPAContratoOut,
     PPATarifaIn, PPATarifaOut,
     PPACompromisoIn, PPACompromisoOut,
+    PPAResponsableIn, PPAResponsableUpdate, PPAResponsableOut, PPAResponsableAsignar,
 )
 
 router = APIRouter(prefix="/ppa", tags=["PPA"])
@@ -23,6 +26,7 @@ router = APIRouter(prefix="/ppa", tags=["PPA"])
 def _load_options():
     return [
         selectinload(PPAContrato.proyectos),
+        selectinload(PPAContrato.responsable),
         selectinload(PPAContrato.comprador),
         selectinload(PPAContrato.vendedor),
         selectinload(PPAContrato.tarifas),
@@ -163,6 +167,171 @@ def get_partes(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "compradores": [{"nombre": r.comprador_nombre, "nit": r.comprador_nit} for r in compradores],
         "vendedores": [{"nombre": r.vendedor_nombre, "nit": r.vendedor_nit} for r in vendedores],
     }
+
+
+# ── Empresas responsables de PPA (catálogo) ──────────────────────────────────
+# OJO: estas rutas van ANTES de `@router.get("/{id}")`, si no FastAPI intenta
+# resolver "responsables" como el id del contrato y responde 422.
+
+def _responsable_or_404(rid: int, db: Session) -> PPAResponsable:
+    r = db.query(PPAResponsable).filter(PPAResponsable.id == rid).first()
+    if not r:
+        raise HTTPException(404, "Responsable no encontrado")
+    return r
+
+
+def _validar_nombre_libre(nombre: str, db: Session, excepto_id: int | None = None) -> str:
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise HTTPException(422, "El nombre del responsable no puede estar vacío")
+    q = db.query(PPAResponsable).filter(func.lower(PPAResponsable.nombre) == nombre.lower())
+    if excepto_id is not None:
+        q = q.filter(PPAResponsable.id != excepto_id)
+    if q.first():
+        raise HTTPException(409, f'Ya existe un responsable llamado "{nombre}"')
+    return nombre
+
+
+@router.get("/responsables", response_model=list[PPAResponsableOut])
+def list_responsables(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Catálogo de empresas responsables, con cuántos contratos vivos tiene cada una."""
+    conteos = dict(
+        db.query(PPAContrato.responsable_id, func.count(PPAContrato.id))
+        .filter(PPAContrato.deleted_at.is_(None), PPAContrato.responsable_id.isnot(None))
+        .group_by(PPAContrato.responsable_id)
+        .all()
+    )
+    rows = db.query(PPAResponsable).order_by(PPAResponsable.nombre).all()
+    return [
+        PPAResponsableOut(
+            id=r.id, nombre=r.nombre,
+            incluir_en_cumplimiento=r.incluir_en_cumplimiento,
+            n_contratos=conteos.get(r.id, 0),
+        )
+        for r in rows
+    ]
+
+
+@router.post("/responsables", response_model=PPAResponsableOut, status_code=201)
+def create_responsable(data: PPAResponsableIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    nombre = _validar_nombre_libre(data.nombre, db)
+    r = PPAResponsable(nombre=nombre, incluir_en_cumplimiento=data.incluir_en_cumplimiento)
+    db.add(r)
+    db.commit()
+    return PPAResponsableOut(id=r.id, nombre=r.nombre,
+                             incluir_en_cumplimiento=r.incluir_en_cumplimiento, n_contratos=0)
+
+
+@router.patch("/responsables/{rid}", response_model=PPAResponsableOut)
+def update_responsable(rid: int, data: PPAResponsableUpdate,
+                       db: Session = Depends(get_db), _=Depends(get_current_user)):
+    r = _responsable_or_404(rid, db)
+    if data.nombre is not None:
+        r.nombre = _validar_nombre_libre(data.nombre, db, excepto_id=rid)
+    if data.incluir_en_cumplimiento is not None:
+        r.incluir_en_cumplimiento = data.incluir_en_cumplimiento
+    db.commit()
+    n = (db.query(func.count(PPAContrato.id))
+         .filter(PPAContrato.deleted_at.is_(None), PPAContrato.responsable_id == rid).scalar()) or 0
+    return PPAResponsableOut(id=r.id, nombre=r.nombre,
+                             incluir_en_cumplimiento=r.incluir_en_cumplimiento, n_contratos=n)
+
+
+@router.delete("/responsables/{rid}", status_code=204)
+def delete_responsable(rid: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Borra un responsable. Se bloquea si aún tiene contratos: reasignarlos primero
+    deja explícito qué pasa con ellos (el ON DELETE SET NULL los volvería visibles
+    en la matriz sin que nadie se entere)."""
+    r = _responsable_or_404(rid, db)
+    n = (db.query(func.count(PPAContrato.id))
+         .filter(PPAContrato.deleted_at.is_(None), PPAContrato.responsable_id == rid).scalar()) or 0
+    if n:
+        raise HTTPException(409, f'No se puede eliminar "{r.nombre}": tiene {n} contrato(s). '
+                                 "Reasígnalos a otro responsable primero.")
+    db.delete(r)
+    db.commit()
+
+
+@router.post("/responsables/asignar")
+def asignar_responsable(data: PPAResponsableAsignar,
+                        db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Asigna (o desasigna, con responsable_id=null) el responsable de varios contratos."""
+    if data.responsable_id is not None:
+        _responsable_or_404(data.responsable_id, db)
+    if not data.contrato_ids:
+        return {"actualizados": 0}
+    n = (
+        db.query(PPAContrato)
+        .filter(PPAContrato.id.in_(data.contrato_ids), PPAContrato.deleted_at.is_(None))
+        .update({PPAContrato.responsable_id: data.responsable_id}, synchronize_session=False)
+    )
+    db.commit()
+    return {"actualizados": n}
+
+
+# Contratos de los que Unergy NO es responsable (confirmado por Juan, 2026-08-08).
+# Solo se usa para la clasificación inicial; después se administra desde la UI.
+RESPONSABLE_EXTERNO_CONTRATOS = [
+    "BIA Delta 1", "BIA Naos 1", "BIA Naos 2", "BIA Naos 3", "BIA Polaris 1",
+    "Sol&Cielo7", "Sol&Cielo9",
+]
+
+
+def _norm_nombre(s: str | None) -> str:
+    """Clave de comparación tolerante: sin tildes, sin espacios ni símbolos.
+    'Sol&Cielo 7' == 'sol y cielo7'? No —solo ignora lo no alfanumérico— pero sí
+    'Sol&Cielo7' == 'SOL&CIELO 7'."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def sembrar_responsables_ppa(db: Session, clasificar: bool = True) -> dict:
+    """Crea el catálogo base de responsables y, si nadie ha clasificado todavía,
+    asigna Unergy a todos los contratos salvo los de RESPONSABLE_EXTERNO_CONTRATOS.
+
+    Idempotente y ONE-SHOT para la clasificación: en cuanto un contrato tiene
+    responsable, no vuelve a tocar asignaciones (un redeploy no debe revertir lo
+    que se cambió a mano en la UI).
+    """
+    catalogo: dict[str, PPAResponsable] = {}
+    for nombre, incluir in (("Unergy", True), ("Externo", False)):
+        obj = db.query(PPAResponsable).filter(PPAResponsable.nombre == nombre).first()
+        if obj is None:
+            obj = PPAResponsable(nombre=nombre, incluir_en_cumplimiento=incluir)
+            db.add(obj)
+            db.flush()
+        catalogo[nombre] = obj
+
+    rep = {"unergy": 0, "externo": 0, "sin_match": [], "clasifico": False}
+    ya_clasificado = (
+        db.query(PPAContrato.id).filter(PPAContrato.responsable_id.isnot(None)).first() is not None
+    )
+    if not clasificar or ya_clasificado:
+        db.commit()
+        return rep
+
+    externos = {_norm_nombre(n): n for n in RESPONSABLE_EXTERNO_CONTRATOS}
+    vistos: set[str] = set()
+    for c in db.query(PPAContrato).filter(PPAContrato.deleted_at.is_(None)).all():
+        clave = next(
+            (k for k in (_norm_nombre(c.nombre_interno), _norm_nombre(c.numero_codigo_contrato))
+             if k and k in externos),
+            None,
+        )
+        if clave:
+            c.responsable_id = catalogo["Externo"].id
+            vistos.add(clave)
+            rep["externo"] += 1
+        else:
+            c.responsable_id = catalogo["Unergy"].id
+            rep["unergy"] += 1
+    db.commit()
+    rep["clasifico"] = True
+    rep["sin_match"] = [n for k, n in externos.items() if k not in vistos]
+    return rep
 
 
 def _compute_visibility(contrato: PPAContrato, db: Session) -> dict:
@@ -390,3 +559,30 @@ def replace_compromisos(
         .order_by(PPACompromisoEnergia.año, PPACompromisoEnergia.mes)
         .all()
     )
+
+
+# ── IPP mensual global (numerador de la indexación de energía) ────────────────
+class IppMensualIn(BaseModel):
+    año: int
+    mes: int
+    valor: float
+
+
+@router.get("/ipp/mensual")
+def list_ipp_mensual(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    rows = db.query(IppMensual).order_by(IppMensual.año, IppMensual.mes).all()
+    return [{"año": r.año, "mes": r.mes, "valor": float(r.valor)} for r in rows]
+
+
+@router.put("/ipp/mensual")
+def upsert_ipp_mensual(rows: list[IppMensualIn], db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Upsert de valores IPP por (año, mes). No borra los demás períodos."""
+    for r in rows:
+        obj = db.query(IppMensual).filter(IppMensual.año == r.año, IppMensual.mes == r.mes).first()
+        if obj is None:
+            db.add(IppMensual(año=r.año, mes=r.mes, valor=r.valor))
+        else:
+            obj.valor = r.valor
+    db.commit()
+    out = db.query(IppMensual).order_by(IppMensual.año, IppMensual.mes).all()
+    return [{"año": o.año, "mes": o.mes, "valor": float(o.valor)} for o in out]

@@ -4,19 +4,23 @@ from datetime import date
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models.clientes import ClienteTasaServicio
 from app.models.contactos import Contacto, ProyectoAreaContacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
     ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
+    TasaServicioUpsert, TasaServicioOut,
 )
 from app.schemas.proyectos import ContactoCreate, ContactoUpdate, ContactoOut
 from app.schemas.common import PaginatedResponse
+from app.utils.nombre_matching import mejor_candidato
 
 UPLOADS_DIR = Path("uploads/clientes")
 ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
@@ -102,10 +106,57 @@ def vista_comercial(
     return filas
 
 
+def buscar_cliente_duplicado(db: Session, razon_social_nombre: str | None, excluir_id: int | None = None) -> Cliente | None:
+    """Busca un cliente ya existente con nombre muy parecido (mismo algoritmo de
+    tokens+similitud que ya usan proyectos/fronteras -- ver app/utils/nombre_matching.py).
+
+    Deliberadamente permisivo (puede marcar como "parecidos" dos empresas distintas
+    que comparten una palabra común): el aviso no bloquea, solo exige confirmar
+    "crear de todos modos". Caso real que motivó esto: la migración del CRM creó
+    "Quantum" como cliente nuevo cuando ya existía "Quantum Energy Ingenieria S.A.S."
+    -- un match exacto de nombre no lo hubiera detectado."""
+    if not razon_social_nombre:
+        return None
+    query = db.query(Cliente).filter(Cliente.deleted_at.is_(None))
+    if excluir_id:
+        query = query.filter(Cliente.id != excluir_id)
+    candidatos = [(c, [c.razon_social_nombre]) for c in query.all()]
+    match, _score = mejor_candidato(razon_social_nombre, candidatos)
+    return match
+
+
 @router.post("", response_model=ClienteOut, status_code=201)
-def create_cliente(data: ClienteCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    cliente = Cliente(**data.model_dump())
+def create_cliente(
+    data: ClienteCreate,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un cliente con nombre muy parecido"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    if not forzar:
+        duplicado = buscar_cliente_duplicado(db, data.razon_social_nombre)
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un cliente con un nombre muy parecido: "
+                        f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.razon_social_nombre,
+                },
+            )
+    payload = data.model_dump(exclude={"contactos", "servicios"})
+    cliente = Cliente(**payload)
     db.add(cliente)
+    db.flush()  # asigna cliente.id sin cerrar la transacción
+    for c in data.contactos:
+        db.add(Contacto(cliente_id=cliente.id, nombre=c.nombre, telefono=c.telefono,
+                         email=c.email, tipo=c.tipo))
+    for s in data.servicios:
+        db.add(ClienteServicio(cliente_id=cliente.id, tipo=s.tipo,
+                                fecha_inicio=s.fecha_inicio, notas=s.notas))
     db.commit()
     return _get_cliente_or_404(cliente.id, db)
 
@@ -172,6 +223,54 @@ def test_correo_operacional(
         return {"ok": True, "enviado_a": email}
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
+
+
+# ── Excepciones de tasa de impuesto por servicio ──────────────────────────────
+@router.get("/{id}/tasas-servicio", response_model=list[TasaServicioOut])
+def listar_tasas_servicio(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    _get_cliente_or_404(id, db)
+    return (
+        db.query(ClienteTasaServicio)
+        .filter(ClienteTasaServicio.cliente_id == id)
+        .order_by(ClienteTasaServicio.servicio, ClienteTasaServicio.proyecto_id).all()
+    )
+
+
+@router.put("/{id}/tasa-servicio", response_model=TasaServicioOut)
+def upsert_tasa_servicio(id: int, data: TasaServicioUpsert,
+                         db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Crea/actualiza una excepción de tasa por (cliente, servicio[, proyecto]).
+    Cada _pct null hereda la tasa general del cliente."""
+    _get_cliente_or_404(id, db)
+    row = (
+        db.query(ClienteTasaServicio)
+        .filter(
+            ClienteTasaServicio.cliente_id == id,
+            ClienteTasaServicio.servicio == data.servicio,
+            ClienteTasaServicio.proyecto_id.is_(data.proyecto_id) if data.proyecto_id is None
+            else ClienteTasaServicio.proyecto_id == data.proyecto_id,
+        ).first()
+    )
+    if row is None:
+        row = ClienteTasaServicio(cliente_id=id, servicio=data.servicio, proyecto_id=data.proyecto_id)
+        db.add(row)
+    row.iva_pct = data.iva_pct
+    row.retencion_pct = data.retencion_pct
+    row.reteiva_pct = data.reteiva_pct
+    row.reteica_pct = data.reteica_pct
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/{id}/tasa-servicio/{tasa_id}")
+def eliminar_tasa_servicio(id: int, tasa_id: int,
+                           db: Session = Depends(get_db), _=Depends(get_current_user)):
+    db.query(ClienteTasaServicio).filter(
+        ClienteTasaServicio.id == tasa_id, ClienteTasaServicio.cliente_id == id
+    ).delete()
+    db.commit()
+    return {"ok": True}
 
 
 # ── Servicios ────────────────────────────────────────────────────────────────
@@ -632,3 +731,138 @@ def get_cliente_panel(
         "condiciones": condiciones,
         "contratos": contratos,
     }
+
+
+# ── Fusión de clientes duplicados ───────────────────────────────────────────
+# Mismo patrón que /proyectos/{ganador_id}/merge/{perdedor_id}: dry_run por
+# defecto, mueve filas relacionadas, resuelve colisiones quedandose con la del
+# ganador, y NUNCA borra fisico -- soft-delete (deleted_at), igual que ya hace
+# dedup_clientes (reversible).
+
+_MERGE_CLIENTE_SIMPLE = ["cliente_documentos_comerciales", "oportunidades", "proyecto_area_contacto"]
+_MERGE_CLIENTE_COMPOSITE = [
+    ("contactos", ["email", "tipo"]),                  # UNIQUE (cliente_id, email, tipo)
+    ("cliente_servicios", ["tipo"]),                    # unicidad de app: un servicio por tipo
+    ("proyecto_inversionistas", ["proyecto_id"]),       # evita duplicar al cliente como inversionista del mismo proyecto
+]
+# nit_cedula es UNIQUE en la BD -- necesita liberarse en el perdedor antes de
+# copiarse al ganador (mismo tratamiento que sunfactory_project_id en proyectos).
+_MERGE_CLIENTE_SCALAR_UNIQUE = ["nit_cedula"]
+_MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY = [
+    "telefono_contacto", "direccion", "ciudad", "departamento",
+    "tipo_persona", "representante_legal", "origina_investment_id",
+]
+
+
+def _scalar_cliente(db: Session, sql: str, params: dict):
+    return db.execute(text(sql), params).scalar()
+
+
+@router.post("/{ganador_id}/merge/{perdedor_id}")
+def merge_clientes(
+    ganador_id: int,
+    perdedor_id: int,
+    dry_run: bool = Query(True, description="true (default): solo reporta, no modifica nada."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Fusiona el cliente `perdedor_id` dentro de `ganador_id`.
+
+    Con `dry_run=true` (por defecto) solo devuelve un reporte de lo que pasaría.
+    Con `dry_run=false` ejecuta la fusión completa en una sola transacción y da
+    de baja (soft-delete) al perdedor. Política de colisión: se conserva la
+    fila del ganador.
+    """
+    if ganador_id == perdedor_id:
+        raise HTTPException(400, "El ganador y el perdedor no pueden ser el mismo cliente.")
+    ganador = db.query(Cliente).filter(Cliente.id == ganador_id, Cliente.deleted_at.is_(None)).first()
+    perdedor = db.query(Cliente).filter(Cliente.id == perdedor_id, Cliente.deleted_at.is_(None)).first()
+    if not ganador:
+        raise HTTPException(404, f"Cliente ganador {ganador_id} no encontrado.")
+    if not perdedor:
+        raise HTTPException(404, f"Cliente perdedor {perdedor_id} no encontrado.")
+
+    p = {"keeper": ganador_id, "loser": perdedor_id}
+    movimientos = []  # filas por tabla: {tabla, a_mover, descartadas_por_colision}
+
+    for t in _MERGE_CLIENTE_SIMPLE:
+        n = _scalar_cliente(db, f"SELECT count(*) FROM {t} WHERE cliente_id=:loser", p)
+        if n:
+            movimientos.append({"tabla": t, "a_mover": n, "descartadas_por_colision": 0})
+
+    for t, keys in _MERGE_CLIENTE_COMPOSITE:
+        n = _scalar_cliente(db, f"SELECT count(*) FROM {t} WHERE cliente_id=:loser", p)
+        if not n:
+            continue
+        cond = " AND ".join(f"k.{c} = {t}.{c}" for c in keys)
+        coli = _scalar_cliente(
+            db,
+            f"SELECT count(*) FROM {t} WHERE cliente_id=:loser AND EXISTS "
+            f"(SELECT 1 FROM {t} k WHERE k.cliente_id=:keeper AND {cond})",
+            p,
+        )
+        movimientos.append({"tabla": t, "a_mover": n - coli, "descartadas_por_colision": coli})
+
+    # ppa_contratos: doble FK (comprador_id / vendedor_id), sin unicidad por cliente.
+    ppa_compra = _scalar_cliente(db, "SELECT count(*) FROM ppa_contratos WHERE comprador_id=:loser", p)
+    ppa_venta = _scalar_cliente(db, "SELECT count(*) FROM ppa_contratos WHERE vendedor_id=:loser", p)
+    if ppa_compra or ppa_venta:
+        movimientos.append({"tabla": "ppa_contratos", "a_mover": ppa_compra + ppa_venta, "descartadas_por_colision": 0})
+
+    # Campos escalares vacíos en el ganador: qué se copiaría del perdedor.
+    campos_copiados = []
+    for f in _MERGE_CLIENTE_SCALAR_UNIQUE + _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY:
+        val_keeper = getattr(ganador, f, None)
+        val_loser = getattr(perdedor, f, None)
+        if (val_keeper in (None, "")) and (val_loser not in (None, "")):
+            campos_copiados.append({"campo": f, "valor": val_loser})
+
+    reporte = {
+        "dry_run": dry_run,
+        "ganador": {"id": ganador.id, "nombre": ganador.razon_social_nombre},
+        "perdedor": {"id": perdedor.id, "nombre": perdedor.razon_social_nombre},
+        "movimientos": movimientos,
+        "campos_copiados_al_ganador": campos_copiados,
+        "total_filas_a_mover": sum(m["a_mover"] for m in movimientos),
+        "total_filas_descartadas": sum(m["descartadas_por_colision"] for m in movimientos),
+    }
+
+    if dry_run:
+        return reporte
+
+    try:
+        # 1) ppa_contratos: doble FK
+        db.execute(text("UPDATE ppa_contratos SET comprador_id=:keeper WHERE comprador_id=:loser"), p)
+        db.execute(text("UPDATE ppa_contratos SET vendedor_id=:keeper WHERE vendedor_id=:loser"), p)
+
+        # 2) Tablas con colisión por clave compuesta: descartar la del perdedor, mover el resto
+        for t, keys in _MERGE_CLIENTE_COMPOSITE:
+            cond = " AND ".join(f"k.{c} = {t}.{c}" for c in keys)
+            db.execute(text(
+                f"DELETE FROM {t} WHERE cliente_id=:loser AND EXISTS "
+                f"(SELECT 1 FROM {t} k WHERE k.cliente_id=:keeper AND {cond})"), p)
+            db.execute(text(f"UPDATE {t} SET cliente_id=:keeper WHERE cliente_id=:loser"), p)
+
+        # 3) Tablas simples
+        for t in _MERGE_CLIENTE_SIMPLE:
+            db.execute(text(f"UPDATE {t} SET cliente_id=:keeper WHERE cliente_id=:loser"), p)
+
+        # 4) Campos escalares únicos: liberar del perdedor y copiar al ganador si está vacío
+        for f in _MERGE_CLIENTE_SCALAR_UNIQUE:
+            db.execute(text(f"UPDATE clientes SET {f}=NULL WHERE id=:loser"), p)
+        for c in campos_copiados:
+            db.execute(
+                text(f"UPDATE clientes SET {c['campo']}=:val WHERE id=:keeper"),
+                {**p, "val": c["valor"]},
+            )
+
+        # 5) Dar de baja al perdedor (soft-delete, nunca fisico)
+        db.execute(text("UPDATE clientes SET deleted_at = NOW() WHERE id=:loser"), p)
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"La fusión falló y se revirtió por completo: {type(e).__name__}: {e}")
+
+    reporte["ejecutado"] = True
+    return reporte

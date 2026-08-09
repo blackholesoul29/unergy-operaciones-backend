@@ -33,6 +33,8 @@ class OMSeleccion(Base):
     incluido:    Mapped[bool] = mapped_column(Boolean, default=True,  nullable=False)
     facturado:   Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     valor_manual: Mapped[float | None] = mapped_column(Numeric(14, 0), nullable=True)  # override del valor a facturar; NULL = usar calculado
+    valor_facturado_congelado: Mapped[float | None] = mapped_column(Numeric(14, 0), nullable=True)  # #4: valor fijado al facturar (no se recalcula)
+    motivo_exclusion: Mapped[str | None] = mapped_column(String(500), nullable=True)  # #6: por qué se excluyó del mes (si incluido=False)
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -50,6 +52,29 @@ class OMFacturaMensual(Base):
     ruta_local:     Mapped[str | None] = mapped_column(String(1000), nullable=True)   # path en el servidor
     subido_en:      Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:     Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OMPaginaSinMatch(Base):
+    """Página del consolidado O&M que no se pudo emparejar automáticamente a un
+    contrato; queda pendiente de asignación manual desde Proveedor."""
+    __tablename__ = "om_pagina_sin_match"
+    __table_args__ = (
+        UniqueConstraint("periodo", "pagina", name="uq_om_sin_match_periodo_pagina"),
+    )
+
+    id:                   Mapped[int]             = mapped_column(BigInteger, primary_key=True)
+    periodo:              Mapped[str]             = mapped_column(String(7), nullable=False, index=True)
+    pagina:               Mapped[int]             = mapped_column(Integer, nullable=False)
+    nombre_extraido:      Mapped[str | None]      = mapped_column(String(300), nullable=True)
+    estrategia:           Mapped[str | None]      = mapped_column(String(30), nullable=True)
+    razon:                Mapped[str]             = mapped_column(String(200), nullable=False)
+    numero_factura:       Mapped[str | None]      = mapped_column(String(30), nullable=True)
+    muestra_texto:        Mapped[str | None]      = mapped_column(String(500), nullable=True)
+    origen:               Mapped[str]             = mapped_column(String(20), default="upload", nullable=False)  # "upload" | "backfill"
+    resuelto:             Mapped[bool]            = mapped_column(Boolean, default=False, nullable=False)
+    contrato_id_asignado: Mapped[int | None]      = mapped_column(BigInteger, ForeignKey("contratos_servicio.id"), nullable=True)
+    asignado_en:          Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at:           Mapped[datetime]        = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class OMDocumentoProyecto(Base):

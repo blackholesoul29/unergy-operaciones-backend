@@ -24,13 +24,6 @@ class EstadoFronteraEnum(str, enum.Enum):
     en_falla = "en_falla"
 
 
-class EstadoOperacionalEnum(str, enum.Enum):
-    activo = "activo"
-    inactivo = "inactivo"
-    en_registro = "en_registro"
-    descomisionado = "descomisionado"
-
-
 class FuenteLecturaEnum(str, enum.Enum):
     medidor_principal = "medidor_principal"
     medidor_respaldo = "medidor_respaldo"
@@ -142,18 +135,10 @@ class Frontera(Base):
     factor_ajuste: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_perdidas_frontera_principal: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
 
-    # Quoia meter link
-    quoia_meter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # Id interno del border en Quoia -- lo requiere get_border_report_status(),
     # que no acepta frt_code. Se guarda al confirmar desde /quoia/pendientes
     # para no tener que resolverlo con una llamada extra en cada reporte CGM.
     quoia_border_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-    # Estado operacional (lifecycle)
-    estado_operacional: Mapped[str | None] = mapped_column(
-        SAEnum(EstadoOperacionalEnum, name="estado_operacional_enum"),
-        nullable=True, default="activo",
-    )
 
     # Soft delete
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -103,3 +103,24 @@ def test_filas_para_bd_una_por_planta_categoria_contrato():
     }
     sic = {f.proyecto_id: f.codigo_sic for f in filas}
     assert sic[10] == "700" and sic[14] == "800" and sic[13] is None
+
+
+def test_snapshot_obsoleto_detecta_reglas_viejas():
+    """Un mes ya materializado con reglas viejas debe recalcularse solo: si no,
+    GET /clasificacion-energia contradice al tab Proyectos de Cumplimiento."""
+    from datetime import datetime, timedelta, timezone
+    from app.services.clasificacion_energia import (
+        snapshot_obsoleto, LOGICA_ACTUALIZADA_EN,
+    )
+
+    class _Fila:
+        def __init__(self, calculado_en):
+            self.calculado_en = calculado_en
+
+    assert snapshot_obsoleto(None), "sin snapshot → recalcular"
+    assert snapshot_obsoleto(_Fila(None))
+    assert snapshot_obsoleto(_Fila(LOGICA_ACTUALIZADA_EN - timedelta(days=1)))
+    assert not snapshot_obsoleto(_Fila(LOGICA_ACTUALIZADA_EN + timedelta(days=1)))
+    # SQLite devuelve datetimes naive: se asumen UTC, no deben reventar
+    naive = (LOGICA_ACTUALIZADA_EN + timedelta(days=1)).replace(tzinfo=None)
+    assert not snapshot_obsoleto(_Fila(naive))

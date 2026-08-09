@@ -22,6 +22,9 @@ from app.models.proyectos import (
 from app.models.contactos import ProyectoAreaContacto, Contacto
 from app.models.servicios import ServicioRepresentacion
 from app.models.clientes import Cliente
+from app.models.contratos import (
+    PPAContrato, PPAResponsable, ppa_contrato_proyectos_table,
+)
 from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
 from app.schemas.proyectos import ProyectoCreate, ProyectoUpdate
@@ -57,6 +60,12 @@ def db():
             # (ver app/api/v1/proyectos.py) — sin estas dos tablas ese
             # eager load falla con "no such table: fronteras".
             Frontera.__table__, OperadorRed.__table__,
+            # ProyectoOut ahora expone ppa_contratos y los endpoints hacen
+            # selectinload(Proyecto.ppa_contratos) — sin la tabla puente y
+            # ppa_contratos el eager load falla con
+            # "no such table: ppa_contrato_proyectos".
+            ppa_contrato_proyectos_table, PPAContrato.__table__,
+            PPAResponsable.__table__,
         ],
     )
     s = sessionmaker(bind=engine)()

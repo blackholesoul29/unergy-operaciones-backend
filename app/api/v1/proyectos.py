@@ -25,6 +25,7 @@ from app.schemas.proyectos import (
 from app.schemas.common import PaginatedResponse
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.operadores_red_sync import sincronizar_operador_red
+from app.services import gen_promedio
 from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
 from app.services.proyectos_backfill_unergy import asignar_sub_project_unergy_si_aplica
 
@@ -290,6 +291,79 @@ def backfill_ubicacion_proyectos(
     return backfill_ubicacion(db, dry_run=dry_run)
 
 
+# ── Generación mensual promedio ───────────────────────────────────────────────
+# El promedio se calcula desde la API de generación de Unergy y se PERSISTE en el
+# proyecto, para que las vistas de contratos no dependan de esa API en cada
+# consulta. Ver app/services/gen_promedio.py.
+#
+# Van declaradas ANTES de /{id}: ese path param está tipado `int`, así que si
+# fueran después, FastAPI intentaría convertir "gen-promedio" a entero y
+# devolvería 422 en vez de resolver la ruta.
+
+
+@router.post("/gen-promedio/recalcular")
+async def recalcular_gen_promedio(
+    meses: int = Query(gen_promedio.MESES_POR_DEFECTO, ge=1, le=24,
+                       description="Cuántos meses COMPLETOS promediar"),
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    force: bool = Query(False, description="Pisar también los promedios cargados a mano"),
+    proyecto_id: list[int] | None = Query(None, description="Limitar a estos proyectos"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Recalcula `gen_mensual_promedio_mwh` desde el histórico de generación.
+
+    Idempotente y seguro de repetir. Por defecto **no escribe** (`dry_run=true`)
+    y **no pisa** los valores cargados a mano: una planta sin histórico se
+    diligencia con `PATCH /proyectos/{id}` y el recálculo la respeta.
+
+    La respuesta trae `sin_datos`, `saltados` y `fallidos` con nombre y motivo:
+    esa es la lista de trabajo de lo que hay que cargar a mano. Un proyecto que
+    no se pudo calcular tiene que verse, no desaparecer del reporte.
+
+    Tarda: consulta la API de generación planta por planta (de a 8 en paralelo).
+    """
+    return await gen_promedio.recalcular(
+        db, meses=meses, dry_run=dry_run, force=force, proyecto_ids=proyecto_id,
+    )
+
+
+@router.get("/gen-promedio")
+def listar_gen_promedio(
+    solo_faltantes: bool = Query(False, description="Solo los que no tienen promedio cargado"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """El promedio de cada proyecto, con su origen y su antigüedad.
+
+    Es la vista para saber qué falta por cargar a mano sin tener que disparar un
+    recálculo contra la API de generación.
+    """
+    filas = []
+    for p in gen_promedio.proyectos_objetivo(db):
+        valor = float(p.gen_mensual_promedio_mwh) if p.gen_mensual_promedio_mwh is not None else None
+        if solo_faltantes and valor is not None:
+            continue
+        filas.append({
+            "id": p.id,
+            "nombre_comercial": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "gen_mensual_promedio_mwh": valor,
+            "gen_promedio_origen": p.gen_promedio_origen,
+            "gen_promedio_meses": p.gen_promedio_meses,
+            "gen_promedio_desde": p.gen_promedio_desde,
+            "gen_promedio_hasta": p.gen_promedio_hasta,
+            "gen_promedio_actualizado_en": p.gen_promedio_actualizado_en,
+            # Sin identificador de monitoreo la API no lo resuelve: carga manual sí o sí.
+            "requiere_carga_manual": not (p.sub_project or p.alias_monitoreo),
+        })
+    return {
+        "total": len(filas),
+        "con_promedio": sum(1 for f in filas if f["gen_mensual_promedio_mwh"] is not None),
+        "items": filas,
+    }
+
+
 @router.get("/{id}", response_model=ProyectoOut)
 def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
@@ -388,6 +462,17 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     # mande el flag explícito en el payload).
     if "fecha_inicio_comercializacion" in payload and "fecha_comercializacion_editada_manual" not in payload:
         p.fecha_comercializacion_editada_manual = True
+
+    # Mismo criterio para el promedio de generación: si alguien lo escribe a mano
+    # queda marcado 'manual' y el recálculo no lo pisa. Es el caso de las plantas
+    # sin histórico, que es justamente para lo que existe la carga manual.
+    if "gen_mensual_promedio_mwh" in payload and "gen_promedio_origen" not in payload:
+        from datetime import datetime as _dt, timezone as _tz
+        p.gen_promedio_origen = gen_promedio.ORIGEN_MANUAL
+        p.gen_promedio_actualizado_en = _dt.now(_tz.utc)
+        p.gen_promedio_meses = None
+        p.gen_promedio_desde = None
+        p.gen_promedio_hasta = None
 
     for k, v in payload.items():
         setattr(p, k, v)

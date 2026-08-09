@@ -278,6 +278,11 @@ class ProyectoCreate(BaseModel):
     fecha_fin_representacion: Optional[date] = None
     fecha_inicio_comercializacion: Optional[date] = None
     fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio (MWh/mes). Escribirla por PATCH la marca como
+    # 'manual' y el recálculo desde la API deja de pisarla — es el camino para
+    # las plantas sin histórico. Ver app/services/gen_promedio.py.
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -362,6 +367,15 @@ class ProyectoOut(BaseModel):
     fecha_fin_representacion: Optional[date]
     fecha_inicio_comercializacion: Optional[date] = None
     fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio, persistida para no depender de la API de
+    # generación en cada consulta. `gen_promedio_origen` dice si salió del
+    # histórico ('api') o lo cargó una persona ('manual').
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
+    gen_promedio_meses: Optional[int] = None
+    gen_promedio_desde: Optional[date] = None
+    gen_promedio_hasta: Optional[date] = None
+    gen_promedio_actualizado_en: Optional[datetime] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]

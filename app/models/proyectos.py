@@ -95,6 +95,26 @@ class Proyecto(Base):
     # no la vuelve a pisar.
     fecha_comercializacion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # ── Generación mensual promedio ───────────────────────────────────────────
+    # Cuánta energía entrega esta planta en un mes típico, en MWh. Se calcula UNA
+    # vez desde la API de generación de Unergy (app/services/gen_promedio.py) y
+    # se persiste acá, para que las vistas de contratos no dependan de esa API en
+    # cada consulta: con esto alcanza con leer la BD.
+    #
+    # Las plantas sin histórico (recién energizadas, sin sub_project) se cargan a
+    # mano; por eso hace falta saber de dónde salió cada valor —ver
+    # `gen_promedio_origen`— y no pisar lo manual al recalcular. Es el mismo
+    # patrón que `fecha_comercializacion_editada_manual`.
+    gen_mensual_promedio_mwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    # 'api' = derivado del histórico · 'manual' = lo puso una persona.
+    gen_promedio_origen: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Cuántos meses COMPLETOS entraron al promedio. Un promedio de un mes no vale
+    # lo mismo que uno de seis, y sin este número no hay forma de saberlo.
+    gen_promedio_meses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gen_promedio_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gen_promedio_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gen_promedio_actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion_vereda: Mapped[str | None] = mapped_column(String(500), nullable=True)

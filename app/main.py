@@ -721,6 +721,16 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_frt ON liquidacion_xm_datos (frontera_id) WHERE frontera_id IS NOT NULL",
     # migration — fecha_fin_representacion en proyectos
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_fin_representacion DATE",
+    # migration (058) — generación mensual promedio por proyecto, para no depender
+    # de la API de generación de Unergy en cada consulta de contratos.
+    # `gen_promedio_origen` ('api' | 'manual') existe para que el recálculo NO pise
+    # los valores cargados a mano en las plantas sin histórico.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_mensual_promedio_mwh NUMERIC(12,3)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_origen VARCHAR(10)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_meses INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_desde DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_hasta DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_actualizado_en TIMESTAMPTZ",
     # migration — missing updated_at on liquidacion child tables
     "ALTER TABLE liquidacion_costos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE liquidacion_mandato_lineas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",

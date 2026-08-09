@@ -406,7 +406,8 @@ def _nombre_frontera(db, ids: list) -> dict:
 
 
 def calcular_balance(db, year: int, month: int,
-                     excluir_compra_externa: bool = False, hoy: date | None = None) -> dict:
+                     excluir_compra_externa: bool = False, hoy: date | None = None,
+                     incluir_todos: bool = False) -> dict:
     """Balance mensual de energía en bolsa, real + proyección al cierre.
 
     Real: generación de cada tramo dentro de [primer día, corte]. Si el tramo
@@ -455,7 +456,10 @@ def calcular_balance(db, year: int, month: int,
                              "compra_externa_en_bolsa": [], "tramos_estimados": []},
         }
 
-    data = get_plantas_contratos(year=year, month=month, db=db, _=None)
+    # El balance se arma sobre plantas-contratos, así que hereda de ahí el filtro
+    # de empresa responsable (ver _contratos_vigentes en cumplimiento.py).
+    data = get_plantas_contratos(year=year, month=month, incluir_todos=incluir_todos,
+                                 db=db, _=None)
 
     ids_compra_externa = {
         p["id"] for c in (data.get("compra_externa") or [])

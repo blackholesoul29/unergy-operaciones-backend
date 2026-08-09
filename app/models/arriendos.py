@@ -15,10 +15,28 @@ class ArrProyecto(Base):
     nombre:      Mapped[str]        = mapped_column(String(255), nullable=False)
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     valor_base:    Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
-    canon_archivo: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     activo:      Mapped[bool]       = mapped_column(Boolean, default=True, nullable=False)
     created_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime]   = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ArrArrendador(Base):
+    """Un arrendador (persona/entidad que recibe el pago) dentro de un contrato
+    de arriendo. Todo contrato de arriendo tiene siempre >=1 arrendador (tras el
+    backfill de arranque)."""
+    __tablename__ = "arr_arrendador"
+
+    id:              Mapped[int]         = mapped_column(BigInteger, primary_key=True)
+    contrato_id:     Mapped[int]         = mapped_column(BigInteger, ForeignKey("contratos_servicio.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre:          Mapped[str]         = mapped_column(String(255), nullable=False)
+    valor_base:      Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # canon ANUAL (misma semántica que tarifa_base)
+    responsable_iva: Mapped[bool]        = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    activo:          Mapped[bool]        = mapped_column(Boolean, default=True, nullable=False)
+    anticipo_pagado_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    anticipo_pagado_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    observaciones:         Mapped[str | None]  = mapped_column(String(1000), nullable=True)
+    created_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at:      Mapped[datetime]    = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class ArrIPCTasa(Base):
@@ -37,12 +55,14 @@ class ArrDocumento(Base):
     """Documento de pago de arriendo (cuenta_cobro, factura) por proyecto, período y pago_id."""
     __tablename__ = "arr_documento"
     __table_args__ = (
-        UniqueConstraint("arr_proyecto_id", "periodo", "pago_id", name="uq_arr_doc_proyecto_periodo_pago"),
+        UniqueConstraint("arr_proyecto_id", "periodo", "pago_id", "arr_arrendador_id", name="uq_arr_doc_proyecto_periodo_pago_arrendador"),
     )
 
     id:                Mapped[int]        = mapped_column(BigInteger, primary_key=True)
     # nullable: los predios SIN match en BD se guardan igual (para revisión manual)
     arr_proyecto_id:   Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
+    arr_arrendador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_arrendador.id", ondelete="CASCADE"), nullable=True, index=True)
+    proyecto_id:       Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
     periodo:           Mapped[str]        = mapped_column(String(7), nullable=False, index=True)
     pago_id:           Mapped[int]        = mapped_column(Integer, nullable=False)
     codigo_contrato:   Mapped[str]        = mapped_column(String(120), nullable=False)
@@ -63,13 +83,16 @@ class ArrDocumento(Base):
 class ArrSeleccion(Base):
     __tablename__ = "arr_seleccion_mensual"
     __table_args__ = (
-        UniqueConstraint("arr_proyecto_id", "periodo", name="uq_arr_seleccion_proyecto_periodo"),
+        UniqueConstraint("arr_arrendador_id", "periodo", name="uq_arr_seleccion_arrendador_periodo"),
     )
 
     id:              Mapped[int]  = mapped_column(BigInteger, primary_key=True)
-    arr_proyecto_id: Mapped[int]  = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=False, index=True)
+    arr_proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_proyectos.id", ondelete="CASCADE"), nullable=True, index=True)
+    arr_arrendador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("arr_arrendador.id", ondelete="CASCADE"), nullable=True, index=True)
     periodo:         Mapped[str]  = mapped_column(String(7), nullable=False, index=True)
     incluido:        Mapped[bool] = mapped_column(Boolean, default=True,  nullable=False)
     facturado:       Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    valor_facturado_congelado: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # canon fijo al facturar
+    motivo_exclusion: Mapped[str | None] = mapped_column(String(500), nullable=True)  # por qué se excluyó del mes
     created_at:      Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:      Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

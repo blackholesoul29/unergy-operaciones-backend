@@ -9,6 +9,7 @@ los compromisos de energía (min/max MWh) del contrato PPA.
 
 import calendar
 import logging
+import time as _time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -17,7 +18,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
@@ -25,7 +26,7 @@ from app.core.database import get_db, SessionLocal
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.utils.gescon_vigencia import resolver_vigencias
 from app.services.comercializacion import identificador_monitoreo as _mon_id
-from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa
+from app.models.contratos import PPAContrato, PPACompromisoEnergia, PPATarifa, PPAResponsable
 from app.models.cumplimiento import CumplimientoMensual, EstadoCumplimientoEnum
 from app.schemas.cumplimiento import (
     CumplimientoMensualOut, CerrarPeriodoRequest, CerrarPeriodoResponse,
@@ -369,10 +370,59 @@ def _gen_vigencia_mwh(
 
 # ── Contratos vigentes ────────────────────────────────────────────────────────
 
-def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> list:
+INCLUIR_TODOS_DESC = (
+    "Incluye también los contratos cuya empresa responsable está marcada como no "
+    "relevante (incluir_en_cumplimiento=false). Por defecto se omiten en todas las "
+    "vistas de /mem/cumplimiento."
+)
+
+
+def _responsable_payload(contrato) -> dict:
+    """Empresa responsable del PPA, aplanada para las filas de las vistas."""
+    r = contrato.responsable
+    return {
+        "responsable_id": contrato.responsable_id,
+        "responsable": r.nombre if r else None,
+        "responsable_relevante": r.incluir_en_cumplimiento if r else True,
+    }
+
+
+def _ids_responsables_ocultos(db: Session) -> set:
+    """Responsables marcados como NO relevantes: sus contratos los gestiona un
+    tercero y no deben aparecer en las vistas de /mem/cumplimiento."""
+    return {
+        r.id for r in db.query(PPAResponsable)
+        .filter(PPAResponsable.incluir_en_cumplimiento.is_(False)).all()
+    }
+
+
+def _filtro_responsable_relevante(db: Session):
+    """Cláusula SQL reusable: deja pasar los contratos sin responsable y los de un
+    responsable relevante. Devuelve None si no hay ninguno oculto (no filtra)."""
+    ocultos = _ids_responsables_ocultos(db)
+    if not ocultos:
+        return None
+    return or_(
+        PPAContrato.responsable_id.is_(None),
+        PPAContrato.responsable_id.notin_(ocultos),
+    )
+
+
+def _contratos_vigentes(db: Session, year: int, month: int | None = None,
+                        solo_relevantes: bool = True) -> list:
     """
     PPA contracts active during the given period, excluding soft-deleted.
     month=None → any month in the year.
+
+    `solo_relevantes` (default True) además descarta los contratos cuya empresa
+    responsable está marcada con incluir_en_cumplimiento=False. Es el default
+    porque TODAS las vistas de /mem/cumplimiento los ocultan; los endpoints
+    exponen `incluir_todos` para verlos. Contrato SIN responsable = se incluye:
+    nada se esconde por omisión, solo por marca explícita.
+
+    Se pasa False a propósito en /descubrimientos y /cerrar-periodo: no son vistas
+    de esa página y cerrar-periodo además PERSISTE registros mensuales — dejar
+    contratos fuera del cierre cambiaría datos históricos, no solo lo que se ve.
     """
     if month:
         first_day = date(year, month, 1)
@@ -380,16 +430,21 @@ def _contratos_vigentes(db: Session, year: int, month: int | None = None) -> lis
     else:
         first_day = date(year, 1, 1)
         last_day = date(year, 12, 31)
-    return (
+    q = (
         db.query(PPAContrato)
+        # el responsable se lee en las filas de la matriz: precargarlo evita N+1
+        .options(selectinload(PPAContrato.responsable))
         .filter(
             PPAContrato.deleted_at.is_(None),
             or_(PPAContrato.fecha_inicio.is_(None), PPAContrato.fecha_inicio <= last_day),
             or_(PPAContrato.fecha_fin.is_(None), PPAContrato.fecha_fin >= first_day),
         )
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
     )
+    if solo_relevantes:
+        clausula = _filtro_responsable_relevante(db)
+        if clausula is not None:
+            q = q.filter(clausula)
+    return q.order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id).all()
 
 
 def _contrato_vigente_en_mes(contrato, year: int, month: int) -> bool:
@@ -581,6 +636,76 @@ def _fin_efectivo_asic(db: Session, asic: AsicSolicitud, last_day: date) -> date
     return v.fecha_fin_efectiva if v else asic.fecha_fin
 
 
+# ── Historial intra-mes ───────────────────────────────────────────────────────
+# El tab Proyectos muestra el HISTORIAL del mes, no una foto: una planta que
+# cambió de modalidad a mitad de mes aparece en todas las piscinas por las que
+# pasó, cada una con su ventana de días. Estos helpers son aritmética de fechas
+# pura (sin BD) para poder probarlos sueltos.
+
+def _fecha_corte(year: int, month: int, hoy: date | None = None) -> date:
+    """Fecha contra la que se decide si una ventana sigue vigente.
+
+    Mes en curso → HOY: una planta cuyo contrato termina el 30 sigue vigente el
+    26. Mes pasado → último día del mes (foto de cierre). Mes futuro → último
+    día del mes (proyección).
+    """
+    hoy = hoy or date.today()
+    if (year, month) == (hoy.year, hoy.month):
+        return hoy
+    return date(year, month, calendar.monthrange(year, month)[1])
+
+
+def _recortar(ini: date | None, fin: date | None, lo: date, hi: date):
+    """Intersección de [ini, fin] con [lo, hi]. Bordes nulos = abiertos.
+    Devuelve None si no se tocan."""
+    a = max(ini, lo) if ini else lo
+    b = min(fin, hi) if fin else hi
+    return (a, b) if a <= b else None
+
+
+def _restar_intervalos(base, ocupados: list) -> list:
+    """Días de `base` (par (ini, fin)) que NO cubre ninguno de `ocupados`.
+
+    Es lo que convierte la bolsa de "plantas sin contrato" a "días sin
+    contrato": el residuo de una planta liberada el 23-jul es [24-jul, 31-jul].
+    """
+    if base is None:
+        return []
+    libres = [base]
+    for oi, of in sorted(ocupados):
+        nuevos = []
+        for li, lf in libres:
+            if of < li or oi > lf:  # sin solape: el tramo sobrevive entero
+                nuevos.append((li, lf))
+                continue
+            if li < oi:
+                nuevos.append((li, oi - timedelta(days=1)))
+            if lf > of:
+                nuevos.append((of + timedelta(days=1), lf))
+        libres = nuevos
+    return libres
+
+
+def _estado_segmento(ini: date, fin: date, corte: date) -> str:
+    """'terminado' (se acabó antes del corte) | 'futuro' (aún no empieza) |
+    'vigente'. Los contadores de la vista solo cuentan 'vigente'."""
+    if fin < corte:
+        return "terminado"
+    if ini > corte:
+        return "futuro"
+    return "vigente"
+
+
+def _con_segmento(entry: dict, ini: date | None, fin: date | None,
+                  first_day: date, last_day: date, corte: date) -> dict:
+    """Añade a una fila de planta su ventana recortada al mes y su estado."""
+    seg = _recortar(ini, fin, first_day, last_day) or (first_day, last_day)
+    entry["segmento_inicio"] = seg[0].isoformat()
+    entry["segmento_fin"] = seg[1].isoformat()
+    entry["estado"] = _estado_segmento(seg[0], seg[1], corte)
+    return entry
+
+
 # ── Impacto de mantenimiento ──────────────────────────────────────────────────
 
 def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) -> dict[int, float]:
@@ -620,14 +745,22 @@ def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/ppa")
-def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def list_ppa(
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
     """Lista todos los contratos PPA para el selector."""
-    rows = (
+    q = (
         db.query(PPAContrato)
+        .options(selectinload(PPAContrato.responsable))
         .filter(PPAContrato.deleted_at.is_(None))
-        .order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id)
-        .all()
     )
+    if not incluir_todos:
+        clausula = _filtro_responsable_relevante(db)
+        if clausula is not None:
+            q = q.filter(clausula)
+    rows = q.order_by(PPAContrato.nombre_interno.nullslast(), PPAContrato.id).all()
     return [
         {
             "id": r.id,
@@ -636,6 +769,7 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
             "comprador_nombre": r.comprador_nombre,
             "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
             "fecha_fin": r.fecha_fin.isoformat() if r.fecha_fin else None,
+            **_responsable_payload(r),
         }
         for r in rows
     ]
@@ -645,6 +779,7 @@ def list_ppa(db: Session = Depends(get_db), _=Depends(get_current_user)):
 def get_resumen(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -666,7 +801,7 @@ def get_resumen(
     lost_map = _lost_energy_mwh_por_proyecto(db, first_day, last_day)
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = _contratos_vigentes(db, year, month)
+    contratos = _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
     compromisos_map = {
         c.contrato_id: c
         for c in db.query(PPACompromisoEnergia).filter(
@@ -817,6 +952,7 @@ def get_resumen(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "energia_minima_mwh": min_mwh,
             "energia_maxima_mwh": max_mwh,
             "gen_total_mwh": gen_total_c,
@@ -922,11 +1058,12 @@ def get_resumen(
 @router.get("/ppa/resumen-anual")
 def get_resumen_anual(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Annual commitment totals per contract (DB only, no Unergy API)."""
-    contratos = _contratos_vigentes(db, year)
+    contratos = _contratos_vigentes(db, year, solo_relevantes=not incluir_todos)
     compromisos = (
         db.query(PPACompromisoEnergia)
         .filter(PPACompromisoEnergia.año == year)
@@ -951,6 +1088,7 @@ def get_resumen_anual(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "total_min_mwh": round(total_min, 1) if rows else None,
@@ -966,6 +1104,7 @@ def get_resumen_anual(
 def get_simulador(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -998,9 +1137,9 @@ def get_simulador(
         .all()
     )
 
-    contratos_db = _contratos_vigentes(db, year, month)
+    contratos_db = _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
 
-    contratos_venta = _query_contratos_venta(db, year, month)
+    contratos_venta = _query_contratos_venta(db, year, month, solo_relevantes=not incluir_todos)
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     from sqlalchemy.orm import selectinload
@@ -1242,6 +1381,7 @@ def get_simulador(
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
             # Plantas esperadas para el mes (denominador del indicador de cumplimiento de plantas).
@@ -1264,6 +1404,7 @@ def get_simulador(
 def get_plantas_contratos(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1299,19 +1440,25 @@ def get_plantas_contratos(
     )
     plantas_map = {p.id: p for p in plantas_db}
 
-    contratos_venta = _query_contratos_venta(db, year, month)
+    contratos_venta = _query_contratos_venta(db, year, month, solo_relevantes=not incluir_todos)
+    corte = _fecha_corte(year, month)
 
     # --- VENTA: use GESCON to resolve plant assignments ---
     venta_out = []
-    assigned_plant_ids: set[int] = set()
+    # Días del mes que cada planta pasó asignada a un contrato de venta. La
+    # bolsa es el RESIDUO de esto (ver más abajo), no el complemento del set de
+    # plantas: así una planta liberada a mitad de mes aparece en las dos.
+    assigned_windows: dict[int, list] = defaultdict(list)
     for c in contratos_venta:
         plantas_list = []
         if c.numero_codigo_contrato:
             for asic in _resolve_gescon(db, c.numero_codigo_contrato, year, month):
                 if asic.proyecto_id and asic.proyecto_id in plantas_map:
                     p = plantas_map[asic.proyecto_id]
-                    assigned_plant_ids.add(p.id)
-                    plantas_list.append({
+                    seg = _recortar(asic.fecha_inicio, asic.fecha_fin, first_day, last_day)
+                    if seg:
+                        assigned_windows[p.id].append(seg)
+                    plantas_list.append(_con_segmento({
                         "id": p.id,
                         "nombre": p.nombre_comercial,
                         "codigo_sic": asic.codigo_sic_contrato,
@@ -1320,13 +1467,14 @@ def get_plantas_contratos(
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
                         "es_duplicado": bool(asic.es_duplicado),
                         "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
-                    })
+                    }, asic.fecha_inicio, asic.fecha_fin, first_day, last_day, corte))
         venta_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             # Clave GESCON (contrato_interno en asic_solicitudes) para el detalle
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "plantas": plantas_list,
@@ -1396,14 +1544,15 @@ def get_plantas_contratos(
                 card["contrato_ppa_id"] = r.contrato_ppa_id
                 card["id"] = r.contrato_ppa_id
             if r.proyecto_id:
-                card["plantas"].append({
+                fin_mostrado = fin_ef or r.fecha_fin
+                card["plantas"].append(_con_segmento({
                     "id": r.proyecto_id,
                     "nombre": r.proyecto.nombre_comercial if r.proyecto else f"Proyecto {r.proyecto_id}",
                     "codigo_sic": r.codigo_sic_contrato,
                     "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
                     # fin EFECTIVO (recortado por relevos), no la fecha cruda
-                    "fecha_fin": fin_ef.isoformat() if fin_ef else (r.fecha_fin.isoformat() if r.fecha_fin else None),
-                })
+                    "fecha_fin": fin_mostrado.isoformat() if fin_mostrado else None,
+                }, r.fecha_inicio, fin_mostrado, first_day, last_day, corte))
         compra_out = sorted(por_contrato.values(), key=lambda c: c["nombre"])
 
     # --- COMPRA EXTERNA (g. ppa_compra_externa): PPAs de compra FUERA de GESCON ---
@@ -1414,13 +1563,14 @@ def get_plantas_contratos(
     # excluye aquí para no duplicarlo.
     gescon_compra_ids = {c["contrato_ppa_id"] for c in compra_out if c.get("contrato_ppa_id")}
     compra_externa_out = []
-    for c in _contratos_vigentes(db, year, month):
+    for c in _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos):
         if (c.tipo_contrato or "venta") != "compra" or c.id in gescon_compra_ids:
             continue
         compra_externa_out.append({
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "numero_codigo_contrato": c.numero_codigo_contrato,
+            **_responsable_payload(c),
             "vendedor_nombre": c.vendedor_nombre,
             "vendedor_nit": c.vendedor_nit,
             "tarifa_base": float(c.tarifa_base) if c.tarifa_base is not None else None,
@@ -1429,44 +1579,61 @@ def get_plantas_contratos(
             # Plantas externas vinculadas al PPA (no exigen representación ni
             # estado en_operacion: no son plantas del portafolio Unergy).
             "plantas": [
-                {
+                _con_segmento({
                     "id": p.id,
                     "nombre": p.nombre_comercial,
                     "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
                     "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
-                }
+                }, c.fecha_inicio, c.fecha_fin, first_day, last_day, corte)
                 for p in c.proyectos
             ],
         })
 
-    # --- BOLSA: remanente sin contrato PPA, subdividido en comercializador (UNGC) / libre ---
-    # Paso POSTERIOR que NO altera la lógica de contratos: solo subdivide el remanente.
+    # --- BOLSA: DÍAS del mes sin contrato PPA, subdivididos en comercializador (UNGC) / libre ---
+    # Paso POSTERIOR que NO altera la lógica de contratos: solo reparte el residuo.
+    # Antes esto era "plantas no asignadas"; con eso una planta liberada el 23-jul
+    # quedaba en (a) los 31 días y (e) salía vacía. Ahora se restan los días ya
+    # cubiertos por contratos y CADA tramo libre genera su propia fila.
     bolsa_plantas = []
     bolsa_comercializador = []
     bolsa_libre = []
     for p in plantas_db:
-        if p.id in assigned_plant_ids:
-            continue
-        piscina, asic = _clasificar_remanente_bolsa(db, p.id, first_day, last_day)
-        fin_efectivo = _fin_efectivo_asic(db, asic, last_day) if asic else None
-        entry = {
-            "id": p.id,
-            "nombre": p.nombre_comercial,
-            # "comercializador" (registro SIC vigente con comprador UNGC) | "libre" (sin SIC vigente)
-            "piscina": piscina,
-            "codigo_sic": asic.codigo_sic_contrato if asic else None,
-            "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
-            # ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
-            # (recortado por relevos). Nulos para la piscina libre.
-            "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
-            "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
-        }
-        bolsa_plantas.append(entry)
-        (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
+        # Ventana operativa dentro del mes: no inventamos días en bolsa antes de
+        # que la planta empiece a comercializar ni después de que termine su
+        # representación. Ambos campos suelen ser NULL → mes completo.
+        operativa = _recortar(
+            p.fecha_inicio_comercializacion, p.fecha_fin_representacion, first_day, last_day
+        )
+        for seg_ini, seg_fin in _restar_intervalos(operativa, assigned_windows.get(p.id) or []):
+            # La modalidad se evalúa SOBRE EL TRAMO, no sobre el mes: una planta
+            # que salió de contrato el 23 se juzga por lo que tenga del 24 al 31.
+            piscina, asic = _clasificar_remanente_bolsa(db, p.id, seg_ini, seg_fin)
+            fin_efectivo = _fin_efectivo_asic(db, asic, seg_fin) if asic else None
+            entry = {
+                "id": p.id,
+                "nombre": p.nombre_comercial,
+                # "comercializador" (registro SIC vigente con comprador UNGC) | "libre" (sin SIC vigente)
+                "piscina": piscina,
+                "codigo_sic": asic.codigo_sic_contrato if asic else None,
+                "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
+                # ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
+                # (recortado por relevos). Nulos para la piscina libre — ahí la
+                # ventana que importa es el propio tramo (segmento_*).
+                "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
+                "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
+                "segmento_inicio": seg_ini.isoformat(),
+                "segmento_fin": seg_fin.isoformat(),
+                "estado": _estado_segmento(seg_ini, seg_fin, corte),
+            }
+            bolsa_plantas.append(entry)
+            (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
     out = {
         "year": year,
         "month": month,
+        # Fecha contra la que se evalúa "vigente" (hoy si el mes es el actual,
+        # fin de mes si no). El front la usa para explicar los contadores.
+        "fecha_corte": corte.isoformat(),
         "venta": venta_out,
         "compra": compra_out,
         # Compatibilidad con el frontend: "bolsa" sigue siendo la lista COMPLETA del remanente,
@@ -1483,6 +1650,39 @@ def get_plantas_contratos(
     from app.services.clasificacion_energia import derivar_pools
     out.update(derivar_pools(out))
     return out
+
+
+@router.get("/balance-energia")
+def get_balance_energia(
+    year: int = Query(..., ge=2020, le=2050),
+    month: int = Query(..., ge=1, le=12),
+    excluir_compra_externa: bool = Query(
+        False,
+        description="Saca del balance las plantas con PPA de compra externa (piscina g). "
+                    "Su energía está comprada fuera de GESCON, así que contarlas en el "
+                    "residuo de bolsa infla la venta en bolsa UNGG.",
+    ),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Balance mensual de energía en bolsa (MWh), real + proyección al cierre.
+
+    Responde "este mes, ¿cuánto compro o compraré en bolsa?". Netea DENTRO de
+    cada agente: la venta en bolsa de UNGG se contrarresta con sus compras
+    (duplicados + uso del recurso); la venta por UNGC va aparte porque es otro
+    agente y solo acarrea cartera.
+
+    Cruza los DOS ejes que hasta ahora se calculaban por separado: los días de
+    cada tramo (historial intra-mes) y el % de despacho. Lo que no está
+    contratado en un tramo se vende en bolsa por UNGG.
+    """
+    from app.services.balance_energia import calcular_balance
+
+    return calcular_balance(
+        db, year, month, excluir_compra_externa=excluir_compra_externa,
+        incluir_todos=incluir_todos,
+    )
 
 
 @router.post("/backfill-comercializacion")
@@ -1520,6 +1720,7 @@ def get_sin_fecha_comercializacion(
 def get_energia_transada(
     year: int = Query(..., ge=2020, le=2050),
     month: int = Query(..., ge=1, le=12),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -1588,7 +1789,7 @@ def get_energia_transada(
 
     # ── 2. Asignaciones GESCON de contratos de venta vigentes ─────────────────
     contratos_venta = [
-        c for c in _contratos_vigentes(db, year, month)
+        c for c in _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
         if (getattr(c, "tipo_contrato", None) or "venta") != "compra"
     ]
     asignaciones: dict[int, list[dict]] = defaultdict(list)
@@ -2005,16 +2206,20 @@ def _anual_meses_para_contrato(contrato, year, gescon_per_month, comp_map, month
     return meses, proyectos
 
 
-def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None):
+def _query_contratos_venta(db: Session, year: int | None = None, month: int | None = None,
+                           solo_relevantes: bool = True):
     """Retorna contratos PPA de venta (tipo_contrato != 'compra').
 
     Replica EXACTAMENTE el filtro que usa get_simulador para construir contratos_venta:
     primero obtiene todos los vigentes del año/mes dado, luego excluye compras.
     Si year es None usa el año en curso (para el endpoint anual-matriz).
+
+    `solo_relevantes` se delega a _contratos_vigentes (ver allí la regla y por qué
+    el default es True).
     """
     if year is None:
         year = date.today().year
-    contratos_db = _contratos_vigentes(db, year, month)
+    contratos_db = _contratos_vigentes(db, year, month, solo_relevantes=solo_relevantes)
     return [c for c in contratos_db if (c.tipo_contrato or "venta") != "compra"]
 
 
@@ -2063,14 +2268,18 @@ def _build_fetch_sets(gpm_por_contrato: dict, year: int, today) -> tuple:
 @router.get("/anual-matriz")
 def get_anual_matriz(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description="Incluir contratos cuyo responsable está marcado como no relevante"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Matriz anual contrato->proyectos x 12 meses (solo venta). Deduplica fetches a Unergy."""
+    """Matriz anual contrato->proyectos x 12 meses (solo venta). Deduplica fetches a Unergy.
+
+    Por defecto oculta los contratos de responsables no relevantes; además de limpiar
+    la vista, ahorra sus llamadas a la API de Unergy."""
     today = date.today()
 
     # 1. Contratos de venta (mismo universo que el simulador, sin restricción de mes)
-    contratos = _query_contratos_venta(db, year)
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
 
     # 2. GESCON por contrato/mes + compromisos por contrato
     gpm_por_contrato: dict = {}
@@ -2138,6 +2347,7 @@ def get_anual_matriz(
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
+            **_responsable_payload(c),
             "meses": meses,
             "proyectos": proyectos,
             "n_plantas": n_plantas,
@@ -2200,6 +2410,7 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
         "nombre_interno": contrato.nombre_interno,
         "numero_codigo_contrato": contrato.numero_codigo_contrato,
         "comprador_nombre": contrato.comprador_nombre,
+        **_responsable_payload(contrato),
         "meses": meses,
         "proyectos": proyectos,
         "n_plantas": n_plantas,
@@ -2210,12 +2421,13 @@ def _matriz_un_contrato(db: Session, contrato, year: int, today) -> dict:
 @router.get("/anual-matriz/contratos")
 def get_anual_matriz_contratos(
     year: int = Query(..., ge=2020, le=2050),
+    incluir_todos: bool = Query(False, description="Incluir contratos cuyo responsable está marcado como no relevante"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Lista ligera de contratos de venta para la matriz anual (sin generación → carga instantánea).
     El frontend pinta las filas y luego pide el detalle de cada una vía /anual-matriz/contrato/{id}."""
-    contratos = _query_contratos_venta(db, year)
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
     return {
         "year": year,
         "contratos": [
@@ -2224,6 +2436,7 @@ def get_anual_matriz_contratos(
                 "nombre_interno": c.nombre_interno,
                 "numero_codigo_contrato": c.numero_codigo_contrato,
                 "comprador_nombre": c.comprador_nombre,
+                **_responsable_payload(c),
             }
             for c in contratos
         ],
@@ -2618,7 +2831,9 @@ def get_descubrimientos(
     Cruza deltas MWh (cumplimiento) × precio promedio bolsa del mes.
     Solo usa datos de DB — no llama la API de Unergy.
     """
-    contratos = _contratos_vigentes(db, year)
+    # Sin filtro de responsable: /descubrimientos no es una vista de
+    # /mem/cumplimiento y su chamba es destapar exposición, no esconderla.
+    contratos = _contratos_vigentes(db, year, solo_relevantes=False)
 
     meses_data = []
     gran_total_compras_cop = 0.0
@@ -2806,7 +3021,10 @@ def cerrar_periodo(
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = _contratos_vigentes(db, year, month)
+    # Sin filtro de responsable A PROPÓSITO: esto PERSISTE el cierre mensual. Dejar
+    # contratos fuera cambiaría el histórico guardado, no solo lo que se ve en
+    # pantalla — y marcar un responsable como no relevante borraría su cierre.
+    contratos = _contratos_vigentes(db, year, month, solo_relevantes=False)
     if not contratos:
         raise HTTPException(404, "No hay contratos PPA registrados")
 
@@ -3279,3 +3497,273 @@ def fix_enlaces(
 
     db.commit()
     return {"status": "ok", "actions": actions}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Panel anual — una sola llamada con todo lo que dibuja la pestaña Cumplimiento
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Existe para consumidores externos (paneles de gerencia) que necesitan replicar
+# la gráfica de /mem/cumplimiento sin reimplementar lógica de negocio.
+#
+# Por qué no basta con los endpoints que ya había:
+#   - /cumplimiento/ppa/{id}/anual devuelve UN contrato. El consolidado obligaba a
+#     llamarlo N veces y sumar del lado del cliente (~60 líneas en el frontend),
+#     con dos consecuencias: N tokens + fetches repetidos de plantas compartidas
+#     entre contratos (los duplicados), y una regla de negocio duplicada que se
+#     desincroniza en cuanto se toca de este lado.
+#   - Este endpoint reusa la maquinaria de /anual-matriz, que deduplica los
+#     fetches a la API de Unergy sobre TODOS los contratos a la vez.
+
+_PANEL_CACHE: dict[str, tuple[float, dict]] = {}   # key → (monotonic_ts, payload)
+PANEL_CACHE_TTL = 900   # 15 min. La generación de meses cerrados no cambia; la del
+                        # mes en curso se refresca en el siguiente ciclo.
+
+
+def _panel_cache_get(key: str) -> dict | None:
+    entry = _PANEL_CACHE.get(key)
+    if entry and (_time.monotonic() - entry[0]) < PANEL_CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _panel_cache_set(key: str, data: dict) -> None:
+    _PANEL_CACHE[key] = (_time.monotonic(), data)
+
+
+def _sumar_opcional(valores: list) -> float | None:
+    """Suma ignorando None. Devuelve None si TODOS son None.
+
+    Distingue "nadie tiene compromiso" (None) de "el compromiso es cero" (0.0).
+    Un contrato sin compromiso cargado no debe arrastrar el consolidado a cero.
+    """
+    presentes = [v for v in valores if v is not None]
+    return round(sum(presentes), 3) if presentes else None
+
+
+def _consolidar_meses(meses_por_contrato: list[list[dict]]) -> list[dict]:
+    """Suma los 12 meses de N contratos en una sola serie consolidada.
+
+    Función pura: recibe las listas de meses ya construidas por
+    `_anual_meses_para_contrato` y no hace I/O.
+
+    Reglas (equivalentes a `loadConsolidado()` del frontend, más los casos que
+    aquél no contempla):
+      - min/max se suman solo entre los contratos que los tienen. Si ninguno
+        tiene, el mes queda en None, no en 0.
+      - El valor que se compara contra el compromiso es `valor_mwh`, que el
+        backend ya resolvió por mes (real / cierre proyectado / proyección).
+        Los meses en que un contrato no está vigente traen valor_mwh=None y por
+        lo tanto no aportan — que es justo lo que corresponde.
+      - `compras_bolsa_mwh` es el déficit DEL CONSOLIDADO (lo que dibuja la
+        gráfica). `suma_compras_bolsa_mwh` es la suma de los déficits de cada
+        contrato, que es el número operativo real: los contratos no se netean
+        entre sí, un excedente en uno no cubre el faltante de otro.
+    """
+    if not meses_por_contrato:
+        return []
+
+    consolidado = []
+    for i in range(12):
+        fila = [c[i] for c in meses_por_contrato if i < len(c)]
+        if not fila:
+            continue
+
+        min_mwh = _sumar_opcional([m.get("min_mwh") for m in fila])
+        max_mwh = _sumar_opcional([m.get("max_mwh") for m in fila])
+        valor   = _sumar_opcional([m.get("valor_mwh") for m in fila])
+        gen     = round(sum(m.get("gen_mwh") or 0 for m in fila), 3)
+
+        estado, compras, excedentes = "sin_compromisos", None, None
+        if min_mwh is not None or max_mwh is not None:
+            if valor is None:
+                estado = "sin_datos"
+            else:
+                efectivo_min = min_mwh if min_mwh is not None else 0.0
+                if valor < efectivo_min:
+                    estado, compras, excedentes = "deficit", round(efectivo_min - valor, 3), 0.0
+                elif max_mwh is not None and valor > max_mwh:
+                    estado, compras, excedentes = "excedente", 0.0, round(valor - max_mwh, 3)
+                else:
+                    estado, compras, excedentes = "ok", 0.0, 0.0
+
+        bolsa_dup = sum(m.get("exposicion_bolsa_duplicados_mwh") or 0 for m in fila)
+        ref = fila[0]
+
+        plantas = []
+        for m in fila:
+            for p in (m.get("plantas") or []):
+                plantas.append({**p, "contrato": m.get("_contrato_label")})
+
+        consolidado.append({
+            "month": i + 1,
+            "min_mwh": min_mwh,
+            "max_mwh": max_mwh,
+            "gen_mwh": gen,
+            "gen_proyectada_mwh": _sumar_opcional([m.get("gen_proyectada_mwh") for m in fila]),
+            "gen_proyectada_cierre": _sumar_opcional([m.get("gen_proyectada_cierre") for m in fila]),
+            "valor_mwh": valor,
+            "estado": estado,
+            "tipo_datos": ref.get("tipo_datos"),
+            "dia_actual": ref.get("dia_actual"),
+            "dias_restantes": ref.get("dias_restantes"),
+            "compras_bolsa_mwh": compras,
+            "excedentes_bolsa_mwh": excedentes,
+            "suma_compras_bolsa_mwh": _sumar_opcional([m.get("compras_bolsa_mwh") for m in fila]),
+            "suma_excedentes_bolsa_mwh": _sumar_opcional([m.get("excedentes_bolsa_mwh") for m in fila]),
+            "exposicion_bolsa_duplicados_mwh": round(bolsa_dup, 3) if bolsa_dup > 0 else None,
+            "n_contratos_con_compromiso": sum(
+                1 for m in fila if m.get("min_mwh") is not None or m.get("max_mwh") is not None
+            ),
+            "plantas": plantas,
+            "n_plantas": len(plantas),
+        })
+    return consolidado
+
+
+def _totales_tabla(meses: list[dict]) -> dict:
+    """Fila de la tabla 'Resumen anual por contrato': mín/máx anual y meses con compromiso."""
+    return {
+        "total_min_mwh": _sumar_opcional([m.get("min_mwh") for m in meses]),
+        "total_max_mwh": _sumar_opcional([m.get("max_mwh") for m in meses]),
+        "meses_con_compromisos": sum(
+            1 for m in meses if m.get("min_mwh") is not None or m.get("max_mwh") is not None
+        ),
+    }
+
+
+@router.get("/panel-anual")
+def get_panel_anual(
+    year: int = Query(..., ge=2020, le=2050, description="Año a consultar"),
+    incluir_plantas: bool = Query(True, description="Incluir el desglose planta por planta de cada mes"),
+    refrescar: bool = Query(False, description="Ignorar la caché y volver a consultar la generación"),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Todo lo que dibuja la pestaña Cumplimiento de /mem/cumplimiento, en una llamada.
+
+    Devuelve, para el año pedido:
+      - `consolidado`: los 12 meses con todos los contratos de venta sumados.
+      - `contratos[]`: cada contrato con sus 12 meses y los totales de la tabla resumen.
+
+    Pensado para paneles externos: el valor que se compara contra el compromiso ya
+    viene resuelto en `valor_mwh`, así que el consumidor no reimplementa reglas de
+    negocio y sus números no pueden divergir de los de la plataforma.
+
+    Cacheado 15 minutos en memoria (`?refrescar=true` para saltarla).
+    """
+    # incluir_todos va en la llave: si no, la respuesta filtrada y la completa se
+    # pisarían entre sí en la caché.
+    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}:{int(incluir_todos)}"
+    if not refrescar:
+        cached = _panel_cache_get(cache_key)
+        if cached is not None:
+            return {**cached, "desde_cache": True}
+
+    today = date.today()
+    contratos = _query_contratos_venta(db, year, solo_relevantes=not incluir_todos)
+
+    # GESCON por contrato/mes + compromisos, igual que get_anual_matriz.
+    gpm_por_contrato: dict = {}
+    comp_por_contrato: dict = {}
+    for c in contratos:
+        gpm_por_contrato[c.id] = {
+            m: (_resolve_gescon(db, c.numero_codigo_contrato, year, m) if c.numero_codigo_contrato else [])
+            for m in range(1, 13)
+        }
+        comp_por_contrato[c.id] = {
+            r.mes: r for r in db.query(PPACompromisoEnergia).filter(
+                PPACompromisoEnergia.contrato_id == c.id,
+                PPACompromisoEnergia.año == year,
+            ).all()
+        }
+
+    # Un solo set deduplicado de fetches para TODOS los contratos: una planta que
+    # despacha a tres contratos se consulta una vez, no tres.
+    need_month, need_avg, need_range = _build_fetch_sets(gpm_por_contrato, year, today)
+    month_cache: dict = {}
+    avg_cache: dict = {}
+    range_cache: dict = {}
+
+    if need_month or need_avg or need_range:
+        try:
+            token = _unergy_token()
+        except Exception as exc:
+            logger.error("Auth Unergy failed in get_panel_anual: %s", exc)
+            token = None
+
+        if token and need_month:
+            def _ft(task):
+                m, sp = task
+                return task, _fetch_month(token, sp, year, m)
+            with ThreadPoolExecutor(max_workers=min(len(need_month), 12)) as pool:
+                for task, res in pool.map(_ft, list(need_month)):
+                    month_cache[task] = res
+
+        if token and need_avg:
+            def _fa(sp):
+                return sp, _fetch_recent_avg(token, sp, n_days=30)
+            with ThreadPoolExecutor(max_workers=min(len(need_avg), 8)) as pool:
+                for sp, res in pool.map(_fa, list(need_avg)):
+                    avg_cache[sp] = res.get("avg_daily_mwh")
+
+        if token and need_range:
+            def _fr(task):
+                sp, start, end = task
+                return task, _fetch_range(token, sp, start, end)
+            with ThreadPoolExecutor(max_workers=min(len(need_range), 12)) as pool:
+                for task, res in pool.map(_fr, list(need_range)):
+                    range_cache[task] = res
+
+    out_contratos = []
+    meses_por_contrato = []
+    for c in contratos:
+        meses, _proyectos = _anual_meses_para_contrato(
+            c, year, gpm_por_contrato[c.id], comp_por_contrato[c.id],
+            month_cache, avg_cache, today, range_cache,
+        )
+        etiqueta = c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}"
+        # `_contrato_label` lo consume _consolidar_meses para etiquetar cada planta
+        # con el contrato al que aporta; no se expone en la respuesta.
+        for m in meses:
+            m["_contrato_label"] = etiqueta
+        meses_por_contrato.append(meses)
+
+        limpios = []
+        for m in meses:
+            fila = {k: v for k, v in m.items() if k != "_contrato_label"}
+            if not incluir_plantas:
+                fila.pop("plantas", None)
+            limpios.append(fila)
+
+        out_contratos.append({
+            "id": c.id,
+            "nombre_interno": c.nombre_interno,
+            "numero_codigo_contrato": c.numero_codigo_contrato,
+            "comprador_nombre": c.comprador_nombre,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            **_totales_tabla(meses),
+            **_rollup_cumplimiento(meses),
+            "meses": limpios,
+        })
+
+    consolidado_meses = _consolidar_meses(meses_por_contrato)
+    if not incluir_plantas:
+        for m in consolidado_meses:
+            m.pop("plantas", None)
+
+    payload = {
+        "year": year,
+        "generado_en": datetime.now(timezone.utc).isoformat(),
+        "consolidado": {
+            "nombre": "Consolidado (todos)",
+            "n_contratos": len(out_contratos),
+            **_totales_tabla(consolidado_meses),
+            "meses": consolidado_meses,
+        },
+        "contratos": out_contratos,
+    }
+    _panel_cache_set(cache_key, payload)
+    return {**payload, "desde_cache": False}

@@ -22,6 +22,7 @@ _REPORTE_CGM_TEXTO = (
     "Cordial Saludo,\n\n"
     "Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente "
     "{fecha_frase}, reportado al ASIC.\n\n"
+    "{nota_mensual}"
     "Quedamos atentos a cualquier observación al respecto.\n\n"
     "Atentamente,\n\n"
     "--\n"
@@ -44,6 +45,7 @@ _REPORTE_CGM_HTML = """\
   <p>Cordial Saludo,</p>
   <p>Por medio del presente correo remitimos el reporte de mediciones CGM correspondiente
   {fecha_frase}, reportado al ASIC.</p>
+  {nota_mensual}
   <p>Quedamos atentos a cualquier observación al respecto.</p>
   <p>Atentamente,</p>
   <br>
@@ -90,6 +92,8 @@ def _log_send(
     tipo: str,
     success: bool,
     error_msg: str | None = None,
+    proyectos: list[str] | None = None,
+    proyectos_total: int | None = None,
 ) -> None:
     """Log email send to database (fire-and-forget)."""
     try:
@@ -99,8 +103,8 @@ def _log_send(
         try:
             db.execute(sa_text("""
                 INSERT INTO email_envios
-                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at)
-                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts)
+                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total)
+                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total)
             """), {
                 "to": to_email,
                 "cc": ",".join(cc) if cc else None,
@@ -109,6 +113,8 @@ def _log_send(
                 "ok": success,
                 "err": error_msg,
                 "ts": datetime.now(timezone.utc),
+                "proyectos": ",".join(proyectos) if proyectos else None,
+                "proyectos_total": proyectos_total,
             })
             db.commit()
         except Exception as e:
@@ -583,9 +589,26 @@ def send_reporte_cgm_email(
     filename: str,
     fecha_str: str,
     destinatario_nombre: str,
+    proyectos: list[str] | None = None,
+    proyectos_total: int | None = None,
+    excel_mensual_bytes: bytes | None = None,
+    filename_mensual: str | None = None,
+    mes_str: str | None = None,
+    adjuntos_extra: list[tuple[bytes, str]] | None = None,
 ) -> None:
     """
     Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
+
+    excel_mensual_bytes/filename_mensual/mes_str son opcionales -- se usan
+    solo cuando el envío cubre el último día de un mes, para adjuntar
+    ADEMÁS el consolidado de todo ese mes (mismo formato, más días). Ver
+    reporte_cgm.dias_del_mes()/es_ultimo_dia_del_mes().
+
+    adjuntos_extra: lista de (bytes, filename) adicionales -- para clientes
+    puntuales que piden un Excel separado por proyecto en vez de uno
+    combinado, todos en el mismo correo (ver CLIENTES_EXCEL_POR_PROYECTO en
+    reporte_cgm.py).
+
     Lanza RuntimeError si SMTP no está configurado o falla el envío.
     """
     if not settings.SMTP_HOST:
@@ -596,6 +619,10 @@ def send_reporte_cgm_email(
 
     subject = f"Reporte CGM — {fecha_str} — {destinatario_nombre}"
     fecha_frase = f"al periodo {fecha_str}" if " a " in fecha_str else f"al día {fecha_str}"
+    nota_mensual_texto = f"Adjuntamos también el consolidado del mes de {mes_str}.\n\n" if excel_mensual_bytes else ""
+    nota_mensual_html = (
+        f'<p>Adjuntamos también el consolidado del mes de {mes_str}.</p>' if excel_mensual_bytes else ""
+    )
 
     msg = MIMEMultipart("mixed")
     msg["From"] = settings.SMTP_FROM
@@ -604,8 +631,12 @@ def send_reporte_cgm_email(
 
     cuerpo = MIMEMultipart("related")
     alternativa = MIMEMultipart("alternative")
-    alternativa.attach(MIMEText(_REPORTE_CGM_TEXTO.format(fecha_frase=fecha_frase), "plain", "utf-8"))
-    alternativa.attach(MIMEText(_REPORTE_CGM_HTML.format(fecha_frase=fecha_frase), "html", "utf-8"))
+    alternativa.attach(MIMEText(
+        _REPORTE_CGM_TEXTO.format(fecha_frase=fecha_frase, nota_mensual=nota_mensual_texto), "plain", "utf-8",
+    ))
+    alternativa.attach(MIMEText(
+        _REPORTE_CGM_HTML.format(fecha_frase=fecha_frase, nota_mensual=nota_mensual_html), "html", "utf-8",
+    ))
     cuerpo.attach(alternativa)
 
     if _LOGO_UNERGY.exists():
@@ -617,16 +648,30 @@ def send_reporte_cgm_email(
 
     msg.attach(cuerpo)
 
-    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    adjunto.set_payload(excel_bytes)
-    encoders.encode_base64(adjunto)
     # filename como parámetro aparte (no interpolado en el string) -- así
     # Python aplica la codificación RFC 2231 si el nombre tiene tildes/ñ
     # (ej. "COX ENERGY GENERACIÓN...", "CGM Ingeniería"). Interpolado a mano
     # como antes, Gmail no lo interpretaba y mostraba el adjunto sin nombre
     # ni ícono ("noname").
+    adjunto = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    adjunto.set_payload(excel_bytes)
+    encoders.encode_base64(adjunto)
     adjunto.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(adjunto)
+
+    if excel_mensual_bytes:
+        adjunto_mensual = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        adjunto_mensual.set_payload(excel_mensual_bytes)
+        encoders.encode_base64(adjunto_mensual)
+        adjunto_mensual.add_header("Content-Disposition", "attachment", filename=filename_mensual)
+        msg.attach(adjunto_mensual)
+
+    for extra_bytes, extra_filename in (adjuntos_extra or []):
+        adjunto_extra = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        adjunto_extra.set_payload(extra_bytes)
+        encoders.encode_base64(adjunto_extra)
+        adjunto_extra.add_header("Content-Disposition", "attachment", filename=extra_filename)
+        msg.attach(adjunto_extra)
 
     # CCO real (no aparece en ningún header, solo en el sobre SMTP) -- lista de
     # seguimiento interno, igual que CORREO_SEGUIMIENTO en el script standalone.
@@ -635,9 +680,15 @@ def send_reporte_cgm_email(
 
     try:
         _smtp_send(msg, sobres)
-        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True)
+        _log_send(
+            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True,
+            proyectos=proyectos, proyectos_total=proyectos_total,
+        )
     except Exception as exc:
-        _log_send(to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False, error_msg=str(exc))
+        _log_send(
+            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False,
+            error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
+        )
         raise RuntimeError(f"No se pudo enviar el reporte CGM: {exc}") from exc
 
 

@@ -104,7 +104,7 @@ def _parse_monto(texto: str | None) -> Decimal | None:
         return None
 
 
-def _safe_filename(nombre: str) -> str:
+def safe_filename(nombre: str) -> str:
     return re.sub(r'[/\\:*?"<>|]', "-", nombre)
 
 
@@ -184,7 +184,10 @@ def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> tuple[int | N
     Devuelve (contrato_id, ratio) del mejor match.
 
     Estrategia en orden:
-    1. Substring exacto del nombre distintivo en el nombre BD normalizado
+    1. Substring exacto del nombre distintivo en el nombre BD normalizado — solo se acepta
+       si hay EXACTAMENTE un contrato candidato (evita colisiones como "Chiriguaná 2" siendo
+       substring de "Chiriguaná 24"; si hay varios, se devuelve ambiguo (None, -1.0) en vez
+       de adivinar el primero).
     2. SequenceMatcher sobre nombre completo normalizado (umbral 0.78)
     """
     if not contratos:
@@ -193,19 +196,22 @@ def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> tuple[int | N
     norm_extraido = _normalizar(nombre_extraido)
     distintivo = _normalizar(_nombre_distintivo(nombre_extraido))
 
+    if distintivo and len(distintivo) >= 4:
+        candidatos = [
+            c["contrato_id"] for c in contratos
+            if distintivo in _normalizar(c["nombre_proyecto"])
+            or _normalizar(_nombre_distintivo(c["nombre_proyecto"])) in norm_extraido
+        ]
+        if len(candidatos) == 1:
+            return candidatos[0], 1.0
+        if len(candidatos) > 1:
+            return None, -1.0  # ambiguo entre varios contratos — mejor no adivinar
+
+    # Estrategia 2: fuzzy sobre nombre completo
     mejor_ratio = 0.0
     mejor_id = None
-
     for c in contratos:
         norm_bd = _normalizar(c["nombre_proyecto"])
-        distintivo_bd = _normalizar(_nombre_distintivo(c["nombre_proyecto"]))
-
-        # Estrategia 1: substring bidireccional del nombre distintivo
-        if distintivo and len(distintivo) >= 4:
-            if distintivo in norm_bd or distintivo_bd in norm_extraido:
-                return c["contrato_id"], 1.0
-
-        # Estrategia 2: fuzzy sobre nombre completo
         ratio = SequenceMatcher(None, norm_extraido, norm_bd).ratio()
         if ratio > mejor_ratio:
             mejor_ratio = ratio
@@ -214,6 +220,92 @@ def match_proyecto(nombre_extraido: str, contratos: list[dict]) -> tuple[int | N
     if mejor_ratio >= _UMBRAL_FUZZY:
         return mejor_id, mejor_ratio
     return None, mejor_ratio
+
+
+# ── Detección (sin escritura) ──────────────────────────────────────────────────
+
+def detectar_paginas(ruta_pdf: Path, contratos: list[dict]) -> dict:
+    """
+    Recorre el PDF y clasifica cada página por contrato — SIN escribir ningún
+    archivo. Separado de `dividir_pdf()` para poder reusarse en contextos de
+    solo-lectura (ej. backfill histórico sobre facturas ya guardadas, que no
+    debe tocar `OMDocumentoProyecto` de meses ya facturados).
+
+    Returns:
+        {
+          'asignadas': {contrato_id: (lista_indices_0based, datos_ultima_factura)},
+          'sin_match': [{'pagina', 'nombre_extraido', 'estrategia', 'razon',
+                          'muestra_texto', 'numero_factura'}],
+        }
+    """
+    sin_match: list[dict] = []
+    paginas_por_contrato: dict[int, tuple[list[int], dict]] = {}
+
+    with pdfplumber.open(ruta_pdf) as pdf:
+        for i, pagina in enumerate(pdf.pages):
+            texto = pagina.extract_text() or ""
+            datos = extraer_datos_pagina(texto)
+            nombre = datos["nombre_proyecto"]
+
+            if not nombre:
+                sin_match.append({
+                    "pagina": i + 1,
+                    "nombre_extraido": None,
+                    "estrategia": None,
+                    "razon": "no_se_extrajo_nombre",
+                    "muestra_texto": texto[:300].strip(),
+                    "numero_factura": datos.get("numero_factura"),
+                })
+                continue
+
+            contrato_id, ratio = match_proyecto(nombre, contratos)
+            if contrato_id is None:
+                razon = (
+                    "match_ambiguo_multiples_contratos" if ratio < 0
+                    else f"sin_match_fuzzy (mejor ratio: {ratio:.2f})"
+                )
+                sin_match.append({
+                    "pagina": i + 1,
+                    "nombre_extraido": nombre,
+                    "estrategia": datos["estrategia"],
+                    "razon": razon,
+                    "muestra_texto": nombre,
+                    "numero_factura": datos.get("numero_factura"),
+                })
+                continue
+
+            if contrato_id not in paginas_por_contrato:
+                paginas_por_contrato[contrato_id] = ([], datos)
+            paginas_por_contrato[contrato_id][0].append(i)
+
+    return {"asignadas": paginas_por_contrato, "sin_match": sin_match}
+
+
+def extraer_pagina_datos(ruta_pdf: Path, pagina: int) -> dict:
+    """Metadata de UNA página aislada (1-indexed) — usado en asignación manual
+    de un `sin_match`, donde solo hace falta esa página puntual."""
+    with pdfplumber.open(ruta_pdf) as pdf:
+        texto = pdf.pages[pagina - 1].extract_text() or ""
+    return extraer_datos_pagina(texto)
+
+
+def escribir_o_anexar_pagina(ruta_pdf_origen: Path, pagina: int, ruta_salida: Path) -> None:
+    """
+    Extrae una página (1-indexed) de `ruta_pdf_origen` y la agrega a
+    `ruta_salida`: si ya existe (el contrato ya tenía documento ese período,
+    ej. por otras páginas que sí matchearon), conserva sus páginas actuales y
+    anexa la nueva; si no existe, la crea.
+    """
+    writer = PdfWriter()
+    if ruta_salida.exists():
+        for p in PdfReader(str(ruta_salida)).pages:
+            writer.add_page(p)
+    reader_origen = PdfReader(str(ruta_pdf_origen))
+    writer.add_page(reader_origen.pages[pagina - 1])
+
+    ruta_salida.parent.mkdir(parents=True, exist_ok=True)
+    with open(ruta_salida, "wb") as f:
+        writer.write(f)
 
 
 # ── Función principal ─────────────────────────────────────────────────────────
@@ -241,49 +333,16 @@ def dividir_pdf(
         }
     """
     directorio_salida.mkdir(parents=True, exist_ok=True)
-    sin_match: list[dict] = []
-    # paginas_por_contrato: contrato_id → (lista_indices, datos_ultima_factura)
-    paginas_por_contrato: dict[int, tuple[list[int], dict]] = {}
+    deteccion = detectar_paginas(ruta_pdf, contratos)
+    paginas_por_contrato = deteccion["asignadas"]
 
     reader = PdfReader(str(ruta_pdf))
-    with pdfplumber.open(ruta_pdf) as pdf:
-        for i, pagina in enumerate(pdf.pages):
-            texto = pagina.extract_text() or ""
-            datos = extraer_datos_pagina(texto)
-            nombre = datos["nombre_proyecto"]
-
-            if not nombre:
-                sin_match.append({
-                    "pagina": i + 1,
-                    "nombre_extraido": None,
-                    "estrategia": None,
-                    "razon": "no_se_extrajo_nombre",
-                    "muestra_texto": texto[:300].strip(),
-                    "numero_factura": datos.get("numero_factura"),
-                })
-                continue
-
-            contrato_id, ratio = match_proyecto(nombre, contratos)
-            if contrato_id is None:
-                sin_match.append({
-                    "pagina": i + 1,
-                    "nombre_extraido": nombre,
-                    "estrategia": datos["estrategia"],
-                    "razon": f"sin_match_fuzzy (mejor ratio: {ratio:.2f})",
-                    "muestra_texto": nombre,
-                    "numero_factura": datos.get("numero_factura"),
-                })
-                continue
-
-            if contrato_id not in paginas_por_contrato:
-                paginas_por_contrato[contrato_id] = ([], datos)
-            paginas_por_contrato[contrato_id][0].append(i)
 
     # Escribir un PDF por contrato con todas sus páginas
     procesados: list[dict] = []
     for contrato_id, (indices, datos) in paginas_por_contrato.items():
         contrato = next(c for c in contratos if c["contrato_id"] == contrato_id)
-        safe_nombre = _safe_filename(contrato["nombre_proyecto"])
+        safe_nombre = safe_filename(contrato["nombre_proyecto"])
         nombre_archivo = f"SOFV_{safe_nombre}_{periodo}_mantenimiento.pdf"
         ruta_salida = directorio_salida / nombre_archivo
 
@@ -306,4 +365,4 @@ def dividir_pdf(
             "cufe": datos.get("cufe"),
         })
 
-    return {"procesados": procesados, "sin_match": sin_match}
+    return {"procesados": procesados, "sin_match": deteccion["sin_match"]}

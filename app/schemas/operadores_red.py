@@ -42,6 +42,16 @@ class OperadorRedContactoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OperadorRedCreate(BaseModel):
+    nombre_legal: str
+    nombre_comercial: Optional[str] = None
+
+
+class OperadorRedUpdate(BaseModel):
+    nombre_legal: Optional[str] = None
+    nombre_comercial: Optional[str] = None
+
+
 class OperadorRedOut(BaseModel):
     id: int
     nombre_legal: str

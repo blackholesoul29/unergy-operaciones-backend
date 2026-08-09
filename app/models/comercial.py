@@ -1,23 +1,42 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import (BigInteger, String, Boolean, Date, DateTime,
-                        ForeignKey, Enum as SAEnum, Text)
+from sqlalchemy import (BigInteger, Integer, String, Boolean, Date, DateTime,
+                        ForeignKey, Enum as SAEnum, Numeric, Text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
 
 
-class EstadoOportunidadEnum(str, enum.Enum):
-    # Pipeline de 6 estados (2026-07-15). Los 4 anteriores se renombraron in-place:
-    # oferta→envio_oferta, negociacion→negociacion_contrato, servicio_operativo→operando
-    # (que a su vez venía de 'fin'). firmado y declinado son nuevos.
-    prospeccion = "prospeccion"
-    envio_oferta = "envio_oferta"
-    negociacion_contrato = "negociacion_contrato"
+class EstadoComercialEnum(str, enum.Enum):
+    """Pipeline de 6 etapas. Desde 2026-08-02 vive en la OFERTA, no en el cliente:
+    una oferta se envía, se acepta y se firma por su cuenta, sin arrastrar a sus
+    hermanas del mismo cliente (Tecni-plast tiene Margaritas 1 firmada y
+    Margaritas 2 todavía en envío).
+
+    Vocabulario actual y de dónde viene cada valor:
+      oportunidad ← prospeccion
+      oferta      ← envio_oferta (que en 2026-07-15 venía de 'oferta'; vuelve al original)
+      contrato    ← negociacion_contrato
+      firmado, operando (← servicio_operativo ← 'fin'), declinado
+      terminado   nuevo: el suministro llegó a su fecha_fin
+    El tipo PostgreSQL sigue llamándose estado_oportunidad_enum: renombrarlo no
+    aporta nada y sí agrega un modo de falla en el arranque.
+    """
+
+    oportunidad = "oportunidad"
+    oferta = "oferta"
+    contrato = "contrato"
     firmado = "firmado"
     operando = "operando"
+    # El contrato corrió y se venció. No se mueve a mano: lo pone el job diario
+    # cuando pasa la fecha_fin del PPA (ver cerrar_contratos_vencidos).
+    terminado = "terminado"
     declinado = "declinado"
+
+
+# Alias de compatibilidad: el nombre viejo siguió importándose en varios módulos.
+EstadoOportunidadEnum = EstadoComercialEnum
 
 
 class TipoServicioOportunidadEnum(str, enum.Enum):
@@ -59,10 +78,13 @@ class Oportunidad(Base):
     nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tipo_servicio: Mapped[str | None] = mapped_column(
         SAEnum(TipoServicioOportunidadEnum, name="tipo_servicio_oportunidad_enum"), nullable=True)
+    # DEPRECADO (2026-08-02): el estado del pipeline se mudó a la oferta. La
+    # columna sigue aquí porque borrarla rompería los históricos y no aporta
+    # nada; la API ya no la lee, deriva el estado del cliente de sus ofertas
+    # (la más avanzada). No escribir aquí sin actualizar también las ofertas.
     estado: Mapped[str] = mapped_column(
-        SAEnum(EstadoOportunidadEnum, name="estado_oportunidad_enum"),
-        nullable=False, default="prospeccion")
-    # Timestamp de la última transición de estado — base del contador de alerta.
+        SAEnum(EstadoComercialEnum, name="estado_oportunidad_enum"),
+        nullable=False, default="oportunidad")
     estado_desde: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     # Consecutivo manual por ahora (automatización = futuro explícito).
     numero_oferta: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -98,12 +120,19 @@ class Oportunidad(Base):
 
 
 class OportunidadEstadoHistorial(Base):
-    """Una fila por transición de estado (y una al crear, con anterior=NULL)."""
+    """Una fila por transición de estado (y una al crear, con anterior=NULL).
+
+    Desde 2026-08-02 las transiciones son de la OFERTA: `oferta_id` dice cuál.
+    Las filas viejas lo traen NULL — son del tiempo en que el estado era del
+    cliente — y se conservan como histórico.
+    """
 
     __tablename__ = "oportunidad_estado_historial"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     oportunidad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=False, index=True)
+    oferta_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("oportunidad_ofertas.id", ondelete="CASCADE"), nullable=True, index=True)
     estado_anterior: Mapped[str | None] = mapped_column(String(20), nullable=True)
     estado_nuevo: Mapped[str] = mapped_column(String(20), nullable=False)
     usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
@@ -145,6 +174,15 @@ class OportunidadOferta(Base):
     proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     numero_oferta: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     precio_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Etapa del pipeline DE ESTA OFERTA (2026-08-02). Fuente única de la verdad.
+    estado: Mapped[str] = mapped_column(
+        SAEnum(EstadoComercialEnum, name="estado_oportunidad_enum"),
+        nullable=False, default="oportunidad", server_default="oportunidad")
+    # Entrada a la etapa actual — base del contador de días sin respuesta.
+    estado_desde: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    # DERIVADO de `estado` (ver estado_a_resultado). Se conserva porque lo leen
+    # el import de hojas y las vistas viejas; nunca se edita a mano.
     resultado: Mapped[str] = mapped_column(
         SAEnum(ResultadoOfertaEnum, name="resultado_oferta_enum"),
         nullable=False, default="pendiente", server_default="pendiente")
@@ -155,6 +193,40 @@ class OportunidadOferta(Base):
     # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
     # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.
     detalle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Envío de la oferta (2026-07-28). fecha_oferta (arriba) es el PRIMER envío;
+    # aquí van los toques posteriores y la respuesta del cliente. Que
+    # fecha_ultima_respuesta sea NULL significa que el cliente NUNCA respondió,
+    # que es la señal fuerte del tablero (Los Apóstoles: 6 toques, 0 respuestas).
+    seguimientos: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    fecha_ultima_respuesta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    documento_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # ── En qué contrato desembocó la oferta (2026-08-02) ─────────────────────
+    # Una oferta evoluciona en un contrato: compra de energía → PPA, servicios
+    # → contrato de representación/O&M. Las condiciones comerciales (periodo,
+    # tarifa, indexación, energía contratada, carpeta de soporte) NO se copian
+    # aquí: ya viven en ppa_contratos / contratos_servicio, que es lo que leen
+    # Cumplimiento y Liquidaciones. Duplicarlas garantizaría que se desincronicen.
+    ppa_contrato_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ppa_contratos.id", ondelete="SET NULL"), nullable=True, index=True)
+    contrato_servicio_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("contratos_servicio.id", ondelete="SET NULL"), nullable=True, index=True)
+    # ── Ficha operativa declarada (2026-08-03) ───────────────────────────────
+    # Lo que el equipo consulta por API vive en `proyectos`, pero la mayoría de
+    # las ofertas del pipeline no tienen proyecto todavía (la planta no existe).
+    # Estas columnas son el fallback declarado; la API resuelve por cascada
+    # Proyecto → oferta → null y dice de dónde salió cada dato (ficha_operativa).
+    municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Solo el FK al catálogo, sin texto libre: `proyectos.operador_red` (texto)
+    # ya está declarado legacy en su propio modelo y no se repite el error. Si
+    # falta un operador, se arregla el catálogo.
+    operador_red_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
+    # Generación mensual ESTIMADA, en kWh para hablar el idioma del CRM
+    # (cantidad_minima_kwh_mes). No confundir con esa: aquella es un compromiso
+    # contractual del PPA, esta es una estimación técnica de la planta.
+    energia_promedio_kwh_mes: Mapped[float | None] = mapped_column(
+        Numeric(14, 3), nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

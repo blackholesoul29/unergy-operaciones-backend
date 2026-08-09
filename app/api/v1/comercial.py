@@ -1,7 +1,10 @@
-"""CRM comercial: pipeline Prospección→Oferta→Negociación→Fin.
+"""CRM comercial: pipeline Oportunidad→Oferta→Contrato→Firmado→Operando→Declinado.
 
 Capa PREVIA a operación — reutiliza Cliente/Proyecto/Contactos/Documentos
 existentes. Solo roles admin y comercial (lectura y escritura).
+
+Desde 2026-08-02 la etapa del pipeline es de la OFERTA. El cliente no tiene
+estado propio: el que se muestra en su fila es el de su oferta más avanzada.
 """
 import json
 import re
@@ -25,11 +28,15 @@ from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion, OportunidadOferta,
 )
+from app.models.contratos import PPAContrato, PPATarifa
 from app.schemas.comercial import (
     OportunidadCreate, OportunidadUpdate, EstadoChangeIn, GestionCreate, ProyectoDesdeCRMIn,
-    OfertaCreate, OfertaUpdate,
+    OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
-from app.services.comercial import calcular_alerta, col_now
+from app.services.comercial import (
+    calcular_alerta, col_now, contexto_ficha, estado_a_resultado, ficha_operativa,
+    resumen_etapas,
+)
 
 router = APIRouter(prefix="/comercial", tags=["comercial"])
 
@@ -48,6 +55,15 @@ def _get_oportunidad_or_404(id: int, db: Session) -> Oportunidad:
     if not op:
         raise HTTPException(404, "Oportunidad no encontrada")
     return op
+
+
+def _validar_operador_red(db: Session, operador_red_id: int | None) -> None:
+    """El FK al catálogo se valida aquí y no en la BD: sin esto, un id inventado
+    revienta como IntegrityError 500 en vez de un 422 con mensaje."""
+    if operador_red_id is None:
+        return
+    if not db.query(OperadorRed.id).filter(OperadorRed.id == operador_red_id).first():
+        raise HTTPException(422, "operador_red_id no existe en el catálogo de operadores")
 
 
 def _proyecto_out(p: Proyecto) -> dict:
@@ -104,20 +120,50 @@ def _gen_codigo(db: Session, tipo: str, fecha) -> str:
     return f"OP.{seg} No.{_next_consecutivo(db):04d}-{ref.month}-{ref.year}"
 
 
-def _oferta_out(o: OportunidadOferta) -> dict:
+def _valor(v):
+    """Enum de SQLAlchemy → str; deja pasar lo que ya es str o None."""
+    return v if isinstance(v, (str, type(None))) else v.value
+
+
+def _oferta_out(o: OportunidadOferta, ficha: dict | None = None) -> dict:
     return {
         "id": o.id, "oportunidad_id": o.oportunidad_id,
-        "tipo": o.tipo if isinstance(o.tipo, str) else o.tipo.value,
+        "tipo": _valor(o.tipo),
         "planta_nombre": o.planta_nombre, "proyecto_id": o.proyecto_id,
         "numero_oferta": o.numero_oferta,
         "codigo_seguimiento": _norm_codigo(o.numero_oferta),
         "precio_detalle": o.precio_detalle,
-        "resultado": o.resultado if isinstance(o.resultado, str) else o.resultado.value,
+        # Etapa propia de la oferta. `resultado` se deriva de ella y viaja solo
+        # para que no se rompa lo que ya lo leía.
+        "estado": _valor(o.estado),
+        "estado_desde": o.estado_desde,
+        "resultado": _valor(o.resultado),
         "etapa_texto": o.etapa_texto, "fecha_oferta": o.fecha_oferta,
         "fecha_tentativa_inicio": o.fecha_tentativa_inicio,
         "contrato_firmado": o.contrato_firmado, "detalle": o.detalle, "notas": o.notas,
+        "seguimientos": o.seguimientos or 0,
+        "fecha_ultima_respuesta": o.fecha_ultima_respuesta,
+        "documento_url": o.documento_url,
+        # En qué contrato desembocó. Las condiciones viven allá, no aquí.
+        "ppa_contrato_id": o.ppa_contrato_id,
+        "contrato_servicio_id": o.contrato_servicio_id,
+        # Lo DECLARADO en la oferta, en crudo: el editor necesita distinguirlo de
+        # lo resuelto en `ficha` (que puede venir del Proyecto).
+        "municipio": o.municipio,
+        "departamento": o.departamento,
+        "operador_red_id": o.operador_red_id,
+        "energia_promedio_kwh_mes": (float(o.energia_promedio_kwh_mes)
+                                     if o.energia_promedio_kwh_mes is not None else None),
+        # Los 6 parámetros resueltos por cascada + de dónde salió cada uno.
+        "ficha": ficha,
         "created_at": o.created_at, "updated_at": o.updated_at,
     }
+
+
+def _fichas(db: Session, ofertas) -> dict[int, dict]:
+    """{oferta_id: ficha} con la precarga por lotes hecha una sola vez."""
+    ctx = contexto_ficha(db, ofertas)
+    return {o.id: ficha_operativa(o, **ctx[o.id]) for o in ofertas}
 
 
 def _resumen_ofertas(ofertas) -> dict:
@@ -129,19 +175,32 @@ def _resumen_ofertas(ofertas) -> dict:
     return out
 
 
-def _op_base_out(op: Oportunidad, cliente: Cliente, ultima_gestion, ahora: datetime) -> dict:
-    estado = op.estado if isinstance(op.estado, str) else op.estado.value
-    dias, alerta = calcular_alerta(estado, op.estado_desde, ultima_gestion,
-                                   settings.COMERCIAL_ALERTA_DIAS, ahora)
+def _op_base_out(op: Oportunidad, cliente: Cliente, ultima_gestion, ahora: datetime,
+                 ofertas_estado: list[tuple] | None = None) -> dict:
+    """`ofertas_estado` es [(estado, estado_desde), …] de las ofertas del cliente.
+
+    Un cliente NO tiene etapa: el negocio es la oferta. Por eso aquí va
+    `etapas` —el conteo por etapa de sus ofertas— y no un estado único. La
+    alerta sí se agrega: es la de la oferta más rezagada de las abiertas, para
+    que una sola oferta olvidada marque al cliente en la lista.
+    """
+    etapas = resumen_etapas(e for e, _ in (ofertas_estado or []))
+    dias, alerta = 0, False
+    for e, desde in (ofertas_estado or []):
+        d, a = calcular_alerta(e, desde or op.estado_desde, ultima_gestion,
+                               settings.COMERCIAL_ALERTA_DIAS, ahora)
+        if a and (not alerta or d > dias):
+            dias, alerta = d, True
+        elif not alerta and d > dias:
+            dias = d
     return {
         "id": op.id,
+        "etapas": etapas,
         "nombre": op.nombre or cliente.razon_social_nombre,
         "cliente_id": op.cliente_id,
         "cliente_razon_social": cliente.razon_social_nombre,
         "cliente_nit": cliente.nit_cedula,
         "tipo_servicio": op.tipo_servicio if isinstance(op.tipo_servicio, (str, type(None))) else op.tipo_servicio.value,
-        "estado": estado,
-        "estado_desde": op.estado_desde,
         "numero_oferta": op.numero_oferta,
         "es_migrada": op.es_migrada,
         "dias_sin_respuesta": dias,
@@ -188,7 +247,10 @@ def list_oportunidades(
         .filter(Oportunidad.deleted_at.is_(None), Cliente.deleted_at.is_(None))
     )
     if estado:
-        qy = qy.filter(Oportunidad.estado == estado)
+        # El estado ya no es del cliente: se filtra por tener ≥1 oferta en esa etapa.
+        con_estado = db.query(OportunidadOferta.oportunidad_id).filter(
+            OportunidadOferta.estado == estado).subquery()
+        qy = qy.filter(Oportunidad.id.in_(db.query(con_estado.c.oportunidad_id)))
     if tipo_servicio:
         # Nuevo: filtra oportunidades que tengan ≥1 sub-oferta de ese tipo.
         con_oferta = db.query(OportunidadOferta.oportunidad_id).filter(
@@ -221,16 +283,19 @@ def list_oportunidades(
     # identidad de su oferta líder; todas comparten la familia OP.*.
     lead_por_op: dict = {}
     num_ofertas_por_op: dict = {}
+    estados_por_op: dict = {}
     if op_ids:
         ofs = (
             db.query(OportunidadOferta.oportunidad_id, OportunidadOferta.numero_oferta,
                      OportunidadOferta.planta_nombre, OportunidadOferta.tipo,
                      OportunidadOferta.proyecto_id, OportunidadOferta.fecha_oferta,
-                     OportunidadOferta.id)
+                     OportunidadOferta.id, OportunidadOferta.estado,
+                     OportunidadOferta.estado_desde)
             .filter(OportunidadOferta.oportunidad_id.in_(op_ids)).all()
         )
-        for oid, num, planta, tipo, pid, fecha, ofid in ofs:
+        for oid, num, planta, tipo, pid, fecha, ofid, estado, estado_desde in ofs:
             num_ofertas_por_op[oid] = num_ofertas_por_op.get(oid, 0) + 1
+            estados_por_op.setdefault(oid, []).append((_valor(estado), estado_desde))
             # clave de "más reciente": fecha_oferta (date.min si falta) y luego id
             clave = (fecha or date.min, ofid)
             prev = lead_por_op.get(oid)
@@ -243,7 +308,7 @@ def list_oportunidades(
                 })
     out = []
     for op, cli, ultima, n_proy, kwp in filas:
-        row = _op_base_out(op, cli, ultima, ahora)
+        row = _op_base_out(op, cli, ultima, ahora, estados_por_op.get(op.id))
         row["num_proyectos"] = int(n_proy or 0)
         row["capacidad_total_kwp"] = float(kwp or 0)
         row["resumen_ofertas"] = resumen_por_op.get(op.id, {})
@@ -290,7 +355,7 @@ def list_ofertas_todas(
     if tipo:
         qy = qy.filter(OportunidadOferta.tipo == tipo)
     if estado:
-        qy = qy.filter(Oportunidad.estado == estado)
+        qy = qy.filter(OportunidadOferta.estado == estado)
     if resultado:
         qy = qy.filter(OportunidadOferta.resultado == resultado)
     if q:
@@ -303,19 +368,20 @@ def list_ofertas_todas(
         )
     ahora = col_now()
     filas = qy.order_by(OportunidadOferta.updated_at.desc(), OportunidadOferta.id.desc()).all()
+    fichas = _fichas(db, [of for of, _, _, _ in filas])
     out = []
     for of, op, cli, ultima in filas:
-        estado_op = op.estado if isinstance(op.estado, str) else op.estado.value
-        dias, alerta = calcular_alerta(estado_op, op.estado_desde, ultima,
-                                       settings.COMERCIAL_ALERTA_DIAS, ahora)
-        row = _oferta_out(of)
+        # La alerta es de la oferta: cuenta desde que ENTRÓ a su etapa actual, no
+        # desde que el cliente cambió de estado. Una oferta firmada ya no alerta
+        # aunque su hermana lleve meses sin respuesta.
+        dias, alerta = calcular_alerta(_valor(of.estado), of.estado_desde or op.estado_desde,
+                                       ultima, settings.COMERCIAL_ALERTA_DIAS, ahora)
+        row = _oferta_out(of, fichas[of.id])
         row.update({
             "cliente_id": op.cliente_id,
             "cliente_razon_social": cli.razon_social_nombre,
             "cliente_nit": cli.nit_cedula,
             "oportunidad_nombre": op.nombre or cli.razon_social_nombre,
-            "estado": estado_op,                # etapa del pipeline (heredada de la oportunidad)
-            "estado_desde": op.estado_desde,
             "dias_sin_respuesta": dias,
             "alerta": alerta,
         })
@@ -374,7 +440,7 @@ def create_oportunidad(
         nombre=data.nombre,
         tipo_servicio=data.tipo_servicio,
         notas=data.notas,
-        estado="prospeccion",          # SIEMPRE server-side (spec §3.1)
+        estado="oportunidad",          # SIEMPRE server-side (spec §3.1)
         estado_desde=col_now(),
         creado_por_usuario_id=current.id,
     )
@@ -382,7 +448,7 @@ def create_oportunidad(
     db.flush()
     db.add(OportunidadEstadoHistorial(
         oportunidad_id=op.id, estado_anterior=None,
-        estado_nuevo="prospeccion", usuario_id=current.id))
+        estado_nuevo="oportunidad", usuario_id=current.id))
     db.commit()
     db.refresh(op)
     return _op_base_out(op, cliente, None, col_now()) | {"num_proyectos": 0, "capacidad_total_kwp": 0.0}
@@ -407,7 +473,9 @@ def get_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario = D
     if not op:
         raise HTTPException(404, "Oportunidad no encontrada")
     ultima = op.gestiones[0].fecha if op.gestiones else None
-    base = _op_base_out(op, op.cliente, ultima, col_now())
+    base = _op_base_out(op, op.cliente, ultima, col_now(),
+                        [(_valor(o.estado), o.estado_desde) for o in op.ofertas])
+    fichas_op = _fichas(db, op.ofertas)
     base.update({
         "notas": op.notas,
         "fecha_tentativa_inicio_representacion": op.fecha_tentativa_inicio_representacion,
@@ -437,10 +505,10 @@ def get_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario = D
         "historial": [
             {"id": h.id, "estado_anterior": h.estado_anterior,
              "estado_nuevo": h.estado_nuevo, "fecha": h.created_at,
-             "usuario_id": h.usuario_id}
+             "usuario_id": h.usuario_id, "oferta_id": h.oferta_id}
             for h in op.historial
         ],
-        "ofertas": [_oferta_out(o) for o in op.ofertas],
+        "ofertas": [_oferta_out(o, fichas_op[o.id]) for o in op.ofertas],
         "resumen_ofertas": _resumen_ofertas(op.ofertas),
     })
     return base
@@ -475,18 +543,64 @@ def cambiar_estado(
     id: int, data: EstadoChangeIn,
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
+    """Mueve TODAS las ofertas del cliente a una etapa. Se conserva porque el
+    tablero viejo arrastra la tarjeta del cliente; para mover una sola oferta
+    —que es lo normal— está POST /ofertas/{id}/estado."""
     _check_comercial(current)
     op = _get_oportunidad_or_404(id, db)
-    actual = op.estado if isinstance(op.estado, str) else op.estado.value
-    if data.estado == actual:
-        raise HTTPException(409, f"La oportunidad ya está en '{actual}'")
-    db.add(OportunidadEstadoHistorial(
-        oportunidad_id=op.id, estado_anterior=actual,
-        estado_nuevo=data.estado, usuario_id=current.id))
-    op.estado = data.estado
-    op.estado_desde = col_now()
+    ofertas = db.query(OportunidadOferta).filter(
+        OportunidadOferta.oportunidad_id == op.id).all()
+    ahora = col_now()
+    movidas = 0
+    for o in ofertas:
+        actual = _valor(o.estado)
+        if actual == data.estado:
+            continue
+        db.add(OportunidadEstadoHistorial(
+            oportunidad_id=op.id, oferta_id=o.id, estado_anterior=actual,
+            estado_nuevo=data.estado, usuario_id=current.id))
+        o.estado = data.estado
+        o.estado_desde = ahora
+        o.resultado = estado_a_resultado(data.estado)
+        movidas += 1
+    # Espejo en la columna deprecada: hay históricos y consultas que aún la leen.
+    if _valor(op.estado) != data.estado:
+        if not ofertas:
+            db.add(OportunidadEstadoHistorial(
+                oportunidad_id=op.id, estado_anterior=_valor(op.estado),
+                estado_nuevo=data.estado, usuario_id=current.id))
+        op.estado = data.estado
+        op.estado_desde = ahora
+    elif not movidas:
+        raise HTTPException(409, f"Todo el negocio ya está en '{data.estado}'")
     db.commit()
-    return {"ok": True, "estado": data.estado, "estado_desde": op.estado_desde}
+    return {"ok": True, "estado": data.estado, "estado_desde": ahora,
+            "ofertas_movidas": movidas}
+
+
+@router.post("/ofertas/{oferta_id}/estado")
+def cambiar_estado_oferta(
+    oferta_id: int, data: EstadoChangeIn,
+    db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
+):
+    """Mueve UNA oferta de etapa. Es la operación normal del tablero: una oferta
+    se firma sin arrastrar a sus hermanas del mismo cliente."""
+    _check_comercial(current)
+    o = db.query(OportunidadOferta).filter(OportunidadOferta.id == oferta_id).first()
+    if not o:
+        raise HTTPException(404, "Oferta no encontrada")
+    actual = _valor(o.estado)
+    if data.estado == actual:
+        raise HTTPException(409, f"La oferta ya está en '{actual}'")
+    db.add(OportunidadEstadoHistorial(
+        oportunidad_id=o.oportunidad_id, oferta_id=o.id, estado_anterior=actual,
+        estado_nuevo=data.estado, usuario_id=current.id))
+    o.estado = data.estado
+    o.estado_desde = col_now()
+    o.resultado = estado_a_resultado(data.estado)
+    db.commit()
+    db.refresh(o)
+    return _oferta_out(o)
 
 
 @router.get("/oportunidades/{id}/gestiones")
@@ -574,7 +688,8 @@ def list_ofertas(id: int, db: Session = Depends(get_db), current: Usuario = Depe
         .filter(OportunidadOferta.oportunidad_id == id)
         .order_by(OportunidadOferta.id).all()
     )
-    return [_oferta_out(o) for o in ofs]
+    fichas = _fichas(db, ofs)
+    return [_oferta_out(o, fichas[o.id]) for o in ofs]
 
 
 @router.post("/oportunidades/{id}/ofertas", status_code=201)
@@ -585,14 +700,20 @@ def create_oferta(
     _check_comercial(current)
     _get_oportunidad_or_404(id, db)
     payload = data.model_dump()
+    _validar_operador_red(db, payload.get("operador_red_id"))
     # Autogenera el código de seguimiento OP.{SEG} No.{NNNN}-{MM}-{YYYY} si no se envió.
     if not payload.get("numero_oferta"):
         payload["numero_oferta"] = _gen_codigo(db, payload["tipo"], payload.get("fecha_oferta"))
-    o = OportunidadOferta(oportunidad_id=id, **payload)
+    payload["resultado"] = estado_a_resultado(payload["estado"])
+    o = OportunidadOferta(oportunidad_id=id, estado_desde=col_now(), **payload)
     db.add(o)
+    db.flush()
+    db.add(OportunidadEstadoHistorial(
+        oportunidad_id=id, oferta_id=o.id, estado_anterior=None,
+        estado_nuevo=payload["estado"], usuario_id=current.id))
     db.commit()
     db.refresh(o)
-    return _oferta_out(o)
+    return _oferta_out(o, _fichas(db, [o])[o.id])
 
 
 @router.patch("/ofertas/{oferta_id}")
@@ -604,10 +725,128 @@ def update_oferta(
     o = db.query(OportunidadOferta).filter(OportunidadOferta.id == oferta_id).first()
     if not o:
         raise HTTPException(404, "Oferta no encontrada")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    cambios = data.model_dump(exclude_unset=True)
+    if "operador_red_id" in cambios:
+        _validar_operador_red(db, cambios["operador_red_id"])
+    for k, v in cambios.items():
         setattr(o, k, v)
     db.commit()
     return {"ok": True, "id": o.id}
+
+
+@router.post("/ofertas/{oferta_id}/firmar", status_code=201)
+def firmar_oferta(
+    oferta_id: int, data: FirmarOfertaIn,
+    db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
+):
+    """La oferta evoluciona en su contrato PPA y queda 'firmada'.
+
+    Crea el PPAContrato con las condiciones pactadas (y sus ppa_tarifas si hay
+    tabla por año), lo enlaza a la oferta y le pasa la planta. Las condiciones
+    NO se copian a la oferta: el contrato es la fuente única, que es lo que ya
+    leen Cumplimiento y Liquidaciones.
+
+    Idempotente por enlace: si la oferta ya tiene contrato, responde 409 en vez
+    de crear un segundo.
+    """
+    _check_comercial(current)
+    o = db.query(OportunidadOferta).filter(OportunidadOferta.id == oferta_id).first()
+    if not o:
+        raise HTTPException(404, "Oferta no encontrada")
+    if o.ppa_contrato_id:
+        raise HTTPException(409, f"La oferta ya tiene el contrato PPA {o.ppa_contrato_id}")
+    if _valor(o.tipo) != "compra_energia":
+        raise HTTPException(
+            422, "Solo las ofertas de compra de energía derivan en un PPA; "
+                 "las de servicios usan el contrato de representación")
+    op = _get_oportunidad_or_404(o.oportunidad_id, db)
+    cliente = db.query(Cliente).filter(Cliente.id == op.cliente_id).first()
+
+    contrato = PPAContrato(
+        numero_codigo_contrato=data.numero_codigo_contrato or _norm_codigo(o.numero_oferta),
+        nombre_interno=data.nombre_interno or o.planta_nombre,
+        # Unergy compra la energía al generador: el cliente de la oferta vende.
+        vendedor_id=op.cliente_id,
+        vendedor_nombre=cliente.razon_social_nombre if cliente else None,
+        vendedor_nit=cliente.nit_cedula if cliente else None,
+        fecha_inicio=data.fecha_inicio,
+        fecha_fin=data.fecha_fin,
+        tarifa_base=data.tarifa_base or _tarifa_del_primer_anio(data),
+        indice_indexacion=data.indice_indexacion,
+        periodo_indexacion_base=data.periodo_indexacion_base,
+        cantidad_minima_kwh_mes=data.cantidad_minima_kwh_mes,
+        carpeta_link=data.carpeta_link,
+        tipo_contrato="compra",
+    )
+    if o.proyecto_id:
+        proyecto = db.query(Proyecto).filter(Proyecto.id == o.proyecto_id).first()
+        if proyecto:
+            contrato.proyectos = [proyecto]
+    db.add(contrato)
+    db.flush()
+
+    # La tabla de precios por año se expande a las 12 filas mensuales que espera
+    # ppa_tarifas, acotada al periodo de suministro real.
+    for fila in _tarifas_mensuales(data):
+        db.add(PPATarifa(contrato_id=contrato.id, **fila))
+
+    o.ppa_contrato_id = contrato.id
+    anterior = _valor(o.estado)
+    if anterior != "firmado":
+        db.add(OportunidadEstadoHistorial(
+            oportunidad_id=op.id, oferta_id=o.id, estado_anterior=anterior,
+            estado_nuevo="firmado", usuario_id=current.id))
+        o.estado = "firmado"
+        o.estado_desde = col_now()
+        o.resultado = estado_a_resultado("firmado")
+    db.commit()
+    db.refresh(o)
+    return {"oferta": _oferta_out(o), "ppa_contrato_id": contrato.id,
+            "tarifas_creadas": len(_tarifas_mensuales(data))}
+
+
+def _tarifa_del_primer_anio(data: FirmarOfertaIn) -> float | None:
+    """tarifa_base del contrato cuando el precio viene como tabla por año."""
+    if not data.precios_anuales:
+        return None
+    return min(data.precios_anuales, key=lambda p: p.anio).precio
+
+
+def _tarifas_mensuales(data: FirmarOfertaIn) -> list[dict]:
+    """Expande la tabla anual de la oferta a filas (año, mes, tarifa).
+
+    ppa_tarifas es mensual porque los contratos viejos indexan mes a mes; las
+    ofertas nuevas traen un solo precio por año, así que se replica en sus 12
+    meses. Se recorta al periodo de suministro: un contrato que arranca en
+    octubre no tiene tarifa de enero a septiembre de ese año.
+    """
+    if not data.precios_anuales:
+        return []
+    filas = []
+    for p in data.precios_anuales:
+        desde = data.fecha_inicio.month if p.anio == data.fecha_inicio.year else 1
+        hasta = data.fecha_fin.month if p.anio == data.fecha_fin.year else 12
+        if p.anio < data.fecha_inicio.year or p.anio > data.fecha_fin.year:
+            continue          # año fuera del periodo: la oferta lo trae de más
+        for mes in range(desde, hasta + 1):
+            filas.append({"año": p.anio, "mes": mes, "tarifa": p.precio})
+    return filas
+
+
+@router.post("/ofertas/{oferta_id}/seguimiento")
+def registrar_seguimiento(oferta_id: int, db: Session = Depends(get_db),
+                          current: Usuario = Depends(get_current_user)):
+    """Un click: suma un toque a la oferta. Es lo que permite mantener el dato
+    al día sin volver a exportar correos. NO toca fecha_oferta: el toque de hoy
+    no es el primer envío."""
+    _check_comercial(current)
+    o = db.query(OportunidadOferta).filter(OportunidadOferta.id == oferta_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Oferta no encontrada")
+    o.seguimientos = (o.seguimientos or 0) + 1
+    db.commit()
+    db.refresh(o)
+    return _oferta_out(o, _fichas(db, [o])[o.id])
 
 
 @router.delete("/ofertas/{oferta_id}", status_code=204)
@@ -707,8 +946,15 @@ def _etapa_global(resultados: set[str]) -> str:
     if "aceptado" in resultados:
         return "operando"
     if resultados & {"pendiente"}:
-        return "envio_oferta"
-    return "prospeccion"
+        return "oferta"
+    return "oportunidad"
+
+
+def _etapa_de_resultado(resultado: str) -> str:
+    """Etapa inicial de una oferta importada de las hojas, donde lo único que
+    hay es el resultado. 'aceptado' entra como operando porque las hojas solo
+    marcaban así lo que ya estaba andando."""
+    return {"aceptado": "operando", "declinado": "declinado"}.get(resultado, "oferta")
 
 
 def _build_detalle(row: dict) -> dict | None:
@@ -816,14 +1062,14 @@ def importar_hojas(
         op = op_por_cliente.get(cliente.id)
         if op:
             return op
-        op = Oportunidad(cliente_id=cliente.id, estado="prospeccion",
+        op = Oportunidad(cliente_id=cliente.id, estado="oportunidad",
                          estado_desde=ahora, es_migrada=True,
                          creado_por_usuario_id=current.id)
         db.add(op)
         db.flush()
         db.add(OportunidadEstadoHistorial(
             oportunidad_id=op.id, estado_anterior=None,
-            estado_nuevo="prospeccion", usuario_id=current.id))
+            estado_nuevo="oportunidad", usuario_id=current.id))
         op_por_cliente[cliente.id] = op
         ops_creadas.add(op.id)
         return op
@@ -901,6 +1147,7 @@ def importar_hojas(
                     oportunidad_id=op.id, tipo=tipo, planta_nombre=planta,
                     proyecto_id=proj_id, numero_oferta=num,
                     precio_detalle=row.get("precio_detalle"), resultado=resultado,
+                    estado=_etapa_de_resultado(resultado), estado_desde=col_now(),
                     etapa_texto=row.get("etapa_texto"),
                     contrato_firmado=row.get("contrato_firmado"),
                     fecha_oferta=_parse_fecha(row.get("fecha_oferta")),
@@ -1041,3 +1288,39 @@ def dedup_clientes(
     if not dry_run:
         db.commit()
     return res
+
+
+ARCHIVO_ACTUALIZACION = "comercial_actualizacion_2026-07.json"
+
+
+def ruta_actualizacion() -> Path:
+    """data/comercial_actualizacion_2026-07.json, desde la raíz del repo
+    (app/api/v1/comercial.py → tres niveles arriba de `app`)."""
+    return Path(__file__).resolve().parents[3] / "data" / ARCHIVO_ACTUALIZACION
+
+
+@router.post("/aplicar-actualizacion")
+def aplicar_actualizacion(
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Aplica data/comercial_actualizacion_2026-07.json (envíos de oferta y
+    estados reportados por Alejandro). Admin. dry_run por defecto: devuelve el
+    reporte sin escribir nada."""
+    from app.services.comercial_actualizacion import aplicar, validar, ya_aplicado
+
+    rol = current.rol if isinstance(current.rol, str) else current.rol.value
+    if rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin")
+    ruta = ruta_actualizacion()
+    if not ruta.exists():
+        raise HTTPException(status_code=404, detail="Archivo de actualización no encontrado")
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    problemas = validar(datos)
+    if problemas and not dry_run:
+        raise HTTPException(status_code=422, detail={"problemas_del_archivo": problemas})
+    rep = aplicar(db, datos, dry_run=dry_run)
+    rep["problemas_del_archivo"] = problemas
+    rep["ya_aplicado"] = ya_aplicado(db)
+    return rep

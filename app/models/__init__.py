@@ -8,7 +8,7 @@ from app.models.proyectos import (
 )
 from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
 from app.models.servicios import ServicioOperacion, ServicioRepresentacion
-from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia
+from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia, PPAResponsable
 from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.informes import InformeGuardado
 from app.models.operadores_red import OperadorRed, OperadorRedContacto
@@ -45,13 +45,15 @@ from app.models.mandatos import (
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
+from app.models.verificacion_costos import VerificacionCosto
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
     "ProyectoGrupoPanel", "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
     "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado", "ServicioOperacion",
     "ServicioRepresentacion",
-    "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia",
+    "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia", "PPAResponsable",
     "Frontera", "FronteraLectura", "FronteraQuoiaIgnorada", "InformeGuardado", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",
     "FallaCatResolucion", "Falla", "FallaSeguimiento", "FallaIntervalo", "FallaInversor",
@@ -76,9 +78,15 @@ __all__ = [
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
+    "VerificacionCosto",
+    "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
     EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
+)
+from app.models.registros_cnd import (
+    RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
+    RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )

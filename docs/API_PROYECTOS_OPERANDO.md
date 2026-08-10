@@ -1,13 +1,13 @@
-# API de Proyectos en Operación
+# API de Proyectos Firmados y en Operación
 
-Una sola llamada devuelve **todas las plantas que hoy están operando**, con estos datos por
-planta:
+Una sola llamada devuelve **todas las plantas con negocio cerrado** — firmadas y operando —
+con estos datos por planta:
 
-**nombre · ubicación · operador de red · generación mensual promedio · fecha de inicio de
-comercialización · tiempo del contrato de energía.**
+**nombre · estado · ubicación · operador de red · generación mensual promedio · fecha de
+inicio de comercialización · tiempo del contrato de energía · API ID de Unergy.**
 
-Es la misma lista que se ve en la plataforma en `/comercial` filtrando por la etapa
-**Operando**, pero agrupada por planta y en un JSON pensado para integrar.
+Es la misma lista que se ve en la plataforma en `/comercial` filtrando por las etapas
+**Firmado** y **Operando**, pero agrupada por planta y en un JSON pensado para integrar.
 
 - **Base URL:** `https://backend-production-63d8.up.railway.app`
 - **Endpoint:** `GET /api/v1/comercial/proyectos-operando`
@@ -48,15 +48,16 @@ Respuesta:
 
 ```json
 {
-  "generado_en": "2026-08-09T21:21:49-05:00",
-  "estado": "operando",
-  "total": 6,
+  "generado_en": "2026-08-10T09:21:49-05:00",
+  "estados": ["firmado", "operando"],
+  "total": 38,
+  "por_estado": { "firmado": 7, "operando": 31 },
   "items": [ { … una entrada por planta … } ]
 }
 ```
 
-`items` no está paginado: vienen todas las plantas operando. Hoy son unas decenas y la
-llamada tarda menos de un segundo.
+`items` no está paginado: vienen todas. Hoy son unas decenas y la llamada tarda menos de un
+segundo.
 
 ---
 
@@ -66,6 +67,8 @@ llamada tarda menos de un segundo.
 {
   "proyecto_id": 9,
   "nombre": "La Catedral",
+  "estado": "operando",
+  "api_id_unergy": "catedral",
   "ubicacion": {
     "municipio": "Corozal",
     "departamento": "Sucre",
@@ -120,21 +123,24 @@ llamada tarda menos de un segundo.
     "operador_red": "proyecto",
     "gen_promedio_mensual": "medido",
     "fecha_inicio_comercializacion": "proyecto",
-    "contrato_energia": "contrato"
+    "contrato_energia": "contrato",
+    "api_id_unergy": "sub_project"
   }
 }
 ```
 
-### Los seis campos pedidos
+### Los campos pedidos
 
 | Lo que pidieron | Dónde está |
 |---|---|
 | Nombre | `nombre` |
+| Estado (firmado / operando) | `estado` |
 | Ubicación | `ubicacion.texto` (o `municipio` / `departamento` por separado) |
 | Operador de red | `operador_red` |
 | Generación mensual promedio | `gen_promedio_mensual_mwh` (y `…_kwh`) |
 | Fecha de inicio de comercialización | `fecha_inicio_comercializacion` |
 | Tiempo del contrato de energía | `contrato_energia.duracion_texto` (y `duracion_meses` / `duracion_anios`) |
+| API ID de Unergy | `api_id_unergy` |
 
 ### Referencia completa
 
@@ -142,6 +148,8 @@ llamada tarda menos de un segundo.
 |---|---|---|
 | `proyecto_id` | `int \| null` | Id de la planta en la plataforma. **`null`** = la planta todavía no existe como proyecto, los datos vienen de la oferta comercial |
 | `nombre` | `string \| null` | Nombre de la planta |
+| `estado` | `string` | `firmado` o `operando` — ver la sección 4 |
+| `api_id_unergy` | `string \| null` | Con qué id se consulta esta planta en la API de Unergy (`sub_project`). `null` = todavía no tiene identificador de monitoreo cargado |
 | `ubicacion.municipio` | `string \| null` | Municipio |
 | `ubicacion.departamento` | `string \| null` | Departamento |
 | `ubicacion.texto` | `string \| null` | `"Municipio, Departamento"` armado; `null` si no hay ninguno de los dos |
@@ -160,7 +168,7 @@ llamada tarda menos de un segundo.
 | `contrato_energia.duracion_meses` | `int \| null` | Duración en meses calendario |
 | `contrato_energia.duracion_anios` | `float \| null` | La misma duración en años, 1 decimal |
 | `contrato_energia.duracion_texto` | `string \| null` | `"6 años y 11 meses"` — listo para mostrar |
-| `contrato_energia.meses_restantes` | `int \| null` | Meses que le quedan desde hoy; `0` si ya venció |
+| `contrato_energia.meses_restantes` | `int \| null` | Meses que le quedan desde hoy; `0` si ya venció. Si **todavía no arrancó** (etapa `firmado`) es su duración completa |
 | `contrato_energia.vigente` | `bool \| null` | Si el contrato está corriendo hoy |
 | `contrato_energia.ppa_contrato_id` | `int \| null` | Id del contrato en la plataforma |
 | `contrato_energia.numero_codigo_contrato` | `string \| null` | Código del contrato |
@@ -169,7 +177,7 @@ llamada tarda menos de un segundo.
 | `contrato_energia.cantidad_minima_kwh_mes` | `float \| null` | Energía comprometida por mes. **No es lo mismo que la generación promedio** |
 | `cliente` | `string \| null` | Razón social del cliente dueño del negocio |
 | `potencia_instalada_kwp` | `float \| null` | Potencia instalada |
-| `ofertas[]` | `array` | Las ofertas comerciales de esa planta que están en Operando |
+| `ofertas[]` | `array` | Las ofertas comerciales de esa planta, cada una con su propia etapa en `estado` |
 | `fuentes` | `object` | De dónde salió cada dato — ver abajo |
 
 **Todas las fechas son `YYYY-MM-DD`.** Los `datetime` van en ISO 8601 con offset de Colombia
@@ -177,7 +185,35 @@ llamada tarda menos de un segundo.
 
 ---
 
-## 4. `gen_promedio_origen` — léanlo siempre
+## 4. `estado` — firmado vs. operando
+
+Las dos mitades de la respuesta. Es lo primero que conviene mirar en cada fila:
+
+| Valor | Qué significa | Qué esperar de los datos |
+|---|---|---|
+| `firmado` | Hay contrato, el **suministro todavía no arrancó** | Es normal que `gen_promedio_mensual_mwh` y `fecha_inicio_comercializacion` vengan en `null`: la planta aún no entrega energía. `contrato_energia.vigente` es `false` y `fecha_inicio` está en el futuro |
+| `operando` | Ya está entregando energía | Debería tener generación promedio y fecha de inicio de comercialización |
+
+Cuando una planta tiene varias ofertas (por ejemplo compra de energía + servicios
+operacionales), `estado` es la etapa **más avanzada** de todas: una con la energía operando y
+los servicios recién firmados sale como `operando`. La etapa de cada oferta por separado está
+en `ofertas[]`.
+
+Para pedir solo las que ya operan:
+
+```bash
+curl "$BASE/comercial/proyectos-operando?estado=operando" -H "X-API-Key: $UNERGY_API_KEY"
+```
+
+`por_estado` en el sobre trae el conteo de cada etapa, así no hay que contarlas.
+
+> **Ojo con `contrato_energia.meses_restantes` en las firmadas:** si el contrato todavía no
+> arrancó, ese número es su duración completa (no la distancia hasta la fecha de fin). Nunca
+> es mayor que `duracion_meses`.
+
+---
+
+## 5. `gen_promedio_origen` — léanlo siempre
 
 El número está siempre en la misma casilla, pero no siempre vale lo mismo. **Muestren el
 origen al lado del número** (aunque sea un ícono o un tooltip):
@@ -195,7 +231,7 @@ es una ventana completa, 27 es una ventana con huecos de monitoreo. No vale lo m
 
 ---
 
-## 5. `fuentes` — distinguir "no aplica" de "todavía no lo sabemos"
+## 6. `fuentes` — distinguir "no aplica" de "todavía no lo sabemos"
 
 Sin este mapa, un dato que no aplica y un dato que falta se ven idénticos (los dos `null`).
 
@@ -206,14 +242,15 @@ Sin este mapa, un dato que no aplica y un dato que falta se ven idénticos (los 
 | `"oferta"` | Lo declaró la oferta comercial (la planta aún no existe como proyecto) |
 | `"contrato"` | Salió del contrato PPA |
 | `"medido"` / `"manual"` / `"estimado"` / `"declarado"` | Solo para `gen_promedio_mensual`, ver arriba |
+| `"sub_project"` / `"alias_monitoreo"` | Solo para `api_id_unergy`: de qué campo salió el id. `alias_monitoreo` es el respaldo histórico y puede no estar validado |
 | `null` | **Nadie lo aportó todavía.** No es un error |
 
-`fuentes` siempre trae estas 7 llaves: `nombre`, `municipio`, `departamento`, `operador_red`,
-`gen_promedio_mensual`, `fecha_inicio_comercializacion`, `contrato_energia`.
+`fuentes` siempre trae estas 8 llaves: `nombre`, `municipio`, `departamento`, `operador_red`,
+`gen_promedio_mensual`, `fecha_inicio_comercializacion`, `contrato_energia`, `api_id_unergy`.
 
 ---
 
-## 6. Tres cosas que conviene saber antes de integrar
+## 7. Tres cosas que conviene saber antes de integrar
 
 **1. La forma de la respuesta nunca cambia.** Todas las llaves están siempre, aunque el valor
 sea `null`. No hace falta programar defensivamente contra llaves ausentes — sí contra valores
@@ -235,25 +272,34 @@ los dos códigos en `ofertas[]`. No hay que deduplicar.
 
 ---
 
-## 7. Filtro
+## 8. Filtros
 
-Solo hay uno, y es opcional:
+Los dos son opcionales y se combinan:
 
 | Parámetro | Qué hace |
 |---|---|
+| `estado` | `firmado` o `operando`. Repetible. Por defecto vienen las dos |
 | `q` | Busca texto en el nombre de la planta, la razón social del cliente y el código de seguimiento |
 
 ```bash
+# solo las que ya operan
+curl "$BASE/comercial/proyectos-operando?estado=operando" -H "X-API-Key: $UNERGY_API_KEY"
+
+# solo las firmadas que aún no arrancan
+curl "$BASE/comercial/proyectos-operando?estado=firmado" -H "X-API-Key: $UNERGY_API_KEY"
+
+# por nombre
 curl "$BASE/comercial/proyectos-operando?q=catedral" -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
-No hay parámetro para cambiar de etapa: este endpoint es **siempre** de las plantas operando.
-Quien necesite ver otras etapas del pipeline comercial tiene
-`GET /comercial/ofertas?estado=firmado` (ese sí pide rol `comercial` o `admin`).
+Cualquier otra etapa da **422**, no una lista vacía: pedir `?estado=declinado` y recibir 200
+con cero filas se leería como "no hay ninguna declinada", que es otra cosa. Para el resto del
+pipeline comercial está `GET /comercial/ofertas?estado=…` (ese sí pide rol `comercial` o
+`admin`).
 
 ---
 
-## 8. Ejemplos
+## 9. Ejemplos
 
 ### Python
 
@@ -269,13 +315,17 @@ r = requests.get(f"{BASE}/comercial/proyectos-operando",
 r.raise_for_status()
 datos = r.json()
 
-print(f"{datos['total']} plantas operando (al {datos['generado_en']})")
+print(f"{datos['total']} plantas al {datos['generado_en']} — {datos['por_estado']}")
 for p in datos["items"]:
     gen = p["gen_promedio_mensual_mwh"]
+    # el origen importa tanto como el número: medido != estimado
     gen_txt = f"{gen:,.1f} MWh/mes ({p['gen_promedio_origen']})" if gen is not None else "sin dato"
-    print(f"{p['nombre']:35} {p['ubicacion']['texto'] or '—':30} "
-          f"{p['operador_red'] or '—':25} {gen_txt:28} "
-          f"{p['contrato_energia']['duracion_texto'] or '—'}")
+    print(f"{p['estado']:9} {p['nombre']:35} {p['api_id_unergy'] or '—':18} "
+          f"{p['ubicacion']['texto'] or '—':30} {p['operador_red'] or '—':25} "
+          f"{gen_txt:28} {p['contrato_energia']['duracion_texto'] or '—'}")
+
+# solo las que ya entregan energía
+operando = [p for p in datos["items"] if p["estado"] == "operando"]
 ```
 
 ### JavaScript
@@ -287,11 +337,15 @@ const res = await fetch(`${BASE}/comercial/proyectos-operando`, {
   headers: { "X-API-Key": process.env.UNERGY_API_KEY },
 });
 if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-const { total, items } = await res.json();
+const { total, por_estado, items } = await res.json();
+
+console.log(total, por_estado);   // 38 { firmado: 7, operando: 31 }
 
 items.forEach((p) => {
   console.log(
+    p.estado,                     // "firmado" | "operando"
     p.nombre,
+    p.api_id_unergy ?? "—",
     p.ubicacion.texto ?? "—",
     p.operador_red ?? "—",
     p.gen_promedio_mensual_mwh ?? "—",
@@ -305,29 +359,30 @@ items.forEach((p) => {
 
 ```bash
 curl -s "$BASE/comercial/proyectos-operando" -H "X-API-Key: $UNERGY_API_KEY" \
-| jq -r '["nombre","ubicacion","operador","gen_mwh_mes","origen","inicio_comercializacion","contrato"],
-         (.items[] | [.nombre, .ubicacion.texto, .operador_red,
+| jq -r '["estado","nombre","api_id_unergy","ubicacion","operador","gen_mwh_mes","origen","inicio_comercializacion","contrato"],
+         (.items[] | [.estado, .nombre, .api_id_unergy, .ubicacion.texto, .operador_red,
                       .gen_promedio_mensual_mwh, .gen_promedio_origen,
                       .fecha_inicio_comercializacion,
-                      .contrato_energia.duracion_texto]) | @csv' > plantas_operando.csv
+                      .contrato_energia.duracion_texto]) | @csv' > plantas.csv
 ```
 
 ---
 
-## 9. Errores
+## 10. Errores
 
 | Código | Cuándo | Qué hacer |
 |---|---|---|
 | 401 | `Token requerido` — no mandaron el header `X-API-Key` | Revisar el header |
 | 401 | `API Key inválida` — la key no existe o está desactivada | Pedirle una nueva a Juan José |
 | 401 | `Usuario inactivo o no encontrado` | El usuario dueño de la key se desactivó |
+| 422 | `Etapa no válida: …` | `estado` solo acepta `firmado` y `operando` |
 | 422 | Parámetro mal formado | Revisar `q` |
 
 Un resultado vacío **no es un error**: responde 200 con `total: 0` e `items: []`.
 
 ---
 
-## 10. Recomendaciones de uso
+## 11. Recomendaciones de uso
 
 - **Cachéen del lado de ustedes.** Los datos cambian a lo sumo una vez al día (la generación
   promedio se recalcula por lote). Llamar cada 5 minutos no aporta nada; una vez por hora
@@ -339,7 +394,7 @@ Un resultado vacío **no es un error**: responde 200 con `total: 0` e `items: []
 
 ---
 
-## 11. Contacto
+## 12. Contacto
 
 Juan José (juanjose@unergy.io) para API keys, para reportar datos que salgan en `null` y para
 pedir campos nuevos.

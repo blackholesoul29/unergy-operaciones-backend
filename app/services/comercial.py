@@ -278,10 +278,10 @@ def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
     }
 
 
-# ── Proyectos en operación (consumo externo) ─────────────────────────────────
+# ── Plantas firmadas y operando (consumo externo) ─────────────────────────────
 # Superficie de solo lectura para integrar la plataforma con otra: "dame las
-# plantas que hoy están operando y sus seis datos". Vive acá y no en
-# proyectos.py porque quién está operando lo define el pipeline comercial
+# plantas con negocio cerrado y sus datos". Vive acá y no en proyectos.py porque
+# en qué etapa está cada planta lo define el pipeline comercial
 # (`oportunidad_ofertas.estado`), que es lo que se ve en /comercial.
 #
 # La diferencia con ficha_operativa(): esta habla de PROYECTOS (una fila por
@@ -290,6 +290,14 @@ def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
 # de inicio de COMERCIALIZACIÓN, que no es la de inicio del contrato.
 
 ESTADO_OPERANDO = "operando"
+ESTADO_FIRMADO = "firmado"
+
+# Las dos etapas de negocio cerrado, que son las que se entregan hacia afuera:
+# `firmado` = hay contrato pero el suministro todavía no arrancó; `operando` = ya
+# está entregando energía. Antes solo se devolvía `operando`; se agregó `firmado`
+# porque son plantas comprometidas y quien integra necesita verlas, con la etapa
+# al lado para poder distinguirlas.
+ETAPAS_ENTREGABLES = (ESTADO_FIRMADO, ESTADO_OPERANDO)
 
 # De dónde salió la generación promedio. Se nombra por su naturaleza y no por la
 # columna: quien integra necesita saber si el número está medido o estimado, no
@@ -307,8 +315,11 @@ def duracion_contrato(inicio, fin, hoy=None) -> dict:
     por mes. `texto` es la forma en que lo dice la gente ("6 años y 11 meses") y
     existe para que quien integre no tenga que rearmarla en su front.
 
-    `meses_restantes` se cuenta desde hoy, sin incluir el mes en curso completo:
-    un contrato que vence este mes tiene 1 mes restante, uno vencido tiene 0.
+    `meses_restantes` se cuenta desde hoy: un contrato que vence este mes tiene 1
+    mes restante y uno vencido tiene 0. Si **todavía no arrancó** (caso de las
+    plantas en etapa `firmado`) le queda su duración completa, no la distancia
+    hasta el fin — contar desde hoy daría más meses restantes que meses de
+    contrato, que es imposible.
     """
     meses = meses_de_contrato(inicio, fin)
     anios = None
@@ -327,7 +338,10 @@ def duracion_contrato(inicio, fin, hoy=None) -> dict:
     hoy = hoy or col_now().date()
     restantes = None
     if fin is not None:
-        restantes = meses_de_contrato(hoy, fin) or 0
+        if inicio is not None and inicio > hoy:
+            restantes = meses          # firmado, sin arrancar
+        else:
+            restantes = meses_de_contrato(hoy, fin) or 0
     vigente = None
     if inicio is not None or fin is not None:
         vigente = ((inicio is None or inicio <= hoy)
@@ -403,6 +417,13 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
     principal = ofertas[0]
     fuentes: dict[str, str | None] = {}
 
+    # Etapa de la PLANTA = la más avanzada de sus ofertas. Una planta con la
+    # oferta de energía operando y la de servicios recién firmada está operando:
+    # colapsar hacia atrás diría que todavía no entrega energía, y es mentira.
+    # Las etapas de cada oferta viajan igual en `ofertas[]`.
+    etapa = max((_valor_enum(o.estado) for o in ofertas),
+                key=lambda e: ETAPA_ORDEN.get(e, -1))
+
     def _elegir(campo, del_proyecto, de_la_oferta):
         if del_proyecto not in (None, ""):
             fuentes[campo] = "proyecto"
@@ -452,6 +473,21 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
     gen_mwh, gen_origen, gen_detalle = _gen_promedio(proyecto, ofertas)
     fuentes["gen_promedio_mensual"] = gen_origen
 
+    # Identificador de la planta en la API de Unergy: es el `sub_project` que se
+    # manda como parámetro a /project_generation/ (ver monitoreo._fetch_unergy_raw)
+    # y con el que se calcula la generación promedio. `alias_monitoreo` es el
+    # respaldo histórico —el mismo `sub_project or alias_monitoreo` que usan las
+    # otras seis llamadas del repo—, y se marca como tal: no es el campo canónico.
+    api_id_unergy = None
+    fuentes["api_id_unergy"] = None
+    if proyecto is not None:
+        if proyecto.sub_project:
+            api_id_unergy = proyecto.sub_project
+            fuentes["api_id_unergy"] = "sub_project"
+        elif proyecto.alias_monitoreo:
+            api_id_unergy = proyecto.alias_monitoreo
+            fuentes["api_id_unergy"] = "alias_monitoreo"
+
     # Inicio de comercialización = primer día con generación real (lo autoderiva
     # app.services.comercializacion). NO se rellena con la fecha del contrato ni
     # con la entrada en operación: son tres hechos distintos y mezclarlos haría
@@ -484,6 +520,12 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
     return {
         "proyecto_id": proyecto.id if proyecto else None,
         "nombre": nombre,
+        # `firmado` = hay contrato y el suministro no arrancó · `operando` = ya
+        # entrega energía. Es el dato que separa las dos mitades de la respuesta.
+        "estado": etapa,
+        # Con qué id se consulta esta planta en la API de Unergy. null = todavía
+        # no tiene identificador de monitoreo cargado.
+        "api_id_unergy": api_id_unergy,
         "ubicacion": {
             "municipio": municipio,
             "departamento": departamento,
@@ -534,12 +576,22 @@ def _codigo_seguimiento(numero: str | None) -> str | None:
     return numero
 
 
-def proyectos_operando(db, q=None, hoy=None) -> list[dict]:
-    """Las plantas que hoy están en la etapa 'operando' del pipeline comercial.
+def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list[dict]:
+    """Las plantas con negocio cerrado: por defecto `firmado` **y** `operando`.
 
-    Una fila por PLANTA, no por oferta. Todo se precarga por lotes: un número
-    fijo de consultas sin importar cuántas plantas haya, porque quien integra va
-    a llamar esto en cada refresco de su tablero.
+    Una fila por PLANTA, no por oferta, con la etapa de la planta en `estado`.
+    Todo se precarga por lotes: un número fijo de consultas sin importar cuántas
+    plantas haya, porque quien integra va a llamar esto en cada refresco de su
+    tablero.
+
+    `estados` filtra por la etapa **resuelta de la planta** (su oferta más
+    avanzada), no por "tiene alguna oferta en esa etapa". La diferencia importa:
+    una planta con la energía operando y los servicios recién firmados no debe
+    salir en `estados=("firmado",)` —está operando— y si saliera, los conteos de
+    las dos etapas por separado sumarían más que el total.
+
+    La fila siempre trae TODAS sus ofertas cerradas, no solo las de la etapa
+    filtrada: acotar la etapa elige plantas, no recorta su contenido.
     """
     from sqlalchemy.orm import selectinload
     from app.models.clientes import Cliente
@@ -550,12 +602,17 @@ def proyectos_operando(db, q=None, hoy=None) -> list[dict]:
     from app.models.proyectos import Proyecto
 
     hoy = hoy or col_now().date()
+    estados = tuple(estados)
 
+    # La consulta trae SIEMPRE las dos etapas entregables y el filtro por etapa se
+    # aplica al final, sobre la etapa resuelta de cada planta. Filtrar acá dejaría
+    # a una planta operando dentro de estados=("firmado",) por tener una oferta de
+    # servicios firmada, y le recortaría las ofertas que sí importan.
     filas = (
         db.query(OportunidadOferta, Cliente.razon_social_nombre)
         .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
         .join(Cliente, Cliente.id == Oportunidad.cliente_id)
-        .filter(OportunidadOferta.estado == ESTADO_OPERANDO,
+        .filter(OportunidadOferta.estado.in_(ETAPAS_ENTREGABLES),
                 Oportunidad.deleted_at.is_(None),
                 Cliente.deleted_at.is_(None))
         .all()
@@ -640,6 +697,9 @@ def proyectos_operando(db, q=None, hoy=None) -> list[dict]:
             cliente=cliente_por_oferta.get(grupo[0].id), hoy=hoy)
         out.append(fila)
 
+    if set(estados) != set(ETAPAS_ENTREGABLES):
+        out = [f for f in out if f["estado"] in estados]
+
     if q:
         aguja = q.strip().lower()
         out = [f for f in out
@@ -666,7 +726,8 @@ def _valor_enum(v):
 UMBRAL_VINCULO = 0.72
 
 
-def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) -> dict:
+def proponer_vinculos_proyecto(db, estados=ETAPAS_ENTREGABLES,
+                               umbral=UMBRAL_VINCULO) -> dict:
     """Empareja por nombre las ofertas sin `proyecto_id` con proyectos existentes.
 
     Existe porque el pipeline comercial se cargó desde hojas de cálculo, donde la
@@ -682,6 +743,9 @@ def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) ->
 
     Usa el matcher compartido (`mejor_candidato`), que tiene guarda de
     ambigüedad: si dos proyectos quedan parejos no adivina.
+
+    `estados` acota las etapas; por defecto las entregables (firmado y operando),
+    que son las que alimentan la API. `estados=None` mira todo el pipeline.
     """
     from app.models.comercial import Oportunidad, OportunidadOferta
     from app.models.proyectos import Proyecto
@@ -690,8 +754,8 @@ def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) ->
          .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
          .filter(OportunidadOferta.proyecto_id.is_(None),
                  Oportunidad.deleted_at.is_(None)))
-    if solo_operando:
-        q = q.filter(OportunidadOferta.estado == ESTADO_OPERANDO)
+    if estados:
+        q = q.filter(OportunidadOferta.estado.in_(tuple(estados)))
     ofertas = q.all()
 
     candidatos = [
@@ -724,7 +788,7 @@ def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) ->
 
     return {
         "umbral": umbral,
-        "solo_operando": solo_operando,
+        "estados": list(estados) if estados else "todas",
         "n_ofertas_sin_proyecto": len(ofertas),
         "n_propuestos": len(propuestos),
         "n_sin_candidato": len(sin_candidato),
@@ -737,7 +801,7 @@ def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) ->
     }
 
 
-def vincular_proyectos(db, solo_operando=True, umbral=UMBRAL_VINCULO,
+def vincular_proyectos(db, estados=ETAPAS_ENTREGABLES, umbral=UMBRAL_VINCULO,
                        dry_run=True, solo_ofertas=None) -> dict:
     """Aplica los vínculos que propone `proponer_vinculos_proyecto`.
 
@@ -751,7 +815,7 @@ def vincular_proyectos(db, solo_operando=True, umbral=UMBRAL_VINCULO,
     """
     from app.models.comercial import OportunidadOferta
 
-    reporte = proponer_vinculos_proyecto(db, solo_operando=solo_operando, umbral=umbral)
+    reporte = proponer_vinculos_proyecto(db, estados=estados, umbral=umbral)
     a_aplicar = reporte["propuestos"]
     if solo_ofertas is not None:
         permitidas = set(solo_ofertas)

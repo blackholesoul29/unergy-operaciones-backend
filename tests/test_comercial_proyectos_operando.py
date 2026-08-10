@@ -118,22 +118,94 @@ def _ppa(db, proyecto=None, **kw):
 
 # ── El universo: solo 'operando' ─────────────────────────────────────────────
 
-def test_solo_devuelve_las_plantas_en_etapa_operando(db):
-    """Es lo que Juan pidió: la API siempre trae los proyectos operando. Una
-    oferta firmada todavía no opera y una terminada ya dejó de operar."""
+def test_devuelve_las_plantas_firmadas_y_operando_con_su_etapa(db):
+    """Las dos etapas de negocio cerrado. El resto del pipeline queda afuera: una
+    oferta apenas enviada no es un compromiso, una terminada ya se venció y una
+    declinada no existe como negocio."""
     _oferta(db, planta_nombre="Opera", estado="operando")
     _oferta(db, planta_nombre="Recién firmada", estado="firmado")
+    _oferta(db, planta_nombre="En negociación", estado="contrato")
     _oferta(db, planta_nombre="Ya terminó", estado="terminado")
     _oferta(db, planta_nombre="Se cayó", estado="declinado")
     db.commit()
 
     filas = proyectos_operando(db, hoy=HOY)
 
+    assert {f["nombre"]: f["estado"] for f in filas} == {
+        "Opera": "operando", "Recién firmada": "firmado"}
+
+
+def test_se_puede_pedir_solo_operando(db):
+    """El comportamiento original sigue disponible acotando la etapa."""
+    _oferta(db, planta_nombre="Opera", estado="operando")
+    _oferta(db, planta_nombre="Recién firmada", estado="firmado")
+    db.commit()
+
+    filas = proyectos_operando(db, hoy=HOY, estados=("operando",))
     assert [f["nombre"] for f in filas] == ["Opera"]
 
 
-def test_sin_ofertas_operando_devuelve_lista_vacia(db):
-    _oferta(db, planta_nombre="Firmada", estado="firmado")
+def test_la_etapa_de_la_planta_es_la_mas_avanzada_de_sus_ofertas(db):
+    """Una planta con la energía operando y los servicios recién firmados ESTÁ
+    operando: decir 'firmado' diría que todavía no entrega energía."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="servicios_operacionales",
+            estado="firmado")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="compra_energia",
+            estado="operando")
+    db.commit()
+
+    filas = proyectos_operando(db, hoy=HOY)
+
+    assert len(filas) == 1 and filas[0]["estado"] == "operando"
+    # y las dos etapas por oferta siguen visibles
+    assert {o["estado"] for o in filas[0]["ofertas"]} == {"firmado", "operando"}
+
+
+def test_filtrar_por_firmado_no_trae_una_planta_que_ya_opera(db):
+    """El filtro es por la etapa RESUELTA de la planta, no por "tiene alguna
+    oferta en esa etapa". Si trajera a la que opera, los conteos de las dos
+    etapas por separado sumarían más que el total, y quien integre vería una
+    planta operando etiquetada como firmada."""
+    mixta = _proyecto(db, nombre_comercial="GD Biosolar")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=mixta.id, tipo="compra_energia",
+            estado="operando")
+    _oferta(db, oportunidad=op, proyecto_id=mixta.id, tipo="servicios_operacionales",
+            estado="firmado")
+    sola = _proyecto(db, nombre_comercial="GD Elektra")
+    _oferta(db, proyecto_id=sola.id, estado="firmado")
+    db.commit()
+
+    solo_firmado = proyectos_operando(db, hoy=HOY, estados=("firmado",))
+    solo_operando = proyectos_operando(db, hoy=HOY, estados=("operando",))
+    todas = proyectos_operando(db, hoy=HOY)
+
+    assert [f["nombre"] for f in solo_firmado] == ["GD Elektra"]
+    assert [f["nombre"] for f in solo_operando] == ["GD Biosolar"]
+    assert len(solo_firmado) + len(solo_operando) == len(todas)
+
+
+def test_acotar_la_etapa_elige_plantas_pero_no_recorta_sus_ofertas(db):
+    """La fila sigue trayendo todas sus ofertas cerradas: quien filtra por
+    `operando` no debería perder de vista que la planta tiene servicios
+    firmados."""
+    proy = _proyecto(db, nombre_comercial="GD Biosolar")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="compra_energia",
+            estado="operando")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="servicios_operacionales",
+            estado="firmado")
+    db.commit()
+
+    fila = proyectos_operando(db, hoy=HOY, estados=("operando",))[0]
+
+    assert {o["estado"] for o in fila["ofertas"]} == {"firmado", "operando"}
+
+
+def test_sin_ofertas_cerradas_devuelve_lista_vacia(db):
+    _oferta(db, planta_nombre="Apenas enviada", estado="oferta")
     db.commit()
     assert proyectos_operando(db, hoy=HOY) == []
 
@@ -235,9 +307,50 @@ def _py(**kw):
                 gen_promedio_hasta=None, gen_promedio_actualizado_en=None,
                 mwh_mes_estimado=None, p50_mensual_kwh=None,
                 fecha_inicio_comercializacion=None, fecha_entrada_operacion=None,
-                latitud=None, longitud=None, potencia_instalada_kwp=None)
+                latitud=None, longitud=None, potencia_instalada_kwp=None,
+                sub_project=None, alias_monitoreo=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
+
+
+# ── API ID de Unergy ─────────────────────────────────────────────────────────
+
+def test_el_api_id_unergy_es_el_sub_project():
+    """Es el parámetro `sub_project` con el que se consulta /project_generation/
+    en la API de Unergy, el mismo con el que se calcula el promedio."""
+    f = fila_operando([_of()], proyecto=_py(sub_project="catedral"), hoy=HOY)
+
+    assert f["api_id_unergy"] == "catedral"
+    assert f["fuentes"]["api_id_unergy"] == "sub_project"
+
+
+def test_sin_sub_project_vale_el_alias_de_monitoreo_pero_se_marca():
+    """`sub_project or alias_monitoreo` es el respaldo que usan las otras seis
+    llamadas del repo. Se marca la fuente porque el alias no es el campo
+    canónico y puede no estar validado."""
+    f = fila_operando([_of()], proyecto=_py(alias_monitoreo="la_catedral_1"), hoy=HOY)
+
+    assert f["api_id_unergy"] == "la_catedral_1"
+    assert f["fuentes"]["api_id_unergy"] == "alias_monitoreo"
+
+
+def test_el_sub_project_le_gana_al_alias():
+    f = fila_operando([_of()], proyecto=_py(sub_project="catedral",
+                                            alias_monitoreo="viejo"), hoy=HOY)
+    assert f["api_id_unergy"] == "catedral"
+
+
+def test_sin_identificador_de_monitoreo_el_api_id_es_null():
+    """Juan: "si lo tiene, si no entregarlo como nulo por ahora"."""
+    f = fila_operando([_of()], proyecto=_py(), hoy=HOY)
+    assert f["api_id_unergy"] is None
+    assert f["fuentes"]["api_id_unergy"] is None
+
+
+def test_una_planta_sin_proyecto_no_tiene_api_id():
+    """El id vive en el Proyecto; una oferta sin planta cargada no lo tiene."""
+    f = fila_operando([_of(planta_nombre="GD Rio Pamplonita")], hoy=HOY)
+    assert f["api_id_unergy"] is None
 
 
 def test_el_proyecto_manda_sobre_lo_declarado_en_la_oferta():
@@ -317,7 +430,7 @@ def test_sin_ningun_dato_los_campos_y_sus_fuentes_quedan_en_null():
 
     for campo in ("nombre", "municipio", "departamento", "operador_red",
                   "gen_promedio_mensual", "fecha_inicio_comercializacion",
-                  "contrato_energia"):
+                  "contrato_energia", "api_id_unergy"):
         assert f["fuentes"][campo] is None, campo
     assert f["ubicacion"]["texto"] is None
     assert f["gen_promedio_mensual_mwh"] is None
@@ -452,6 +565,17 @@ def test_el_contrato_dice_cuanto_le_queda_y_si_esta_vigente():
 
     vencido = duracion_contrato(dt.date(2020, 1, 1), dt.date(2021, 12, 31), hoy=HOY)
     assert vencido["meses_restantes"] == 0 and vencido["vigente"] is False
+
+
+def test_un_contrato_firmado_que_no_arranco_le_queda_su_duracion_completa():
+    """El caso de las plantas en etapa `firmado`. Contando desde hoy daría más
+    meses restantes que meses de contrato, que es imposible."""
+    d = duracion_contrato(dt.date(2027, 1, 1), dt.date(2032, 12, 31), hoy=HOY)
+
+    assert d["duracion_meses"] == 72
+    assert d["meses_restantes"] == 72       # no 77, que es la distancia hasta el fin
+    assert d["meses_restantes"] <= d["duracion_meses"]
+    assert d["vigente"] is False            # firmado, todavía no corre
 
 
 def test_sin_contrato_la_duracion_queda_en_null_sin_reventar():
@@ -678,13 +802,18 @@ def test_una_oferta_sin_nombre_de_planta_se_reporta_aparte(db):
     assert r["n_sin_nombre"] == 1 and r["n_propuestos"] == 0
 
 
-def test_por_defecto_solo_mira_las_ofertas_operando(db):
+def test_por_defecto_mira_las_etapas_entregables(db):
+    """Las que alimentan la API: firmado y operando. Una oferta que apenas se
+    envió no vale la pena vincular todavía, pero `estados=None` la alcanza."""
     _proyecto(db, nombre_comercial="La Catedral")
-    _oferta(db, planta_nombre="Catedral", estado="oferta")
+    _proyecto(db, nombre_comercial="GD Taurus IX")
+    _oferta(db, planta_nombre="Catedral", estado="oferta")       # etapa temprana
+    _oferta(db, planta_nombre="Taurus IX", estado="firmado")
     db.commit()
 
-    assert proponer_vinculos_proyecto(db)["n_propuestos"] == 0
-    assert proponer_vinculos_proyecto(db, solo_operando=False)["n_propuestos"] == 1
+    por_defecto = proponer_vinculos_proyecto(db)
+    assert [f["planta_nombre"] for f in por_defecto["propuestos"]] == ["Taurus IX"]
+    assert proponer_vinculos_proyecto(db, estados=None)["n_propuestos"] == 2
 
 
 def test_en_seco_no_escribe_nada(db):
@@ -782,7 +911,7 @@ def test_la_ruta_devuelve_el_sobre_con_total_e_items(db, client):
                      gen_mensual_promedio_mwh=178.4, gen_promedio_origen="api",
                      gen_promedio_dias=30,
                      fecha_inicio_comercializacion=dt.date(2026, 2, 12),
-                     potencia_instalada_kwp=999.9)
+                     potencia_instalada_kwp=999.9, sub_project="catedral")
     ppa = _ppa(db, numero_codigo_contrato="UNG-2026-014",
                fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31))
     _oferta(db, proyecto_id=proy.id, ppa_contrato_id=ppa.id,
@@ -793,9 +922,12 @@ def test_la_ruta_devuelve_el_sobre_con_total_e_items(db, client):
 
     assert r.status_code == 200, r.text
     cuerpo = r.json()
-    assert cuerpo["estado"] == "operando" and cuerpo["total"] == 1
+    assert cuerpo["estados"] == ["firmado", "operando"] and cuerpo["total"] == 1
+    assert cuerpo["por_estado"] == {"firmado": 0, "operando": 1}
     fila = cuerpo["items"][0]
+    assert fila["estado"] == "operando"
     assert fila["nombre"] == "GD Catedral"
+    assert fila["api_id_unergy"] == "catedral"
     assert fila["ubicacion"]["texto"] == "Corozal, Sucre"
     assert fila["operador_red"] == "AFINIA S.A.S. E.S.P."
     assert fila["gen_promedio_mensual_mwh"] == 178.4
@@ -828,6 +960,43 @@ def test_sin_datos_la_ruta_devuelve_un_sobre_vacio_no_un_404(db, client):
     r = client.get("/api/v1/comercial/proyectos-operando")
     assert r.status_code == 200
     assert r.json()["total"] == 0 and r.json()["items"] == []
+
+
+def test_la_ruta_devuelve_firmadas_y_operando_con_el_conteo_por_etapa(db, client):
+    _oferta(db, planta_nombre="Ya opera", estado="operando")
+    _oferta(db, planta_nombre="Firmada A", estado="firmado")
+    _oferta(db, planta_nombre="Firmada B", estado="firmado")
+    _oferta(db, planta_nombre="Apenas enviada", estado="oferta")
+    db.commit()
+
+    cuerpo = client.get("/api/v1/comercial/proyectos-operando").json()
+
+    assert cuerpo["total"] == 3
+    assert cuerpo["por_estado"] == {"firmado": 2, "operando": 1}
+    assert {i["nombre"]: i["estado"] for i in cuerpo["items"]} == {
+        "Firmada A": "firmado", "Firmada B": "firmado", "Ya opera": "operando"}
+
+
+def test_la_ruta_acepta_acotar_la_etapa(db, client):
+    _oferta(db, planta_nombre="Ya opera", estado="operando")
+    _oferta(db, planta_nombre="Firmada", estado="firmado")
+    db.commit()
+
+    cuerpo = client.get("/api/v1/comercial/proyectos-operando",
+                        params={"estado": "firmado"}).json()
+
+    assert cuerpo["estados"] == ["firmado"]
+    assert [i["nombre"] for i in cuerpo["items"]] == ["Firmada"]
+
+
+def test_una_etapa_que_este_endpoint_no_sirve_da_422_y_no_lista_vacia(db, client):
+    """Pedir ?estado=declinado y recibir 200 con cero filas se leería como "no
+    hay ninguna declinada", que es otra cosa."""
+    r = client.get("/api/v1/comercial/proyectos-operando",
+                   params={"estado": "declinado"})
+
+    assert r.status_code == 422
+    assert "declinado" in r.text
 
 
 def test_generado_en_trae_el_offset_real_de_colombia(db, client):

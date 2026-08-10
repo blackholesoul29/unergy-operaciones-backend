@@ -34,9 +34,9 @@ from app.schemas.comercial import (
     OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
 from app.services.comercial import (
-    UMBRAL_VINCULO, ahora_colombia, calcular_alerta, col_now, contexto_ficha,
-    estado_a_resultado, ficha_operativa, proyectos_operando, resumen_etapas,
-    vincular_proyectos,
+    ETAPAS_ENTREGABLES, UMBRAL_VINCULO, ahora_colombia, calcular_alerta, col_now,
+    contexto_ficha, estado_a_resultado, ficha_operativa, proyectos_operando,
+    resumen_etapas, vincular_proyectos,
 )
 
 router = APIRouter(prefix="/comercial", tags=["comercial"])
@@ -394,33 +394,60 @@ def list_ofertas_todas(
 
 @router.get("/proyectos-operando")
 def list_proyectos_operando(
+    estado: list[str] | None = Query(
+        None,
+        description="Etapas a devolver. Por defecto firmado y operando. Repetible: ?estado=operando"),
     q: str | None = Query(None, description="Filtra por nombre de planta, cliente o código de seguimiento"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Las plantas que hoy están **operando**, con sus datos operativos.
+    """Las plantas con negocio cerrado: **firmadas y operando**.
 
     Es la superficie pensada para integrar la plataforma con otra: devuelve una
     fila por PLANTA (no por oferta) con nombre, ubicación, operador de red,
     generación mensual promedio, fecha de inicio de comercialización y duración
     del contrato de energía. Ver `docs/API_PROYECTOS_OPERANDO.md`.
 
-    El universo es el mismo que se ve en `/comercial` filtrando por la etapa
-    **Operando**: `oportunidad_ofertas.estado = 'operando'`. No hay parámetro
-    para cambiar de etapa — quien necesite otra tiene
-    `GET /comercial/ofertas?estado=…`, que devuelve el CRM completo.
+    Cada fila trae su **`estado`**, que es lo que separa las dos mitades:
+
+    - `firmado` — hay contrato, el suministro todavía no arrancó. Es normal que
+      no tenga generación promedio: la planta aún no entrega energía.
+    - `operando` — ya está entregando.
+
+    Cuando una planta tiene varias ofertas, `estado` es la etapa **más
+    avanzada** de todas (una con la energía operando y los servicios recién
+    firmados está operando). La etapa de cada oferta viaja en `ofertas[]`.
+
+    El universo es el mismo que se ve en `/comercial` filtrando por esas dos
+    etapas. Con `?estado=operando` se limita a las que ya operan. Para el resto
+    del pipeline está `GET /comercial/ofertas?estado=…`, que devuelve el CRM
+    completo (y sí exige rol comercial).
 
     A diferencia del resto de `/comercial`, **no exige rol comercial**: es de
     solo lectura y no expone precios, márgenes ni bitácora comercial. Basta con
     una cuenta activa de la plataforma (API Key o token).
     """
-    items = proyectos_operando(db, q=q)
+    etapas = tuple(estado) if estado else ETAPAS_ENTREGABLES
+    invalidas = [e for e in etapas if e not in ETAPAS_ENTREGABLES]
+    if invalidas:
+        # 422 explícito y no una lista vacía: pedir ?estado=declinado y recibir
+        # 200 con cero filas se lee como "no hay ninguna", que es otra cosa.
+        raise HTTPException(
+            422,
+            f"Etapa no válida: {', '.join(invalidas)}. "
+            f"Este endpoint solo devuelve {' y '.join(ETAPAS_ENTREGABLES)}; "
+            "para el resto del pipeline usá GET /comercial/ofertas?estado=…",
+        )
+    items = proyectos_operando(db, q=q, estados=etapas)
     return {
         # ahora_colombia() y no col_now(): esta fecha viaja hacia afuera y tiene
         # que traer su offset real (-05:00). Ver el docstring de col_now().
         "generado_en": ahora_colombia(),
-        "estado": "operando",
+        "estados": list(etapas),
         "total": len(items),
+        # Cuántas hay de cada etapa, para no tener que contarlas del lado de quien
+        # integra.
+        "por_estado": {e: sum(1 for i in items if i["estado"] == e) for e in etapas},
         "items": items,
     }
 
@@ -428,7 +455,9 @@ def list_proyectos_operando(
 @router.post("/ofertas/vincular-proyectos")
 def vincular_ofertas_a_proyectos(
     dry_run: bool = Query(True, description="Solo previsualizar, sin escribir"),
-    solo_operando: bool = Query(True, description="Limitar a las ofertas en etapa Operando"),
+    estado: list[str] | None = Query(
+        None, description="Etapas a mirar. Por defecto firmado y operando. Repetible"),
+    todas_las_etapas: bool = Query(False, description="Mirar todo el pipeline, no solo firmado/operando"),
     umbral: float = Query(UMBRAL_VINCULO, ge=0.5, le=1.0,
                           description="Qué tan parecido tiene que ser el nombre para proponer el vínculo"),
     oferta_id: list[int] | None = Query(None, description="Aplicar solo a estas ofertas (para aceptar unas y descartar otras)"),
@@ -443,6 +472,9 @@ def vincular_ofertas_a_proyectos(
     vínculo, `GET /comercial/proyectos-operando` devuelve el nombre y poco más:
     la ubicación, el operador, la generación y el contrato viven en el Proyecto.
 
+    Por defecto mira las etapas **firmado y operando**, que son las que alimentan
+    esa API; con `todas_las_etapas=true` recorre todo el pipeline.
+
     **Por defecto no escribe** (`dry_run=true`): devuelve `propuestos` (lo que
     haría), `sin_candidato` (con el mejor puntaje que encontró, para saber si
     faltó poco o no hay nada parecido) y `sin_nombre`. Revisá esa lista antes de
@@ -455,7 +487,8 @@ def vincular_ofertas_a_proyectos(
     """
     if current.rol.value != "admin":
         raise HTTPException(403, "Solo admin puede vincular ofertas a proyectos")
-    return vincular_proyectos(db, solo_operando=solo_operando, umbral=umbral,
+    etapas = None if todas_las_etapas else (tuple(estado) if estado else ETAPAS_ENTREGABLES)
+    return vincular_proyectos(db, estados=etapas, umbral=umbral,
                               dry_run=dry_run, solo_ofertas=oferta_id)
 
 

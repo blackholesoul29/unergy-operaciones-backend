@@ -280,6 +280,27 @@ def test_sin_catalogo_el_operador_cae_a_lo_declarado_en_la_oferta():
     assert f["fuentes"]["operador_red"] == "oferta"
 
 
+def test_el_nombre_y_el_id_del_operador_salen_de_la_misma_oferta(db):
+    """Con dos ofertas que declaran operadores distintos, el nombre y el id
+    tienen que describir al mismo operador. Resolver el nombre por un lado y el
+    id por otro daba un par incoherente."""
+    essa = OperadorRed(nombre_legal="ESSA S.A. E.S.P.")
+    cens = OperadorRed(nombre_legal="CENS S.A. E.S.P.")
+    db.add_all([essa, cens]); db.flush()
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, planta_nombre="GD Rio Pamplonita",
+            tipo="compra_energia", operador_red_id=essa.id)
+    _oferta(db, oportunidad=op, planta_nombre="GD Rio Pamplonita",
+            tipo="servicios_operacionales", operador_red_id=cens.id)
+    db.commit()
+
+    # sin proyecto vinculado, las dos ofertas caen en grupos distintos: se
+    # comprueba en cada uno que el par (nombre, id) sea consistente
+    for fila in proyectos_operando(db, hoy=HOY):
+        esperado = {essa.id: "ESSA S.A. E.S.P.", cens.id: "CENS S.A. E.S.P."}
+        assert fila["operador_red"] == esperado[fila["operador_red_id"]]
+
+
 def test_como_ultimo_recurso_vale_el_texto_libre_legacy_del_proyecto():
     """`proyectos.operador_red` es texto sin validar y está declarado legacy,
     pero en filas viejas es el único dato que hay. Se marca como tal para que

@@ -627,10 +627,15 @@ def proyectos_operando(db, q=None, hoy=None) -> list[dict]:
         if ppa is None and proyecto is not None:
             ppa = _mejor_ppa(ppas_por_proyecto.get(proyecto.id, []), hoy)
 
+        # El nombre del operador se busca en la MISMA oferta que fila_operando
+        # va a usar para el id (la primera con operador declarado). Resolverlo
+        # en la primera que "exista en el catálogo" podía devolver el nombre de
+        # una oferta y el id de otra.
+        con_operador = next((o for o in grupo if o.operador_red_id is not None), None)
         fila = fila_operando(
             grupo, proyecto=proyecto, ppa=ppa,
-            operador_oferta=next((operadores[o.operador_red_id] for o in grupo
-                                  if o.operador_red_id in operadores), None),
+            operador_oferta=(operadores.get(con_operador.operador_red_id)
+                             if con_operador else None),
             cliente=cliente_por_oferta.get(grupo[0].id), hoy=hoy)
         out.append(fila)
 

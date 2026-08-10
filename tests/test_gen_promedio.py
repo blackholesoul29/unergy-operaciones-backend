@@ -128,3 +128,19 @@ def test_el_alias_de_monitoreo_sirve_como_identificador():
 
 def test_un_valor_de_api_se_recalcula_sin_force():
     assert gp.decidir(ProyFalso(origen="api"), force=False) is None
+
+
+# ── caso real ────────────────────────────────────────────────────────────────
+
+def test_caso_real_valle_de_gandalf():
+    """MGS 0004 Valle de Gandalf, reportado por operaciones el 2026-08-09:
+    227.467 kWh entre el 8 de julio y el 8 de agosto (32 días) → ~7.108 kWh/día.
+
+    La vista mostraba 57,9 MWh, que eran los 8 días que iban de agosto. El
+    promedio de 30 días tiene que quedar en el orden de los 200 MWh, que es lo
+    que genera de verdad una minigranja de 1 MW.
+    """
+    kwh_dia = 227_467 / 32
+    r = gp.promedio_mensual(ventana(HOY, 30, kwh_dia), hoy=HOY)
+    assert r["promedio_mwh"] == pytest.approx(213.3, abs=0.5)
+    assert r["promedio_mwh"] > 200, "una MGS de 1 MW no genera 57 MWh al mes"

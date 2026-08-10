@@ -1400,6 +1400,39 @@ def get_simulador(
     return result
 
 
+@router.get("/vista-contratos", summary="Foto de un día: qué planta está en qué contrato")
+def get_vista_contratos(
+    fecha: str = Query(..., description="Día de la foto, YYYY-MM-DD (p. ej. 2026-08-20)"),
+    responsable: str | None = Query(
+        "Unergy",
+        description="Empresa responsable a mostrar. Vacío o 'todos' = sin filtro. "
+                    "Ojo: filtra ESTRICTO — un contrato sin responsable asignado no pasa.",
+    ),
+    incluir_todos: bool = Query(False, description=INCLUIR_TODOS_DESC),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Todo lo que hace falta para leer los contratos de venta de UN día, en una
+    sola llamada: qué plantas tiene cada contrato ese día, cuánto se comprometió
+    el contrato en el mes y cuánto genera cada planta en un mes típico.
+
+    Pensado para consumirse desde afuera (script, Excel, Power BI) sin tener que
+    entender GESCON. Ver `docs/API_VISTA_CONTRATOS.md`.
+
+    Es solo lectura y no escribe nada.
+    """
+    from app.services import vista_contratos
+
+    try:
+        dia = date.fromisoformat(fecha)
+    except ValueError:
+        raise HTTPException(422, f"'{fecha}' no es una fecha válida. Usá el formato YYYY-MM-DD.")
+
+    filtro = None if (responsable or "").strip().lower() in ("", "todos") else responsable
+    return vista_contratos.construir(db, fecha=dia, responsable=filtro,
+                                     incluir_todos=incluir_todos)
+
+
 @router.get("/plantas-contratos")
 def get_plantas_contratos(
     year: int = Query(..., ge=2020, le=2050),

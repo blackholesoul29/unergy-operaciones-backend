@@ -94,6 +94,13 @@ TOLERANCIA_CGM_VS_MEDIDOR = 0.50
 # dato en sí no es confiablemente el de esta frontera.
 FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
 
+# frontera_id (Consumo) con un patrón de consumo atípico confirmado --
+# ninguna validación automática (CGM vs mediana, medidor vs mediana) es
+# confiable para decidir sola si un día puntual es normal o no. Siempre
+# queda para revisar a mano sin importar qué Caso resultó ganador ese día
+# (mismo criterio que FRONTERAS_MEDIDOR_SOSPECHOSO en clasificador.py).
+FRONTERAS_CONSUMO_SIEMPRE_REVISAR: set[int] = {78}  # La Catedral Consumo
+
 # %: qué tan lejos puede quedar un medidor del otro (principal vs respaldo)
 # antes de dejar de "preferir siempre el principal" cuando no hay mediana
 # histórica con qué arbitrar. Diferencias chicas (ej. Sol&Cielo 7 Los Bongos
@@ -218,6 +225,8 @@ def clasificar_consumo(
             mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
             if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
                 resultado_cgm["revisar_manualmente"] = True
+        if frontera_id in FRONTERAS_CONSUMO_SIEMPRE_REVISAR:
+            resultado_cgm["revisar_manualmente"] = True
         return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
@@ -245,6 +254,8 @@ def clasificar_consumo(
             resultado["revisar_manualmente"] = True
 
     resultado.setdefault("revisar_manualmente", False)
+    if frontera_id in FRONTERAS_CONSUMO_SIEMPRE_REVISAR:
+        resultado["revisar_manualmente"] = True
     resultado["horas_rellenadas_historico"] = sorted(horas_historico) or None
     return resultado
 

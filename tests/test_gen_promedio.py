@@ -10,10 +10,31 @@ terminó hace más de una semana; los últimos 30 días describen la planta hoy.
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.models.base import Base
 
 from app.services import gen_promedio as gp
 
 HOY = date(2026, 8, 9)
+
+
+@compiles(JSONB, "sqlite")
+def _jsonb_as_text(element, compiler, **kw):
+    return "TEXT"
+
+
+@pytest.fixture
+def db():
+    from app.models.proyectos import Proyecto
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[Proyecto.__table__])
+    s = sessionmaker(bind=engine)()
+    yield s
+    s.close()
 
 
 def ventana(hoy, dias, kwh_por_dia, saltear=0):
@@ -144,3 +165,70 @@ def test_caso_real_valle_de_gandalf():
     r = gp.promedio_mensual(ventana(HOY, 30, kwh_dia), hoy=HOY)
     assert r["promedio_mwh"] == pytest.approx(213.3, abs=0.5)
     assert r["promedio_mwh"] > 200, "una MGS de 1 MW no genera 57 MWh al mes"
+
+
+# ── a quién se le calcula ────────────────────────────────────────────────────
+
+def test_un_proyecto_sin_tipo_cargado_no_queda_afuera(db):
+    """En SQL, `tipo_proyecto != 'autoconsumo'` es NULL cuando el campo es NULL,
+    y NULL no pasa el WHERE. Con eso, toda planta sin tipo cargado quedaba fuera
+    del recálculo en silencio y nunca recibía promedio, corriera las veces que
+    corriera. Se detectó contra la BD local: 56 en operación, 0 elegibles.
+    """
+    from app.models.proyectos import EstadoProyectoEnum, Proyecto, TipoProyectoEnum
+
+    db.add_all([
+        Proyecto(id=1, nombre_comercial="Sin tipo", estado=EstadoProyectoEnum.en_operacion,
+                 tipo_proyecto=None, sub_project="a"),
+        Proyecto(id=2, nombre_comercial="Minigranja", estado=EstadoProyectoEnum.en_operacion,
+                 tipo_proyecto=TipoProyectoEnum.minigranja, sub_project="b"),
+        Proyecto(id=3, nombre_comercial="Autoconsumo", estado=EstadoProyectoEnum.en_operacion,
+                 tipo_proyecto=TipoProyectoEnum.autoconsumo, sub_project="c"),
+        Proyecto(id=4, nombre_comercial="En desarrollo", estado=EstadoProyectoEnum.en_desarrollo,
+                 tipo_proyecto=None, sub_project="d"),
+    ])
+    db.commit()
+
+    nombres = [p.nombre_comercial for p in gp.proyectos_objetivo(db)]
+    assert "Sin tipo" in nombres, "los proyectos sin tipo cargado deben entrar"
+    assert "Minigranja" in nombres
+    assert "Autoconsumo" not in nombres      # autoconsumo sigue excluido
+    assert "En desarrollo" not in nombres    # solo los que están en operación
+
+
+def test_el_resultado_se_persiste_de_verdad(db):
+    """Lo que el usuario ve fallar: se corre el recálculo y la columna sigue
+    vacía. `aplicar` + commit tiene que dejar el valor y su procedencia en la
+    fila, no solo devolverlo en el reporte."""
+    from datetime import datetime, timezone
+    from app.models.proyectos import EstadoProyectoEnum, Proyecto
+
+    db.add(Proyecto(id=1, nombre_comercial="Gandalf", estado=EstadoProyectoEnum.en_operacion,
+                    sub_project="gandalf"))
+    db.commit()
+
+    p = db.get(Proyecto, 1)
+    r = gp.promedio_mensual(ventana(HOY, 30, 227_467 / 32), hoy=HOY)
+    ahora = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+    gp.aplicar(p, r, ahora)
+    db.commit()
+
+    db.expire_all()
+    guardado = db.get(Proyecto, 1)
+    assert float(guardado.gen_mensual_promedio_mwh) == pytest.approx(213.3, abs=0.5)
+    assert guardado.gen_promedio_origen == "api"
+    assert guardado.gen_promedio_dias == 30
+    assert guardado.gen_promedio_desde == HOY - timedelta(days=30)
+    assert guardado.gen_promedio_hasta == HOY - timedelta(days=1)
+    assert guardado.gen_promedio_actualizado_en is not None
+
+
+def test_una_vez_guardado_como_manual_el_recalculo_lo_respeta(db):
+    from app.models.proyectos import EstadoProyectoEnum, Proyecto
+    db.add(Proyecto(id=1, nombre_comercial="A mano", estado=EstadoProyectoEnum.en_operacion,
+                    sub_project="x", gen_mensual_promedio_mwh=180.0,
+                    gen_promedio_origen=gp.ORIGEN_MANUAL))
+    db.commit()
+    p = db.get(Proyecto, 1)
+    assert gp.decidir(p, force=False) is not None    # se salta
+    assert gp.decidir(p, force=True) is None         # con force sí entra

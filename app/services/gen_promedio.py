@@ -32,6 +32,7 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.proyectos import EstadoProyectoEnum, Proyecto, TipoProyectoEnum
@@ -111,7 +112,12 @@ def proyectos_objetivo(db: Session, proyecto_ids: list[int] | None = None) -> li
     q = db.query(Proyecto).filter(
         Proyecto.deleted_at.is_(None),
         Proyecto.estado == EstadoProyectoEnum.en_operacion,
-        Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo,
+        # `!= autoconsumo` a secas deja fuera los NULL: en SQL una comparación
+        # contra NULL da NULL, y NULL no pasa el WHERE. Con eso, toda planta sin
+        # tipo cargado quedaba fuera del recálculo en silencio y nunca recibía
+        # promedio, se corriera las veces que se corriera.
+        or_(Proyecto.tipo_proyecto.is_(None),
+            Proyecto.tipo_proyecto != TipoProyectoEnum.autoconsumo),
     )
     if proyecto_ids:
         q = q.filter(Proyecto.id.in_(proyecto_ids))

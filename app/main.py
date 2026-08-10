@@ -3431,7 +3431,7 @@ def _deferred_init():
 
             _mgs_scheduler.add_job(
                 _scheduled_reporte_energia,
-                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
+                CronTrigger(hour=4, minute=0, timezone=settings.TIMEZONE),
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
             )

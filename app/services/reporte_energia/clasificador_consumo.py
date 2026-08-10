@@ -50,8 +50,11 @@ HORAS = list(range(24))
 ESTADOS_AUTOMATICO = {"OK", "WARNING"}
 
 # %: qué tan lejos puede quedar el medidor más cercano de la mediana
-# histórica antes de dejar de confiar en él.
-TOLERANCIA_HISTORICO_CONSUMO = 0.50
+# histórica antes de dejar de confiar en él. Bajado de 0.50 a 0.30 (ver MGS
+# 0015 El Son Consumo 2026-08-09: un bug de Quoia duplicó el consumo real,
+# 38,41 kWh vs mediana 26,795 kWh -- 43,4% de diferencia, pasaba con el 50%
+# de antes).
+TOLERANCIA_HISTORICO_CONSUMO = 0.30
 
 # frontera_id (Consumo) -> frontera_id (Consumo del vecino de predio) --
 # para el Caso 'Histórico' cuando la frontera nunca ha tenido un día de

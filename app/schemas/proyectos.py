@@ -372,7 +372,7 @@ class ProyectoOut(BaseModel):
     # histórico ('api') o lo cargó una persona ('manual').
     gen_mensual_promedio_mwh: Optional[float] = None
     gen_promedio_origen: Optional[str] = None
-    gen_promedio_meses: Optional[int] = None
+    gen_promedio_dias: Optional[int] = None
     gen_promedio_desde: Optional[date] = None
     gen_promedio_hasta: Optional[date] = None
     gen_promedio_actualizado_en: Optional[datetime] = None

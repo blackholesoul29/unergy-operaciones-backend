@@ -6,10 +6,14 @@ para 70 proyectos), frágil (si esa API está caída no hay vista) y se repite e
 cada consulta aunque el número casi no cambie. Acá se calcula **una vez** y se
 persiste en `proyectos.gen_mensual_promedio_mwh`; después alcanza con leer la BD.
 
-**Qué es el promedio.** MWh por mes, sobre los últimos `meses` meses **completos**
-con datos suficientes. El mes en curso NO entra: está a medias y bajaría el
-promedio sin motivo. Un mes con muchos días sin lectura tampoco entra (ver
-`RATIO_DIAS_MINIMO`): mediría la caída del monitoreo, no la de la planta.
+**Qué es el promedio.** MWh en un mes típico, medido sobre una ventana **móvil**
+de los últimos 30 días corridos — no sobre el mes calendario anterior. Un
+promedio "de julio" consultado el 9 de agosto describe algo que terminó hace más
+de una semana; los últimos 30 días describen la planta hoy.
+
+El día de hoy no entra: está a medias. Y si la ventana tiene muchos días sin
+lectura (ver `RATIO_DIAS_MINIMO`) no se devuelve número: sería medir la caída del
+monitoreo, no la de la planta.
 
 **Manual vs. API.** Una planta recién energizada no tiene histórico y su promedio
 se carga a mano. `gen_promedio_origen` distingue los dos casos y el recálculo
@@ -18,30 +22,32 @@ respeta lo manual salvo que se pida `force`. Es el mismo patrón que
 
 El módulo se divide a propósito en dos capas:
 
-- `promedio_mensual` y `agrupar_por_mes` — **puras**, sin red ni BD. Es donde
-  vive la regla y es lo que prueban los tests.
+- `promedio_mensual` y `decidir` — **puras**, sin red ni BD. Ahí vive la regla
+  y es lo que prueban los tests.
 - `recalcular` — orquesta: baja el histórico, llama a las puras y persiste.
 """
 from __future__ import annotations
 
 import asyncio
-import calendar
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.proyectos import EstadoProyectoEnum, Proyecto, TipoProyectoEnum
 
-# Un mes entra al promedio si tiene lecturas en al menos este ratio de sus días.
-# 0.85 deja pasar un fin de semana perdido del monitoreo pero descarta el mes de
-# arranque de una planta, que arrastraría el promedio hacia abajo.
+# La ventana vale si al menos este ratio de sus días tiene lectura. 0.85 deja
+# pasar un fin de semana perdido del monitoreo pero descarta una planta recién
+# energizada, que daría un promedio construido sobre cuatro días.
 RATIO_DIAS_MINIMO = 0.85
 
-# Cuántos meses completos mirar hacia atrás por defecto. Seis cubre medio año de
-# estacionalidad sin castigar a las plantas jóvenes.
-MESES_POR_DEFECTO = 6
+# Largo de la ventana móvil, en días corridos hacia atrás desde ayer. 30 ≈ un mes
+# y es lo que hace que el número describa a la planta HOY y no el mes pasado.
+DIAS_POR_DEFECTO = 30
+
+# El campo se expresa siempre como "MWh en un mes de 30 días", sea cual sea el
+# largo de la ventana: si no, cambiar `dias` cambiaría la unidad del dato.
+DIAS_MES_REFERENCIA = 30
 
 ORIGEN_API = "api"
 ORIGEN_MANUAL = "manual"
@@ -49,65 +55,48 @@ ORIGEN_MANUAL = "manual"
 
 # ── Núcleo puro ──────────────────────────────────────────────────────────────
 
-def agrupar_por_mes(por_dia: dict[date, float]) -> dict[tuple[int, int], dict]:
-    """`{fecha: kwh}` → `{(año, mes): {"kwh": total, "dias": n}}`."""
-    meses: dict[tuple[int, int], dict] = {}
-    for dia, kwh in por_dia.items():
-        clave = (dia.year, dia.month)
-        m = meses.setdefault(clave, {"kwh": 0.0, "dias": 0})
-        m["kwh"] += float(kwh or 0)
-        m["dias"] += 1
-    return meses
-
-
 def promedio_mensual(
     por_dia: dict[date, float],
     hoy: date,
-    meses: int = MESES_POR_DEFECTO,
+    dias: int = DIAS_POR_DEFECTO,
 ) -> dict:
-    """Promedio en MWh/mes sobre los últimos `meses` meses completos con datos.
+    """Promedio en MWh/mes sobre los últimos `dias` días corridos.
+
+    La ventana es `[hoy - dias, hoy - 1]`: **hoy no entra** porque está a medias,
+    y lo anterior a la ventana tampoco, aunque haya histórico. Esa es la
+    diferencia con promediar el mes calendario pasado — el número describe a la
+    planta ahora.
+
+    El promedio se normaliza por los días **con lectura**, no por el largo de la
+    ventana: si el monitoreo se cayó tres días, la planta no generó menos, y
+    dividir por 30 haría ver una caída que no existe.
 
     Devuelve siempre la misma forma, también cuando no alcanza para calcular:
-    `{"promedio_mwh": None, "meses": 0, "desde": None, "hasta": None,
-      "descartados": [...], "motivo": "..."}`. Un `None` explícito es mejor que un
-    cero: "no sé" y "genera cero" son cosas distintas.
+    `promedio_mwh=None` con el motivo. Un `None` explícito es mejor que un cero —
+    "no sé" y "genera cero" son cosas distintas.
     """
-    vacio = {"promedio_mwh": None, "meses": 0, "desde": None, "hasta": None,
-             "descartados": [], "motivo": None}
-    if not por_dia:
-        return {**vacio, "motivo": "sin lecturas en el histórico"}
+    hasta = hoy - timedelta(days=1)
+    desde = hoy - timedelta(days=dias)
+    vacio = {"promedio_mwh": None, "dias": dias, "dias_con_datos": 0,
+             "desde": desde, "hasta": hasta, "motivo": None}
 
-    # El mes en curso queda fuera: está incompleto por definición.
-    primer_dia_mes_actual = date(hoy.year, hoy.month, 1)
-    agrupados = agrupar_por_mes(por_dia)
+    en_ventana = {d: float(k or 0) for d, k in por_dia.items() if desde <= d <= hasta}
+    if not en_ventana:
+        return {**vacio, "motivo": f"sin lecturas entre {desde} y {hasta}"}
 
-    completos, descartados = [], []
-    for (anio, mes), datos in sorted(agrupados.items()):
-        inicio = date(anio, mes, 1)
-        if inicio >= primer_dia_mes_actual:
-            descartados.append(f"{anio}-{mes:02d}: mes en curso")
-            continue
-        dias_mes = calendar.monthrange(anio, mes)[1]
-        if datos["dias"] < dias_mes * RATIO_DIAS_MINIMO:
-            descartados.append(
-                f"{anio}-{mes:02d}: solo {datos['dias']} de {dias_mes} días con lecturas"
-            )
-            continue
-        completos.append(((anio, mes), datos["kwh"]))
+    n = len(en_ventana)
+    if n < dias * RATIO_DIAS_MINIMO:
+        return {**vacio, "dias_con_datos": n,
+                "motivo": f"solo {n} de {dias} días con lecturas: "
+                          "muy poco para un promedio confiable"}
 
-    if not completos:
-        return {**vacio, "descartados": descartados,
-                "motivo": "ningún mes completo con datos suficientes"}
-
-    usados = completos[-meses:]
-    total_kwh = sum(kwh for _, kwh in usados)
-    (a0, m0), (a1, m1) = usados[0][0], usados[-1][0]
+    promedio_diario = sum(en_ventana.values()) / n
     return {
-        "promedio_mwh": round(total_kwh / len(usados) / 1000.0, 3),
-        "meses": len(usados),
-        "desde": date(a0, m0, 1),
-        "hasta": date(a1, m1, calendar.monthrange(a1, m1)[1]),
-        "descartados": descartados,
+        "promedio_mwh": round(promedio_diario * DIAS_MES_REFERENCIA / 1000.0, 3),
+        "dias": dias,
+        "dias_con_datos": n,
+        "desde": desde,
+        "hasta": hasta,
         "motivo": None,
     }
 
@@ -133,7 +122,7 @@ def aplicar(proyecto: Proyecto, resultado: dict, ahora: datetime) -> None:
     """Escribe el resultado del cálculo en el proyecto. Sin commit."""
     proyecto.gen_mensual_promedio_mwh = Decimal(str(resultado["promedio_mwh"]))
     proyecto.gen_promedio_origen = ORIGEN_API
-    proyecto.gen_promedio_meses = resultado["meses"]
+    proyecto.gen_promedio_dias = resultado["dias_con_datos"]
     proyecto.gen_promedio_desde = resultado["desde"]
     proyecto.gen_promedio_hasta = resultado["hasta"]
     proyecto.gen_promedio_actualizado_en = ahora
@@ -152,7 +141,7 @@ def decidir(proyecto: Proyecto, force: bool) -> str | None:
 
 async def recalcular(
     db: Session,
-    meses: int = MESES_POR_DEFECTO,
+    dias: int = DIAS_POR_DEFECTO,
     dry_run: bool = True,
     force: bool = False,
     proyecto_ids: list[int] | None = None,
@@ -192,13 +181,11 @@ async def recalcular(
             return {"error": f"no se pudo autenticar contra la API de generación: {e}",
                     "actualizados": [], "sin_datos": [], "saltados": saltados, "fallidos": []}
 
-        # Ventana: `meses` completos hacia atrás + el mes en curso (que se descarta
-        # después, pero pedirlo evita un borde raro si la corrida cae el día 1).
-        inicio = date(hoy.year, hoy.month, 1) - timedelta(days=31 * (meses + 1))
-        d_from = datetime(inicio.year, inicio.month, 1, 0, 0, 0, tzinfo=_COL_TZ)
+        # Se pide la ventana con dos días de colchón: el primer delta necesita una
+        # lectura previa con la que restarse (el contador es acumulado).
+        inicio = hoy - timedelta(days=dias + 2)
+        d_from = datetime(inicio.year, inicio.month, inicio.day, 0, 0, 0, tzinfo=_COL_TZ)
         d_to = datetime(hoy.year, hoy.month, hoy.day, 23, 59, 59, tzinfo=_COL_TZ)
-        # Se pide dos días antes para tener la lectura previa: el contador es
-        # acumulado y el primer delta necesita con qué restarse.
         fetch_from = (d_from - timedelta(days=2)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         fetch_to = d_to.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -232,10 +219,10 @@ async def recalcular(
                     continue
                 por_dia[d] = por_dia.get(d, 0.0) + float(e.get("kwh") or 0)
 
-            r = promedio_mensual(por_dia, hoy=hoy, meses=meses)
+            r = promedio_mensual(por_dia, hoy=hoy, dias=dias)
             if r["promedio_mwh"] is None:
                 sin_datos.append({"id": p.id, "nombre": p.nombre_comercial,
-                                  "motivo": r["motivo"], "descartados": r["descartados"][:4]})
+                                  "motivo": r["motivo"], "dias_con_datos": r["dias_con_datos"]})
                 continue
 
             anterior = float(p.gen_mensual_promedio_mwh) if p.gen_mensual_promedio_mwh is not None else None
@@ -244,7 +231,7 @@ async def recalcular(
             actualizados.append({
                 "id": p.id, "nombre": p.nombre_comercial,
                 "anterior_mwh": anterior, "nuevo_mwh": r["promedio_mwh"],
-                "meses": r["meses"],
+                "dias_con_datos": r["dias_con_datos"],
                 "desde": r["desde"].isoformat(), "hasta": r["hasta"].isoformat(),
             })
 
@@ -254,7 +241,7 @@ async def recalcular(
     return {
         "dry_run": dry_run,
         "force": force,
-        "meses_pedidos": meses,
+        "dias_ventana": dias,
         "hoy": hoy.isoformat(),
         "n_objetivo": len(objetivo),
         "n_actualizados": len(actualizados),

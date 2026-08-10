@@ -108,9 +108,10 @@ class Proyecto(Base):
     gen_mensual_promedio_mwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     # 'api' = derivado del histórico · 'manual' = lo puso una persona.
     gen_promedio_origen: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # Cuántos meses COMPLETOS entraron al promedio. Un promedio de un mes no vale
-    # lo mismo que uno de seis, y sin este número no hay forma de saberlo.
-    gen_promedio_meses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Cuántos días CON LECTURA entraron al promedio, de los 30 de la ventana. Un
+    # promedio hecho sobre 27 días no vale lo mismo que uno sobre 30, y sin este
+    # número no hay forma de saberlo.
+    gen_promedio_dias: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gen_promedio_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
     gen_promedio_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
     gen_promedio_actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

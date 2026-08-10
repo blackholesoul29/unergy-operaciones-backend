@@ -303,8 +303,8 @@ def backfill_ubicacion_proyectos(
 
 @router.post("/gen-promedio/recalcular")
 async def recalcular_gen_promedio(
-    meses: int = Query(gen_promedio.MESES_POR_DEFECTO, ge=1, le=24,
-                       description="Cuántos meses COMPLETOS promediar"),
+    dias: int = Query(gen_promedio.DIAS_POR_DEFECTO, ge=7, le=365,
+                      description="Largo de la ventana móvil, en días corridos hacia atrás"),
     dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
     force: bool = Query(False, description="Pisar también los promedios cargados a mano"),
     proyecto_id: list[int] | None = Query(None, description="Limitar a estos proyectos"),
@@ -324,7 +324,7 @@ async def recalcular_gen_promedio(
     Tarda: consulta la API de generación planta por planta (de a 8 en paralelo).
     """
     return await gen_promedio.recalcular(
-        db, meses=meses, dry_run=dry_run, force=force, proyecto_ids=proyecto_id,
+        db, dias=dias, dry_run=dry_run, force=force, proyecto_ids=proyecto_id,
     )
 
 
@@ -350,7 +350,7 @@ def listar_gen_promedio(
             "sub_project": p.sub_project,
             "gen_mensual_promedio_mwh": valor,
             "gen_promedio_origen": p.gen_promedio_origen,
-            "gen_promedio_meses": p.gen_promedio_meses,
+            "gen_promedio_dias": p.gen_promedio_dias,
             "gen_promedio_desde": p.gen_promedio_desde,
             "gen_promedio_hasta": p.gen_promedio_hasta,
             "gen_promedio_actualizado_en": p.gen_promedio_actualizado_en,
@@ -470,7 +470,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
         from datetime import datetime as _dt, timezone as _tz
         p.gen_promedio_origen = gen_promedio.ORIGEN_MANUAL
         p.gen_promedio_actualizado_en = _dt.now(_tz.utc)
-        p.gen_promedio_meses = None
+        p.gen_promedio_dias = None
         p.gen_promedio_desde = None
         p.gen_promedio_hasta = None
 

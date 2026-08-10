@@ -727,7 +727,7 @@ _PENDING_DDLS = [
     # los valores cargados a mano en las plantas sin histórico.
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_mensual_promedio_mwh NUMERIC(12,3)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_origen VARCHAR(10)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_meses INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_dias INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_desde DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_hasta DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_actualizado_en TIMESTAMPTZ",

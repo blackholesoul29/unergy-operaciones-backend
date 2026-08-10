@@ -34,8 +34,8 @@ from app.schemas.comercial import (
     OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
 from app.services.comercial import (
-    calcular_alerta, col_now, contexto_ficha, estado_a_resultado, ficha_operativa,
-    resumen_etapas,
+    ahora_colombia, calcular_alerta, col_now, contexto_ficha, estado_a_resultado,
+    ficha_operativa, proyectos_operando, resumen_etapas,
 )
 
 router = APIRouter(prefix="/comercial", tags=["comercial"])
@@ -389,6 +389,39 @@ def list_ofertas_todas(
             continue
         out.append(row)
     return out
+
+
+@router.get("/proyectos-operando")
+def list_proyectos_operando(
+    q: str | None = Query(None, description="Filtra por nombre de planta, cliente o código de seguimiento"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Las plantas que hoy están **operando**, con sus datos operativos.
+
+    Es la superficie pensada para integrar la plataforma con otra: devuelve una
+    fila por PLANTA (no por oferta) con nombre, ubicación, operador de red,
+    generación mensual promedio, fecha de inicio de comercialización y duración
+    del contrato de energía. Ver `docs/API_PROYECTOS_OPERANDO.md`.
+
+    El universo es el mismo que se ve en `/comercial` filtrando por la etapa
+    **Operando**: `oportunidad_ofertas.estado = 'operando'`. No hay parámetro
+    para cambiar de etapa — quien necesite otra tiene
+    `GET /comercial/ofertas?estado=…`, que devuelve el CRM completo.
+
+    A diferencia del resto de `/comercial`, **no exige rol comercial**: es de
+    solo lectura y no expone precios, márgenes ni bitácora comercial. Basta con
+    una cuenta activa de la plataforma (API Key o token).
+    """
+    items = proyectos_operando(db, q=q)
+    return {
+        # ahora_colombia() y no col_now(): esta fecha viaja hacia afuera y tiene
+        # que traer su offset real (-05:00). Ver el docstring de col_now().
+        "generado_en": ahora_colombia(),
+        "estado": "operando",
+        "total": len(items),
+        "items": items,
+    }
 
 
 @router.post("/oportunidades", status_code=201)

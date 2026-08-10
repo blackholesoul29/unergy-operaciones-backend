@@ -512,7 +512,16 @@ def clasificar_generacion(
             curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
             fp=fp_relleno,
         )
-        if horas_reconectador or horas_solenium_h or horas_historico:
+        # Las horas que ninguna de las tres fuentes cubre Y que además caen
+        # fuera de la ventana solar se llenan directo en 0.0 -- ahí el valor
+        # esperado ya es ~0 sin importar la fuente (mismo criterio que la
+        # excepción de más abajo), así que no tiene sentido dejarlas en
+        # blanco en el editor de corrección manual (ver MGS 0077 Chiriguaná
+        # Norte 4 2026-08-09: 20h-22h).
+        horas_fuera_ventana = [h for h in curva_rellenada[curva_rellenada.isna()].index if h not in HORAS_SOLARES]
+        if horas_fuera_ventana:
+            curva_rellenada[horas_fuera_ventana] = 0.0
+        if horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana:
             resultado["curva_final"] = curva_rellenada
             resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
         if horas_solenium_h and resultado.get("fp") is None:

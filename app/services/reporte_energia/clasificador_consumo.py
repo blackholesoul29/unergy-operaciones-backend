@@ -228,8 +228,11 @@ def clasificar_consumo(
     # puede traer huecos puntuales (el medidor dejó de reportar a media
     # tarde, por ejemplo) -- se rellenan con el histórico horario propio
     # (no hay reconectador para Consumo). El total se recalcula sobre la
-    # curva ya rellenada; si aun así quedan horas sin cubrir, se marca
-    # Revisar Manualmente.
+    # curva ya rellenada. Cualquier relleno con histórico queda marcado
+    # para revisar -- decisión explícita del usuario (ver MGS 0012 La
+    # Reserva Consumo 2026-08-09): aunque no dependa de una API externa
+    # como el reconectador/Solenium de Generación, sigue siendo una
+    # estimación (mediana × forma), no dato real medido ese día.
     curva_actual = resultado.get("curva_final")
     horas_historico: set[int] = set()
     if resultado.get("caso") == "Medidor" and isinstance(curva_actual, pd.Series) and curva_actual.isna().any():
@@ -237,6 +240,7 @@ def clasificar_consumo(
         if horas_historico:
             resultado["curva_final"] = curva_rellenada
             resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
+            resultado["revisar_manualmente"] = True
         if curva_rellenada.isna().any():
             resultado["revisar_manualmente"] = True
 

@@ -27,6 +27,14 @@ _TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, T
 # front -- se decide acá por el id del cliente.
 CLIENTES_EXCEL_POR_PROYECTO: set[int] = {75}
 
+# cliente_id -- pedido puntual: en vez de resolver sus fronteras por
+# proyectos vinculados (ProyectoAreaContacto/ProyectoInversionista), recibe
+# TODAS las fronteras del sistema en formato Cliente. 157 = "Operaciones
+# Unergy" (creado para esto -- correo operaciones@unergy.io, sin vincular
+# ningún proyecto a propósito, para no tener que mantener esa lista al día
+# cada vez que se crea un proyecto nuevo).
+CLIENTES_TODAS_LAS_FRONTERAS: set[int] = {157}
+
 
 def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
     return (
@@ -40,7 +48,15 @@ def _fronteras_de_operador(db: Session, operador_id: int) -> list[Frontera]:
 def _fronteras_de_cliente(db: Session, cliente_id: int) -> list[Frontera]:
     """Fronteras de los proyectos donde este cliente es la fuente del contacto
     CGM (por puntero de área, o por ser inversionista vigente) -- no depende
-    de quién sea el titular del proyecto."""
+    de quién sea el titular del proyecto. Excepción: CLIENTES_TODAS_LAS_FRONTERAS
+    se salta ese filtro por completo y trae todo."""
+    if cliente_id in CLIENTES_TODAS_LAS_FRONTERAS:
+        return (
+            db.query(Frontera)
+            .options(joinedload(Frontera.proyecto))
+            .filter(Frontera.deleted_at.is_(None))
+            .all()
+        )
     proyecto_ids = get_proyecto_ids_por_contacto_cliente(db, "cgm", cliente_id)
     if not proyecto_ids:
         return []

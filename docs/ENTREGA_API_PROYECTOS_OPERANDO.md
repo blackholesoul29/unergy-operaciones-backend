@@ -108,23 +108,69 @@ Cualquier cosa me escribís.
 
 ---
 
-## ⚠️ Antes de entregar — hay que llenar los datos (30 min)
+## ✅ Estado de los datos — YA EJECUTADO el 2026-08-10
 
-**La API funciona. Lo que falta es dato cargado**, y hoy falta bastante. Consultado en
-producción el 2026-08-09:
+Los backfills y el vinculado **ya se corrieron**. Antes y después:
 
-| | |
-|---|---|
-| Plantas en etapa Operando | **32** |
-| …vinculadas a un proyecto de la plataforma | **4** |
-| …con generación promedio | **1** |
-| …con ubicación | **1** |
-| …con operador de red | **4** |
-| …con fecha de inicio de comercialización | **4** |
-| …con contrato de energía | **4** |
+| Campo | Antes | Ahora |
+|---|---|---|
+| Plantas en etapa Operando | 32 | **31** |
+| …con nombre | 32 | **31/31** |
+| …vinculadas a un proyecto | 4 | **24/31** |
+| …con operador de red | 4 | **23/31** |
+| …con fecha de inicio de comercialización | 4 | **22/31** |
+| …con generación promedio | 1 | **17/31** (todas `medido`) |
+| …con contrato de energía | 4 | **17/31** |
+| …con ubicación | 1 | **5/31** ⚠️ |
 
-Si se la entregás así, ella ve 32 nombres y el resto en `null`. Los tres pasos de abajo
-arreglan eso; el primero es el que más rinde.
+Qué se ejecutó:
+
+1. `POST /comercial/ofertas/vincular-proyectos?dry_run=false` → **21 vínculos aplicados**
+2. `POST /cumplimiento/backfill-comercializacion?dry_run=false` → 0 nuevos (112 proyectos no
+   tienen identificador de monitoreo), pero al vincular quedaron expuestas las fechas que ya
+   estaban cargadas: pasó de 4 a 22
+3. `POST /proyectos/gen-promedio/recalcular?dry_run=false` → **48 proyectos actualizados**,
+   0 fallidos
+4. `POST /proyectos/backfill-ubicacion?dry_run=false` → 0 de 149: **Sun Factory y Solenium no
+   tienen la ubicación**, hay que cargarla a mano
+
+### Lo que queda pendiente
+
+**Ubicación (5/31)** — es el hueco real. Los proyectos no tienen `municipio`/`departamento`
+cargados y las fuentes externas tampoco. Se carga a mano desde el detalle de cada proyecto.
+La API no lo disimula: `fuentes.municipio: null` significa "nadie lo cargó todavía", así que
+tu compañera puede distinguirlo de un dato real.
+
+**2 vínculos que dejé sin aplicar a propósito** (decisión tuya, no mía):
+
+| Oferta | Propuesta | Por qué la dejé afuera |
+|---|---|---|
+| 24 | GD La Hormiga → **GD La Hormiguita** | No existe ningún proyecto "GD La Hormiga". El diminutivo puede ser OTRA planta |
+| 33 | GD ISABELA 1 y GD ISABELA 2. → **GD Isabela** | Esa oferta nombra DOS plantas; apuntarla a un solo proyecto mostraría la generación de una como si fuera de ambas |
+
+Para aplicar cualquiera de las dos, cuando decidas:
+
+```bash
+curl -X POST "$BASE/comercial/ofertas/vincular-proyectos?dry_run=false&oferta_id=24" \
+  -H "X-API-Key: $KEY"
+```
+
+**5 plantas con una inconsistencia que vale la pena revisar:** el CRM dice que la oferta está
+*operando*, pero el `estado` del proyecto dice que no está en operación — por eso quedan sin
+generación promedio (el cálculo solo mira proyectos `en_operacion`):
+
+- AGGE Extractora Monterrey (267) · GD Isabela (276) · GD Taurus IX (262) ·
+  GD Taurus X (263) · MGS Naos 2 (33, marcado *cancelado*)
+
+O la etapa del CRM está mal, o el estado del proyecto está mal. Cualquiera de las dos que
+corrijas, la generación aparece sola en el siguiente recálculo.
+
+**2 plantas sin generación por falta de lecturas** (Bayunca, GD San Pelayo): la ventana de 30
+días no tuvo suficientes días con dato. Es cobertura de monitoreo, no un problema de la API.
+
+---
+
+## Referencia — cómo se corren esos pasos (para la próxima vez)
 
 ### A. Vincular las ofertas del CRM con las plantas (el paso importante)
 

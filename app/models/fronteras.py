@@ -23,13 +23,6 @@ class EstadoFronteraEnum(str, enum.Enum):
     en_falla = "en_falla"
 
 
-class EstadoOperacionalEnum(str, enum.Enum):
-    activo = "activo"
-    inactivo = "inactivo"
-    en_registro = "en_registro"
-    descomisionado = "descomisionado"
-
-
 class FuenteLecturaEnum(str, enum.Enum):
     medidor_principal = "medidor_principal"
     medidor_respaldo = "medidor_respaldo"
@@ -141,14 +134,10 @@ class Frontera(Base):
     factor_ajuste: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     factor_perdidas_frontera_principal: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
 
-    # Quoia meter link
-    quoia_meter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-
-    # Estado operacional (lifecycle)
-    estado_operacional: Mapped[str | None] = mapped_column(
-        SAEnum(EstadoOperacionalEnum, name="estado_operacional_enum"),
-        nullable=True, default="activo",
-    )
+    # Id interno del border en Quoia -- lo requiere get_border_report_status(),
+    # que no acepta frt_code. Se guarda al confirmar desde /quoia/pendientes
+    # para no tener que resolverlo con una llamada extra en cada reporte CGM.
+    quoia_border_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Soft delete
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -194,3 +183,17 @@ class FronteraLectura(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     frontera: Mapped["Frontera"] = relationship("Frontera", back_populates="lecturas")
+
+
+class FronteraQuoiaIgnorada(Base):
+    """Borders de Quoia marcados a propósito como 'no aplica' en el panel de
+    /fronteras/quoia/pendientes, para que dejen de aparecer como pendientes
+    (ej. medidores de prueba, borders de un tercero)."""
+
+    __tablename__ = "fronteras_quoia_ignoradas"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frt_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    motivo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ignorado_por_usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

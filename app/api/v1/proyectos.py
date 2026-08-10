@@ -5,10 +5,10 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
-from app.services.tsf_sync import _core
+from app.utils.nombre_matching import mejor_candidato
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoGrupoPanel, ProyectoInversor,
+    ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
 )
 from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
@@ -20,8 +20,14 @@ from app.schemas.proyectos import (
     ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
     ProyectoAreaContactoSet, ProyectoAreaContactoOut,
+    ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
 )
 from app.schemas.common import PaginatedResponse
+from app.services.mgs.gaia_client import GaiaClient
+from app.services.operadores_red_sync import sincronizar_operador_red
+from app.services import gen_promedio
+from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
+from app.services.proyectos_backfill_unergy import asignar_sub_project_unergy_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -36,6 +42,7 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.area_contactos),
             selectinload(Proyecto.servicio_representacion),
+            selectinload(Proyecto.ppa_contratos),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         )
         .filter(Proyecto.id == id)
@@ -77,6 +84,7 @@ def list_proyectos(
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.area_contactos),
         selectinload(Proyecto.servicio_representacion),
+        selectinload(Proyecto.ppa_contratos),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
     )
     if q:
@@ -94,28 +102,32 @@ def list_proyectos(
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
 
 
-def _buscar_duplicado_por_nombre(db: Session, nombre_comercial: str | None) -> Proyecto | None:
-    """Busca un proyecto existente cuyo "nombre de lugar" (sin tildes/mayúsculas,
-    sin prefijos MGS/Minigranja/GD ni números) esté contenido en el nuevo nombre
-    o viceversa -- p. ej. "monterrubio" SÍ coincide con
-    "Minigranja 0029 - Monterrubio".
+def _buscar_duplicado_por_nombre(
+    db: Session, nombre_comercial: str | None, tipo_proyecto: str | None = None,
+) -> Proyecto | None:
+    """Busca un proyecto existente con nombre parecido, via solapamiento de
+    tokens + similitud de texto (mismo algoritmo de app/utils/nombre_matching.py
+    que se usa para reconciliar Quoia/Solenium/GESCON) -- detecta parecidos
+    aunque no sea un caso de "un nombre contenido en el otro" (p. ej. "AGGE
+    Extractora Monterrey" vs "AGGE Frontera Monterrey").
+
+    Si se pasa tipo_proyecto, solo compara contra proyectos del mismo tipo --
+    reduce falsos positivos entre proyectos de naturaleza distinta que
+    comparten palabras en el nombre.
 
     Esto es deliberadamente permisivo (puede marcar como "parecidos" dos fases
     reales distintas de un mismo desarrollo, p. ej. "Chinú Sur" y "Chinú Sur 2"):
     es aceptable porque el aviso no bloquea -- la persona puede confirmar
-    "crear de todos modos" con un clic si de verdad es un proyecto distinto. Un
-    match exacto (sin este margen) dejaba pasar duplicados obvios sin avisar.
+    "crear de todos modos" con un clic si de verdad es un proyecto distinto.
     """
-    objetivo = _core(nombre_comercial)
-    if len(objetivo) < 4:
+    if not nombre_comercial:
         return None
-    for c in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all():
-        n = _core(c.nombre_comercial)
-        if len(n) < 4:
-            continue
-        if objetivo in n or n in objetivo:
-            return c
-    return None
+    q = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
+    if tipo_proyecto:
+        q = q.filter(Proyecto.tipo_proyecto == tipo_proyecto)
+    candidatos = [(c, [c.nombre_comercial]) for c in q.all()]
+    item, _score = mejor_candidato(nombre_comercial, candidatos)
+    return item
 
 
 @router.post("", response_model=ProyectoOut, status_code=201)
@@ -129,7 +141,7 @@ def create_proyecto(
     _verificar_unicos(db, payload)
 
     if not forzar:
-        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"))
+        duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"), payload.get("tipo_proyecto"))
         if duplicado:
             # detail estructurado (no un string plano como los demás 409 de este
             # archivo): el frontend lo usa para ofrecer "crear de todos modos"
@@ -161,12 +173,248 @@ def create_proyecto(
             "ID de Solenium o de Sun Factory) ya está en uso por otro proyecto.",
         )
     db.refresh(proyecto)
+    asignar_sub_project_unergy_si_aplica(proyecto, db)
     return _get_proyecto_or_404(proyecto.id, db)
+
+
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+# Deben ir antes de /{id} para no chocar -- aunque acá no aplica porque son
+# rutas de 2+ segmentos, se deja el mismo orden por consistencia con el resto.
+
+@router.get("/pendientes", response_model=list[ProyectoPendienteOut])
+def listar_proyectos_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Candidatos de Sun Factory/Quoia/Solenium sin reflejar en `proyectos`,
+    o ya existentes pero con estado/fase desincronizados. Nunca se escriben
+    solos -- ver /pendientes/{clave}/confirmar."""
+    return resolver_pendientes(db)
+
+
+@router.post("/pendientes/{clave}/confirmar", response_model=ProyectoOut, status_code=201)
+def confirmar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteConfirmar,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    pendientes = resolver_pendientes(db)
+    item = next((p for p in pendientes if p["clave"] == clave), None)
+    if not item:
+        raise HTTPException(404, "Ese candidato ya no aparece como pendiente (puede que ya se haya resuelto).")
+
+    overrides = body.model_dump(exclude_unset=True)
+    potencia_ac_kw = overrides.get("potencia_ac_kw", item.get("potencia_ac_kw"))
+    capacidad_instalada_kwp = overrides.get("capacidad_instalada_kwp", item.get("capacidad_instalada_kwp"))
+
+    if item["tipo_sugerencia"] == "crear":
+        payload = {
+            "nombre_comercial": overrides.get("nombre_comercial") or item["nombre_sugerido"],
+            "tipo_proyecto": overrides.get("tipo_proyecto") or item.get("tipo_proyecto_sugerido"),
+            "estado": item.get("estado_sugerido") or "en_desarrollo",
+            "municipio": overrides.get("municipio") or item.get("municipio"),
+            "departamento": overrides.get("departamento") or item.get("departamento"),
+            "latitud": item.get("latitud"),
+            "longitud": item.get("longitud"),
+            "fase_construccion": item.get("fase_construccion_sugerida"),
+            "origina_code": item.get("origina_code"),
+            "codigo_tsf": item.get("codigo_tsf"),
+            "sunfactory_project_id": item.get("sunfactory_project_id"),
+            "sub_project": item.get("sub_project"),
+            "project_id_solenium": item.get("project_id_solenium"),
+            "origen": "pendientes",
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        proyecto = Proyecto(**payload)
+        db.add(proyecto)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "No se pudo crear: algún código/ID único ya está en uso por otro proyecto.")
+        db.refresh(proyecto)
+        proyecto_id = proyecto.id
+    else:
+        proyecto = db.query(Proyecto).filter(Proyecto.id == item["proyecto_id"]).first()
+        if not proyecto:
+            raise HTTPException(404, "El proyecto vinculado ya no existe")
+        if item.get("estado_sugerido") and proyecto.estado != "en_operacion" and item["estado_sugerido"] == "en_operacion":
+            proyecto.estado = "en_operacion"
+        if item.get("fase_construccion_sugerida"):
+            proyecto.fase_construccion = item["fase_construccion_sugerida"]
+        # Backfill de vínculos y ubicación -- solo si el proyecto todavía no los tenía.
+        for campo in (
+            "origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project",
+            "project_id_solenium", "municipio", "departamento", "latitud", "longitud",
+        ):
+            if getattr(proyecto, campo) is None and item.get(campo) is not None:
+                setattr(proyecto, campo, item[campo])
+        db.commit()
+        proyecto_id = proyecto.id
+
+    asignar_sub_project_unergy_si_aplica(proyecto, db)
+
+    if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
+        it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()
+        if not it:
+            it = ProyectoInfoTecnica(proyecto_id=proyecto_id)
+            db.add(it)
+        if it.potencia_ac_kw is None and potencia_ac_kw is not None:
+            it.potencia_ac_kw = potencia_ac_kw
+        if it.capacidad_instalada_kwp is None and capacidad_instalada_kwp is not None:
+            it.capacidad_instalada_kwp = capacidad_instalada_kwp
+        db.commit()
+
+    return _get_proyecto_or_404(proyecto_id, db)
+
+
+@router.post("/pendientes/{clave}/ignorar", status_code=204)
+def ignorar_proyecto_pendiente(
+    clave: str,
+    body: ProyectoPendienteIgnorar,
+    db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
+):
+    if db.query(ProyectoPendienteIgnorado).filter(ProyectoPendienteIgnorado.clave == clave).first():
+        return
+    db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.commit()
+
+
+@router.post("/backfill-ubicacion")
+def backfill_ubicacion_proyectos(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Completa latitud/longitud/municipio/departamento en proyectos existentes
+    que les falte ese dato, cruzando contra Sun Factory y Solenium. Idempotente
+    y nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
+    return backfill_ubicacion(db, dry_run=dry_run)
+
+
+# ── Generación mensual promedio ───────────────────────────────────────────────
+# El promedio se calcula desde la API de generación de Unergy y se PERSISTE en el
+# proyecto, para que las vistas de contratos no dependan de esa API en cada
+# consulta. Ver app/services/gen_promedio.py.
+#
+# Van declaradas ANTES de /{id}: ese path param está tipado `int`, así que si
+# fueran después, FastAPI intentaría convertir "gen-promedio" a entero y
+# devolvería 422 en vez de resolver la ruta.
+
+
+@router.post("/gen-promedio/recalcular")
+async def recalcular_gen_promedio(
+    dias: int = Query(gen_promedio.DIAS_POR_DEFECTO, ge=7, le=365,
+                      description="Largo de la ventana móvil, en días corridos hacia atrás"),
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    force: bool = Query(False, description="Pisar también los promedios cargados a mano"),
+    proyecto_id: list[int] | None = Query(None, description="Limitar a estos proyectos"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Recalcula `gen_mensual_promedio_mwh` desde el histórico de generación.
+
+    Idempotente y seguro de repetir. Por defecto **no escribe** (`dry_run=true`)
+    y **no pisa** los valores cargados a mano: una planta sin histórico se
+    diligencia con `PATCH /proyectos/{id}` y el recálculo la respeta.
+
+    La respuesta trae `sin_datos`, `saltados` y `fallidos` con nombre y motivo:
+    esa es la lista de trabajo de lo que hay que cargar a mano. Un proyecto que
+    no se pudo calcular tiene que verse, no desaparecer del reporte.
+
+    Tarda: consulta la API de generación planta por planta (de a 8 en paralelo).
+    """
+    return await gen_promedio.recalcular(
+        db, dias=dias, dry_run=dry_run, force=force, proyecto_ids=proyecto_id,
+    )
+
+
+@router.get("/gen-promedio")
+def listar_gen_promedio(
+    solo_faltantes: bool = Query(False, description="Solo los que no tienen promedio cargado"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """El promedio de cada proyecto, con su origen y su antigüedad.
+
+    Es la vista para saber qué falta por cargar a mano sin tener que disparar un
+    recálculo contra la API de generación.
+    """
+    filas = []
+    for p in gen_promedio.proyectos_objetivo(db):
+        valor = float(p.gen_mensual_promedio_mwh) if p.gen_mensual_promedio_mwh is not None else None
+        if solo_faltantes and valor is not None:
+            continue
+        filas.append({
+            "id": p.id,
+            "nombre_comercial": p.nombre_comercial,
+            "sub_project": p.sub_project,
+            "gen_mensual_promedio_mwh": valor,
+            "gen_promedio_origen": p.gen_promedio_origen,
+            "gen_promedio_dias": p.gen_promedio_dias,
+            "gen_promedio_desde": p.gen_promedio_desde,
+            "gen_promedio_hasta": p.gen_promedio_hasta,
+            "gen_promedio_actualizado_en": p.gen_promedio_actualizado_en,
+            # Sin identificador de monitoreo la API no lo resuelve: carga manual sí o sí.
+            "requiere_carga_manual": not (p.sub_project or p.alias_monitoreo),
+        })
+    return {
+        "total": len(filas),
+        "con_promedio": sum(1 for f in filas if f["gen_mensual_promedio_mwh"] is not None),
+        "items": filas,
+    }
 
 
 @router.get("/{id}", response_model=ProyectoOut)
 def get_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_proyecto_or_404(id, db)
+
+
+@router.get("/{id}/debug-generacion")
+def debug_generacion(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)) -> dict:
+    """Diagnóstico de solo lectura: ¿la(s) frontera(s) de generación de este
+    proyecto tienen generación REAL hoy en Quoia? Usa el mismo método por nodo
+    (no por frt_code -- ya sabemos que ese da 400 para algunos borders) que
+    Proyectos pendientes, cacheado 1h. Sirve para verificar si un proyecto
+    marcado `en_operacion` de verdad está comercializando energía."""
+    fronteras = (
+        db.query(Frontera)
+        .filter(
+            Frontera.proyecto_id == id,
+            Frontera.deleted_at.is_(None),
+            Frontera.tipo_frontera.in_(["generacion", "generacion_consumo"]),
+        )
+        .all()
+    )
+    if not fronteras:
+        return {"tiene_frontera": False, "detalle": "Este proyecto no tiene frontera de generación registrada."}
+
+    gaia = GaiaClient()
+    if not gaia.enabled:
+        raise HTTPException(status_code=502, detail="Credenciales de Quoia no configuradas.")
+    try:
+        borders = gaia.get_all_borders()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar Quoia: {exc}")
+    generacion_real = _generacion_real_por_frt(gaia, borders)
+
+    borders_by_code = {}
+    for b in borders:
+        gen = b.get("frt_generation") or {}
+        code = (gen.get("frt_code") or "").strip().lower()
+        if code:
+            borders_by_code[code] = gen
+
+    resultado = []
+    for f in fronteras:
+        codigo = (f.codigo_frontera or "").strip().lower()
+        info = borders_by_code.get(codigo, {})
+        resultado.append({
+            "codigo_frontera": f.codigo_frontera,
+            "tipo_frontera": f.tipo_frontera,
+            "last_report_date": info.get("last_report_date"),
+            "generacion_real_hoy": generacion_real.get(codigo, False),
+        })
+    return {"tiene_frontera": True, "fronteras": resultado}
 
 
 # Columnas con restricción UNIQUE en el modelo Proyecto. Si se intenta asignar a un
@@ -209,6 +457,23 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
     payload = data.model_dump(exclude_unset=True)
     _verificar_unicos(db, payload, excluir_id=id)
 
+    # Si el usuario edita la fecha de inicio de comercialización a mano, marca el
+    # flag para que el backfill/job diario no la vuelva a pisar (salvo que él mismo
+    # mande el flag explícito en el payload).
+    if "fecha_inicio_comercializacion" in payload and "fecha_comercializacion_editada_manual" not in payload:
+        p.fecha_comercializacion_editada_manual = True
+
+    # Mismo criterio para el promedio de generación: si alguien lo escribe a mano
+    # queda marcado 'manual' y el recálculo no lo pisa. Es el caso de las plantas
+    # sin histórico, que es justamente para lo que existe la carga manual.
+    if "gen_mensual_promedio_mwh" in payload and "gen_promedio_origen" not in payload:
+        from datetime import datetime as _dt, timezone as _tz
+        p.gen_promedio_origen = gen_promedio.ORIGEN_MANUAL
+        p.gen_promedio_actualizado_en = _dt.now(_tz.utc)
+        p.gen_promedio_dias = None
+        p.gen_promedio_desde = None
+        p.gen_promedio_hasta = None
+
     for k, v in payload.items():
         setattr(p, k, v)
     try:
@@ -221,6 +486,9 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
             "No se pudo guardar: algún valor único (p. ej. API ID Unergy o topic slug) "
             "ya está en uso por otro proyecto.",
         )
+    if "operador_red_id" in payload:
+        sincronizar_operador_red(db, p)
+        db.commit()
     return _get_proyecto_or_404(id, db)
 
 
@@ -316,7 +584,11 @@ _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
     "proyecto_inicio_operacion",
 ]
-_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium"]
+_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium", "sunfactory_project_id"]
+# Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el
+# valor del perdedor (a diferencia de _MERGE_SCALAR_UNIQUE, no hace falta
+# liberarlos en el perdedor antes de copiar: no hay constraint que choque).
+_MERGE_SCALAR_FILL_IF_EMPTY = ["municipio", "departamento", "latitud", "longitud", "codigo_tsf"]
 
 
 def _scalar(db, sql, params):
@@ -387,9 +659,9 @@ def merge_proyectos(
     if n_subp:
         movimientos.append({"tabla": "proyectos (subproyectos)", "a_mover": n_subp, "descartadas_por_colision": 0})
 
-    # Campos escalares únicos: qué se copiaría al ganador
+    # Campos escalares vacíos en el ganador: qué se copiaría del perdedor
     campos_copiados = []
-    for f in _MERGE_SCALAR_UNIQUE:
+    for f in _MERGE_SCALAR_UNIQUE + _MERGE_SCALAR_FILL_IF_EMPTY:
         val_keeper = getattr(ganador, f, None)
         val_loser = getattr(perdedor, f, None)
         if (val_keeper in (None, "")) and (val_loser not in (None, "")):

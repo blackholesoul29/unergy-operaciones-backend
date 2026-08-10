@@ -16,19 +16,33 @@ TIPOS_CONFIG = {
     "trsd":     {"ruta": "publica", "patron": "diario"},
     "cxcsb":    {"ruta": "publica", "patron": "mensual"},
     "tserv":    {"ruta": "publica", "patron": "mensual"},
+    "afac":     {"ruta": "publica", "patron": "mensual"},
 }
 
 # Tipos cuyo archivo trae código SIC de planta y se puede enriquecer con
 # nombre + MW desde el snapshot mensual de fronteras del FTP.
-TIPOS_ENRIQUECIBLES = {"grip", "arrpas", "tgrl", "cxcsb"}
+# OJO: tgrl NO va aquí — su archivo no tiene columna de código SIC de planta
+# (trae CODIGO/AGENTE); se filtra por agente, ver TIPOS_FILTRO_AGENTE.
+TIPOS_ENRIQUECIBLES = {"grip", "arrpas", "cxcsb"}
 
 # Columna del archivo XM que trae el código SIC de planta, según tipo.
 COLUMNA_CODIGO_ENRIQUECIMIENTO = {
     "grip": "PLANTA",
-    "tgrl": "PLANTA",
     "arrpas": "SUBMERCADO",
     "cxcsb": "SUBMERCADO",
 }
+
+# Tipos que, con el checkbox, se filtran a solo las filas de un agente de
+# Unergy (listan todos los agentes del mercado y no traen código SIC de
+# planta — el notebook original de tgrl filtraba por la columna AGENTE).
+# Unergy participa como generador (UNGG) y como comercializador (UNGC).
+TIPOS_FILTRO_AGENTE = {"tgrl"}
+COLUMNA_AGENTE = "AGENTE"
+AGENTES_VALIDOS = {"UNGG", "UNGC"}
+AGENTE_POR_DEFECTO = "UNGG"
+
+# Todos los tipos a los que aplica el checkbox "solo Unergy" (SIC o agente).
+TIPOS_FILTRABLES = TIPOS_ENRIQUECIBLES | TIPOS_FILTRO_AGENTE
 
 
 class TipoXMInvalido(ValueError):

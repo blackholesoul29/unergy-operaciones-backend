@@ -155,12 +155,13 @@ class ProyectoInversorOut(ProyectoInversorCreate):
 # ── Contactos (siempre de Cliente) ────────────────────────────────────────────
 # Usado por /clientes/{id}/contactos -- el endpoint fija cliente_id.
 
-TipoContacto = Literal["operacional", "cgm", "liquidacion"]
+TipoContacto = Literal["operacional", "cgm", "liquidacion", "comercial", "contable"]
 
 
 class ContactoCreate(BaseModel):
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: TipoContacto
     recibe_notificaciones: bool = True
 
@@ -176,6 +177,7 @@ class ContactoCreate(BaseModel):
 class ContactoUpdate(BaseModel):
     nombre: Optional[str] = None
     email: Optional[str] = None
+    telefono: Optional[str] = None
     tipo: Optional[TipoContacto] = None
     recibe_notificaciones: Optional[bool] = None
 
@@ -195,6 +197,7 @@ class ContactoOut(BaseModel):
     cliente_id: int
     nombre: Optional[str] = None
     email: str
+    telefono: Optional[str] = None
     tipo: str
     recibe_notificaciones: bool
     created_at: datetime
@@ -237,6 +240,21 @@ class ServicioRepresentacionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── PPA asociado (resumen) ────────────────────────────────────────────────────
+# Lo justo para identificar y filtrar por el contrato desde el listado de
+# proyectos. El detalle completo del PPA sigue viviendo en /ppa.
+
+class ProyectoPPAResumenOut(BaseModel):
+    id: int
+    numero_codigo_contrato: Optional[str] = None
+    nombre_interno: Optional[str] = None
+    tipo_contrato: Optional[str] = None
+    comprador_nombre: Optional[str] = None
+    fecha_inicio: Optional[date] = None
+    fecha_fin: Optional[date] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
@@ -258,6 +276,13 @@ class ProyectoCreate(BaseModel):
     estado: Optional[str] = "en_desarrollo"
     fecha_entrada_operacion: Optional[date] = None
     fecha_fin_representacion: Optional[date] = None
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio (MWh/mes). Escribirla por PATCH la marca como
+    # 'manual' y el recálculo desde la API deja de pisarla — es el camino para
+    # las plantas sin histórico. Ver app/services/gen_promedio.py.
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
@@ -265,6 +290,7 @@ class ProyectoCreate(BaseModel):
     longitud: Optional[float] = None
     tipo_conexion: Optional[str] = None
     operador_red: Optional[str] = None
+    operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
     estado_resultados_url: Optional[str] = None
@@ -274,18 +300,27 @@ class ProyectoCreate(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
+    # IDs de liquidación (códigos SIC de generación y consumo)
+    codigo_sic_generacion: Optional[str] = None
+    codigo_sic_consumo: Optional[str] = None
+    # IDs de Quoia (reportes de generación/consumo y nodo)
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: Optional[bool] = None
     srv_representacion: Optional[bool] = None
     srv_cgm: Optional[bool] = None
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: Optional[bool] = None
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
@@ -330,6 +365,17 @@ class ProyectoOut(BaseModel):
     estado: str
     fecha_entrada_operacion: Optional[date]
     fecha_fin_representacion: Optional[date]
+    fecha_inicio_comercializacion: Optional[date] = None
+    fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio, persistida para no depender de la API de
+    # generación en cada consulta. `gen_promedio_origen` dice si salió del
+    # histórico ('api') o lo cargó una persona ('manual').
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
+    gen_promedio_dias: Optional[int] = None
+    gen_promedio_desde: Optional[date] = None
+    gen_promedio_hasta: Optional[date] = None
+    gen_promedio_actualizado_en: Optional[datetime] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]
@@ -337,6 +383,7 @@ class ProyectoOut(BaseModel):
     longitud: Optional[float]
     tipo_conexion: Optional[str]
     operador_red: Optional[str]
+    operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
@@ -347,22 +394,30 @@ class ProyectoOut(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
+    codigo_sic_generacion: Optional[str] = None
+    codigo_sic_consumo: Optional[str] = None
+    quoia_reporte_generacion_id: Optional[int] = None
+    quoia_reporte_consumo_id: Optional[int] = None
+    quoia_nodo_id: Optional[int] = None
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool
+    # Etiqueta de comunidad energética
+    es_comunidad_energetica: bool = False
+    nombre_comunidad: Optional[str] = None
     # Pipeline TSF / próximos a energizarse
     origina_code: Optional[str] = None
     sunfactory_project_id: Optional[int] = None
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
-    fecha_estimada_editada_manual: Optional[bool] = None
     avance_obra_pct: Optional[float] = None
     mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
     servicio_representacion: Optional[ServicioRepresentacionOut] = None
+    ppa_contratos: list[ProyectoPPAResumenOut] = []
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
     grupos_panel: list[ProyectoGrupoPanelOut] = []
@@ -382,6 +437,17 @@ class ProyectoOut(BaseModel):
             return list(v) if hasattr(v, "__iter__") else [v]
         return v
 
+    @field_validator("ppa_contratos", mode="before")
+    @classmethod
+    def solo_ppas_vivos(cls, v):
+        """La relación Proyecto.ppa_contratos es un viewonly sobre la tabla
+        puente, así que no conoce el borrado lógico de `ppa_contratos`. Aquí se
+        filtran los eliminados para que no reaparezcan en el listado."""
+        if v is None:
+            return []
+        items = v if isinstance(v, list) else (list(v) if hasattr(v, "__iter__") else [v])
+        return [c for c in items if getattr(c, "deleted_at", None) is None]
+
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod
     def coerce_json_list(cls, v):
@@ -396,3 +462,47 @@ class ProyectoOut(BaseModel):
             except Exception:
                 return None
         return v
+
+
+# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+
+class ProyectoPendienteOut(BaseModel):
+    clave: str
+    tipo_sugerencia: Literal["crear", "actualizar"]
+    confianza: Literal["id", "nombre", "sin_match"]
+    fuentes: list[str]
+    proyecto_id: Optional[int] = None
+    proyecto_nombre_actual: Optional[str] = None
+    nombre_sugerido: str
+    estado_actual: Optional[str] = None
+    estado_sugerido: Optional[str] = None
+    fase_construccion_actual: Optional[str] = None
+    fase_construccion_sugerida: Optional[str] = None
+    tipo_proyecto_sugerido: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+    sub_project: Optional[str] = None
+    project_id_solenium: Optional[str] = None
+    origina_code: Optional[str] = None
+    codigo_tsf: Optional[str] = None
+    sunfactory_project_id: Optional[int] = None
+
+
+class ProyectoPendienteConfirmar(BaseModel):
+    """Todos los campos son overrides opcionales -- si no se envían, se usa
+    lo que trajo la fuente. `nombre_comercial`/`tipo_proyecto` son
+    obligatorios en la práctica para "crear" (el frontend los pre-llena)."""
+    nombre_comercial: Optional[str] = None
+    tipo_proyecto: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    potencia_ac_kw: Optional[float] = None
+    capacidad_instalada_kwp: Optional[float] = None
+
+
+class ProyectoPendienteIgnorar(BaseModel):
+    motivo: Optional[str] = None

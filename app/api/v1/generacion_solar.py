@@ -441,7 +441,7 @@ def generacion_hoy(
                 gen = gen["results"]
             gen_kwh_map = gen.get("generation_kwh") or {}
             kwh = sum(
-                float(v) for k, v in gen_kwh_map.items()
+                float(v or 0) for k, v in gen_kwh_map.items()
                 if str(k).startswith(today_str)
             )
             if kwh > 0:
@@ -658,6 +658,50 @@ def debug_matching(
             for norm, sid in list(sol_name_map.items())[:30]
         ],
     }
+
+
+@router.get("/debug-ap-historico/{proyecto_id}")
+def debug_ap_historico(
+    proyecto_id: int,
+    fecha: str = Query(..., description="YYYY-MM-DD, fecha pasada a verificar"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Temporal: verifica si Gaia ya tiene relleno retroactivo (backfill) de AP
+    para una fecha pasada, en un proyecto puntual -- para decidir si la
+    derivada de eae (ver gaia_client.py) sigue haciendo falta o si con el
+    tiempo el medidor termina reportando el dato real de todos modos."""
+    p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    gaia = _get_gaia()
+    if not gaia:
+        raise HTTPException(502, "Credenciales de Gaia no configuradas")
+
+    _db_fronteras = db.query(Frontera.proyecto_id, Frontera.codigo_frontera).filter(
+        Frontera.tipo_frontera.in_([TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo]),
+        Frontera.codigo_frontera.isnot(None),
+    ).all()
+    _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
+    node_principal, node_respaldo = find_gaia_node_pair(
+        gaia=gaia, proyecto_id=p.id, db_proyecto_frt_map=_db_proyecto_frt_map,
+    )
+
+    resultado = {}
+    for label, node_id in (("principal", node_principal), ("respaldo", node_respaldo)):
+        if not node_id:
+            resultado[label] = None
+            continue
+        ap = gaia.get_node_measurements(node_id, fecha, "ap") or []
+        eae = gaia.get_node_measurements(node_id, fecha, "eae") or []
+        resultado[label] = {
+            "node_id": node_id,
+            "lecturas_ap": len(ap),
+            "primera_ap": ap[0] if ap else None,
+            "ultima_ap": ap[-1] if ap else None,
+            "lecturas_eae": len(eae),
+        }
+    return {"proyecto_id": proyecto_id, "nombre": p.nombre_comercial, "fecha": fecha, "nodos": resultado}
 
 
 @router.get("/fleet")
@@ -1180,9 +1224,6 @@ def project_monitoring_detail(
     ).all()
     _db_proyecto_frt_map = build_db_proyecto_frt_map(list(_db_fronteras))
     node_principal, node_respaldo = find_gaia_node_pair(
-        p.nombre_comercial or "",
-        p.alias_monitoreo or "",
-        p.nombre_bitacora or "",
         gaia=gaia,
         proyecto_id=p.id,
         db_proyecto_frt_map=_db_proyecto_frt_map,

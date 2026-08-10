@@ -5,7 +5,7 @@ from sqlalchemy import (
     BigInteger, String, Numeric, Boolean, Date, DateTime, Integer,
     ForeignKey, Text, UniqueConstraint, Index,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 from sqlalchemy.sql import func
 from app.models.base import Base
 
@@ -59,8 +59,10 @@ class PanelContable(Base):
 
     er_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Snapshot del ER recalculado: {hoja: {coord: valor}} en JSON. Permite releer
-    # una celda al cambiar el mapeo sin volver a subir el archivo.
-    er_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # una celda al cambiar el mapeo sin volver a subir el archivo. deferred: es un
+    # TEXT grande que no se necesita al listar/serializar paneles; se carga solo
+    # cuando se accede (mapeo-celda / fuente-ingreso), no en cada GET /panel-contable.
+    er_snapshot: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
     generado_por_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("usuarios.id"), nullable=True
     )
@@ -138,6 +140,9 @@ class PanelContableLinea(Base):
     # La comparten todas las líneas del mismo concepto (el origen es del 100%).
     hoja: Mapped[str | None] = mapped_column(String(120), nullable=True)
     celda: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Origen del valor cuando NO viene del ER sino de un módulo: 'om' | 'arriendos'.
+    # NULL = valor del ER (lo normal). El frontend lo muestra como etiqueta.
+    fuente: Mapped[str | None] = mapped_column(String(20), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     panel: Mapped["PanelContable"] = relationship("PanelContable", back_populates="lineas")
@@ -188,6 +193,40 @@ class AliasFuenteIngreso(Base):
     columna_origen: Mapped[str] = mapped_column(String(40), nullable=False)  # "Sheet1!G35"
     etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PanelSoporte(Base):
+    """
+    Soporte/comprobante (archivo en Drive) de una transacción del panel, anclado a
+    (proyecto, periodo, tipo, grupo, concepto) — NO a la línea, porque las líneas se
+    borran y recrean al recargar el ER. Así el soporte sobrevive a recargas. El
+    concepto es del 100% (la transacción), no del inversionista.
+    """
+    __tablename__ = "panel_soporte"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "periodo", "tipo", "grupo", "concepto",
+                         name="uq_panel_soporte"),
+        Index("ix_panel_soporte_lookup", "proyecto_id", "periodo", "tipo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)   # "YYYY-MM"
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)     # preliquidacion | oficial
+    grupo: Mapped[str] = mapped_column(String(20), nullable=False)
+    concepto: Mapped[str] = mapped_column(String(255), nullable=False)
+    archivo_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    archivo_nombre: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    drive_file_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

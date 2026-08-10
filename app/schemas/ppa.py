@@ -15,6 +15,34 @@ class ClienteBasico(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PPAResponsableBasico(BaseModel):
+    id: int
+    nombre: str
+    incluir_en_cumplimiento: bool = True
+    model_config = {"from_attributes": True}
+
+
+class PPAResponsableIn(BaseModel):
+    nombre: str
+    incluir_en_cumplimiento: bool = True
+
+
+class PPAResponsableUpdate(BaseModel):
+    nombre: str | None = None
+    incluir_en_cumplimiento: bool | None = None
+
+
+class PPAResponsableOut(PPAResponsableBasico):
+    n_contratos: int = 0
+
+
+class PPAResponsableAsignar(BaseModel):
+    """Asignación en bloque. responsable_id=None desasigna (deja el contrato sin
+    responsable, que es 'se incluye por defecto')."""
+    contrato_ids: list[int]
+    responsable_id: int | None = None
+
+
 class PPATarifaIn(BaseModel):
     año: int
     mes: int
@@ -47,6 +75,7 @@ class PPAContratoCreate(BaseModel):
     vendedor_id: int | None = None
     numero_codigo_contrato: str | None = None
     nombre_interno: str | None = None
+    responsable_id: int | None = None
     comprador_nombre: str | None = None
     comprador_nit: str | None = None
     vendedor_nombre: str | None = None
@@ -71,6 +100,7 @@ class PPAContratoCreate(BaseModel):
     gescon_cantidades_kwh: float | None = None
     tipo_contrato: str | None = "venta"
     carpeta_link: str | None = None
+    renovacion_automatica: bool | None = None
 
 
 class PPAContratoUpdate(BaseModel):
@@ -79,6 +109,7 @@ class PPAContratoUpdate(BaseModel):
     vendedor_id: int | None = None
     numero_codigo_contrato: str | None = None
     nombre_interno: str | None = None
+    responsable_id: int | None = None
     comprador_nombre: str | None = None
     comprador_nit: str | None = None
     vendedor_nombre: str | None = None
@@ -103,6 +134,7 @@ class PPAContratoUpdate(BaseModel):
     gescon_cantidades_kwh: float | None = None
     tipo_contrato: str | None = None
     carpeta_link: str | None = None
+    renovacion_automatica: bool | None = None
 
 
 class PPAContratoOut(BaseModel):
@@ -114,6 +146,8 @@ class PPAContratoOut(BaseModel):
     vendedor: ClienteBasico | None = None
     numero_codigo_contrato: str | None
     nombre_interno: str | None
+    responsable_id: int | None = None
+    responsable: PPAResponsableBasico | None = None
     comprador_nombre: str | None
     comprador_nit: str | None
     vendedor_nombre: str | None
@@ -138,6 +172,7 @@ class PPAContratoOut(BaseModel):
     gescon_cantidades_kwh: float | None
     tipo_contrato: str | None = None
     carpeta_link: str | None = None
+    renovacion_automatica: bool | None = None
     tarifas: list[PPATarifaOut] = []
     compromisos_energia: list[PPACompromisoOut] = []
     # Computed visibility fields (populated by endpoint, not ORM)

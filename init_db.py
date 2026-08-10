@@ -21,8 +21,15 @@ def add_columns():
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_bitacora VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_clientes VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS srv_operacion BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_inicio_comercializacion DATE",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_comercializacion_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
         # liquidaciones detalle
@@ -48,6 +55,9 @@ def add_columns():
         # en contrato; Unergy le paga a precio bolsa. Clasifica doble (a+c).
         "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE clasificacion_energia_mensual ADD COLUMN IF NOT EXISTS uso_del_recurso BOOLEAN NOT NULL DEFAULT FALSE",
+        # Panel de fronteras pendientes de Quoia (migracion 043) -- respaldo por
+        # si alembic no llega a aplicarla (ver incidente de la migracion 035).
+        "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_border_id INTEGER",
     ]
     for s in stmts:
         try:

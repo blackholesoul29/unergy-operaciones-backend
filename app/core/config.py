@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 480
     # Token de larga duración para la app móvil (PWA) — default 30 días
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
+    # CRM comercial: días sin respuesta antes de alertar (configurable por env).
+    COMERCIAL_ALERTA_DIAS: int = 5
+    # La actualización comercial de julio 2026 se aplica UNA vez y se marca sola
+    # (ver app/services/comercial_actualizacion.MARCA_VERSION). Poner esto en
+    # true fuerza a reaplicarla, pisando lo que se haya cambiado a mano después.
+    COMERCIAL_REAPLICAR_ACTUALIZACION: bool = False
 
     @field_validator("SECRET_KEY", mode="after")
     @classmethod

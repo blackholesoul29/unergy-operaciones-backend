@@ -30,7 +30,7 @@ class SoleniumClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0
-        self._http = httpx.Client(timeout=TIMEOUT)
+        self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
 
     @property
     def enabled(self) -> bool:
@@ -201,3 +201,27 @@ class SoleniumClient:
         if not data:
             return None
         return data.get("results") or data
+
+    def get_relay(self, project_id: int) -> dict | None:
+        """Estado actual del reconectador (relay) de un proyecto.
+
+        No todos los proyectos tienen reconectador instalado -- devuelve
+        None (404) si no existe, no una excepción.
+        """
+        url = f"{self._data_url}/project/{project_id}/relay/"
+        return self._get(url)
+
+    def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
+                              variables: str = "kw") -> dict | None:
+        """Histórico del reconectador (relay) de un proyecto en un rango de fechas.
+
+        start_date / end_date: "YYYY-MM-DD HH:MM:SS"
+        variables: lista separada por comas de variables eléctricas, ej.
+                   "i_a,i_b,i_c,u_a,u_b,u_c,u_r,u_s,u_t,f_abc,kva,kw,pf"
+        """
+        url = f"{self._data_url}/project/{project_id}/relay/historical/"
+        return self._get(url, params={
+            "start_date": start_date,
+            "end_date": end_date,
+            "vars": variables,
+        })

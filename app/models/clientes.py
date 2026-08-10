@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text
+from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -43,7 +43,6 @@ class Cliente(Base):
     nit_cedula: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo_persona: Mapped[str | None] = mapped_column(SAEnum(TipoPersonaEnum, name="tipo_persona_enum"), nullable=True)
     representante_legal: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_electronico: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_liquidacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -62,7 +61,14 @@ class Cliente(Base):
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    reteiva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     rut_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Origen comercial del cliente. VARCHAR (no enum de BD) a propósito:
+    # la tabla ya existe y un tipo nuevo complicaría la migración; la
+    # validación de valores vive en el schema Pydantic (OrigenClienteLiteral).
+    origen_tipo: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Persona que recomendó/consiguió el cliente.
+    origen_detalle: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -103,9 +109,42 @@ class ClienteDocumentoComercial(Base):
     archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     archivo_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
     servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Oportunidad del CRM a la que pertenece este documento (oferta/CC/RUT).
+    oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="documentos_comerciales")
     servicio: Mapped["ClienteServicio | None"] = relationship("ClienteServicio")
+
+
+class ClienteTasaServicio(Base):
+    """
+    Excepción de tasa de impuesto por (cliente, servicio) — y opcionalmente por
+    proyecto. Sobrescribe las tasas planas del cliente (iva/retencion/reteiva/
+    reteica_pct) SOLO para ese servicio (Representación|CGM|Administración). Cada
+    _pct null ⇒ hereda la tasa general del cliente. proyecto_id null ⇒ aplica a
+    todos los proyectos del cliente; si viene, solo a ese proyecto.
+    Ej.: Solenium, Administración, retencion_pct=11 (ReteFuente Adm 11% en vez de 4%).
+    """
+    __tablename__ = "cliente_tasa_servicio"
+    __table_args__ = (
+        UniqueConstraint("cliente_id", "servicio", "proyecto_id",
+                         name="uq_cliente_tasa_servicio"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    servicio: Mapped[str] = mapped_column(String(30), nullable=False)
+    proyecto_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=True
+    )
+    iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    reteiva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

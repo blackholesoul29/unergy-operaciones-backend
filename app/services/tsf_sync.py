@@ -10,11 +10,17 @@ Fuente del pipeline (igual que el endpoint de lectura original):
      + % de avance de obra. Cruce por base_name ↔ minifarm_project.name.
   3. API de generación Unergy → ¿ya genera? Si sí, está energizada de hecho.
 
-`sync_tsf_projects(db, force)` hace un upsert por `proyectos.origina_code`:
-  - Crea el proyecto si no existe (origen='tsf_sync', estado='en_desarrollo').
-  - Actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada).
-  - Respeta `fecha_estimada_editada_manual` salvo `force=True` (el operador pidió
-    re-sincronizar y sobrescribir sus cambios con la info de Solenium).
+`sync_tsf_projects(db)` es SOLO de actualización, ya NO crea proyectos:
+  - Si encuentra el proyecto (por sunfactory_project_id/origina_code/codigo_tsf),
+    actualiza los campos propios de TSF (fase, % obra, potencia, fecha estimada)
+    -- siempre desde la fuente, sin edición manual del operador que respetar.
+  - Si no encuentra match ni con un candidato de nombre parecido (para sugerir
+    vínculo), lo cuenta en `sin_match` y lo deja pasar -- la CREACIÓN de
+    proyectos nuevos vive ahora en `app/services/proyectos_pendientes.py`
+    (GET /proyectos/pendientes), que cruza Sun Factory + Quoia + Solenium y
+    exige confirmación humana antes de escribir. Antes esta función insertaba
+    la fila sin revisión; el riesgo de duplicados/nombres mal derivados ya no
+    vale la pena ahora que existe esa cola de confirmación dedicada.
 Todos los cruces externos son best-effort: si una fuente no responde, degrada.
 """
 from __future__ import annotations
@@ -120,20 +126,46 @@ def _parse_iso_date(raw: str | None) -> date | None:
         return None
 
 
+
+# Siglas que .title() rompería (p. ej. "AGGE" -> "Agge"); se restauran a
+# mayúscula tras el title-case.
+_SIGLAS_MAYUSCULA = {"AGGE", "AGPE"}
+
+
 def _derive_commercial_name(code: str) -> str:
     """Nombre legible derivado del código de proyecto de origina.
 
     Los códigos tienen la forma `<PREFIJO>_<SITIO>`, p. ej.
-    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur". Es el respaldo cuando el proyecto aún
-    no está en la tabla `proyectos`."""
+    `COLSUCT3P1_MORROA_SUR` → "Morroa Sur", y el sitio puede traer guiones
+    (`LA-JAGUA-DEL-PILAR` → "La Jagua Del Pilar"). Es el respaldo cuando el
+    proyecto aún no está en la tabla `proyectos`."""
     if not code:
         return ""
     parts = code.split("_", 1)
     prefix = parts[0]
     is_code_prefix = bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
     readable = (parts[1] if len(parts) > 1 and is_code_prefix else code)
-    readable = readable.replace("_", " ").strip()
-    return readable.title() if readable else code
+    readable = re.sub(r"[_-]+", " ", readable).strip()
+    if not readable:
+        return code
+    titled = readable.title()
+    return " ".join(
+        w.upper() if w.upper() in _SIGLAS_MAYUSCULA else w
+        for w in titled.split(" ")
+    )
+
+
+def _parece_codigo(nombre: str | None) -> bool:
+    """True si `nombre` en realidad es el código interno (p. ej.
+    `COLBOYT123P1_FIRAVITOBA_OCCIDENTE`) en vez de un nombre comercial real --
+    Sun Factory a veces guarda el mismo código en su campo `name`. El código
+    de todos modos siempre queda a salvo en `origina_code`/`codigo_tsf`
+    (vienen del campo `base_name`, aparte), esto solo evita que ensucie el
+    nombre visible."""
+    if not nombre or "_" not in nombre:
+        return not nombre
+    prefix = nombre.split("_", 1)[0]
+    return bool(re.match(r"^COL[A-Z0-9]*$", prefix)) or any(c.isdigit() for c in prefix)
 
 
 def _tsf_code_from_base_name(base_name: str | None) -> str | None:
@@ -224,21 +256,29 @@ def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
     return {"energization_date": ed, "avance_pct": avance, "milestone": chosen.get("name")}
 
 
-def _sunfactory_energization(token: str, project_id: int) -> dict | None:
-    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
+def _sunfactory_milestones_raw(token: str, project_id: int) -> list[dict]:
+    """Milestones crudos de un proyecto vía Sun Factory (con paginación). Separado
+    de `_sunfactory_energization` para poder inspeccionarlos sin filtrar (ver
+    endpoint de diagnóstico `/proximos-energizar/{id}/debug-sunfactory`)."""
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     milestones: list[dict] = []
     url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
+    with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
+        pages = 0
+        while url and pages < 20:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
+            url = data.get("next") if isinstance(data, dict) else None
+            pages += 1
+    return milestones
+
+
+def _sunfactory_energization(token: str, project_id: int) -> dict | None:
+    """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
     try:
-        with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
-            pages = 0
-            while url and pages < 20:
-                resp = client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-                milestones += data.get("results", []) if isinstance(data, dict) else (data or [])
-                url = data.get("next") if isinstance(data, dict) else None
-                pages += 1
+        milestones = _sunfactory_milestones_raw(token, project_id)
     except Exception as exc:
         logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
         return None
@@ -425,7 +465,10 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
             "base_name": base_name,
             "tsf_code": _tsf_code_from_base_name(base_name),
             "solenium_id": pid,
-            "commercial_name": p.get("name") or _derive_commercial_name(base_name or ""),
+            "commercial_name": (
+                p.get("name") if p.get("name") and not _parece_codigo(p.get("name"))
+                else _derive_commercial_name(base_name or "")
+            ),
             "status": _SF_IMPORT_STATES.get(p.get("state"), "En construcción"),
             "municipio": p.get("city"),
             "departamento": p.get("department"),
@@ -570,18 +613,41 @@ def _norm(s: str | None) -> str:
     return re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
 
 
-_PREFIJOS_PLANTA_RE = re.compile(r"\b(mgs|mgr|minigranja|granja|solar|gd)\b")
-_NUMERO_SUELTO_RE = re.compile(r"\b0*\d+\b")
+_PREFIJO_CATALOGO_RE = re.compile(r"^(?:(?:mgs|mgr|minigranja|granja|solar|gd)\b\s*)+")
+_NUMERO_CATALOGO_RE = re.compile(r"^0*\d+\s*[-–]?\s*")
+
+# Solenium abrevia la dirección pegada al número de fase (p. ej. "Chiriguana N2"
+# = "Chiriguana Norte 2", "Valencia Or_1" = "Valencia Oriente 1") -- se expande
+# ANTES de comparar para que coincida con la convención completa que usamos
+# internamente. No tocar: '\s*' cubre tanto "n2" (sin espacio) como "or 1"
+# (con espacio, tras _norm() convertir el "_" en espacio).
+_ABREV_DIRECCION = {"n": "norte", "s": "sur", "or": "oriente", "oc": "occidente", "occ": "occidente"}
+_ABREV_DIRECCION_RE = re.compile(
+    r"\b(" + "|".join(_ABREV_DIRECCION) + r")\s*(\d+)\b"
+)
+
+
+def _expandir_abreviaturas_direccion(n: str) -> str:
+    return _ABREV_DIRECCION_RE.sub(lambda m: f"{_ABREV_DIRECCION[m.group(1)]} {m.group(2)}", n)
 
 
 def _core(s: str | None) -> str:
-    """Nombre normalizado sin prefijos de tipo de planta (MGS/Minigranja/GD/...)
-    ni números sueltos -- para comparar el "nombre de lugar" real detrás de
-    convenciones de nomenclatura distintas (p. ej. "MGS 0032 - El Paso Norte" vs
-    "Minigranja 0032 - El Paso Norte")."""
+    """Nombre normalizado sin prefijo de catálogo (MGS/Minigranja/GD/... + el
+    número que le sigue inmediatamente) -- para comparar el "nombre de lugar"
+    real detrás de convenciones de nomenclatura distintas (p. ej.
+    "MGS 0032 - El Paso Norte" vs "Minigranja 0032 - El Paso Norte").
+
+    A propósito NO toca números en cualquier otra posición del nombre: esos
+    suelen ser el número de FASE real ("Norte 2" vs "Norte 4"), y borrarlos
+    colapsaba fases distintas en el mismo core -- bug encontrado 2026-07-08
+    comparando contra Quoia/Solenium en producción (10 proyectos con fase
+    activa que ya reportaban generación real quedaban indistinguibles de
+    fases hermanas). También expande las abreviaturas de dirección que usa
+    Solenium (N2/Or_1) antes de comparar, si no, "sin match" falso."""
     n = _norm(s)
-    n = _PREFIJOS_PLANTA_RE.sub(" ", n)
-    n = _NUMERO_SUELTO_RE.sub(" ", n)
+    n = _expandir_abreviaturas_direccion(n)
+    n = _PREFIJO_CATALOGO_RE.sub("", n)
+    n = _NUMERO_CATALOGO_RE.sub("", n)
     return re.sub(r"\s+", " ", n).strip()
 
 
@@ -651,11 +717,8 @@ _STATUS_TO_FASE = {
 _FASE_TO_LABEL = {v: k for k, v in _STATUS_TO_FASE.items()}
 
 
-def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = True) -> dict:
+def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
     """Upsert del pipeline TSF en `proyectos`. Devuelve estadísticas.
-
-    `force=True`: sobrescribe la fecha estimada incluso si el operador la editó
-    manualmente, y resetea la marca (Solenium suele tener la fecha más fresca).
 
     `enrich_dates=False`: NO consulta los hitos de cada proyecto (que son ~99
     llamadas HTTP y pueden hacer timeout en un request síncrono); usa la fecha del
@@ -665,7 +728,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
     Fuente principal: Sun Factory (la "BD de Solenium/TSF"), accesible por internet.
     No depende de originabotdb (que solo es alcanzable desde la red interna)."""
     projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
-    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0,
+    stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0, "sin_match": 0,
              "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory",
              "sugerencias_vinculo": []}
 
@@ -690,7 +753,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             solenium_pipeline_id = p.get("solenium_id")
             existing = db.execute(
                 text("""
-                    SELECT id, fecha_estimada_editada_manual FROM proyectos
+                    SELECT id, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
                         (CAST(:sol_id AS integer) IS NOT NULL
                              AND sunfactory_project_id = CAST(:sol_id AS integer))
@@ -708,11 +771,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
             energ = p["energization_date"]
 
             if existing is None:
-                # Ningun match exacto por id/codigo. Antes de crear una fila nueva,
-                # ver si hay un proyecto ya existente (tipicamente creado a mano,
-                # sin ningun codigo de Sun Factory nunca registrado) que podria ser
-                # el mismo -- para no duplicarlo, se sugiere el vinculo en vez de
-                # crear automaticamente. Ver POST /proyectos/{id}/vincular-sunfactory.
+                # Ningun match exacto por id/codigo. Si hay un proyecto ya existente
+                # con nombre parecido (tipicamente creado a mano, sin ningun codigo
+                # de Sun Factory nunca registrado), se sugiere el vinculo -- ver
+                # POST /proyectos/{id}/vincular-sunfactory.
                 candidato = _buscar_candidato_similar(
                     db, p.get("commercial_name") or code, p.get("municipio"),
                 )
@@ -732,51 +794,17 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     })
                     continue
 
-                db.execute(
-                    text("""
-                        INSERT INTO proyectos (
-                            nombre_comercial, origina_code, codigo_tsf, sunfactory_project_id,
-                            fase_construccion,
-                            fecha_estimada_energizacion, fecha_estimada_editada_manual,
-                            avance_obra_pct, mwh_mes_estimado, potencia_instalada_kwp,
-                            municipio, departamento, latitud, longitud,
-                            estado, tipo_proyecto, origen,
-                            srv_operacion, srv_representacion, srv_cgm,
-                            srv_ppa, srv_promotor, srv_rec, generar_liquidacion,
-                            created_at, updated_at
-                        ) VALUES (
-                            :nombre, :code, :tsf, :sol_id,
-                            :fase,
-                            :energ, FALSE,
-                            :avance, :mwh, :potencia,
-                            :municipio, :departamento, :latitud, :longitud,
-                            'en_desarrollo', 'minigranja', 'tsf_sync',
-                            FALSE, FALSE, FALSE,
-                            FALSE, FALSE, FALSE, FALSE,
-                            NOW(), NOW()
-                        )
-                    """),
-                    {
-                        "nombre": p["commercial_name"] or code,
-                        "code": code,
-                        "tsf": tsf_code,
-                        "sol_id": solenium_pipeline_id,
-                        "fase": fase,
-                        "energ": energ,
-                        "avance": p.get("avance_pct"),
-                        "mwh": p.get("monthly_mwh"),
-                        "potencia": p.get("installed_power_kwp"),
-                        "municipio": p["municipio"],
-                        "departamento": p["departamento"],
-                        "latitud": p["latitud"],
-                        "longitud": p["longitud"],
-                    },
-                )
-                stats["creados"] += 1
+                # Sin match de ningun tipo: ya NO se crea aqui. Queda para que
+                # /proyectos/pendientes lo detecte y un humano lo confirme.
+                stats["sin_match"] += 1
             else:
-                manual = bool(existing.fecha_estimada_editada_manual)
-                # La fecha estimada solo se pisa si no la editó el operador, o si force.
-                set_date = (not manual) or force
+                # Si el proyecto ya quedó confirmado como en operación (ej. vía
+                # Proyectos pendientes con evidencia real de Quoia/Solenium), no
+                # dejar que Sun Factory lo regrese a una fase de obra anterior
+                # solo porque su propio tracker todavía no se actualizó -- el
+                # estado real (`estado`) manda sobre el pipeline de construcción,
+                # salvo que Sun Factory ya reporte "energizado", que siempre gana.
+                set_fase = fase == "energizado" or existing.estado != "en_operacion"
                 params = {
                     "id": existing.id,
                     "fase": fase,
@@ -791,10 +819,10 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                     "longitud": p["longitud"],
                 }
                 date_sql = ""
-                if set_date and energ is not None:
-                    date_sql = (", fecha_estimada_energizacion = :energ, "
-                                "fecha_estimada_editada_manual = FALSE")
+                if energ is not None:
+                    date_sql = ", fecha_estimada_energizacion = :energ"
                     params["energ"] = energ
+                fase_sql = "fase_construccion = :fase, " if set_fase else ""
                 # COALESCE(existente, nuevo): enlaza/rellena sin pisar lo que el
                 # operador ya tenga (origina_code, codigo_tsf, ubicación).
                 # sunfactory_project_id se respalda aqui la PRIMERA vez que se
@@ -803,8 +831,7 @@ def sync_tsf_projects(db: Session, force: bool = False, enrich_dates: bool = Tru
                 db.execute(
                     text(f"""
                         UPDATE proyectos SET
-                            fase_construccion = :fase,
-                            avance_obra_pct = COALESCE(:avance, avance_obra_pct),
+                            {fase_sql}avance_obra_pct = COALESCE(:avance, avance_obra_pct),
                             potencia_instalada_kwp = COALESCE(:potencia, potencia_instalada_kwp),
                             origina_code = COALESCE(origina_code, :code),
                             codigo_tsf = COALESCE(codigo_tsf, :tsf),

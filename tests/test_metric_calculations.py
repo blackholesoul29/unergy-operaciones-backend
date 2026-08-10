@@ -131,6 +131,7 @@ from app.services.om_calculator import (
     factor_acumulado,
     calcular_prorrateo,
     calcular_proyecto,
+    _aniversarios_cumplidos,
     _redondear,
 )
 
@@ -138,13 +139,19 @@ IPC = {2024: 0.0928, 2025: 0.052, 2026: 0.051}
 
 
 def test_factor_acumulado_ejemplo_documentado():
-    # inicio 2023, periodo 2026 → (1.0928)(1.052)(1.051)
-    assert round(factor_acumulado(2023, 2026, IPC), 6) == 1.208257
+    # inicio 2023, periodo 2026 → aniversarios 2024, 2025 y 2026 cumplidos →
+    # (1.0928)(1.052)(1.051)
+    aniversarios = _aniversarios_cumplidos(date(2023, 1, 1), 2026, 12)
+    assert round(factor_acumulado(aniversarios, IPC), 6) == 1.208257
 
 
 def test_factor_acumulado_anio_base_sin_indexacion():
-    assert factor_acumulado(2026, 2026, IPC) == 1.0
-    assert factor_acumulado(2027, 2026, IPC) == 1.0  # inicio > periodo
+    # base en el mismo año del período: aún no cumple un aniversario → factor 1.0
+    aniversarios_mismo_anio = _aniversarios_cumplidos(date(2026, 1, 1), 2026, 12)
+    assert aniversarios_mismo_anio == []
+    assert factor_acumulado(aniversarios_mismo_anio, IPC) == 1.0
+    # inicio posterior al período → sin aniversarios cumplidos → factor 1.0
+    assert factor_acumulado(_aniversarios_cumplidos(date(2027, 1, 1), 2026, 12), IPC) == 1.0
 
 
 def test_redondear_half_up_y_cop_entero():

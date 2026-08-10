@@ -533,7 +533,15 @@ def clasificar_generacion(
         # del día -- forzar revisión ahí no aporta nada).
         if any(h in HORAS_SOLARES for h in horas_reconectador | horas_solenium_h):
             revisar = True
-        if curva_rellenada.isna().any():
+        # Mismo criterio de la excepción de arriba -- un hueco que sigue sin
+        # llenarse porque cae fuera de las ventanas horarias (reconectador
+        # 7h-16h, Solenium/histórico 6h-17h) no es un hueco real que
+        # preocupe: esas horas ya se esperan en ~0 sin importar la fuente
+        # (ver MGS 0077 Chiriguaná Norte 4 2026-08-09: 20h-22h sin dato,
+        # fuera de ambas ventanas desde el acotamiento de hoy -- quedaba
+        # marcado para revisar sin ninguna razón real, la curva completa
+        # coincidía con inversores dentro de rango).
+        if any(h in HORAS_SOLARES for h in curva_rellenada[curva_rellenada.isna()].index):
             revisar = True
 
         # medidor_usado='revisar' es el valor "no se pudo construir nada"

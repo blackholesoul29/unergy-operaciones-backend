@@ -592,6 +592,170 @@ def test_no_hace_una_consulta_por_planta(db):
         f"{con_dos} consultas con 2 plantas y {con_diez} con 10: hay N+1")
 
 
+# ── Vincular ofertas a proyectos por nombre ──────────────────────────────────
+# En producción, 28 de las 32 ofertas operando no tenían proyecto: el CRM se
+# cargó desde hojas donde la planta es texto libre. Los casos de abajo son
+# nombres REALES de esas dos listas.
+
+from app.services.comercial import (  # noqa: E402
+    proponer_vinculos_proyecto, vincular_proyectos,
+)
+
+
+def test_propone_los_vinculos_de_los_nombres_reales_de_produccion(db):
+    """"Catedral"/"La Catedral", "Taurus IX"/"GD Taurus IX", "Parque Solar
+    Baraya"/"Minigranja Solar Baraya": la misma planta escrita distinto."""
+    for nombre in ("La Catedral", "GD Taurus IX", "Minigranja Solar Baraya",
+                   "GD San Pelayo", "GD Marimonda"):
+        _proyecto(db, nombre_comercial=nombre)
+    for planta in ("Catedral", "Taurus IX", "Parque Solar Baraya",
+                   "San Pelayo", "Marimondá"):
+        _oferta(db, planta_nombre=planta)
+    db.commit()
+
+    r = proponer_vinculos_proyecto(db)
+
+    emparejados = {f["planta_nombre"]: f["proyecto_nombre"] for f in r["propuestos"]}
+    assert emparejados == {
+        "Catedral": "La Catedral",
+        "Taurus IX": "GD Taurus IX",
+        "Parque Solar Baraya": "Minigranja Solar Baraya",
+        "San Pelayo": "GD San Pelayo",
+        "Marimondá": "GD Marimonda",
+    }
+    assert r["n_sin_candidato"] == 0
+
+
+def test_no_confunde_plantas_hermanas_numeradas(db):
+    """"GD Polaris 1" y "GD Polaris 2" son plantas DISTINTAS. El prefijo "GD" es
+    ruido, así que lo único que las separa es el número: si el matcher se las
+    come, la API le muestra a una la generación de la otra."""
+    _proyecto(db, nombre_comercial="GD Polaris 1")
+    _proyecto(db, nombre_comercial="GD Polaris 2")
+    _oferta(db, planta_nombre="Polaris 2")
+    db.commit()
+
+    r = proponer_vinculos_proyecto(db)
+
+    assert [f["proyecto_nombre"] for f in r["propuestos"]] == ["GD Polaris 2"]
+
+
+def test_no_adivina_cuando_dos_proyectos_quedan_parejos(db):
+    """La guarda de ambigüedad del matcher compartido: mejor dejarlo para
+    revisión manual que vincular la planta equivocada en silencio."""
+    _proyecto(db, nombre_comercial="GD Isabela 1")
+    _proyecto(db, nombre_comercial="GD Isabela 2")
+    _oferta(db, planta_nombre="GD ISABELA")
+    db.commit()
+
+    r = proponer_vinculos_proyecto(db)
+
+    assert r["n_propuestos"] == 0
+    assert r["sin_candidato"][0]["planta_nombre"] == "GD ISABELA"
+
+
+def test_lo_que_no_alcanza_el_umbral_se_reporta_con_su_puntaje(db):
+    """Un nombre de EMPRESA en la casilla de la planta (pasa en las hojas) no
+    tiene que vincularse a nada, pero sí tiene que verse en el reporte."""
+    _proyecto(db, nombre_comercial="La Catedral")
+    _oferta(db, planta_nombre="SOLUCIONES DE ENERGIA Y TELECOMUNICACIONES SONETEL S.A.S")
+    db.commit()
+
+    r = proponer_vinculos_proyecto(db)
+
+    assert r["n_propuestos"] == 0
+    fila = r["sin_candidato"][0]
+    assert fila["planta_nombre"].startswith("SOLUCIONES")
+    assert 0.0 <= fila["score"] < 0.72
+
+
+def test_una_oferta_sin_nombre_de_planta_se_reporta_aparte(db):
+    _proyecto(db, nombre_comercial="La Catedral")
+    _oferta(db, planta_nombre=None)
+    db.commit()
+
+    r = proponer_vinculos_proyecto(db)
+    assert r["n_sin_nombre"] == 1 and r["n_propuestos"] == 0
+
+
+def test_por_defecto_solo_mira_las_ofertas_operando(db):
+    _proyecto(db, nombre_comercial="La Catedral")
+    _oferta(db, planta_nombre="Catedral", estado="oferta")
+    db.commit()
+
+    assert proponer_vinculos_proyecto(db)["n_propuestos"] == 0
+    assert proponer_vinculos_proyecto(db, solo_operando=False)["n_propuestos"] == 1
+
+
+def test_en_seco_no_escribe_nada(db):
+    """El default es dry_run: nadie vincula 28 plantas sin haber mirado la lista."""
+    proy = _proyecto(db, nombre_comercial="La Catedral")
+    of = _oferta(db, planta_nombre="Catedral")
+    db.commit()
+
+    r = vincular_proyectos(db, dry_run=True)
+
+    assert r["n_propuestos"] == 1 and r["n_aplicados"] == 0
+    db.refresh(of)
+    assert of.proyecto_id is None
+    assert proy.id is not None
+
+
+def test_aplicado_de_verdad_escribe_el_vinculo(db):
+    proy = _proyecto(db, nombre_comercial="La Catedral", municipio="Corozal",
+                     gen_mensual_promedio_mwh=178.4, gen_promedio_origen="api")
+    of = _oferta(db, planta_nombre="Catedral")
+    db.commit()
+
+    r = vincular_proyectos(db, dry_run=False)
+
+    assert r["n_aplicados"] == 1
+    db.refresh(of)
+    assert of.proyecto_id == proy.id
+    # y con eso la API ya devuelve los datos de la planta
+    fila = proyectos_operando(db, hoy=HOY)[0]
+    assert fila["ubicacion"]["municipio"] == "Corozal"
+    assert fila["gen_promedio_mensual_mwh"] == 178.4
+
+
+def test_repetirlo_no_cambia_nada(db):
+    """Idempotente: solo toca ofertas sin proyecto."""
+    _proyecto(db, nombre_comercial="La Catedral")
+    _oferta(db, planta_nombre="Catedral")
+    db.commit()
+
+    vincular_proyectos(db, dry_run=False)
+    segunda = vincular_proyectos(db, dry_run=False)
+
+    assert segunda["n_propuestos"] == 0 and segunda["n_aplicados"] == 0
+
+
+def test_se_pueden_aceptar_unas_propuestas_y_descartar_otras(db):
+    """Sin esto, aceptar 20 de 28 obligaría a subir el umbral y perder las
+    buenas, o a vincular a mano una por una."""
+    _proyecto(db, nombre_comercial="La Catedral")
+    _proyecto(db, nombre_comercial="GD Taurus IX")
+    buena = _oferta(db, planta_nombre="Catedral")
+    otra = _oferta(db, planta_nombre="Taurus IX")
+    db.commit()
+
+    r = vincular_proyectos(db, dry_run=False, solo_ofertas=[buena.id])
+
+    assert r["n_aplicados"] == 1
+    db.refresh(buena); db.refresh(otra)
+    assert buena.proyecto_id is not None
+    assert otra.proyecto_id is None
+    assert [f["oferta_id"] for f in r["omitidos_por_filtro"]] == [otra.id]
+
+
+def test_un_proyecto_borrado_no_es_candidato(db):
+    _proyecto(db, nombre_comercial="La Catedral", deleted_at=dt.datetime(2026, 7, 1))
+    _oferta(db, planta_nombre="Catedral")
+    db.commit()
+
+    assert proponer_vinculos_proyecto(db)["n_propuestos"] == 0
+
+
 # ── La ruta HTTP ─────────────────────────────────────────────────────────────
 # Se monta un app mínimo con solo este router, sin arrancar app.main.
 

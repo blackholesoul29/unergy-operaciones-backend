@@ -34,8 +34,9 @@ from app.schemas.comercial import (
     OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
 from app.services.comercial import (
-    ahora_colombia, calcular_alerta, col_now, contexto_ficha, estado_a_resultado,
-    ficha_operativa, proyectos_operando, resumen_etapas,
+    UMBRAL_VINCULO, ahora_colombia, calcular_alerta, col_now, contexto_ficha,
+    estado_a_resultado, ficha_operativa, proyectos_operando, resumen_etapas,
+    vincular_proyectos,
 )
 
 router = APIRouter(prefix="/comercial", tags=["comercial"])
@@ -422,6 +423,40 @@ def list_proyectos_operando(
         "total": len(items),
         "items": items,
     }
+
+
+@router.post("/ofertas/vincular-proyectos")
+def vincular_ofertas_a_proyectos(
+    dry_run: bool = Query(True, description="Solo previsualizar, sin escribir"),
+    solo_operando: bool = Query(True, description="Limitar a las ofertas en etapa Operando"),
+    umbral: float = Query(UMBRAL_VINCULO, ge=0.5, le=1.0,
+                          description="Qué tan parecido tiene que ser el nombre para proponer el vínculo"),
+    oferta_id: list[int] | None = Query(None, description="Aplicar solo a estas ofertas (para aceptar unas y descartar otras)"),
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Vincula por nombre las ofertas del CRM con las plantas ya cargadas.
+
+    El pipeline comercial se cargó desde hojas donde la planta es texto libre
+    ("Catedral" contra "La Catedral", "Taurus IX" contra "GD Taurus IX"), así que
+    muchas ofertas no apuntan al Proyecto aunque la planta exista. Sin ese
+    vínculo, `GET /comercial/proyectos-operando` devuelve el nombre y poco más:
+    la ubicación, el operador, la generación y el contrato viven en el Proyecto.
+
+    **Por defecto no escribe** (`dry_run=true`): devuelve `propuestos` (lo que
+    haría), `sin_candidato` (con el mejor puntaje que encontró, para saber si
+    faltó poco o no hay nada parecido) y `sin_nombre`. Revisá esa lista antes de
+    correrlo con `dry_run=false`.
+
+    Idempotente: solo toca ofertas sin proyecto. Para deshacer un vínculo, poner
+    el proyecto en NULL desde la ficha de la oferta.
+
+    Solo admin: escribe en el CRM.
+    """
+    if current.rol.value != "admin":
+        raise HTTPException(403, "Solo admin puede vincular ofertas a proyectos")
+    return vincular_proyectos(db, solo_operando=solo_operando, umbral=umbral,
+                              dry_run=dry_run, solo_ofertas=oferta_id)
 
 
 @router.post("/oportunidades", status_code=201)

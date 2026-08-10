@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.utils.nombre_matching import mejor_candidato
 from app.utils.series_mensuales import serie_mensual_kwh
 
 # Pipeline de la oferta, en orden. 'declinado' queda fuera del orden porque no
@@ -655,6 +656,121 @@ def proyectos_operando(db, q=None, hoy=None) -> list[dict]:
 
 def _valor_enum(v):
     return v if isinstance(v, (str, type(None))) else v.value
+
+
+# Umbral para proponer un vínculo oferta→proyecto. Bastante más alto que el
+# UMBRAL_ACEPTAR=0.55 del matcher: con 0.55 la dedup de clientes llegó a fusionar
+# falsos positivos (Soluenergías→FEM, 0.59). Acá el costo de un match malo es que
+# una planta muestre la generación y el contrato de OTRA, así que se prefiere no
+# proponer nada y que quede en la lista de revisión manual.
+UMBRAL_VINCULO = 0.72
+
+
+def proponer_vinculos_proyecto(db, solo_operando=True, umbral=UMBRAL_VINCULO) -> dict:
+    """Empareja por nombre las ofertas sin `proyecto_id` con proyectos existentes.
+
+    Existe porque el pipeline comercial se cargó desde hojas de cálculo, donde la
+    planta es texto libre: "Catedral" contra "La Catedral", "Taurus IX" contra
+    "GD Taurus IX", "Parque Solar Baraya" contra "Minigranja Solar Baraya". Son
+    la misma planta y sin el vínculo la API de plantas operando devuelve el
+    nombre y nada más.
+
+    NO escribe: solo propone. La decisión de vincular es de una persona, porque
+    un match equivocado le pone a una planta la generación y el contrato de otra
+    — un error silencioso, que es el peor tipo. Quien la aplique es
+    `vincular_proyectos()`.
+
+    Usa el matcher compartido (`mejor_candidato`), que tiene guarda de
+    ambigüedad: si dos proyectos quedan parejos no adivina.
+    """
+    from app.models.comercial import Oportunidad, OportunidadOferta
+    from app.models.proyectos import Proyecto
+
+    q = (db.query(OportunidadOferta)
+         .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+         .filter(OportunidadOferta.proyecto_id.is_(None),
+                 Oportunidad.deleted_at.is_(None)))
+    if solo_operando:
+        q = q.filter(OportunidadOferta.estado == ESTADO_OPERANDO)
+    ofertas = q.all()
+
+    candidatos = [
+        (p, [n for n in (p.nombre_comercial, p.nombre_bitacora, p.nombre_clientes) if n])
+        for p in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
+    ]
+
+    propuestos, sin_candidato, sin_nombre = [], [], []
+    for o in ofertas:
+        if not (o.planta_nombre or "").strip():
+            sin_nombre.append({"oferta_id": o.id,
+                               "codigo": _codigo_seguimiento(o.numero_oferta)})
+            continue
+        proyecto, score = mejor_candidato(o.planta_nombre, candidatos)
+        fila = {
+            "oferta_id": o.id,
+            "codigo": _codigo_seguimiento(o.numero_oferta),
+            "planta_nombre": o.planta_nombre,
+            "estado": _valor_enum(o.estado),
+            "score": score,
+        }
+        if proyecto is not None and score >= umbral:
+            fila.update({"proyecto_id": proyecto.id,
+                         "proyecto_nombre": proyecto.nombre_comercial})
+            propuestos.append(fila)
+        else:
+            # Se reporta el mejor score aunque no alcance: dice si faltó poco
+            # (revisar a mano) o si no hay nada parecido (crear la planta).
+            sin_candidato.append(fila)
+
+    return {
+        "umbral": umbral,
+        "solo_operando": solo_operando,
+        "n_ofertas_sin_proyecto": len(ofertas),
+        "n_propuestos": len(propuestos),
+        "n_sin_candidato": len(sin_candidato),
+        "n_sin_nombre": len(sin_nombre),
+        # Las tres listas son el valor del reporte: qué se va a vincular, qué hay
+        # que mirar a mano y qué ni siquiera tiene nombre de planta.
+        "propuestos": sorted(propuestos, key=lambda f: -f["score"]),
+        "sin_candidato": sorted(sin_candidato, key=lambda f: -f["score"]),
+        "sin_nombre": sin_nombre,
+    }
+
+
+def vincular_proyectos(db, solo_operando=True, umbral=UMBRAL_VINCULO,
+                       dry_run=True, solo_ofertas=None) -> dict:
+    """Aplica los vínculos que propone `proponer_vinculos_proyecto`.
+
+    Idempotente: solo toca ofertas con `proyecto_id` en NULL, así que repetirla
+    no cambia nada. `solo_ofertas` limita la escritura a una lista de ids —
+    el camino para aceptar unas propuestas y descartar otras sin tener que subir
+    el umbral.
+
+    Reversible a mano: deshacer un vínculo es poner `proyecto_id` en NULL desde
+    la ficha de la oferta.
+    """
+    from app.models.comercial import OportunidadOferta
+
+    reporte = proponer_vinculos_proyecto(db, solo_operando=solo_operando, umbral=umbral)
+    a_aplicar = reporte["propuestos"]
+    if solo_ofertas is not None:
+        permitidas = set(solo_ofertas)
+        omitidas = [f for f in a_aplicar if f["oferta_id"] not in permitidas]
+        a_aplicar = [f for f in a_aplicar if f["oferta_id"] in permitidas]
+        reporte["omitidos_por_filtro"] = omitidas
+
+    if not dry_run and a_aplicar:
+        por_id = {o.id: o for o in db.query(OportunidadOferta).filter(
+            OportunidadOferta.id.in_([f["oferta_id"] for f in a_aplicar])).all()}
+        for fila in a_aplicar:
+            oferta = por_id.get(fila["oferta_id"])
+            if oferta is not None and oferta.proyecto_id is None:
+                oferta.proyecto_id = fila["proyecto_id"]
+        db.commit()
+
+    reporte.update({"dry_run": dry_run, "n_aplicados": 0 if dry_run else len(a_aplicar),
+                    "aplicados": [] if dry_run else a_aplicar})
+    return reporte
 
 
 def _mejor_ppa(contratos, hoy):

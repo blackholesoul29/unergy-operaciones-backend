@@ -126,6 +126,17 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.medidor_principal_completo = resultado.get("medidor_principal_completo")
     fila.medidor_respaldo_completo = resultado.get("medidor_respaldo_completo")
     fila.error_clasificacion = resultado.get("error_clasificacion")
+    # clasificador.py SÍ calcula estas curvas de referencia (tal como
+    # estaban al momento de clasificar, ver comentario ahí sobre El Paso
+    # Norte 2026-08-05) pero nunca se estaban copiando a la fila -- por eso
+    # 'Detalle de las fuentes' seguía cayendo a la consulta en vivo aunque
+    # la fila fuera de hoy, y nunca mostraba el aviso de "Quoia ya cambió"
+    # (MGS 0028 Chiriguaná Norte 1 2026-08-10: medidor principal usado en
+    # 6.686,2 kWh al clasificar, pero en vivo ya mostraba 10.300,3 kWh, sin
+    # ningún aviso que lo explicara).
+    fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
+    fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
+    fila.curva_solenium_referencia = resultado.get("curva_solenium_referencia")
     if existente is None:
         db.add(fila)
 
@@ -152,6 +163,10 @@ def _upsert_consumo(db: Session, frontera_id: int, fecha: date, resultado: dict)
     fila.recuperacion_datos = resultado.get("recuperacion_datos")
     fila.revisar_manualmente = bool(resultado.get("revisar_manualmente", False))
     fila.error_clasificacion = resultado.get("error_clasificacion")
+    # Mismo fix que _upsert_generacion -- clasificador_consumo.py sí calcula
+    # estas curvas de referencia pero nunca se estaban copiando a la fila.
+    fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
+    fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
     if existente is None:
         db.add(fila)
 

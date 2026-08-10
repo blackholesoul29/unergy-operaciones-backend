@@ -1082,7 +1082,12 @@ def fleet_monitoring(
     counts = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0}
 
     for p in proyectos:
-        sol_id = int(p.project_id_solenium)
+        try:
+            sol_id = int(p.project_id_solenium)
+        except (TypeError, ValueError):
+            logger.warning("project_id_solenium inválido proyecto_id=%s valor=%r",
+                            p.id, p.project_id_solenium)
+            continue
         avail   = avail_map.get(sol_id, {})
         summary = summary_map.get(sol_id, {})
 

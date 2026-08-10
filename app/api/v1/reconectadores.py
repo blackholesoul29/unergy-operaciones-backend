@@ -79,26 +79,27 @@ def _get_user_token(username: str, password: str) -> str:
     return token
 
 
-def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> bool | None:
+def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> tuple[bool, bool | None]:
     """
-    Llama GET /project/{sol_id}/relay/ y retorna el campo `active`.
+    Llama GET /project/{sol_id}/relay/.
     Respuesta Solenium: {"results": {"active": true|false|null, ...}, "success": true}
-    404 = proyecto sin reconectador → retorna None.
+
+    Retorna (tiene_reconectador, active):
+      - tiene_reconectador=False: Solenium respondió 404 (sin relay físico) o hubo
+        un error/timeout (no se pudo confirmar) → el proyecto debe omitirse.
+      - tiene_reconectador=True: Solenium confirmó el relay; `active` es
+        True/False, o None si Solenium no informó el estado puntual.
     """
     url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
     try:
-        data = client._get(url)   # retorna None en 404
+        data = client._get(url)   # retorna None en 404 o en error/timeout
         if not data:
-            return None
-        # active está en data["results"]["active"]
+            return False, None
         results = data.get("results") or {}
-        val = results.get("active")
-        if val is None:
-            return None
-        return bool(val)
+        return True, results.get("active")
     except Exception as exc:
         logger.warning("relay_get sol_id=%d error=%s", sol_id, exc)
-        return None
+        return False, None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -117,8 +118,9 @@ def debug_relay(
     sol_id = int(proyecto.project_id_solenium)
     url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
     raw = client._get(url)
+    tiene_reconectador, active = _fetch_relay_estado(sol_id, client)
     return {"sol_id": sol_id, "url": url, "raw": raw,
-            "parsed_active": _fetch_relay_estado(sol_id, client)}
+            "tiene_reconectador": tiene_reconectador, "parsed_active": active}
 
 
 @router.get("/estados", response_model=list[RelayEstado])
@@ -143,9 +145,16 @@ def get_estados(
     if not proyectos:
         return []
 
-    def _query(p):
-        sol_id = int(p.project_id_solenium)
-        active = _fetch_relay_estado(sol_id, client)
+    def _query(p) -> RelayEstado | None:
+        try:
+            sol_id = int(p.project_id_solenium)
+        except (TypeError, ValueError):
+            logger.warning("project_id_solenium inválido proyecto_id=%s valor=%r",
+                           p.id, p.project_id_solenium)
+            return None
+        tiene_reconectador, active = _fetch_relay_estado(sol_id, client)
+        if not tiene_reconectador:
+            return None
         return RelayEstado(
             proyecto_id=p.id,
             nombre=p.nombre_comercial,
@@ -154,7 +163,7 @@ def get_estados(
         )
 
     with ThreadPoolExecutor(max_workers=8) as ex:
-        resultados = list(ex.map(_query, proyectos))
+        resultados = [r for r in ex.map(_query, proyectos) if r is not None]
 
     return resultados
 

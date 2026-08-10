@@ -211,6 +211,24 @@ curl "$BASE/comercial/proyectos-operando?estado=operando" -H "X-API-Key: $UNERGY
 > arrancó, ese número es su duración completa (no la distancia hasta la fecha de fin). Nunca
 > es mayor que `duracion_meses`.
 
+### Por qué una planta firmada puede no tener `contrato_energia`
+
+`contrato_energia` es el **contrato de compra de energía** (el PPA). Una planta cuyo negocio
+cerrado es de **servicios operacionales** (representación, CGM) no tiene PPA: su contrato es
+de otro tipo y no vive en ese campo. En esos casos `contrato_energia` viene en `null` y no es
+un dato faltante — es que no aplica.
+
+Para saber en cuál de los dos casos están, miren `ofertas[].tipo`:
+
+| `ofertas[].tipo` | Qué esperar de `contrato_energia` |
+|---|---|
+| `compra_energia` | Debería tener el PPA. Si viene `null`, ahí sí falta cargarlo |
+| `servicios_operacionales` | Normal que venga `null`: no hay contrato de energía |
+| `comunidad_energetica` | Depende del negocio |
+
+Hoy las 5 plantas en etapa `firmado` son todas de servicios (`OP.REPCGM…`), así que ninguna
+trae `contrato_energia`.
+
 ---
 
 ## 5. `gen_promedio_origen` — léanlo siempre

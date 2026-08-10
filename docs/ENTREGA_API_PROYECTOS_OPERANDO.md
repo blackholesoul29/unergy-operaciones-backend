@@ -1,12 +1,21 @@
-# Entrega — API de Proyectos en Operación
+# Entrega — API de Proyectos Firmados y en Operación
 
 Paso a paso para que Juan José le entregue la API a su compañera y ella la integre en la
 otra plataforma.
 
-**Qué se entrega:** un endpoint que devuelve, en una sola llamada, todas las plantas que
-están en etapa **Operando** en `/comercial`, con nombre, ubicación, operador de red,
-generación mensual promedio, fecha de inicio de comercialización y tiempo del contrato de
-energía.
+**Qué se entrega:** un endpoint que devuelve, en una sola llamada, todas las plantas con
+negocio cerrado en `/comercial` — etapas **Firmado** y **Operando** — con nombre, **estado**,
+ubicación, operador de red, generación mensual promedio, fecha de inicio de comercialización,
+tiempo del contrato de energía y **API ID de Unergy**.
+
+Cada fila trae su `estado`:
+
+- `firmado` — hay contrato, el suministro todavía no arrancó. Es normal que no tenga
+  generación promedio ni fecha de comercialización: la planta aún no entrega energía.
+- `operando` — ya está entregando.
+
+Una planta con la energía operando y los servicios recién firmados sale como `operando` (la
+etapa más avanzada de sus ofertas). Con `?estado=operando` o `?estado=firmado` se acota.
 
 ```
 GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando
@@ -68,7 +77,7 @@ Texto para copiar y pegar:
 
 ---
 
-Hola, te paso la API con las plantas que tenemos operando.
+Hola, te paso la API con nuestras plantas firmadas y operando.
 
 **Endpoint (una sola llamada, trae todo):**
 ```
@@ -76,8 +85,9 @@ GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-op
 Header: X-API-Key: <te la mando aparte>
 ```
 
-Devuelve una entrada por planta con: nombre, ubicación, operador de red, generación mensual
-promedio, fecha de inicio de comercialización y duración del contrato de energía.
+Devuelve una entrada por planta con: nombre, **estado**, ubicación, operador de red,
+generación mensual promedio, fecha de inicio de comercialización, duración del contrato de
+energía y el **API ID de Unergy**.
 
 Prueba rápida:
 ```bash
@@ -85,16 +95,24 @@ curl "https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-
   -H "X-API-Key: LA_KEY"
 ```
 
-Tres cosas para tener en cuenta al integrar:
+Cuatro cosas para tener en cuenta al integrar:
 
-1. **Los campos pueden venir en `null`** cuando ese dato todavía no está cargado de nuestro
+1. **`estado` es lo primero que hay que mirar en cada fila:**
+   - `firmado` → hay contrato pero el suministro no arrancó. Es **normal** que no tenga
+     generación promedio ni fecha de comercialización: la planta todavía no entrega energía.
+   - `operando` → ya está entregando.
+
+   El sobre trae `por_estado` con el conteo de cada una, y podés acotar con
+   `?estado=operando` o `?estado=firmado`. Ojo: si una planta tiene varias ofertas, `estado`
+   es la etapa más avanzada de todas.
+2. **Los campos pueden venir en `null`** cuando ese dato todavía no está cargado de nuestro
    lado. Cada respuesta trae un objeto `fuentes` que dice de dónde salió cada valor, para
    que puedas distinguir "no aplica" de "todavía no lo sabemos". Si ves muchos `null`,
    avisame — es dato faltante nuestro, no un error de la API.
-2. **`gen_promedio_origen`** dice si la generación promedio es `medido` (real, últimos 30
+3. **`gen_promedio_origen`** dice si la generación promedio es `medido` (real, últimos 30
    días), `manual`, `estimado` o `declarado`. Mostralo al lado del número: no todos valen
    lo mismo.
-3. **Cachéalo de tu lado.** Los datos cambian a lo sumo una vez al día; con consultar una
+4. **Cachéalo de tu lado.** Los datos cambian a lo sumo una vez al día; con consultar una
    vez por hora sobra.
 
 La documentación completa (esquema de todos los campos, ejemplos en Python y JS, errores)
@@ -110,21 +128,38 @@ Cualquier cosa me escribís.
 
 ## ✅ Estado de los datos — YA EJECUTADO el 2026-08-10
 
-Los backfills y el vinculado **ya se corrieron**. Antes y después:
+Los backfills y el vinculado **ya se corrieron**. Ahora la API devuelve **36 plantas: 31
+operando + 5 firmadas.**
 
 | Campo | Antes | Ahora |
 |---|---|---|
-| Plantas en etapa Operando | 32 | **31** |
-| …con nombre | 32 | **31/31** |
-| …vinculadas a un proyecto | 4 | **24/31** |
-| …con operador de red | 4 | **23/31** |
-| …con fecha de inicio de comercialización | 4 | **22/31** |
-| …con generación promedio | 1 | **17/31** (todas `medido`) |
-| …con contrato de energía | 4 | **17/31** |
-| …con ubicación | 1 | **5/31** ⚠️ |
+| Plantas devueltas | 32 (solo operando) | **36** (31 operando + 5 firmadas) |
+| …con nombre | 32 | **36/36** |
+| …vinculadas a un proyecto | 4 | **28/36** |
+| …con API ID de Unergy | — | **28/36** |
+| …con operador de red | 4 | **27/36** |
+| …con ubicación | 1 | **8/36** ⚠️ |
+| …con contrato de energía | 4 | **17/36** (ver nota abajo) |
+
+Sobre las **31 que ya operan** (en las firmadas estos dos campos no aplican todavía, porque
+la planta no entrega energía):
+
+| Campo | Antes | Ahora |
+|---|---|---|
+| con fecha de inicio de comercialización | 4 | **22/31** |
+| con generación promedio | 1 | **17/31** (todas `medido`) |
+
+> **Las 5 firmadas no tienen `contrato_energia`, y está bien.** Sus ofertas son todas de
+> **servicios** (`OP.REPCGM…`: representación / CGM), no de compra de energía, así que no hay
+> PPA que reportar — el contrato de representación vive en otra tabla. `ofertas[].tipo` lo
+> dice: `servicios_operacionales`. Si alguna llegara a tener una oferta `compra_energia` sin
+> PPA, ahí sí faltaría cargarlo.
 
 Qué se ejecutó:
 
+0. `POST /comercial/ofertas/vincular-proyectos?dry_run=false` sobre las firmadas →
+   **3 vínculos más** (Sirius → GD Sirius, AGUSTÍN 2 → GD Agustín 2, AGUSTÍN 3 → GD Agustín 3),
+   todos con puntaje 1.00
 1. `POST /comercial/ofertas/vincular-proyectos?dry_run=false` → **21 vínculos aplicados**
 2. `POST /cumplimiento/backfill-comercializacion?dry_run=false` → 0 nuevos (112 proyectos no
    tienen identificador de monitoreo), pero al vincular quedaron expuestas las fechas que ya
@@ -154,6 +189,10 @@ Para aplicar cualquiera de las dos, cuando decidas:
 curl -X POST "$BASE/comercial/ofertas/vincular-proyectos?dry_run=false&oferta_id=24" \
   -H "X-API-Key: $KEY"
 ```
+
+**"Agustín" (oferta 15, firmada) quedó sin vincular por ambigüedad:** existen GD Agustin 1,
+GD Agustín 2 y GD Agustín 3, y el nombre suelto no dice cuál. Decidí vos y aplicá con
+`oferta_id=15`.
 
 **5 plantas con una inconsistencia que vale la pena revisar:** el CRM dice que la oferta está
 *operando*, pero el `estado` del proyecto dice que no está en operación — por eso quedan sin

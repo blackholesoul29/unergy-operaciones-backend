@@ -1350,6 +1350,11 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lat NUMERIC(10,6)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lng NUMERIC(10,6)",
+    # Sitios Starlink que no son proyecto nuestro (ej. temas contables/oficina):
+    # se marcan "excluido" para que dejen de bloquear el export de Costos sin
+    # forzar una asignación de minigranja que no existe (2026-08-11).
+    "ALTER TABLE starlink_mapeo_sitio ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 

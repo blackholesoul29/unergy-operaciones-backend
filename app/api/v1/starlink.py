@@ -32,7 +32,7 @@ def _regenerar_lineas(db: Session, fac: StarlinkFactura) -> None:
     resolviendo cada sitio contra el catálogo starlink_mapeo_sitio (match por nombre)."""
     agrupado = json.loads(fac.agrupado_json)
     mapeos = [
-        {"patron": m.patron, "proyecto_id": m.proyecto_id}
+        {"patron": m.patron, "proyecto_id": m.proyecto_id, "excluido": m.excluido}
         for m in db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.activo.is_(True)).all()
     ]
     db.query(StarlinkFacturaLinea).filter(StarlinkFacturaLinea.factura_id == fac.id).delete()
@@ -40,6 +40,7 @@ def _regenerar_lineas(db: Session, fac: StarlinkFactura) -> None:
         db.add(StarlinkFacturaLinea(
             factura_id=fac.id,
             proyecto_id=ln["proyecto_id"],
+            excluido=ln["excluido"],
             descripcion=ln["descripcion"],
             sin_iva=ln["sin_iva"],
             iva=ln["iva"],
@@ -116,6 +117,7 @@ def obtener_factura(
         {
             "descripcion":      l.descripcion,
             "proyecto_id":      l.proyecto_id,
+            "excluido":         l.excluido,
             "nombre_comercial": nombres.get(l.proyecto_id),
             "codigo_tsf":       codigos.get(l.proyecto_id),
             "tipo_proyecto":    tipos.get(l.proyecto_id),
@@ -214,6 +216,7 @@ def listar_mapeo(db: Session = Depends(get_db), _=Depends(get_current_user)):
         {
             "id": m.id, "patron": m.patron, "proyecto_id": m.proyecto_id,
             "nombre_comercial": nombres.get(m.proyecto_id), "activo": m.activo,
+            "excluido": m.excluido,
         }
         for m in filas
     ]
@@ -224,19 +227,23 @@ def listar_mapeo(db: Session = Depends(get_db), _=Depends(get_current_user)):
 @router.put("/mapeo")
 def upsert_mapeo(payload: dict, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Crea o actualiza un mapeo sitio→proyecto (clave: patron) y reprocesa TODAS
-    las facturas guardadas para reflejar el cambio en las líneas."""
+    las facturas guardadas para reflejar el cambio en las líneas.
+    excluido=True marca el sitio como "no es proyecto nuestro" (ej. tema
+    contable) — se guarda sin proyecto_id y deja de bloquear el export de Costos."""
     patron = (payload.get("patron") or "").strip()
     if not patron:
         raise HTTPException(400, "patron es obligatorio.")
-    proyecto_id = payload.get("proyecto_id")
+    excluido = bool(payload.get("excluido", False))
+    proyecto_id = None if excluido else payload.get("proyecto_id")
 
     m = db.query(StarlinkMapeoSitio).filter(StarlinkMapeoSitio.patron == patron).first()
     if m:
         m.proyecto_id = proyecto_id
         m.activo = payload.get("activo", True)
+        m.excluido = excluido
     else:
         m = StarlinkMapeoSitio(patron=patron, proyecto_id=proyecto_id,
-                               activo=payload.get("activo", True))
+                               activo=payload.get("activo", True), excluido=excluido)
         db.add(m)
     db.flush()
 

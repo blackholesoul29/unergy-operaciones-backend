@@ -18,18 +18,21 @@ def normalizar_sitio(nombre: str) -> str:
 def resolver_lineas(agrupado: list[dict], mapeos: list[dict]) -> list[dict]:
     """
     agrupado: entradas con 'descripcion', 'sin_iva', 'iva', 'monto_total'.
-    mapeos:   entradas con 'patron' (texto) y 'proyecto_id' (int | None).
+    mapeos:   entradas con 'patron' (texto), 'proyecto_id' (int | None) y
+              'excluido' (bool, sitio que no es proyecto nuestro).
     Devuelve una línea por entrada del agrupado:
-      {'descripcion', 'proyecto_id', 'sin_iva', 'iva', 'monto_total'}.
-    Sin match → proyecto_id = None.
+      {'descripcion', 'proyecto_id', 'excluido', 'sin_iva', 'iva', 'monto_total'}.
+    Sin match → proyecto_id = None, excluido = False.
     """
-    indice = {normalizar_sitio(m["patron"]): m.get("proyecto_id") for m in mapeos}
+    indice = {normalizar_sitio(m["patron"]): m for m in mapeos}
     lineas: list[dict] = []
     for it in agrupado:
         desc = it.get("descripcion", "")
+        m = indice.get(normalizar_sitio(desc))
         lineas.append({
             "descripcion": desc,
-            "proyecto_id": indice.get(normalizar_sitio(desc)),
+            "proyecto_id": m.get("proyecto_id") if m else None,
+            "excluido":    bool(m.get("excluido")) if m else False,
             "sin_iva":     float(it.get("sin_iva") or 0),
             "iva":         float(it.get("iva") or 0),
             "monto_total": float(it.get("monto_total") or 0),

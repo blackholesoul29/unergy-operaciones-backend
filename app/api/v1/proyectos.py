@@ -26,7 +26,7 @@ from app.schemas.common import PaginatedResponse
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.operadores_red_sync import sincronizar_operador_red
 from app.services import gen_promedio
-from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes, backfill_ubicacion
+from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes
 from app.services.proyectos_backfill_unergy import asignar_sub_project_unergy_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
@@ -277,18 +277,6 @@ def ignorar_proyecto_pendiente(
         return
     db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
     db.commit()
-
-
-@router.post("/backfill-ubicacion")
-def backfill_ubicacion_proyectos(
-    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Completa latitud/longitud/municipio/departamento en proyectos existentes
-    que les falte ese dato, cruzando contra Sun Factory y Solenium. Idempotente
-    y nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
-    return backfill_ubicacion(db, dry_run=dry_run)
 
 
 # ── Generación mensual promedio ───────────────────────────────────────────────

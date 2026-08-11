@@ -7,9 +7,9 @@
     "en construcción" mientras Quoia ya lo ve generando), o le faltan datos
     (Potencia AC/Capacidad instalada) que la fuente sí tiene.
 
-Solenium quedó fuera de este cruce por decisión explícita (2026-08-11) --
-sigue usándose para `backfill_ubicacion()` (relleno de lat/lon/municipio),
-que es un caso aparte, no de creación/cambio de estado.
+Solenium quedó fuera de este cruce por decisión explícita (2026-08-11); el
+backfill de ubicación que también lo usaba (`backfill_ubicacion()`) se
+eliminó por la misma razón.
 
 Cascada de confianza (nunca se auto-aplica, solo decide qué tan segura es
 la sugerencia):
@@ -33,7 +33,6 @@ from sqlalchemy.orm import Session
 from app.models.fronteras import Frontera
 from app.models.proyectos import Proyecto, ProyectoPendienteIgnorado
 from app.services.mgs.gaia_client import GaiaClient, _get_dynamic_maps
-from app.services.mgs.solenium_client import SoleniumClient
 from app.services.tsf_sync import (
     _core, _derive_commercial_name, _parece_codigo,
     _sunfactory_all_projects, _sunfactory_token,
@@ -348,106 +347,6 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     return out
 
 
-# Cache de "¿generación real sostenida?" por project_id de Solenium -- mismo
-# criterio y TTL que Quoia (ver _generacion_real_multidia_por_frt): el listado
-# de proyectos de Solenium por sí solo NO implica que ya opere, solo que
-# existe en su sistema de monitoreo.
-_generacion_solenium_cache: dict[int, bool] | None = None
-_generacion_solenium_cache_ts: float = 0.0
-
-
-def _generacion_real_solenium(client: SoleniumClient, project_ids: list[int]) -> dict[int, bool]:
-    """¿Este proyecto de Solenium generó de verdad (kWh > 0, vía inversores)
-    en cada uno de los últimos `_DIAS_GENERACION_SOSTENIDA` días? Mismo
-    principio que para Quoia: que un proyecto esté en el listado de Solenium
-    no prueba que esté operando -- eso solo lo confirma generación medida."""
-    global _generacion_solenium_cache, _generacion_solenium_cache_ts
-    now = time.monotonic()
-    if _generacion_solenium_cache is not None and (now - _generacion_solenium_cache_ts) < _GENERACION_REAL_CACHE_TTL:
-        return _generacion_solenium_cache
-
-    hoy = date.today()
-    dias_ventana = [(hoy - timedelta(days=i)).isoformat() for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
-    fecha_desde = min(dias_ventana)
-    fecha_hasta = hoy.isoformat()
-
-    resultado: dict[int, bool] = {}
-    ids = [pid for pid in project_ids if pid is not None]
-    if ids:
-        with ThreadPoolExecutor(max_workers=min(len(ids), 12)) as pool:
-            def _check(pid):
-                try:
-                    gen = client.get_generation(pid, fecha_desde, fecha_hasta) or {}
-                    if "results" in gen:
-                        gen = gen["results"]
-                    gen_kwh_map = gen.get("generation_kwh") or {}
-                    por_dia: dict[str, float] = {}
-                    for ts, v in gen_kwh_map.items():
-                        try:
-                            dia = str(ts)[:10]
-                            por_dia[dia] = por_dia.get(dia, 0.0) + float(v)
-                        except (TypeError, ValueError):
-                            continue
-                    return pid, all(por_dia.get(d, 0.0) > 0 for d in dias_ventana)
-                except Exception:
-                    return pid, False
-            for pid, tiene in pool.map(_check, ids):
-                resultado[pid] = tiene
-
-    _generacion_solenium_cache = resultado
-    _generacion_solenium_cache_ts = now
-    return resultado
-
-
-def _candidatos_solenium() -> list[_Candidato]:
-    client = SoleniumClient()
-    if not client.enabled:
-        return []
-    try:
-        raw = client.get_projects()
-    except Exception:
-        return []
-
-    generacion_real = _generacion_real_solenium(client, [p.get("id") for p in raw])
-
-    out = []
-    for p in raw:
-        nombre = (p.get("name") or "").strip()
-        if not nombre or _excluir_por_nombre(nombre):
-            continue
-        cap = p.get("installed_capacity")
-        try:
-            cap_val = float(cap) if cap is not None else None
-        except (TypeError, ValueError):
-            cap_val = None  # "Desconocida"
-
-        if p.get("is_minifarm"):
-            tipo = "minigranja"
-        elif p.get("is_self_consumption"):
-            tipo = "autoconsumo"
-        else:
-            tipo = None  # ambiguo -- que lo decida quien confirma
-
-        lat, lon = p.get("lat"), p.get("lon")
-        c = _Candidato(
-            fuentes={"solenium"},
-            nombre_raw=nombre,
-            latitud=lat if _coord_valida(lat, lon) else None,
-            longitud=lon if _coord_valida(lat, lon) else None,
-            tipo_proyecto=tipo,
-            capacidad_instalada_kwp=cap_val,
-            project_id_solenium=str(p["id"]) if p.get("id") is not None else None,
-        )
-        # Aparecer en el listado de Solenium NO prueba que ya opere -- exige
-        # generación real sostenida (mismo criterio que Quoia).
-        if generacion_real.get(p.get("id")):
-            c.estado_sugerido = "en_operacion"
-            c.fase_construccion = "energizado"
-        c.core = _core(c.nombre_raw)
-        out.append(c)
-    return out
-
-
 def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
     """Combina candidatos de distintas fuentes que refieren al mismo
     proyecto real (mismo `core`), sin pisar campos ya llenados.
@@ -493,7 +392,7 @@ def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
 
 
 def _reforzar_solo_quoia(candidatos: list[_Candidato]) -> None:
-    """Sin corroboración de Sun Factory/Solenium (el candidato viene solo de
+    """Sin corroboración de Sun Factory (el candidato viene solo de
     Quoia), exige generación sostenida varios días, no solo el último
     reportado -- caso real 2026-07-10: Garza/La Perdiz/Taurus VIII-X se
     confirmaron como "en operación" con evidencia de un solo día que resultó
@@ -641,72 +540,3 @@ def resolver_pendientes(db: Session) -> list[dict]:
             })
 
     return pendientes
-
-
-def backfill_ubicacion(db: Session, dry_run: bool = True) -> dict:
-    """Completa latitud/longitud/municipio/departamento en proyectos que ya
-    existen pero les falta ese dato, cruzando contra Sun Factory y Solenium
-    (Quoia no trae coordenadas). Match por vínculo directo (ID/código) primero;
-    si no hay vínculo, por nombre normalizado (`_core`). Nunca pisa un valor
-    ya diligenciado."""
-    proyectos = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
-
-    por_sunfactory_id = {p.sunfactory_project_id: p for p in proyectos if p.sunfactory_project_id is not None}
-    por_origina_code = {(p.origina_code or "").upper(): p for p in proyectos if p.origina_code}
-    por_codigo_tsf = {(p.codigo_tsf or "").upper(): p for p in proyectos if p.codigo_tsf}
-    por_solenium_id = {p.project_id_solenium: p for p in proyectos if p.project_id_solenium}
-    por_core = {}
-    for p in proyectos:
-        core = _core(p.nombre_comercial)
-        if len(core) >= 3:
-            por_core.setdefault(core, p)
-
-    candidatos = _fusionar_por_core(_candidatos_sunfactory() + _candidatos_solenium())
-
-    actualizados = []
-    vistos: set[int] = set()
-    for c in candidatos:
-        if c.latitud is None and c.longitud is None and not c.municipio and not c.departamento:
-            continue  # nada que aportar
-
-        match = None
-        if c.sunfactory_project_id is not None:
-            match = por_sunfactory_id.get(c.sunfactory_project_id)
-        if match is None and c.origina_code:
-            match = por_origina_code.get(c.origina_code.upper())
-        if match is None and c.codigo_tsf:
-            match = por_codigo_tsf.get(c.codigo_tsf.upper())
-        if match is None and c.project_id_solenium:
-            match = por_solenium_id.get(c.project_id_solenium)
-        if match is None:
-            match = por_core.get(c.core)
-
-        if match is None or match.id in vistos:
-            continue
-
-        cambios = {}
-        if match.latitud is None and c.latitud is not None:
-            cambios["latitud"] = c.latitud
-        if match.longitud is None and c.longitud is not None:
-            cambios["longitud"] = c.longitud
-        if not match.municipio and c.municipio:
-            cambios["municipio"] = c.municipio
-        if not match.departamento and c.departamento:
-            cambios["departamento"] = c.departamento
-
-        if cambios:
-            vistos.add(match.id)
-            actualizados.append({"id": match.id, "nombre": match.nombre_comercial, "cambios": cambios})
-            if not dry_run:
-                for campo, valor in cambios.items():
-                    setattr(match, campo, valor)
-
-    if not dry_run and actualizados:
-        db.commit()
-
-    return {
-        "dry_run": dry_run,
-        "total_candidatos": len(candidatos),
-        "actualizados": len(actualizados),
-        "detalle": actualizados,
-    }

@@ -80,9 +80,17 @@ def _datos_proyectos_para_resumen(
     if not proyecto_ids:
         return {}
 
-    capacidad_dc: dict[int, float | None] = dict(db.query(
-        ProyectoInfoTecnica.proyecto_id, ProyectoInfoTecnica.capacidad_instalada_kwp,
-    ).filter(ProyectoInfoTecnica.proyecto_id.in_(proyecto_ids)).all())
+    # Numeric() en Postgres llega como Decimal, no float -- sin este cast,
+    # "total_gen / capacidad_dc" en calcular_resumen_diario/mensual explota
+    # con "unsupported operand type(s) for /: 'float' and 'decimal.Decimal'"
+    # (bug real 2026-08-11, recién visible porque el backfill de Solenium
+    # llenó capacidad_instalada_kwp en proyectos que antes tenían None).
+    capacidad_dc: dict[int, float | None] = {
+        pid: float(cap) if cap is not None else None
+        for pid, cap in db.query(
+            ProyectoInfoTecnica.proyecto_id, ProyectoInfoTecnica.capacidad_instalada_kwp,
+        ).filter(ProyectoInfoTecnica.proyecto_id.in_(proyecto_ids)).all()
+    }
 
     mapa_borders = curvas_energia.construir_mapa_borders(gaia)
 

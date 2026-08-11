@@ -34,8 +34,11 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import psycopg
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
+
+from app.models.proyectos import Proyecto
+from app.utils.nombre_matching import mejor_candidato
 
 from app.core.config import settings
 
@@ -853,3 +856,138 @@ def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
             stats["errores"] += 1
 
     return stats
+
+
+# ── Backfill de departamento/municipio/codigo_tsf por nombre ────────────────────
+# `sync_tsf_projects()` ya rellena estos tres campos continuamente (job de 6h +
+# botón "Actualizar"), pero SOLO para proyectos ya vinculados por ID
+# (sunfactory_project_id/origina_code/codigo_tsf/base_name). Un proyecto sin
+# ningún vínculo por ID (creado a mano, o cuyo vínculo con Sun Factory nunca se
+# confirmó) nunca los recibe por esa vía -- esto cubre ese hueco emparejando
+# por nombre, con el mismo umbral estricto que el backfill de Unergy (0.95):
+# mejor dejar el campo vacío que asignar la ubicación de otro proyecto.
+UMBRAL_UBICACION_TSF = 0.95
+
+
+def _match_sunfactory_por_id(proyecto: Proyecto, sf_projects: list[dict]) -> dict | None:
+    """Mismo orden de prioridad que sync_tsf_projects(): sunfactory_project_id
+    > origina_code > codigo_tsf/base_name."""
+    if proyecto.sunfactory_project_id is not None:
+        for sp in sf_projects:
+            if sp.get("solenium_id") == proyecto.sunfactory_project_id:
+                return sp
+    if proyecto.origina_code:
+        for sp in sf_projects:
+            if (sp.get("origina_code") or "").upper() == proyecto.origina_code.upper():
+                return sp
+    if proyecto.codigo_tsf:
+        for sp in sf_projects:
+            if (sp.get("tsf_code") or "").upper() == proyecto.codigo_tsf.upper() \
+               or (sp.get("base_name") or "").upper() == proyecto.codigo_tsf.upper():
+                return sp
+    return None
+
+
+def _match_sunfactory_seguro(proyecto: Proyecto, sf_projects: list[dict]) -> dict | None:
+    """Vínculo por ID si existe (siempre confiable); si no, por nombre, solo
+    si el score supera UMBRAL_UBICACION_TSF."""
+    item = _match_sunfactory_por_id(proyecto, sf_projects)
+    if item:
+        return item
+    candidatos = [(sp, [sp.get("commercial_name")]) for sp in sf_projects if sp.get("commercial_name")]
+    item, score = mejor_candidato(proyecto.nombre_comercial, candidatos)
+    return item if item and score >= UMBRAL_UBICACION_TSF else None
+
+
+def _cambios_ubicacion_codigo_tsf(proyecto: Proyecto, item: dict) -> dict:
+    """Solo los campos vacíos -- nunca pisa un valor ya cargado."""
+    cambios = {}
+    if not proyecto.departamento and item.get("departamento"):
+        cambios["departamento"] = item["departamento"]
+    if not proyecto.municipio and item.get("municipio"):
+        cambios["municipio"] = item["municipio"]
+    if not proyecto.codigo_tsf and item.get("tsf_code"):
+        cambios["codigo_tsf"] = item["tsf_code"]
+    return cambios
+
+
+def backfill_ubicacion_codigo_tsf(db: Session, apply: bool = False) -> dict:
+    """Corrida masiva sobre proyectos existentes a los que les falte
+    departamento, municipio o codigo_tsf. Ver
+    scripts/backfill_ubicacion_tsf.py para el CLI (dry-run por defecto)."""
+    candidatos_proyecto = (
+        db.query(Proyecto)
+        .filter(
+            Proyecto.deleted_at.is_(None),
+            or_(Proyecto.departamento.is_(None), Proyecto.municipio.is_(None), Proyecto.codigo_tsf.is_(None)),
+        )
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    if not candidatos_proyecto:
+        return {"ok": True, "revisados": 0, "asignados": [], "sin_match_seguro": []}
+
+    sf_projects, warnings = fetch_sunfactory_projects(enrich_dates=False)
+    if not sf_projects:
+        return {"ok": False, "error": "Sun Factory no devolvió proyectos" + (f" ({warnings[0]})" if warnings else "")}
+
+    asignados: list[dict] = []
+    sin_match_seguro: list[dict] = []
+
+    for p in candidatos_proyecto:
+        item = _match_sunfactory_seguro(p, sf_projects)
+        if not item:
+            sin_match_seguro.append({
+                "proyecto_id": p.id, "nombre": p.nombre_comercial,
+                "motivo": "sin match seguro en Sun Factory",
+            })
+            continue
+        cambios = _cambios_ubicacion_codigo_tsf(p, item)
+        if not cambios:
+            continue  # ya matcheó pero no aportó nada nuevo (los 3 campos ya estaban llenos)
+        asignados.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "cambios": cambios})
+        if apply:
+            for campo, valor in cambios.items():
+                setattr(p, campo, valor)
+
+    if apply and asignados:
+        db.commit()
+
+    return {
+        "ok": True,
+        "revisados": len(candidatos_proyecto),
+        "asignados": asignados,
+        "sin_match_seguro": sin_match_seguro,
+    }
+
+
+def sincronizar_ubicacion_tsf_si_aplica(proyecto: Proyecto, db: Session) -> dict | None:
+    """Best-effort para UN proyecto, en el momento de crearlo/confirmarlo (ver
+    app/api/v1/proyectos.py) -- llena departamento/municipio/codigo_tsf desde
+    Sun Factory si falta alguno, para que los proyectos nuevos no dependan de
+    que alguien corra el backfill manual más adelante.
+
+    Nunca sobreescribe un valor ya cargado, y nunca lanza: si Sun Factory
+    falla, está lento, o no hay match seguro, el proyecto simplemente queda
+    como estaba."""
+    if proyecto.departamento and proyecto.municipio and proyecto.codigo_tsf:
+        return None
+    try:
+        sf_projects, _warnings = fetch_sunfactory_projects(enrich_dates=False)
+        if not sf_projects:
+            return None
+        item = _match_sunfactory_seguro(proyecto, sf_projects)
+        if not item:
+            return None
+        cambios = _cambios_ubicacion_codigo_tsf(proyecto, item)
+        if cambios:
+            for campo, valor in cambios.items():
+                setattr(proyecto, campo, valor)
+            db.commit()
+        return cambios or None
+    except Exception:
+        logger.warning(
+            "No se pudo sincronizar ubicación/código TSF desde Sun Factory para proyecto %s (%s)",
+            proyecto.id, proyecto.nombre_comercial, exc_info=True,
+        )
+        return None

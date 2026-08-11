@@ -28,6 +28,7 @@ from app.services.operadores_red_sync import sincronizar_operador_red
 from app.services import gen_promedio
 from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes
 from app.services.proyectos_backfill_unergy import sincronizar_datos_unergy_si_aplica
+from app.services.tsf_sync import sincronizar_ubicacion_tsf_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -174,6 +175,7 @@ def create_proyecto(
         )
     db.refresh(proyecto)
     sincronizar_datos_unergy_si_aplica(proyecto, db)
+    sincronizar_ubicacion_tsf_si_aplica(proyecto, db)
     return _get_proyecto_or_404(proyecto.id, db)
 
 
@@ -251,6 +253,7 @@ def confirmar_proyecto_pendiente(
         proyecto_id = proyecto.id
 
     sincronizar_datos_unergy_si_aplica(proyecto, db)
+    sincronizar_ubicacion_tsf_si_aplica(proyecto, db)
 
     if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
         it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()

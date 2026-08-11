@@ -123,7 +123,10 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
 
     # Mapeo a tipo de catálogo (para que vistas/analytics legacy muestren etiqueta)
     nuevo_tipo_id = None
-    if categoria in ("red", "frontera", "eventos_adversos") and falla.subtipo_codigo:
+    # Categorías de opción/equipo (red, frontera, eventos, generando sin datos):
+    # el tipo sale del subtipo. Genérico a propósito: agregar una categoría a
+    # ESTRUCTURA_FALLAS no debe exigir tocar esta lista.
+    if cat["tipo"] in ("opcion", "equipo") and falla.subtipo_codigo:
         t = db.query(FallaCatTipo).filter_by(codigo=tipo_codigo(categoria, falla.subtipo_codigo)).first()
         if t:
             nuevo_tipo_id = t.id
@@ -147,7 +150,7 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
         clasif["detalle"] = falla.subtipo_detalle
     # tipo_libre legible (respaldo para listados/emails/analytics legacy) en las
     # categorías de opción/equipo; para inversores se arma más abajo.
-    if categoria in ("red", "frontera", "eventos_adversos"):
+    if cat["tipo"] in ("opcion", "equipo"):
         _et = clasif.get("subtipo_etiqueta") or cat["etiqueta"]
         falla.tipo_libre = (f"{_et}: {falla.subtipo_detalle}" if falla.subtipo_detalle else _et)[:255]
     if categoria == "frontera":

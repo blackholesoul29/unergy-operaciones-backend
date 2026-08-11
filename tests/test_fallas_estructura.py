@@ -6,8 +6,10 @@ from app.services.fallas.estructura import (
 )
 
 
-def test_cuatro_categorias_canonicas():
-    assert CATEGORIA_CODIGOS == {"red", "frontera", "inversores", "eventos_adversos"}
+def test_categorias_canonicas():
+    assert CATEGORIA_CODIGOS == {
+        "red", "frontera", "inversores", "generando_sin_datos", "eventos_adversos",
+    }
 
 
 def test_red_tiene_opciones_de_spec():
@@ -48,6 +50,26 @@ def test_eventos_adversos():
     assert ev["etiqueta"] == "Eventos naturales"
     codigos = {o["codigo"] for o in ev["opciones"]}
     assert codigos == {"incendio", "inundacion", "huracan", "clima_nublado_lluvioso", "otro"}
+
+
+def test_generando_sin_datos_opciones():
+    g = get_categoria("generando_sin_datos")
+    assert g["tipo"] == "opcion"
+    codigos = {o["codigo"] for o in g["opciones"]}
+    assert codigos == {"incertidumbre", "verificado_encendido", "verificado_apagado"}
+    # Sin verificación en sitio la falla queda pendiente de reclasificar;
+    # una vez verificada (encendido/apagado) ya no.
+    assert es_subtipo_pendiente("generando_sin_datos", "incertidumbre") is True
+    assert es_subtipo_pendiente("generando_sin_datos", "verificado_encendido") is False
+    assert es_subtipo_pendiente("generando_sin_datos", "verificado_apagado") is False
+
+
+def test_validar_generando_sin_datos():
+    assert validar_clasificacion("generando_sin_datos", "verificado_apagado") == (True, None)
+    ok, _ = validar_clasificacion("generando_sin_datos", None)
+    assert not ok
+    ok, err = validar_clasificacion("generando_sin_datos", "encendido")
+    assert not ok and "inválida" in err
 
 
 def test_tipo_codigo_es_calificado():

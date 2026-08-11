@@ -192,8 +192,8 @@ Es la metodología vigente: primero el **sistema afectado**, luego el detalle. V
 
 | Campo | Tipo | Req. | Descripción |
 |---|---|:---:|---|
-| `categoria_codigo` | `string` | — | Sistema afectado: `red` \| `frontera` \| `inversores` \| `eventos_adversos`. **Manden esto siempre en fallas nuevas.** Si se omite, la falla queda sin clasificar |
-| `subtipo_codigo` | `string` | condicional | **Obligatorio** si `categoria_codigo` es `red`, `frontera` o `eventos_adversos`. No aplica a `inversores` |
+| `categoria_codigo` | `string` | — | Sistema afectado: `red` \| `frontera` \| `inversores` \| `generando_sin_datos` \| `eventos_adversos`. **Manden esto siempre en fallas nuevas.** Si se omite, la falla queda sin clasificar |
+| `subtipo_codigo` | `string` | condicional | **Obligatorio** en todas las categorías salvo `inversores`, que no lo usa |
 | `subtipo_detalle` | `string` | — | Texto libre. La estructura lo marca como requerido para `red.mantenimiento_red` y `eventos_adversos.otro`, pero **el servidor no lo exige** (solo el formulario web). Mándenlo igual en esos dos casos |
 | `frontera_afecta_medicion` | `bool` | — | Solo `frontera`. Si la falla afecta la medición comercial. En otras categorías se fuerza a `null` |
 | `frontera_perdida_comunicacion` | `bool` | — | Solo `frontera`. ⚠️ **`true` dispara la alarma `comunicacion_frontera`** |
@@ -319,7 +319,19 @@ Equipos de la medición comercial. Requiere `subtipo_codigo`. Acepta los dos fla
 
 > Estos cuatro códigos fueron **retirados** y ya no se aceptan al crear, aunque siguen resolviéndose para no degradar fallas históricas: `no_generacion`, `generacion_anomala`, `limitacion_potencia`, `strings_mal_conectados`. Si los mandan, reciben 422.
 
-### 4.4 `eventos_adversos` — "Eventos naturales"
+### 4.4 `generando_sin_datos` — "Sistema generando pero sin datos"
+
+No llegan datos de generación y desde el monitoreo no se puede afirmar si la planta generó o no. Requiere `subtipo_codigo`: el subtipo **no es un evento, es el resultado de la verificación en sitio**.
+
+| `subtipo_codigo` | Etiqueta | Notas |
+|---|---|---|
+| `incertidumbre` | Incertidumbre (no sabemos si generó o no) | Aún sin verificar en sitio: el servidor marca la falla con `pendiente_reclasificar: true` hasta que se confirme encendido/apagado |
+| `verificado_encendido` | Verificado en sitio: proyecto encendido | La planta sí genera; la falla es solo de datos/monitoreo |
+| `verificado_apagado` | Verificado en sitio: proyecto apagado | Se confirmó en sitio que no está generando |
+
+> Flujo esperado: se abre con `incertidumbre` y, cuando alguien verifica en sitio, se hace `PATCH /fallas/{id}` con el `subtipo_codigo` definitivo — eso limpia solo `pendiente_reclasificar`.
+
+### 4.5 `eventos_adversos` — "Eventos naturales"
 
 Requiere `subtipo_codigo`. Nótese que el código es `eventos_adversos` pero la etiqueta que se muestra es "Eventos naturales" — **búsquenlo por código, no por etiqueta**.
 

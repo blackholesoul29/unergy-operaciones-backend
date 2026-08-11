@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends
@@ -238,21 +239,33 @@ def enviar_reporte_cgm(
     filas_por_frt: dict[str, list[dict]] = {}
     if frt_codes:
         borders = svc.resolver_borders(gaia, frt_codes)
-        for frt_code in frt_codes:
-            meta = borders.get(frt_code.lower())
-            if meta is None:
-                # No aparece en el listado de Quoia (caso real 2026-07-10:
-                # Bayunca/San Onofre registrados ahí bajo otra compañía) --
-                # no hay nombre ni dato real que reportar, así que no se
-                # incluye ninguna fila para este frt_code. Distinto del caso
-                # "sí está en Quoia pero no reportó este día" (eso sí se deja
-                # como "Sin reporte" dentro de fetch_filas).
-                continue
-            filas_por_frt[frt_code] = [
-                fila
-                for dia in dias_fetch
-                for fila in svc.fetch_filas(gaia, frt_code, meta, dia)
-            ]
+        # (frt_code, dia) es la unidad real de trabajo -- una llamada HTTP a
+        # Quoia cada una. Con destinatarios chicos (1-22 proyectos) daba igual
+        # hacerlo secuencial, pero "Operaciones Unergy" (TODAS las fronteras,
+        # ~300) multiplicado por varios días del mes puede ser miles de
+        # llamadas -- secuencial excedía el timeout del frontend (30s,
+        # caso real reportado 2026-08-11). GaiaClient ya se usa en paralelo
+        # en otras partes del backend (ej. proyectos_pendientes.py).
+        tareas = [
+            (frt_code, dia)
+            for frt_code in frt_codes
+            if borders.get(frt_code.lower()) is not None
+            # No aparece en el listado de Quoia (caso real 2026-07-10:
+            # Bayunca/San Onofre registrados ahí bajo otra compañía) -- no hay
+            # nombre ni dato real que reportar, así que no se incluye ninguna
+            # fila para este frt_code. Distinto del caso "sí está en Quoia
+            # pero no reportó este día" (eso sí se deja como "Sin reporte"
+            # dentro de fetch_filas).
+            for dia in dias_fetch
+        ]
+        if tareas:
+            with ThreadPoolExecutor(max_workers=12) as pool:
+                resultados_filas = pool.map(
+                    lambda t: (t[0], svc.fetch_filas(gaia, t[0], borders.get(t[0].lower()), t[1])),
+                    tareas,
+                )
+                for frt_code, filas in resultados_filas:
+                    filas_por_frt.setdefault(frt_code, []).extend(filas)
 
     # 3. Generar y enviar un Excel por destinatario, filtrado a sus fronteras.
     resultados = []

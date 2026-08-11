@@ -409,8 +409,8 @@ def correlate_investments(db: Session) -> dict:
 def correlate_projects(db: Session) -> dict:
     """Run cross-database correlation and update proyectos with matches."""
     rows = db.execute(text(
-        "SELECT id, nombre, codigo_tsf, alias_monitoreo, origina_code, quoia_node_name "
-        "FROM proyectos WHERE estado = 'en_operacion' ORDER BY nombre"
+        "SELECT id, nombre_comercial AS nombre, codigo_tsf, alias_monitoreo, origina_code, quoia_node_name "
+        "FROM proyectos WHERE estado = 'en_operacion' ORDER BY nombre_comercial"
     )).mappings().all()
 
     ops_projects = [dict(r) for r in rows]
@@ -538,7 +538,7 @@ def correlate_projects(db: Session) -> dict:
 def get_project_cross_view(db: Session, proyecto_id: int) -> dict:
     """Get unified cross-database view for a single project."""
     row = db.execute(text("""
-        SELECT id, nombre, codigo_tsf, alias_monitoreo,
+        SELECT id, nombre_comercial AS nombre, codigo_tsf, alias_monitoreo,
                origina_code, requestsdb_supply_id, quoia_node_name
         FROM proyectos WHERE id = :pid
     """), {"pid": proyecto_id}).mappings().first()

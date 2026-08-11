@@ -505,11 +505,16 @@ def clasificar_generacion(
 
     # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
     # de recuperarlo como con los medidores) -- excepto cuando el resultado
-    # ya confía en CGM (medidor_usado='cgm', Caso 1 o el Caso 5 de arriba):
-    # ese camino no reporta con Solenium, y si viene de la rama de Caso 5
-    # que sí comparó contra el total parcial de inversores, ya decidió su
-    # propia bandera con ese chequeo -- no la pise acá.
-    if resultado.get("medidor_usado") != "cgm" and e_inv_original > 0 and not solenium_completo:
+    # ya viene de un camino de Caso 5 que YA comparó contra el total parcial
+    # de inversores (_error_ventana_solar) y decidió su propia bandera con
+    # ese chequeo -- no la pise acá pisándola con "no era 'cgm'" (ver MGS
+    # 0014 El Olimpo 2026-08-10: 'principal_sin_cgm' con 0,03% de diferencia
+    # -- pasaba su propio chequeo pero esta regla lo volvía a marcar solo
+    # por no ser exactamente 'cgm').
+    if (
+        resultado.get("medidor_usado") not in ("cgm", "principal_sin_cgm", "respaldo_sin_cgm")
+        and e_inv_original > 0 and not solenium_completo
+    ):
         revisar = True
 
     # --- Relleno horario centralizado ---

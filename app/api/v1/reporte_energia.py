@@ -25,13 +25,12 @@ from app.schemas.reporte_energia import (
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse,
 )
-from app.services.reporte_energia import curvas, solenium as solenium_svc, orquestador, excel as excel_svc, historial
+from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial
 from app.services.reporte_energia import excel_terceros
 from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solenium_client import SoleniumClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
 
@@ -180,7 +179,12 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_resp_bd = rep.curva_medidor_respaldo
     curva_sol_bd = rep.curva_solenium_referencia if es_generacion else None
 
-    curva_medidor_ppal_viva = curva_medidor_resp_viva = curva_sol_viva = None
+    # Solenium ya NO se consulta en vivo acá -- costaba ~2s en cada apertura
+    # del panel, solo para detectar si Solenium cambió desde que se
+    # clasificó (un caso mucho menos común que el del medidor). Se usa
+    # directo lo que quedó persistido; si la fila es de antes del fix de
+    # persistencia, simplemente no hay curva de Solenium que mostrar acá.
+    curva_medidor_ppal_viva = curva_medidor_resp_viva = None
     try:
         gaia = GaiaClient()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
@@ -208,23 +212,16 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
             else:
                 curva_medidor_ppal_viva = curva_a_lista(c["consumo_ppal"])
                 curva_medidor_resp_viva = curva_a_lista(c["consumo_resp"])
-        if es_generacion and front.proyecto_id:
-            proyecto = db.get(Proyecto, front.proyecto_id)
-            if proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit():
-                sol = SoleniumClient()
-                curva_s, _ = solenium_svc.curva_generacion(sol, int(proyecto.project_id_solenium), str(fecha))
-                curva_sol_viva = curva_a_lista(curva_s)
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
     medidor_actualizado_en_quoia = any([
         _curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva),
         _curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva),
-        _curva_cambio(curva_sol_bd, curva_sol_viva),
     ])
     curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
-    curva_sol = curva_sol_bd if curva_sol_bd is not None else curva_sol_viva
+    curva_sol = curva_sol_bd
 
     # Total EN VIVO de la fuente que realmente se usó (medidor_usado) --
     # solo para el aviso "el medidor ya muestra un valor distinto en Quoia"

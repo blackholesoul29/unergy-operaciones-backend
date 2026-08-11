@@ -3457,13 +3457,12 @@ def _deferred_init():
                 name="Check IPC anual O&M",
             )
 
-            if settings.ORIGINA_DATABASE_URL:
-                _mgs_scheduler.add_job(
-                    _scheduled_tsf_sync,
-                    IntervalTrigger(hours=6),
-                    id="tsf_sync",
-                    name="Sync pipeline TSF -> proyectos",
-                )
+            _mgs_scheduler.add_job(
+                _scheduled_tsf_sync,
+                IntervalTrigger(hours=6),
+                id="tsf_sync",
+                name="Sync pipeline TSF -> proyectos",
+            )
 
             _mgs_scheduler.start()
             poll_once_async()

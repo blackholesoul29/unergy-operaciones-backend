@@ -944,7 +944,11 @@ def backfill_ubicacion_codigo_tsf(db: Session, apply: bool = False) -> dict:
             continue
         cambios = _cambios_ubicacion_codigo_tsf(p, item)
         if not cambios:
-            continue  # ya matcheó pero no aportó nada nuevo (los 3 campos ya estaban llenos)
+            sin_match_seguro.append({
+                "proyecto_id": p.id, "nombre": p.nombre_comercial,
+                "motivo": "matcheó con Sun Factory, pero ese registro tampoco tiene el dato que falta",
+            })
+            continue
         asignados.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "cambios": cambios})
         if apply:
             for campo, valor in cambios.items():

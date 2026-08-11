@@ -299,6 +299,29 @@ ESTADO_FIRMADO = "firmado"
 # al lado para poder distinguirlas.
 ETAPAS_ENTREGABLES = (ESTADO_FIRMADO, ESTADO_OPERANDO)
 
+# Todo el pipeline consultable desde afuera. `terminado` y `declinado` son
+# SALIDAS, no avances: la primera es un negocio que corrió y se venció, la
+# segunda uno que nunca fue.
+ETAPAS_ACTIVAS = ("oportunidad", "oferta", "contrato", ESTADO_FIRMADO, ESTADO_OPERANDO)
+ETAPAS_SALIDA = ("terminado", "declinado")
+ETAPAS_CONSULTABLES = ETAPAS_ACTIVAS + ETAPAS_SALIDA
+
+# Cómo se elige la etapa de una PLANTA que tiene varias ofertas: cualquier etapa
+# activa le gana a cualquier salida, y entre activas gana la más avanzada.
+#
+# No alcanza con ETAPA_ORDEN, donde `terminado` es el último y por lo tanto el
+# "más avanzado": una planta que ya opera y que además tiene un contrato viejo
+# terminado saldría como `terminado` y desaparecería de la consulta por defecto,
+# cuando la verdad es que está entregando energía. Entre dos salidas gana
+# `terminado`, que al menos llegó a operar.
+_RANGO_ETAPA = {e: (1, i) for i, e in enumerate(ETAPAS_ACTIVAS)}
+_RANGO_ETAPA.update({"terminado": (0, 1), "declinado": (0, 0)})
+
+
+def etapa_de_la_planta(estados) -> str:
+    """La etapa que representa a una planta a partir de las de sus ofertas."""
+    return max(estados, key=lambda e: _RANGO_ETAPA.get(e, (-1, 0)))
+
 # De dónde salió la generación promedio. Se nombra por su naturaleza y no por la
 # columna: quien integra necesita saber si el número está medido o estimado, no
 # en qué tabla vive.
@@ -402,7 +425,11 @@ def _gen_promedio(proyecto, ofertas) -> tuple[float | None, str | None, dict]:
 
 def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
                   cliente=None, hoy=None) -> dict:
-    """Una planta operando, con los seis datos que se consumen desde afuera.
+    """Una planta operando, con los datos que se consumen desde afuera.
+
+    Trae DOS estados y no hay que confundirlos: `estado_pipeline` es la etapa
+    comercial (firmado/operando) y `estado_proyecto` es el estado de la planta
+    en la plataforma (en_desarrollo/en_operacion/suspendido/cancelado).
 
     `ofertas` son TODAS las ofertas en 'operando' de esa planta: una misma planta
     puede tener la de compra de energía y la de servicios, y colapsarlas en dos
@@ -417,12 +444,12 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
     principal = ofertas[0]
     fuentes: dict[str, str | None] = {}
 
-    # Etapa de la PLANTA = la más avanzada de sus ofertas. Una planta con la
-    # oferta de energía operando y la de servicios recién firmada está operando:
-    # colapsar hacia atrás diría que todavía no entrega energía, y es mentira.
-    # Las etapas de cada oferta viajan igual en `ofertas[]`.
-    etapa = max((_valor_enum(o.estado) for o in ofertas),
-                key=lambda e: ETAPA_ORDEN.get(e, -1))
+    # Etapa de la PLANTA = la más avanzada de sus ofertas, con las salidas
+    # (terminado/declinado) siempre por debajo de cualquier etapa viva. Una
+    # planta con la oferta de energía operando y la de servicios recién firmada
+    # está operando: colapsar hacia atrás diría que todavía no entrega energía,
+    # y es mentira. Las etapas de cada oferta viajan igual en `ofertas[]`.
+    etapa = etapa_de_la_planta(_valor_enum(o.estado) for o in ofertas)
 
     def _elegir(campo, del_proyecto, de_la_oferta):
         if del_proyecto not in (None, ""):
@@ -488,6 +515,17 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
             api_id_unergy = proyecto.alias_monitoreo
             fuentes["api_id_unergy"] = "alias_monitoreo"
 
+    # Estado del PROYECTO (en_desarrollo | en_operacion | suspendido | cancelado),
+    # que no es la etapa comercial y por eso viaja aparte de `estado_pipeline`:
+    # uno dice en qué punto está el negocio y el otro en qué punto está la planta.
+    # Pueden discrepar (oferta operando y proyecto todavía en_desarrollo) y acá NO
+    # se los concilia: inventar coherencia taparía el dato mal cargado en vez de
+    # mostrarlo. La etiqueta viaja al lado para que quien integra la pinte tal cual.
+    from app.models.proyectos import ESTADO_PROYECTO_LABELS  # dict, no toca la BD
+
+    estado_proyecto = _valor_enum(proyecto.estado) if proyecto is not None else None
+    fuentes["estado_proyecto"] = "proyecto" if estado_proyecto else None
+
     # Inicio de comercialización = primer día con generación real (lo autoderiva
     # app.services.comercializacion). NO se rellena con la fecha del contrato ni
     # con la entrada en operación: son tres hechos distintos y mezclarlos haría
@@ -517,12 +555,30 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
 
     partes_ubicacion = [p for p in (municipio, departamento) if p]
 
+    # La oferta VIGENTE: la que sostiene la etapa de la planta. Lo normal es que
+    # haya una sola viva, pero una planta puede tener a la vez la de compra de
+    # energía y la de servicios (representación/CGM), así que cuando las dos
+    # están en la misma etapa manda la de energía, que es la que define el
+    # negocio. Es `null` cuando la etapa de la planta es una SALIDA: si todo lo
+    # que tiene está terminado o declinado, no hay nada vigente que señalar.
+    # `ofertas[]` sigue trayéndolas todas.
+    vigente = None
+    if etapa not in ETAPAS_SALIDA:
+        vigente = min((o for o in ofertas if _valor_enum(o.estado) == etapa),
+                      key=lambda o: (0 if _valor_enum(o.tipo) == "compra_energia" else 1, o.id))
+
     return {
         "proyecto_id": proyecto.id if proyecto else None,
         "nombre": nombre,
-        # `firmado` = hay contrato y el suministro no arrancó · `operando` = ya
-        # entrega energía. Es el dato que separa las dos mitades de la respuesta.
-        "estado": etapa,
+        # Etapa COMERCIAL: `firmado` = hay contrato y el suministro no arrancó ·
+        # `operando` = ya entrega energía. Es el dato que separa las dos mitades
+        # de la respuesta. Se llama `estado_pipeline` y no `estado` porque al
+        # lado viaja el estado del proyecto y "estado" a secas no decía cuál.
+        "estado_pipeline": etapa,
+        # Estado del PROYECTO. null cuando la oferta todavía no está vinculada a
+        # una planta cargada en la plataforma: ahí no hay estado que dar.
+        "estado_proyecto": estado_proyecto,
+        "estado_proyecto_label": ESTADO_PROYECTO_LABELS.get(estado_proyecto),
         # Con qué id se consulta esta planta en la API de Unergy. null = todavía
         # no tiene identificador de monitoreo cargado.
         "api_id_unergy": api_id_unergy,
@@ -549,19 +605,28 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
         "cliente": cliente,
         "potencia_instalada_kwp": (float(proyecto.potencia_instalada_kwp)
                                    if proyecto is not None and proyecto.potencia_instalada_kwp is not None else None),
-        "ofertas": [
-            {
-                "oferta_id": o.id,
-                "codigo_seguimiento": _codigo_seguimiento(o.numero_oferta),
-                "tipo": o.tipo if isinstance(o.tipo, str) else o.tipo.value,
-                "estado": o.estado if isinstance(o.estado, str) else o.estado.value,
-                "oportunidad_id": o.oportunidad_id,
-            }
-            for o in ofertas
-        ],
+        # La oferta que manda, suelta, porque casi siempre es una sola y hacer
+        # recorrer una lista de un elemento para el caso normal es incómodo.
+        "oferta_vigente": _oferta_min(vigente) if vigente is not None else None,
+        # Y TODAS las ofertas de la planta, de todo el pipeline, cada una con su
+        # etapa: acá aparecen la de servicios que acompaña a la de energía y las
+        # que ya se cayeron o se vencieron.
+        "ofertas": [_oferta_min(o) for o in ofertas],
         "fuentes": fuentes,
         # Guardado para ordenar y depurar; no forma parte del contrato público.
         "_principal": principal.id,
+    }
+
+
+def _oferta_min(o) -> dict:
+    """La oferta como se ve desde afuera. Misma forma en `oferta_vigente` y en
+    `ofertas[]` a propósito: quien integra escribe un solo lector."""
+    return {
+        "oferta_id": o.id,
+        "codigo_seguimiento": _codigo_seguimiento(o.numero_oferta),
+        "tipo": _valor_enum(o.tipo),
+        "estado": _valor_enum(o.estado),
+        "oportunidad_id": o.oportunidad_id,
     }
 
 
@@ -577,9 +642,12 @@ def _codigo_seguimiento(numero: str | None) -> str | None:
 
 
 def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list[dict]:
-    """Las plantas con negocio cerrado: por defecto `firmado` **y** `operando`.
+    """Las plantas del pipeline comercial: por defecto `firmado` **y** `operando`.
 
-    Una fila por PLANTA, no por oferta, con la etapa de la planta en `estado`.
+    Una fila por PLANTA, no por oferta, con la etapa comercial de la planta en
+    `estado_pipeline` y el estado del proyecto en `estado_proyecto`. `estados`
+    acepta cualquiera de `ETAPAS_CONSULTABLES` (todo el pipeline, incluidas las
+    salidas `terminado` y `declinado`), no solo las entregables.
     Todo se precarga por lotes: un número fijo de consultas sin importar cuántas
     plantas haya, porque quien integra va a llamar esto en cada refresco de su
     tablero.
@@ -604,15 +672,19 @@ def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list
     hoy = hoy or col_now().date()
     estados = tuple(estados)
 
-    # La consulta trae SIEMPRE las dos etapas entregables y el filtro por etapa se
-    # aplica al final, sobre la etapa resuelta de cada planta. Filtrar acá dejaría
-    # a una planta operando dentro de estados=("firmado",) por tener una oferta de
+    # La consulta trae SIEMPRE todo el pipeline y el filtro por etapa se aplica
+    # al final, sobre la etapa resuelta de cada planta. Filtrar acá dejaría a una
+    # planta operando dentro de estados=("firmado",) por tener una oferta de
     # servicios firmada, y le recortaría las ofertas que sí importan.
+    #
+    # El universo es todo el pipeline aunque se pidan solo las entregables: la
+    # etapa de una planta tiene que ser la misma sin importar cómo se la
+    # consulte, y para eso hay que mirarle todas las ofertas.
     filas = (
         db.query(OportunidadOferta, Cliente.razon_social_nombre)
         .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
         .join(Cliente, Cliente.id == Oportunidad.cliente_id)
-        .filter(OportunidadOferta.estado.in_(ETAPAS_ENTREGABLES),
+        .filter(OportunidadOferta.estado.in_(ETAPAS_CONSULTABLES),
                 Oportunidad.deleted_at.is_(None),
                 Cliente.deleted_at.is_(None))
         .all()
@@ -697,8 +769,8 @@ def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list
             cliente=cliente_por_oferta.get(grupo[0].id), hoy=hoy)
         out.append(fila)
 
-    if set(estados) != set(ETAPAS_ENTREGABLES):
-        out = [f for f in out if f["estado"] in estados]
+    if set(estados) != set(ETAPAS_CONSULTABLES):
+        out = [f for f in out if f["estado_pipeline"] in estados]
 
     if q:
         aguja = q.strip().lower()

@@ -4,18 +4,25 @@ Paso a paso para que Juan José le entregue la API a su compañera y ella la int
 otra plataforma.
 
 **Qué se entrega:** un endpoint que devuelve, en una sola llamada, todas las plantas con
-negocio cerrado en `/comercial` — etapas **Firmado** y **Operando** — con nombre, **estado**,
-ubicación, operador de red, generación mensual promedio, fecha de inicio de comercialización,
+negocio cerrado en `/comercial` — etapas **Firmado** y **Operando** — con nombre, **estado
+comercial**, **estado del proyecto**, ubicación, operador de red, generación mensual promedio, fecha de inicio de comercialización,
 tiempo del contrato de energía y **API ID de Unergy**.
 
-Cada fila trae su `estado`:
+Cada fila trae **dos estados**. El comercial, `estado_pipeline`:
 
 - `firmado` — hay contrato, el suministro todavía no arrancó. Es normal que no tenga
   generación promedio ni fecha de comercialización: la planta aún no entrega energía.
 - `operando` — ya está entregando.
 
 Una planta con la energía operando y los servicios recién firmados sale como `operando` (la
-etapa más avanzada de sus ofertas). Con `?estado=operando` o `?estado=firmado` se acota.
+etapa más avanzada de sus ofertas). Con `?estado_pipeline=operando` o `=firmado` se acota, y
+con **`?todas_las_etapas=true`** viene el pipeline completo: `oportunidad`, `oferta`,
+`contrato`, `firmado`, `operando`, `terminado` y `declinado`.
+
+Y el del proyecto, `estado_proyecto` (`en_desarrollo` · `en_operacion` · `suspendido` ·
+`cancelado`), con su etiqueta lista en `estado_proyecto_label` ("En operación"). Es `null` en
+las plantas que todavía no están vinculadas a un proyecto de la plataforma. Los dos estados
+pueden discrepar y la API **no los concilia**: los muestra como están.
 
 ```
 GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando
@@ -61,8 +68,8 @@ curl "https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-
   -H "X-API-Key: uop_TU_KEY_ACA"
 ```
 
-Tiene que responder un JSON que arranca con `{"generado_en": …, "estado": "operando",
-"total": N, …}`.
+Tiene que responder un JSON que arranca con `{"generado_en": …, "estados_pipeline":
+["firmado", "operando"], "total": N, …}`.
 
 - Si da **401** → la key quedó mal copiada (tienen que ser 68 caracteres).
 - Si da **200 con `total: 0`** → no hay ofertas en etapa Operando en el CRM; ver la sección
@@ -85,7 +92,8 @@ GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-op
 Header: X-API-Key: <te la mando aparte>
 ```
 
-Devuelve una entrada por planta con: nombre, **estado**, ubicación, operador de red,
+Devuelve una entrada por planta con: nombre, **estado comercial**, **estado del proyecto**,
+ubicación, operador de red,
 generación mensual promedio, fecha de inicio de comercialización, duración del contrato de
 energía y el **API ID de Unergy**.
 
@@ -95,24 +103,43 @@ curl "https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-
   -H "X-API-Key: LA_KEY"
 ```
 
-Cuatro cosas para tener en cuenta al integrar:
+Cinco cosas para tener en cuenta al integrar:
 
-1. **`estado` es lo primero que hay que mirar en cada fila:**
+1. **Hay dos estados por fila y responden preguntas distintas.**
+
+   `estado_pipeline` — en qué punto está el **negocio**:
    - `firmado` → hay contrato pero el suministro no arrancó. Es **normal** que no tenga
      generación promedio ni fecha de comercialización: la planta todavía no entrega energía.
    - `operando` → ya está entregando.
 
-   El sobre trae `por_estado` con el conteo de cada una, y podés acotar con
-   `?estado=operando` o `?estado=firmado`. Ojo: si una planta tiene varias ofertas, `estado`
-   es la etapa más avanzada de todas.
-2. **Los campos pueden venir en `null`** cuando ese dato todavía no está cargado de nuestro
+   El sobre trae `por_estado_pipeline` con el conteo de cada una, y podés acotar con
+   `?estado_pipeline=operando` o `=firmado`. Ojo: si una planta tiene varias ofertas,
+   `estado_pipeline` es la etapa más avanzada de todas.
+
+   `estado_proyecto` — en qué punto está la **planta**: `en_desarrollo`, `en_operacion`,
+   `suspendido` o `cancelado`, con la etiqueta lista para mostrar en `estado_proyecto_label`
+   ("En operación"). Viene en `null` si esa oferta todavía no está vinculada a una planta
+   cargada de nuestro lado.
+
+   Los dos pueden **no coincidir** (oferta operando sobre un proyecto `en_desarrollo`): son
+   dos hechos distintos y no los conciliamos. Si te topás con una discrepancia que te
+   estorba, avisame: es dato por corregir nuestro.
+
+   Sin filtro vienen solo las cerradas (firmado + operando). Con `?todas_las_etapas=true`
+   viene todo el pipeline, incluidas prospección, negociación, terminadas y declinadas.
+2. **`oferta_vigente` te ahorra recorrer la lista.** Una planta puede tener dos ofertas vivas
+   al tiempo (la de compra de energía y la de servicios/CGM), así que `ofertas[]` es una
+   lista. Pero el caso normal es una sola, y esa viene suelta en `oferta_vigente` (si dos
+   están en la misma etapa, manda la de compra de energía). Es `null` solo cuando la planta
+   no tiene nada vivo, o sea que todas sus ofertas están terminadas o declinadas.
+3. **Los campos pueden venir en `null`** cuando ese dato todavía no está cargado de nuestro
    lado. Cada respuesta trae un objeto `fuentes` que dice de dónde salió cada valor, para
    que puedas distinguir "no aplica" de "todavía no lo sabemos". Si ves muchos `null`,
    avisame — es dato faltante nuestro, no un error de la API.
-3. **`gen_promedio_origen`** dice si la generación promedio es `medido` (real, últimos 30
+4. **`gen_promedio_origen`** dice si la generación promedio es `medido` (real, últimos 30
    días), `manual`, `estimado` o `declarado`. Mostralo al lado del número: no todos valen
    lo mismo.
-4. **Cachéalo de tu lado.** Los datos cambian a lo sumo una vez al día; con consultar una
+5. **Cachéalo de tu lado.** Los datos cambian a lo sumo una vez al día; con consultar una
    vez por hora sobra.
 
 La documentación completa (esquema de todos los campos, ejemplos en Python y JS, errores)
@@ -195,8 +222,10 @@ GD Agustín 2 y GD Agustín 3, y el nombre suelto no dice cuál. Decidí vos y a
 `oferta_id=15`.
 
 **5 plantas con una inconsistencia que vale la pena revisar:** el CRM dice que la oferta está
-*operando*, pero el `estado` del proyecto dice que no está en operación — por eso quedan sin
-generación promedio (el cálculo solo mira proyectos `en_operacion`):
+*operando*, pero el estado del proyecto dice que no está en operación — por eso quedan sin
+generación promedio (el cálculo solo mira proyectos `en_operacion`). **Desde que la API
+devuelve `estado_proyecto`, esto se ve desde afuera:** son las filas con
+`estado_pipeline: "operando"` y `estado_proyecto` distinto de `en_operacion`.
 
 - AGGE Extractora Monterrey (267) · GD Isabela (276) · GD Taurus IX (262) ·
   GD Taurus X (263) · MGS Naos 2 (33, marcado *cancelado*)

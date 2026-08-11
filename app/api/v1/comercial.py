@@ -34,7 +34,8 @@ from app.schemas.comercial import (
     OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
 from app.services.comercial import (
-    ETAPAS_ENTREGABLES, UMBRAL_VINCULO, ahora_colombia, calcular_alerta, col_now,
+    ETAPAS_CONSULTABLES, ETAPAS_ENTREGABLES, UMBRAL_VINCULO,
+    ahora_colombia, calcular_alerta, col_now,
     contexto_ficha, estado_a_resultado, ficha_operativa, proyectos_operando,
     resumen_etapas, vincular_proyectos,
 )
@@ -394,60 +395,99 @@ def list_ofertas_todas(
 
 @router.get("/proyectos-operando")
 def list_proyectos_operando(
-    estado: list[str] | None = Query(
+    estado_pipeline: list[str] | None = Query(
         None,
-        description="Etapas a devolver. Por defecto firmado y operando. Repetible: ?estado=operando"),
+        description="Etapas comerciales a devolver. Por defecto firmado y operando. "
+                    "Acepta cualquier etapa del pipeline. Repetible: ?estado_pipeline=operando"),
+    todas_las_etapas: bool = Query(
+        False,
+        description="Devolver TODO el pipeline (oportunidad, oferta, contrato, firmado, "
+                    "operando, terminado, declinado). Se ignora si se pasan etapas explícitas"),
     q: str | None = Query(None, description="Filtra por nombre de planta, cliente o código de seguimiento"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Las plantas con negocio cerrado: **firmadas y operando**.
+    """Las plantas del pipeline comercial. Por defecto, las de negocio cerrado:
+    **firmadas y operando**.
 
     Es la superficie pensada para integrar la plataforma con otra: devuelve una
     fila por PLANTA (no por oferta) con nombre, ubicación, operador de red,
     generación mensual promedio, fecha de inicio de comercialización y duración
     del contrato de energía. Ver `docs/API_PROYECTOS_OPERANDO.md`.
 
-    Cada fila trae su **`estado`**, que es lo que separa las dos mitades:
+    Cada fila trae **dos estados distintos**, que no hay que confundir:
+
+    **`estado_pipeline`** — la etapa comercial, lo que separa las dos mitades:
 
     - `firmado` — hay contrato, el suministro todavía no arrancó. Es normal que
       no tenga generación promedio: la planta aún no entrega energía.
     - `operando` — ya está entregando.
 
-    Cuando una planta tiene varias ofertas, `estado` es la etapa **más
-    avanzada** de todas (una con la energía operando y los servicios recién
-    firmados está operando). La etapa de cada oferta viaja en `ofertas[]`.
+    Con `?todas_las_etapas=true` (o repitiendo `?estado_pipeline=`) se pide el
+    pipeline completo: `oportunidad`, `oferta`, `contrato`, `firmado`,
+    `operando`, `terminado` y `declinado`.
 
-    El universo es el mismo que se ve en `/comercial` filtrando por esas dos
-    etapas. Con `?estado=operando` se limita a las que ya operan. Para el resto
-    del pipeline está `GET /comercial/ofertas?estado=…`, que devuelve el CRM
-    completo (y sí exige rol comercial).
+    Cuando una planta tiene varias ofertas, `estado_pipeline` es la etapa **más
+    avanzada** de todas (una con la energía operando y los servicios recién
+    firmados está operando), con una regla: `terminado` y `declinado` son
+    **salidas**, no avances, así que cualquier etapa viva les gana. Una planta
+    que opera y además arrastra un contrato terminado sigue siendo `operando`.
+    El filtro elige por esa etapa resuelta, de modo que cada planta cae en una
+    sola y los conteos suman el total.
+
+    La oferta que sostiene esa etapa viaja suelta en **`oferta_vigente`** —lo
+    normal es que haya una sola viva— y es `null` si la planta solo tiene
+    ofertas terminadas o declinadas. `ofertas[]` trae **todas** las de la
+    planta, de todo el pipeline, cada una con su etapa.
+
+    **`estado_proyecto`** — el estado de la planta en la plataforma:
+    `en_desarrollo` · `en_operacion` · `suspendido` · `cancelado`, con su
+    etiqueta en `estado_proyecto_label` ("En operación"). Es `null` cuando la
+    oferta todavía no está vinculada a una planta cargada.
+
+    Los dos estados pueden **discrepar** (una oferta operando sobre un proyecto
+    marcado `en_desarrollo`): son dos hechos, y acá se muestran como están sin
+    conciliarlos.
+
+    El universo es el mismo que se ve en `/comercial`. Con
+    `?estado_pipeline=operando` se limita a las que ya operan. `GET
+    /comercial/ofertas?estado=…` sigue siendo la vista por OFERTA (y esa sí
+    exige rol comercial).
 
     A diferencia del resto de `/comercial`, **no exige rol comercial**: es de
-    solo lectura y no expone precios, márgenes ni bitácora comercial. Basta con
-    una cuenta activa de la plataforma (API Key o token).
+    solo lectura y no expone precios, márgenes ni bitácora comercial. Ojo con
+    esto al pedir el pipeline completo: sin ser datos sensibles de precio, la
+    prospección y los negocios caídos quedan visibles para cualquier cuenta
+    activa de la plataforma (API Key o token).
     """
-    etapas = tuple(estado) if estado else ETAPAS_ENTREGABLES
-    invalidas = [e for e in etapas if e not in ETAPAS_ENTREGABLES]
+    # Las etapas explícitas mandan sobre `todas_las_etapas`: son más específicas,
+    # y mandar las dos cosas es lo que hace quien está probando la llamada.
+    if estado_pipeline:
+        etapas = tuple(estado_pipeline)
+    elif todas_las_etapas:
+        etapas = ETAPAS_CONSULTABLES
+    else:
+        etapas = ETAPAS_ENTREGABLES
+    invalidas = [e for e in etapas if e not in ETAPAS_CONSULTABLES]
     if invalidas:
-        # 422 explícito y no una lista vacía: pedir ?estado=declinado y recibir
-        # 200 con cero filas se lee como "no hay ninguna", que es otra cosa.
+        # 422 explícito y no una lista vacía: pedir una etapa que no existe y
+        # recibir 200 con cero filas se lee como "no hay ninguna", que es otra cosa.
         raise HTTPException(
             422,
             f"Etapa no válida: {', '.join(invalidas)}. "
-            f"Este endpoint solo devuelve {' y '.join(ETAPAS_ENTREGABLES)}; "
-            "para el resto del pipeline usá GET /comercial/ofertas?estado=…",
+            f"Las etapas del pipeline son: {', '.join(ETAPAS_CONSULTABLES)}.",
         )
     items = proyectos_operando(db, q=q, estados=etapas)
     return {
         # ahora_colombia() y no col_now(): esta fecha viaja hacia afuera y tiene
         # que traer su offset real (-05:00). Ver el docstring de col_now().
         "generado_en": ahora_colombia(),
-        "estados": list(etapas),
+        "estados_pipeline": list(etapas),
         "total": len(items),
-        # Cuántas hay de cada etapa, para no tener que contarlas del lado de quien
-        # integra.
-        "por_estado": {e: sum(1 for i in items if i["estado"] == e) for e in etapas},
+        # Cuántas hay de cada etapa comercial, para no tener que contarlas del
+        # lado de quien integra.
+        "por_estado_pipeline": {
+            e: sum(1 for i in items if i["estado_pipeline"] == e) for e in etapas},
         "items": items,
     }
 

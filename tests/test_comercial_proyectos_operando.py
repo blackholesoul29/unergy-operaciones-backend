@@ -37,7 +37,7 @@ from app.models.comercial import (
     Oportunidad, OportunidadOferta, OportunidadEstadoHistorial, OportunidadGestion,
 )
 from app.services.comercial import (
-    duracion_contrato, fila_operando, proyectos_operando,
+    ETAPAS_CONSULTABLES, duracion_contrato, fila_operando, proyectos_operando,
 )
 
 
@@ -131,7 +131,7 @@ def test_devuelve_las_plantas_firmadas_y_operando_con_su_etapa(db):
 
     filas = proyectos_operando(db, hoy=HOY)
 
-    assert {f["nombre"]: f["estado"] for f in filas} == {
+    assert {f["nombre"]: f["estado_pipeline"] for f in filas} == {
         "Opera": "operando", "Recién firmada": "firmado"}
 
 
@@ -158,7 +158,7 @@ def test_la_etapa_de_la_planta_es_la_mas_avanzada_de_sus_ofertas(db):
 
     filas = proyectos_operando(db, hoy=HOY)
 
-    assert len(filas) == 1 and filas[0]["estado"] == "operando"
+    assert len(filas) == 1 and filas[0]["estado_pipeline"] == "operando"
     # y las dos etapas por oferta siguen visibles
     assert {o["estado"] for o in filas[0]["ofertas"]} == {"firmado", "operando"}
 
@@ -308,9 +308,193 @@ def _py(**kw):
                 mwh_mes_estimado=None, p50_mensual_kwh=None,
                 fecha_inicio_comercializacion=None, fecha_entrada_operacion=None,
                 latitud=None, longitud=None, potencia_instalada_kwp=None,
-                sub_project=None, alias_monitoreo=None)
+                sub_project=None, alias_monitoreo=None, estado=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
+
+
+# ── Todo el pipeline, no solo el negocio cerrado ─────────────────────────────
+
+def test_por_defecto_siguen_saliendo_solo_firmadas_y_operando(db):
+    """Abrir el pipeline no cambia lo que devuelve la llamada sin filtros: quien
+    ya integró contra firmado/operando no se entera."""
+    _oferta(db, planta_nombre="Opera", estado="operando")
+    _oferta(db, planta_nombre="Prospecto", estado="oportunidad")
+    _oferta(db, planta_nombre="En negociación", estado="contrato")
+    _oferta(db, planta_nombre="Ya terminó", estado="terminado")
+    _oferta(db, planta_nombre="Se cayó", estado="declinado")
+    db.commit()
+
+    assert [f["nombre"] for f in proyectos_operando(db, hoy=HOY)] == ["Opera"]
+
+
+def test_se_puede_pedir_cualquier_etapa_del_pipeline(db):
+    _oferta(db, planta_nombre="Prospecto", estado="oportunidad")
+    _oferta(db, planta_nombre="Se cayó", estado="declinado")
+    _oferta(db, planta_nombre="Opera", estado="operando")
+    db.commit()
+
+    assert [f["nombre"] for f in
+            proyectos_operando(db, hoy=HOY, estados=("declinado",))] == ["Se cayó"]
+    assert [f["nombre"] for f in
+            proyectos_operando(db, hoy=HOY, estados=ETAPAS_CONSULTABLES)] == [
+        "Opera", "Prospecto", "Se cayó"]
+
+
+def test_las_salidas_no_le_ganan_a_una_etapa_viva(db):
+    """El riesgo de abrir el pipeline: `terminado` es el último de ETAPAS, así que
+    tomarlo como "el más avanzado" haría que una planta que ESTÁ entregando
+    energía y arrastra un contrato viejo terminado se reporte como terminada — y
+    desaparezca de la consulta por defecto."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="compra_energia",
+            estado="operando")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="servicios_operacionales",
+            estado="terminado")
+    db.commit()
+
+    filas = proyectos_operando(db, hoy=HOY, estados=ETAPAS_CONSULTABLES)
+
+    assert len(filas) == 1 and filas[0]["estado_pipeline"] == "operando"
+    assert [f["nombre"] for f in proyectos_operando(db, hoy=HOY)] == ["GD Catedral"]
+
+
+def test_sin_nada_vivo_la_planta_queda_en_su_salida(db):
+    """Y entre dos salidas gana `terminado`: llegó a operar, la declinada nunca fue."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="compra_energia",
+            estado="declinado")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="servicios_operacionales",
+            estado="terminado")
+    db.commit()
+
+    fila = proyectos_operando(db, hoy=HOY, estados=ETAPAS_CONSULTABLES)[0]
+
+    assert fila["estado_pipeline"] == "terminado"
+
+
+def test_una_planta_cae_en_una_sola_etapa_y_los_conteos_suman_el_total(db):
+    """La propiedad que sostiene el filtro: sumar las etapas por separado tiene
+    que dar el total, o quien integra ve la misma planta dos veces."""
+    for i, e in enumerate(ETAPAS_CONSULTABLES):
+        _oferta(db, planta_nombre=f"Planta {i}", estado=e)
+    mixta = _proyecto(db, nombre_comercial="GD Mixta")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=mixta.id, estado="operando")
+    _oferta(db, oportunidad=op, proyecto_id=mixta.id,
+            tipo="servicios_operacionales", estado="contrato")
+    db.commit()
+
+    todas = proyectos_operando(db, hoy=HOY, estados=ETAPAS_CONSULTABLES)
+    por_etapa = {e: proyectos_operando(db, hoy=HOY, estados=(e,))
+                 for e in ETAPAS_CONSULTABLES}
+
+    assert sum(len(v) for v in por_etapa.values()) == len(todas) == 8
+    assert [f["nombre"] for f in por_etapa["operando"]] == ["GD Mixta", "Planta 4"]
+
+
+def test_la_fila_trae_todas_sus_ofertas_aunque_se_acote_la_etapa(db):
+    """Acotar elige plantas, no recorta su contenido: la oferta declinada de una
+    planta que opera sigue visible."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, estado="operando")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id,
+            tipo="servicios_operacionales", estado="declinado")
+    db.commit()
+
+    fila = proyectos_operando(db, hoy=HOY, estados=("operando",))[0]
+
+    assert {o["estado"] for o in fila["ofertas"]} == {"operando", "declinado"}
+
+
+# ── La oferta vigente ────────────────────────────────────────────────────────
+
+def test_la_oferta_vigente_es_la_que_sostiene_la_etapa_de_la_planta():
+    """Invariante: si hay oferta vigente, su etapa es la de la planta. Sin esto,
+    la fila diría 'operando' y señalaría una oferta en otra etapa."""
+    f = fila_operando([_of(id=1, estado="operando"),
+                       _of(id=2, estado="contrato", tipo="servicios_operacionales")],
+                      hoy=HOY)
+
+    assert f["oferta_vigente"]["oferta_id"] == 1
+    assert f["oferta_vigente"]["estado"] == f["estado_pipeline"] == "operando"
+    # y la lista completa no se toca
+    assert [o["oferta_id"] for o in f["ofertas"]] == [1, 2]
+
+
+def test_empatadas_en_la_misma_etapa_manda_la_de_compra_de_energia():
+    """Una planta puede tener viva la de energía y la de servicios/CGM al tiempo.
+    La que define el negocio es la de energía."""
+    f = fila_operando([_of(id=7, estado="operando", tipo="servicios_operacionales"),
+                       _of(id=9, estado="operando", tipo="compra_energia")], hoy=HOY)
+
+    assert f["oferta_vigente"]["oferta_id"] == 9
+    assert f["oferta_vigente"]["tipo"] == "compra_energia"
+
+
+def test_sin_nada_vivo_no_hay_oferta_vigente():
+    """`terminado` y `declinado` son salidas: no hay nada vigente que señalar.
+    Las ofertas siguen en la lista."""
+    f = fila_operando([_of(id=1, estado="terminado"),
+                       _of(id=2, estado="declinado")], hoy=HOY)
+
+    assert f["estado_pipeline"] == "terminado"
+    assert f["oferta_vigente"] is None
+    assert len(f["ofertas"]) == 2
+
+
+def test_la_oferta_vigente_tiene_la_misma_forma_que_las_de_la_lista():
+    """Quien integra escribe un solo lector para las dos."""
+    f = fila_operando([_of(id=3, numero_oferta="OF.COM No.0051-3-2026")], hoy=HOY)
+
+    assert f["oferta_vigente"] == f["ofertas"][0]
+    # y el prefijo OF→OP sigue normalizándose en las dos
+    assert f["oferta_vigente"]["codigo_seguimiento"] == "OP.COM No.0051-3-2026"
+
+
+# ── Estado del proyecto (distinto de la etapa comercial) ─────────────────────
+
+def test_el_estado_del_proyecto_viaja_con_su_etiqueta():
+    """La etiqueta va al lado del slug para que quien integra la pinte tal cual y
+    no arme su propio mapa de español, que se desalinearía al agregar un estado."""
+    f = fila_operando([_of()], proyecto=_py(estado="en_operacion"), hoy=HOY)
+
+    assert f["estado_proyecto"] == "en_operacion"
+    assert f["estado_proyecto_label"] == "En operación"
+    assert f["fuentes"]["estado_proyecto"] == "proyecto"
+
+
+def test_sin_planta_vinculada_no_hay_estado_de_proyecto():
+    """El estado vive en el Proyecto; una oferta que todavía no quedó vinculada a
+    una planta cargada no lo tiene. `fuentes` separa "no aplica" de "no se sabe"."""
+    f = fila_operando([_of(planta_nombre="GD Rio Pamplonita")], hoy=HOY)
+
+    assert f["estado_proyecto"] is None
+    assert f["estado_proyecto_label"] is None
+    assert f["fuentes"]["estado_proyecto"] is None
+
+
+def test_la_etapa_comercial_y_el_estado_del_proyecto_no_se_concilian():
+    """Los dos estados pueden contradecirse (hay 5 plantas así en producción, con
+    la oferta operando y el proyecto sin actualizar). Se muestran como están:
+    inventar coherencia taparía el dato mal cargado en vez de dejarlo ver."""
+    f = fila_operando([_of(estado="operando")],
+                      proyecto=_py(estado="en_desarrollo"), hoy=HOY)
+
+    assert f["estado_pipeline"] == "operando"
+    assert f["estado_proyecto"] == "en_desarrollo"
+
+
+def test_un_estado_de_proyecto_sin_etiqueta_no_rompe_la_fila():
+    """Si algún día entra un estado que el catálogo de etiquetas no conoce, la
+    fila sale igual con la etiqueta en null: nunca un 500 hacia quien integra."""
+    f = fila_operando([_of()], proyecto=_py(estado="inventado"), hoy=HOY)
+
+    assert f["estado_proyecto"] == "inventado"
+    assert f["estado_proyecto_label"] is None
 
 
 # ── API ID de Unergy ─────────────────────────────────────────────────────────
@@ -922,10 +1106,10 @@ def test_la_ruta_devuelve_el_sobre_con_total_e_items(db, client):
 
     assert r.status_code == 200, r.text
     cuerpo = r.json()
-    assert cuerpo["estados"] == ["firmado", "operando"] and cuerpo["total"] == 1
-    assert cuerpo["por_estado"] == {"firmado": 0, "operando": 1}
+    assert cuerpo["estados_pipeline"] == ["firmado", "operando"] and cuerpo["total"] == 1
+    assert cuerpo["por_estado_pipeline"] == {"firmado": 0, "operando": 1}
     fila = cuerpo["items"][0]
-    assert fila["estado"] == "operando"
+    assert fila["estado_pipeline"] == "operando"
     assert fila["nombre"] == "GD Catedral"
     assert fila["api_id_unergy"] == "catedral"
     assert fila["ubicacion"]["texto"] == "Corozal, Sucre"
@@ -936,6 +1120,26 @@ def test_la_ruta_devuelve_el_sobre_con_total_e_items(db, client):
     assert fila["contrato_energia"]["duracion_meses"] == 83
     assert fila["contrato_energia"]["duracion_texto"] == "6 años y 11 meses"
     assert fila["ofertas"][0]["codigo_seguimiento"] == "OP.COM No.0051-3-2026"
+
+
+def test_la_ruta_trae_los_dos_estados_por_separado(db, client):
+    """Serializado de verdad: la columna es un Enum de SQLAlchemy y sin resolverlo
+    la respuesta saldría con el repr del enum en vez del slug."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral", estado="en_operacion")
+    _oferta(db, proyecto_id=proy.id, estado="operando")
+    sin_planta = _oferta(db, planta_nombre="GD Sin Vincular", estado="firmado")
+    assert sin_planta.proyecto_id is None
+    db.commit()
+
+    items = {i["nombre"]: i for i in
+             client.get("/api/v1/comercial/proyectos-operando").json()["items"]}
+
+    assert items["GD Catedral"]["estado_pipeline"] == "operando"
+    assert items["GD Catedral"]["estado_proyecto"] == "en_operacion"
+    assert items["GD Catedral"]["estado_proyecto_label"] == "En operación"
+    # La que no tiene planta cargada trae la etapa comercial pero no el estado.
+    assert items["GD Sin Vincular"]["estado_pipeline"] == "firmado"
+    assert items["GD Sin Vincular"]["estado_proyecto"] is None
 
 
 def test_la_ruta_acepta_el_filtro_q(db, client):
@@ -972,8 +1176,8 @@ def test_la_ruta_devuelve_firmadas_y_operando_con_el_conteo_por_etapa(db, client
     cuerpo = client.get("/api/v1/comercial/proyectos-operando").json()
 
     assert cuerpo["total"] == 3
-    assert cuerpo["por_estado"] == {"firmado": 2, "operando": 1}
-    assert {i["nombre"]: i["estado"] for i in cuerpo["items"]} == {
+    assert cuerpo["por_estado_pipeline"] == {"firmado": 2, "operando": 1}
+    assert {i["nombre"]: i["estado_pipeline"] for i in cuerpo["items"]} == {
         "Firmada A": "firmado", "Firmada B": "firmado", "Ya opera": "operando"}
 
 
@@ -983,20 +1187,70 @@ def test_la_ruta_acepta_acotar_la_etapa(db, client):
     db.commit()
 
     cuerpo = client.get("/api/v1/comercial/proyectos-operando",
-                        params={"estado": "firmado"}).json()
+                        params={"estado_pipeline": "firmado"}).json()
 
-    assert cuerpo["estados"] == ["firmado"]
+    assert cuerpo["estados_pipeline"] == ["firmado"]
     assert [i["nombre"] for i in cuerpo["items"]] == ["Firmada"]
 
 
-def test_una_etapa_que_este_endpoint_no_sirve_da_422_y_no_lista_vacia(db, client):
-    """Pedir ?estado=declinado y recibir 200 con cero filas se leería como "no
-    hay ninguna declinada", que es otra cosa."""
+def test_una_etapa_que_no_existe_da_422_y_no_lista_vacia(db, client):
+    """Recibir 200 con cero filas se leería como "no hay ninguna", que es otra
+    cosa que "esa etapa no existe"."""
     r = client.get("/api/v1/comercial/proyectos-operando",
-                   params={"estado": "declinado"})
+                   params={"estado_pipeline": "en_operacion"})
 
     assert r.status_code == 422
-    assert "declinado" in r.text
+    # El error dice cuáles sí valen, para no tener que ir a la documentación.
+    assert "en_operacion" in r.text and "declinado" in r.text
+
+
+def test_la_ruta_trae_todo_el_pipeline_cuando_se_le_pide(db, client):
+    _oferta(db, planta_nombre="Prospecto", estado="oportunidad")
+    _oferta(db, planta_nombre="Opera", estado="operando")
+    _oferta(db, planta_nombre="Se cayó", estado="declinado")
+    db.commit()
+
+    solo_cerradas = client.get("/api/v1/comercial/proyectos-operando").json()
+    todo = client.get("/api/v1/comercial/proyectos-operando",
+                      params={"todas_las_etapas": "true"}).json()
+
+    assert [i["nombre"] for i in solo_cerradas["items"]] == ["Opera"]
+    assert todo["total"] == 3
+    assert todo["por_estado_pipeline"] == {
+        "oportunidad": 1, "oferta": 0, "contrato": 0, "firmado": 0,
+        "operando": 1, "terminado": 0, "declinado": 1}
+
+
+def test_las_etapas_explicitas_le_ganan_a_todas_las_etapas(db, client):
+    """Mandar las dos cosas es lo que hace quien está probando la llamada; gana
+    lo más específico en vez de dar un 422 por contradicción."""
+    _oferta(db, planta_nombre="Prospecto", estado="oportunidad")
+    _oferta(db, planta_nombre="Opera", estado="operando")
+    db.commit()
+
+    cuerpo = client.get("/api/v1/comercial/proyectos-operando",
+                        params={"todas_las_etapas": "true",
+                                "estado_pipeline": "oportunidad"}).json()
+
+    assert cuerpo["estados_pipeline"] == ["oportunidad"]
+    assert [i["nombre"] for i in cuerpo["items"]] == ["Prospecto"]
+
+
+def test_la_ruta_trae_la_oferta_vigente_suelta(db, client):
+    proy = _proyecto(db, nombre_comercial="GD Catedral", estado="en_operacion")
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, proyecto_id=proy.id, tipo="compra_energia",
+            estado="operando", numero_oferta="OF.COM No.0051-3-2026")
+    _oferta(db, oportunidad=op, proyecto_id=proy.id,
+            tipo="servicios_operacionales", estado="declinado")
+    db.commit()
+
+    fila = client.get("/api/v1/comercial/proyectos-operando").json()["items"][0]
+
+    assert fila["oferta_vigente"]["codigo_seguimiento"] == "OP.COM No.0051-3-2026"
+    assert fila["oferta_vigente"]["tipo"] == "compra_energia"
+    # la declinada no es la vigente, pero sigue estando
+    assert len(fila["ofertas"]) == 2
 
 
 def test_generado_en_trae_el_offset_real_de_colombia(db, client):

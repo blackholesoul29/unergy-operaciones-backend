@@ -32,6 +32,18 @@ class EstadoProyectoEnum(str, enum.Enum):
     cancelado = "cancelado"
 
 
+# Cómo se lee cada estado en pantalla. Vive al lado del enum y no en la vista
+# que lo muestra: las APIs que salen hacia afuera mandan la etiqueta junto al
+# slug para que quien integre no hardcodee su propio mapa de español, que se
+# desalinearía el día que se agregue un estado.
+ESTADO_PROYECTO_LABELS = {
+    "en_desarrollo": "En desarrollo",
+    "en_operacion": "En operación",
+    "suspendido": "Suspendido",
+    "cancelado": "Cancelado",
+}
+
+
 class TipoProyectoEnum(str, enum.Enum):
     minigranja = "minigranja"
     autoconsumo = "autoconsumo"

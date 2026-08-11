@@ -498,39 +498,42 @@ def cumplimiento(periodo: str = Query(...), db: Session = Depends(get_db), _=Dep
             g["proyectos"].add(l["proyecto"])
 
     filas = []
-    n_cumple = n_bajo = n_sin = 0
+    n_cumple = n_bajo = 0
     faltante_mwh = 0.0
+    faltante_kwh = 0.0
     for pid, g in grupos.items():
-        desp = round(g["kwh"] / 1000.0, 2)   # kWh → MWh
         mn, mx = comp.get(pid, (None, None))
-        estado, pct, dif, sospechosa = "sin_compromiso", None, None, False
-        if mn is not None:
-            dif = round(desp - mn, 2)
-            pct = round(desp / mn * 100, 1) if mn else None
-            if mx and mx > 0 and desp > mx:
-                estado = "sobre_maximo"
-            elif desp >= mn:
-                estado = "cumple"
-            else:
-                estado = "bajo_minimo"
-                faltante_mwh += (mn - desp)
-            # Aviso de posible bug de unidades (kWh vs MWh): escalas muy dispares.
-            if mn > 0 and (desp > mn * 50 or desp < mn / 50):
-                sospechosa = True
+        if mn is None:
+            continue   # solo PPA con mínimo cargado
+        desp = round(g["kwh"] / 1000.0, 2)   # kWh → MWh
+        pct, sospechosa = None, False
+        dif = round(desp - mn, 2)
+        pct = round(desp / mn * 100, 1) if mn else None
+        if mx and mx > 0 and desp > mx:
+            estado = "sobre_maximo"
+        elif desp >= mn:
+            estado = "cumple"
+        else:
+            estado = "bajo_minimo"
+            faltante_mwh += (mn - desp)
+            faltante_kwh += (mn * 1000.0 - g["kwh"])   # exacto en kWh (mín MWh→kWh − despacho kWh)
+        # Aviso de posible bug de unidades (kWh vs MWh): escalas muy dispares.
+        if mn > 0 and (desp > mn * 50 or desp < mn / 50):
+            sospechosa = True
         if estado in ("cumple", "sobre_maximo"):
             n_cumple += 1
-        elif estado == "bajo_minimo":
-            n_bajo += 1
         else:
-            n_sin += 1
+            n_bajo += 1
         filas.append({
             "ppa": g["ppa"], "numero_contrato": g["numero_contrato"],
             "comprador": ", ".join(sorted(g["compradores"])) or None,
             "proyecto": ", ".join(sorted(g["proyectos"])) or None,
             "contratos": g["contratos"],
             "minimo_mwh": mn, "maximo_mwh": mx, "despachado_mwh": desp,
-            "pct": pct, "diferencia_mwh": dif, "estado": estado,
-            "unidad_sospechosa": sospechosa,
+            "pct": pct, "diferencia_mwh": dif,
+            # Faltante en kWh (exacto): 0 si cumple/sobre; positivo si está por debajo.
+            "faltante_kwh": round(mn * 1000.0 - g["kwh"], 2) if estado == "bajo_minimo" else 0.0,
+            "estado": estado, "unidad_sospechosa": sospechosa,
         })
 
     orden = {"bajo_minimo": 0, "sobre_maximo": 1, "sin_compromiso": 2, "cumple": 3}
@@ -538,8 +541,9 @@ def cumplimiento(periodo: str = Query(...), db: Session = Depends(get_db), _=Dep
     return {
         "periodo": per,
         "resumen": {
-            "cumplen": n_cumple, "bajo_minimo": n_bajo, "sin_compromiso": n_sin,
-            "faltante_mwh": round(faltante_mwh, 1), "ppas": len(filas),
+            "cumplen": n_cumple, "bajo_minimo": n_bajo,
+            "faltante_mwh": round(faltante_mwh, 1), "faltante_kwh": round(faltante_kwh, 2),
+            "ppas": len(filas),
         },
         "filas": filas,
     }

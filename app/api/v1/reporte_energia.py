@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -189,9 +190,14 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         gaia = GaiaClient()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
         # veces por sesión solo para mostrar curvas de referencia, no hace
-        # falta traer el catálogo completo de Quoia en cada clic.
-        mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
-        borders = curvas.construir_mapa_borders(gaia)
+        # falta traer el catálogo completo de Quoia en cada clic. En frío
+        # (TTL vencido) son dos llamadas HTTP independientes -- en paralelo
+        # en vez de secuencial, el costo es el máximo de las dos, no la suma.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut_nodo = executor.submit(curvas.construir_mapa_medidor_nodo, gaia)
+            fut_borders = executor.submit(curvas.construir_mapa_borders, gaia)
+            mapa_nodo = fut_nodo.result()
+            borders = fut_borders.result()
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if meta:
             c = curvas.curvas_de_frontera(

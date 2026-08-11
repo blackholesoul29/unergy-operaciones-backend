@@ -25,8 +25,12 @@ HORAS = list(range(24))
 # todos los borders), no solo el de esa frontera. El reporte real
 # (orquestador.ejecutar_dia) corre una vez al día y no necesita el TTL --
 # esto es sobre todo para la vista de detalle, que se abre repetidas veces
-# en la misma sesión.
-_CACHE_TTL = 300  # segundos
+# en la misma sesión. Subido de 300 a 1800 (30 min) -- este catálogo (qué
+# medidor/nodo tiene cada frontera) casi no cambia día a día, así que un
+# TTL más largo reduce cuánto se paga el costo de refrescarlo (~5-9s en
+# frío) sin perder nada de precisión real (los VALORES de medición se
+# siguen consultando frescos siempre, solo el mapeo de IDs se reusa más).
+_CACHE_TTL = 1800  # segundos
 _mapa_medidor_nodo_cache: dict[int, int] | None = None
 _mapa_medidor_nodo_ts = 0.0
 _mapa_borders_cache: dict[str, dict] | None = None

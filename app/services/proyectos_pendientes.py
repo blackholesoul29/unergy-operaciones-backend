@@ -1,11 +1,15 @@
-"""Proyectos pendientes: fusiona Sun Factory + Quoia + Solenium contra la
-tabla `proyectos`, y produce dos tipos de sugerencia -- nunca escribe solo:
+"""Proyectos pendientes: fusiona Sun Factory + Quoia contra la tabla
+`proyectos`, y produce dos tipos de sugerencia -- nunca escribe solo:
 
   - "crear": el proyecto no tiene fila en absoluto.
   - "actualizar": el proyecto ya existe, pero una fuente externa contradice
     su `estado`/`fase_construccion` actual (ej. Sun Factory sigue diciendo
-    "en construcción" mientras Quoia/Solenium ya lo ven generando), o le
-    faltan datos (Potencia AC/Capacidad instalada) que la fuente sí tiene.
+    "en construcción" mientras Quoia ya lo ve generando), o le faltan datos
+    (Potencia AC/Capacidad instalada) que la fuente sí tiene.
+
+Solenium quedó fuera de este cruce por decisión explícita (2026-08-11) --
+sigue usándose para `backfill_ubicacion()` (relleno de lat/lon/municipio),
+que es un caso aparte, no de creación/cambio de estado.
 
 Cascada de confianza (nunca se auto-aplica, solo decide qué tan segura es
 la sugerencia):
@@ -530,7 +534,6 @@ def resolver_pendientes(db: Session) -> list[dict]:
     crudos = (
         _candidatos_sunfactory()
         + _candidatos_quoia(fronteras_vinculadas)
-        + _candidatos_solenium()
     )
     candidatos = _fusionar_por_core(crudos)
     _reforzar_solo_quoia(candidatos)

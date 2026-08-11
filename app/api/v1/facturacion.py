@@ -23,7 +23,7 @@ from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
 from app.models.contratos import (
     DespachoContratoMensual, IppMensual, FacturaAgrupacion, FacturaOrden, FacturaEmitida,
-    PrecioBolsaMensual, DespachoContratoDia,
+    PrecioBolsaMensual, DespachoContratoDia, PPACompromisoEnergia,
 )
 from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
 from app.services.facturacion_factura import construir_mensaje, contribuciones
@@ -257,6 +257,7 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
         lineas.append({
             "contrato": c,
             "comprador": d.comprador,
+            "ppa_id": pid,
             "proyecto_id": proyid,
             "proyecto": proy_nombre.get(proyid) if proyid else None,
             "ppa": ppa_nom,
@@ -456,6 +457,92 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
 @router.get("")
 def facturacion(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _facturacion_periodo(db, _norm_periodo(periodo))
+
+
+@router.get("/cumplimiento")
+def cumplimiento(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Compromiso (mínimo mensual del PPA) vs cumplimiento (energía despachada).
+
+    Por contrato marco (PPA): suma el despacho de todos sus contratos SIC y lo compara
+    con el mínimo/máximo del mes (ppa_compromisos_energia, en MWh). El despacho está en
+    kWh → se convierte a MWh. Muestra TODOS los PPA despachados; los que no tienen
+    compromiso cargado salen como 'sin_compromiso'. La energía sin PPA (bolsa/UNGC) no
+    entra aquí (no tiene contrato marco)."""
+    per = _norm_periodo(periodo)
+    y, m = per.split("-")
+    año, mes = int(y), int(m)
+
+    data = _facturacion_periodo(db, per)
+    comp = {}
+    for r in (db.query(PPACompromisoEnergia)
+              .filter(PPACompromisoEnergia.año == año, PPACompromisoEnergia.mes == mes).all()):
+        comp[r.contrato_id] = (
+            float(r.energia_minima) if r.energia_minima is not None else None,
+            float(r.energia_maxima) if r.energia_maxima is not None else None,
+        )
+
+    grupos: dict = {}
+    for l in data["lineas"]:
+        pid = l.get("ppa_id")
+        if not pid:
+            continue   # sin PPA (bolsa/UNGC) no aplica a compromiso
+        g = grupos.setdefault(pid, {
+            "ppa_id": pid, "ppa": l["ppa"], "numero_contrato": l["numero_contrato"],
+            "compradores": set(), "proyectos": set(), "kwh": 0.0, "contratos": 0,
+        })
+        g["kwh"] += l["kwh"]
+        g["contratos"] += 1
+        if l["comprador"]:
+            g["compradores"].add(l["comprador"])
+        if l["proyecto"]:
+            g["proyectos"].add(l["proyecto"])
+
+    filas = []
+    n_cumple = n_bajo = n_sin = 0
+    faltante_mwh = 0.0
+    for pid, g in grupos.items():
+        desp = round(g["kwh"] / 1000.0, 2)   # kWh → MWh
+        mn, mx = comp.get(pid, (None, None))
+        estado, pct, dif, sospechosa = "sin_compromiso", None, None, False
+        if mn is not None:
+            dif = round(desp - mn, 2)
+            pct = round(desp / mn * 100, 1) if mn else None
+            if mx and mx > 0 and desp > mx:
+                estado = "sobre_maximo"
+            elif desp >= mn:
+                estado = "cumple"
+            else:
+                estado = "bajo_minimo"
+                faltante_mwh += (mn - desp)
+            # Aviso de posible bug de unidades (kWh vs MWh): escalas muy dispares.
+            if mn > 0 and (desp > mn * 50 or desp < mn / 50):
+                sospechosa = True
+        if estado in ("cumple", "sobre_maximo"):
+            n_cumple += 1
+        elif estado == "bajo_minimo":
+            n_bajo += 1
+        else:
+            n_sin += 1
+        filas.append({
+            "ppa": g["ppa"], "numero_contrato": g["numero_contrato"],
+            "comprador": ", ".join(sorted(g["compradores"])) or None,
+            "proyecto": ", ".join(sorted(g["proyectos"])) or None,
+            "contratos": g["contratos"],
+            "minimo_mwh": mn, "maximo_mwh": mx, "despachado_mwh": desp,
+            "pct": pct, "diferencia_mwh": dif, "estado": estado,
+            "unidad_sospechosa": sospechosa,
+        })
+
+    orden = {"bajo_minimo": 0, "sobre_maximo": 1, "sin_compromiso": 2, "cumple": 3}
+    filas.sort(key=lambda f: (orden.get(f["estado"], 9), -(f["despachado_mwh"] or 0)))
+    return {
+        "periodo": per,
+        "resumen": {
+            "cumplen": n_cumple, "bajo_minimo": n_bajo, "sin_compromiso": n_sin,
+            "faltante_mwh": round(faltante_mwh, 1), "ppas": len(filas),
+        },
+        "filas": filas,
+    }
 
 
 # ── Agrupación manual de facturas (dividir un PPA en sub-facturas) ─────────────

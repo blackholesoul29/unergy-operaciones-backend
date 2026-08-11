@@ -76,6 +76,26 @@ def _error_con_curva(e_inv: float, curva: pd.Series) -> float | None:
     return (e_inv - e_nodo) / e_inv * 100
 
 
+def _error_ventana_solar(curva_referencia: pd.Series, curva_solenium: pd.Series) -> float | None:
+    """Compara curva_referencia (CGM o medidor) contra Solenium, ambas
+    restringidas a la ventana solar (HORAS_SOLARES) -- las horas que
+    Solenium no reportó DENTRO de esa ventana cuentan como 0 en la
+    comparación (no se excluyen, a diferencia de las horas fuera de la
+    ventana, que nunca importan). Antes se comparaba solo contra las horas
+    que Solenium sí tenía, sin importar dónde cayeran -- si esas horas eran
+    un pedazo angosto y no representativo del día (ver MGS Gandalf
+    2026-08-10: Solenium solo reportó 12h-23h, sin la mañana completa), la
+    comparación pasaba "bien" sin haber validado nada real. Con esta
+    ventana fija, un hueco de generación real que Solenium se perdió sí se
+    nota (ver MGS 0025 El Copey Occidente 2026-08-05, que sigue pasando
+    limpio -- su hueco real era de madrugada, fuera de la ventana)."""
+    ref_ventana = float(curva_referencia.reindex(HORAS_SOLARES).fillna(0).sum())
+    sol_ventana = float(curva_solenium.reindex(HORAS_SOLARES).fillna(0).sum())
+    if sol_ventana == 0:
+        return None
+    return (sol_ventana - ref_ventana) / sol_ventana * 100
+
+
 def _tiene_dato(curva: pd.Series | None) -> bool:
     return isinstance(curva, pd.Series) and curva.notna().any()
 
@@ -170,16 +190,16 @@ def _decidir_caso(
             resultado_cgm = {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
             # Solenium reportó parcial ese día (e_inv_incompleto) -- no se
             # descarta solo por estar incompleto, se usa igual como chequeo
-            # de plausibilidad: se compara CGM contra inversores SOLO en las
-            # horas que Solenium sí cubrió (no el total del día completo,
-            # que siempre se vería "mal" contra un total parcial). Si
-            # coincide dentro del rango normal, no hace falta Revisar
-            # Manualmente solo porque hubo un hueco en un dato que ni
-            # siquiera se usó para el número reportado (se sigue confiando
-            # en CGM en ambos casos -- esto solo decide la bandera).
+            # de plausibilidad: se compara CGM contra inversores dentro de
+            # la ventana solar (huecos de Solenium ahí cuentan como 0, ver
+            # _error_ventana_solar) -- no el total del día completo, que
+            # siempre se vería "mal" contra un total parcial. Si coincide
+            # dentro del rango normal, no hace falta Revisar Manualmente
+            # solo porque hubo un hueco en un dato que ni siquiera se usó
+            # para el número reportado (se sigue confiando en CGM en ambos
+            # casos -- esto solo decide la bandera).
             if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
-                curva_cgm_horas_comunes = curva_cgm.where(curva_solenium.notna())
-                error_parcial = _error_con_curva(e_inv_incompleto, curva_cgm_horas_comunes)
+                error_parcial = _error_ventana_solar(curva_cgm, curva_solenium)
                 resultado_cgm["error_final_pct"] = error_parcial
                 resultado_cgm["revisar_manualmente"] = not _en_rango(error_parcial)
             return resultado_cgm
@@ -233,16 +253,15 @@ def _decidir_caso(
         if _tiene_dato(curva):
             # Mismo blindaje que ya tiene el camino de CGM válido más arriba
             # -- si Solenium reportó parcial ese día, se compara el medidor
-            # contra ese total SOLO en las horas que Solenium sí cubrió (ver
-            # MGS 0025 El Copey Occidente 2026-08-05: medidor 6.861 kWh vs
-            # inversores parciales 6.887,4 kWh en las mismas horas, ~0,4% de
-            # diferencia -- no había motivo para marcar Revisar Manualmente
-            # a ciegas). Sin inversores con qué comparar, se mantiene el
-            # criterio de siempre: queda marcado.
+            # contra Solenium dentro de la ventana solar (ver
+            # _error_ventana_solar -- MGS 0025 El Copey Occidente
+            # 2026-08-05: medidor 6.861 kWh vs inversores parciales 6.887,4
+            # kWh, ~0,3% de diferencia -- no había motivo para marcar
+            # Revisar Manualmente a ciegas). Sin inversores con qué
+            # comparar, se mantiene el criterio de siempre: queda marcado.
             error_parcial = None
             if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
-                curva_medidor_horas_comunes = curva.where(curva_solenium.notna())
-                error_parcial = _error_con_curva(e_inv_incompleto, curva_medidor_horas_comunes)
+                error_parcial = _error_ventana_solar(curva, curva_solenium)
 
                 # Si el elegido por defecto (siempre principal, mientras
                 # tenga dato) falla la comparación contra inversores pero el
@@ -254,7 +273,7 @@ def _decidir_caso(
                 # YA están dentro de rango, se mantiene principal -- no
                 # cambia solo porque el otro tenga un error un poco menor.
                 if not _en_rango(error_parcial) and curva is curva_ppal and _tiene_dato(curva_resp):
-                    error_resp = _error_con_curva(e_inv_incompleto, curva_resp.where(curva_solenium.notna()))
+                    error_resp = _error_ventana_solar(curva_resp, curva_solenium)
                     if error_resp is not None and _en_rango(error_resp):
                         curva, error_parcial = curva_resp, error_resp
 

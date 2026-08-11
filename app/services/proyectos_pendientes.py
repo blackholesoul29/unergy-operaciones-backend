@@ -171,6 +171,44 @@ def _nodo_tiene_generacion(gaia: GaiaClient, node_id: int | None, node_id_resp: 
     return False
 
 
+def _cgm_tiene_generacion(gaia: GaiaClient, border_id: int | None, fecha: str) -> bool:
+    """True si el reporte CGM (Quoia/ASIC) de esa frontera muestra energía
+    real ese día -- fallback para cuando el medidor de nodo no tiene NINGUNA
+    medición aunque el borde diga estado OK con reporte reciente (ver AGGE
+    Extractora Monterrey 2026-08-10: medidor 0 filas, pero CGM 3.204 kWh
+    reales ese mismo día -- mismo patrón ya documentado en memoria como
+    "Estado válido sin CGM real", que hasta ahora también bloqueaba la
+    sugerencia de pendientes, no solo el reporte de energía)."""
+    if border_id is None:
+        return False
+    try:
+        reporte = gaia.get_border_report_status(border_id, fecha)
+    except Exception:
+        return False
+    curva = reporte.get("reported_data_main") if reporte else None
+    if not curva:
+        return False
+    return sum(float(v) for v in curva if v is not None) > 0
+
+
+def _generacion_real(
+    gaia: GaiaClient, node_id: int | None, node_id_resp: int | None, border_id: int | None, fecha: str,
+) -> bool:
+    """Medidor de nodo primero (más preciso); CGM como respaldo si el nodo
+    no tiene nada -- ver _cgm_tiene_generacion."""
+    return _nodo_tiene_generacion(gaia, node_id, node_id_resp, fecha) or _cgm_tiene_generacion(gaia, border_id, fecha)
+
+
+def _frt_a_border_id(borders: list[dict]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for b in borders:
+        frt = b.get("frt_generation") or {}
+        code = (frt.get("frt_code") or "").strip().lower()
+        if code and frt.get("id") is not None:
+            out[code] = frt["id"]
+    return out
+
+
 # Cache de "¿generación real?" por frt_code -- evita repetir ~66 llamadas de
 # medición en paralelo en cada GET /proyectos/pendientes (se llama también
 # desde confirmar/ignorar). Mismo TTL que _get_dynamic_maps en gaia_client.
@@ -190,7 +228,8 @@ def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str,
 
     con_reporte = [
         ((b.get("frt_generation") or {}).get("frt_code", "").strip().lower(),
-         (b.get("frt_generation") or {}).get("last_report_date"))
+         (b.get("frt_generation") or {}).get("last_report_date"),
+         (b.get("frt_generation") or {}).get("id"))
         for b in borders
         if (b.get("frt_generation") or {}).get("last_report_date")
     ]
@@ -198,9 +237,9 @@ def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str,
     if con_reporte:
         with ThreadPoolExecutor(max_workers=min(len(con_reporte), 12)) as pool:
             def _check(item):
-                code, fecha = item
+                code, fecha, border_id = item
                 node_p, node_r = frt_a_nodos.get(code, (None, None))
-                return code, _nodo_tiene_generacion(gaia, node_p, node_r, fecha)
+                return code, _generacion_real(gaia, node_p, node_r, border_id, fecha)
             for code, tiene in pool.map(_check, con_reporte):
                 resultado[code] = tiene
 
@@ -218,7 +257,7 @@ _DIAS_GENERACION_SOSTENIDA = 3
 
 
 def _generacion_real_multidia_por_frt(
-    gaia: GaiaClient, frt_codes: list[str],
+    gaia: GaiaClient, frt_codes: list[str], frt_a_border: dict[str, int] | None = None,
 ) -> dict[str, bool]:
     """Como `_generacion_real_por_frt`, pero exige generación real en los
     últimos `_DIAS_GENERACION_SOSTENIDA` días completos (no el día de hoy,
@@ -234,6 +273,7 @@ def _generacion_real_multidia_por_frt(
 
     dynamic = _get_dynamic_maps(gaia) or {}
     frt_a_nodos = dynamic.get("frt") or {}
+    frt_a_border = frt_a_border or {}
     hoy = date.today()
     fechas = [(hoy - timedelta(days=i)).isoformat() for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
 
@@ -243,7 +283,8 @@ def _generacion_real_multidia_por_frt(
         with ThreadPoolExecutor(max_workers=min(len(codigos), 12)) as pool:
             def _check(code):
                 node_p, node_r = frt_a_nodos.get(code, (None, None))
-                sostenida = all(_nodo_tiene_generacion(gaia, node_p, node_r, f) for f in fechas)
+                border_id = frt_a_border.get(code)
+                sostenida = all(_generacion_real(gaia, node_p, node_r, border_id, f) for f in fechas)
                 return code, sostenida
             for code, tiene in pool.map(_check, codigos):
                 resultado[code] = tiene
@@ -265,7 +306,8 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     # Multi-día solo para los que ya pasaron el de 1 día -- subconjunto chico,
     # evita multiplicar por 3 las llamadas de medición para todo el pipeline.
     codigos_1dia = [code for code, tiene in generacion_real.items() if tiene]
-    generacion_multidia = _generacion_real_multidia_por_frt(gaia, codigos_1dia)
+    frt_a_border = _frt_a_border_id(borders)
+    generacion_multidia = _generacion_real_multidia_por_frt(gaia, codigos_1dia, frt_a_border)
 
     out = []
     for b in borders:

@@ -177,13 +177,13 @@ def create_proyecto(
     return _get_proyecto_or_404(proyecto.id, db)
 
 
-# ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
+# ── Proyectos pendientes (Sun Factory + Quoia) ──────────────────────────────
 # Deben ir antes de /{id} para no chocar -- aunque acá no aplica porque son
 # rutas de 2+ segmentos, se deja el mismo orden por consistencia con el resto.
 
 @router.get("/pendientes", response_model=list[ProyectoPendienteOut])
 def listar_proyectos_pendientes(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Candidatos de Sun Factory/Quoia/Solenium sin reflejar en `proyectos`,
+    """Candidatos de Sun Factory/Quoia sin reflejar en `proyectos`,
     o ya existentes pero con estado/fase desincronizados. Nunca se escriben
     solos -- ver /pendientes/{clave}/confirmar."""
     return resolver_pendientes(db)

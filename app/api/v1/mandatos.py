@@ -154,13 +154,23 @@ async def upload_firmado(periodo: str = Form(...), file: UploadFile = File(...),
 
 
 @router.post("/{mandato_id}/asociar-pdf")
-def asociar_pdf(mandato_id: int, ruta: str = Form(...), nombre: str = Form(...),
+def asociar_pdf(mandato_id: int, nombre: str = Form(...),
                 db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Asocia manualmente un PDF ya subido a `_PDF_DIR` (vía upload-firmado) a
+    otro mandato. Solo recibe el nombre de archivo (no una ruta) para no permitir
+    que el cliente apunte a un archivo arbitrario del servidor."""
     m = db.get(Mandato, mandato_id)
     if not m:
         raise HTTPException(404, "Mandato no encontrado.")
-    m.pdf_firmado_ruta = ruta
-    m.pdf_firmado_nombre = nombre
+    destino = _PDF_DIR / Path(nombre).name
+    try:
+        destino.resolve().relative_to(_PDF_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, "Nombre de archivo inválido.")
+    if not destino.is_file():
+        raise HTTPException(404, "El archivo no existe en el servidor. Súbelo primero con 'Subir firmados'.")
+    m.pdf_firmado_ruta = str(destino)
+    m.pdf_firmado_nombre = destino.name
     m.fecha_firmado = m.fecha_firmado or date.today()
     if transicion_valida(m.estado, "firmado"):
         m.estado = "firmado"
@@ -241,24 +251,41 @@ async def upload_zip(periodo: str = Form(...), file: UploadFile = File(...),
 
 @router.get("/{mandato_id}/pdf")
 def descargar_pdf(mandato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Sirve el PDF firmado del mandato, sin importar si llegó por 'Subir
+    firmados' (archivo suelto en _PDF_DIR) o dentro del ZIP del período."""
     m = db.get(Mandato, mandato_id)
     if not m:
         raise HTTPException(404, "Mandato no encontrado.")
-    if not m.archivo_zip_nombre:
-        raise HTTPException(404, "Este mandato no tiene PDF asociado en un ZIP.")
-    periodo = m.periodo.strftime("%Y-%m")
-    zpath = _ZIP_DIR / f"{periodo}.zip"
-    if not zpath.exists():
-        raise HTTPException(404, "No se encontró el ZIP del período.")
-    zf = zipfile.ZipFile(zpath)
-    entry = next((n for n in zf.namelist() if n.split("/")[-1] == m.archivo_zip_nombre), None)
-    if not entry:
-        raise HTTPException(404, "El PDF no está dentro del ZIP del período.")
-    data = zf.read(entry)
-    return StreamingResponse(
-        io.BytesIO(data), media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{m.archivo_zip_nombre}"'},
-    )
+
+    if m.pdf_firmado_ruta:
+        ruta = Path(m.pdf_firmado_ruta)
+        try:
+            ruta.resolve().relative_to(_PDF_DIR.resolve())
+        except ValueError:
+            raise HTTPException(404, "PDF no disponible.")
+        if not ruta.is_file():
+            raise HTTPException(404, "El archivo del PDF ya no existe en el servidor.")
+        return StreamingResponse(
+            io.BytesIO(ruta.read_bytes()), media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{m.pdf_firmado_nombre or ruta.name}"'},
+        )
+
+    if m.archivo_zip_nombre:
+        periodo = m.periodo.strftime("%Y-%m")
+        zpath = _ZIP_DIR / f"{periodo}.zip"
+        if not zpath.exists():
+            raise HTTPException(404, "No se encontró el ZIP del período.")
+        zf = zipfile.ZipFile(zpath)
+        entry = next((n for n in zf.namelist() if n.split("/")[-1] == m.archivo_zip_nombre), None)
+        if not entry:
+            raise HTTPException(404, "El PDF no está dentro del ZIP del período.")
+        data = zf.read(entry)
+        return StreamingResponse(
+            io.BytesIO(data), media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{m.archivo_zip_nombre}"'},
+        )
+
+    raise HTTPException(404, "Este mandato no tiene PDF asociado.")
 
 
 @maestra_router.get("")

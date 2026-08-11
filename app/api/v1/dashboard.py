@@ -12,9 +12,8 @@ from app.core.database import get_db
 from app.models import (
     Proyecto, Cliente, Falla, FallaCatEstado, FallaCatPrioridad,
     Liquidacion, GeneracionDiaria, PPAContrato, PPACompromisoEnergia,
-    Garantia, CumplimientoMensual,
+    CumplimientoMensual,
 )
-from app.models.garantias import EstadoGarantiaEnum
 from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("dashboard")
@@ -145,35 +144,6 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     except Exception:
         pass
 
-    # Garantías: expiring within 30 days + total balance
-    garantias_vigentes = 0
-    garantias_por_vencer = 0
-    garantias_valor_total = 0
-    try:
-        threshold = today + timedelta(days=30)
-        garantias_vigentes = (
-            db.query(func.count(Garantia.id))
-            .filter(Garantia.estado == EstadoGarantiaEnum.vigente)
-            .scalar() or 0
-        )
-        garantias_por_vencer = (
-            db.query(func.count(Garantia.id))
-            .filter(
-                Garantia.estado == EstadoGarantiaEnum.vigente,
-                Garantia.fecha_vencimiento.isnot(None),
-                Garantia.fecha_vencimiento <= threshold,
-            )
-            .scalar() or 0
-        )
-        total_row = (
-            db.query(func.sum(Garantia.valor_cop))
-            .filter(Garantia.estado == EstadoGarantiaEnum.vigente)
-            .scalar()
-        )
-        garantias_valor_total = round(float(total_row), 0) if total_row else 0
-    except Exception:
-        pass
-
     # Liquidaciones: projects pending settlement this month
     liquidaciones_pendientes = 0
     try:
@@ -273,9 +243,6 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "fleet_power_kw": fleet_power_kw,
         "fleet_online": fleet_online,
         "fleet_total": fleet_total,
-        "garantias_vigentes": garantias_vigentes,
-        "garantias_por_vencer": garantias_por_vencer,
-        "garantias_valor_total_cop": garantias_valor_total,
         "gen_solenium_last_date": gen_last_date,
         "gen_solenium_projects": gen_projects_with_data,
         "liquidaciones_pendientes": liquidaciones_pendientes,

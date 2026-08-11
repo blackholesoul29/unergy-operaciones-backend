@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, costos_variables, starlink, inicio_operacion, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, estados_resultados, registros_cnd, reporte_energia, facturacion
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, costos_variables, starlink, inicio_operacion, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, estados_resultados, registros_cnd, reporte_energia, facturacion
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -26,7 +26,6 @@ api_router.include_router(evo_proxy.router)
 api_router.include_router(correlation.router)
 api_router.include_router(solar.router)
 api_router.include_router(generacion_solar.router)
-api_router.include_router(garantias.router)
 api_router.include_router(garantias_ajustes.router)
 api_router.include_router(notificaciones.router)
 api_router.include_router(mapa.router)

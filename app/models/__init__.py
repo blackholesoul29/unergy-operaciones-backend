@@ -29,6 +29,7 @@ from app.models.gestion import GestionRegistro
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.models.costos_variables import CostoVariable
+from app.models.polizas import Poliza
 from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
 from app.models.inicio_operacion import ProyectoInicioOperacion
 from app.models.panel_contable import (
@@ -64,6 +65,7 @@ __all__ = [
     "CumplimientoMensual",
     "Notificacion", "TipoNotificacionEnum",
     "CostoVariable",
+    "Poliza",
     "StarlinkFactura", "StarlinkMapeoSitio", "StarlinkFacturaLinea",
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",

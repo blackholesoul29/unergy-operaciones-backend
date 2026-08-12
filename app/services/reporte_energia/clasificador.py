@@ -520,32 +520,53 @@ def clasificar_generacion(
     # --- Relleno horario centralizado ---
     curva_actual = resultado.get("curva_final")
     horas_reconectador, horas_solenium_h, horas_historico = set(), set(), set()
+    horas_fuera_ventana_directo: set[int] = set()
     if (
         resultado["caso"] in CASOS_CON_RELLENO_HORARIO
         and isinstance(curva_actual, pd.Series)
         and curva_actual.isna().any()
     ):
-        if resultado.get("fp") is not None:
-            fp_relleno, fp_calc_relleno = resultado["fp"], resultado.get("fp_calculada")
-        else:
-            fp_relleno, fp_calc_relleno = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+        # Huecos fuera de la ventana solar (madrugada/noche) se llenan en
+        # 0.0 de una ANTES de intentar reconectador/Solenium/histórico -- el
+        # valor esperado ahí ya es ~0 sin importar la fuente (decisión
+        # explícita 2026-08-12: no tiene sentido gastar esas consultas, ni
+        # arriesgar que devuelvan ruido, en horas donde la certeza física ya
+        # es mejor que cualquier fuente de respaldo). Antes se intentaban
+        # las tres fuentes para TODAS las horas faltantes y solo se forzaba
+        # 0.0 lo que quedara sin llenar al final.
+        huecos_iniciales = curva_actual[curva_actual.isna()].index
+        horas_fuera_ventana_directo = {h for h in huecos_iniciales if h not in HORAS_SOLARES}
+        if horas_fuera_ventana_directo:
+            curva_actual = curva_actual.copy()
+            curva_actual[sorted(horas_fuera_ventana_directo)] = 0.0
 
-        curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico = reconectador.rellenar_horas_faltantes(
-            db, sol, curva_actual, project_id_solenium, fecha_str,
-            frontera_id=frontera_id,
-            curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
-            fp=fp_relleno,
-        )
+        if curva_actual.isna().any():
+            if resultado.get("fp") is not None:
+                fp_relleno, fp_calc_relleno = resultado["fp"], resultado.get("fp_calculada")
+            else:
+                fp_relleno, fp_calc_relleno = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+
+            curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico = reconectador.rellenar_horas_faltantes(
+                db, sol, curva_actual, project_id_solenium, fecha_str,
+                frontera_id=frontera_id,
+                curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
+                fp=fp_relleno,
+            )
+        else:
+            curva_rellenada = curva_actual
+
         # Las horas que ninguna de las tres fuentes cubre Y que además caen
-        # fuera de la ventana solar se llenan directo en 0.0 -- ahí el valor
-        # esperado ya es ~0 sin importar la fuente (mismo criterio que la
-        # excepción de más abajo), así que no tiene sentido dejarlas en
-        # blanco en el editor de corrección manual (ver MGS 0077 Chiriguaná
-        # Norte 4 2026-08-09: 20h-22h).
+        # fuera de la ventana solar (debería ser raro ya que se llenaron
+        # arriba, pero la ventana de reconectador -7h-16h- y la de
+        # Solenium/histórico -6h-17h- no son idénticas a HORAS_SOLARES) se
+        # llenan igual directo en 0.0 -- así no queda ninguna en blanco en
+        # el editor de corrección manual (ver MGS 0077 Chiriguaná Norte 4
+        # 2026-08-09: 20h-22h).
         horas_fuera_ventana = [h for h in curva_rellenada[curva_rellenada.isna()].index if h not in HORAS_SOLARES]
         if horas_fuera_ventana:
             curva_rellenada[horas_fuera_ventana] = 0.0
-        if horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana:
+        horas_fuera_ventana_directo |= set(horas_fuera_ventana)
+        if horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana_directo:
             resultado["curva_final"] = curva_rellenada
             resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
         if horas_solenium_h and resultado.get("fp") is None:

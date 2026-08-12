@@ -226,18 +226,22 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
     curva_sol = curva_sol_bd
 
-    # Total EN VIVO de la fuente que realmente se usó (medidor_usado) --
-    # solo para el aviso "el medidor ya muestra un valor distinto en Quoia"
-    # (curva_medidor_principal/respaldo/solenium ya muestran lo persistido).
+    # Curva y total EN VIVO de la fuente que realmente se usó (medidor_usado)
+    # -- para el aviso "el medidor ya muestra un valor distinto en Quoia"
+    # (curva_medidor_principal/respaldo ya muestran lo persistido) y para que
+    # 'Reportar con otra fuente' pueda ofrecer directamente ese valor
+    # actualizado, sin que la persona tenga que copiarlo a mano (pedido
+    # 2026-08-12).
     energia_actual_kwh = None
+    curva_actual: list | None = None
     if medidor_actualizado_en_quoia:
         mu = rep.medidor_usado or ""
         if mu.startswith("principal") and curva_medidor_ppal_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_medidor_ppal_viva if v is not None)
+            curva_actual = curva_medidor_ppal_viva
         elif mu.startswith("respaldo") and curva_medidor_resp_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_medidor_resp_viva if v is not None)
-        elif mu == "inversores" and curva_sol_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_sol_viva if v is not None)
+            curva_actual = curva_medidor_resp_viva
+        if curva_actual is not None:
+            energia_actual_kwh = sum(v for v in curva_actual if v is not None)
 
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
@@ -268,6 +272,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_solenium=curva_sol,
         medidor_actualizado_en_quoia=medidor_actualizado_en_quoia,
         energia_actual_kwh=round(energia_actual_kwh, 4) if energia_actual_kwh is not None else None,
+        curva_actual=curva_actual,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )

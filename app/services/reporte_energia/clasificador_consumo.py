@@ -26,9 +26,9 @@ corto, solo dos niveles:
                      valor" elegiría sistemáticamente el más inflado.
   Caso 'Histórico' -- ni CGM ni medidor creíble, pero hay historial propio
                      (o del vecino de predio, ver VECINO_HISTORICO_CONSUMO)
-                     -- mediana × forma horaria. NO marca Revisar
-                     Manualmente: sí hay con qué comparar y la curva no
-                     queda vacía.
+                     -- mediana × forma horaria. Marca Revisar Manualmente:
+                     ningún dato real de ese día respalda la curva
+                     completa, es una estimación de punta a punta.
   Caso 'Sin dato' -- nada de lo anterior -- curva vacía, Revisar Manualmente.
 
 Recuperación activa de medidor (ver clasificador.py) aplica igual acá --
@@ -400,7 +400,8 @@ def _decidir_medidor_o_historico(
         medidor_usado = "historico" if fuente_id == frontera_id else "historico_vecino"
         return {
             "caso": "Histórico", "energia_final_kwh": mediana, "curva_final": curva_historico,
-            "medidor_usado": medidor_usado, "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+            "medidor_usado": medidor_usado, "revisar_manualmente": True,
+            "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "recuperacion_datos": recuperacion_datos,
         }
 

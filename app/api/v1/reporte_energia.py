@@ -291,7 +291,7 @@ def editar_curva(
     frontera_id: int, body: EditarCurvaRequest, fecha: date = Query(...),
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
-    front, rep, _Modelo = _fila_por_id(db, frontera_id, fecha)
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     if len(body.curva_final) != 24:
         raise HTTPException(422, "curva_final debe tener 24 valores")
 
@@ -311,6 +311,21 @@ def editar_curva(
     # genérico "Editado manualmente".
     FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico"}
     rep.medidor_usado = body.fuente if body.fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
+    # Si la persona confirma que el MEDIDOR (no una estimación) es la
+    # fuente correcta, 'caso' se actualiza para que esta fila SÍ pueda
+    # alimentar la mediana/forma histórica de días futuros -- antes quedaba
+    # congelado en lo que decidió el clasificador automático (ej. caso
+    # 'Histórico' o 3), y CASOS_CONFIABLES_GENERACION/CONSUMO en
+    # historial.py filtran por ese campo, no por medidor_usado, así que una
+    # corrección manual con dato real nunca contaba (ver Valencia Oriente 2
+    # Consumo 2026-08-12: editada a 'Medidor principal' y validada, pero
+    # 'caso' seguía en 'Histórico'). 'Inversores × FP', 'Histórico propio' y
+    # 'Matriz de ceros' siguen sin tocar 'caso' -- son estimaciones o un
+    # valor de reemplazo, no una lectura real del medidor (mismo criterio
+    # que ya excluye el Caso 3 -- Inversores × FP automático -- de
+    # CASOS_CONFIABLES_GENERACION).
+    if body.fuente in ("principal", "respaldo"):
+        rep.caso = "Medidor" if Modelo is ReporteEnergiaConsumo else 5
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.

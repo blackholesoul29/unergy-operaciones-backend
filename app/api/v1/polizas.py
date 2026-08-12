@@ -60,6 +60,8 @@ def _to_out(p: Proyecto, poliza: Poliza | None) -> PolizaOut:
         marca_inversores=info.marca_inversores if info else None,
         cantidad_inversores=info.cantidad_inversores if info else None,
         capacidad_instalada_kwp=_num(info.capacidad_instalada_kwp) if info else None,
+        # operador_red_legal = catálogo (Proyecto.operador / fronteras.operador);
+        # operador_red = texto legado de GESCON, respaldo si no hay vínculo al catálogo.
         operador_red=p.operador_red_legal or p.operador_red,
         voltaje_red=info.voltaje_red if info else None,
         potencia_panel_kwp=info.potencia_panel_kwp if info else None,
@@ -129,7 +131,11 @@ def guardar(
 ):
     proyecto = (
         db.query(Proyecto)
-        .options(selectinload(Proyecto.info_tecnica))
+        .options(
+            selectinload(Proyecto.info_tecnica),
+            selectinload(Proyecto.operador),
+            selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+        )
         .filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None))
         .first()
     )

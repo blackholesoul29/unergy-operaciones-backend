@@ -206,3 +206,21 @@ def test_listar_datos_tecnicos_none_si_no_hay_info_tecnica(db):
     assert resultado[0].potencia_panel_kwp is None
     assert resultado[0].potencia_inversores_kwp is None
     assert resultado[0].potencia_ac_kw is None
+
+
+def test_listar_operador_red_cae_a_frontera_si_proyecto_no_tiene_propio(db):
+    op = OperadorRed(nombre_legal="ESSA S.A. E.S.P.")
+    db.add(op)
+    db.flush()
+
+    p = _proyecto(db, nombre_comercial="Sin operador propio")
+    frontera = Frontera(
+        proyecto_id=p.id, nombre_frontera="Frontera 1",
+        tipo_frontera="generacion", operador_red_id=op.id,
+    )
+    db.add(frontera)
+    db.flush()
+
+    resultado = listar(search=None, tipo_proyecto=None, poliza_om=None, db=db, _=None)
+
+    assert resultado[0].operador_red == "ESSA S.A. E.S.P."

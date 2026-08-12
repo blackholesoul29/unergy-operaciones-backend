@@ -223,10 +223,19 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
-    medidor_actualizado_en_quoia = any([
-        _curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva),
-        _curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva),
-    ])
+    # Escopado al medidor REALMENTE usado (medidor_usado), no "cualquiera de
+    # los dos" -- antes comparaba ambos (any()) y el aviso podía disparar por
+    # un cambio en el medidor que NO se usa para el reporte, mostrando encima
+    # "X ahora vs X al momento de clasificar" (redundante) si el medidor SÍ
+    # usado nunca tuvo curva_bd persistida (cae a la viva para los dos lados
+    # de la comparación, ver Detalle de las fuentes 2026-08-12).
+    mu = rep.medidor_usado or ""
+    if mu.startswith("principal"):
+        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
+    elif mu.startswith("respaldo"):
+        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
+    else:
+        medidor_actualizado_en_quoia = False
     curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
     curva_sol = curva_sol_bd
@@ -240,7 +249,6 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     energia_actual_kwh = None
     curva_actual: list | None = None
     if medidor_actualizado_en_quoia:
-        mu = rep.medidor_usado or ""
         if mu.startswith("principal") and curva_medidor_ppal_viva is not None:
             curva_actual = curva_medidor_ppal_viva
         elif mu.startswith("respaldo") and curva_medidor_resp_viva is not None:

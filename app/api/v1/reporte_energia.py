@@ -305,6 +305,17 @@ def editar_curva(
     rep.curva_final = curva_a_lista(curva)
     rep.energia_final_kwh = float(curva.fillna(0).sum())
     rep.editado_manualmente = True
+    # Los flags de 'hora rellenada' (reconectador/Solenium/histórico) eran
+    # de la curva ANTERIOR -- si la persona reemplaza curva_final a mano
+    # (otra fuente, o celda por celda), esas horas ya no vienen de ese
+    # relleno; dejarlos quedaba mostrando el diamante dorado de 'Rellenado'
+    # sobre datos que ya no lo son (ver GD Naos 1 2026-08-12: 'Medidor
+    # principal' elegido a mano, pero seguía marcando 14h-16h como
+    # 'Rellenado (histórico)', dato del clasificador automático original).
+    if Modelo is ReporteEnergiaGeneracion:
+        rep.horas_rellenadas_reconectador = None
+        rep.horas_rellenadas_solenium = None
+    rep.horas_rellenadas_historico = None
     # 'Fuente usada' quedaba mostrando lo que el clasificador decidió
     # originalmente (ej. 'Histórico propio') aunque la persona ya hubiera
     # reemplazado la curva con otra fuente ('Reportar con otra fuente') --

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
+from app.models.fronteras import Frontera
 from app.models.polizas import Poliza
 from app.models.proyectos import Proyecto
 from app.schemas.polizas import PolizaOut, PolizaUpsert
@@ -59,6 +60,11 @@ def _to_out(p: Proyecto, poliza: Poliza | None) -> PolizaOut:
         marca_inversores=info.marca_inversores if info else None,
         cantidad_inversores=info.cantidad_inversores if info else None,
         capacidad_instalada_kwp=_num(info.capacidad_instalada_kwp) if info else None,
+        operador_red=p.operador_red_legal or p.operador_red,
+        voltaje_red=info.voltaje_red if info else None,
+        potencia_panel_kwp=info.potencia_panel_kwp if info else None,
+        potencia_inversores_kwp=info.potencia_inversores_kwp if info else None,
+        potencia_ac_kw=_num(info.potencia_ac_kw) if info else None,
         numero_poliza=poliza.numero_poliza if poliza else None,
         poliza_om=poliza.poliza_om if poliza else False,
         fecha_vencimiento=poliza.fecha_vencimiento if poliza else None,
@@ -92,7 +98,11 @@ def listar(
     q = (
         db.query(Proyecto, Poliza)
         .outerjoin(Poliza, Poliza.proyecto_id == Proyecto.id)
-        .options(selectinload(Proyecto.info_tecnica))
+        .options(
+            selectinload(Proyecto.info_tecnica),
+            selectinload(Proyecto.operador),
+            selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+        )
         .filter(Proyecto.deleted_at.is_(None))
     )
     if search:

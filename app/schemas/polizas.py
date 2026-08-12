@@ -40,6 +40,11 @@ class PolizaOut(BaseModel):
     marca_inversores: Optional[str] = None
     cantidad_inversores: Optional[int] = None
     capacidad_instalada_kwp: Optional[float] = None
+    operador_red: Optional[str] = None
+    voltaje_red: Optional[str] = None
+    potencia_panel_kwp: Optional[str] = None
+    potencia_inversores_kwp: Optional[str] = None
+    potencia_ac_kw: Optional[float] = None
 
     numero_poliza: Optional[str] = None
     poliza_om: bool = False

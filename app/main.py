@@ -685,8 +685,15 @@ _PENDING_DDLS = [
     # días donde reconectador SÍ se llegó a consultar (medidor+inversores ya
     # dejaron huecos), a diferencia de medidor/Solenium que se piden siempre.
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_reconectador_referencia JSONB",
+    # migration — reporte_energia_generacion: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo -- mismo campo se
+    # agrega acá porque Generación también gana la opción en 'Rellenar horas')
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    # migration — reporte_energia_consumo: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo)
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,

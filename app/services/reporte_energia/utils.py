@@ -51,3 +51,40 @@ def lista_a_curva(valores: list[float | None] | None) -> pd.Series:
     if not valores:
         return CURVA_VACIA.copy()
     return pd.Series({h: valores[h] if h < len(valores) else None for h in HORAS}, dtype=float)
+
+
+def rellenar_con_otro_medidor(
+    curva: pd.Series, medidor_usado: str | None,
+    curva_principal: list[float | None] | None, curva_respaldo: list[float | None] | None,
+) -> tuple[pd.Series, set[int]]:
+    """Rellena los huecos de `curva` con el OTRO medidor (el que NO ganó
+    como medidor_usado), para las mismas horas -- mismo consumo/generación
+    física, otro canal de lectura (ver MGS 0021 Ibirico Consumo
+    2026-08-11: medidor respaldo usado sin dato a las 4h, pero principal sí
+    la tenía). No es una estimación como histórico/Solenium/reconectador --
+    es dato real de un medidor, así que es la PRIMERA fuente a intentar en
+    la acción manual 'Rellenar horas' (Generación y Consumo), antes de
+    reconectador/Solenium×FP/histórico.
+
+    Retorna (curva_rellenada, horas_rellenadas)."""
+    if not curva.isna().any():
+        return curva, set()
+    mu = medidor_usado or ""
+    if mu.startswith("principal"):
+        otra = curva_respaldo
+    elif mu.startswith("respaldo"):
+        otra = curva_principal
+    else:
+        otra = None
+    if otra is None:
+        return curva, set()
+
+    curva_otro = lista_a_curva(otra)
+    curva = curva.copy()
+    horas: set[int] = set()
+    for h in list(curva[curva.isna()].index):
+        valor = curva_otro.get(h)
+        if pd.notna(valor):
+            curva[h] = valor
+            horas.add(h)
+    return curva, horas

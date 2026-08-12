@@ -29,7 +29,8 @@ from app.schemas.reporte_energia import (
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador
 from app.services.reporte_energia import excel_terceros
 from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
-from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
+from app.services.reporte_energia.clasificador_consumo import rellenar_horas_faltantes_consumo
+from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
@@ -273,6 +274,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         horas_rellenadas_reconectador=rep.horas_rellenadas_reconectador if es_generacion else None,
         horas_rellenadas_solenium=rep.horas_rellenadas_solenium if es_generacion else None,
         horas_rellenadas_historico=rep.horas_rellenadas_historico,
+        horas_rellenadas_medidor_cruzado=rep.horas_rellenadas_medidor_cruzado,
         recuperacion_datos=rep.recuperacion_datos,
         revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
         validado_por=rep.validado_por.nombre if rep.validado_por else None,
@@ -363,61 +365,77 @@ def rellenar_horario(
     frontera_id: int, fecha: date = Query(...),
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
-    """Rellena a mano las horas que quedaron sin dato en 'curva_final' con
-    reconectador / Solenium × FP / histórico -- acción explícita, ya NO pasa
-    sola durante la clasificación automática (decisión 2026-08-12: mezclar
-    otra fuente en la curva final sin que nadie lo pidiera era demasiado
-    invasivo). Solo aplica a Generación -- Consumo solo tiene histórico como
-    fuente de relleno y ahí casi todo lo que llena con histórico ya queda
-    para revisar de todas formas, así que se dejó automático.
+    """Rellena a mano las horas que quedaron sin dato en 'curva_final' --
+    acción explícita, ya NO pasa sola durante la clasificación automática
+    (decisión 2026-08-12: mezclar otra fuente en la curva final sin que
+    nadie lo pidiera era demasiado invasivo). Orden de fuentes, la primera
+    que tenga dato para cada hora gana:
+
+    1. El OTRO medidor (el que no ganó como medidor_usado) -- mismo
+       consumo/generación física, dato real, no una estimación.
+    2. Generación: reconectador, luego Solenium × FP.
+    3. Histórico propio (mediana × forma) -- último recurso en ambos árboles.
+
+    Aplica a Generación y Consumo.
     """
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    if Modelo is not ReporteEnergiaGeneracion:
-        raise HTTPException(400, "El relleno horario manual solo aplica a fronteras de Generación")
+    es_generacion = Modelo is ReporteEnergiaGeneracion
 
     curva_actual = lista_a_curva(rep.curva_final)
     if not curva_actual.isna().any():
         raise HTTPException(400, "Esta curva no tiene horas sin dato para rellenar")
 
-    proyecto = front.proyecto
-    project_id_solenium = (
-        int(proyecto.project_id_solenium)
-        if proyecto and proyecto.project_id_solenium and str(proyecto.project_id_solenium).isdigit()
-        else None
+    curva_actual, horas_medidor_cruzado = rellenar_con_otro_medidor(
+        curva_actual, rep.medidor_usado, rep.curva_medidor_principal, rep.curva_medidor_respaldo,
     )
-    curva_solenium = lista_a_curva(rep.curva_solenium_referencia) if rep.curva_solenium_referencia else None
-    if rep.fp is not None:
-        fp, fp_calc = float(rep.fp), float(rep.fp_calculada) if rep.fp_calculada is not None else None
-    else:
-        fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
 
-    sol = SoleniumClient()
-    curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
-        reconectador.rellenar_horas_faltantes(
-            db, sol, curva_actual, project_id_solenium, str(fecha),
-            frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
-        )
-    )
-    if not (horas_reconectador or horas_solenium_h or horas_historico):
-        raise HTTPException(
-            400, "Ninguna fuente (reconectador, Solenium × FP, histórico) tenía dato para las horas faltantes",
-        )
+    horas_reconectador, horas_solenium_h, horas_historico = set(), set(), set()
+    curva_reconectador_ref = None
+    fp = fp_calc = None
+    if curva_actual.isna().any():
+        if es_generacion:
+            proyecto = front.proyecto
+            project_id_solenium = (
+                int(proyecto.project_id_solenium)
+                if proyecto and proyecto.project_id_solenium and str(proyecto.project_id_solenium).isdigit()
+                else None
+            )
+            curva_solenium = lista_a_curva(rep.curva_solenium_referencia) if rep.curva_solenium_referencia else None
+            if rep.fp is not None:
+                fp, fp_calc = float(rep.fp), float(rep.fp_calculada) if rep.fp_calculada is not None else None
+            else:
+                fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
 
-    rep.curva_final = curva_a_lista(curva_rellenada)
-    rep.energia_final_kwh = float(curva_rellenada.fillna(0).sum())
-    rep.horas_rellenadas_reconectador = sorted(horas_reconectador) or None
-    rep.horas_rellenadas_solenium = sorted(horas_solenium_h) or None
+            sol = SoleniumClient()
+            curva_actual, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
+                reconectador.rellenar_horas_faltantes(
+                    db, sol, curva_actual, project_id_solenium, str(fecha),
+                    frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
+                )
+            )
+        else:
+            curva_actual, horas_historico = rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
+
+    if not (horas_medidor_cruzado or horas_reconectador or horas_solenium_h or horas_historico):
+        raise HTTPException(400, "Ninguna fuente tenía dato para las horas faltantes")
+
+    rep.curva_final = curva_a_lista(curva_actual)
+    rep.energia_final_kwh = float(curva_actual.fillna(0).sum())
+    rep.horas_rellenadas_medidor_cruzado = sorted(horas_medidor_cruzado) or None
     rep.horas_rellenadas_historico = sorted(horas_historico) or None
-    if curva_reconectador_ref is not None:
-        rep.curva_reconectador_referencia = curva_a_lista(curva_reconectador_ref)
-    if horas_solenium_h and rep.fp is None:
-        rep.fp = fp
-        rep.fp_calculada = fp_calc
-    if rep.medidor_usado == "revisar":
-        rep.medidor_usado = "relleno_horario"
-    # Mismo criterio ya aplicado a los rellenos automáticos: una sustitución
-    # de fuente (aunque reconectador/Solenium sean el mismo medidor físico)
-    # siempre queda para revisar a mano.
+    if es_generacion:
+        rep.horas_rellenadas_reconectador = sorted(horas_reconectador) or None
+        rep.horas_rellenadas_solenium = sorted(horas_solenium_h) or None
+        if curva_reconectador_ref is not None:
+            rep.curva_reconectador_referencia = curva_a_lista(curva_reconectador_ref)
+        if horas_solenium_h and rep.fp is None:
+            rep.fp = fp
+            rep.fp_calculada = fp_calc
+        if rep.medidor_usado == "revisar":
+            rep.medidor_usado = "relleno_horario"
+    # Cualquier sustitución de fuente (aunque sea el mismo medidor físico
+    # por otro canal, u otro medidor real) siempre queda para revisar a
+    # mano -- mismo criterio ya aplicado a los rellenos automáticos.
     rep.revisar_manualmente = True
     # Evita que una re-ejecución del clasificador para este mismo día pise
     # este relleno manual (mismo guard que ya protege 'Reportar con otra

@@ -143,12 +143,14 @@ def _medidor_mas_cercano(curva_a: pd.Series, curva_b: pd.Series, mediana: float)
     return curva_b, "respaldo", _en_rango_historico(curva_b, mediana)
 
 
-def _rellenar_horas_faltantes_consumo(
+def rellenar_horas_faltantes_consumo(
     db: Session, curva: pd.Series, frontera_id: int, fecha: date,
 ) -> tuple[pd.Series, set[int]]:
-    """Rellena las horas en NaN de un Caso 'Medidor' ya aceptado con el
-    histórico horario propio -- no existe reconectador para Consumo, así
-    que este es el único recurso de relleno horario disponible."""
+    """Rellena las horas en NaN de un Caso 'Medidor' con el histórico
+    horario propio -- último recurso de la acción manual 'Rellenar horas'
+    (POST /fronteras/{id}/rellenar-horario en reporte_energia.py), después
+    de intentar medidor cruzado. No existe reconectador/Solenium para
+    Consumo, así que histórico es la única fuente además del otro medidor."""
     if not curva.isna().any():
         return curva, set()
 
@@ -233,52 +235,41 @@ def clasificar_consumo(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,
     )
 
-    # Relleno de horas puntuales (2026-07-25): un Caso 'Medidor' ya aceptado
-    # puede traer huecos puntuales (el medidor dejó de reportar a media
-    # tarde, por ejemplo) -- se rellenan con el histórico horario propio
-    # (no hay reconectador para Consumo). El total se recalcula sobre la
-    # curva ya rellenada. Cualquier relleno con histórico queda marcado
-    # para revisar -- decisión explícita del usuario (ver MGS 0012 La
-    # Reserva Consumo 2026-08-09): aunque no dependa de una API externa
-    # como el reconectador/Solenium de Generación, sigue siendo una
-    # estimación (mediana × forma), no dato real medido ese día.
+    # Relleno horario (2026-08-12): solo el cero directo se aplica
+    # automático acá. Medidor cruzado/histórico dejaron de rellenar solos
+    # (mismo cambio que Generación) -- quedan disponibles como acción
+    # manual desde el front (POST /fronteras/{id}/rellenar-horario en
+    # reporte_energia.py), que decide la persona explícitamente.
     curva_actual = resultado.get("curva_final")
-    horas_historico: set[int] = set()
     horas_ventana_solar_directo: set[int] = set()
     if resultado.get("caso") == "Medidor" and isinstance(curva_actual, pd.Series) and curva_actual.isna().any():
-        # Huecos DENTRO de la ventana solar se llenan en 0.0 directo, ANTES
-        # de intentar el histórico -- decisión explícita del usuario
-        # (2026-08-12): esta frontera es el consumo de red del MISMO
-        # proyecto de generación solar, así que durante horas de sol alto
-        # el consumo de red ya se espera en ~0 (los propios paneles cubren
-        # la carga del sitio) -- mismo principio que ya se aplicó a
-        # Generación para las horas FUERA de la ventana solar. A
-        # diferencia del histórico, esto no es una estimación (mediana ×
-        # forma), es una certeza física del mismo tipo, así que NO marca
-        # Revisar Manualmente.
+        # Huecos DENTRO de la ventana solar se llenan en 0.0 directo -- esta
+        # frontera es el consumo de red del MISMO proyecto de generación
+        # solar, así que durante horas de sol alto el consumo de red ya se
+        # espera en ~0 (los propios paneles cubren la carga del sitio) --
+        # mismo principio que Generación para las horas FUERA de la
+        # ventana solar. No es una estimación, es una certeza física, así
+        # que NO marca Revisar Manualmente.
         huecos_iniciales = curva_actual[curva_actual.isna()].index
         horas_ventana_solar_directo = {h for h in huecos_iniciales if h in HORAS_SOLARES}
         if horas_ventana_solar_directo:
             curva_actual = curva_actual.copy()
             curva_actual[sorted(horas_ventana_solar_directo)] = 0.0
+            resultado["curva_final"] = curva_actual
+            resultado["energia_final_kwh"] = float(curva_actual.fillna(0).sum())
 
+        # Un hueco fuera de la ventana solar (madrugada/noche) sin dato real
+        # sí preocupa -- ahí es consumo real de red, no hay certeza física
+        # que ayude, y sin el relleno automático de medidor cruzado/
+        # histórico no queda nada más con qué completarlo desde acá.
         if curva_actual.isna().any():
-            curva_rellenada, horas_historico = _rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
-        else:
-            curva_rellenada = curva_actual
-
-        if horas_historico or horas_ventana_solar_directo:
-            resultado["curva_final"] = curva_rellenada
-            resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
-        if horas_historico:
-            resultado["revisar_manualmente"] = True
-        if curva_rellenada.isna().any():
             resultado["revisar_manualmente"] = True
 
     resultado.setdefault("revisar_manualmente", False)
     if frontera_id in FRONTERAS_CONSUMO_SIEMPRE_REVISAR:
         resultado["revisar_manualmente"] = True
-    resultado["horas_rellenadas_historico"] = sorted(horas_historico) or None
+    resultado["horas_rellenadas_historico"] = None
+    resultado["horas_rellenadas_medidor_cruzado"] = None
     return resultado
 
 

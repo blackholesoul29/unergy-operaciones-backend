@@ -88,6 +88,11 @@ class ReporteEnergiaGeneracion(Base):
     horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Horas rellenadas con el OTRO medidor (el que no ganó como fuente) --
+    # mismo consumo/generación física, otro canal de lectura (2026-08-12,
+    # ver MGS 0021 Ibirico Consumo). Primera fuente que se intenta en
+    # 'Rellenar horas', antes de reconectador/Solenium/histórico.
+    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     recuperacion_datos: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -172,6 +177,11 @@ class ReporteEnergiaConsumo(Base):
     curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Horas rellenadas con el OTRO medidor (el que no ganó como fuente) --
+    # mismo consumo físico, otro canal de lectura (2026-08-12, ver MGS 0021
+    # Ibirico Consumo). Distinto de horas_rellenadas_historico: es dato real
+    # de un medidor, no una estimación.
+    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     recuperacion_datos: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -55,6 +55,9 @@ class DetalleFronteraReporte(BaseModel):
     horas_rellenadas_reconectador: list[int] | None = None
     horas_rellenadas_solenium: list[int] | None = None
     horas_rellenadas_historico: list[int] | None = None
+    # Horas rellenadas con el otro medidor (el que no ganó como fuente) --
+    # Generación y Consumo -- dato real de un medidor, no una estimación.
+    horas_rellenadas_medidor_cruzado: list[int] | None = None
     recuperacion_datos: str | None = None
     revisar_manualmente: bool
     editado_manualmente: bool

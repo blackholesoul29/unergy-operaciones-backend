@@ -754,6 +754,95 @@ def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
     return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 
+def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
+    """Envía UNA fila a Quoia (gaia.post_report) -- factorizado para
+    reusarse tanto en /enviar (todas las fronteras del día) como en
+    /fronteras/{id}/enviar (una sola, envío controlado de prueba antes de
+    confiar en el envío masivo -- ver ADVERTENCIA en gaia_client.post_report).
+
+    Retorna (resultado, motivo):
+    - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
+      (_reporte_ya_valido) -- no se llama a Quoia para nada.
+    - (True, None): envío intentado y exitoso.
+    - (False, motivo): envío intentado y falló (sin border_id, Quoia
+      rechazó, o excepción de red)."""
+    if _reporte_ya_valido(rep, es_generacion):
+        return None, None
+
+    frt_code = (front.codigo_frontera or "").strip().lower()
+    meta = borders.get(frt_code)
+    border_id = meta.get("id") if meta else None
+    rep.enviado_quoia_en = datetime.now(timezone.utc)
+
+    if not border_id:
+        rep.enviado_quoia_ok = False
+        rep.enviado_quoia_error = "Sin border_id en Quoia"
+        return False, "sin border_id en Quoia"
+
+    curva = rep.curva_final or [0.0] * 24
+    main_readings = [float(v) if v is not None else 0.0 for v in curva]
+    respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
+    if respaldo_terceros:
+        # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
+        # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
+        backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
+    else:
+        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
+        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
+        # vez por hora al momento de enviar, porque la API espera números fijos.
+        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+
+    try:
+        ok = gaia.post_report(border_id, main_readings, backup_readings)
+        motivo = None if ok else "Quoia rechazó el envío"
+    except Exception as exc:
+        ok = False
+        motivo = str(exc)
+
+    rep.enviado_quoia_ok = ok
+    rep.enviado_quoia_error = motivo
+    return ok, motivo
+
+
+@router.post("/fronteras/{frontera_id}/enviar", response_model=EnviarReporteEnergiaResponse)
+def enviar_frontera(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Envío controlado de UNA sola frontera a Quoia -- pensado para probar
+    gaia.post_report() contra Quoia real (nunca se ha hecho, ver ADVERTENCIA
+    en gaia_client.py) antes de confiar en el envío masivo (POST /enviar),
+    que manda TODAS las fronteras del día de una sola vez. Misma lógica de
+    bloqueo y de "ya válido en Quoia" que el envío masivo, escopada a esta
+    fila -- así la prueba de mañana refleja fielmente lo que haría el botón
+    real.
+    """
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
+
+    if rep.revisar_manualmente:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[], bloqueado=True,
+            motivo_bloqueo="Esta frontera tiene Revisar Manualmente pendiente.",
+        )
+
+    gaia = GaiaClient()
+    borders = resolver_borders(gaia, {front.codigo_frontera}) if front.codigo_frontera else {}
+    resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+    db.commit()
+
+    if resultado is None:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[], bloqueado=False,
+            motivo_bloqueo="Quoia ya tenía el dato correcto (CGM válido) -- no hacía falta enviar nada.",
+        )
+    if resultado is False:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[f"{_nombre_frontera(front)} — {motivo}"], bloqueado=False,
+        )
+    return EnviarReporteEnergiaResponse(fecha=fecha, enviados=1, fallidos=[], bloqueado=False)
+
+
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)
 def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Envía el reporte del día a Quoia -- bloqueado si queda alguna
@@ -799,46 +888,12 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
     def _procesar(rep, front, es_generacion: bool) -> None:
         nonlocal enviados
-        if _reporte_ya_valido(rep, es_generacion):
-            return  # Quoia ya tiene el dato correcto, no hace falta corregir
-
-        frt_code = (front.codigo_frontera or "").strip().lower()
-        meta = borders.get(frt_code)
-        border_id = meta.get("id") if meta else None
-        rep.enviado_quoia_en = datetime.now(timezone.utc)
-
-        if not border_id:
-            rep.enviado_quoia_ok = False
-            rep.enviado_quoia_error = "Sin border_id en Quoia"
-            fallidos.append(f"{_nombre_frontera(front)} — sin border_id en Quoia")
-            return
-
-        curva = rep.curva_final or [0.0] * 24
-        main_readings = [float(v) if v is not None else 0.0 for v in curva]
-        respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
-        if respaldo_terceros:
-            # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
-            # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
-            backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
-        else:
-            # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
-            # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
-            # vez por hora al momento de enviar, porque la API espera números fijos.
-            backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
-
-        try:
-            ok = gaia.post_report(border_id, main_readings, backup_readings)
-            motivo = None if ok else "Quoia rechazó el envío"
-        except Exception as exc:
-            ok = False
-            motivo = str(exc)
-
-        rep.enviado_quoia_ok = ok
-        rep.enviado_quoia_error = motivo
-        if ok:
+        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+        if resultado is True:
             enviados += 1
-        else:
+        elif resultado is False:
             fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
+        # resultado is None: ya era válido en Quoia, no hacía falta nada
 
     for rep, front in gen_filas:
         _procesar(rep, front, es_generacion=True)

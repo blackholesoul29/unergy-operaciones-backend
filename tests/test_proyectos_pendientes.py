@@ -1,28 +1,4 @@
-from datetime import date, timedelta
-
 from app.services import proyectos_pendientes as pp
-
-
-class _FakeSoleniumClient:
-    enabled = True
-
-    def __init__(self, proyectos, generacion_por_id):
-        self._proyectos = proyectos
-        self._generacion_por_id = generacion_por_id
-
-    def get_projects(self):
-        return self._proyectos
-
-    def get_generation(self, project_id, date_from, date_to):
-        return self._generacion_por_id.get(project_id, {})
-
-
-def _proyecto_solenium(id=1, name="GD Ejemplo"):
-    return {
-        "id": id, "name": name, "installed_capacity": 500,
-        "is_minifarm": False, "is_self_consumption": False,
-        "lat": None, "lon": None,
-    }
 
 
 def _candidato_quoia(estado_sugerido="en_operacion", fase="energizado", multidia=False):
@@ -69,31 +45,12 @@ def test_reforzar_solo_quoia_no_afecta_candidatos_sin_sugerencia():
     assert c.fase_construccion is None
 
 
-def test_candidatos_solenium_no_sugiere_operando_sin_generacion_real(monkeypatch):
-    # Solenium marcaba TODO su listado como "en_operacion" sin verificar nada
-    # -- aparecer en el sistema de monitoreo no prueba que ya opere.
-    monkeypatch.setattr(pp, "_generacion_solenium_cache", None)
-    client = _FakeSoleniumClient([_proyecto_solenium(1)], {1: {}})
-    monkeypatch.setattr(pp, "SoleniumClient", lambda: client)
-
-    out = pp._candidatos_solenium()
-    assert len(out) == 1
-    assert out[0].estado_sugerido is None
-    assert out[0].fase_construccion is None
-
-
-def test_candidatos_solenium_sugiere_operando_con_generacion_sostenida(monkeypatch):
-    monkeypatch.setattr(pp, "_generacion_solenium_cache", None)
-    hoy = date.today()
-    dias_ventana = [(hoy - timedelta(days=i)).isoformat() for i in range(1, pp._DIAS_GENERACION_SOSTENIDA + 1)]
-    gen_kwh_map = {f"{d}T12:00:00": 10.0 for d in dias_ventana}
-    client = _FakeSoleniumClient([_proyecto_solenium(2)], {2: {"generation_kwh": gen_kwh_map}})
-    monkeypatch.setattr(pp, "SoleniumClient", lambda: client)
-
-    out = pp._candidatos_solenium()
-    assert len(out) == 1
-    assert out[0].estado_sugerido == "en_operacion"
-    assert out[0].fase_construccion == "energizado"
+# Los tests de `_candidatos_solenium` se retiraron con la función: Solenium salió
+# de las sugerencias de pendientes (commits e4ae8fa y 64f0c55, 2026-08-11). El
+# invariante que protegían —aparecer en un sistema de monitoreo no prueba que la
+# planta ya opere— sigue cubierto para la única fuente que aún puede cometerlo, en
+# `test_reforzar_solo_quoia_descarta_sin_generacion_sostenida`. `_candidatos_sunfactory`
+# nunca tuvo test directo; esto no cambió con el borrado.
 
 
 def test_fusionar_por_core_propaga_generacion_multidia():

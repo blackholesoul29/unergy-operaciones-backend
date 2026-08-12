@@ -376,7 +376,9 @@ def rellenar_horario(
     2. Generación: reconectador, luego Solenium × FP.
     3. Histórico propio (mediana × forma) -- último recurso en ambos árboles.
 
-    Aplica a Generación y Consumo.
+    Aplica a Generación y Consumo. No fuerza revisar_manualmente -- es una
+    acción manual y consciente, igual que editar_curva(); queda pendiente
+    de un "Validar Frontera" explícito.
     """
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     es_generacion = Modelo is ReporteEnergiaGeneracion
@@ -433,10 +435,12 @@ def rellenar_horario(
             rep.fp_calculada = fp_calc
         if rep.medidor_usado == "revisar":
             rep.medidor_usado = "relleno_horario"
-    # Cualquier sustitución de fuente (aunque sea el mismo medidor físico
-    # por otro canal, u otro medidor real) siempre queda para revisar a
-    # mano -- mismo criterio ya aplicado a los rellenos automáticos.
-    rep.revisar_manualmente = True
+    # revisar_manualmente NO se fuerza acá -- ese forzado tenía sentido
+    # mientras el relleno era automático y silencioso (nadie lo notaba sin
+    # la bandera); ahora que es una acción manual y consciente (la persona
+    # ve las fuentes disponibles y decide hacer clic), queda igual que
+    # editar_curva(): pendiente de un "Validar Frontera" explícito, sin que
+    # el botón se lo imponga.
     # Evita que una re-ejecución del clasificador para este mismo día pise
     # este relleno manual (mismo guard que ya protege 'Reportar con otra
     # fuente', ver editar_curva() arriba).

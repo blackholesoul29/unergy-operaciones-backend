@@ -573,28 +573,25 @@ def clasificar_generacion(
             resultado["fp"] = round(fp_relleno, 4) if fp_relleno is not None else None
             resultado["fp_calculada"] = round(fp_calc_relleno, 4) if fp_calc_relleno is not None else None
 
-        # Mismo caso de Villanueva/Paz Verso: un relleno vía reconectador o
-        # Solenium × FP no es tan confiable como para darlo por bueno en
-        # silencio, aunque haya tapado TODOS los huecos -- la API de
-        # Solenium tiene un número limitado de consultas y puede no traer
-        # la hora aunque Fusion sí la tenga completa. El histórico propio
-        # no depende de ninguna API externa, así que ese no aplica.
-        # Excepción: si las horas rellenadas caen FUERA de la ventana solar
-        # (madrugada/noche), el valor esperado ya es ~0 sin importar la
-        # fuente -- no hay nada real que un dato de respaldo pueda arruinar
-        # (ver MGS 0021 Ibirico 2026-08-05: reconectador rellenó 19h y 23h,
-        # ambas en 0,0 kWh, coincidiendo con medidor/inversores en el resto
-        # del día -- forzar revisión ahí no aporta nada).
-        if any(h in HORAS_SOLARES for h in horas_reconectador | horas_solenium_h):
+        # Cualquier relleno horario con una fuente real (reconectador,
+        # Solenium × FP o histórico) marca revisar SIEMPRE, sin importar la
+        # hora -- decisión explícita del usuario (2026-08-12): son
+        # sustituciones de dato (una fuente de respaldo reemplazando al
+        # medidor), no algo que se pueda dar por bueno en silencio, ni
+        # siquiera reconectador/Solenium a pesar de ser el mismo medidor
+        # físico (la API puede fallar o traer ruido). El relleno con cero
+        # directo (horas_fuera_ventana_directo) NO entra acá -- no es una
+        # fuente ni una estimación, es una certeza física (fuera de la
+        # ventana solar no hay sol, así que no hay nada que sustituir).
+        if horas_reconectador or horas_solenium_h or horas_historico:
             revisar = True
-        # Mismo criterio de la excepción de arriba -- un hueco que sigue sin
-        # llenarse porque cae fuera de las ventanas horarias (reconectador
-        # 7h-16h, Solenium/histórico 6h-17h) no es un hueco real que
-        # preocupe: esas horas ya se esperan en ~0 sin importar la fuente
-        # (ver MGS 0077 Chiriguaná Norte 4 2026-08-09: 20h-22h sin dato,
-        # fuera de ambas ventanas desde el acotamiento de hoy -- quedaba
-        # marcado para revisar sin ninguna razón real, la curva completa
-        # coincidía con inversores dentro de rango).
+        # Un hueco DENTRO de la ventana solar que ninguna de las tres
+        # fuentes logró llenar sí preocupe -- ahí la certeza física no
+        # ayuda (podría ser generación real) y no hay ningún dato con qué
+        # completarlo. Fuera de la ventana ya se llenó directo en 0.0 más
+        # arriba, así que este chequeo nunca dispara por eso (ver MGS 0077
+        # Chiriguaná Norte 4 2026-08-09: 20h-22h, antes marcaba revisar sin
+        # ninguna razón real).
         if any(h in HORAS_SOLARES for h in curva_rellenada[curva_rellenada.isna()].index):
             revisar = True
 

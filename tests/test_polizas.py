@@ -69,6 +69,8 @@ from app.models.base import Base
 import app.models  # noqa: F401
 from app.models.proyectos import Proyecto, ProyectoInfoTecnica
 from app.models.polizas import Poliza
+from app.models.operadores_red import OperadorRed
+from app.models.fronteras import Frontera
 from app.schemas.polizas import PolizaUpsert
 from app.api.v1.polizas import listar, guardar
 
@@ -86,7 +88,10 @@ def _b(e, c, **k):
 @pytest.fixture
 def db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[Proyecto.__table__, ProyectoInfoTecnica.__table__, Poliza.__table__])
+    Base.metadata.create_all(engine, tables=[
+        Proyecto.__table__, ProyectoInfoTecnica.__table__, Poliza.__table__,
+        OperadorRed.__table__, Frontera.__table__,
+    ])
     s = sessionmaker(bind=engine)()
     yield s
     s.close()
@@ -162,3 +167,60 @@ def test_guardar_404_si_proyecto_no_existe(db):
     with pytest.raises(HTTPException) as exc_info:
         guardar(999, PolizaUpsert(numero_poliza="X"), db=db, _=None)
     assert exc_info.value.status_code == 404
+
+
+def test_listar_incluye_datos_tecnicos_existentes(db):
+    op = OperadorRed(nombre_legal="Afinia S.A. E.S.P.")
+    db.add(op)
+    db.flush()
+
+    p = _proyecto(db, operador_red_id=op.id)
+    info = ProyectoInfoTecnica(
+        proyecto_id=p.id,
+        voltaje_red="13.8/800",
+        potencia_panel_kwp="0.58",
+        potencia_inversores_kwp="300, 60 y 36",
+        potencia_ac_kw=996,
+    )
+    db.add(info)
+    db.flush()
+
+    resultado = listar(search=None, tipo_proyecto=None, poliza_om=None, db=db, _=None)
+
+    assert len(resultado) == 1
+    fila = resultado[0]
+    assert fila.operador_red == "Afinia S.A. E.S.P."
+    assert fila.voltaje_red == "13.8/800"
+    assert fila.potencia_panel_kwp == "0.58"
+    assert fila.potencia_inversores_kwp == "300, 60 y 36"
+    assert fila.potencia_ac_kw == 996.0
+
+
+def test_listar_datos_tecnicos_none_si_no_hay_info_tecnica(db):
+    _proyecto(db, nombre_comercial="Sin info técnica")
+
+    resultado = listar(search=None, tipo_proyecto=None, poliza_om=None, db=db, _=None)
+
+    assert resultado[0].operador_red is None
+    assert resultado[0].voltaje_red is None
+    assert resultado[0].potencia_panel_kwp is None
+    assert resultado[0].potencia_inversores_kwp is None
+    assert resultado[0].potencia_ac_kw is None
+
+
+def test_listar_operador_red_cae_a_frontera_si_proyecto_no_tiene_propio(db):
+    op = OperadorRed(nombre_legal="ESSA S.A. E.S.P.")
+    db.add(op)
+    db.flush()
+
+    p = _proyecto(db, nombre_comercial="Sin operador propio")
+    frontera = Frontera(
+        proyecto_id=p.id, nombre_frontera="Frontera 1",
+        tipo_frontera="generacion", operador_red_id=op.id,
+    )
+    db.add(frontera)
+    db.flush()
+
+    resultado = listar(search=None, tipo_proyecto=None, poliza_om=None, db=db, _=None)
+
+    assert resultado[0].operador_red == "ESSA S.A. E.S.P."

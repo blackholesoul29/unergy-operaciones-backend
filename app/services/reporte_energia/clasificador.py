@@ -518,6 +518,14 @@ def clasificar_generacion(
         revisar = True
 
     # --- Relleno horario centralizado ---
+    # Solo el cero directo (certeza física, fuera de la ventana solar) se
+    # aplica automático acá. reconectador/Solenium × FP/histórico dejaron de
+    # rellenar la curva final solos (decisión explícita 2026-08-12: mezclar
+    # otra fuente en la curva final sin que nadie lo pidiera era demasiado
+    # invasivo) -- quedan disponibles como acción manual desde el front, ver
+    # POST /fronteras/{id}/rellenar-horario en reporte_energia.py, que
+    # reusa reconectador.rellenar_horas_faltantes() sobre lo que haya
+    # quedado acá.
     curva_actual = resultado.get("curva_final")
     horas_reconectador, horas_solenium_h, horas_historico = set(), set(), set()
     horas_fuera_ventana_directo: set[int] = set()
@@ -526,89 +534,27 @@ def clasificar_generacion(
         and isinstance(curva_actual, pd.Series)
         and curva_actual.isna().any()
     ):
-        # Huecos fuera de la ventana solar (madrugada/noche) se llenan en
-        # 0.0 de una ANTES de intentar reconectador/Solenium/histórico -- el
-        # valor esperado ahí ya es ~0 sin importar la fuente (decisión
-        # explícita 2026-08-12: no tiene sentido gastar esas consultas, ni
-        # arriesgar que devuelvan ruido, en horas donde la certeza física ya
-        # es mejor que cualquier fuente de respaldo). Antes se intentaban
-        # las tres fuentes para TODAS las horas faltantes y solo se forzaba
-        # 0.0 lo que quedara sin llenar al final.
         huecos_iniciales = curva_actual[curva_actual.isna()].index
         horas_fuera_ventana_directo = {h for h in huecos_iniciales if h not in HORAS_SOLARES}
         if horas_fuera_ventana_directo:
             curva_actual = curva_actual.copy()
             curva_actual[sorted(horas_fuera_ventana_directo)] = 0.0
+            resultado["curva_final"] = curva_actual
+            resultado["energia_final_kwh"] = float(curva_actual.fillna(0).sum())
 
-        if curva_actual.isna().any():
-            if resultado.get("fp") is not None:
-                fp_relleno, fp_calc_relleno = resultado["fp"], resultado.get("fp_calculada")
-            else:
-                fp_relleno, fp_calc_relleno = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
-
-            curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
-                reconectador.rellenar_horas_faltantes(
-                    db, sol, curva_actual, project_id_solenium, fecha_str,
-                    frontera_id=frontera_id,
-                    curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
-                    fp=fp_relleno,
-                )
-            )
-            if curva_reconectador_ref is not None:
-                resultado["curva_reconectador_referencia"] = curva_a_lista(curva_reconectador_ref)
-        else:
-            curva_rellenada = curva_actual
-
-        # Las horas que ninguna de las tres fuentes cubre Y que además caen
-        # fuera de la ventana solar (debería ser raro ya que se llenaron
-        # arriba, pero la ventana de reconectador -7h-16h- y la de
-        # Solenium/histórico -6h-17h- no son idénticas a HORAS_SOLARES) se
-        # llenan igual directo en 0.0 -- así no queda ninguna en blanco en
-        # el editor de corrección manual (ver MGS 0077 Chiriguaná Norte 4
-        # 2026-08-09: 20h-22h).
-        horas_fuera_ventana = [h for h in curva_rellenada[curva_rellenada.isna()].index if h not in HORAS_SOLARES]
-        if horas_fuera_ventana:
-            curva_rellenada[horas_fuera_ventana] = 0.0
-        horas_fuera_ventana_directo |= set(horas_fuera_ventana)
-        if horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana_directo:
-            resultado["curva_final"] = curva_rellenada
-            resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
-        if horas_solenium_h and resultado.get("fp") is None:
-            resultado["fp"] = round(fp_relleno, 4) if fp_relleno is not None else None
-            resultado["fp_calculada"] = round(fp_calc_relleno, 4) if fp_calc_relleno is not None else None
-
-        # Cualquier relleno horario con una fuente real (reconectador,
-        # Solenium × FP o histórico) marca revisar SIEMPRE, sin importar la
-        # hora -- decisión explícita del usuario (2026-08-12): son
-        # sustituciones de dato (una fuente de respaldo reemplazando al
-        # medidor), no algo que se pueda dar por bueno en silencio, ni
-        # siquiera reconectador/Solenium a pesar de ser el mismo medidor
-        # físico (la API puede fallar o traer ruido). El relleno con cero
-        # directo (horas_fuera_ventana_directo) NO entra acá -- no es una
-        # fuente ni una estimación, es una certeza física (fuera de la
-        # ventana solar no hay sol, así que no hay nada que sustituir).
-        if horas_reconectador or horas_solenium_h or horas_historico:
-            revisar = True
-        # Un hueco DENTRO de la ventana solar que ninguna de las tres
-        # fuentes logró llenar sí preocupe -- ahí la certeza física no
-        # ayuda (podría ser generación real) y no hay ningún dato con qué
-        # completarlo. Fuera de la ventana ya se llenó directo en 0.0 más
-        # arriba, así que este chequeo nunca dispara por eso (ver MGS 0077
-        # Chiriguaná Norte 4 2026-08-09: 20h-22h, antes marcaba revisar sin
-        # ninguna razón real).
-        if any(h in HORAS_SOLARES for h in curva_rellenada[curva_rellenada.isna()].index):
+        # Un hueco DENTRO de la ventana solar sin dato marca revisar -- ahí
+        # la certeza física no ayuda (podría ser generación real) y, sin el
+        # relleno automático de las otras tres fuentes, no queda nada más
+        # con qué completarlo desde acá salvo la acción manual.
+        if any(h in HORAS_SOLARES for h in curva_actual[curva_actual.isna()].index):
             revisar = True
 
         # medidor_usado='revisar' es el valor "no se pudo construir nada"
-        # que puso _decidir_caso() para una curva vacía -- si el relleno de
-        # arriba SÍ logró llenar horas (aunque no todas), ya no es cierto
-        # que no haya fuente: quedaría diciendo "Sin fuente" con una energía
-        # real y un FP calculado (ver Granja Solar Uruaco 2026-08-03: caso 3,
-        # medidor_usado seguía en 'revisar' con 4.595,53 kWh reconstruidos
-        # vía Solenium × FP en horas_rellenadas_solenium).
-        if resultado.get("medidor_usado") == "revisar" and (
-            horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana_directo
-        ):
+        # que puso _decidir_caso() para una curva vacía -- si el cero directo
+        # SÍ logró llenar horas (aunque no todas), ya no es cierto que no
+        # haya fuente (ver Granja Solar Uruaco 2026-08-03: caso 3,
+        # medidor_usado seguía en 'revisar' con energía real reconstruida).
+        if resultado.get("medidor_usado") == "revisar" and horas_fuera_ventana_directo:
             resultado["medidor_usado"] = "relleno_horario"
 
     resultado["revisar_manualmente"] = revisar

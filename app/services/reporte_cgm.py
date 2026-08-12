@@ -181,40 +181,62 @@ def _calcular_resumen(
     n_dias = len(dias)
     horas_solares_total = len(HORAS_SOLARES) * n_dias
 
-    def _fila(datos: dict) -> dict:
-        frt_gen = datos.get("frt_gen")
-        frt_con = datos.get("frt_con")
+    # Total Consumo e Indisponibilidad necesitan una llamada a Quoia por
+    # (proyecto, día) -- se aplana todo (proyecto x día x tipo) en UN solo
+    # pool en vez de paralelizar solo por proyecto y dejar el loop de días
+    # secuencial adentro: con destinatarios chicos (1-22 proyectos, Hoja 2 de
+    # un día) daba igual, pero "Operaciones Unergy" (todas las fronteras,
+    # ~100+ proyectos) en el Resumen Mensual (Hoja 3, hasta ~30 días) hacía
+    # que cada hilo por proyecto tuviera que hacer sus N días uno por uno --
+    # bug real 2026-08-11/12: con la paralelización solo por proyecto, la
+    # Hoja 3 seguía tardando >180s aunque la Hoja 2 (1 día) ya bajó a ~15s.
+    tareas: list[tuple[int, str, str]] = []  # (proyecto_id, "gen"|"con", dia)
+    for pid, datos in proyectos.items():
+        if datos.get("frt_gen") and (datos.get("main_meter_gen") or datos.get("backup_meter_gen")):
+            tareas += [(pid, "gen", dia) for dia in dias]
+        if datos.get("frt_con") and (datos.get("main_meter_con") or datos.get("backup_meter_con")):
+            tareas += [(pid, "con", dia) for dia in dias]
 
+    def _trabajo(tarea: tuple[int, str, str]) -> tuple[int, str, float]:
+        pid, tipo, dia = tarea
+        datos = proyectos[pid]
+        if tipo == "gen":
+            c = curvas_energia.curvas_de_frontera(
+                gaia, mapa_nodo, datos.get("main_meter_gen"), datos.get("backup_meter_gen"),
+                dia, datos.get("frt_gen"), recuperar=False,
+            )
+            curva = _medidor_con_dato(c["curva_ppal"], c["curva_resp"])
+            return pid, tipo, float(_horas_en_cero(curva))
+        # Consumo -- medidor (variable iae, 'consumo_ppal'/'consumo_resp', mismo
+        # criterio que ya usa clasificador_consumo.py para esta misma frontera),
+        # no CGM -- principal si tiene dato, si no respaldo.
+        c = curvas_energia.curvas_de_frontera(
+            gaia, mapa_nodo, datos.get("main_meter_con"), datos.get("backup_meter_con"),
+            dia, datos.get("frt_con"), recuperar=False,
+        )
+        curva = _medidor_con_dato(c["consumo_ppal"], c["consumo_resp"])
+        return pid, tipo, float(curva.fillna(0).sum()) if curva is not None else 0.0
+
+    horas_cero_por_pid: dict[int, float] = {}
+    con_por_pid: dict[int, float] = {}
+    if tareas:
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            for pid, tipo, valor in pool.map(_trabajo, tareas):
+                destino = horas_cero_por_pid if tipo == "gen" else con_por_pid
+                destino[pid] = destino.get(pid, 0.0) + valor
+
+    filas_resumen = []
+    for pid, datos in proyectos.items():
+        frt_gen = datos.get("frt_gen")
         total_gen = sum(
             f["total reported energy"]
             for f in filas_por_frt.get(frt_gen, [])
             if f["meter"] == "main" and f["report date"] in dias_set
         ) if frt_gen else 0.0
 
-        main_meter_gen, backup_meter_gen = datos.get("main_meter_gen"), datos.get("backup_meter_gen")
-        horas_cero_total = None
-        if frt_gen and (main_meter_gen or backup_meter_gen):
-            horas_cero_total = 0
-            for dia in dias:
-                c = curvas_energia.curvas_de_frontera(
-                    gaia, mapa_nodo, main_meter_gen, backup_meter_gen, dia, frt_gen, recuperar=False,
-                )
-                curva = _medidor_con_dato(c["curva_ppal"], c["curva_resp"])
-                horas_cero_total += _horas_en_cero(curva)
-
-        # Total Consumo -- medidor (variable iae, 'consumo_ppal'/'consumo_resp',
-        # mismo criterio que ya usa clasificador_consumo.py para esta misma
-        # frontera), no CGM -- principal si tiene dato, si no respaldo.
-        main_meter_con, backup_meter_con = datos.get("main_meter_con"), datos.get("backup_meter_con")
-        total_con = 0.0
-        if frt_con and (main_meter_con or backup_meter_con):
-            for dia in dias:
-                c = curvas_energia.curvas_de_frontera(
-                    gaia, mapa_nodo, main_meter_con, backup_meter_con, dia, frt_con, recuperar=False,
-                )
-                curva = _medidor_con_dato(c["consumo_ppal"], c["consumo_resp"])
-                if curva is not None:
-                    total_con += float(curva.fillna(0).sum())
+        tiene_medidor_gen = frt_gen and (datos.get("main_meter_gen") or datos.get("backup_meter_gen"))
+        horas_cero_total = horas_cero_por_pid.get(pid) if tiene_medidor_gen else None
+        total_con = con_por_pid.get(pid, 0.0)
 
         capacidad_dc = datos.get("capacidad_dc_kwp")
         capacidad_efectiva_kw = (
@@ -222,7 +244,7 @@ def _calcular_resumen(
         )
         gen_max_teorica = capacidad_efectiva_kw * 24 * n_dias if capacidad_efectiva_kw else None
 
-        return {
+        filas_resumen.append({
             etiqueta_columna: etiqueta_valor,
             "Proyecto": datos["nombre"],
             "Total Generación (kWh)": round(total_gen, 3),
@@ -233,18 +255,8 @@ def _calcular_resumen(
                 if horas_cero_total is not None and horas_solares_total else None
             ),
             "Factor de Planta (%)": round(total_gen / gen_max_teorica * 100, 2) if gen_max_teorica else None,
-        }
-
-    # Cada proyecto hace su propio loop secuencial de días por dentro de
-    # _fila() (una llamada a Quoia por día, Generación y Consumo) -- con
-    # destinatarios chicos (1-22 proyectos) daba igual, pero "Operaciones
-    # Unergy" (todas las fronteras, ~100+ proyectos) multiplicado por varios
-    # días del mes hacía que este paso por sí solo tardara minutos (bug real
-    # 2026-08-11, el fetch de la Hoja 1 ya se había paralelizado pero este
-    # loop de resumen no). Se paralaliza por PROYECTO -- cada uno sigue
-    # pidiendo sus propios días en orden, pero varios proyectos a la vez.
-    with ThreadPoolExecutor(max_workers=12) as pool:
-        return list(pool.map(_fila, proyectos.values()))
+        })
+    return filas_resumen
 
 
 def calcular_resumen_mensual(

@@ -605,7 +605,9 @@ def clasificar_generacion(
         # real y un FP calculado (ver Granja Solar Uruaco 2026-08-03: caso 3,
         # medidor_usado seguía en 'revisar' con 4.595,53 kWh reconstruidos
         # vía Solenium × FP en horas_rellenadas_solenium).
-        if resultado.get("medidor_usado") == "revisar" and (horas_reconectador or horas_solenium_h or horas_historico):
+        if resultado.get("medidor_usado") == "revisar" and (
+            horas_reconectador or horas_solenium_h or horas_historico or horas_fuera_ventana_directo
+        ):
             resultado["medidor_usado"] = "relleno_horario"
 
     resultado["revisar_manualmente"] = revisar

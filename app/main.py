@@ -680,6 +680,11 @@ _PENDING_DDLS = [
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_solenium_referencia JSONB",
+    # migration — reporte_energia_generacion: curva de reconectador tal como
+    # estaba al momento de clasificar (2026-08-12) -- solo se llena en los
+    # días donde reconectador SÍ se llegó a consultar (medidor+inversores ya
+    # dejaron huecos), a diferencia de medidor/Solenium que se piden siempre.
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_reconectador_referencia JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
     # migration — correlation_sync_log: track sync runs

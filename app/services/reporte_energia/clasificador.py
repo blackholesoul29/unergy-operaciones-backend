@@ -546,12 +546,16 @@ def clasificar_generacion(
             else:
                 fp_relleno, fp_calc_relleno = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
 
-            curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico = reconectador.rellenar_horas_faltantes(
-                db, sol, curva_actual, project_id_solenium, fecha_str,
-                frontera_id=frontera_id,
-                curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
-                fp=fp_relleno,
+            curva_rellenada, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
+                reconectador.rellenar_horas_faltantes(
+                    db, sol, curva_actual, project_id_solenium, fecha_str,
+                    frontera_id=frontera_id,
+                    curva_solenium=curva_solenium if isinstance(curva_solenium, pd.Series) else None,
+                    fp=fp_relleno,
+                )
             )
+            if curva_reconectador_ref is not None:
+                resultado["curva_reconectador_referencia"] = curva_a_lista(curva_reconectador_ref)
         else:
             curva_rellenada = curva_actual
 

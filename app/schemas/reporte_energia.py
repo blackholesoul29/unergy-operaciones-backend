@@ -69,6 +69,10 @@ class DetalleFronteraReporte(BaseModel):
     curva_medidor_principal: list[float | None] | None = None
     curva_medidor_respaldo: list[float | None] | None = None
     curva_solenium: list[float | None] | None = None
+    # A diferencia de las de arriba, casi siempre viene en null -- solo se
+    # llenó si el reconectador se consultó ese día (medidor+inversores ya
+    # dejaron huecos sin cubrir). Solo aplica a Generación.
+    curva_reconectador: list[float | None] | None = None
     # True si el valor EN VIVO de Quoia (medidor o Solenium) ya difiere del
     # que quedó guardado al momento de clasificar -- señal de que conviene
     # re-correr el clasificador para este día (ver MGS 0032 El Paso Norte

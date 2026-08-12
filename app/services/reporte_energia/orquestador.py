@@ -137,6 +137,10 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
     fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
     fila.curva_solenium_referencia = resultado.get("curva_solenium_referencia")
+    # Solo viene poblada si el reconectador SÍ se llegó a consultar ese día
+    # (medidor+inversores ya dejaron huecos) -- null la mayoría de los días,
+    # a diferencia de medidor/Solenium arriba.
+    fila.curva_reconectador_referencia = resultado.get("curva_reconectador_referencia")
     if existente is None:
         db.add(fila)
 

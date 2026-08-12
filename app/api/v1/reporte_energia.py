@@ -179,6 +179,10 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_ppal_bd = rep.curva_medidor_principal
     curva_medidor_resp_bd = rep.curva_medidor_respaldo
     curva_sol_bd = rep.curva_solenium_referencia if es_generacion else None
+    # Igual que Solenium -- persistida, sin re-consultar en vivo (sería una
+    # llamada más a la API de Solenium en cada apertura del panel). Casi
+    # siempre en null: solo se llenó si el reconectador se consultó ese día.
+    curva_reconectador_bd = rep.curva_reconectador_referencia if es_generacion else None
 
     # Solenium ya NO se consulta en vivo acá -- costaba ~2s en cada apertura
     # del panel, solo para detectar si Solenium cambió desde que se
@@ -270,6 +274,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        curva_reconectador=curva_reconectador_bd,
         medidor_actualizado_en_quoia=medidor_actualizado_en_quoia,
         energia_actual_kwh=round(energia_actual_kwh, 4) if energia_actual_kwh is not None else None,
         curva_actual=curva_actual,

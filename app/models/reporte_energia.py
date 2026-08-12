@@ -79,6 +79,11 @@ class ReporteEnergiaGeneracion(Base):
     curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     curva_solenium_referencia: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # A diferencia de medidor/Solenium, el reconectador NO se consulta todos
+    # los días -- solo cuando medidor e inversores × FP ya dejaron huecos sin
+    # cubrir (tercera fuente de la cadena de relleno, ver reconectador.py) --
+    # así que esta columna queda en null la mayoría de los días, a propósito.
+    curva_reconectador_referencia: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)

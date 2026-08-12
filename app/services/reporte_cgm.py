@@ -7,6 +7,7 @@ catálogo de Quoia -- el llamador decide qué frt_codes pedir.
 from __future__ import annotations
 
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from io import BytesIO
 
@@ -180,8 +181,7 @@ def _calcular_resumen(
     n_dias = len(dias)
     horas_solares_total = len(HORAS_SOLARES) * n_dias
 
-    filas_resumen = []
-    for datos in proyectos.values():
+    def _fila(datos: dict) -> dict:
         frt_gen = datos.get("frt_gen")
         frt_con = datos.get("frt_con")
 
@@ -222,7 +222,7 @@ def _calcular_resumen(
         )
         gen_max_teorica = capacidad_efectiva_kw * 24 * n_dias if capacidad_efectiva_kw else None
 
-        filas_resumen.append({
+        return {
             etiqueta_columna: etiqueta_valor,
             "Proyecto": datos["nombre"],
             "Total Generación (kWh)": round(total_gen, 3),
@@ -233,8 +233,18 @@ def _calcular_resumen(
                 if horas_cero_total is not None and horas_solares_total else None
             ),
             "Factor de Planta (%)": round(total_gen / gen_max_teorica * 100, 2) if gen_max_teorica else None,
-        })
-    return filas_resumen
+        }
+
+    # Cada proyecto hace su propio loop secuencial de días por dentro de
+    # _fila() (una llamada a Quoia por día, Generación y Consumo) -- con
+    # destinatarios chicos (1-22 proyectos) daba igual, pero "Operaciones
+    # Unergy" (todas las fronteras, ~100+ proyectos) multiplicado por varios
+    # días del mes hacía que este paso por sí solo tardara minutos (bug real
+    # 2026-08-11, el fetch de la Hoja 1 ya se había paralelizado pero este
+    # loop de resumen no). Se paralaliza por PROYECTO -- cada uno sigue
+    # pidiendo sus propios días en orden, pero varios proyectos a la vez.
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        return list(pool.map(_fila, proyectos.values()))
 
 
 def calcular_resumen_mensual(

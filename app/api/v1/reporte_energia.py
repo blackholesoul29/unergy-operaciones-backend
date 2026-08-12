@@ -200,24 +200,21 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
             borders = fut_borders.result()
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if meta:
-            c = curvas.curvas_de_frontera(
+            # curva_medidor_en_vivo() en vez de curvas_de_frontera(): acá solo
+            # hace falta UNA variable (eae o iae, según el tipo de frontera) --
+            # curvas_de_frontera() trae las 4 (eae+iae x principal+respaldo) de
+            # forma secuencial porque el clasificador sí las necesita todas;
+            # pedir las 2 de más y en secuencia era la mayor parte de la demora
+            # al abrir el panel (2026-08-12). Sin recuperación activa tampoco
+            # -- esto es solo para mostrar una curva de referencia, no tiene
+            # sentido interrogar el medidor (hasta 90s) por eso.
+            var_name = "eae" if es_generacion else "iae"
+            curva_p, curva_r = curvas.curva_medidor_en_vivo(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-                str(fecha), front.codigo_frontera,
-                recuperar=False,  # esto es solo para mostrar una curva de referencia --
-                                  # no tiene sentido interrogar el medidor (hasta 90s) por eso
+                str(fecha), front.codigo_frontera, var_name,
             )
-            # curvas_de_frontera() siempre trae ambas variables del medidor --
-            # eae (curva_ppal/curva_resp, generación) e iae (consumo_ppal/
-            # consumo_resp) -- hay que elegir la que corresponde al tipo de
-            # frontera, si no la de Consumo termina mostrando la curva de
-            # generación del mismo medidor (bug real: 2026-08-03, El Joropo
-            # Consumo mostraba una curva con forma solar de mediodía).
-            if es_generacion:
-                curva_medidor_ppal_viva = curva_a_lista(c["curva_ppal"])
-                curva_medidor_resp_viva = curva_a_lista(c["curva_resp"])
-            else:
-                curva_medidor_ppal_viva = curva_a_lista(c["consumo_ppal"])
-                curva_medidor_resp_viva = curva_a_lista(c["consumo_resp"])
+            curva_medidor_ppal_viva = curva_a_lista(curva_p)
+            curva_medidor_resp_viva = curva_a_lista(curva_r)
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 

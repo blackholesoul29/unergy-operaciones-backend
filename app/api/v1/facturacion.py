@@ -12,6 +12,7 @@ Fuentes:
 """
 import io
 import logging
+import re
 from calendar import monthrange
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -80,12 +81,41 @@ async def cargar_despacho(
     i_fec = _find({"FECHADOCUMENTO", "FECHA DOCUMENTO", "FECHA"})
     if i_con is None:
         raise HTTPException(400, "No encontré la columna CONTRATO en el archivo")
-    horas = [i for i, h in enumerate(header)
-             if isinstance(h, str) and (h.strip().upper().startswith("DESP_HORA")
-                                        or h.strip().upper().replace(" ", "").startswith("H0")
-                                        or h.strip().upper().replace(" ", "") in {f"H{n}" for n in range(24)})]
-    if not horas:
-        raise HTTPException(400, "No encontré columnas de horas (DESP_HORA 01..24)")
+    # Columnas de ENERGÍA por hora. El despacho bien armado trae EXACTAMENTE 24
+    # (DESP_HORA 01..24). Hay archivos mal armados (p. ej. abril `dspcttos_txF`) que
+    # mezclan energía y PRECIO por hora, dejando columnas duplicadas/48 de hora — y
+    # los nombres quedan tan corruptos que no se pueden leer confiable. En vez de
+    # inflar el total callado, se RECHAZA y se pide el archivo correcto.
+    def _horas_por_patron(patron):
+        d: dict[int, int] = {}
+        cnt = 0
+        for i, h in enumerate(header):
+            if not isinstance(h, str):
+                continue
+            mm = re.match(patron, h.strip().upper().replace(" ", ""))
+            if not mm:
+                continue
+            cnt += 1
+            n = int(mm.group(1))
+            if 1 <= n <= 24 and n not in d:
+                d[n] = i
+        return d, cnt
+
+    hd, n_cols_hora = _horas_por_patron(r"^DESP_HORA(\d{1,2})(?:\.\d+)?$")
+    if not hd:   # respaldo para formatos H01..H24
+        hd, n_cols_hora = _horas_por_patron(r"^H(\d{1,2})(?:\.\d+)?$")
+    if not hd:
+        raise HTTPException(400, "No encontré columnas de horas (DESP_HORA 01..24) en el archivo.")
+    if len(hd) != 24 or n_cols_hora != 24:
+        raise HTTPException(
+            400,
+            f"El archivo parece mal armado: encontré {n_cols_hora} columnas de hora y "
+            f"{len(hd)} horas distintas (deben ser 24 columnas = 24 horas). Suele pasar "
+            f"cuando el Excel trae la energía y el PRECIO por hora mezclados (ej. "
+            f"'dspcttos_txF'). Sube el archivo de despacho correcto (24 columnas "
+            f"DESP_HORA 01..24, ej. 'dspcttos_txr' / 'dspcttos_txf').",
+        )
+    horas = [hd[n] for n in sorted(hd)]
 
     agg: dict = {}
     diario: dict = {}   # (contrato, fecha) → kwh del día
@@ -134,7 +164,8 @@ async def cargar_despacho(
         db.add(DespachoContratoDia(periodo=per, codigo_sic_contrato=con, fecha=fecha, kwh=kwh_dia))
     db.commit()
     total = sum(d["kwh"] for d in agg.values())
-    return {"periodo": per, "contratos": len(agg), "kwh_total": round(total, 2), "archivo": archivo.filename}
+    return {"periodo": per, "contratos": len(agg), "kwh_total": round(total, 2),
+            "horas": len(horas), "archivo": archivo.filename}
 
 
 @router.get("/despacho")

@@ -198,23 +198,31 @@ def _calcular_resumen(
             tareas += [(pid, "con", dia) for dia in dias]
 
     def _trabajo(tarea: tuple[int, str, str]) -> tuple[int, str, float]:
+        # curvas_de_frontera() pide SIEMPRE 4 curvas (eae/iae x principal/
+        # respaldo) -- acá solo hace falta una variable, así que se llama
+        # _curva_nodo() directo (2 llamadas en vez de 4) para no duplicar el
+        # trabajo. Medido en producción 2026-08-12: con curvas_de_frontera,
+        # el Resumen Mensual (72 proyectos x 12 días) tardaba >170s incluso
+        # ya aplanado/paralelizado -- el cuello de botella no era la
+        # paralelización, era pedir el doble de curvas de las necesarias.
         pid, tipo, dia = tarea
         datos = proyectos[pid]
         if tipo == "gen":
-            c = curvas_energia.curvas_de_frontera(
-                gaia, mapa_nodo, datos.get("main_meter_gen"), datos.get("backup_meter_gen"),
-                dia, datos.get("frt_gen"), recuperar=False,
-            )
-            curva = _medidor_con_dato(c["curva_ppal"], c["curva_resp"])
+            main_id, back_id, var = datos.get("main_meter_gen"), datos.get("backup_meter_gen"), "eae"
+        else:
+            main_id, back_id, var = datos.get("main_meter_con"), datos.get("backup_meter_con"), "iae"
+
+        node_p = mapa_nodo.get(int(main_id)) if main_id else None
+        node_r = mapa_nodo.get(int(back_id)) if back_id else None
+        curva_p, _ = curvas_energia._curva_nodo(gaia, node_p, dia, f"resumen/{tipo}/principal", var)
+        curva_r, _ = curvas_energia._curva_nodo(gaia, node_r, dia, f"resumen/{tipo}/respaldo", var)
+        curva = _medidor_con_dato(curva_p, curva_r)
+
+        if tipo == "gen":
             return pid, tipo, float(_horas_en_cero(curva))
-        # Consumo -- medidor (variable iae, 'consumo_ppal'/'consumo_resp', mismo
-        # criterio que ya usa clasificador_consumo.py para esta misma frontera),
-        # no CGM -- principal si tiene dato, si no respaldo.
-        c = curvas_energia.curvas_de_frontera(
-            gaia, mapa_nodo, datos.get("main_meter_con"), datos.get("backup_meter_con"),
-            dia, datos.get("frt_con"), recuperar=False,
-        )
-        curva = _medidor_con_dato(c["consumo_ppal"], c["consumo_resp"])
+        # Consumo -- medidor (variable iae, mismo criterio que ya usa
+        # clasificador_consumo.py para esta misma frontera), no CGM --
+        # principal si tiene dato, si no respaldo.
         return pid, tipo, float(curva.fillna(0).sum()) if curva is not None else 0.0
 
     horas_cero_por_pid: dict[int, float] = {}

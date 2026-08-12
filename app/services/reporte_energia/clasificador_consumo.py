@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva, curva_a_lista
+from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, curva_a_lista
 
 HORAS = list(range(24))
 ESTADOS_AUTOMATICO = {"OK", "WARNING"}
@@ -244,11 +244,33 @@ def clasificar_consumo(
     # estimación (mediana × forma), no dato real medido ese día.
     curva_actual = resultado.get("curva_final")
     horas_historico: set[int] = set()
+    horas_ventana_solar_directo: set[int] = set()
     if resultado.get("caso") == "Medidor" and isinstance(curva_actual, pd.Series) and curva_actual.isna().any():
-        curva_rellenada, horas_historico = _rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
-        if horas_historico:
+        # Huecos DENTRO de la ventana solar se llenan en 0.0 directo, ANTES
+        # de intentar el histórico -- decisión explícita del usuario
+        # (2026-08-12): esta frontera es el consumo de red del MISMO
+        # proyecto de generación solar, así que durante horas de sol alto
+        # el consumo de red ya se espera en ~0 (los propios paneles cubren
+        # la carga del sitio) -- mismo principio que ya se aplicó a
+        # Generación para las horas FUERA de la ventana solar. A
+        # diferencia del histórico, esto no es una estimación (mediana ×
+        # forma), es una certeza física del mismo tipo, así que NO marca
+        # Revisar Manualmente.
+        huecos_iniciales = curva_actual[curva_actual.isna()].index
+        horas_ventana_solar_directo = {h for h in huecos_iniciales if h in HORAS_SOLARES}
+        if horas_ventana_solar_directo:
+            curva_actual = curva_actual.copy()
+            curva_actual[sorted(horas_ventana_solar_directo)] = 0.0
+
+        if curva_actual.isna().any():
+            curva_rellenada, horas_historico = _rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
+        else:
+            curva_rellenada = curva_actual
+
+        if horas_historico or horas_ventana_solar_directo:
             resultado["curva_final"] = curva_rellenada
             resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
+        if horas_historico:
             resultado["revisar_manualmente"] = True
         if curva_rellenada.isna().any():
             resultado["revisar_manualmente"] = True

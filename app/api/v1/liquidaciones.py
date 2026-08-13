@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func, text
+from sqlalchemy import func, text, or_
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
@@ -27,7 +27,9 @@ from app.models.liquidaciones import (
     EstadoMandatoEnum, EstadoFacturaEnum,
 )
 from app.models.proyectos import Proyecto, ProyectoInversionista
-from app.models.contratos import PPATarifa, PPAContrato, ppa_contrato_proyectos_table
+from app.models.contratos import (
+    PPATarifa, PPAContrato, ppa_contrato_proyectos_table, ContratoServicio,
+)
 from app.models.clientes import Cliente, ClienteTasaServicio
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
@@ -452,12 +454,27 @@ def resumen_liquidaciones_desde_panel(
 
     # Alertas: proyectos minigranja en operación que NO tienen panel este período
     # (posible carga de ER faltante). Solo para tipo preliquidacion.
+    # Solo se alerta por proyectos que REPRESENTAMOS: las liquidaciones aplican
+    # únicamente a esos. Criterio SEGURO (no dejar de liquidar algo representado):
+    # se representa si el flag srv_representacion está activo O existe un contrato
+    # de servicio de representación vigente. Solo se excluye lo que no tiene
+    # representación por NINGUNA fuente (p. ej. San Pedro: flag off y sin contrato).
+    # OJO datos: el flag y el contrato a veces se contradicen (El Roble, Chima
+    # Oriente tienen flag off pero contrato vigente) → se conservan por seguridad.
     sin_panel = []
     if tipo == "preliquidacion":
+        tiene_contrato_repr = (
+            db.query(ContratoServicio.id)
+            .filter(ContratoServicio.proyecto_id == Proyecto.id,
+                    ContratoServicio.servicio_aplica == "representacion",
+                    ContratoServicio.estado == "vigente")
+            .exists()
+        )
         q = (
             db.query(Proyecto.id, Proyecto.nombre_comercial)
             .filter(Proyecto.estado == "en_operacion",
-                    Proyecto.tipo_proyecto == "minigranja")
+                    Proyecto.tipo_proyecto == "minigranja",
+                    or_(Proyecto.srv_representacion.is_(True), tiene_contrato_repr))
         )
         if proy_ids:
             q = q.filter(~Proyecto.id.in_(proy_ids))

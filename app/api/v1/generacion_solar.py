@@ -1127,16 +1127,33 @@ def fleet_monitoring(
             if pid is not None:
                 sol_name_map[_normalize_name(sp.get("name") or "")] = int(pid)
 
+        # project_id_solenium es único en la tabla: un mismo sol_id puede matchear
+        # por nombre a dos proyectos internos distintos (ej. planta principal vs.
+        # su proyecto de "excedentes"). Sin este chequeo, ese conflicto revienta
+        # el UPDATE de TODOS los proyectos de este lote (misma transacción) y
+        # ninguno queda asignado, aunque su match individual fuera correcto.
+        used_ids = {
+            v for (v,) in db.query(Proyecto.project_id_solenium)
+                            .filter(Proyecto.project_id_solenium.isnot(None)).all()
+        }
+
         for p in sin_id:
             sol_id = _find_solenium_id(p, sol_name_map)
             if sol_id is None:
                 logger.warning("sin match solenium al auto-asignar: proyecto_id=%d nombre='%s'",
                                 p.id, p.nombre_comercial)
                 continue
+            if str(sol_id) in used_ids:
+                logger.warning(
+                    "match ambiguo al auto-asignar: proyecto_id=%d nombre='%s' -> sol_id=%d "
+                    "ya asignado a otro proyecto, requiere revisión manual",
+                    p.id, p.nombre_comercial, sol_id)
+                continue
             logger.info("auto-asignando project_id_solenium=%d a proyecto_id=%d nombre='%s'",
                         sol_id, p.id, p.nombre_comercial)
             p.project_id_solenium = str(sol_id)
             db.add(p)
+            used_ids.add(str(sol_id))
         db.commit()
 
     today_str = _hoy_col().isoformat()

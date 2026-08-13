@@ -17,13 +17,14 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.contratos import ContratoServicio
 from app.models.clientes import Cliente, ClienteTasaServicio
 import json
 
@@ -55,6 +56,26 @@ def _es_minigranja_operativa():
     Excluye AMC, Acanto, COLxxx, proyectos en desarrollo, etc.
     """
     return (Proyecto.tipo_proyecto == "minigranja") & (Proyecto.estado == "en_operacion")
+
+
+def _representamos():
+    """
+    Condición SQLAlchemy: representamos el proyecto. Las liquidaciones (y por tanto
+    el Panel) solo aplican a proyectos que representamos. Criterio SEGURO — igual que
+    en liquidaciones.py: flag srv_representacion activo O contrato de representación
+    vigente (el flag y el contrato a veces se contradicen; se conserva si CUALQUIERA
+    indica representación para no dejar de liquidar algo representado).
+    """
+    tiene_contrato_repr = (
+        select(ContratoServicio.id)
+        .where(
+            ContratoServicio.proyecto_id == Proyecto.id,
+            ContratoServicio.servicio_aplica == "representacion",
+            ContratoServicio.estado == "vigente",
+        )
+        .exists()
+    )
+    return or_(Proyecto.srv_representacion.is_(True), tiene_contrato_repr)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -567,10 +588,12 @@ def listar_clasificacion(
         .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
     }
     # El Panel Contable es SOLO de minigranjas operativas: filtrar para no listar
-    # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er).
+    # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er). Además, solo
+    # proyectos que REPRESENTAMOS: los que no representamos no se liquidan, así que
+    # no deben aparecer en la clasificación (p. ej. San Pedro).
     proyectos = (
         db.query(Proyecto)
-        .filter(_es_minigranja_operativa())
+        .filter(_es_minigranja_operativa(), _representamos())
         .order_by(Proyecto.nombre_comercial)
         .all()
     )

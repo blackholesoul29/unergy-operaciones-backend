@@ -11,8 +11,8 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
 import app.models  # noqa: F401  (registra todos los modelos)
-from app.models.garantias_proyecciones import GarantiaSnapshot
-from app.services.garantias_proyecciones import filas_snapshot
+from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado
+from app.services.garantias_proyecciones import filas_snapshot, pagado_por_periodo, set_pagado
 from app.services import garantias_proyecciones as svc
 from app.api.v1 import garantias_proyecciones as api
 
@@ -124,3 +124,40 @@ def test_endpoint_post_guarda_snapshot(db, monkeypatch):
     assert out["guardadas"] == 2
     # y quedan en el historial
     assert len(api.get_historial(db=db, _=USER)["snapshots"]) == 2
+
+
+def test_guardar_y_leer_pagado(db):
+    db.add(GarantiaPagado(anio=2026, mes=8, valor=80_000_000.0))
+    db.commit()
+    leido = db.query(GarantiaPagado).one()
+    assert leido.anio == 2026 and float(leido.valor) == 80_000_000.0
+
+
+def test_set_y_pagado_por_periodo(db):
+    set_pagado(db, 2026, 8, 80_000_000.0)
+    set_pagado(db, 2026, 8, 75_000_000.0)  # upsert: reemplaza
+    d = pagado_por_periodo(db)
+    assert d[(2026, 8)] == 75_000_000.0
+
+
+def test_construir_live_incluye_saldo(db, monkeypatch):
+    bal = {"balance": {"ungg": {
+        "venta_bolsa": {"real": 0.0, "proyectado": 30.0, "total": 50.0, "n_plantas": 1},
+        "compra_bolsa_directa": {"real": 0.0, "proyectado": 4.0, "total": 6.0, "n_plantas": 1},
+    }}, "periodo": {}}
+    monkeypatch.setattr(svc, "_balance_fn", lambda db_, a, m: bal)
+    monkeypatch.setattr(svc, "_precio_fn", lambda: 900.0)
+    monkeypatch.setattr(svc, "_regulatorio_fn",
+                        lambda a, m: {"valor": 0.0, "anio": a, "mes": m, "fallback": False})
+    # garantia resto mes actual = 26*1000*900 = 23_400_000; pagamos 24_000_000 -> saldo +600_000
+    set_pagado(db, 2026, 8, 24_000_000.0)
+    res = svc.construir_proyecciones_live(db, hoy=date(2026, 8, 14))
+    v1 = res["ventanas"][0]
+    assert v1["pagado"] == 24_000_000.0
+    assert v1["saldo"] == 24_000_000.0 - 23_400_000.0
+
+
+def test_endpoint_put_y_get_pagado(db):
+    api.put_pagado(anio=2026, mes=8, valor=80_000_000.0, db=db, _=USER)
+    out = api.get_pagado(db=db, _=USER)
+    assert out["pagado"] == [{"anio": 2026, "mes": 8, "valor": 80_000_000.0}]

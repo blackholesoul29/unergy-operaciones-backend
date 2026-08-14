@@ -1,7 +1,9 @@
 """Snapshot semanal de una estimación de garantía (una fila por ventana y corte)."""
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, func
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -27,3 +29,17 @@ class GarantiaSnapshot(Base):
     regulatorio_mes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     regulatorio_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GarantiaPagado(Base):
+    """Monto de garantía efectivamente precobrado/pagado por período (ingreso manual)."""
+    __tablename__ = "garantia_pagado"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    anio: Mapped[int] = mapped_column(Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(Integer, nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("anio", "mes", name="uq_garantia_pagado_periodo"),)

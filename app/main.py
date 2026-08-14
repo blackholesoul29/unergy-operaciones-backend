@@ -2507,9 +2507,14 @@ def _scheduled_reporte_energia():
 def _scheduled_excel_terceros_cedillanos():
     """Revisa operaciones@unergy.io por correo nuevo de Cedillanos con su
     Excel de CGM (ver excel_terceros_email.py) -- reemplaza la carga
-    manual. Una vez al día alcanza: si el correo llega más tarde de lo
-    esperado un día puntual, la próxima corrida diaria lo recoge igual
-    (sigue sin leer hasta que se procese con éxito)."""
+    manual. El reporte debe estar listo antes de las 6am, pero el correo
+    de Cedillanos históricamente llega entre 3:25am y 6:10am (con
+    tendencia a correrse más tarde, ver sesión 2026-08-14) -- por eso esta
+    función corre cada 15 min de 4am a 6am (ver registro del cron más
+    abajo) en vez de una sola vez, para minimizar el tiempo entre que el
+    correo llega y el dato queda cargado. Costo despreciable: sin correo
+    nuevo, cada corrida es solo un IMAP SEARCH que no toca la base de
+    datos (ver revisar_correo_cedillanos)."""
     from app.services.reporte_energia.excel_terceros_email import revisar_correo_cedillanos
 
     revisar_correo_cedillanos()
@@ -3491,11 +3496,24 @@ def _deferred_init():
             )
 
             if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                # Cada 15 min de 4:00am a 6:00am (9 corridas) -- el correo de
+                # Cedillanos históricamente llega entre 3:25am y 6:10am (con
+                # tendencia a correrse más tarde) y el reporte debe estar
+                # listo antes de las 6am. Dos triggers porque CronTrigger no
+                # soporta minutos distintos por hora en una sola expresión
+                # (4am-5:45am cada 15 min + 6:00am exacto, el último intento
+                # antes del corte).
                 _mgs_scheduler.add_job(
                     _scheduled_excel_terceros_cedillanos,
-                    CronTrigger(hour=9, minute=0, timezone=settings.TIMEZONE),
-                    id="excel_terceros_cedillanos",
-                    name="Reporte de Energía -- Excel de Cedillanos por correo",
+                    CronTrigger(hour="4,5", minute="*/15", timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (4-5:45am)",
+                )
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_6am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
                 )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del

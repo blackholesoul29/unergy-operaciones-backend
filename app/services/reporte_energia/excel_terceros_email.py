@@ -26,9 +26,11 @@ logger = logging.getLogger("reporte_energia.excel_terceros_email")
 
 CEDILLANOS_FRONTERA_ID = 79  # Cedillanos_excedentes, Frt88292
 CEDILLANOS_REMITENTE = "cgm@erco.energy"
-# Más estable que "Alsec Llanos" en el asunto -- no depende de si el correo
-# trae prefijo RE:/FW: ni de variaciones de mayúsculas/tildes en el nombre.
-CEDILLANOS_ASUNTO_CLAVE = "85329"
+# El SEARCH de Gmail busca por TOKEN completo, no por subcadena (probado en
+# vivo 2026-08-14): "85329" nunca hace match con "FRT85329" en el asunto,
+# aunque sí sea una subcadena real -- hay que usar el token completo tal
+# como aparece en el asunto ("RE: FRT85329 - Alsec Llanos").
+CEDILLANOS_ASUNTO_CLAVE = "FRT85329"
 
 
 def _extraer_adjuntos_excel(msg: email.message.Message) -> list[tuple[str, bytes]]:

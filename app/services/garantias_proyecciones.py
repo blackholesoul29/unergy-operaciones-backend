@@ -9,7 +9,7 @@ Funciones puras (`calcular_garantia`, `neto_de_balance`) separadas de la orquest
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 MWH_A_KWH = 1000.0
 KWH_PLANTA_NUEVA_DEFAULT = 180.0
@@ -87,3 +87,76 @@ def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
             ventana("mes_siguiente", a_sig, m_sig, "total", reg_siguiente),
         ],
     }
+
+
+def filas_snapshot(resultado: dict) -> list:
+    """Convierte la salida de `proyecciones` en filas GarantiaSnapshot (sin commitear)."""
+    from app.models.garantias_proyecciones import GarantiaSnapshot
+    corte = date.fromisoformat(resultado["fecha_corte"])
+    precio = resultado.get("precio_bolsa_cop_kwh")
+    filas = []
+    for v in resultado["ventanas"]:
+        reg = v.get("regulatorio_periodo") or {}
+        filas.append(GarantiaSnapshot(
+            fecha_corte=corte, clave=v["clave"], anio=v["anio"], mes=v["mes"],
+            neto_mwh=v.get("neto_mwh"), precio_bolsa=precio,
+            valor_energia=v.get("valor_energia"),
+            valor_plantas_nuevas=v.get("valor_plantas_nuevas"),
+            costo_regulatorio=v.get("costo_regulatorio"),
+            garantia_total=v.get("garantia_total"),
+            plantas_nuevas=resultado.get("plantas_nuevas", 0),
+            kwh_planta_nueva=resultado.get("kwh_planta_nueva"),
+            regulatorio_anio=reg.get("anio"), regulatorio_mes=reg.get("mes"),
+            regulatorio_fallback=bool(reg.get("fallback")),
+        ))
+    return filas
+
+
+def _balance_fn(db, anio: int, mes: int) -> dict:
+    from app.services.balance_energia import calcular_balance
+    return calcular_balance(db, anio, mes)
+
+
+def _precio_fn() -> float | None:
+    from datetime import date as _d
+    from app.services.simem_bolsa import precio_bolsa_prom_7d
+    hoy = _d.today()
+    inicio = hoy - timedelta(days=25)
+    return precio_bolsa_prom_7d(inicio.isoformat(), hoy.isoformat())
+
+
+def _regulatorio_fn(anio: int, mes: int) -> dict:
+    from app.services.costo_regulatorio_drive import costo_regulatorio_del_mes
+    return costo_regulatorio_del_mes(anio, mes)
+
+
+def construir_proyecciones_live(db, hoy: date | None = None, *, plantas_nuevas: int = 0,
+                                kwh_planta_nueva: float = KWH_PLANTA_NUEVA_DEFAULT) -> dict:
+    """Calcula las dos ventanas cableando las dependencias reales (balance, precio SIMEM,
+    costo regulatorio de Drive). Los `_*_fn` de módulo son mockeables en tests."""
+    if hoy is None:
+        hoy = date.today()
+    return proyecciones(
+        hoy,
+        calcular_balance_fn=lambda a, m: _balance_fn(db, a, m),
+        precio_fn=_precio_fn,
+        regulatorio_fn=_regulatorio_fn,
+        plantas_nuevas=plantas_nuevas, kwh_planta_nueva=kwh_planta_nueva,
+    )
+
+
+def guardar_snapshot(db, resultado: dict) -> list:
+    """Persiste las filas del resultado y las devuelve."""
+    filas = filas_snapshot(resultado)
+    for f in filas:
+        db.add(f)
+    db.commit()
+    return filas
+
+
+def historial_snapshots(db, limite: int = 200) -> list:
+    """Últimos snapshots, más recientes primero."""
+    from app.models.garantias_proyecciones import GarantiaSnapshot
+    return (db.query(GarantiaSnapshot)
+            .order_by(GarantiaSnapshot.fecha_corte.desc(), GarantiaSnapshot.id.desc())
+            .limit(limite).all())

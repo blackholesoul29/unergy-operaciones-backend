@@ -40,3 +40,13 @@ def test_parsear_proyecto_tercero_costo():
         "CMU0521-Mandato-Costos-Minigranja Solar Baraya-SOLENIUM SAS.pdf", "costo")
     assert proj == "Minigranja Solar Baraya"
     assert terc == "SOLENIUM SAS"
+
+
+def test_parsear_quita_sufijos_gmail():
+    # Los sufijos (1)/(2) que agrega Gmail no deben ensuciar la identidad
+    proj, terc = parsear_proyecto_tercero(
+        "CMU0521-Mandato-Costos-Minigranja Solar Baraya-SOLENIUM SAS (1).pdf", "costo")
+    assert proj == "Minigranja Solar Baraya"
+    assert terc == "SOLENIUM SAS"
+    proj2, _ = parsear_proyecto_tercero("CMU0184 - Mandato-El Llano Sas Bic (1) (1).pdf", "ingreso")
+    assert "(1)" not in proj2

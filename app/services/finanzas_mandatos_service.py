@@ -74,6 +74,7 @@ def parsear_proyecto_tercero(nombre: str, tipo: str) -> tuple[str, str]:
     Split por el ultimo '-' tras quitar CMU y el prefijo 'Mandato(-Costos)'.
     Si no se puede separar, devuelve (resto, '')."""
     base = re.sub(r"\.pdf$", "", nombre or "", flags=re.IGNORECASE)
+    base = re.sub(r"\s*\(\d+\)", "", base)   # quita sufijos (1),(2) que agrega Gmail
     base = _CMU_RE.sub("", base).strip(" -")
     base = re.sub(r"(?i)^ajuste\s+", "", base).strip()
     base = re.sub(r"(?i)^mandato-?costos-?", "", base)

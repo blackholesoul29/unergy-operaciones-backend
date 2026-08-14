@@ -89,6 +89,16 @@ def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
     }
 
 
+def aplicar_pagado(resultado: dict, pagado_por_periodo: dict) -> dict:
+    """Anexa `pagado` y `saldo` (pagado − garantia_total) a cada ventana. `pagado` es
+    None si no hay dato para ese (anio, mes) → `saldo` None. Muta y devuelve el resultado."""
+    for v in resultado.get("ventanas", []):
+        pagado = pagado_por_periodo.get((v["anio"], v["mes"]))
+        v["pagado"] = pagado
+        v["saldo"] = None if pagado is None else pagado - (v.get("garantia_total") or 0.0)
+    return resultado
+
+
 def filas_snapshot(resultado: dict) -> list:
     """Convierte la salida de `proyecciones` en filas GarantiaSnapshot (sin commitear)."""
     from app.models.garantias_proyecciones import GarantiaSnapshot
@@ -136,13 +146,33 @@ def construir_proyecciones_live(db, hoy: date | None = None, *, plantas_nuevas: 
     costo regulatorio de Drive). Los `_*_fn` de módulo son mockeables en tests."""
     if hoy is None:
         hoy = date.today()
-    return proyecciones(
+    resultado = proyecciones(
         hoy,
         calcular_balance_fn=lambda a, m: _balance_fn(db, a, m),
         precio_fn=_precio_fn,
         regulatorio_fn=_regulatorio_fn,
         plantas_nuevas=plantas_nuevas, kwh_planta_nueva=kwh_planta_nueva,
     )
+    return aplicar_pagado(resultado, pagado_por_periodo(db))
+
+
+def pagado_por_periodo(db) -> dict:
+    """{(anio, mes): valor} de lo pagado registrado."""
+    from app.models.garantias_proyecciones import GarantiaPagado
+    return {(p.anio, p.mes): float(p.valor) for p in db.query(GarantiaPagado).all()}
+
+
+def set_pagado(db, anio: int, mes: int, valor: float):
+    """Upsert del pagado de un período."""
+    from app.models.garantias_proyecciones import GarantiaPagado
+    fila = db.query(GarantiaPagado).filter_by(anio=anio, mes=mes).one_or_none()
+    if fila is None:
+        fila = GarantiaPagado(anio=anio, mes=mes, valor=valor)
+        db.add(fila)
+    else:
+        fila.valor = valor
+    db.commit()
+    return fila
 
 
 def guardar_snapshot(db, resultado: dict) -> list:

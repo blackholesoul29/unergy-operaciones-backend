@@ -2,7 +2,9 @@
 Sin BD, sin red, sin reloj."""
 from datetime import date
 
-from app.services.garantias_proyecciones import calcular_garantia, neto_de_balance, proyecciones
+from app.services.garantias_proyecciones import (
+    aplicar_pagado, calcular_garantia, neto_de_balance, proyecciones,
+)
 
 
 def test_formula_base_valoriza_neto_en_kwh_mas_regulatorio():
@@ -93,3 +95,15 @@ def test_proyecciones_maneja_rollover_de_diciembre():
     assert (v1["anio"], v1["mes"]) == (2026, 12)
     assert (v2["anio"], v2["mes"]) == (2027, 1)          # rollover de año
     assert (2026, 11) in calls and (2026, 12) in calls   # regulatorio del mes anterior a cada ventana
+
+
+def test_aplicar_pagado_calcula_saldo_por_ventana():
+    resultado = {"ventanas": [
+        {"clave": "resto_mes_actual", "anio": 2026, "mes": 8, "garantia_total": 70.0},
+        {"clave": "mes_siguiente", "anio": 2026, "mes": 9, "garantia_total": 100.0},
+    ]}
+    # pagado 80 para agosto, nada para septiembre
+    out = aplicar_pagado(resultado, {(2026, 8): 80.0})
+    v1, v2 = out["ventanas"]
+    assert v1["pagado"] == 80.0 and v1["saldo"] == 10.0   # 80 - 70 = +10 (a favor)
+    assert v2["pagado"] is None and v2["saldo"] is None    # sin pagado -> sin saldo

@@ -99,3 +99,16 @@ def test_extraer_facturas_separa_encabezado_tipo_y_lineas():
 def test_extraer_y_calcular_da_solo_generador():
     from app.services.costo_regulatorio import costo_regulatorio_de_facturas
     assert costo_regulatorio_de_facturas(extraer_facturas_xm(_hoja_demo())) == 999626.0
+
+
+import os
+import pytest
+from app.services.costo_regulatorio import costo_regulatorio_de_archivo
+
+_ARCHIVO_JULIO = r"C:\Users\jessi\OneDrive\Documentos\Estado Resultados\2026\07_Julio\Cruce facturas 7 2026 txf.xlsx"
+
+
+@pytest.mark.skipif(not os.path.exists(_ARCHIVO_JULIO),
+                    reason="archivo Cruce facturas de julio no disponible (CI)")
+def test_archivo_real_julio_reproduce_67_191_598():
+    assert costo_regulatorio_de_archivo(_ARCHIVO_JULIO) == 67191598.0

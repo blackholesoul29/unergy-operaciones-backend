@@ -12,6 +12,7 @@ class TipoInformeEnum(str, enum.Enum):
     fmo = "fmo"
     port = "port"
     ranking = "ranking"
+    pm = "pm"  # Informe de Puesta en Marcha (pestaña "Informe" en Costos Variables)
 
 
 class EstadoInformeEnum(str, enum.Enum):

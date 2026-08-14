@@ -1369,6 +1369,7 @@ _PENDING_DDLS = [
     "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
     # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
     # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
+    "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
     """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
         id BIGSERIAL PRIMARY KEY,
         proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),

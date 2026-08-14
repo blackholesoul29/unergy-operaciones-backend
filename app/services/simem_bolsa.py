@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import httpx
+
 SIMEM_URL = "https://www.simem.co/backend-files/api/PublicData"
 DATASET_PRECIO_BOLSA = "EC6945"
 VARIABLE_NACIONAL = "PB_Nal"
@@ -68,3 +70,28 @@ def promedio_ultimos_n_dias(daily: dict[str, float], n: int = 7) -> float | None
     ultimos = sorted(daily)[-n:]
     vals = [daily[d] for d in ultimos]
     return sum(vals) / len(vals)
+
+
+_TIMEOUT = httpx.Timeout(10.0, read=40.0)
+
+
+def fetch_records(start: str, end: str, *, dataset: str = DATASET_PRECIO_BOLSA,
+                  client: httpx.Client | None = None) -> list[dict]:
+    """GET a SIMEM PublicData. Devuelve result.records (o [] si no hay). `client`
+    inyectable para tests (MockTransport)."""
+    params = {"startdate": start, "enddate": end, "datasetId": dataset}
+    propio = client is None
+    cli = client or httpx.Client(timeout=_TIMEOUT, headers={"User-Agent": "unergy-ops/1.0"})
+    try:
+        resp = cli.get(SIMEM_URL, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        if propio:
+            cli.close()
+    result = data.get("result") if isinstance(data, dict) else None
+    if isinstance(result, dict) and isinstance(result.get("records"), list):
+        return result["records"]
+    if isinstance(data, dict) and isinstance(data.get("Records"), list):
+        return data["Records"]
+    return []

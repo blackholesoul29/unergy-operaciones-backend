@@ -61,3 +61,31 @@ def test_promedio_ultimos_n_dias_toma_los_mas_recientes():
 
 def test_promedio_ultimos_n_dias_vacio_devuelve_none():
     assert promedio_ultimos_n_dias({}, 7) is None
+
+
+import httpx
+from app.services.simem_bolsa import fetch_records, DATASET_PRECIO_BOLSA
+
+
+def test_fetch_records_arma_url_y_parsea_result_records():
+    capturado = {}
+
+    def handler(request):
+        capturado["url"] = str(request.url)
+        return httpx.Response(200, json={"result": {"records": [
+            {"CodigoVariable": "PB_Nal", "FechaHora": "2026-08-01 00:00:00",
+             "Version": "TX1", "Valor": 100.0},
+        ]}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    recs = fetch_records("2026-08-01", "2026-08-14", client=client)
+
+    assert f"datasetId={DATASET_PRECIO_BOLSA}" in capturado["url"]
+    assert "startdate=2026-08-01" in capturado["url"]
+    assert "enddate=2026-08-14" in capturado["url"]
+    assert len(recs) == 1 and recs[0]["Valor"] == 100.0
+
+
+def test_fetch_records_sin_records_devuelve_lista_vacia():
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={})))
+    assert fetch_records("2026-08-01", "2026-08-14", client=client) == []

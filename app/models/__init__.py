@@ -32,6 +32,7 @@ from app.models.costos_variables import CostoVariable
 from app.models.polizas import Poliza
 from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
 from app.models.inicio_operacion import ProyectoInicioOperacion
+from app.models.informe_om import ProyectoInformeOM
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
     ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,

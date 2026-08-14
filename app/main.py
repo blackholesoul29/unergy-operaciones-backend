@@ -1367,6 +1367,31 @@ _PENDING_DDLS = [
     # forzar una asignación de minigranja que no existe (2026-08-11).
     "ALTER TABLE starlink_mapeo_sitio ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
+    # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
+    # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
+    """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),
+        version VARCHAR(100),
+        elaborado_por VARCHAR(255),
+        actividad VARCHAR(255),
+        objetivo_alcance JSONB NOT NULL DEFAULT '{}'::jsonb,
+        datos_generales JSONB NOT NULL DEFAULT '{}'::jsonb,
+        arquitectura_comunicacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+        equipos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        variables_monitoreadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        configuracion_monitoreo JSONB NOT NULL DEFAULT '{}'::jsonb,
+        protocolo_pruebas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        eventos_operativos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        observaciones JSONB NOT NULL DEFAULT '{}'::jsonb,
+        recomendaciones JSONB NOT NULL DEFAULT '[]'::jsonb,
+        conclusion TEXT,
+        firmas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        evidencia_arquitectura JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
 ]
 
 

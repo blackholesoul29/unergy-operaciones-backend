@@ -95,3 +95,12 @@ def fetch_records(start: str, end: str, *, dataset: str = DATASET_PRECIO_BOLSA,
     if isinstance(data, dict) and isinstance(data.get("Records"), list):
         return data["Records"]
     return []
+
+
+def precio_bolsa_prom_7d(start: str, end: str, *, n_dias: int = 7,
+                         client: httpx.Client | None = None) -> float | None:
+    """Orquesta: fetch SIMEM -> promedio diario (versión más alta por día) -> promedio de
+    los últimos n días conocidos. Devuelve COP/kWh (o None si SIMEM no trae datos)."""
+    records = fetch_records(start, end, client=client)
+    daily = promedio_diario_max_version(records)
+    return promedio_ultimos_n_dias(daily, n_dias)

@@ -41,6 +41,9 @@ from app.models.panel_contable import (
 from app.models.mandatos import (
     Mandato, MandatoInversionista, EstadoMandatoCostoEnum,
 )
+from app.models.finanzas_mandatos import (
+    FinanzasMandato, TipoMandatoEnum, EstadoFirmaEnum,
+)
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum

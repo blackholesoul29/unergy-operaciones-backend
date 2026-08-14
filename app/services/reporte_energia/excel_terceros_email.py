@@ -1,0 +1,120 @@
+"""Lectura automática del Excel de Cedillanos vía correo (IMAP) --
+Cedillanos maneja su propio CGM y envía un Excel diario a
+operaciones@unergy.io en vez de que alguien lo suba a mano. Ver
+excel_terceros.py para el formato del archivo; aplicar_excel_terceros() ahí
+es el procesamiento compartido con el upload manual (POST
+/cargar-excel-terceros).
+
+El nombre/código del asunto del correo (ej. "FRT85329 - Alsec Llanos", ver
+captura 2026-08-13) es del sistema del remitente (cgm@erco.energy) -- no
+tiene relación con nuestro frt_code. El frontera_id de destino es fijo acá,
+no lo decide el contenido del correo ni del Excel (mismo criterio que
+aplicar_excel_terceros(): "qué frontera_id recibe los datos lo decide la
+URL/config, no el contenido del archivo").
+"""
+from __future__ import annotations
+
+import email
+import imaplib
+import logging
+
+from app.core.config import settings
+from app.core.database import SessionLocal
+from app.services.reporte_energia.excel_terceros import aplicar_excel_terceros
+
+logger = logging.getLogger("reporte_energia.excel_terceros_email")
+
+CEDILLANOS_FRONTERA_ID = 79  # Cedillanos_excedentes, Frt88292
+CEDILLANOS_REMITENTE = "cgm@erco.energy"
+# Más estable que "Alsec Llanos" en el asunto -- no depende de si el correo
+# trae prefijo RE:/FW: ni de variaciones de mayúsculas/tildes en el nombre.
+CEDILLANOS_ASUNTO_CLAVE = "85329"
+
+
+def _extraer_adjuntos_excel(msg: email.message.Message) -> list[tuple[str, bytes]]:
+    """(nombre_archivo, contenido) de cada adjunto .xlsx/.xls del correo."""
+    adjuntos: list[tuple[str, bytes]] = []
+    for parte in msg.walk():
+        nombre = parte.get_filename()
+        if not nombre or not nombre.lower().endswith((".xlsx", ".xls")):
+            continue
+        contenido = parte.get_payload(decode=True)
+        if contenido:
+            adjuntos.append((nombre, contenido))
+    return adjuntos
+
+
+def revisar_correo_cedillanos() -> None:
+    """Busca en operaciones@unergy.io correos SIN LEER de Cedillanos (ver
+    CEDILLANOS_REMITENTE/CEDILLANOS_ASUNTO_CLAVE), aplica el primer adjunto
+    Excel que cargue con éxito a CEDILLANOS_FRONTERA_ID, y marca el correo
+    como leído solo si algo se cargó -- si falla (adjunto con formato
+    inesperado, sin filas 'Primary', etc.) queda sin leer para reintentar
+    en la próxima corrida, en vez de perderse en silencio.
+
+    Pensado para correr una vez al día (ver main.py). No lanza excepción
+    hacia el llamador -- cualquier falla de conexión/autenticación queda
+    solo en el log, para no tumbar el resto del scheduler.
+    """
+    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
+        logger.info("IMAP: SMTP_USER/SMTP_PASSWORD no configurados, se omite la revisión de correo")
+        return
+
+    try:
+        imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
+        imap.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+    except Exception as exc:
+        logger.error("IMAP: no se pudo conectar/autenticar contra %s: %s", settings.IMAP_HOST, exc)
+        return
+
+    try:
+        imap.select("INBOX")
+        criterio = f'(UNSEEN FROM "{CEDILLANOS_REMITENTE}" SUBJECT "{CEDILLANOS_ASUNTO_CLAVE}")'
+        status, data = imap.search(None, criterio)
+        if status != "OK":
+            logger.error("IMAP: búsqueda falló: %s", data)
+            return
+
+        ids = data[0].split() if data and data[0] else []
+        if not ids:
+            logger.info("IMAP: sin correos nuevos de Cedillanos")
+            return
+
+        db = SessionLocal()
+        try:
+            for msg_id in ids:
+                status, msg_data = imap.fetch(msg_id, "(RFC822)")
+                if status != "OK" or not msg_data or not msg_data[0]:
+                    continue
+                msg = email.message_from_bytes(msg_data[0][1])
+                adjuntos = _extraer_adjuntos_excel(msg)
+                if not adjuntos:
+                    logger.warning("IMAP: correo de Cedillanos sin adjunto Excel -- asunto=%r", msg.get("Subject"))
+                    continue
+
+                cargado = False
+                for nombre, contenido in adjuntos:
+                    try:
+                        fechas = aplicar_excel_terceros(db, CEDILLANOS_FRONTERA_ID, contenido)
+                    except ValueError as e:
+                        db.rollback()
+                        logger.error("IMAP: %s con formato inesperado: %s", nombre, e)
+                        continue
+                    if not fechas:
+                        db.rollback()
+                        logger.warning("IMAP: %s sin filas 'Primary' válidas", nombre)
+                        continue
+                    db.commit()
+                    logger.info("IMAP: cargado %s -- fechas %s", nombre, sorted(fechas))
+                    cargado = True
+
+                if cargado:
+                    imap.store(msg_id, "+FLAGS", "\\Seen")
+        finally:
+            db.close()
+    finally:
+        try:
+            imap.close()
+        except Exception:
+            pass
+        imap.logout()

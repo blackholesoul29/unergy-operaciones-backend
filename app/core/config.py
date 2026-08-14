@@ -110,6 +110,14 @@ class Settings(BaseSettings):
     # Copia oculta (BCC) del Reporte CGM -- lista separada por comas.
     CORREO_SEGUIMIENTO: str = ""
 
+    # IMAP — lectura automática de correos entrantes (ej. Excel de terceros
+    # que envía Cedillanos vía cgm@erco.energy, ver excel_terceros_email.py).
+    # Reusa SMTP_USER/SMTP_PASSWORD -- misma cuenta de Gmail, el mismo App
+    # Password sirve para IMAP y SMTP a la vez. Requiere que IMAP esté
+    # habilitado en la configuración de esa cuenta de Gmail/Workspace.
+    IMAP_HOST: str = "imap.gmail.com"
+    IMAP_PORT: int = 993
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:

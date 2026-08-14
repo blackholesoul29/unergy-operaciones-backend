@@ -2504,6 +2504,17 @@ def _scheduled_reporte_energia():
     ejecutar_dia_background(fecha)
 
 
+def _scheduled_excel_terceros_cedillanos():
+    """Revisa operaciones@unergy.io por correo nuevo de Cedillanos con su
+    Excel de CGM (ver excel_terceros_email.py) -- reemplaza la carga
+    manual. Una vez al día alcanza: si el correo llega más tarde de lo
+    esperado un día puntual, la próxima corrida diaria lo recoge igual
+    (sigue sin leer hasta que se procese con éxito)."""
+    from app.services.reporte_energia.excel_terceros_email import revisar_correo_cedillanos
+
+    revisar_correo_cedillanos()
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3478,6 +3489,14 @@ def _deferred_init():
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
             )
+
+            if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour=9, minute=0, timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo",
+                )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del
             # cambio de dia para que el tablero amanezca correcto.

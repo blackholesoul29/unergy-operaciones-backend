@@ -112,3 +112,28 @@ _ARCHIVO_JULIO = r"C:\Users\jessi\OneDrive\Documentos\Estado Resultados\2026\07_
                     reason="archivo Cruce facturas de julio no disponible (CI)")
 def test_archivo_real_julio_reproduce_67_191_598():
     assert costo_regulatorio_de_archivo(_ARCHIVO_JULIO) == 67191598.0
+
+
+import io
+import openpyxl
+from app.services.costo_regulatorio import costo_regulatorio_de_bytes
+
+
+def _xlsx_bytes_demo():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Facturas XM"
+    for r in [
+        ["Factura ASIC2 - GENERADOR", None, None, None, None],
+        ["campo", "cantidad", "last_value", "current_value", "total"],
+        ["Fazni", 1, 0, 0, 999626.0],
+        ["Valor total", 1, 0, 0, 999626.0],
+    ]:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_costo_regulatorio_de_bytes_parsea_workbook_en_memoria():
+    assert costo_regulatorio_de_bytes(_xlsx_bytes_demo()) == 999626.0

@@ -77,9 +77,21 @@ def extraer_facturas_xm(ws) -> list[dict]:
     return facturas
 
 
-def costo_regulatorio_de_archivo(path: str) -> float:
-    """Abre el xlsx y devuelve el costo regulatorio de su hoja 'Facturas XM'."""
-    import openpyxl
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+def _costo_de_workbook(wb) -> float:
     ws = wb[NOMBRE_HOJA] if NOMBRE_HOJA in wb.sheetnames else wb[wb.sheetnames[0]]
     return costo_regulatorio_de_facturas(extraer_facturas_xm(ws))
+
+
+def costo_regulatorio_de_archivo(path: str) -> float:
+    """Abre el xlsx de una ruta y devuelve su costo regulatorio."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    return _costo_de_workbook(wb)
+
+
+def costo_regulatorio_de_bytes(contenido: bytes) -> float:
+    """Igual que `_de_archivo` pero desde bytes (p. ej. un archivo bajado de Drive)."""
+    import io
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(contenido), data_only=True, read_only=True)
+    return _costo_de_workbook(wb)

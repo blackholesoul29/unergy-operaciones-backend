@@ -82,3 +82,45 @@ def parsear_proyecto_tercero(nombre: str, tipo: str) -> tuple[str, str]:
         proyecto, tercero = base.rsplit("-", 1)
         return proyecto.strip(), tercero.strip()
     return base.strip(), ""
+
+
+from datetime import date as _date
+
+
+def upsert_mandato(db, *, proyecto, tercero, periodo, tipo, cmu, estado,
+                   comentario=None, fecha=None, correo_ref=None,
+                   drive_file_id=None, drive_url=None):
+    """Crea o actualiza por identidad (proyecto,tercero,periodo,tipo).
+    Nunca degrada 'firmado' -> 'sin_firma'. Guarda cmu_anterior si cambia el CMU.
+    Devuelve (mandato, creado: bool)."""
+    from app.models.finanzas_mandatos import FinanzasMandato
+    m = (db.query(FinanzasMandato)
+         .filter(FinanzasMandato.proyecto == proyecto,
+                 FinanzasMandato.tercero == tercero,
+                 FinanzasMandato.periodo == periodo,
+                 FinanzasMandato.tipo == tipo).first())
+    creado = m is None
+    if creado:
+        m = FinanzasMandato(proyecto=proyecto, tercero=tercero, periodo=periodo,
+                            tipo=tipo, estado="sin_firma")
+        db.add(m)
+    if cmu and m.cmu and cmu != m.cmu:
+        m.cmu_anterior = m.cmu
+    if cmu:
+        m.cmu = cmu
+    if correo_ref:
+        m.correo_ref = correo_ref
+    hoy = fecha or _date.today()
+    if estado == "firmado":
+        m.estado = "firmado"
+        m.fecha_firma = m.fecha_firma or hoy
+        if drive_file_id:
+            m.drive_file_id, m.drive_url = drive_file_id, drive_url
+    elif estado == "con_comentarios":
+        if m.estado != "firmado":
+            m.estado = "con_comentarios"
+        m.comentario = comentario
+    else:  # sin_firma
+        m.fecha_envio = m.fecha_envio or hoy
+    db.flush()
+    return m, creado

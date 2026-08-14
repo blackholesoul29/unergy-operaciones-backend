@@ -1,7 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (
-    BigInteger, String, Text, Date, DateTime, Enum as SAEnum, UniqueConstraint, Index,
+    BigInteger, Integer, String, Text, Date, DateTime, Enum as SAEnum,
+    UniqueConstraint, Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -34,7 +35,8 @@ class FinanzasMandato(Base):
         Index("ix_finmandatos_cmu", "cmu"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     proyecto: Mapped[str] = mapped_column(String(255), nullable=False)
     tercero: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     periodo: Mapped[date] = mapped_column(Date, nullable=False)

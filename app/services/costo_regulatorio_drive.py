@@ -47,3 +47,50 @@ def seleccionar_cruce(cruces: list[dict], anio: int, mes: int) -> dict | None:
     candidatos = [c for c in previos if (c["anio"], c["mes"]) == ultimo_periodo]
     elegido = max(candidatos, key=lambda c: _rank_version(c["version"]))
     return {**elegido, "fallback": True}
+
+
+from app.services.costo_regulatorio import costo_regulatorio_de_bytes
+
+
+def _cruces_de_carpeta(listar) -> list[dict]:
+    """Lista la carpeta de ER y deja solo los cruces, con período/versión parseados."""
+    from app.services.drive import TIPO_CRUCE, parse_nombre_er
+    cruces = []
+    for f in listar():
+        if f.get("mimeType") == "application/vnd.google-apps.folder":
+            continue
+        info = parse_nombre_er(f.get("name", ""))
+        if info["tipo"] == TIPO_CRUCE:
+            cruces.append({"id": f.get("id"), "anio": info["anio"],
+                           "mes": info["mes"], "version": info["version"]})
+    return cruces
+
+
+def costo_regulatorio_del_mes(anio: int, mes: int, *, listar=None, descargar=None) -> dict:
+    """Costo regulatorio de (anio, mes) desde el Drive de ER, con fallback al último
+    período disponible. Devuelve {'valor', 'anio', 'mes', 'version', 'fallback', 'cruce'}.
+    `valor` es None si no hay ningún cruce. `listar`/`descargar` son inyectables (tests);
+    por defecto usan `app.services.drive`.
+    """
+    if listar is None or descargar is None:
+        from app.services.drive import descargar_archivo, er_folder_id, listar_carpeta
+        if listar is None:
+            listar = lambda: listar_carpeta(er_folder_id())
+        if descargar is None:
+            descargar = descargar_archivo
+
+    cruces = _cruces_de_carpeta(listar)
+    elegido = seleccionar_cruce(cruces, anio, mes)
+    if elegido is None:
+        return {"valor": None, "anio": anio, "mes": mes,
+                "version": None, "fallback": False, "cruce": None}
+    contenido = descargar(elegido["id"])
+    valor = costo_regulatorio_de_bytes(contenido)
+    return {
+        "valor": valor,
+        "anio": elegido["anio"],
+        "mes": elegido["mes"],
+        "version": elegido["version"],
+        "fallback": elegido["fallback"],
+        "cruce": elegido,
+    }

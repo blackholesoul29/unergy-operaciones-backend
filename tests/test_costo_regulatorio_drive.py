@@ -38,3 +38,51 @@ def test_fallback_al_ultimo_periodo_no_mayor_al_pedido():
 
 def test_sin_cruces_devuelve_none():
     assert seleccionar_cruce([], 2026, 8) is None
+
+
+import io
+import openpyxl
+from app.services.costo_regulatorio_drive import costo_regulatorio_del_mes
+
+
+def _xlsx_generador_bytes(valor):
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Facturas XM"
+    for r in [
+        ["Factura ASIC9 - GENERADOR", None, None, None, None],
+        ["campo", "cantidad", "last_value", "current_value", "total"],
+        ["Fazni", 1, 0, 0, float(valor)],
+        ["Valor total", 1, 0, 0, float(valor)],
+    ]:
+        ws.append(r)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def _listar_fake():
+    # Simula lo que devuelve listar_carpeta ya "crudo": dicts con name/id/mimeType.
+    return [
+        {"id": "jul", "name": "Cruce facturas 7 2026 txf.xlsx", "mimeType": "x"},
+        {"id": "jun", "name": "Cruce facturas 6 2026 txf.xlsx", "mimeType": "x"},
+        {"id": "er1", "name": "Estado resultados Cliente Proyecto 7 2026.xlsx", "mimeType": "x"},
+    ]
+
+
+def test_del_mes_exacto_baja_y_parsea():
+    bajados = {"jul": _xlsx_generador_bytes(500000), "jun": _xlsx_generador_bytes(111)}
+    r = costo_regulatorio_del_mes(2026, 7, listar=_listar_fake, descargar=bajados.get)
+    assert r["valor"] == 500000.0
+    assert r["fallback"] is False
+    assert (r["anio"], r["mes"]) == (2026, 7)
+
+
+def test_del_mes_con_fallback_usa_ultimo_disponible():
+    bajados = {"jul": _xlsx_generador_bytes(500000), "jun": _xlsx_generador_bytes(111)}
+    r = costo_regulatorio_del_mes(2026, 8, listar=_listar_fake, descargar=bajados.get)
+    assert r["valor"] == 500000.0    # julio, el último <= agosto
+    assert r["fallback"] is True
+    assert (r["anio"], r["mes"]) == (2026, 7)
+
+
+def test_del_mes_sin_cruces_devuelve_none_valor():
+    r = costo_regulatorio_del_mes(2026, 8, listar=lambda: [], descargar=lambda i: b"")
+    assert r["valor"] is None
+    assert r["cruce"] is None

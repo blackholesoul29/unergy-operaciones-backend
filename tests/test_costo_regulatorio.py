@@ -61,3 +61,41 @@ def test_total_julio_2026_reproduce_valor_referencia():
             ("Total servicios de administracion sic", 10915789.0), ("Valor total", 36600000.0)]),
     ]
     assert costo_regulatorio_de_facturas(facturas) == 67191598.0
+
+
+import openpyxl
+from app.services.costo_regulatorio import extraer_facturas_xm
+
+
+def _hoja_demo():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Facturas XM"
+    filas = [
+        ["Factura ASIC1 - COMERCIALIZADOR", None, None, None, None],
+        ["campo", "cantidad", "last_value", "current_value", "total"],
+        ["Servicios de administracion sic", 1, 0, 0, 800000.0],
+        ["Valor total", 1, 0, 0, 800000.0],
+        [None, None, None, None, None],
+        ["Factura ASIC2 - GENERADOR", None, None, None, None],
+        ["campo", "cantidad", "last_value", "current_value", "total"],
+        ["Fazni", 1, 0, 0, 999626.0],
+        ["Valor total", 1, 0, 0, 999626.0],
+    ]
+    for r in filas:
+        ws.append(r)
+    return ws
+
+
+def test_extraer_facturas_separa_encabezado_tipo_y_lineas():
+    facturas = extraer_facturas_xm(_hoja_demo())
+    assert [f["asic"] for f in facturas] == ["ASIC1", "ASIC2"]
+    assert [f["tipo"] for f in facturas] == ["COMERCIALIZADOR", "GENERADOR"]
+    assert ("Fazni", 999626.0) in facturas[1]["lineas"]
+    # la fila 'campo' (header) NO es una línea de concepto
+    assert all(l[0] != "campo" for f in facturas for l in f["lineas"])
+
+
+def test_extraer_y_calcular_da_solo_generador():
+    from app.services.costo_regulatorio import costo_regulatorio_de_facturas
+    assert costo_regulatorio_de_facturas(extraer_facturas_xm(_hoja_demo())) == 999626.0

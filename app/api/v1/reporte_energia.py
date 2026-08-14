@@ -468,34 +468,9 @@ async def cargar_excel_terceros(
 
     contenido = await archivo.read()
     try:
-        por_fecha = excel_terceros.parse_excel_terceros(contenido)
+        fechas_cargadas = excel_terceros.aplicar_excel_terceros(db, frontera_id, contenido)
     except ValueError as e:
         raise HTTPException(400, str(e))
-
-    fechas_cargadas: list[date] = []
-    for fecha, datos in por_fecha.items():
-        principal = datos["principal"]
-        if principal is None:
-            continue  # sin fila 'Primary' para ese día -- nada que reportar
-
-        rep = db.execute(
-            select(ReporteEnergiaGeneracion).where(
-                ReporteEnergiaGeneracion.frontera_id == frontera_id,
-                ReporteEnergiaGeneracion.fecha == fecha,
-            )
-        ).scalar_one_or_none()
-        if rep is None:
-            rep = ReporteEnergiaGeneracion(frontera_id=frontera_id, fecha=fecha, caso=0)
-            db.add(rep)
-
-        rep.caso = 0
-        rep.medidor_usado = "excel_terceros"
-        rep.curva_final = principal
-        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
-        rep.curva_respaldo_terceros = datos["respaldo"]
-        rep.revisar_manualmente = False
-        rep.editado_manualmente = True
-        fechas_cargadas.append(fecha)
 
     if not fechas_cargadas:
         raise HTTPException(400, "No encontré ninguna fila 'Primary' con ENERGY TYPE = ENERGIA EXPORTADA ACTIVA")

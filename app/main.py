@@ -1369,6 +1369,7 @@ _PENDING_DDLS = [
     "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
     # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
     # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
+    "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
     """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
         id BIGSERIAL PRIMARY KEY,
         proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),
@@ -2503,6 +2504,22 @@ def _scheduled_reporte_energia():
     ejecutar_dia_background(fecha)
 
 
+def _scheduled_excel_terceros_cedillanos():
+    """Revisa operaciones@unergy.io por correo nuevo de Cedillanos con su
+    Excel de CGM (ver excel_terceros_email.py) -- reemplaza la carga
+    manual. El reporte debe estar listo antes de las 6am, pero el correo
+    de Cedillanos históricamente llega entre 3:25am y 6:10am (con
+    tendencia a correrse más tarde, ver sesión 2026-08-14) -- por eso esta
+    función corre cada 15 min de 4am a 6am (ver registro del cron más
+    abajo) en vez de una sola vez, para minimizar el tiempo entre que el
+    correo llega y el dato queda cargado. Costo despreciable: sin correo
+    nuevo, cada corrida es solo un IMAP SEARCH que no toca la base de
+    datos (ver revisar_correo_cedillanos)."""
+    from app.services.reporte_energia.excel_terceros_email import revisar_correo_cedillanos
+
+    revisar_correo_cedillanos()
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3477,6 +3494,27 @@ def _deferred_init():
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
             )
+
+            if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                # Cada 15 min de 4:00am a 6:00am (9 corridas) -- el correo de
+                # Cedillanos históricamente llega entre 3:25am y 6:10am (con
+                # tendencia a correrse más tarde) y el reporte debe estar
+                # listo antes de las 6am. Dos triggers porque CronTrigger no
+                # soporta minutos distintos por hora en una sola expresión
+                # (4am-5:45am cada 15 min + 6:00am exacto, el último intento
+                # antes del corte).
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour="4,5", minute="*/15", timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (4-5:45am)",
+                )
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_6am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
+                )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del
             # cambio de dia para que el tablero amanezca correcto.

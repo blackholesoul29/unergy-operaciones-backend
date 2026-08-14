@@ -8,6 +8,8 @@ from app.services.garantias_proyecciones import (
     construir_proyecciones_live,
     guardar_snapshot,
     historial_snapshots,
+    pagado_por_periodo,
+    set_pagado,
 )
 
 router = APIRouter(prefix="/garantias/proyecciones", tags=["Garantías · Proyecciones"])
@@ -52,3 +54,24 @@ def get_historial(db: Session = Depends(get_db), _=Depends(get_current_user)):
          "regulatorio_fallback": f.regulatorio_fallback}
         for f in filas
     ]}
+
+
+@router.get("/pagado")
+def get_pagado(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Montos de garantía pagados por período."""
+    d = pagado_por_periodo(db)
+    return {"pagado": [{"anio": a, "mes": m, "valor": v}
+                       for (a, m), v in sorted(d.items())]}
+
+
+@router.put("/pagado")
+def put_pagado(
+    anio: int = Query(..., ge=2020, le=2050),
+    mes: int = Query(..., ge=1, le=12),
+    valor: float = Query(..., ge=0),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Fija (upsert) el monto pagado de un período."""
+    set_pagado(db, anio, mes, valor)
+    return {"anio": anio, "mes": mes, "valor": valor}

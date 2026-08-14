@@ -88,3 +88,4 @@ from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
     RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )
+from app.models.garantias_proyecciones import GarantiaSnapshot  # noqa: F401

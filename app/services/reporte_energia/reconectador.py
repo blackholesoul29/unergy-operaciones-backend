@@ -93,7 +93,7 @@ def rellenar_horas_faltantes(
     frontera_id: int | None = None,
     curva_solenium: pd.Series | None = None,
     fp: float | None = None,
-) -> tuple[pd.Series, set[int], set[int], set[int]]:
+) -> tuple[pd.Series, set[int], set[int], set[int], pd.Series | None]:
     """Rellena las horas en NaN de `curva` en tres pasos, en orden:
 
     1. Curva de Solenium (inversores) del MISMO día × factor de pérdida.
@@ -109,14 +109,19 @@ def rellenar_horas_faltantes(
     ahí no protege nada y solo arriesga meter ruido de telemetría nocturna
     como si fuera dato real (ver MGS 0022 La Cumbia 2026-08-05).
 
-    Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico).
+    Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico,
+    curva_reconectador) -- este último es la curva CRUDA del reconectador tal
+    como se consultó (para mostrarla de referencia en el detalle del front,
+    ver ReporteEnergiaCurvaChart.vue), o None si no se llegó a consultar
+    (medidor+inversores ya cubrieron todo, o el proyecto no tiene reconectador).
     """
     horas_reconectador: set[int] = set()
     horas_solenium: set[int] = set()
     horas_historico: set[int] = set()
+    curva_reconectador_ref: pd.Series | None = None
 
     if not curva.isna().any():
-        return curva, horas_reconectador, horas_solenium, horas_historico
+        return curva, horas_reconectador, horas_solenium, horas_historico, curva_reconectador_ref
 
     curva = curva.copy()
     horas_faltantes = set(curva[curva.isna()].index)
@@ -134,6 +139,7 @@ def rellenar_horas_faltantes(
     if horas_faltantes and id_solenium is not None:
         curva_relay = get_curva_reconectador(sol, int(id_solenium), fecha_str)
         if curva_relay is not None:
+            curva_reconectador_ref = curva_relay
             for h in list(horas_faltantes):
                 if h not in HORAS_RECONECTADOR:
                     continue
@@ -156,4 +162,4 @@ def rellenar_horas_faltantes(
                     curva[h] = curva_historica[h]
                     horas_historico.add(h)
 
-    return curva, horas_reconectador, horas_solenium, horas_historico
+    return curva, horas_reconectador, horas_solenium, horas_historico, curva_reconectador_ref

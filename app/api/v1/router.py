@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, costos_variables, starlink, inicio_operacion, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, estados_resultados, registros_cnd, reporte_energia, facturacion, retos
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, correlation, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, costos_variables, polizas, starlink, inicio_operacion, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, finanzas_mandatos, retos
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -35,12 +35,15 @@ api_router.include_router(reconectadores.router)
 api_router.include_router(om.router)
 api_router.include_router(arriendos.router)
 api_router.include_router(costos_variables.router)
+api_router.include_router(polizas.router)
 api_router.include_router(starlink.router)
 api_router.include_router(inicio_operacion.router)
+api_router.include_router(informe_om.router)
 api_router.include_router(panel_contable.router)
 api_router.include_router(facturacion.router)
 api_router.include_router(mandatos.router)
 api_router.include_router(mandatos.maestra_router)
+api_router.include_router(finanzas_mandatos.router)
 api_router.include_router(mantenimiento_impacto.router)
 api_router.include_router(clasificacion_energia.router)
 api_router.include_router(operadores_red.router)
@@ -49,4 +52,5 @@ api_router.include_router(reporte_energia.router)
 api_router.include_router(verificacion_costos.router)
 api_router.include_router(estados_resultados.router)
 api_router.include_router(registros_cnd.router)
+api_router.include_router(garantias_proyecciones.router)
 api_router.include_router(retos.router)

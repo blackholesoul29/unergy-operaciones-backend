@@ -119,6 +119,7 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.horas_rellenadas_reconectador = resultado.get("horas_rellenadas_reconectador")
     fila.horas_rellenadas_solenium = resultado.get("horas_rellenadas_solenium")
     fila.horas_rellenadas_historico = resultado.get("horas_rellenadas_historico")
+    fila.horas_rellenadas_medidor_cruzado = resultado.get("horas_rellenadas_medidor_cruzado")
     fila.recuperacion_datos = resultado.get("recuperacion_datos")
     fila.revisar_manualmente = bool(resultado.get("revisar_manualmente", False))
     fila.energia_medidor_principal_kwh = resultado.get("energia_medidor_principal_kwh")
@@ -137,6 +138,10 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
     fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
     fila.curva_solenium_referencia = resultado.get("curva_solenium_referencia")
+    # Solo viene poblada si el reconectador SÍ se llegó a consultar ese día
+    # (medidor+inversores ya dejaron huecos) -- null la mayoría de los días,
+    # a diferencia de medidor/Solenium arriba.
+    fila.curva_reconectador_referencia = resultado.get("curva_reconectador_referencia")
     if existente is None:
         db.add(fila)
 
@@ -160,6 +165,7 @@ def _upsert_consumo(db: Session, frontera_id: int, fecha: date, resultado: dict)
     fila.energia_cgm_kwh = resultado.get("energia_cgm_kwh")
     fila.estado_reporte = resultado.get("estado_reporte")
     fila.horas_rellenadas_historico = resultado.get("horas_rellenadas_historico")
+    fila.horas_rellenadas_medidor_cruzado = resultado.get("horas_rellenadas_medidor_cruzado")
     fila.recuperacion_datos = resultado.get("recuperacion_datos")
     fila.revisar_manualmente = bool(resultado.get("revisar_manualmente", False))
     fila.error_clasificacion = resultado.get("error_clasificacion")

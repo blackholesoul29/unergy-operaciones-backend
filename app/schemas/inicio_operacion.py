@@ -27,9 +27,34 @@ class InicioOperacionProyecto(BaseModel):
     fecha_entrada_operacion: Optional[date] = None
 
 
+class InicioOperacionInversor(BaseModel):
+    """Inversor del proyecto según la API de Solenium (fuente en vivo, no la
+    tabla proyecto_inversores). potencia_nominal_kw es una aproximación leída
+    del nombre del dispositivo -- Solenium no expone un campo de capacidad
+    nominal explícito. power_kw/state son telemetría en vivo. La revisión de
+    strings vive en `checklist.inversores.items`."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: Optional[str] = None
+    potencia_nominal_kw: Optional[float] = None
+    power_kw: Optional[float] = None
+    state: Optional[str] = None
+
+
 class InicioOperacionDetail(BaseModel):
     proyecto: InicioOperacionProyecto
     ficha: InicioOperacionFicha
+    inversores: list[InicioOperacionInversor] = []
+    # Calculados a partir del checklist, no se guardan directamente:
+    fusion_solar_estado: Optional[str] = None
+    frontera_estado: Optional[str] = None
+    estacion_meteo_estado: Optional[str] = None
+    reconectador_estado: Optional[str] = None
+    progreso_pct: int = 0
+    # Telemetría en vivo (Solenium / Gaia), informativa -- no se guarda:
+    reconectador_live: Optional[dict[str, Any]] = None
+    frontera_live: dict[str, Any] = {}
 
 
 class InicioOperacionListItem(BaseModel):

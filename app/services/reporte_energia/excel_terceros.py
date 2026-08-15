@@ -13,6 +13,10 @@ import io
 from datetime import date
 
 import openpyxl
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.reporte_energia import ReporteEnergiaGeneracion
 
 _ENERGY_TYPE_OBJETIVO = "ENERGIAEXPORTADAACTIVA"
 _ACENTOS = str.maketrans("ÁÉÍÓÚÑ", "AEIOUN")
@@ -90,3 +94,39 @@ def parse_excel_terceros(contenido: bytes) -> dict[date, dict]:
             dia["respaldo"] = curva
 
     return resultado
+
+
+def aplicar_excel_terceros(db: Session, frontera_id: int, contenido: bytes) -> list[date]:
+    """Parsea `contenido` y aplica cada fila 'Primary' a ReporteEnergiaGeneracion
+    -- misma lógica para el upload manual (POST /cargar-excel-terceros) y la
+    lectura automática de correo (excel_terceros_email.py). Retorna las
+    fechas efectivamente cargadas (puede ser varias si el Excel trae más de
+    un día). Lanza ValueError si el archivo no tiene el formato esperado."""
+    por_fecha = parse_excel_terceros(contenido)
+
+    fechas_cargadas: list[date] = []
+    for fecha, datos in por_fecha.items():
+        principal = datos["principal"]
+        if principal is None:
+            continue  # sin fila 'Primary' para ese día -- nada que reportar
+
+        rep = db.execute(
+            select(ReporteEnergiaGeneracion).where(
+                ReporteEnergiaGeneracion.frontera_id == frontera_id,
+                ReporteEnergiaGeneracion.fecha == fecha,
+            )
+        ).scalar_one_or_none()
+        if rep is None:
+            rep = ReporteEnergiaGeneracion(frontera_id=frontera_id, fecha=fecha, caso=0)
+            db.add(rep)
+
+        rep.caso = 0
+        rep.medidor_usado = "excel_terceros"
+        rep.curva_final = principal
+        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
+        rep.curva_respaldo_terceros = datos["respaldo"]
+        rep.revisar_manualmente = False
+        rep.editado_manualmente = True
+        fechas_cargadas.append(fecha)
+
+    return fechas_cargadas

@@ -26,12 +26,14 @@ from app.schemas.reporte_energia import (
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse,
 )
-from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial
+from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador
 from app.services.reporte_energia import excel_terceros
 from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
-from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva
+from app.services.reporte_energia.clasificador_consumo import rellenar_horas_faltantes_consumo
+from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
+from app.services.mgs.solenium_client import SoleniumClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
 
@@ -179,6 +181,10 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_ppal_bd = rep.curva_medidor_principal
     curva_medidor_resp_bd = rep.curva_medidor_respaldo
     curva_sol_bd = rep.curva_solenium_referencia if es_generacion else None
+    # Igual que Solenium -- persistida, sin re-consultar en vivo (sería una
+    # llamada más a la API de Solenium en cada apertura del panel). Casi
+    # siempre en null: solo se llenó si el reconectador se consultó ese día.
+    curva_reconectador_bd = rep.curva_reconectador_referencia if es_generacion else None
 
     # Solenium ya NO se consulta en vivo acá -- costaba ~2s en cada apertura
     # del panel, solo para detectar si Solenium cambió desde que se
@@ -200,47 +206,56 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
             borders = fut_borders.result()
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if meta:
-            c = curvas.curvas_de_frontera(
+            # curva_medidor_en_vivo() en vez de curvas_de_frontera(): acá solo
+            # hace falta UNA variable (eae o iae, según el tipo de frontera) --
+            # curvas_de_frontera() trae las 4 (eae+iae x principal+respaldo) de
+            # forma secuencial porque el clasificador sí las necesita todas;
+            # pedir las 2 de más y en secuencia era la mayor parte de la demora
+            # al abrir el panel (2026-08-12). Sin recuperación activa tampoco
+            # -- esto es solo para mostrar una curva de referencia, no tiene
+            # sentido interrogar el medidor (hasta 90s) por eso.
+            var_name = "eae" if es_generacion else "iae"
+            curva_p, curva_r = curvas.curva_medidor_en_vivo(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-                str(fecha), front.codigo_frontera,
-                recuperar=False,  # esto es solo para mostrar una curva de referencia --
-                                  # no tiene sentido interrogar el medidor (hasta 90s) por eso
+                str(fecha), front.codigo_frontera, var_name,
             )
-            # curvas_de_frontera() siempre trae ambas variables del medidor --
-            # eae (curva_ppal/curva_resp, generación) e iae (consumo_ppal/
-            # consumo_resp) -- hay que elegir la que corresponde al tipo de
-            # frontera, si no la de Consumo termina mostrando la curva de
-            # generación del mismo medidor (bug real: 2026-08-03, El Joropo
-            # Consumo mostraba una curva con forma solar de mediodía).
-            if es_generacion:
-                curva_medidor_ppal_viva = curva_a_lista(c["curva_ppal"])
-                curva_medidor_resp_viva = curva_a_lista(c["curva_resp"])
-            else:
-                curva_medidor_ppal_viva = curva_a_lista(c["consumo_ppal"])
-                curva_medidor_resp_viva = curva_a_lista(c["consumo_resp"])
+            curva_medidor_ppal_viva = curva_a_lista(curva_p)
+            curva_medidor_resp_viva = curva_a_lista(curva_r)
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
-    medidor_actualizado_en_quoia = any([
-        _curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva),
-        _curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva),
-    ])
+    # Escopado al medidor REALMENTE usado (medidor_usado), no "cualquiera de
+    # los dos" -- antes comparaba ambos (any()) y el aviso podía disparar por
+    # un cambio en el medidor que NO se usa para el reporte, mostrando encima
+    # "X ahora vs X al momento de clasificar" (redundante) si el medidor SÍ
+    # usado nunca tuvo curva_bd persistida (cae a la viva para los dos lados
+    # de la comparación, ver Detalle de las fuentes 2026-08-12).
+    mu = rep.medidor_usado or ""
+    if mu.startswith("principal"):
+        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
+    elif mu.startswith("respaldo"):
+        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
+    else:
+        medidor_actualizado_en_quoia = False
     curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
     curva_sol = curva_sol_bd
 
-    # Total EN VIVO de la fuente que realmente se usó (medidor_usado) --
-    # solo para el aviso "el medidor ya muestra un valor distinto en Quoia"
-    # (curva_medidor_principal/respaldo/solenium ya muestran lo persistido).
+    # Curva y total EN VIVO de la fuente que realmente se usó (medidor_usado)
+    # -- para el aviso "el medidor ya muestra un valor distinto en Quoia"
+    # (curva_medidor_principal/respaldo ya muestran lo persistido) y para que
+    # 'Reportar con otra fuente' pueda ofrecer directamente ese valor
+    # actualizado, sin que la persona tenga que copiarlo a mano (pedido
+    # 2026-08-12).
     energia_actual_kwh = None
+    curva_actual: list | None = None
     if medidor_actualizado_en_quoia:
-        mu = rep.medidor_usado or ""
         if mu.startswith("principal") and curva_medidor_ppal_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_medidor_ppal_viva if v is not None)
+            curva_actual = curva_medidor_ppal_viva
         elif mu.startswith("respaldo") and curva_medidor_resp_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_medidor_resp_viva if v is not None)
-        elif mu == "inversores" and curva_sol_viva is not None:
-            energia_actual_kwh = sum(v for v in curva_sol_viva if v is not None)
+            curva_actual = curva_medidor_resp_viva
+        if curva_actual is not None:
+            energia_actual_kwh = sum(v for v in curva_actual if v is not None)
 
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
@@ -259,6 +274,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         horas_rellenadas_reconectador=rep.horas_rellenadas_reconectador if es_generacion else None,
         horas_rellenadas_solenium=rep.horas_rellenadas_solenium if es_generacion else None,
         horas_rellenadas_historico=rep.horas_rellenadas_historico,
+        horas_rellenadas_medidor_cruzado=rep.horas_rellenadas_medidor_cruzado,
         recuperacion_datos=rep.recuperacion_datos,
         revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
         validado_por=rep.validado_por.nombre if rep.validado_por else None,
@@ -269,8 +285,10 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_principal=curva_medidor_ppal,
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
+        curva_reconectador=curva_reconectador_bd,
         medidor_actualizado_en_quoia=medidor_actualizado_en_quoia,
         energia_actual_kwh=round(energia_actual_kwh, 4) if energia_actual_kwh is not None else None,
+        curva_actual=curva_actual,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
@@ -289,7 +307,7 @@ def editar_curva(
     frontera_id: int, body: EditarCurvaRequest, fecha: date = Query(...),
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
-    front, rep, _Modelo = _fila_por_id(db, frontera_id, fecha)
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     if len(body.curva_final) != 24:
         raise HTTPException(422, "curva_final debe tener 24 valores")
 
@@ -297,6 +315,17 @@ def editar_curva(
     rep.curva_final = curva_a_lista(curva)
     rep.energia_final_kwh = float(curva.fillna(0).sum())
     rep.editado_manualmente = True
+    # Los flags de 'hora rellenada' (reconectador/Solenium/histórico) eran
+    # de la curva ANTERIOR -- si la persona reemplaza curva_final a mano
+    # (otra fuente, o celda por celda), esas horas ya no vienen de ese
+    # relleno; dejarlos quedaba mostrando el diamante dorado de 'Rellenado'
+    # sobre datos que ya no lo son (ver GD Naos 1 2026-08-12: 'Medidor
+    # principal' elegido a mano, pero seguía marcando 14h-16h como
+    # 'Rellenado (histórico)', dato del clasificador automático original).
+    if Modelo is ReporteEnergiaGeneracion:
+        rep.horas_rellenadas_reconectador = None
+        rep.horas_rellenadas_solenium = None
+    rep.horas_rellenadas_historico = None
     # 'Fuente usada' quedaba mostrando lo que el clasificador decidió
     # originalmente (ej. 'Histórico propio') aunque la persona ya hubiera
     # reemplazado la curva con otra fuente ('Reportar con otra fuente') --
@@ -304,12 +333,118 @@ def editar_curva(
     # se llenó desde una de esas opciones, se refleja esa fuente específica
     # (mismos valores que ya usa ETIQUETAS_FUENTE en el front: 'Medidor
     # principal'/'respaldo', 'Inversores × FP', 'Histórico propio'); si fue
-    # edición celda por celda sin pasar por ahí, queda el genérico.
+    # edición celda por celda sin pasar por ahí, o si se usó 'Matriz de
+    # ceros' (no es una fuente real, solo un valor de reemplazo), queda el
+    # genérico "Editado manualmente".
     FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico"}
     rep.medidor_usado = body.fuente if body.fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
+    # Si la persona confirma que el MEDIDOR (no una estimación) es la
+    # fuente correcta, 'caso' se actualiza para que esta fila SÍ pueda
+    # alimentar la mediana/forma histórica de días futuros -- antes quedaba
+    # congelado en lo que decidió el clasificador automático (ej. caso
+    # 'Histórico' o 3), y CASOS_CONFIABLES_GENERACION/CONSUMO en
+    # historial.py filtran por ese campo, no por medidor_usado, así que una
+    # corrección manual con dato real nunca contaba (ver Valencia Oriente 2
+    # Consumo 2026-08-12: editada a 'Medidor principal' y validada, pero
+    # 'caso' seguía en 'Histórico'). 'Inversores × FP', 'Histórico propio' y
+    # 'Matriz de ceros' siguen sin tocar 'caso' -- son estimaciones o un
+    # valor de reemplazo, no una lectura real del medidor (mismo criterio
+    # que ya excluye el Caso 3 -- Inversores × FP automático -- de
+    # CASOS_CONFIABLES_GENERACION).
+    if body.fuente in ("principal", "respaldo"):
+        rep.caso = "Medidor" if Modelo is ReporteEnergiaConsumo else 5
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.post("/fronteras/{frontera_id}/rellenar-horario", response_model=DetalleFronteraReporte)
+def rellenar_horario(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Rellena a mano las horas que quedaron sin dato en 'curva_final' --
+    acción explícita, ya NO pasa sola durante la clasificación automática
+    (decisión 2026-08-12: mezclar otra fuente en la curva final sin que
+    nadie lo pidiera era demasiado invasivo). Orden de fuentes, la primera
+    que tenga dato para cada hora gana:
+
+    1. El OTRO medidor (el que no ganó como medidor_usado) -- mismo
+       consumo/generación física, dato real, no una estimación.
+    2. Generación: reconectador, luego Solenium × FP.
+    3. Histórico propio (mediana × forma) -- último recurso en ambos árboles.
+
+    Aplica a Generación y Consumo. No fuerza revisar_manualmente -- es una
+    acción manual y consciente, igual que editar_curva(); queda pendiente
+    de un "Validar Frontera" explícito.
+    """
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
+
+    curva_actual = lista_a_curva(rep.curva_final)
+    if not curva_actual.isna().any():
+        raise HTTPException(400, "Esta curva no tiene horas sin dato para rellenar")
+
+    curva_actual, horas_medidor_cruzado = rellenar_con_otro_medidor(
+        curva_actual, rep.medidor_usado, rep.curva_medidor_principal, rep.curva_medidor_respaldo,
+    )
+
+    horas_reconectador, horas_solenium_h, horas_historico = set(), set(), set()
+    curva_reconectador_ref = None
+    fp = fp_calc = None
+    if curva_actual.isna().any():
+        if es_generacion:
+            proyecto = front.proyecto
+            project_id_solenium = (
+                int(proyecto.project_id_solenium)
+                if proyecto and proyecto.project_id_solenium and str(proyecto.project_id_solenium).isdigit()
+                else None
+            )
+            curva_solenium = lista_a_curva(rep.curva_solenium_referencia) if rep.curva_solenium_referencia else None
+            if rep.fp is not None:
+                fp, fp_calc = float(rep.fp), float(rep.fp_calculada) if rep.fp_calculada is not None else None
+            else:
+                fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+
+            sol = SoleniumClient()
+            curva_actual, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
+                reconectador.rellenar_horas_faltantes(
+                    db, sol, curva_actual, project_id_solenium, str(fecha),
+                    frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
+                )
+            )
+        else:
+            curva_actual, horas_historico = rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
+
+    if not (horas_medidor_cruzado or horas_reconectador or horas_solenium_h or horas_historico):
+        raise HTTPException(400, "Ninguna fuente tenía dato para las horas faltantes")
+
+    rep.curva_final = curva_a_lista(curva_actual)
+    rep.energia_final_kwh = float(curva_actual.fillna(0).sum())
+    rep.horas_rellenadas_medidor_cruzado = sorted(horas_medidor_cruzado) or None
+    rep.horas_rellenadas_historico = sorted(horas_historico) or None
+    if es_generacion:
+        rep.horas_rellenadas_reconectador = sorted(horas_reconectador) or None
+        rep.horas_rellenadas_solenium = sorted(horas_solenium_h) or None
+        if curva_reconectador_ref is not None:
+            rep.curva_reconectador_referencia = curva_a_lista(curva_reconectador_ref)
+        if horas_solenium_h and rep.fp is None:
+            rep.fp = fp
+            rep.fp_calculada = fp_calc
+        if rep.medidor_usado == "revisar":
+            rep.medidor_usado = "relleno_horario"
+    # revisar_manualmente NO se fuerza acá -- ese forzado tenía sentido
+    # mientras el relleno era automático y silencioso (nadie lo notaba sin
+    # la bandera); ahora que es una acción manual y consciente (la persona
+    # ve las fuentes disponibles y decide hacer clic), queda igual que
+    # editar_curva(): pendiente de un "Validar Frontera" explícito, sin que
+    # el botón se lo imponga.
+    # Evita que una re-ejecución del clasificador para este mismo día pise
+    # este relleno manual (mismo guard que ya protege 'Reportar con otra
+    # fuente', ver editar_curva() arriba).
+    rep.editado_manualmente = True
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
 
@@ -333,34 +468,9 @@ async def cargar_excel_terceros(
 
     contenido = await archivo.read()
     try:
-        por_fecha = excel_terceros.parse_excel_terceros(contenido)
+        fechas_cargadas = excel_terceros.aplicar_excel_terceros(db, frontera_id, contenido)
     except ValueError as e:
         raise HTTPException(400, str(e))
-
-    fechas_cargadas: list[date] = []
-    for fecha, datos in por_fecha.items():
-        principal = datos["principal"]
-        if principal is None:
-            continue  # sin fila 'Primary' para ese día -- nada que reportar
-
-        rep = db.execute(
-            select(ReporteEnergiaGeneracion).where(
-                ReporteEnergiaGeneracion.frontera_id == frontera_id,
-                ReporteEnergiaGeneracion.fecha == fecha,
-            )
-        ).scalar_one_or_none()
-        if rep is None:
-            rep = ReporteEnergiaGeneracion(frontera_id=frontera_id, fecha=fecha, caso=0)
-            db.add(rep)
-
-        rep.caso = 0
-        rep.medidor_usado = "excel_terceros"
-        rep.curva_final = principal
-        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
-        rep.curva_respaldo_terceros = datos["respaldo"]
-        rep.revisar_manualmente = False
-        rep.editado_manualmente = True
-        fechas_cargadas.append(fecha)
 
     if not fechas_cargadas:
         raise HTTPException(400, "No encontré ninguna fila 'Primary' con ENERGY TYPE = ENERGIA EXPORTADA ACTIVA")
@@ -619,6 +729,95 @@ def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
     return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 
+def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
+    """Envía UNA fila a Quoia (gaia.post_report) -- factorizado para
+    reusarse tanto en /enviar (todas las fronteras del día) como en
+    /fronteras/{id}/enviar (una sola, envío controlado de prueba antes de
+    confiar en el envío masivo -- ver ADVERTENCIA en gaia_client.post_report).
+
+    Retorna (resultado, motivo):
+    - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
+      (_reporte_ya_valido) -- no se llama a Quoia para nada.
+    - (True, None): envío intentado y exitoso.
+    - (False, motivo): envío intentado y falló (sin border_id, Quoia
+      rechazó, o excepción de red)."""
+    if _reporte_ya_valido(rep, es_generacion):
+        return None, None
+
+    frt_code = (front.codigo_frontera or "").strip().lower()
+    meta = borders.get(frt_code)
+    border_id = meta.get("id") if meta else None
+    rep.enviado_quoia_en = datetime.now(timezone.utc)
+
+    if not border_id:
+        rep.enviado_quoia_ok = False
+        rep.enviado_quoia_error = "Sin border_id en Quoia"
+        return False, "sin border_id en Quoia"
+
+    curva = rep.curva_final or [0.0] * 24
+    main_readings = [float(v) if v is not None else 0.0 for v in curva]
+    respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
+    if respaldo_terceros:
+        # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
+        # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
+        backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
+    else:
+        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
+        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
+        # vez por hora al momento de enviar, porque la API espera números fijos.
+        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+
+    try:
+        ok = gaia.post_report(border_id, main_readings, backup_readings)
+        motivo = None if ok else "Quoia rechazó el envío"
+    except Exception as exc:
+        ok = False
+        motivo = str(exc)
+
+    rep.enviado_quoia_ok = ok
+    rep.enviado_quoia_error = motivo
+    return ok, motivo
+
+
+@router.post("/fronteras/{frontera_id}/enviar", response_model=EnviarReporteEnergiaResponse)
+def enviar_frontera(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Envío controlado de UNA sola frontera a Quoia -- pensado para probar
+    gaia.post_report() contra Quoia real (nunca se ha hecho, ver ADVERTENCIA
+    en gaia_client.py) antes de confiar en el envío masivo (POST /enviar),
+    que manda TODAS las fronteras del día de una sola vez. Misma lógica de
+    bloqueo y de "ya válido en Quoia" que el envío masivo, escopada a esta
+    fila -- así la prueba de mañana refleja fielmente lo que haría el botón
+    real.
+    """
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
+
+    if rep.revisar_manualmente:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[], bloqueado=True,
+            motivo_bloqueo="Esta frontera tiene Revisar Manualmente pendiente.",
+        )
+
+    gaia = GaiaClient()
+    borders = resolver_borders(gaia, {front.codigo_frontera}) if front.codigo_frontera else {}
+    resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+    db.commit()
+
+    if resultado is None:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[], bloqueado=False,
+            motivo_bloqueo="Quoia ya tenía el dato correcto (CGM válido) -- no hacía falta enviar nada.",
+        )
+    if resultado is False:
+        return EnviarReporteEnergiaResponse(
+            fecha=fecha, enviados=0, fallidos=[f"{_nombre_frontera(front)} — {motivo}"], bloqueado=False,
+        )
+    return EnviarReporteEnergiaResponse(fecha=fecha, enviados=1, fallidos=[], bloqueado=False)
+
+
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)
 def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Envía el reporte del día a Quoia -- bloqueado si queda alguna
@@ -664,46 +863,12 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
     def _procesar(rep, front, es_generacion: bool) -> None:
         nonlocal enviados
-        if _reporte_ya_valido(rep, es_generacion):
-            return  # Quoia ya tiene el dato correcto, no hace falta corregir
-
-        frt_code = (front.codigo_frontera or "").strip().lower()
-        meta = borders.get(frt_code)
-        border_id = meta.get("id") if meta else None
-        rep.enviado_quoia_en = datetime.now(timezone.utc)
-
-        if not border_id:
-            rep.enviado_quoia_ok = False
-            rep.enviado_quoia_error = "Sin border_id en Quoia"
-            fallidos.append(f"{_nombre_frontera(front)} — sin border_id en Quoia")
-            return
-
-        curva = rep.curva_final or [0.0] * 24
-        main_readings = [float(v) if v is not None else 0.0 for v in curva]
-        respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
-        if respaldo_terceros:
-            # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
-            # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
-            backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
-        else:
-            # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
-            # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
-            # vez por hora al momento de enviar, porque la API espera números fijos.
-            backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
-
-        try:
-            ok = gaia.post_report(border_id, main_readings, backup_readings)
-            motivo = None if ok else "Quoia rechazó el envío"
-        except Exception as exc:
-            ok = False
-            motivo = str(exc)
-
-        rep.enviado_quoia_ok = ok
-        rep.enviado_quoia_error = motivo
-        if ok:
+        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+        if resultado is True:
             enviados += 1
-        else:
+        elif resultado is False:
             fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
+        # resultado is None: ya era válido en Quoia, no hacía falta nada
 
     for rep, front in gen_filas:
         _procesar(rep, front, es_generacion=True)

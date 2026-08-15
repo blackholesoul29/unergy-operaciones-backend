@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -193,6 +194,33 @@ def _curva_nodo(
     curva = _curva_de_mediciones(filas, node_id, _CAMPOS_POR_VAR[var_name])
     completo = dia_completo(curva, _horas_reportadas(filas))
     return curva, completo
+
+
+def curva_medidor_en_vivo(
+    gaia: GaiaClient,
+    mapa_medidor_nodo: dict[int, int],
+    main_meter_id: int | None,
+    backup_meter_id: int | None,
+    fecha_str: str,
+    frt_code: str,
+    var_name: str = "eae",
+) -> tuple[pd.Series, pd.Series]:
+    """Curva EN VIVO (principal, respaldo) de UNA sola variable (eae o iae),
+    sin recuperación activa -- pensado para 'Detalle de las fuentes' del
+    front, que solo necesita esto para detectar si Quoia ya cambió desde
+    que se clasificó (medidor_actualizado_en_quoia). curvas_de_frontera()
+    trae las 4 curvas (eae+iae x principal+respaldo) de forma secuencial
+    porque el clasificador SÍ necesita las 4 -- acá solo hacían falta 2, y
+    en paralelo, no en secuencia (era el 4x de más peso en la demora que
+    reportó el usuario al abrir el panel, 2026-08-12)."""
+    node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
+    node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_p = executor.submit(_curva_nodo, gaia, node_p, fecha_str, f"{frt_code}/principal", var_name)
+        fut_r = executor.submit(_curva_nodo, gaia, node_r, fecha_str, f"{frt_code}/respaldo", var_name)
+        curva_p, _ = fut_p.result()
+        curva_r, _ = fut_r.result()
+    return curva_p, curva_r
 
 
 def recuperar_y_releer(

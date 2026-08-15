@@ -29,8 +29,10 @@ from app.models.gestion import GestionRegistro
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.notificaciones import Notificacion, TipoNotificacionEnum
 from app.models.costos_variables import CostoVariable
+from app.models.polizas import Poliza
 from app.models.starlink import StarlinkFactura, StarlinkMapeoSitio, StarlinkFacturaLinea
 from app.models.inicio_operacion import ProyectoInicioOperacion
+from app.models.informe_om import ProyectoInformeOM
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
     ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,
@@ -38,6 +40,9 @@ from app.models.panel_contable import (
 )
 from app.models.mandatos import (
     Mandato, MandatoInversionista, EstadoMandatoCostoEnum,
+)
+from app.models.finanzas_mandatos import (
+    FinanzasMandato, TipoMandatoEnum, EstadoFirmaEnum,
 )
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
@@ -65,6 +70,7 @@ __all__ = [
     "CumplimientoMensual",
     "Notificacion", "TipoNotificacionEnum",
     "CostoVariable",
+    "Poliza",
     "StarlinkFactura", "StarlinkMapeoSitio", "StarlinkFacturaLinea",
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
@@ -87,3 +93,4 @@ from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
     RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )
+from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado  # noqa: F401

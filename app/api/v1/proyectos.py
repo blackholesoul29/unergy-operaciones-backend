@@ -558,7 +558,7 @@ _MERGE_SIMPLE = [
     "proyecto_grupos_panel", "proyecto_inversores",
     "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
     "contratos_servicio", "asic_solicitudes",
-    "rec_procesos", "costos_variables", "garantias",
+    "rec_procesos", "costos_variables",
     "gestion_registros", "cumplimiento_mensual",
 ]
 _MERGE_COMPOSITE = [

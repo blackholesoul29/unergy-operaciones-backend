@@ -350,6 +350,12 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_ppal VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_ppal DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_ppal DATE",
+    # migration — ficha técnica medidor/módem por frontera (2026-08-14)
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_ppal VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_ppal INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_ppal VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS nro_serie_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS marca_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS modelo_med_resp VARCHAR(100)",
@@ -358,6 +364,11 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_resp VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_resp DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_resp DATE",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_resp VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_resp INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_resp VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS factor_perdidas_frontera_principal NUMERIC(10,6)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS codigo_ciiu VARCHAR(20)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS clasificacion_industrial_general VARCHAR(255)",
@@ -680,8 +691,20 @@ _PENDING_DDLS = [
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_solenium_referencia JSONB",
+    # migration — reporte_energia_generacion: curva de reconectador tal como
+    # estaba al momento de clasificar (2026-08-12) -- solo se llena en los
+    # días donde reconectador SÍ se llegó a consultar (medidor+inversores ya
+    # dejaron huecos), a diferencia de medidor/Solenium que se piden siempre.
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_reconectador_referencia JSONB",
+    # migration — reporte_energia_generacion: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo -- mismo campo se
+    # agrega acá porque Generación también gana la opción en 'Rellenar horas')
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    # migration — reporte_energia_consumo: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo)
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     # migration — correlation_sync_log: track sync runs
     """CREATE TABLE IF NOT EXISTS correlation_sync_log (
         id BIGSERIAL PRIMARY KEY,
@@ -1355,6 +1378,32 @@ _PENDING_DDLS = [
     # forzar una asignación de minigranja que no existe (2026-08-11).
     "ALTER TABLE starlink_mapeo_sitio ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
+    # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
+    # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
+    "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
+    """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),
+        version VARCHAR(100),
+        elaborado_por VARCHAR(255),
+        actividad VARCHAR(255),
+        objetivo_alcance JSONB NOT NULL DEFAULT '{}'::jsonb,
+        datos_generales JSONB NOT NULL DEFAULT '{}'::jsonb,
+        arquitectura_comunicacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+        equipos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        variables_monitoreadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        configuracion_monitoreo JSONB NOT NULL DEFAULT '{}'::jsonb,
+        protocolo_pruebas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        eventos_operativos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        observaciones JSONB NOT NULL DEFAULT '{}'::jsonb,
+        recomendaciones JSONB NOT NULL DEFAULT '[]'::jsonb,
+        conclusion TEXT,
+        firmas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        evidencia_arquitectura JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
 ]
 
 
@@ -2466,6 +2515,22 @@ def _scheduled_reporte_energia():
     ejecutar_dia_background(fecha)
 
 
+def _scheduled_excel_terceros_cedillanos():
+    """Revisa operaciones@unergy.io por correo nuevo de Cedillanos con su
+    Excel de CGM (ver excel_terceros_email.py) -- reemplaza la carga
+    manual. El reporte debe estar listo antes de las 6am, pero el correo
+    de Cedillanos históricamente llega entre 3:25am y 6:10am (con
+    tendencia a correrse más tarde, ver sesión 2026-08-14) -- por eso esta
+    función corre cada 15 min de 4am a 6am (ver registro del cron más
+    abajo) en vez de una sola vez, para minimizar el tiempo entre que el
+    correo llega y el dato queda cargado. Costo despreciable: sin correo
+    nuevo, cada corrida es solo un IMAP SEARCH que no toca la base de
+    datos (ver revisar_correo_cedillanos)."""
+    from app.services.reporte_energia.excel_terceros_email import revisar_correo_cedillanos
+
+    revisar_correo_cedillanos()
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3440,6 +3505,27 @@ def _deferred_init():
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
             )
+
+            if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                # Cada 15 min de 4:00am a 6:00am (9 corridas) -- el correo de
+                # Cedillanos históricamente llega entre 3:25am y 6:10am (con
+                # tendencia a correrse más tarde) y el reporte debe estar
+                # listo antes de las 6am. Dos triggers porque CronTrigger no
+                # soporta minutos distintos por hora en una sola expresión
+                # (4am-5:45am cada 15 min + 6:00am exacto, el último intento
+                # antes del corte).
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour="4,5", minute="*/15", timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (4-5:45am)",
+                )
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_6am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
+                )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del
             # cambio de dia para que el tablero amanezca correcto.

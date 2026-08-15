@@ -166,6 +166,39 @@ class AsicModificacionOut(BaseModel):
     resumen: str
 
 
+class AsicTerminacionCreate(BaseModel):
+    """Terminación de un contrato GESCON, bajo su mismo código SIC.
+
+    Solo se captura lo que XM exige (SIC, fecha, requerimiento, cédulas de los
+    agentes y el soporte); la identidad del contrato —contrato interno, nombre
+    interno, SIC vendedor/comprador, prioridad, PPA— se HEREDA de la versión
+    vigente de ese SIC, igual que en una modificación.
+
+    Lo que NO se hereda es `proyecto_id`: una terminación se guarda siempre sin
+    planta. Con planta, `resolver_vigencias` la saca de las activas y
+    Cumplimiento la borra del mes de la terminación en vez de prorratearla
+    hasta la fecha. La planta se muestra derivándola del SIC (display-only).
+    Tampoco se heredan los porcentajes: una terminación no aporta energía.
+    """
+
+    codigo_sic_contrato: str
+    fecha_terminacion: date
+    requerimiento_asic: str | None = None
+    cedula_agente_vendedor: str | None = None
+    cedula_agente_comprador: str | None = None
+    estado_solicitud: str = "publicado"
+    fecha_solicitud: date | None = None
+    link_archivo: str | None = None
+    observaciones: str | None = None
+
+
+class AsicTerminacionOut(BaseModel):
+    terminacion: AsicSolicitudOut
+    # Registros del mismo SIC a los que se les estampó la fecha de fin.
+    cerrados: list[AsicSolicitudOut] = []
+    resumen: str
+
+
 class AsicCambioCreate(BaseModel):
     solicitud_id: int | None = None
     codigo_sic_contrato: str | None = None

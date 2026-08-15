@@ -14,6 +14,7 @@ from app.models.cumplimiento import CumplimientoMensual
 from app.schemas.asic import (
     AsicSolicitudOut, AsicSolicitudCreate, AsicSolicitudUpdate,
     AsicModificacionCreate, AsicModificacionOut,
+    AsicTerminacionCreate, AsicTerminacionOut,
     AsicCambioCreate, AsicCambioOut, GesconDiccionarioCreate, GesconDiccionarioOut,
 )
 from app.utils.gescon_vigencia import resolver_vigencias
@@ -21,7 +22,7 @@ from app.utils.gescon_vigencia import resolver_vigencias
 router = APIRouter(prefix="/asic", tags=["ASIC"])
 
 
-def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
+def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> list[AsicSolicitud]:
     """
     Al publicar una terminación, su `fecha_fin` se estampa como `fecha_fin` del/los
     registro(s) vigente(s) del MISMO código SIC (nivel planta). Los registros NO se
@@ -36,6 +37,9 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
     contrato macro debe cerrarse, se edita directamente en la pestaña PPA. Ver
     `_validar_fecha_fin_vs_ppa` para la regla inversa: ninguna planta puede tener una
     fecha_fin posterior a la del contrato macro.
+
+    Devuelve los registros a los que efectivamente se les estampó la fecha (los que
+    ya terminaban antes no se tocan), para poder reportarlos a quien la radica.
     """
     if (
         solicitud.tipo_solicitud != TipoSolicitudAsicEnum.terminacion
@@ -43,7 +47,7 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
         or not solicitud.codigo_sic_contrato
         or solicitud.fecha_fin is None
     ):
-        return 0
+        return []
 
     fecha_term = solicitud.fecha_fin
 
@@ -62,11 +66,13 @@ def _auto_terminate(db: Session, solicitud: AsicSolicitud) -> int:
         .all()
     )
 
+    cerrados = []
     for t in targets:
         if t.fecha_fin is None or t.fecha_fin > fecha_term:
             t.fecha_fin = fecha_term
+            cerrados.append(t)
 
-    return len(targets)
+    return cerrados
 
 
 def _validar_fecha_fin_vs_ppa(db: Session, solicitud: AsicSolicitud) -> None:
@@ -524,6 +530,120 @@ def create_modificacion(
     )
 
 
+# ── Terminación de un contrato ya registrado ─────────────────────────────
+# Misma dinámica que la modificación: se elige el SIC y la identidad del
+# contrato se hereda. Lo que NO se hereda es la planta — ver docstring de
+# AsicTerminacionCreate: guardar proyecto_id en una terminación hace que
+# Cumplimiento borre la planta del mes en vez de prorratearla hasta la fecha.
+
+_CAMPOS_HEREDADOS_TERMINACION = (
+    "codigo_sic_contrato", "codigo_sic_vendedor", "codigo_sic_comprador",
+    "contrato_interno", "nombre_interno", "prioridad_limitacion",
+    "tipo_mercado", "tipo_asignacion", "contrato_ppa_id",
+)
+
+
+@router.post("/terminacion", response_model=AsicTerminacionOut, status_code=201)
+def create_terminacion(
+    data: AsicTerminacionCreate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Registra la terminación de un contrato GESCON heredando su identidad.
+
+    Solo pide lo que XM exige (SIC, fecha, requerimiento, cédulas, soporte). Al
+    publicarla, `_auto_terminate` estampa la fecha de fin en los registros
+    vigentes del mismo SIC: Cumplimiento los prorratea HASTA esa fecha y los
+    excluye después, dejando el histórico previo intacto.
+    """
+    sic = (data.codigo_sic_contrato or "").strip()
+    if not sic:
+        raise HTTPException(422, "El código SIC del contrato a terminar es obligatorio.")
+
+    activos = _versiones_vigentes_sic(db, sic, en_fecha=data.fecha_terminacion)
+    if not activos:
+        raise HTTPException(
+            404,
+            f"No hay ningún registro publicado y vigente con el código SIC \"{sic}\". "
+            "Revisa el código: una terminación se radica sobre un contrato registrado.",
+        )
+
+    # La identidad es del contrato, no de una planta: sirve cualquier versión
+    # vigente del SIC, prefiriendo una que sí tenga el contrato interno.
+    base = next((a for a in activos if (a.contrato_interno or "").strip()), activos[0])
+
+    inicios = [a.fecha_inicio for a in activos if a.fecha_inicio is not None]
+    if inicios and data.fecha_terminacion < min(inicios):
+        raise HTTPException(
+            422,
+            f"La fecha de terminación ({_fmt_fecha(data.fecha_terminacion)}) es anterior al "
+            f"inicio del contrato ({_fmt_fecha(min(inicios))}).",
+        )
+
+    requerimiento = (data.requerimiento_asic or "").strip() or None
+    if requerimiento and base.requerimiento_asic and requerimiento == base.requerimiento_asic.strip():
+        raise HTTPException(
+            422,
+            f"El requerimiento \"{requerimiento}\" es el mismo del registro vigente. El código "
+            "SIC sí se conserva, pero la terminación se radica con un requerimiento propio.",
+        )
+
+    try:
+        estado = EstadoSolicitudAsicEnum(data.estado_solicitud)
+    except ValueError:
+        raise HTTPException(
+            422,
+            f"Estado inválido: \"{data.estado_solicitud}\". "
+            f"Opciones: {', '.join(e.value for e in EstadoSolicitudAsicEnum)}.",
+        )
+
+    nueva = AsicSolicitud(
+        tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+        estado_solicitud=estado,
+        requerimiento_asic=requerimiento,
+        fecha_solicitud=data.fecha_solicitud or date.today(),
+        fecha_inicio=None,
+        fecha_fin=data.fecha_terminacion,
+        proyecto_id=None,  # deliberado: ver docstring de AsicTerminacionCreate
+        # Las cédulas son de la radicación; si no vienen, se toman del registro.
+        cedula_agente_vendedor=data.cedula_agente_vendedor or base.cedula_agente_vendedor,
+        cedula_agente_comprador=data.cedula_agente_comprador or base.cedula_agente_comprador,
+        link_archivo=data.link_archivo,
+        observaciones=data.observaciones,
+        reemplaza_anterior=True,
+        es_duplicado=False,
+        uso_del_recurso=False,
+        **{campo: getattr(base, campo) for campo in _CAMPOS_HEREDADOS_TERMINACION},
+    )
+
+    try:
+        db.add(nueva)
+        db.flush()
+        _validar_fecha_fin_vs_ppa(db, nueva)
+        cerrados = _auto_terminate(db, nueva)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+
+    etiqueta = base.contrato_interno or base.nombre_interno or f"SIC {sic}"
+    if cerrados:
+        plantas = ", ".join(sorted({_nombre_planta(db, c.proyecto_id) for c in cerrados}))
+        detalle = f"se cerró la vigencia de {len(cerrados)} registro(s): {plantas}"
+    else:
+        detalle = (
+            "no había registros vigentes que cerrar"
+            if estado == EstadoSolicitudAsicEnum.publicado
+            else "queda en borrador: no cierra nada hasta que se publique"
+        )
+    resumen = (
+        f"{etiqueta} (SIC {sic}) termina el {_fmt_fecha(data.fecha_terminacion)}; {detalle}."
+    )
+
+    outs = _aplicar_vigencia(db, _enriquecer_planta(db, [_to_out(f) for f in [nueva, *cerrados]]))
+    return AsicTerminacionOut(terminacion=outs[0], cerrados=outs[1:], resumen=resumen)
+
+
 @router.delete("/{id}", status_code=204)
 def delete_solicitud(
     id: int,
@@ -544,7 +664,16 @@ def delete_solicitud(
     if n_cambios:
         razones.append(f"Tiene {n_cambios} cambio(s) de contrato asociados")
 
-    if s.contrato_ppa_id:
+    # Las terminaciones quedan exentas del bloqueo por cumplimiento: la regla
+    # protege filas cuya energía alimenta el cálculo, y una terminación no
+    # aporta ninguna (Cumplimiento la salta). Sin la exención serían
+    # imposibles de borrar desde que heredan `contrato_interno`, y radicar una
+    # terminación equivocada dejaría de tener arreglo desde la vista.
+    # Ojo: borrar la terminación NO devuelve la fecha_fin que estampó en los
+    # registros del SIC — eso se corrige editando cada registro.
+    if s.tipo_solicitud == TipoSolicitudAsicEnum.terminacion:
+        pass  # exenta: ver comentario arriba
+    elif s.contrato_ppa_id:
         n_cumpl = (
             db.query(CumplimientoMensual)
             .filter(CumplimientoMensual.contrato_ppa_id == s.contrato_ppa_id)
@@ -660,6 +789,122 @@ def backfill_nombre_interno(
             s.nombre_interno = r["nombre_propuesto"]
             if r["vincula_ppa_id"] and not s.contrato_ppa_id:
                 s.contrato_ppa_id = r["vincula_ppa_id"]
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"El backfill falló y se revirtió: {type(e).__name__}: {e}")
+
+    reporte["ejecutado"] = True
+    return reporte
+
+
+@router.post("/backfill-terminaciones")
+def backfill_terminaciones(
+    dry_run: bool = Query(True, description="true (default): solo reporta, no modifica."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Completa la identidad de las terminaciones ya registradas.
+
+    Hasta que existió POST /asic/terminacion, el formulario guardaba la
+    terminación con SIC, fecha y cédulas y nada más: sin contrato interno ni
+    nombre interno, así que salían en blanco en la tabla y en el Excel. Este
+    backfill los rellena desde los registros del MISMO código SIC.
+
+    NO toca `proyecto_id`: una terminación se guarda sin planta a propósito
+    (con planta, Cumplimiento borra la planta del mes de la terminación en vez
+    de prorratearla). Idempotente: solo llena campos vacíos.
+    """
+    campos = (
+        "contrato_interno", "nombre_interno", "codigo_sic_vendedor",
+        "codigo_sic_comprador", "tipo_mercado", "tipo_asignacion",
+    )
+
+    terminaciones = (
+        db.query(AsicSolicitud)
+        .filter(
+            AsicSolicitud.tipo_solicitud == TipoSolicitudAsicEnum.terminacion,
+            AsicSolicitud.codigo_sic_contrato.isnot(None),
+        )
+        .order_by(AsicSolicitud.id)
+        .all()
+    )
+
+    # Fuente por SIC: los registros/modificaciones de ese contrato, del más
+    # reciente al más viejo, para tomar el primero que tenga cada dato.
+    sics = {t.codigo_sic_contrato for t in terminaciones}
+    fuentes: dict[str, list[AsicSolicitud]] = {}
+    if sics:
+        for r in (
+            db.query(AsicSolicitud)
+            .filter(
+                AsicSolicitud.codigo_sic_contrato.in_(sics),
+                AsicSolicitud.tipo_solicitud.in_([
+                    TipoSolicitudAsicEnum.registro,
+                    TipoSolicitudAsicEnum.modificacion,
+                ]),
+            )
+            .order_by(AsicSolicitud.fecha_inicio.desc().nullslast(), AsicSolicitud.id.desc())
+            .all()
+        ):
+            fuentes.setdefault(r.codigo_sic_contrato, []).append(r)
+
+    resueltos, no_resueltos = [], []
+    for t in terminaciones:
+        candidatos = fuentes.get(t.codigo_sic_contrato, [])
+        if not candidatos:
+            no_resueltos.append({
+                "id": t.id,
+                "codigo_sic_contrato": t.codigo_sic_contrato,
+                "motivo": "no hay registros con ese código SIC",
+            })
+            continue
+
+        cambios = {}
+        for campo in campos:
+            if (getattr(t, campo) or "").strip():
+                continue
+            valor = next(
+                (v for v in ((getattr(c, campo) or "").strip() for c in candidatos) if v),
+                None,
+            )
+            if valor:
+                cambios[campo] = valor
+        if t.prioridad_limitacion is None:
+            prio = next((c.prioridad_limitacion for c in candidatos if c.prioridad_limitacion is not None), None)
+            if prio is not None:
+                cambios["prioridad_limitacion"] = prio
+        if t.contrato_ppa_id is None:
+            ppa_id = next((c.contrato_ppa_id for c in candidatos if c.contrato_ppa_id), None)
+            if ppa_id:
+                cambios["contrato_ppa_id"] = ppa_id
+
+        if cambios:
+            resueltos.append({
+                "id": t.id,
+                "codigo_sic_contrato": t.codigo_sic_contrato,
+                "fecha_fin": t.fecha_fin.isoformat() if t.fecha_fin else None,
+                "cambios": cambios,
+            })
+
+    reporte = {
+        "dry_run": dry_run,
+        "total_terminaciones": len(terminaciones),
+        "a_actualizar": len(resueltos),
+        "sin_resolver": len(no_resueltos),
+        "resueltos": resueltos,
+        "no_resueltos": no_resueltos,
+    }
+    if dry_run:
+        return reporte
+
+    try:
+        for r in resueltos:
+            t = db.query(AsicSolicitud).filter(AsicSolicitud.id == r["id"]).first()
+            if not t:
+                continue
+            for campo, valor in r["cambios"].items():
+                setattr(t, campo, valor)
         db.commit()
     except Exception as e:
         db.rollback()

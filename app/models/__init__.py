@@ -44,6 +44,7 @@ from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocum
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
 from app.models.verificacion_costos import VerificacionCosto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.retos import RetoTrimestre, RetoMetrica, RetoValorSemanal
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -75,6 +76,7 @@ __all__ = [
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
     "VerificacionCosto",
     "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
+    "RetoTrimestre", "RetoMetrica", "RetoValorSemanal",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (

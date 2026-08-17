@@ -804,16 +804,23 @@ def backfill_terminaciones(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Completa la identidad de las terminaciones ya registradas.
+    """Deja las terminaciones ya registradas bien aplicadas. Dos cosas:
 
-    Hasta que existió POST /asic/terminacion, el formulario guardaba la
-    terminación con SIC, fecha y cédulas y nada más: sin contrato interno ni
-    nombre interno, así que salían en blanco en la tabla y en el Excel. Este
-    backfill los rellena desde los registros del MISMO código SIC.
+    1. Completa su IDENTIDAD. Hasta que existió POST /asic/terminacion, el
+       formulario guardaba la terminación con SIC, fecha y cédulas y nada más:
+       sin contrato interno ni nombre interno, así que salían en blanco en la
+       tabla y en el Excel. Se rellenan desde los registros del MISMO SIC.
+
+    2. Estampa la FECHA en los registros que quedaron sin recortar. La
+       vigencia efectiva ya se deriva sola (app/utils/gescon_vigencia.py), así
+       que esto no cambia ningún cálculo; sirve para que la fecha_fin
+       ALMACENADA —la que se ve en la tabla y en el Excel— deje de decir 2030
+       cuando el contrato terminó. Reusa `_auto_terminate`, la misma función
+       que corre al guardar una terminación: una sola regla, no dos.
 
     NO toca `proyecto_id`: una terminación se guarda sin planta a propósito
     (con planta, Cumplimiento borra la planta del mes de la terminación en vez
-    de prorratearla). Idempotente: solo llena campos vacíos.
+    de prorratearla). Idempotente: solo llena vacíos y solo recorta hacia atrás.
     """
     campos = (
         "contrato_interno", "nombre_interno", "codigo_sic_vendedor",
@@ -887,6 +894,31 @@ def backfill_terminaciones(
                 "cambios": cambios,
             })
 
+    # Registros que una terminación publicada debería haber cerrado y no cerró.
+    # Mismo criterio que `_auto_terminate` (fecha_fin nula o posterior).
+    sin_recortar = []
+    for t in terminaciones:
+        if t.fecha_fin is None or t.estado_solicitud != EstadoSolicitudAsicEnum.publicado:
+            continue
+        pendientes = [
+            {
+                "id": c.id,
+                "planta": _nombre_planta(db, c.proyecto_id),
+                "fecha_fin_actual": c.fecha_fin.isoformat() if c.fecha_fin else None,
+            }
+            for c in fuentes.get(t.codigo_sic_contrato, [])
+            if c.estado_solicitud == EstadoSolicitudAsicEnum.publicado
+            and (c.fecha_fin is None or c.fecha_fin > t.fecha_fin)
+        ]
+        if pendientes:
+            sin_recortar.append({
+                "id": t.id,
+                "codigo_sic_contrato": t.codigo_sic_contrato,
+                "requerimiento_asic": t.requerimiento_asic,
+                "termina": t.fecha_fin.isoformat(),
+                "registros": pendientes,
+            })
+
     reporte = {
         "dry_run": dry_run,
         "total_terminaciones": len(terminaciones),
@@ -894,6 +926,10 @@ def backfill_terminaciones(
         "sin_resolver": len(no_resueltos),
         "resueltos": resueltos,
         "no_resueltos": no_resueltos,
+        # Fechas pendientes de estampar. El cálculo ya sale bien sin esto (la
+        # vigencia efectiva se deriva); corrige la fecha ALMACENADA.
+        "a_recortar": sum(len(s["registros"]) for s in sin_recortar),
+        "sin_recortar": sin_recortar,
     }
     if dry_run:
         return reporte
@@ -905,6 +941,10 @@ def backfill_terminaciones(
                 continue
             for campo, valor in r["cambios"].items():
                 setattr(t, campo, valor)
+        for s in sin_recortar:
+            t = db.query(AsicSolicitud).filter(AsicSolicitud.id == s["id"]).first()
+            if t:
+                _auto_terminate(db, t)
         db.commit()
     except Exception as e:
         db.rollback()

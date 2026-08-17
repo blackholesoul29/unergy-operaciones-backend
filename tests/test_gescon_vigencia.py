@@ -146,9 +146,8 @@ def test_relevo_recorta_a_todas_las_coexistentes():
 
 # ── Terminación ───────────────────────────────────────────────────────────────
 
-def test_terminacion_marca_no_vigente_sin_recortar():
-    """_auto_terminate ya estampa la fecha_fin real en el registro; la
-    terminación solo debe quitarle la vigencia, no recortar de nuevo."""
+def test_terminacion_con_planta_cierra_esa_planta():
+    """Terminaciones viejas que sí llevan proyecto_id: cierran solo esa planta."""
     regs = [
         _sol(id=50, codigo_sic_contrato="888", proyecto_id=LA_RESERVA,
              fecha_inicio=date(2024, 1, 1), fecha_fin=date(2026, 8, 30)),
@@ -158,9 +157,126 @@ def test_terminacion_marca_no_vigente_sin_recortar():
     ]
     v = resolver_vigencias(regs)
     assert v[50].vigente is False
-    assert v[50].fecha_fin_efectiva == date(2026, 8, 30)  # la estampada, intacta
+    assert v[50].fecha_fin_efectiva == date(2026, 8, 30)
     assert v[50].reemplazado_por_id == 51
     assert v[51].vigente is False
+
+
+# Una terminación se guarda SIN proyecto_id a propósito (ver AsicTerminacionCreate).
+# Hasta el 2026-08-16 el resolutor no hacía nada con ellas: confiaba en que
+# `_auto_terminate` ya hubiera estampado la fecha en los registros al guardar. Eso
+# se materializa una sola vez y se desincroniza — el caso real fue MGS 0008 La Paz
+# Verso (terminación 202608130012), que seguía contando en su contrato.
+
+def test_terminacion_sin_planta_cierra_todo_el_sic_aunque_no_este_estampada():
+    """Con la fecha_fin cruda SIN estampar (2030), el recorte tiene que salir
+    igual de la resolución: es la garantía de que no puede volver a perderse."""
+    regs = [
+        _sol(id=60, codigo_sic_contrato="777", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=61, codigo_sic_contrato="777", proyecto_id=OTRA_PLANTA,
+             reemplaza_anterior=False,
+             fecha_inicio=date(2024, 6, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=62, codigo_sic_contrato="777", tipo_solicitud="terminacion",
+             fecha_inicio=None, fecha_fin=date(2026, 8, 13)),
+    ]
+    v = resolver_vigencias(regs)
+    for fila in (60, 61):
+        assert v[fila].fecha_fin_efectiva == date(2026, 8, 13)
+        assert v[fila].vigente is False
+        assert v[fila].reemplazado_por_id == 62
+        assert v[fila].saliente_por_relevo is True, (
+            "salientes, no simplemente 'no vigentes': el consumidor las prorratea "
+            "hasta la fecha en vez de borrarlas del mes"
+        )
+
+
+def test_terminacion_no_alarga_a_quien_ya_terminaba_antes():
+    regs = [
+        _sol(id=63, codigo_sic_contrato="777", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2025, 6, 30)),
+        _sol(id=64, codigo_sic_contrato="777", tipo_solicitud="terminacion",
+             fecha_fin=date(2026, 8, 13)),
+    ]
+    v = resolver_vigencias(regs)
+    assert v[63].fecha_fin_efectiva == date(2025, 6, 30)
+
+
+def test_la_terminacion_toma_efecto_en_su_fecha_fin_no_al_principio():
+    """Le va `fecha_inicio` nula: ordenada por inicio caería al principio de la
+    fila —antes de que exista nada que cerrar— y no cerraría nada."""
+    regs = [
+        _sol(id=65, codigo_sic_contrato="776", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=66, codigo_sic_contrato="776", tipo_solicitud="terminacion",
+             fecha_inicio=None, fecha_fin=date(2026, 8, 13)),
+    ]
+    # El orden de entrada no debe importar
+    for entrada in (regs, list(reversed(regs))):
+        v = resolver_vigencias(entrada)
+        assert v[65].fecha_fin_efectiva == date(2026, 8, 13)
+
+
+def test_un_registro_posterior_a_la_terminacion_no_se_recorta():
+    """Reactivar el SIC con un registro nuevo después de cerrarlo es válido."""
+    regs = [
+        _sol(id=67, codigo_sic_contrato="775", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=68, codigo_sic_contrato="775", tipo_solicitud="terminacion",
+             fecha_fin=date(2026, 8, 13)),
+        _sol(id=69, codigo_sic_contrato="775", proyecto_id=TERCERA,
+             fecha_inicio=date(2026, 9, 1), fecha_fin=date(2031, 12, 31)),
+    ]
+    v = resolver_vigencias(regs)
+    assert v[67].fecha_fin_efectiva == date(2026, 8, 13)
+    assert v[69].vigente is True
+    assert v[69].fecha_fin_efectiva == date(2031, 12, 31)
+
+
+def test_terminacion_sin_fecha_no_cierra_nada():
+    regs = [
+        _sol(id=70, codigo_sic_contrato="774", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=71, codigo_sic_contrato="774", tipo_solicitud="terminacion"),
+    ]
+    v = resolver_vigencias(regs)
+    assert v[70].vigente is True
+    assert v[70].fecha_fin_efectiva == date(2030, 12, 31)
+
+
+def test_terminacion_no_afecta_los_meses_anteriores():
+    regs = [
+        _sol(id=72, codigo_sic_contrato="773", proyecto_id=LA_RESERVA,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=73, codigo_sic_contrato="773", tipo_solicitud="terminacion",
+             fecha_fin=date(2026, 8, 13)),
+    ]
+    julio = resolver_vigencias(regs, hasta=date(2026, 7, 31))
+    assert julio[72].vigente is True
+    assert julio[72].fecha_fin_efectiva == date(2030, 12, 31)
+    assert julio[73].procesado is False
+
+    agosto = resolver_vigencias(regs, hasta=date(2026, 8, 31))
+    assert agosto[72].fecha_fin_efectiva == date(2026, 8, 13)
+
+
+def test_caso_la_paz_verso_la_terminacion_de_un_sic_no_toca_el_otro():
+    """Verso reparte su 100% entre dos contratos (50% + 50%). Al terminarse uno,
+    deja de contar ahí y sigue entera en el otro."""
+    verso = 808
+    regs = [
+        _sol(id=80, codigo_sic_contrato="A", proyecto_id=verso,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=81, codigo_sic_contrato="B", proyecto_id=verso,
+             fecha_inicio=date(2024, 1, 1), fecha_fin=date(2030, 12, 31)),
+        _sol(id=82, codigo_sic_contrato="A", tipo_solicitud="terminacion",
+             fecha_fin=date(2026, 8, 13)),
+    ]
+    v = resolver_vigencias(regs)
+    assert v[80].fecha_fin_efectiva == date(2026, 8, 13)
+    assert v[80].vigente is False
+    assert v[81].vigente is True, "el otro contrato sigue intacto"
+    assert v[81].fecha_fin_efectiva == date(2030, 12, 31)
 
 
 # ── Horizonte `hasta` (vista histórica por mes) ───────────────────────────────

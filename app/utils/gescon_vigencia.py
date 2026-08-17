@@ -28,9 +28,20 @@ Reglas (idénticas a _resolve_gescon):
   `fecha_inicio − 1` (`saliente_por_relevo=True`, ver docstring de
   _resolve_gescon: el prorrateo por días necesita distinguirlas).
 - reemplaza_anterior=False → coexiste con las plantas activas (no recorta).
-- Terminación → saca a la planta indicada de las activas. Su `fecha_fin` real
-  ya viene estampada en el registro/modificación del mismo SIC por
-  `_auto_terminate`, así que no se recorta nada aquí.
+- Terminación → cierra el SIC en su `fecha_fin`: TODAS las plantas activas
+  quedan recortadas a esa fecha. Toma efecto en `fecha_fin` (una terminación
+  no "empieza" nada: cierra ese día), no en `fecha_inicio`, que va nula.
+
+  Antes esto no se resolvía aquí: se confiaba en que `_auto_terminate` ya
+  había estampado la fecha en los registros al guardar la terminación. Pero
+  eso se materializa UNA vez, al escribir la terminación, y se desincroniza
+  solo — una terminación cargada directo a la BD nunca lo corrió, y un
+  registro creado o editado DESPUÉS con una fecha posterior no lo vuelve a
+  correr. Cuando eso pasa la terminación se vuelve invisible para todos los
+  consumidores a la vez y la planta sigue apareciendo en su contrato (caso
+  real: MGS 0008 La Paz Verso, terminación 202608130012, que seguía contando
+  duplicada). Derivarlo aquí lo hace robusto: el recorte no puede perderse
+  porque no se guarda en ninguna parte.
 
 El llamador debe pasar SOLO solicitudes publicadas, sin desistimientos (mismo
 filtro que _resolve_gescon). Filas en otros estados no participan de la
@@ -49,7 +60,12 @@ class Vigencia:
 
     fecha_fin_efectiva: date | None  # fin real de la ventana; None = abierta
     vigente: bool                    # es la versión vigente actual de su SIC
-    saliente_por_relevo: bool        # recortada por relevo de OTRA planta
+    # Ya no es la versión vigente, pero su ventana recortada SÍ cuenta: el
+    # consumidor debe incluirla prorrateada hasta `fecha_fin_efectiva` en vez de
+    # descartarla. Pasa cuando releva otra planta y cuando la cierra una
+    # terminación. (Una versión superada EN SITIO por su propia planta no lleva
+    # esta marca: la representa su versión nueva.)
+    saliente_por_relevo: bool
     reemplazado_por_id: int | None   # id de la solicitud que la desplazó
     procesado: bool                  # tomó efecto dentro del horizonte `hasta`
 
@@ -60,10 +76,28 @@ def _tipo(r) -> str:
     return getattr(t, "value", t)
 
 
+def _vigente_desde(r) -> date:
+    """Día en que el evento toma efecto.
+
+    Para una terminación es su `fecha_fin`: no empieza nada, cierra el contrato
+    ese día — y además le va `fecha_inicio` nula, así que ordenarla por inicio
+    la mandaría al principio de la fila, antes de que exista nada que cerrar.
+    """
+    if _tipo(r) == "terminacion":
+        return r.fecha_fin or date.min
+    return r.fecha_inicio or date.min
+
+
 def _orden(r):
-    """Clave de orden cronológico. Empates: el sort estable conserva el orden
-    de entrada (los llamadores ya ordenan por created_at en la query)."""
-    return (r.fecha_inicio or date.min, r.fecha_solicitud or date.min)
+    """Clave de orden cronológico. En empate de fecha la terminación va de
+    última: si un registro arranca el mismo día que cierra el contrato, primero
+    entra y después se cierra. Empates restantes: el sort estable conserva el
+    orden de entrada (los llamadores ya ordenan por created_at en la query)."""
+    return (
+        _vigente_desde(r),
+        1 if _tipo(r) == "terminacion" else 0,
+        r.fecha_solicitud or date.min,
+    )
 
 
 def _dia_anterior(d: date) -> date:
@@ -89,7 +123,7 @@ def resolver_vigencias(records, hasta: date | None = None) -> dict[int, Vigencia
     for sic_records in by_sic.values():
         active: dict[int | str, object] = {}
         for r in sorted(sic_records, key=_orden):
-            vigente_desde = r.fecha_inicio or date.min
+            vigente_desde = _vigente_desde(r)
             if hasta is not None and vigente_desde > hasta:
                 out[r.id] = Vigencia(r.fecha_fin, False, False, None, procesado=False)
                 continue
@@ -97,14 +131,23 @@ def resolver_vigencias(records, hasta: date | None = None) -> dict[int, Vigencia
             pid = r.proyecto_id
             if _tipo(r) == "terminacion":
                 out[r.id] = Vigencia(r.fecha_fin, False, False, None, True)
-                if pid is not None:
-                    prev = active.pop(pid, None)
-                    if prev is not None:
-                        # fecha_fin ya estampada por _auto_terminate → sin recorte
-                        v = out[prev.id]
-                        out[prev.id] = Vigencia(
-                            v.fecha_fin_efectiva, False, False, r.id, True
-                        )
+                if r.fecha_fin is None:
+                    continue  # sin fecha no cierra nada
+                # Cierra el SIC: las plantas activas quedan recortadas al día de
+                # la terminación. Se marcan salientes (no simplemente "no
+                # vigentes") para que el consumidor las prorratee hasta esa
+                # fecha en vez de borrarlas del mes.
+                # Las terminaciones viejas llevan proyecto_id (hoy va nulo a
+                # propósito): en ese caso solo se cierra esa planta.
+                objetivos = (
+                    [(pid, active[pid])] if pid is not None and pid in active
+                    else [] if pid is not None
+                    else list(active.items())
+                )
+                for clave, saliente in objetivos:
+                    fin_ef = min(saliente.fecha_fin or date.max, r.fecha_fin)
+                    out[saliente.id] = Vigencia(fin_ef, False, True, r.id, True)
+                    active.pop(clave, None)
                 continue
 
             if pid is None:

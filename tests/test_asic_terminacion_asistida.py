@@ -365,6 +365,68 @@ def test_backfill_es_idempotente_y_no_pisa_lo_que_ya_hay(db):
     assert segunda["a_actualizar"] == 0
 
 
+def test_backfill_estampa_las_fechas_que_quedaron_sin_recortar(db):
+    """Caso La Paz Verso: la terminación existe pero el registro sigue diciendo
+    2030 porque _auto_terminate nunca corrió sobre él (carga directa a BD, o un
+    registro editado después)."""
+    _, registro = _registro(db)
+    termino = _sol(db, tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+                   codigo_sic_contrato="88806", fecha_fin=date(2026, 8, 13),
+                   requerimiento_asic="202608130012")
+    db.commit()
+    assert _fila(db, registro.id).fecha_fin == date(2030, 12, 31)
+
+    previo = asic_api.backfill_terminaciones(dry_run=True, db=db, _=None)
+    assert previo["a_recortar"] == 1
+    assert previo["sin_recortar"][0]["requerimiento_asic"] == "202608130012"
+    assert previo["sin_recortar"][0]["registros"][0]["id"] == registro.id
+    assert _fila(db, registro.id).fecha_fin == date(2030, 12, 31), "dry_run no toca"
+
+    asic_api.backfill_terminaciones(dry_run=False, db=db, _=None)
+
+    assert _fila(db, registro.id).fecha_fin == date(2026, 8, 13)
+    assert _fila(db, termino.id).fecha_fin == date(2026, 8, 13)
+    assert asic_api.backfill_terminaciones(dry_run=True, db=db, _=None)["a_recortar"] == 0
+
+
+def test_backfill_no_recorta_por_una_terminacion_en_borrador(db):
+    _, registro = _registro(db)
+    _sol(db, tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+         estado_solicitud=EstadoSolicitudAsicEnum.en_proceso,
+         codigo_sic_contrato="88806", fecha_fin=date(2026, 8, 13))
+    db.commit()
+
+    assert asic_api.backfill_terminaciones(dry_run=True, db=db, _=None)["a_recortar"] == 0
+    asic_api.backfill_terminaciones(dry_run=False, db=db, _=None)
+    assert _fila(db, registro.id).fecha_fin == date(2030, 12, 31)
+
+
+def test_backfill_no_alarga_a_quien_ya_terminaba_antes(db):
+    _, registro = _registro(db, fecha_fin=date(2025, 6, 30))
+    _sol(db, tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+         codigo_sic_contrato="88806", fecha_fin=date(2026, 8, 13))
+    db.commit()
+
+    assert asic_api.backfill_terminaciones(dry_run=True, db=db, _=None)["a_recortar"] == 0
+    asic_api.backfill_terminaciones(dry_run=False, db=db, _=None)
+    assert _fila(db, registro.id).fecha_fin == date(2025, 6, 30)
+
+
+def test_la_vigencia_efectiva_ya_sale_bien_sin_correr_el_backfill(db):
+    """Lo que de verdad arregla el cálculo es que la terminación se resuelva
+    sola: el backfill solo endereza la fecha ALMACENADA."""
+    _, registro = _registro(db)
+    _sol(db, tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
+         codigo_sic_contrato="88806", fecha_fin=date(2026, 8, 13))
+    db.commit()
+
+    outs = {o.id: o for o in asic_api.list_solicitudes(
+        db=db, _=None, codigo_sic_contrato=None, contrato_interno=None, proyecto_id=None)}
+    assert outs[registro.id].fecha_fin_efectiva == date(2026, 8, 13)
+    assert outs[registro.id].es_version_vigente is False
+    assert outs[registro.id].fecha_fin == date(2030, 12, 31), "la cruda sigue intacta"
+
+
 def test_backfill_reporta_las_que_no_puede_resolver(db):
     _sol(db, tipo_solicitud=TipoSolicitudAsicEnum.terminacion,
          codigo_sic_contrato="99999", fecha_fin=date(2026, 3, 31))

@@ -109,6 +109,27 @@ def _validar_flags_exclusivos(es_duplicado: bool, uso_del_recurso: bool) -> None
         )
 
 
+MODALIDADES_PAGO = ("plg", "plc")
+
+
+def _normalizar_modalidad_pago(valor: str | None) -> str | None:
+    """'plg' | 'plc' | None. Es la modalidad de pago del contrato en el que
+    participa la planta; marcar el par PLG/PLC es lo que permite distinguir una
+    planta repartida entre dos contratos de una duplicada de verdad."""
+    if valor is None:
+        return None
+    limpio = valor.strip().lower()
+    if not limpio:
+        return None
+    if limpio not in MODALIDADES_PAGO:
+        raise HTTPException(
+            422,
+            f"Modalidad de pago inválida: \"{valor}\". "
+            f"Opciones: {', '.join(MODALIDADES_PAGO)} (o vacío si no aplica).",
+        )
+    return limpio
+
+
 def _to_out(s: AsicSolicitud) -> AsicSolicitudOut:
     d = AsicSolicitudOut.model_validate(s)
     if s.proyecto:
@@ -227,6 +248,7 @@ def patch_solicitud(
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(s, k, v)
     _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
+    s.modalidad_pago = _normalizar_modalidad_pago(s.modalidad_pago)
     _validar_fecha_fin_vs_ppa(db, s)
     _auto_terminate(db, s)
     db.commit()
@@ -243,6 +265,7 @@ def create_solicitud(
 ):
     s = AsicSolicitud(**data.model_dump())
     _validar_flags_exclusivos(bool(s.es_duplicado), bool(s.uso_del_recurso))
+    s.modalidad_pago = _normalizar_modalidad_pago(s.modalidad_pago)
     db.add(s)
     db.flush()
     _validar_fecha_fin_vs_ppa(db, s)
@@ -475,6 +498,9 @@ def create_modificacion(
         uso_del_recurso=uso_del_recurso,
         link_archivo=data.link_archivo,
         observaciones=data.observaciones,
+        # La modalidad de pago es del CONTRATO, no de la planta: se conserva
+        # aunque entre otra planta, salvo que la modificación diga otra cosa.
+        modalidad_pago=_normalizar_modalidad_pago(data.modalidad_pago) or base.modalidad_pago,
         **{campo: getattr(base, campo) for campo in _CAMPOS_HEREDADOS},
     )
 

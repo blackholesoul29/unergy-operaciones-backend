@@ -498,3 +498,39 @@ def test_modificar_una_modificacion_encadena_versiones(db):
     assert outs[registro.id].es_version_vigente is False
     assert outs[primera.modificacion.id].fecha_fin_efectiva == date(2027, 2, 28)
     assert outs[segunda.modificacion.id].es_version_vigente is True
+
+
+# ── Modalidad de pago del contrato (PLG / PLC) ────────────────────────────
+# Una planta repartida entre dos contratos, uno PLG y otro PLC, no está
+# duplicada: entre los dos cubren su 100% (MGS 0040 Cacica, MGS 0041
+# Piloneras). Marcar el par es lo que permite distinguirla de una duplicación.
+
+def test_la_modalidad_de_pago_se_guarda(db):
+    _registro_base(db)
+    out = _crear(db, fecha_fin=date(2029, 1, 31), modalidad_pago="plc")
+    assert _fila(db, out.modificacion.id).modalidad_pago == "plc"
+
+
+def test_la_modalidad_de_pago_se_hereda_del_contrato(db):
+    """Es del contrato, no de la planta: se conserva aunque entre otra."""
+    _registro_base(db, modalidad_pago="plg")
+    entrante = _planta(db, "MGS 0044 San Pelayo")
+    db.commit()
+
+    out = _crear(db, proyecto_id=entrante.id)
+
+    assert _fila(db, out.modificacion.id).modalidad_pago == "plg"
+
+
+def test_modalidad_de_pago_invalida_se_rechaza(db):
+    _registro_base(db)
+    with pytest.raises(HTTPException) as e:
+        _crear(db, fecha_fin=date(2029, 1, 31), modalidad_pago="ppa")
+    assert e.value.status_code == 422
+    assert "plg" in e.value.detail and "plc" in e.value.detail
+
+
+def test_modalidad_de_pago_se_normaliza(db):
+    _registro_base(db)
+    out = _crear(db, fecha_fin=date(2029, 1, 31), modalidad_pago="  PLC ")
+    assert _fila(db, out.modificacion.id).modalidad_pago == "plc"

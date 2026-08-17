@@ -633,6 +633,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_fronteras_soft_deleted ON fronteras (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fronteras_estado_op ON fronteras (estado_operacional) WHERE estado_operacional IS NOT NULL",
     # migration — ASIC: XM tracking fields
+    # Modalidad de pago del contrato ('plg' | 'plc'). Una planta repartida entre
+    # dos contratos, uno de cada modalidad, no está duplicada: entre los dos
+    # cubren su 100%.
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS modalidad_pago VARCHAR(3)",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_envio_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_respuesta_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS numero_radicado VARCHAR(100)",

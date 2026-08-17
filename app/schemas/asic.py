@@ -30,6 +30,8 @@ class AsicSolicitudOut(BaseModel):
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
     uso_del_recurso: bool = False
+    # 'plg' | 'plc' — modalidad de pago del contrato. Ver AsicSolicitud.modalidad_pago.
+    modalidad_pago: str | None = None
     fecha_envio_xm: date | None = None
     fecha_respuesta_xm: date | None = None
     numero_radicado: str | None = None
@@ -75,6 +77,8 @@ class AsicSolicitudCreate(BaseModel):
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
     uso_del_recurso: bool = False
+    # 'plg' | 'plc' — modalidad de pago del contrato. Ver AsicSolicitud.modalidad_pago.
+    modalidad_pago: str | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -109,6 +113,7 @@ class AsicSolicitudUpdate(BaseModel):
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
     uso_del_recurso: bool | None = None
+    modalidad_pago: str | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -145,6 +150,8 @@ class AsicModificacionCreate(BaseModel):
     # multiplicador directo (generación × porcentaje_despacho).
     porcentaje_despacho: float | None = None
     modalidad: str | None = None  # normal | duplicado | uso_recurso
+    # Modalidad de pago del contrato ('plg' | 'plc'). Ausente = se hereda.
+    modalidad_pago: str | None = None
 
     # Cuál planta sale, cuando el SIC tiene varias coexistiendo.
     proyecto_saliente_id: int | None = None

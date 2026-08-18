@@ -135,3 +135,42 @@ def test_extraer_observaciones_corta_en_la_firma():
 
 def test_extraer_observaciones_sin_cmu():
     assert extraer_observaciones("Buenas tardes, quedo atenta.") == []
+
+
+from app.services.mandatos.email_parser import cmu_al_inicio_de_nombre, solo_pdfs
+from tests.fixtures_mandatos_correos import (
+    ENVIO_INVERSIONISTA_ADJUNTOS, LIQUIDACION_PRELIMINAR_ADJUNTOS,
+)
+
+
+# ── adjuntos ──────────────────────────────────────────────────────────────────
+
+def test_cmu_al_inicio_de_nombre_convencion_de_jessica():
+    assert cmu_al_inicio_de_nombre("CMU1135-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf") == "CMU1135"
+
+
+def test_cmu_al_inicio_ignora_cmu_en_medio_del_nombre():
+    """Ancla al inicio: un CMU suelto en medio del nombre no cuenta para Fuente 3."""
+    assert cmu_al_inicio_de_nombre("REGISTRO MANDATOS CMU1135.xlsx") is None
+
+
+def test_cmu_al_inicio_sin_match():
+    assert cmu_al_inicio_de_nombre("REGISTRO MANDATOS.xlsx") is None
+    assert cmu_al_inicio_de_nombre("") is None
+    assert cmu_al_inicio_de_nombre(None) is None
+
+
+def test_solo_pdfs_descarta_el_excel():
+    assert solo_pdfs(ENVIO_INVERSIONISTA_ADJUNTOS) == [
+        "CMU1135-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+        "CMU1141-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+        "CMU1139-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+        "CMU1142-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+    ]
+
+
+def test_liquidacion_preliminar_no_aporta_cmu():
+    """Caso negativo: correo de Jessica a inversionistas que menciona
+    'certificados de mandato' pero no trae adjuntos de mandato."""
+    pdfs = solo_pdfs(LIQUIDACION_PRELIMINAR_ADJUNTOS)
+    assert [cmu_al_inicio_de_nombre(n) for n in pdfs] == []

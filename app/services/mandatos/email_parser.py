@@ -182,3 +182,24 @@ def extraer_observaciones(cuerpo: str | None) -> list[dict]:
             vistos.add(cmu)
             resultado.append({"cmu": cmu, "observacion": observacion})
     return resultado
+
+
+# Fuente 3: convención verificada en los correos de Jessica
+# ("CMU1135-Mandato-Costos-{Proyecto}-{Inversionista}.pdf"). Anclada al inicio
+# para no confundir un CMU citado en otra parte del nombre.
+_CMU_INICIO_RE = re.compile(r"^(CMU\d+)", re.IGNORECASE)
+
+
+def cmu_al_inicio_de_nombre(nombre: str | None) -> str | None:
+    """'CMU1135-Mandato-Costos-....pdf' → 'CMU1135'. None si no arranca con CMU.
+
+    Para Fuente 2 (revisoría), cuya convención de nombres NO está verificada,
+    usar extraer_cmu_de_nombre() de mandatos_service, que busca en cualquier parte.
+    """
+    m = _CMU_INICIO_RE.match((nombre or "").strip())
+    return m.group(1).upper() if m else None
+
+
+def solo_pdfs(nombres: list[str]) -> list[str]:
+    """Los nombres que terminan en .pdf, conservando el orden."""
+    return [n for n in nombres if (n or "").lower().endswith(".pdf")]

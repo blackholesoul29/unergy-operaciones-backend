@@ -2,6 +2,16 @@
 
 Transcritos de capturas del buzón adhara@unergy.io. Se conservan tal cual --
 la redacción exacta ES el caso de prueba. No "limpiar" ni normalizar nada acá.
+
+Las "fuentes" que nombran las secciones son las tres del spec
+(docs/superpowers/specs/2026-08-18-mandatos-fase-b-imap-design.md §6.4):
+
+  Fuente 1  observaciones de la revisoría          → estado con_correcciones
+  Fuente 2  PDF firmado adjunto por la revisoría   → estado firmado
+  Fuente 3  envío de Jessica al inversionista      → estado enviado_inversionista
+
+Un mismo correo puede alimentar varias fuentes: el del 14 jul trae PDFs
+firmados y observaciones a la vez.
 """
 
 # ── Fuente 1/2 -- revisoría (vlondono@jbp.com.co) ─────────────────────────────
@@ -48,7 +58,9 @@ Los demás certificados se encuentran actualmente en proceso de firma y se los e
 Cordialmente
 Vanessa Londoño Sánchez"""
 
-# Cuerpo HTML con la tabla del correo de las 2:25 p.m.
+# El MISMO correo de REVISORIA_OBSERVACIONES (10 ago 2:25 p.m.), pero en su
+# versión HTML con la tabla embebida. No es un cuarto correo: existe aparte
+# para ejercitar html_a_texto() contra entidades, <p> y <table> reales.
 REVISORIA_HTML = """<div dir="ltr"><p>Buenas tardes Adhara,</p>
 <p>Revisando la informaci&oacute;n que me compartes, encuentro las siguientes observaciones:</p>
 <p>1. Certificado CMU1255 el valor a pagar no coincide con la suma de los conceptos detallados, adem&aacute;s encuentro una diferencia entre contabilidad y el certificado as&iacute;:</p>
@@ -60,7 +72,10 @@ REVISORIA_HTML = """<div dir="ltr"><p>Buenas tardes Adhara,</p>
 
 # ── Fuente 3 -- envío a inversionistas (jessica@unergy.io) ────────────────────
 
-# 2026-08-12 8:14 a.m. -- 8 adjuntos: 1 xlsx + 4 PDFs de mandato (visibles).
+# 2026-08-12 8:14 a.m. -- el correo real declara 8 adjuntos; acá van los 5
+# visibles en la captura (1 xlsx + 4 PDFs de mandato). Basta para el caso de
+# prueba: lo que se ejercita es que el .xlsx se descarte y que cada PDF aporte
+# su CMU, no cuántos adjuntos traía el correo.
 ENVIO_INVERSIONISTA = """Cordial saludo equipo de PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA , espero se encuentren muy bien.
 
 La presente es con el fin de informarles que los certificados de mandato de costos de los proyectos asociados al 17844 - P.A SOL DE LA SIERRA del mes de junio ya se encuentran emitidos y firmados con fecha actual. Anexo bajo este correo cada uno de estos certificados de mandato

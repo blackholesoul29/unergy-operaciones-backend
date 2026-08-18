@@ -3,11 +3,29 @@
 Fecha: 2026-08-18
 Estado: **propuesta, no aprobada.** Escrito para llevar a una conversación con Jessica.
 
-> Este documento no decide nada por sí solo. Documenta qué hay hoy, dónde se pisan
-> los dos sistemas, y qué preguntas necesitan la respuesta de Jessica antes de que
-> se pueda escribir un plan de implementación. Las secciones 1–4 son hechos
-> verificados contra el código. La sección 5 es una propuesta. La sección 6 son las
-> preguntas abiertas.
+> Las secciones 1–4 son hechos verificados contra el código. La 5 es el diseño.
+> La 6 quedó respondida (ver más abajo).
+
+## 0. Decisiones tomadas (2026-08-18)
+
+Cerradas tras consultar a Jessica. Todo lo demás en este documento se lee a la luz
+de estas.
+
+| Decisión | Valor |
+|---|---|
+| Tabla destino | `finanzas_mandatos` (la de Jessica), **intacta** — datos reales y PDFs en Drive se quedan donde están |
+| Se descarta | tabla `mandatos` de Fase A (31 registros de prueba) y su API |
+| Ubicación en la UI | **Finanzas > Mandatos**, donde ya está, con subpestañas Ingresos / Costos |
+| Sale del menú | la pestaña Costos > Mandatos (Fase A) — el módulo queda en **un solo lugar** |
+| Ingesta | cron IMAP de Fase B; el script de Jessica deja de ser el camino principal |
+| Almacenamiento de PDFs | Google Drive (el de Finanzas), no disco local |
+| Envío a inversionista | **sigue en alcance** — hay que agregarlo al modelo de Finanzas |
+| Identificación del tercero | por el **código numérico del P.A.** (`17844`, `18254`) extraído del cuerpo, no por cruce difuso de nombres |
+| Migración de datos | **ninguna** — la tabla destino ya tiene los datos buenos |
+
+Se conserva el nombre `finanzas_mandatos` y las rutas `/finanzas/mandatos/*` aunque
+la pantalla viva bajo Finanzas: renombrar una tabla con datos reales en producción es
+un riesgo que no compensa la mejora estética.
 
 ---
 
@@ -99,15 +117,73 @@ botón de revertir. Finanzas Mandatos solo guarda un `correo_ref` de texto.
 - **Finanzas Mandatos no tiene ningún cron.** Depende enteramente del script manual.
 - Fase B sí registra un cron horario, pero está en la rama sin mergear.
 
-## 4. Qué no se puede saber desde el código
+## 4. Lo que se preguntó y ya está respondido (2026-08-18)
 
-- **Qué hace exactamente el script de Jessica.** Está fuera del repo. Las funciones
-  del repo parecen un port de su lógica, pero no hay forma de confirmar que
-  coincidan, ni de saber cómo se comporta ante hilos citados o correos raros.
-- **Cuántos datos reales hay en `finanzas_mandatos` en producción**, y de qué
-  períodos. Eso determina el costo de cualquier migración.
-- **Si el envío a inversionistas sigue siendo un objetivo.** El diseño de Jessica lo
-  marcó fuera de alcance para v1; Fase B lo implementó. Puede que ya no se quiera.
+Las respuestas cambiaron partes del diseño. Se dejan acá con lo que implica cada una.
+
+**El script de Jessica hace dos cosas que la plataforma no tiene.** Además de bajar
+y organizar los mandatos que ella envió:
+- **Abre cada PDF y verifica que traiga las dos firmas.** Eso es un hecho objetivo
+  leído del documento, y es *más* confiable que deducir el estado de quién va en el
+  `De:` (`estado_por_direccion`). La integración no puede perder esta capacidad.
+- **Reconcilia por conteo:** si se enviaron 32 mandatos en julio, verifica que
+  vuelvan los 32. Hoy **ninguna de las dos tablas registra cuántos se enviaron**, así
+  que esto no es algo que se migre — es una capacidad nueva que hay que construir.
+
+El repo ya tiene con qué: `pdfplumber` y `pypdf` en `requirements.txt`, y
+`app/services/conciliacion_mandatos.py` ya inspecciona PDFs.
+
+**El envío a inversionistas sigue en pie.** Hay que llevar a `finanzas_mandatos` los
+estados `enviado_inversionista` y el ciclo `con_correcciones` → `corregido`.
+
+**Los datos: dos tablas, dos destinos distintos.**
+
+| Tabla | Contenido | Destino |
+|---|---|---|
+| `mandatos` (Fase A) | 31 registros de prueba de mayo 2025, 0 firmados | se descarta |
+| `finanzas_mandatos` | mandatos reales + PDFs en Drive | **se conserva intacta** |
+
+No hay migración de datos. La tabla de Jessica *es* el destino: sus filas se quedan
+donde están y sus PDFs siguen en Drive con las mismas URLs. Lo único que cambia es
+quién le escribe — hoy su script, después el cron.
+
+**Los ZIP de Vanessa vienen con la misma convención de nombres**, así que el mismo
+parser sirve; pero el cliente IMAP tiene que abrir el ZIP. `POST /mandatos/upload-zip`
+(Fase A) ya tiene esa lógica, se reusa.
+
+### Sigue abierto
+
+- **¿Jessica quiere dejar de correr su script?** Si existe para organizarle a *ella*
+  los mandatos enviados, puede que no sea un pipeline duplicado sino herramienta
+  personal que la plataforma no reemplaza. La integración correcta entonces no es
+  retirarlo, sino que la plataforma cubra la ingesta automática y él siga a su lado.
+- **Si los PDFs quedaron realmente cargados en Drive.** El usuario dijo "se supone
+  que cargó los PDFs". Conviene confirmarlo antes de construir encima; un endpoint de
+  diagnóstico que cuente cuántas filas tienen `drive_url` lo resuelve.
+
+## 4b. La convención de nombres: verificada, y un bug en producción
+
+Captura del Drive de Jessica (2026-08-18), carpeta "Mandato Costos Sol de la Sierra":
+
+```
+CMU1135-Mandato-Costos-Minigranja Solar La Paz Levende.pdf
+CMU1140-Mandato-Costos-Minigranja Solar Merengue.pdf
+CMU1147-Mandato-Costos-Minigranja Solar Cumbia.pdf
+```
+
+**Tres partes, no cuatro.** `CMU####-Mandato-Costos-{Proyecto}.pdf`, sin sufijo de
+inversionista.
+
+**Consecuencia 1 — el tercero no está en el adjunto.** El tercero es el P.A., y vive
+en el cuerpo del correo: `17844 - P.A SOL DE LA SIERRA`. El adaptador debe sacarlo
+de ahí; si confía en el nombre del archivo, `parsear_proyecto_tercero` devuelve
+`tercero=''` y la identidad `(proyecto, tercero, periodo, tipo)` colapsa.
+
+**Consecuencia 2 — bug vivo en Fase A.** `ZIP_NOMBRE_RE` (`mandatos_service.py:9`)
+exige ese sufijo inexistente, y `upload-zip` hace `if not parsed: continue`. Con un
+ZIP real de Vanessa **saltaría todos los archivos y reportaría cero detectados**.
+Fijado en `test_el_parser_de_zip_de_fase_a_rechaza_los_nombres_reales`, que pasa
+mientras el bug exista. Es independiente de esta integración y se puede corregir ya.
 
 ## 5. Propuesta: el esquema de ella, el motor de nosotros
 

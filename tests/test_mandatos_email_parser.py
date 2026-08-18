@@ -1,12 +1,13 @@
 """Tests del parser de correos de mandatos -- funciones puras, sin red ni BD."""
-from app.services.mandatos.email_parser import html_a_texto
-from tests.fixtures_mandatos_correos import REVISORIA_HTML
-
 from app.services.mandatos.email_parser import (
-    clasificar_correo, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO, CLASIF_DESCONOCIDO,
+    CLASIF_DESCONOCIDO, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO,
+    clasificar_correo, cmu_al_inicio_de_nombre, extraer_observaciones,
+    html_a_texto, solo_pdfs,
 )
 from tests.fixtures_mandatos_correos import (
-    REVISORIA_OBSERVACIONES, REVISORIA_SEGUIMIENTO, REVISORIA_MIXTO,
+    ENVIO_INVERSIONISTA_ADJUNTOS, LIQUIDACION_PRELIMINAR_ADJUNTOS,
+    REVISORIA_HTML, REVISORIA_MIXTO, REVISORIA_OBSERVACIONES,
+    REVISORIA_SEGUIMIENTO,
 )
 
 
@@ -97,9 +98,6 @@ def test_clasificar_correo_sin_senales_es_desconocido():
     assert clasificar_correo("Hola", "Buenas tardes, quedo atenta.") == CLASIF_DESCONOCIDO
 
 
-from app.services.mandatos.email_parser import extraer_observaciones
-
-
 # ── extraer_observaciones ─────────────────────────────────────────────────────
 
 def test_extraer_observaciones_correo_real():
@@ -135,12 +133,6 @@ def test_extraer_observaciones_corta_en_la_firma():
 
 def test_extraer_observaciones_sin_cmu():
     assert extraer_observaciones("Buenas tardes, quedo atenta.") == []
-
-
-from app.services.mandatos.email_parser import cmu_al_inicio_de_nombre, solo_pdfs
-from tests.fixtures_mandatos_correos import (
-    ENVIO_INVERSIONISTA_ADJUNTOS, LIQUIDACION_PRELIMINAR_ADJUNTOS,
-)
 
 
 # ── adjuntos ──────────────────────────────────────────────────────────────────

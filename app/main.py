@@ -1090,6 +1090,22 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
+    """CREATE TABLE IF NOT EXISTS mandato_correos (
+        id BIGSERIAL PRIMARY KEY,
+        message_id VARCHAR(998) NOT NULL UNIQUE,
+        fecha TIMESTAMPTZ NOT NULL,
+        remitente VARCHAR(255) NOT NULL,
+        asunto VARCHAR(1000),
+        fuente VARCHAR(20) NOT NULL,
+        clasificacion VARCHAR(20) NOT NULL,
+        resultado VARCHAR(20) NOT NULL,
+        requiere_revision BOOLEAN NOT NULL DEFAULT FALSE,
+        detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
+        revertido BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_revision ON mandato_correos (requiere_revision)",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",

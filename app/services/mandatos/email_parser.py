@@ -11,6 +11,8 @@ import re
 import unicodedata
 from html.parser import HTMLParser
 
+from app.services.mandatos_service import CMU_RE
+
 # Etiquetas que implican salto de línea. Nota: etiquetas autocerradas como
 # <br/> disparan tanto el start-tag como el end-tag, así que aportan DOS saltos
 # de línea -- inofensivo porque las líneas vacías se filtran al final, pero es
@@ -141,3 +143,42 @@ def clasificar_correo(asunto: str | None, cuerpo: str | None) -> str:
     if any(s in c for s in _SENALES_MOLDE):
         return CLASIF_MOLDE_SIMPLE
     return CLASIF_DESCONOCIDO
+
+
+# Líneas desde las que el cuerpo deja de tener contenido útil. Sin este corte,
+# un CMU citado en la firma o en el hilo previo se leería como observación.
+_INICIO_FIRMA = (
+    "cordialmente",
+    "quedo atenta",
+    "quedo atento",
+    "saludos",
+    "atentamente",
+)
+
+
+def extraer_observaciones(cuerpo: str | None) -> list[dict]:
+    """[{'cmu': 'CMU1255', 'observacion': '...'}] en orden de aparición.
+
+    Una línea puede traer varios CMU compartiendo una misma observación
+    (correo real: "Certificados CMU1266,CMU1269,CMU1270 y CMU1271 no se
+    evidencia contabilización..."). La observación es lo que sigue al ÚLTIMO
+    CMU de la línea. Un CMU repetido conserva su primera observación.
+
+    Solo debe llamarse con cuerpos clasificados CLASIF_MOLDE_SIMPLE.
+    """
+    resultado: list[dict] = []
+    vistos: set[str] = set()
+    for linea in (cuerpo or "").split("\n"):
+        if _normaliza(linea).startswith(_INICIO_FIRMA):
+            break
+        cmus = CMU_RE.findall(linea)
+        if not cmus:
+            continue
+        corte = linea.rfind(cmus[-1]) + len(cmus[-1])
+        observacion = linea[corte:].strip().strip(".,:;-–—").strip()
+        for cmu in cmus:
+            if cmu in vistos:
+                continue
+            vistos.add(cmu)
+            resultado.append({"cmu": cmu, "observacion": observacion})
+    return resultado

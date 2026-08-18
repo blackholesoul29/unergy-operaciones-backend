@@ -95,3 +95,43 @@ def test_seguimiento_gana_sobre_molde_simple():
 
 def test_clasificar_correo_sin_senales_es_desconocido():
     assert clasificar_correo("Hola", "Buenas tardes, quedo atenta.") == CLASIF_DESCONOCIDO
+
+
+from app.services.mandatos.email_parser import extraer_observaciones
+
+
+# ── extraer_observaciones ─────────────────────────────────────────────────────
+
+def test_extraer_observaciones_correo_real():
+    obs = extraer_observaciones(REVISORIA_OBSERVACIONES)
+    assert [o["cmu"] for o in obs] == [
+        "CMU1255", "CMU1266", "CMU1269", "CMU1270", "CMU1271", "CMU1284",
+    ]
+
+
+def test_varios_cmu_en_una_linea_comparten_observacion():
+    obs = {o["cmu"]: o["observacion"] for o in extraer_observaciones(REVISORIA_OBSERVACIONES)}
+    esperado = "no se evidencia contabilización del internet, el IVA y el arriendo"
+    assert obs["CMU1266"] == esperado
+    assert obs["CMU1271"] == esperado
+
+
+def test_observacion_arranca_despues_del_ultimo_cmu():
+    obs = {o["cmu"]: o["observacion"] for o in extraer_observaciones(REVISORIA_OBSERVACIONES)}
+    assert obs["CMU1255"].startswith("el valor a pagar no coincide")
+    assert obs["CMU1284"] == "no se evidencia contabilización"
+
+
+def test_extraer_observaciones_correo_mixto():
+    obs = extraer_observaciones(REVISORIA_MIXTO)
+    assert [o["cmu"] for o in obs] == ["CMU1052", "CMU1122"]
+    assert obs[0]["observacion"] == "No se evidencia contabilización del mantenimiento y el IVA de este"
+
+
+def test_extraer_observaciones_corta_en_la_firma():
+    cuerpo = "CMU1000 tiene novedad\nCordialmente\nCMU9999 esto es parte de la firma"
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU1000"]
+
+
+def test_extraer_observaciones_sin_cmu():
+    assert extraer_observaciones("Buenas tardes, quedo atenta.") == []

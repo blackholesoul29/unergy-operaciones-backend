@@ -565,6 +565,7 @@ def list_fallas(
     codigo_legado: str | None = None,
     solo_alerta: bool = False,
     solo_activas: bool = False,
+    activa_en_fecha: date | None = None,
     fecha_programada_desde: date | None = None,
     fecha_programada_hasta: date | None = None,
     con_fecha_programada: bool = False,
@@ -611,6 +612,17 @@ def list_fallas(
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
     if codigo_legado:
         query = query.filter(Falla.codigo_legado == codigo_legado)
+    if activa_en_fecha:
+        # "Activa a la fecha X" (no "activa ahora mismo") -- para mostrar,
+        # en el detalle de un día ya clasificado, las fallas que estaban
+        # abiertas EN ESE MOMENTO, no las que están abiertas hoy consultando
+        # en vivo (ver Reporte de Energía -> "Fallas activas del proyecto").
+        # Se apoya en fecha_resolucion, ya sincronizada de forma confiable
+        # con el estado (ver _sincronizar_resolucion).
+        query = query.filter(
+            Falla.fecha_identificacion <= activa_en_fecha,
+            (Falla.fecha_resolucion.is_(None)) | (func.date(Falla.fecha_resolucion) >= activa_en_fecha),
+        )
     if solo_activas:
         if not estado_joined:
             query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)

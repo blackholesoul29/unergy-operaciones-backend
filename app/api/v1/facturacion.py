@@ -240,12 +240,31 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     )
     vig = resolver_vigencias(universo, hasta=last_day)
     sol: dict = {}
+    # Respaldo para códigos SIN versión vigente: un contrato TERMINADO a mitad de
+    # mes (o relevado sin sucesor bajo el mismo código) queda vigente=False pero
+    # saliente_por_relevo=True — su ventana recortada SIGUE contando y el despacho
+    # ya trae solo la energía de los días que operó. Sin esto, ese código perdía
+    # su dueño y su energía caía a "sin PPA" (valorada a bolsa) en vez de
+    # facturarse a su PPA (caso SIC 89902 / GD San Pelayo → Terpel 8, jul-2026).
+    salientes: dict = {}
     for s in universo:
         v = vig.get(s.id)
-        if v is not None and v.vigente:
-            c = (s.codigo_sic_contrato or "").strip()
-            if c:
-                sol[c] = s
+        if v is None or not v.procesado:
+            continue
+        c = (s.codigo_sic_contrato or "").strip()
+        if not c:
+            continue
+        if v.vigente:
+            sol[c] = s
+        elif v.saliente_por_relevo:
+            # Si hay varios salientes del mismo código, gana el que cerró más
+            # tarde (el último dueño del período).
+            prev = salientes.get(c)
+            fin = v.fecha_fin_efectiva or date.min
+            if prev is None or (vig[prev.id].fecha_fin_efectiva or date.min) < fin:
+                salientes[c] = s
+    for c, s in salientes.items():
+        sol.setdefault(c, s)
     ppas = {p.id: p for p in db.query(PPAContrato).all()}
     tarifas: dict = {}
     for t in db.query(PPATarifa).filter(PPATarifa.año == año, PPATarifa.mes == mes).all():

@@ -54,6 +54,7 @@ def db():
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
         PPAContrato.__table__, PPATarifa.__table__, ContratoServicio.__table__,
         Base.metadata.tables["ppa_contrato_proyectos"],
+        Base.metadata.tables["oportunidad_oferta_proyectos"],
     ])
     session = sessionmaker(bind=engine)()
     yield session

@@ -62,6 +62,7 @@ def db():
             # la tabla puente: sin ella el eager load falla con
             # "no such table: ppa_contrato_proyectos".
             PPAContrato.__table__, Base.metadata.tables["ppa_contrato_proyectos"],
+        Base.metadata.tables["oportunidad_oferta_proyectos"],
         ],
     )
     s = sessionmaker(bind=engine)()

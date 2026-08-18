@@ -1024,3 +1024,302 @@ def _ultimo_mes_generacion(db, proyecto_ids, hoy=None) -> dict[int, tuple[str, f
         if proyecto_id not in out or periodo > out[proyecto_id][0]:
             out[proyecto_id] = (periodo, float(kwh))
     return out
+
+
+# ── La vista PPA-céntrica del pipeline ───────────────────────────────────────
+#
+# proyectos_operando() responde "¿qué plantas hay?"; esto responde "¿qué
+# contratos de energía hay?" y cuelga las plantas de cada uno. Es el árbol
+# PPA → PROYECTOS → detalles.
+#
+# La idea central: un PPA no firmado NO tiene fila en `ppa_contratos`. La oferta
+# del CRM ES el PPA hasta que se firma, y `ppa["id"] is None` es la única señal
+# de que todavía es un borrador. No hay un segundo estado que pueda contradecir
+# al primero, y no hay filas de mentira ensuciando los 18 módulos que leen
+# ppa_contratos (Cumplimiento, GESCON, liquidaciones, facturación).
+
+# Solo los contratos de ENERGIA derivan en un PPA. Los servicios
+# (representación, CGM) desembocan en contratos_servicio, que es otra entidad.
+# `comunidad_energetica` NO es un tipo de contrato aparte: es un PPA con una
+# característica, y por eso entra acá y se marca en el nodo.
+TIPOS_ENERGIA = ("compra_energia", "comunidad_energetica")
+
+# Las etapas que producen un PPA (borrador o materializado). `oportunidad` queda
+# afuera porque todavía no hay oferta de la que derivar condiciones, y las
+# salidas (declinado/terminado) porque un negocio caído no es un contrato en
+# preparación: sería basura con forma de PPA.
+ETAPAS_CON_PPA = ("oferta", "contrato", ESTADO_FIRMADO, ESTADO_OPERANDO)
+
+# Las etapas en las que todavía NO debería haber contrato. Fuera de estas, que no
+# haya PPA es dato faltante y no un borrador.
+ETAPAS_ANTES_DE_FIRMAR = ("oferta", "contrato")
+
+
+def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict]:
+    """Los contratos de energía del pipeline, con sus plantas colgando.
+
+    Un nodo por PPA: `{"ppa": {...}, "proyectos": [{...con detalles}]}`.
+    """
+    from app.models.comercial import Oportunidad, OportunidadOferta
+
+    hoy = hoy or col_now().date()
+    estados = tuple(estados)
+
+    ofertas = (
+        db.query(OportunidadOferta)
+        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+        .filter(OportunidadOferta.tipo.in_(TIPOS_ENERGIA),
+                OportunidadOferta.estado.in_(estados),
+                Oportunidad.deleted_at.is_(None))
+        .all()
+    )
+    if not ofertas:
+        return []
+
+    ppas = _ppas_por_id(db, {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id})
+    clientes = _clientes_por_oportunidad(db, {o.oportunidad_id for o in ofertas})
+    del_ppa = _proyectos_por_ppa(db, set(ppas))
+    de_oferta = _proyectos_de_ofertas(db, ofertas)
+
+    nodos = []
+    for o in ofertas:
+        ppa = ppas.get(o.ppa_contrato_id)
+        # Para un PPA firmado las plantas son las del CONTRATO: esa es la verdad
+        # contractual. Para un borrador todavía no hay contrato, así que son las
+        # que declaró la oferta.
+        proyectos = del_ppa.get(ppa.id, []) if ppa is not None else de_oferta.get(o.id, [])
+        nodos.append(_nodo_ppa(o, ppa=ppa, proyectos=proyectos,
+                               cliente=clientes.get(o.oportunidad_id), hoy=hoy))
+
+    if q:
+        aguja = q.strip().lower()
+        nodos = [n for n in nodos if _coincide(n, aguja)]
+
+    # Por nombre de planta para que la lista sea estable entre llamadas; el id
+    # desempata cuando dos ofertas nombran la misma planta.
+    nodos.sort(key=lambda n: ((n["ppa"]["planta_declarada"] or "").lower(),
+                              n["ppa"]["oferta_id"]))
+    return nodos
+
+
+def _coincide(nodo, aguja: str) -> bool:
+    """Busca en la planta declarada, el cliente, el código de seguimiento y el
+    nombre de cada proyecto del PPA."""
+    ppa = nodo["ppa"]
+    campos = [ppa["planta_declarada"], ppa["cliente"], ppa["codigo_seguimiento"],
+              ppa["numero_codigo_contrato"], ppa["nombre_interno"]]
+    campos += [p["nombre"] for p in nodo["proyectos"]]
+    return any(aguja in (c or "").lower() for c in campos)
+
+
+def _proyectos_de_ofertas(db, ofertas) -> dict[int, list]:
+    """Las plantas declaradas por cada oferta: las de la M2M si tiene, y si no la
+    del `proyecto_id` único. Así las ofertas ya vinculadas siguen resolviendo su
+    planta sin necesidad de backfill."""
+    from app.models.comercial import oportunidad_oferta_proyectos_table as tabla
+
+    ids = [o.id for o in ofertas]
+    asociadas: dict[int, list[int]] = {}
+    for oferta_id, proyecto_id in db.execute(
+        tabla.select().where(tabla.c.oferta_id.in_(ids))
+    ).all():
+        asociadas.setdefault(oferta_id, []).append(proyecto_id)
+
+    necesarios = {pid for lista in asociadas.values() for pid in lista}
+    necesarios |= {o.proyecto_id for o in ofertas
+                   if o.proyecto_id and o.id not in asociadas}
+    proyectos = _proyectos_por_id(db, necesarios)
+
+    out: dict[int, list] = {}
+    for o in ofertas:
+        pids = asociadas.get(o.id) or ([o.proyecto_id] if o.proyecto_id else [])
+        elegidos = [proyectos[pid] for pid in pids if pid in proyectos]
+        elegidos.sort(key=lambda p: ((p.nombre_comercial or "").lower(), p.id))
+        if elegidos:
+            out[o.id] = elegidos
+    return out
+
+
+def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
+    """Las plantas de cada PPA, en una consulta para todos. Precarga operador y
+    fronteras porque `operador_red_legal` las recorre: sin eso serían dos
+    consultas por planta."""
+    from sqlalchemy.orm import selectinload
+    from app.models.contratos import ppa_contrato_proyectos_table
+    from app.models.fronteras import Frontera
+    from app.models.proyectos import Proyecto
+
+    if not ppa_ids:
+        return {}
+    out: dict[int, list] = {}
+    filas = (
+        db.query(ppa_contrato_proyectos_table.c.contrato_id, Proyecto)
+        .join(Proyecto, Proyecto.id == ppa_contrato_proyectos_table.c.proyecto_id)
+        .options(selectinload(Proyecto.operador),
+                 selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+        .filter(ppa_contrato_proyectos_table.c.contrato_id.in_(ppa_ids),
+                Proyecto.deleted_at.is_(None))
+        .all()
+    )
+    for ppa_id, proyecto in filas:
+        out.setdefault(ppa_id, []).append(proyecto)
+    return out
+
+
+def _proyectos_por_id(db, ids: set[int]) -> dict:
+    from sqlalchemy.orm import selectinload
+    from app.models.fronteras import Frontera
+    from app.models.proyectos import Proyecto
+
+    if not ids:
+        return {}
+    return {p.id: p for p in db.query(Proyecto)
+            .options(selectinload(Proyecto.operador),
+                     selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+            .filter(Proyecto.id.in_(ids), Proyecto.deleted_at.is_(None)).all()}
+
+
+def api_id_unergy(proyecto) -> tuple[str | None, str | None]:
+    """Con qué id se consulta esta planta en la API de Unergy, y de qué campo
+    salió. `alias_monitoreo` es el respaldo histórico y se marca como tal: no es
+    el campo canónico. Es el mismo `sub_project or alias_monitoreo` que usan las
+    otras llamadas del repo, en un solo lugar."""
+    if proyecto is None:
+        return None, None
+    if proyecto.sub_project:
+        return proyecto.sub_project, "sub_project"
+    if proyecto.alias_monitoreo:
+        return proyecto.alias_monitoreo, "alias_monitoreo"
+    return None, None
+
+
+def _es_comunidad(oferta, ppa) -> bool:
+    """Si este PPA es de comunidad energética."""
+    if ppa is not None and ppa.es_comunidad_energetica is not None:
+        return bool(ppa.es_comunidad_energetica)
+    return _valor_enum(oferta.tipo) == "comunidad_energetica"
+
+
+def _condiciones(oferta, ppa, hoy=None) -> dict:
+    """Periodo, duración y energía del PPA, con `origen` diciendo de dónde salen.
+
+    En cuanto el contrato existe manda el contrato, sin mezclar: una fecha de la
+    oferta y una pactada se ven idénticas en el JSON, y sin `origen` quien
+    integra no puede saber si está mirando una intención o un compromiso.
+    """
+    if ppa is not None:
+        c = duracion_contrato(ppa.fecha_inicio, ppa.fecha_fin, hoy=hoy)
+        c["origen"] = "contrato"
+        c["energia_kwh_mes"] = (float(ppa.cantidad_minima_kwh_mes)
+                                if ppa.cantidad_minima_kwh_mes is not None else None)
+        return c
+    c = duracion_contrato(oferta.fecha_tentativa_inicio, oferta.fecha_fin_tentativa,
+                          hoy=hoy)
+    c["origen"] = "oferta"
+    # En la oferta la energía es una ESTIMACION técnica de la planta, no un
+    # compromiso contractual como cantidad_minima_kwh_mes. Ocupa la misma casilla
+    # porque es lo que se compara, y `origen` avisa que no es lo mismo.
+    c["energia_kwh_mes"] = (float(oferta.energia_promedio_kwh_mes)
+                            if oferta.energia_promedio_kwh_mes is not None else None)
+    return c
+
+
+def _nodo_proyecto(proyecto, ofertas) -> dict:
+    """Una planta del PPA con sus detalles.
+
+    La energía promedio sale de `_gen_promedio`, la misma cascada
+    medido → estimado → declarado que usa proyectos_operando, con su origen al
+    lado: un promedio medido y una proyección de ingeniería no valen lo mismo.
+    NO se calcula energía acumulada acá — `api_id_unergy` es la llave para que
+    quien integre la consulte contra la API de generación cuando la necesite.
+    """
+    mwh, origen, detalle = _gen_promedio(proyecto, ofertas)
+    sub, _fuente = api_id_unergy(proyecto)
+    return {
+        "proyecto_id": proyecto.id,
+        "nombre": proyecto.nombre_comercial,
+        "api_id_unergy": sub,
+        "detalles": {
+            "energia_promedio_mensual_mwh": mwh,
+            "energia_promedio_mensual_kwh": round(mwh * 1000, 3) if mwh is not None else None,
+            "energia_promedio_origen": origen,
+            "energia_promedio_detalle": detalle,
+        },
+    }
+
+
+def _clientes_por_oportunidad(db, ids: set[int]) -> dict[int, str]:
+    """Razón social del dueño del negocio, por oportunidad, en una consulta."""
+    from app.models.clientes import Cliente
+    from app.models.comercial import Oportunidad
+
+    if not ids:
+        return {}
+    return dict(db.query(Oportunidad.id, Cliente.razon_social_nombre)
+                .join(Cliente, Cliente.id == Oportunidad.cliente_id)
+                .filter(Oportunidad.id.in_(ids)).all())
+
+
+def _ppas_por_id(db, ids: set[int]) -> dict:
+    """Los PPAs materializados, en una sola consulta. Un PPA borrado deja a su
+    oferta como borrador: la fila ya no está, así que el contrato tampoco."""
+    from app.models.contratos import PPAContrato
+
+    if not ids:
+        return {}
+    return {c.id: c for c in db.query(PPAContrato)
+            .filter(PPAContrato.id.in_(ids), PPAContrato.deleted_at.is_(None)).all()}
+
+
+def _nodo_ppa(oferta, ppa=None, proyectos=(), cliente=None, hoy=None) -> dict:
+    """Un PPA (borrador o materializado) con sus plantas.
+
+    `ppa is None` ⟺ borrador: la oferta todavía no desembocó en un contrato. No
+    se inventa un id ni se rellenan los campos del contrato con los de la
+    oferta sin decirlo — el borrador declara sus condiciones como tentativas.
+    """
+    etapa = _valor_enum(oferta.estado)
+    # Antes de firmar, "no hay contrato" es lo esperado. Después de firmar, es una
+    # INCONSISTENCIA: el negocio cerró y el PPA no está cargado. Son dos cosas
+    # distintas y se nombran distinto — llamar borrador a la segunda diría que el
+    # contrato está en preparación, y taparía dato faltante.
+    antes_de_firmar = etapa in ETAPAS_ANTES_DE_FIRMAR
+    es_borrador = ppa is None and antes_de_firmar
+    if ppa is not None:
+        estado_ppa = "firmado"
+    elif antes_de_firmar:
+        estado_ppa = "borrador"
+    else:
+        estado_ppa = "sin_contrato"
+    return {
+        "ppa": {
+            "id": None if ppa is None else ppa.id,
+            "es_borrador": es_borrador,
+            "estado_ppa": estado_ppa,
+            "etapa_comercial": etapa,
+            # El gate explícito, y el mismo hecho que `id is not None`:
+            # /servicios lista `ppa_contratos`, así que sin fila no hay nada que
+            # listar. Viaja como booleano para que quien integre no tenga que
+            # deducirlo.
+            "aparece_en_servicios": ppa is not None,
+            "numero_codigo_contrato": None if ppa is None else ppa.numero_codigo_contrato,
+            "nombre_interno": None if ppa is None else ppa.nombre_interno,
+            # El nombre de planta tal como lo declaró la oferta. Viaja aunque el
+            # nodo tenga proyectos: en el 74% del pipeline la planta todavía no
+            # existe como Proyecto, y este es el único nombre que hay.
+            "planta_declarada": oferta.planta_nombre,
+            "condiciones": _condiciones(oferta, ppa, hoy=hoy),
+            # Del contrato en cuanto existe; del tipo de la oferta mientras es
+            # borrador. Nunca se deriva de la oferta si el contrato ya lo dice.
+            "es_comunidad_energetica": _es_comunidad(oferta, ppa),
+            "cantidad_proyectos": len(proyectos),
+            "cliente": cliente,
+            "oferta_id": oferta.id,
+            "codigo_seguimiento": _codigo_seguimiento(oferta.numero_oferta),
+            "oportunidad_id": oferta.oportunidad_id,
+            "tipo_contrato": None if ppa is None else ppa.tipo_contrato,
+            "comprador": None if ppa is None else ppa.comprador_nombre,
+            "vendedor": None if ppa is None else ppa.vendedor_nombre,
+        },
+        "proyectos": [_nodo_proyecto(p, [oferta]) for p in proyectos],
+    }

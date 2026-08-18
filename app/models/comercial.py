@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, Integer, String, Boolean, Date, DateTime,
-                        ForeignKey, Enum as SAEnum, Numeric, Text)
+                        ForeignKey, Enum as SAEnum, Numeric, Text, Table, Column)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -159,6 +159,23 @@ class OportunidadGestion(Base):
     oportunidad: Mapped["Oportunidad"] = relationship("Oportunidad", back_populates="gestiones")
 
 
+# Plantas de una OFERTA (muchos-a-muchos, 2026-08-18). Existe porque una oferta
+# puede cubrir varias plantas ("Balmora 1 y 2", "GD ISABELA 1 y GD ISABELA 2"), y
+# con el `proyecto_id` único había que elegir una: el PPA mostraba la generación de
+# esa planta como si fuera la del contrato entero.
+#
+# NO reemplaza a `oportunidad_ofertas.proyecto_id`, que lo leen el vinculador, la
+# ficha operativa y proyectos_operando. Es aditiva: si la oferta tiene filas acá se
+# usan, y si no se cae a la columna vieja. Al firmar, estas plantas son las que
+# pasan a `ppa_contrato_proyectos`.
+oportunidad_oferta_proyectos_table = Table(
+    "oportunidad_oferta_proyectos",
+    Base.metadata,
+    Column("oferta_id", BigInteger, ForeignKey("oportunidad_ofertas.id", ondelete="CASCADE"), primary_key=True),
+    Column("proyecto_id", BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class OportunidadOferta(Base):
     """Sub-oferta = una planta × un tipo de servicio dentro de la oportunidad-cliente.
     Cada fila de las hojas de prospección (Servicios / Energía / Comunidad) es una
@@ -189,6 +206,11 @@ class OportunidadOferta(Base):
     etapa_texto: Mapped[str | None] = mapped_column(String(60), nullable=True)
     fecha_oferta: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_tentativa_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Fin tentativo del suministro (2026-08-18). Con el inicio ya existente, es lo
+    # que permite que un PPA en BORRADOR declare su periodo y su duración antes de
+    # firmarse. Tentativa a propósito: cuando se firma, el periodo pactado vive en
+    # ppa_contratos y esta columna deja de leerse.
+    fecha_fin_tentativa: Mapped[date | None] = mapped_column(Date, nullable=True)
     contrato_firmado: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # Detalle crudo de la hoja de origen: para servicios_operacionales incluye
     # {servicios: [...], servicios_texto, fpo}; extensible por tipo de oferta.

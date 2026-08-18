@@ -101,6 +101,9 @@ class PPAContratoCreate(BaseModel):
     tipo_contrato: str | None = "venta"
     carpeta_link: str | None = None
     renovacion_automatica: bool | None = None
+    # Comunidad energética no es otro tipo de contrato: es una característica de
+    # este PPA. NULL = no sabemos (contratos viejos), distinto de False.
+    es_comunidad_energetica: bool | None = None
 
 
 class PPAContratoUpdate(BaseModel):
@@ -135,6 +138,7 @@ class PPAContratoUpdate(BaseModel):
     tipo_contrato: str | None = None
     carpeta_link: str | None = None
     renovacion_automatica: bool | None = None
+    es_comunidad_energetica: bool | None = None
 
 
 class PPAContratoOut(BaseModel):
@@ -173,6 +177,7 @@ class PPAContratoOut(BaseModel):
     tipo_contrato: str | None = None
     carpeta_link: str | None = None
     renovacion_automatica: bool | None = None
+    es_comunidad_energetica: bool | None = None
     tarifas: list[PPATarifaOut] = []
     compromisos_energia: list[PPACompromisoOut] = []
     # Computed visibility fields (populated by endpoint, not ORM)

@@ -2,6 +2,13 @@
 from app.services.mandatos.email_parser import html_a_texto
 from tests.fixtures_mandatos_correos import REVISORIA_HTML
 
+from app.services.mandatos.email_parser import (
+    clasificar_correo, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO, CLASIF_DESCONOCIDO,
+)
+from tests.fixtures_mandatos_correos import (
+    REVISORIA_OBSERVACIONES, REVISORIA_SEGUIMIENTO, REVISORIA_MIXTO,
+)
+
 
 def test_html_a_texto_desescapa_entidades():
     texto = html_a_texto("<p>informaci&oacute;n&nbsp;compartida</p>")
@@ -58,3 +65,33 @@ def test_html_a_texto_limite_conocido_script_sin_cerrar_con_token_malformado():
     """
     texto = html_a_texto("<p>antes</p><script>if(a<div){secreto=3}<p>CMU3333</p>")
     assert texto == "antes"
+
+
+# ── clasificar_correo ─────────────────────────────────────────────────────────
+
+def test_clasificar_observaciones_nuevas_es_molde_simple():
+    assert clasificar_correo("Mandatos de costos julio", REVISORIA_OBSERVACIONES) == CLASIF_MOLDE_SIMPLE
+
+
+def test_clasificar_correo_mixto_es_molde_simple():
+    assert clasificar_correo("Certificados Sol de la Sierra", REVISORIA_MIXTO) == CLASIF_MOLDE_SIMPLE
+
+
+def test_clasificar_seguimiento_no_se_interpreta():
+    """El correo donde CMU1255 quedó resuelto. Si esto se rompe, el sistema
+    empieza a marcar mandatos resueltos como con_correcciones."""
+    assert clasificar_correo("Mandatos de costos julio", REVISORIA_SEGUIMIENTO) == CLASIF_SEGUIMIENTO
+
+
+def test_clasificar_asunto_re_es_seguimiento():
+    assert clasificar_correo("RE: Certificados", "encuentro las siguientes observaciones: CMU1000 mal") == CLASIF_SEGUIMIENTO
+
+
+def test_seguimiento_gana_sobre_molde_simple():
+    """Ante señales de ambos, gana seguimiento -- falla hacia el lado seguro."""
+    cuerpo = "Agradezco su respuesta. Encuentro las siguientes observaciones: CMU1000 mal"
+    assert clasificar_correo("Certificados", cuerpo) == CLASIF_SEGUIMIENTO
+
+
+def test_clasificar_correo_sin_senales_es_desconocido():
+    assert clasificar_correo("Hola", "Buenas tardes, quedo atenta.") == CLASIF_DESCONOCIDO

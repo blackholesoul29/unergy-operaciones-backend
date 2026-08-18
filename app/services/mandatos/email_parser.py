@@ -98,3 +98,46 @@ def _normaliza(texto: str | None) -> str:
     """Minúsculas sin tildes, para comparar frases con redacción variable."""
     nfkd = unicodedata.normalize("NFKD", texto or "")
     return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
+
+
+CLASIF_MOLDE_SIMPLE = "molde_simple"
+CLASIF_SEGUIMIENTO = "seguimiento"
+CLASIF_DESCONOCIDO = "desconocido"
+
+# Señales de que el correo responde sobre observaciones previas. Un CMU
+# mencionado acá puede estar resuelto, no con novedad -- ver el correo del
+# 2026-08-10 5:50 p.m. en los fixtures.
+_SENALES_SEGUIMIENTO = (
+    "agradezco",
+    "sin embargo",
+    "siguen siendo las mismas",
+    "ajustes realizados",
+    "su respuesta",
+    "en respuesta a",
+)
+
+# Frases que abren un listado de observaciones nuevas.
+_SENALES_MOLDE = (
+    "siguientes observaciones",
+    "siguientes diferencias",
+    "siguientes novedades",
+    "siguientes inconsistencias",
+    "diferencias identificadas",
+)
+
+_PREFIJOS_RESPUESTA = ("re:", "rv:", "fwd:", "rw:")
+
+
+def clasificar_correo(asunto: str | None, cuerpo: str | None) -> str:
+    """molde_simple | seguimiento | desconocido.
+
+    Seguimiento se evalúa PRIMERO y gana ante señales mezcladas: interpretar de
+    menos deja trabajo manual, interpretar de más corrompe estados en silencio.
+    """
+    a = _normaliza(asunto)
+    c = _normaliza(cuerpo)
+    if a.startswith(_PREFIJOS_RESPUESTA) or any(s in c for s in _SENALES_SEGUIMIENTO):
+        return CLASIF_SEGUIMIENTO
+    if any(s in c for s in _SENALES_MOLDE):
+        return CLASIF_MOLDE_SIMPLE
+    return CLASIF_DESCONOCIDO

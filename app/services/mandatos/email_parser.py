@@ -31,6 +31,14 @@ class _ExtractorTexto(HTMLParser):
     # abajo no podría dispararse nunca. Desactivamos ese modo especial para
     # que las etiquetas dentro de un script/style mal cerrado se sigan
     # parseando como etiquetas normales.
+    #
+    # Contrapartida aceptada: un cuerpo de script/style que contenga algo con
+    # forma de par de etiquetas balanceado (p. ej. `var t = "<p>x</p>"`) hace
+    # que ese texto interno se emita como si fuera del documento. Se acepta
+    # porque este parser solo ve correo interno escrito a mano en Gmail/Outlook,
+    # nunca HTML de terceros: nadie redacta <script> a mano, y el CSS de un
+    # <style> no lleva "<" literal (es CSS inválido). Si algún día esto pasara a
+    # leer correo de remitentes arbitrarios, hay que revisar esta decisión.
     CDATA_CONTENT_ELEMENTS: tuple[str, ...] = ()
 
     def __init__(self) -> None:
@@ -43,6 +51,14 @@ class _ExtractorTexto(HTMLParser):
         # o mal formado) no debe silenciar el resto del documento para siempre:
         # si mientras "saltamos" aparece una etiqueta de bloque, asumimos que
         # el tag ignorado nunca se cerró y retomamos el procesamiento normal.
+        #
+        # La recuperación es de mejor esfuerzo, no total: si dentro de ese
+        # script/style sin cerrar aparece además un token con forma de etiqueta
+        # sin terminar (`<div){x=1}` sin ">"), el tokenizador se lo traga junto
+        # con lo que sigue y ese contenido se pierde. Hace falta que se den las
+        # dos rarezas a la vez, así que se documenta en vez de arreglarse: el
+        # arreglo exigiría reimplementar recuperación de tokens malformados,
+        # desproporcionado para un módulo que lee un solo remitente conocido.
         if self._saltando and tag in _BLOQUE:
             self._saltando = False
         if tag in _IGNORAR:

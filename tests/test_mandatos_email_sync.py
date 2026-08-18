@@ -1,11 +1,17 @@
 """Tests de la decisión de sincronización -- pura, sin BD ni IMAP.
 
 decidir_acciones() concentra las reglas de negocio del spec §6.4 y se prueba
-sola; aplicar_correo() (que sí toca la BD) queda cubierto por el uso real.
+sola; lo mismo para elegir_mandato() y planear_transicion(), que son las dos
+decisiones riesgosas que antes vivían enredadas dentro de _aplicar_accion()
+(la parte que sí toca la BD, cubierta por el uso real, no por estos tests).
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
-from app.services.mandatos.email_sync import decidir_acciones, FUENTE_REVISORIA, FUENTE_ENVIO
+from app.services.mandatos.email_sync import (
+    decidir_acciones, elegir_mandato, planear_transicion, _guardar_adjunto,
+    FUENTE_REVISORIA, FUENTE_ENVIO,
+)
 from app.services.mandatos.imap_client import CorreoCrudo
 from tests.fixtures_mandatos_correos import (
     REVISORIA_OBSERVACIONES, REVISORIA_SEGUIMIENTO, REVISORIA_MIXTO,
@@ -91,3 +97,102 @@ def test_envio_ignora_adjuntos_que_no_son_pdf_de_mandato():
         FUENTE_ENVIO,
     )
     assert d["acciones"] == []
+
+
+# ── elegir_mandato ───────────────────────────────────────────────────────────
+
+def _mandato(id_, periodo, estado):
+    return SimpleNamespace(id=id_, cmu="CMU1255", periodo=periodo, estado=estado)
+
+
+def test_elegir_mandato_un_no_terminal_se_elige_sin_ambiguedad():
+    julio = _mandato(1, date(2026, 7, 1), "enviado_inversionista")   # terminal
+    agosto = _mandato(2, date(2026, 8, 1), "enviado_revisoria")       # no terminal
+    m, motivo = elegir_mandato([julio, agosto])
+    assert m is agosto
+    assert motivo is None
+
+
+def test_elegir_mandato_dos_no_terminales_es_ambiguo():
+    """El bug real: julio con_correcciones y agosto enviado_revisoria a la vez --
+    no hay forma de saber a cuál se refiere una corrección tardía sin período."""
+    julio = _mandato(1, date(2026, 7, 1), "con_correcciones")
+    agosto = _mandato(2, date(2026, 8, 1), "enviado_revisoria")
+    m, motivo = elegir_mandato([julio, agosto])
+    assert m is None
+    assert motivo == "periodo_ambiguo"
+
+
+def test_elegir_mandato_sin_candidatos_no_encontrado():
+    m, motivo = elegir_mandato([])
+    assert m is None
+    assert motivo == "cmu_no_encontrado"
+
+
+def test_elegir_mandato_todos_terminales_devuelve_el_mas_reciente():
+    julio = _mandato(1, date(2026, 7, 1), "enviado_inversionista")
+    agosto = _mandato(2, date(2026, 8, 1), "enviado_inversionista")
+    m, motivo = elegir_mandato([julio, agosto])
+    assert m is agosto
+    assert motivo is None
+
+
+# ── planear_transicion ───────────────────────────────────────────────────────
+
+def test_planear_transicion_encadena_firmado_desde_enviado_revisoria():
+    assert planear_transicion("enviado_revisoria", "enviado_inversionista") == [
+        "firmado", "enviado_inversionista",
+    ]
+
+
+def test_planear_transicion_encadena_firmado_desde_corregido():
+    assert planear_transicion("corregido", "enviado_inversionista") == [
+        "firmado", "enviado_inversionista",
+    ]
+
+
+def test_planear_transicion_con_correcciones_no_encadena():
+    """La anomalía que debe verse, no resolverse sola: enviarle al inversionista
+    un mandato con observaciones abiertas nunca se aplica automáticamente."""
+    assert planear_transicion("con_correcciones", "enviado_inversionista") is None
+
+
+def test_planear_transicion_un_paso_normal():
+    assert planear_transicion("enviado_revisoria", "con_correcciones") == ["con_correcciones"]
+
+
+def test_planear_transicion_par_invalido_devuelve_none():
+    assert planear_transicion("enviado_inversionista", "firmado") is None
+
+
+# ── _guardar_adjunto: saneamiento de ruta ────────────────────────────────────
+
+def test_guardar_adjunto_bloquea_path_traversal(tmp_path, monkeypatch):
+    """Un nombre de adjunto con '../' no debe poder escribir fuera de _PDF_DIR --
+    mismo criterio que asociar_pdf() en app/api/v1/mandatos.py."""
+    import app.services.mandatos.email_sync as email_sync
+
+    pdf_dir = tmp_path / "uploads" / "mandatos"
+    fuera = tmp_path / "fuera_del_directorio.pdf"
+    monkeypatch.setattr(email_sync, "_PDF_DIR", pdf_dir)
+
+    nombre_malicioso = "../../../fuera_del_directorio.pdf"
+    resultado = email_sync._guardar_adjunto(nombre_malicioso, b"%PDF-1.4 fake")
+
+    assert resultado is not None                 # se guarda, pero saneado
+    assert not fuera.exists()                    # nunca escribe fuera de _PDF_DIR
+    guardado = pdf_dir / "fuera_del_directorio.pdf"
+    assert guardado.is_file()
+    assert guardado.read_bytes() == b"%PDF-1.4 fake"
+
+
+def test_guardar_adjunto_nombre_normal_se_guarda_dentro_del_directorio(tmp_path, monkeypatch):
+    import app.services.mandatos.email_sync as email_sync
+
+    pdf_dir = tmp_path / "uploads" / "mandatos"
+    monkeypatch.setattr(email_sync, "_PDF_DIR", pdf_dir)
+
+    resultado = email_sync._guardar_adjunto("CMU1255-Mandato-Costos.pdf", b"%PDF-1.4 fake")
+
+    assert resultado == str(pdf_dir / "CMU1255-Mandato-Costos.pdf")
+    assert (pdf_dir / "CMU1255-Mandato-Costos.pdf").read_bytes() == b"%PDF-1.4 fake"

@@ -22,7 +22,7 @@ from app.services.mandatos.email_parser import (
     cmu_al_inicio_de_nombre, extraer_observaciones, solo_pdfs,
 )
 from app.services.mandatos.imap_client import CorreoCrudo, buscar_correos
-from app.services.mandatos_service import extraer_cmu_de_nombre, transicion_valida
+from app.services.mandatos_service import TRANSICIONES, extraer_cmu_de_nombre, transicion_valida
 
 logger = logging.getLogger("mandatos.email_sync")
 
@@ -33,6 +33,9 @@ REMITENTE_REVISORIA = "vlondono@jbp.com.co"
 REMITENTE_ENVIO = "jessica@unergy.io"
 
 _PDF_DIR = Path("uploads/mandatos")
+
+# Mismo límite que upload-firmado (app/api/v1/mandatos.py) para el subido manual.
+_TAMANO_MAX_ADJUNTO_BYTES = 20 * 1024 * 1024
 
 
 def decidir_acciones(correo: CorreoCrudo, fuente: str) -> dict:
@@ -88,9 +91,86 @@ def decidir_acciones(correo: CorreoCrudo, fuente: str) -> dict:
             "adjuntos_sin_cmu": adjuntos_sin_cmu}
 
 
-def _guardar_adjunto(nombre: str, contenido: bytes) -> str:
+def _es_terminal(estado: str) -> bool:
+    """Un estado es terminal cuando la máquina no permite ninguna salida."""
+    return not TRANSICIONES.get(estado)
+
+
+def elegir_mandato(candidatos: list) -> tuple:
+    """Candidatos de un mismo CMU (ya cargados de la BD) → (mandato, motivo).
+
+    El correo nunca dice a qué período pertenece el CMU, así que no se
+    adivina cuando hay más de un período "en curso" para el mismo CMU (bug
+    real: julio queda con_correcciones y agosto enviado_revisoria; una
+    corrección tardía de julio no debe aplicarse sobre agosto solo porque es
+    el período más nuevo). Pura: decide solo entre los objetos recibidos, no
+    consulta nada.
+
+      - sin candidatos                       → (None, "cmu_no_encontrado")
+      - un único candidato no terminal       → (ese candidato, None)
+      - más de un candidato no terminal      → (None, "periodo_ambiguo")
+      - todos los candidatos son terminales  → (el más reciente, None) --
+        se deja que transicion_valida() lo rechace más adelante, así sale
+        como "transicion_invalida" en vez de silenciarse acá.
+    """
+    if not candidatos:
+        return None, "cmu_no_encontrado"
+    no_terminales = [c for c in candidatos if not _es_terminal(c.estado)]
+    if len(no_terminales) == 1:
+        return no_terminales[0], None
+    if len(no_terminales) > 1:
+        return None, "periodo_ambiguo"
+    return max(candidatos, key=lambda c: c.periodo), None
+
+
+def planear_transicion(estado_previo: str, destino: str) -> list[str] | None:
+    """Camino de estados a recorrer, o None si no hay uno válido.
+
+    Normalmente es un solo paso ([destino]). La única excepción deliberada:
+    un PDF de envío a inversionista es evidencia de que el mandato fue
+    firmado, así que desde enviado_revisoria o corregido se encadena
+    firmado → enviado_inversionista en una sola operación. Desde
+    con_correcciones NO se encadena -- enviarle a un inversionista un
+    mandato con observaciones abiertas es una anomalía que debe verse, no
+    resolverse sola -- por eso ese caso cae al chequeo normal de
+    transicion_valida() y devuelve None.
+
+    Una lista vacía (no None) significa "válido, no hay nada que cambiar"
+    (estado_previo ya es destino).
+    """
+    cadena = [destino]
+    if destino == "enviado_inversionista" and estado_previo in ("enviado_revisoria", "corregido"):
+        cadena = ["firmado", "enviado_inversionista"]
+
+    camino: list[str] = []
+    estado = estado_previo
+    for paso in cadena:
+        if estado == paso:
+            continue
+        if not transicion_valida(estado, paso):
+            return None
+        camino.append(paso)
+        estado = paso
+    return camino
+
+
+def _guardar_adjunto(nombre: str, contenido: bytes) -> str | None:
+    """Guarda el adjunto dentro de _PDF_DIR. Devuelve la ruta, o None si el
+    nombre no es seguro.
+
+    `nombre` viene del header MIME de un correo de un remitente externo, así
+    que no se confía en él: igual que asociar_pdf() en app/api/v1/mandatos.py,
+    se usa solo su basename (Path(nombre).name descarta cualquier "../" u
+    otro segmento de directorio) y se verifica que la ruta resultante siga
+    contenida en _PDF_DIR, para que un nombre de archivo malicioso no pueda
+    escribir fuera del directorio de subidas.
+    """
     _PDF_DIR.mkdir(parents=True, exist_ok=True)
-    destino = _PDF_DIR / nombre
+    destino = _PDF_DIR / Path(nombre).name
+    try:
+        destino.resolve().relative_to(_PDF_DIR.resolve())
+    except ValueError:
+        return None
     destino.write_bytes(contenido)
     return str(destino)
 
@@ -98,60 +178,71 @@ def _guardar_adjunto(nombre: str, contenido: bytes) -> str:
 def _aplicar_accion(db: Session, accion: dict, correo: CorreoCrudo, fuente: str) -> dict:
     """Aplica una acción a su mandato. Devuelve el registro para `detalle`.
 
-    Nunca fuerza una transición: si la máquina de estados no la permite, se
-    registra el conflicto y el mandato queda como estaba.
+    Nunca fuerza una transición: si la máquina de estados no la permite, o si
+    el período del CMU es ambiguo, se registra el conflicto y el mandato
+    queda como estaba. El registro guarda, además de estado_previo, el valor
+    anterior de cada campo que sí llegó a tocar -- así revertir_correo()
+    (app/api/v1/mandatos.py) puede deshacerlos todos, no solo el estado.
     """
     cmu = accion["cmu"]
-    # El correo no dice a qué período pertenece el CMU. La restricción única es
-    # (cmu, periodo), así que en teoría un mismo CMU puede repetirse entre
-    # períodos; se toma el más reciente, que es el que está en curso.
-    m = db.execute(
-        select(Mandato).where(Mandato.cmu == cmu).order_by(Mandato.periodo.desc())
-    ).scalars().first()
-    if not m:
+    # El correo no dice a qué período pertenece el CMU: se cargan TODOS los
+    # candidatos de ese CMU y se elige entre ellos sin adivinar (elegir_mandato).
+    candidatos = db.execute(select(Mandato).where(Mandato.cmu == cmu)).scalars().all()
+    m, motivo = elegir_mandato(candidatos)
+    if motivo == "cmu_no_encontrado":
         return {"cmu": cmu, "resultado": "cmu_no_encontrado"}
+    if motivo == "periodo_ambiguo":
+        periodos = sorted(c.periodo.isoformat() for c in candidatos if not _es_terminal(c.estado))
+        return {"cmu": cmu, "resultado": "periodo_ambiguo", "periodos": periodos}
 
     destino = accion["estado_destino"]
     estado_previo = m.estado
     fecha_correo = correo.fecha.date()
 
-    # Un PDF de envío a inversionista es evidencia de que el mandato fue firmado.
-    # Si viene desde enviado_revisoria o corregido, se encadena firmado →
-    # enviado_inversionista. Desde con_correcciones NO: enviar al inversionista
-    # un mandato con observaciones pendientes es una anomalía que debe verse.
-    cadena = [destino]
-    if destino == "enviado_inversionista" and estado_previo in ("enviado_revisoria", "corregido"):
-        cadena = ["firmado", "enviado_inversionista"]
+    camino = planear_transicion(estado_previo, destino)
+    if camino is None:
+        return {"cmu": cmu, "resultado": "transicion_invalida",
+                "estado_previo": estado_previo, "estado_destino": destino}
 
-    estado = estado_previo
-    for paso in cadena:
-        if estado == paso:
-            continue
-        if not transicion_valida(estado, paso):
-            return {"cmu": cmu, "resultado": "transicion_invalida",
-                    "estado_previo": estado_previo, "estado_destino": paso}
-        estado = paso
+    registro = {"cmu": cmu, "resultado": "aplicado", "mandato_id": m.id,
+                "estado_previo": estado_previo,
+                "estado_nuevo": camino[-1] if camino else estado_previo}
 
     if accion["adjunto"]:
         contenido = dict(correo.adjuntos).get(accion["adjunto"])
         if contenido:
-            m.pdf_firmado_ruta = _guardar_adjunto(accion["adjunto"], contenido)
-            m.pdf_firmado_nombre = accion["adjunto"]
+            if len(contenido) > _TAMANO_MAX_ADJUNTO_BYTES:
+                return {"cmu": cmu, "resultado": "adjunto_demasiado_grande",
+                        "adjunto": accion["adjunto"]}
+            ruta = _guardar_adjunto(accion["adjunto"], contenido)
+            if ruta is None:
+                return {"cmu": cmu, "resultado": "adjunto_nombre_invalido",
+                        "adjunto": accion["adjunto"]}
+            registro["pdf_firmado_ruta_previo"] = m.pdf_firmado_ruta
+            registro["pdf_firmado_nombre_previo"] = m.pdf_firmado_nombre
+            m.pdf_firmado_ruta = ruta
+            m.pdf_firmado_nombre = Path(ruta).name
 
-    if estado != estado_previo:
-        m.estado = estado
+    if camino:
+        m.estado = camino[-1]
     if accion["observacion"]:
+        registro["observacion_previa"] = m.observacion
         m.observacion = accion["observacion"]
-    if "firmado" in cadena or destino == "firmado":
-        m.fecha_firmado = m.fecha_firmado or fecha_correo
+    if ("firmado" in camino or destino == "firmado") and m.fecha_firmado is None:
+        registro["fecha_firmado_previa"] = None
+        m.fecha_firmado = fecha_correo
     if destino == "enviado_inversionista":
+        registro["fecha_envio_inversionista_previa"] = (
+            m.fecha_envio_inversionista.isoformat() if m.fecha_envio_inversionista else None
+        )
+        registro["correo_ref_envio_previo"] = m.correo_ref_envio
         m.fecha_envio_inversionista = fecha_correo
         m.correo_ref_envio = correo.message_id
     if fuente == FUENTE_REVISORIA:
+        registro["correo_ref_revisoria_previo"] = m.correo_ref_revisoria
         m.correo_ref_revisoria = correo.message_id
 
-    return {"cmu": cmu, "resultado": "aplicado", "mandato_id": m.id,
-            "estado_previo": estado_previo, "estado_nuevo": estado}
+    return registro
 
 
 def procesar_correo(db: Session, correo: CorreoCrudo, fuente: str) -> MandatoCorreo:

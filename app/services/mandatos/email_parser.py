@@ -135,6 +135,13 @@ def clasificar_correo(asunto: str | None, cuerpo: str | None) -> str:
 
     Seguimiento se evalúa PRIMERO y gana ante señales mezcladas: interpretar de
     menos deja trabajo manual, interpretar de más corrompe estados en silencio.
+
+    A propósito, esta función mira el cuerpo COMPLETO (incluida cualquier cita
+    del hilo), a diferencia de extraer_observaciones() que trabaja sobre el
+    cuerpo recortado -- ver _sin_cita(). Un "agradezco" enterrado en una cita
+    empujando el correo a seguimiento es un resultado seguro: en el peor caso
+    exige revisión manual. Clasificar de más (leer de más) no corrompe nada acá;
+    extraer de más sí. Por eso una función es permisiva y la otra estricta.
     """
     a = _normaliza(asunto)
     c = _normaliza(cuerpo)
@@ -156,6 +163,45 @@ _INICIO_FIRMA = (
 )
 
 
+# Encabezados que marcan el arranque del historial citado de un hilo. Cortar
+# acá es crítico: un CMU citado del correo anterior puede figurar como YA
+# RESUELTO (ver REVISORIA_SEGUIMIENTO en los fixtures) y si extraer_observaciones
+# sigue leyendo después del corte, ese CMU resuelto se guarda como corrección
+# nueva -- el mismo peligro que motiva clasificar_correo, colándose por otra vía.
+_INICIO_CITA_GMAIL_RE = re.compile(r"^el .*\d.* escribio:$")
+_INICIO_CITA_OUTLOOK_RE = re.compile(r"^on .*\d.* wrote:$")
+_SEPARADORES_CITA = ("-----mensaje original-----", "-----original message-----")
+
+
+def _sin_cita(cuerpo: str) -> str:
+    """Todo el texto ANTES de que arranque el historial citado del hilo.
+
+    Corta en la primera línea que sea, en cualquier variante:
+    - una cita de respuesta línea a línea (prefijo '>')
+    - un encabezado de Gmail ("El vie, 10 ago 2026 ... escribió:")
+    - un encabezado de Outlook en inglés ("On ... wrote:")
+    - un separador de reenvío de Outlook ("-----Mensaje original-----")
+    - el bloque de encabezados reenviados de Outlook (De:/Para:/Asunto: en
+      las líneas siguientes a una que empieza con "de:"/"from:")
+    """
+    lineas = cuerpo.split("\n")
+    for i, linea in enumerate(lineas):
+        n = _normaliza(linea)
+        if linea.lstrip().startswith(">"):
+            return "\n".join(lineas[:i])
+        if _INICIO_CITA_GMAIL_RE.match(n) or _INICIO_CITA_OUTLOOK_RE.match(n):
+            return "\n".join(lineas[:i])
+        if n in _SEPARADORES_CITA:
+            return "\n".join(lineas[:i])
+        if n.startswith(("de:", "from:")):
+            siguientes = " ".join(_normaliza(l) for l in lineas[i + 1 : i + 5])
+            tiene_para = "para:" in siguientes or "to:" in siguientes
+            tiene_asunto = "asunto:" in siguientes or "subject:" in siguientes
+            if tiene_para and tiene_asunto:
+                return "\n".join(lineas[:i])
+    return cuerpo
+
+
 def extraer_observaciones(cuerpo: str | None) -> list[dict]:
     """[{'cmu': 'CMU1255', 'observacion': '...'}] en orden de aparición.
 
@@ -164,11 +210,20 @@ def extraer_observaciones(cuerpo: str | None) -> list[dict]:
     evidencia contabilización..."). La observación es lo que sigue al ÚLTIMO
     CMU de la línea. Un CMU repetido conserva su primera observación.
 
-    Solo debe llamarse con cuerpos clasificados CLASIF_MOLDE_SIMPLE.
+    Solo debe llamarse con cuerpos clasificados CLASIF_MOLDE_SIMPLE. Trabaja
+    sobre el cuerpo recortado por _sin_cita() -- ver el comentario ahí y el
+    de clasificar_correo() sobre por qué esta función es la estricta.
+
+    Límite conocido y aceptado: si un correo en texto plano hace wrap de una
+    observación larga en dos líneas, la línea de continuación no tiene CMU y
+    se descarta en silencio, truncando la observación guardada. No se
+    implementa unión de líneas de continuación porque el riesgo es bajo: el
+    camino real es HTML (Gmail/Outlook componen en HTML), y html_a_texto()
+    ya entrega una línea por bloque, sin wraps de texto plano.
     """
     resultado: list[dict] = []
     vistos: set[str] = set()
-    for linea in (cuerpo or "").split("\n"):
+    for linea in _sin_cita(cuerpo or "").split("\n"):
         if _normaliza(linea).startswith(_INICIO_FIRMA):
             break
         cmus = CMU_RE.findall(linea)

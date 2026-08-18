@@ -166,3 +166,48 @@ def test_liquidacion_preliminar_no_aporta_cmu():
     'certificados de mandato' pero no trae adjuntos de mandato."""
     pdfs = solo_pdfs(LIQUIDACION_PRELIMINAR_ADJUNTOS)
     assert [cmu_al_inicio_de_nombre(n) for n in pdfs] == []
+
+
+# ── extraer_observaciones no debe leer el historial citado ────────────────────
+
+def test_extraer_observaciones_no_lee_cita_estilo_gmail():
+    """Repro del hallazgo: un CMU resuelto citado del hilo anterior no debe
+    colarse como observación nueva."""
+    cuerpo = (
+        "Encuentro las siguientes observaciones:\n"
+        "CMU1266 no se evidencia contabilizacion del arriendo\n"
+        "\n"
+        "El vie, 10 ago 2026 a las 14:25, Vanessa <...> escribio:\n"
+        "> Certificado CMU1284 ya se encuentra resuelto"
+    )
+    cmus = [o["cmu"] for o in extraer_observaciones(cuerpo)]
+    assert "CMU1266" in cmus
+    assert "CMU1284" not in cmus
+
+
+def test_extraer_observaciones_no_lee_lineas_con_prefijo_mayor_que():
+    cuerpo = (
+        "Encuentro las siguientes observaciones:\n"
+        "CMU1000 tiene novedad nueva\n"
+        "> CMU9999 esto viene del correo anterior\n"
+    )
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU1000"]
+
+
+def test_extraer_observaciones_no_lee_tras_separador_outlook():
+    cuerpo = (
+        "Encuentro las siguientes observaciones:\n"
+        "CMU1000 tiene novedad nueva\n"
+        "-----Mensaje original-----\n"
+        "CMU9999 esto viene del correo anterior\n"
+    )
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU1000"]
+
+
+def test_extraer_observaciones_sin_cita_no_se_recorta():
+    """Guarda de regresión más importante: un correo sin ninguna cita debe
+    seguir devolviendo la lista completa de CMU."""
+    obs = extraer_observaciones(REVISORIA_OBSERVACIONES)
+    assert [o["cmu"] for o in obs] == [
+        "CMU1255", "CMU1266", "CMU1269", "CMU1270", "CMU1271", "CMU1284",
+    ]

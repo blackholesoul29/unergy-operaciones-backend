@@ -28,3 +28,19 @@ def test_html_a_texto_conserva_los_cmu_de_cada_linea():
 def test_html_a_texto_vacio():
     assert html_a_texto("") == ""
     assert html_a_texto(None) == ""
+
+
+def test_html_a_texto_separa_celdas_de_tabla_con_espacio():
+    texto = html_a_texto(REVISORIA_HTML)
+    assert "Certificado Contabilidad" in texto
+    assert "5,703,802 5,475,170.65" in texto
+
+
+def test_html_a_texto_recupera_texto_tras_script_sin_cerrar():
+    texto = html_a_texto("<p>antes</p><script>var a = 1;<p>CMU1266 dato importante</p>")
+    assert "CMU1266" in texto
+
+
+def test_html_a_texto_no_revienta_con_etiquetas_sin_cerrar():
+    texto = html_a_texto("<div><p>CMU1000 texto")
+    assert "CMU1000" in texto

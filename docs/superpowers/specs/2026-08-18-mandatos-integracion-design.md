@@ -19,7 +19,7 @@ Dos sistemas para lo mismo se construyeron en paralelo, sin saber uno del otro:
 |---|---|---|
 | Fecha | 2026-08-14 | 2026-08-18 |
 | Estado | **En producción** | Rama `feat/mandatos-fase-b-imap`, sin mergear |
-| Tabla | `finanzas_mandato` | `mandatos` + `mandato_correos` |
+| Tabla | `finanzas_mandatos` | `mandatos` + `mandato_correos` |
 | Ingesta | Script local en el PC de Jessica, manual | Cron en Railway, cada hora |
 
 Ambos leen **los mismos correos de Vanessa Londoño** y rastrean **los mismos
@@ -91,7 +91,7 @@ botón de revertir. Finanzas Mandatos solo guarda un `correo_ref` de texto.
 ## 3. Qué está vivo hoy (verificado, no supuesto)
 
 - El router de Finanzas Mandatos **sí está registrado**: `app/api/v1/router.py:46`.
-- **No hay DDL de `finanzas_mandato` en `_PENDING_DDLS`.** La tabla se crea por
+- **No hay DDL de `finanzas_mandatos` en `_PENDING_DDLS`.** La tabla se crea por
   `Base.metadata.create_all()` en el arranque (`app/main.py:1794-1798`), porque el
   modelo está importado en `app/models/__init__.py:44`. Funciona, pero se sale de la
   convención del repo y es invisible si alguien audita el esquema buscando en
@@ -104,7 +104,7 @@ botón de revertir. Finanzas Mandatos solo guarda un `correo_ref` de texto.
 - **Qué hace exactamente el script de Jessica.** Está fuera del repo. Las funciones
   del repo parecen un port de su lógica, pero no hay forma de confirmar que
   coincidan, ni de saber cómo se comporta ante hilos citados o correos raros.
-- **Cuántos datos reales hay en `finanzas_mandato` en producción**, y de qué
+- **Cuántos datos reales hay en `finanzas_mandatos` en producción**, y de qué
   períodos. Eso determina el costo de cualquier migración.
 - **Si el envío a inversionistas sigue siendo un objetivo.** El diseño de Jessica lo
   marcó fuera de alcance para v1; Fase B lo implementó. Puede que ya no se quiera.
@@ -114,7 +114,7 @@ botón de revertir. Finanzas Mandatos solo guarda un `correo_ref` de texto.
 Una sola tabla, una sola ingesta, automática.
 
 **Se conserva de Finanzas Mandatos**
-- La tabla `finanzas_mandato` y su identidad `(proyecto, tercero, periodo, tipo)`
+- La tabla `finanzas_mandatos` y su identidad `(proyecto, tercero, periodo, tipo)`
 - `cmu_anterior` para CMU reexpedido
 - La distinción ingreso / costo
 - Almacenamiento de PDFs en Drive
@@ -132,21 +132,59 @@ Una sola tabla, una sola ingesta, automática.
   mientras el cron demuestre que funciona)
 - La tabla `mandatos` y su API, una vez migrado lo que valga la pena
 
-### El trabajo real está en un punto
+### El trabajo es menor de lo que parecía (corregido 2026-08-18)
 
-El parser de Fase B extrae **CMU**. La identidad de Finanzas necesita **proyecto,
-tercero y tipo**. Hay que ampliar el parser para sacarlos del nombre del adjunto.
+La primera versión de este documento decía que había que ampliar el parser de
+Fase B para extraer proyecto, tercero y tipo. **Eso estaba mal: el parser de
+Finanzas ya lo hace**, y del lado del servidor, no en el script local.
 
-Los nombres siguen la convención `CMU1135-Mandato-Costos-{Proyecto}-{Inversionista}.pdf`,
-verificada en los correos reales de Jessica y ya parseada por `ZIP_NOMBRE_RE`
-(`mandatos_service.py:9`). Pero el propio diseño de Jessica marca esa extracción
-como riesgo sin validar (`2026-08-14-...-design.md:131-134`), y los adjuntos de
-Vanessa —a diferencia de los de Jessica— **no tienen convención verificada**. Ahí
-hay que mirar correos reales antes de comprometerse, igual que se hizo para Fase B.
+En `app/services/finanzas_mandatos_service.py` ya existen y están probados:
+`tipo_de_nombre` (24), `extraer_cmu` (29), `extraer_periodo_de_asunto` (37),
+`parsear_proyecto_tercero` (72) y `upsert_mandato` (91). Más `subir_pdf` en
+`finanzas_mandatos_drive.py`. Lo único que falta es **que algo las llame de forma
+automática** — hoy solo las invoca el script de Jessica, indirectamente, mandando
+los valores ya resueltos a `/ingest`.
+
+Verificado contra los correos reales (`tests/test_mandatos_integracion_contrato.py`,
+12 tests): los cuatro adjuntos del correo del 12 ago rinden identidad completa
+—tipo `costo`, proyecto `Sol de la Sierra`, tercero `Bancolombia`, CMU propio de
+cada uno— y el período sale del asunto, infiriendo el año cuando no aparece.
+
+Como ambos módulos viven en el mismo proceso, el adaptador **no necesita hacer
+HTTP contra `/ingest`**: compone servicios directamente. Queda:
+
+```
+cron IMAP (Fase B)
+  └─ por correo:
+       clasificar_correo + _sin_cita          (Fase B, más robusto)
+       tipo_de_nombre / parsear_proyecto_tercero / extraer_periodo_de_asunto
+       upsert_mandato + subir_pdf             (Finanzas)
+       registrar en mandato_correos           (Fase B, bitácora reversible)
+```
+
+### El riesgo real que sí apareció
+
+`tipo_de_nombre` **nunca dice "no sé"**: devuelve `ingreso` para todo lo que no
+diga literalmente `mandato-costos`. En el flujo de Jessica es inofensivo, porque su
+script solo le entrega adjuntos que ya sabe que son mandatos. El cron de Fase B ve
+**todos** los adjuntos del correo, así que un archivo suelto entraría como mandato
+de ingreso con identidad inventada. Caso concreto y real: el correo del 12 ago trae
+`REGISTRO MANDATOS.xlsx` junto a los PDFs, y hoy se ingeriría como
+`(tipo=ingreso, proyecto="REGISTRO MANDATOS.xlsx", tercero="")`.
+
+**El adaptador debe decidir por sí mismo si un adjunto es un mandato antes de
+preguntar el tipo.** No puede delegar esa decisión, porque esa función no tiene
+forma de responder que no lo es. Fijado en
+`test_tipo_de_nombre_cae_en_ingreso_para_archivos_que_no_son_mandato`.
+
+Queda pendiente de validar la convención de nombres de **los adjuntos de Vanessa**
+(Fuente 2). Los de Jessica están verificados; los de ella no, y el propio diseño de
+Finanzas marca esa extracción como riesgo sin validar
+(`2026-08-14-...-design.md:131-134`).
 
 ### Orden sugerido
 
-1. Normalizar el DDL de `finanzas_mandato` a `_PENDING_DDLS` (independiente, chico)
+1. Normalizar el DDL de `finanzas_mandatos` a `_PENDING_DDLS` (independiente, chico)
 2. Ampliar el parser para extraer proyecto/tercero/tipo, validado contra correos reales
 3. Escribir el adaptador que conecta el cron de Fase B con la lógica de upsert de Finanzas
 4. Correr ambas ingestas en paralelo un ciclo y comparar resultados
@@ -159,7 +197,7 @@ Los pasos 1 y 2 son útiles pase lo que pase con el resto.
 
 1. **¿El script local hace algo que no esté en el diseño?** Manejo de hilos citados,
    correos con varios adjuntos, casos raros que ya te hayan mordido.
-2. **¿Cuántos datos reales hay ya en `finanzas_mandato`?** ¿Vale la pena migrar lo
+2. **¿Cuántos datos reales hay ya en `finanzas_mandatos`?** ¿Vale la pena migrar lo
    de la tabla `mandatos` o se descarta?
 3. **¿Sigue en pie el envío a inversionistas?** Fase B lo implementó; tu diseño lo
    dejó fuera de v1.

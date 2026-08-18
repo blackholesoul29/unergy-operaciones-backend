@@ -55,6 +55,12 @@ class AsicSolicitud(Base):
     # para cumplir este contrato y le paga su generación a precio de bolsa.
     # Mutuamente excluyente con es_duplicado (compra real en bolsa).
     uso_del_recurso: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Modalidad de pago del contrato en el que participa esta planta: 'plg' o
+    # 'plc'. Existe el caso de una planta repartida entre dos contratos, uno de
+    # cada modalidad (MGS 0040 Cacica, MGS 0041 Piloneras): entre los dos cubren
+    # su 100%, no la duplican. Marcar el par es lo que permite distinguirlo de
+    # una duplicación real. NULL = no aplica / sin clasificar.
+    modalidad_pago: Mapped[str | None] = mapped_column(String(3), nullable=True)
     fecha_envio_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_respuesta_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
     numero_radicado: Mapped[str | None] = mapped_column(String(100), nullable=True)

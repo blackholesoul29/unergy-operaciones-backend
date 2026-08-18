@@ -350,6 +350,12 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_ppal VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_ppal DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_ppal DATE",
+    # migration — ficha técnica medidor/módem por frontera (2026-08-14)
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_ppal VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_ppal INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_ppal VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS nro_serie_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS marca_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS modelo_med_resp VARCHAR(100)",
@@ -358,6 +364,11 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_resp VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_resp DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_resp DATE",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_resp VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_resp INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_resp VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS factor_perdidas_frontera_principal NUMERIC(10,6)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS codigo_ciiu VARCHAR(20)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS clasificacion_industrial_general VARCHAR(255)",
@@ -549,6 +560,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_clientes_deleted ON clientes (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_ppa_deleted ON ppa_contratos (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_deleted ON fallas (deleted_at) WHERE deleted_at IS NOT NULL",
+    # el índice de arriba cubre el caso "borrada" (deleted_at IS NOT NULL) --
+    # list_fallas filtra el caso contrario (deleted_at IS NULL) y ordena por
+    # created_at DESC en el 100% de sus páginas, así que necesita su propio índice.
+    "CREATE INDEX IF NOT EXISTS ix_fallas_activas_created ON fallas (created_at DESC) WHERE deleted_at IS NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_deleted ON liquidaciones (deleted_at) WHERE deleted_at IS NOT NULL",
     # migration — PPA tipo_contrato + carpeta_link for purchase contract support
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
@@ -622,6 +637,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_fronteras_soft_deleted ON fronteras (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fronteras_estado_op ON fronteras (estado_operacional) WHERE estado_operacional IS NOT NULL",
     # migration — ASIC: XM tracking fields
+    # Modalidad de pago del contrato ('plg' | 'plc'). Una planta repartida entre
+    # dos contratos, uno de cada modalidad, no está duplicada: entre los dos
+    # cubren su 100%.
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS modalidad_pago VARCHAR(3)",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_envio_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_respuesta_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS numero_radicado VARCHAR(100)",

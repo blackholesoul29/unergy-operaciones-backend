@@ -41,11 +41,15 @@ from app.models.panel_contable import (
 from app.models.mandatos import (
     Mandato, MandatoInversionista, EstadoMandatoCostoEnum,
 )
+from app.models.finanzas_mandatos import (
+    FinanzasMandato, TipoMandatoEnum, EstadoFirmaEnum,
+)
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
 from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
 from app.models.verificacion_costos import VerificacionCosto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
+from app.models.retos import RetoTrimestre, RetoMetrica, RetoValorSemanal
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
@@ -78,6 +82,7 @@ __all__ = [
     "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
     "VerificacionCosto",
     "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
+    "RetoTrimestre", "RetoMetrica", "RetoValorSemanal",
 ]
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (
@@ -88,3 +93,4 @@ from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
     RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )
+from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado  # noqa: F401

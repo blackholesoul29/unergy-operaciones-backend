@@ -449,6 +449,55 @@ def rellenar_horario(
     return _construir_detalle(db, frontera_id, fecha)
 
 
+@router.post("/fronteras/{frontera_id}/deshacer-relleno", response_model=DetalleFronteraReporte)
+def deshacer_relleno(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Revierte lo que puso 'Rellenar horas' -- vuelve a NaN exactamente las
+    horas que quedaron marcadas en horas_rellenadas_* (medidor_cruzado/
+    reconectador/solenium/historico), sin tocar ninguna otra hora de la
+    curva. Si medidor_usado había pasado a 'relleno_horario' (venía de
+    'revisar'), se restaura a 'revisar' -- en cualquier otro caso
+    medidor_usado no lo había tocado el relleno, así que tampoco se toca acá.
+    reconectador/Solenium son campos exclusivos de Generación (Consumo no
+    tiene esas columnas) -- guardado con es_generacion, igual que el resto
+    de este archivo.
+    """
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
+
+    horas_reconectador = (rep.horas_rellenadas_reconectador or []) if es_generacion else []
+    horas_solenium = (rep.horas_rellenadas_solenium or []) if es_generacion else []
+    horas_a_revertir = set(
+        (rep.horas_rellenadas_medidor_cruzado or [])
+        + horas_reconectador
+        + horas_solenium
+        + (rep.horas_rellenadas_historico or [])
+    )
+    if not horas_a_revertir:
+        raise HTTPException(400, "Esta frontera no tiene un relleno horario para deshacer")
+
+    curva = lista_a_curva(rep.curva_final)
+    for h in horas_a_revertir:
+        curva[h] = None
+    rep.curva_final = curva_a_lista(curva)
+    rep.energia_final_kwh = float(curva.fillna(0).sum())
+    rep.horas_rellenadas_medidor_cruzado = None
+    rep.horas_rellenadas_historico = None
+    if es_generacion:
+        rep.horas_rellenadas_reconectador = None
+        rep.horas_rellenadas_solenium = None
+        # Curva de referencia que "Rellenar horas" guarda solo para mostrar
+        # en el gráfico (ReporteEnergiaCurvaChart.vue) -- si se deshace el
+        # relleno, ya no debe seguir apareciendo esa capa en la gráfica.
+        rep.curva_reconectador_referencia = None
+    if rep.medidor_usado == "relleno_horario":
+        rep.medidor_usado = "revisar"
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
+
+
 @router.post("/fronteras/{frontera_id}/cargar-excel-terceros", response_model=CargaExcelTercerosResponse)
 async def cargar_excel_terceros(
     frontera_id: int, archivo: UploadFile = File(...),

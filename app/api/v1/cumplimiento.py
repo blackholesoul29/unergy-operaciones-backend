@@ -1500,6 +1500,9 @@ def get_plantas_contratos(
                         "pct_despacho": float(asic.porcentaje_despacho or 0),
                         "es_duplicado": bool(asic.es_duplicado),
                         "uso_del_recurso": bool(getattr(asic, "uso_del_recurso", False)),
+                        # 'plg' | 'plc': una planta repartida entre dos contratos,
+                        # uno de cada modalidad, no está duplicada.
+                        "modalidad_pago": getattr(asic, "modalidad_pago", None),
                     }, asic.fecha_inicio, asic.fecha_fin, first_day, last_day, corte))
         venta_out.append({
             "id": c.id,

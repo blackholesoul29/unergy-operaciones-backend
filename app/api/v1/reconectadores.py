@@ -56,6 +56,25 @@ class RelayEstado(BaseModel):
     sol_id:      int
     active:      bool | None   # True=ON, False=OFF, None=sin dato
 
+    # Telemetría en vivo del relay — las mismas columnas del panel
+    # "Reconectadores" de Solenium. Nombres alineados con
+    # `inicio_operacion._reconectador_live` para que móvil y escritorio hablen igual.
+    corriente_a:          float | None = None   # I_A
+    corriente_b:          float | None = None   # I_B
+    corriente_c:          float | None = None   # I_C
+    corriente_n:          float | None = None   # I_N
+    voltaje_a:            float | None = None   # U_A
+    voltaje_b:            float | None = None   # U_B
+    voltaje_c:            float | None = None   # U_C
+    voltaje_r:            float | None = None   # U_R
+    voltaje_s:            float | None = None   # U_S
+    voltaje_t:            float | None = None   # U_T
+    frecuencia_hz:        float | None = None   # F_ABC
+    reactiva_kva:         float | None = None   # Reactiva
+    potencia_kw:          float | None = None   # Activa
+    factor_potencia:      float | None = None   # PF
+    ultima_actualizacion: str | None = None     # Tiempo
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -79,27 +98,61 @@ def _get_user_token(username: str, password: str) -> str:
     return token
 
 
-def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> tuple[bool, bool | None]:
+def _num(v) -> float | None:
+    """Solenium a veces manda las medidas como texto o como null."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_relay_estado(sol_id: int, client: SoleniumClient) -> tuple[bool, dict]:
     """
     Llama GET /project/{sol_id}/relay/.
-    Respuesta Solenium: {"results": {"active": true|false|null, ...}, "success": true}
+    Respuesta Solenium: {"results": {"active": true|false|null, "u_a": ..., "kw": ...},
+    "success": true}
 
-    Retorna (tiene_reconectador, active):
+    Retorna (tiene_reconectador, results):
       - tiene_reconectador=False: Solenium respondió 404 (sin relay físico) o hubo
         un error/timeout (no se pudo confirmar) → el proyecto debe omitirse.
-      - tiene_reconectador=True: Solenium confirmó el relay; `active` es
-        True/False, o None si Solenium no informó el estado puntual.
+      - tiene_reconectador=True: Solenium confirmó el relay; `results` trae el
+        estado (`active`) y la telemetría eléctrica, que puede venir incompleta.
     """
     url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
     try:
         data = client._get(url)   # retorna None en 404 o en error/timeout
         if not data:
-            return False, None
-        results = data.get("results") or {}
-        return True, results.get("active")
+            return False, {}
+        return True, (data.get("results") or {})
     except Exception as exc:
         logger.warning("relay_get sol_id=%d error=%s", sol_id, exc)
-        return False, None
+        return False, {}
+
+
+def _build_estado(proyecto_id: int, nombre: str, sol_id: int, r: dict) -> RelayEstado:
+    """Traduce el `results` de Solenium a la telemetría que consume el móvil."""
+    ts = r.get("time")
+    return RelayEstado(
+        proyecto_id=proyecto_id,
+        nombre=nombre,
+        sol_id=sol_id,
+        active=r.get("active"),
+        corriente_a=_num(r.get("i_a")),
+        corriente_b=_num(r.get("i_b")),
+        corriente_c=_num(r.get("i_c")),
+        corriente_n=_num(r.get("i_n")),
+        voltaje_a=_num(r.get("u_a")),
+        voltaje_b=_num(r.get("u_b")),
+        voltaje_c=_num(r.get("u_c")),
+        voltaje_r=_num(r.get("u_r")),
+        voltaje_s=_num(r.get("u_s")),
+        voltaje_t=_num(r.get("u_t")),
+        frecuencia_hz=_num(r.get("f_abc")),
+        reactiva_kva=_num(r.get("kva")),
+        potencia_kw=_num(r.get("kw")),
+        factor_potencia=_num(r.get("pf")),
+        ultima_actualizacion=str(ts) if ts is not None else None,
+    )
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -118,9 +171,11 @@ def debug_relay(
     sol_id = int(proyecto.project_id_solenium)
     url = _SOLENIUM_RELAY_GET.format(sol_id=sol_id)
     raw = client._get(url)
-    tiene_reconectador, active = _fetch_relay_estado(sol_id, client)
+    tiene_reconectador, results = _fetch_relay_estado(sol_id, client)
     return {"sol_id": sol_id, "url": url, "raw": raw,
-            "tiene_reconectador": tiene_reconectador, "parsed_active": active}
+            "tiene_reconectador": tiene_reconectador,
+            "parsed": _build_estado(proyecto.id, proyecto.nombre_comercial,
+                                    sol_id, results) if tiene_reconectador else None}
 
 
 @router.get("/estados", response_model=list[RelayEstado])
@@ -129,7 +184,9 @@ def get_estados(
     _=Depends(get_current_user),
 ):
     """
-    Retorna el estado real del relay (campo `active`) de cada proyecto
+    Retorna el estado real del relay (`active`) y su telemetría eléctrica
+    (corrientes, voltajes, frecuencia, reactiva, activa y PF — las mismas
+    columnas del panel "Reconectadores" de Solenium) para cada proyecto,
     consultando directamente Solenium con las credenciales del servidor.
     No requiere credenciales del usuario.
     """
@@ -152,15 +209,10 @@ def get_estados(
             logger.warning("project_id_solenium inválido proyecto_id=%s valor=%r",
                            p.id, p.project_id_solenium)
             return None
-        tiene_reconectador, active = _fetch_relay_estado(sol_id, client)
+        tiene_reconectador, results = _fetch_relay_estado(sol_id, client)
         if not tiene_reconectador:
             return None
-        return RelayEstado(
-            proyecto_id=p.id,
-            nombre=p.nombre_comercial,
-            sol_id=sol_id,
-            active=active,
-        )
+        return _build_estado(p.id, p.nombre_comercial, sol_id, results)
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         resultados = [r for r in ex.map(_query, proyectos) if r is not None]

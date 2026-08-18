@@ -30,6 +30,8 @@ class AsicSolicitudOut(BaseModel):
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
     uso_del_recurso: bool = False
+    # 'plg' | 'plc' — modalidad de pago del contrato. Ver AsicSolicitud.modalidad_pago.
+    modalidad_pago: str | None = None
     fecha_envio_xm: date | None = None
     fecha_respuesta_xm: date | None = None
     numero_radicado: str | None = None
@@ -75,6 +77,8 @@ class AsicSolicitudCreate(BaseModel):
     reemplaza_anterior: bool = True
     es_duplicado: bool = False
     uso_del_recurso: bool = False
+    # 'plg' | 'plc' — modalidad de pago del contrato. Ver AsicSolicitud.modalidad_pago.
+    modalidad_pago: str | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -109,6 +113,7 @@ class AsicSolicitudUpdate(BaseModel):
     reemplaza_anterior: bool | None = None
     es_duplicado: bool | None = None
     uso_del_recurso: bool | None = None
+    modalidad_pago: str | None = None
     proyecto_id: int | None = None
     contrato_ppa_id: int | None = None
 
@@ -116,6 +121,89 @@ class AsicSolicitudUpdate(BaseModel):
     fecha_envio_xm: date | None = None
     fecha_respuesta_xm: date | None = None
     numero_radicado: str | None = None
+
+
+class AsicModificacionCreate(BaseModel):
+    """Modificación de un contrato GESCON ya registrado.
+
+    Todo ocurre bajo el MISMO código SIC: lo único que una modificación puede
+    cambiar es la fecha de fin, la planta inscrita, su % de despacho y su
+    modalidad de suministro. El resto de datos (contrato interno, nombre
+    interno, SIC vendedor/comprador, prioridad, tipo de mercado, % FNCER,
+    cédulas, contacto, PPA) se HEREDA de la versión vigente de ese SIC: no
+    tiene sentido volver a capturarlos y dejarlos vacíos rompería Cumplimiento,
+    que resuelve por `contrato_interno`.
+
+    `fecha_entrada` es el día en que la modificación toma efecto: se guarda como
+    `fecha_inicio` de la fila nueva y `app/utils/gescon_vigencia.py` recorta la
+    versión anterior al día previo. Antes de esa fecha nada cambia.
+    """
+
+    codigo_sic_contrato: str
+    fecha_entrada: date
+    requerimiento_asic: str
+
+    # Lo modificable. Ausente = se hereda de la versión vigente.
+    fecha_fin: date | None = None
+    proyecto_id: int | None = None
+    # Fracción 0-1 (1 = 100%), igual que en la tabla: Cumplimiento la usa como
+    # multiplicador directo (generación × porcentaje_despacho).
+    porcentaje_despacho: float | None = None
+    modalidad: str | None = None  # normal | duplicado | uso_recurso
+    # Modalidad de pago del contrato ('plg' | 'plc'). Ausente = se hereda.
+    modalidad_pago: str | None = None
+
+    # Cuál planta sale, cuando el SIC tiene varias coexistiendo.
+    proyecto_saliente_id: int | None = None
+
+    # Metadatos opcionales de la radicación.
+    estado_solicitud: str = "publicado"
+    fecha_solicitud: date | None = None
+    link_archivo: str | None = None
+    observaciones: str | None = None
+
+
+class AsicModificacionOut(BaseModel):
+    modificacion: AsicSolicitudOut
+    # Fila de la planta que salió, cerrada explícitamente. Solo se llena cuando
+    # el SIC tenía varias plantas coexistiendo y la modificación releva a una
+    # sola: en el caso normal (una planta) el recorte lo hace la resolución de
+    # vigencia, sin tocar datos.
+    saliente: AsicSolicitudOut | None = None
+    resumen: str
+
+
+class AsicTerminacionCreate(BaseModel):
+    """Terminación de un contrato GESCON, bajo su mismo código SIC.
+
+    Solo se captura lo que XM exige (SIC, fecha, requerimiento, cédulas de los
+    agentes y el soporte); la identidad del contrato —contrato interno, nombre
+    interno, SIC vendedor/comprador, prioridad, PPA— se HEREDA de la versión
+    vigente de ese SIC, igual que en una modificación.
+
+    Lo que NO se hereda es `proyecto_id`: una terminación se guarda siempre sin
+    planta. Con planta, `resolver_vigencias` la saca de las activas y
+    Cumplimiento la borra del mes de la terminación en vez de prorratearla
+    hasta la fecha. La planta se muestra derivándola del SIC (display-only).
+    Tampoco se heredan los porcentajes: una terminación no aporta energía.
+    """
+
+    codigo_sic_contrato: str
+    fecha_terminacion: date
+    requerimiento_asic: str | None = None
+    cedula_agente_vendedor: str | None = None
+    cedula_agente_comprador: str | None = None
+    estado_solicitud: str = "publicado"
+    fecha_solicitud: date | None = None
+    link_archivo: str | None = None
+    observaciones: str | None = None
+
+
+class AsicTerminacionOut(BaseModel):
+    terminacion: AsicSolicitudOut
+    # Registros del mismo SIC a los que se les estampó la fecha de fin.
+    cerrados: list[AsicSolicitudOut] = []
+    resumen: str
 
 
 class AsicCambioCreate(BaseModel):

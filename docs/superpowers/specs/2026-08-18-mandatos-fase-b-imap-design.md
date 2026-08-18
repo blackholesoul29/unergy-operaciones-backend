@@ -255,11 +255,18 @@ Ninguna ruta pierde información. Ante la duda, no actuar y avisar.
 | CMU extraído que no existe en `mandatos` | Sin cambios, se registra en `detalle` para revisión |
 | PDF sin CMU identificable | Archivo **guardado**, marcado para asociación manual |
 | Transición inválida según `TRANSICIONES` | No se aplica, se registra el conflicto |
-| Estado puesto a mano por una persona | No se sobrescribe, se registra el intento |
 | Un correo falla a mitad | Transacción **por correo**: ese se marca `error`, los demás siguen |
 
 El scheduler nunca se cae por un fallo de esta rutina, siguiendo el patrón de
 `revisar_correo_cedillanos()`.
+
+**Sobre los estados puestos a mano.** No se distingue un estado fijado por una
+persona de uno fijado por el lector: haría falta una columna nueva y una noción de
+"propiedad" del dato que el modelo hoy no tiene. La protección es `TRANSICIONES`,
+que solo permite avanzar por caminos válidos. Si el correo propone un movimiento
+que la máquina de estados no admite, no se aplica y queda registrado. Un
+movimiento que sí admite se considera legítimo venga de donde venga, y en todo
+caso queda trazado y es revertible.
 
 ## 9. Frecuencia y UI
 

@@ -2536,6 +2536,18 @@ def _scheduled_excel_terceros_cedillanos():
     revisar_correo_cedillanos()
 
 
+def _scheduled_correos_mandatos():
+    """Lee adhara@unergy.io y actualiza el estado de los mandatos de costos.
+
+    Cada hora de 7am a 7pm: los correos de la revisoría y los envíos a
+    inversionistas llegan en horario laboral y no son urgentes (a diferencia
+    del de Cedillanos, que debe procesarse antes de las 6am). Sin correos
+    nuevos la corrida es solo un IMAP SEARCH que no toca la base."""
+    from app.services.mandatos.email_sync import revisar_correos_mandatos
+
+    revisar_correos_mandatos()
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3530,6 +3542,14 @@ def _deferred_init():
                     CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
                     id="excel_terceros_cedillanos_6am",
                     name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
+                )
+
+            if settings.MANDATOS_IMAP_USER and settings.MANDATOS_IMAP_PASSWORD:
+                _mgs_scheduler.add_job(
+                    _scheduled_correos_mandatos,
+                    CronTrigger(hour="7-19", minute=5, timezone=settings.TIMEZONE),
+                    id="correos_mandatos",
+                    name="Mandatos -- lectura de correo por IMAP (7am-7pm)",
                 )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del

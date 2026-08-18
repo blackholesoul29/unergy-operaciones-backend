@@ -9,6 +9,8 @@ Endpoints:
   POST   /mandatos/upload-firmado           → subir PDF firmado (asocia por CMU del nombre)
   POST   /mandatos/{id}/asociar-pdf         → asociar PDF subido a un CMU manualmente
   DELETE /mandatos/{id}                     → eliminar
+  GET    /mandatos/correos                  → bitácora de correos leídos por IMAP
+  POST   /mandatos/correos/{id}/revertir    → revertir cambios de un correo
   GET    /mandato-inversionistas            → tabla maestra
 """
 from __future__ import annotations
@@ -24,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
-from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum
+from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum, MandatoCorreo
 from app.schemas.mandatos import MandatoCrear, MandatoActualizar, InversionistaOut
 from app.services.mandatos_service import (
     mandato_to_dict, calcular_resumen, transicion_valida, extraer_cmu_de_nombre,
@@ -39,6 +41,52 @@ _PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 _ZIP_DIR = Path("uploads/mandatos/zips")
 _ZIP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.get("/correos")
+def listar_correos(limite: int = 100, solo_revision: bool = False,
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Bitácora de correos leídos por IMAP, del más reciente al más viejo."""
+    q = select(MandatoCorreo).order_by(MandatoCorreo.fecha.desc())
+    if solo_revision:
+        q = q.where(MandatoCorreo.requiere_revision.is_(True))
+    filas = db.execute(q.limit(min(limite, 500))).scalars().all()
+    return [{
+        "id": f.id, "fecha": f.fecha.isoformat(), "remitente": f.remitente,
+        "asunto": f.asunto, "fuente": f.fuente, "clasificacion": f.clasificacion,
+        "resultado": f.resultado, "requiere_revision": f.requiere_revision,
+        "revertido": f.revertido, "detalle": f.detalle,
+    } for f in filas]
+
+
+@router.post("/correos/{correo_id}/revertir")
+def revertir_correo(correo_id: int, db: Session = Depends(get_db),
+                    _=Depends(get_current_user)):
+    """Devuelve al estado previo los mandatos que este correo cambió.
+
+    No borra PDFs guardados ni la fila de bitácora: revertir un estado no
+    des-firma un documento que sí existe.
+    """
+    fila = db.get(MandatoCorreo, correo_id)
+    if not fila:
+        raise HTTPException(404, "Correo no encontrado.")
+    if fila.revertido:
+        raise HTTPException(409, "Este correo ya fue revertido.")
+
+    revertidos = []
+    for accion in (fila.detalle or {}).get("acciones", []):
+        if accion.get("resultado") != "aplicado":
+            continue
+        m = db.get(Mandato, accion.get("mandato_id"))
+        if not m:
+            continue
+        m.estado = accion["estado_previo"]
+        revertidos.append(m.cmu)
+
+    fila.revertido = True
+    fila.requiere_revision = True
+    db.commit()
+    return {"revertidos": revertidos, "total": len(revertidos)}
 
 
 def _periodo_a_date(periodo: str) -> date:

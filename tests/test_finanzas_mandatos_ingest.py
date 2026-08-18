@@ -45,3 +45,23 @@ def test_cmu_corregido_guarda_anterior(db_session):
 def test_router_importa():
     from app.api.v1 import finanzas_mandatos
     assert finanzas_mandatos.router.prefix == "/finanzas/mandatos"
+
+
+def test_empareja_por_cmu_aunque_varie_el_nombre(db_session):
+    # El escenario que inflaba 298: mismo CMU, proyecto con nombre distinto
+    upsert_mandato(db_session, proyecto="El Llano Sas Bic (1)", tercero="Ayura",
+                   periodo=date(2026, 3, 1), tipo="ingreso", cmu="CMU0642", estado="sin_firma")
+    m, creado = upsert_mandato(db_session, proyecto="El Llano Sas Bic", tercero="Ayura X",
+                               periodo=date(2026, 3, 1), tipo="ingreso", cmu="CMU0642", estado="firmado")
+    assert creado is False           # NO crea duplicado
+    assert m.estado == "firmado"     # se marca firmado el mismo registro
+
+
+def test_respaldo_por_proyecto_cuando_cmu_corregido(db_session):
+    # Consecutivo corregido: mismo proyecto+tercero, CMU distinto -> mismo mandato
+    upsert_mandato(db_session, proyecto="Baraya", tercero="SOLENIUM",
+                   periodo=date(2026, 2, 1), tipo="costo", cmu="CMU0617", estado="sin_firma")
+    m, creado = upsert_mandato(db_session, proyecto="Baraya", tercero="SOLENIUM",
+                               periodo=date(2026, 2, 1), tipo="costo", cmu="CMU0619", estado="firmado")
+    assert creado is False
+    assert m.cmu == "CMU0619" and m.cmu_anterior == "CMU0617"

@@ -91,15 +91,25 @@ from datetime import date as _date
 def upsert_mandato(db, *, proyecto, tercero, periodo, tipo, cmu, estado,
                    comentario=None, fecha=None, correo_ref=None,
                    drive_file_id=None, drive_url=None):
-    """Crea o actualiza por identidad (proyecto,tercero,periodo,tipo).
-    Nunca degrada 'firmado' -> 'sin_firma'. Guarda cmu_anterior si cambia el CMU.
+    """Crea o actualiza un mandato. Emparejamiento: PRIMERO por CMU (el
+    identificador confiable; tolera que el nombre del proyecto/tercero varie entre
+    el enviado y el firmado), y como RESPALDO por (proyecto, tercero, periodo,
+    tipo) — que cubre el consecutivo corregido (mismo proyecto+inversionista, otro
+    CMU) y los mandatos sin CMU. Nunca degrada 'firmado' -> 'sin_firma'.
     Devuelve (mandato, creado: bool)."""
     from app.models.finanzas_mandatos import FinanzasMandato
-    m = (db.query(FinanzasMandato)
-         .filter(FinanzasMandato.proyecto == proyecto,
-                 FinanzasMandato.tercero == tercero,
-                 FinanzasMandato.periodo == periodo,
-                 FinanzasMandato.tipo == tipo).first())
+    m = None
+    if cmu:
+        m = (db.query(FinanzasMandato)
+             .filter(FinanzasMandato.cmu == cmu,
+                     FinanzasMandato.periodo == periodo,
+                     FinanzasMandato.tipo == tipo).first())
+    if m is None:
+        m = (db.query(FinanzasMandato)
+             .filter(FinanzasMandato.proyecto == proyecto,
+                     FinanzasMandato.tercero == tercero,
+                     FinanzasMandato.periodo == periodo,
+                     FinanzasMandato.tipo == tipo).first())
     creado = m is None
     if creado:
         m = FinanzasMandato(proyecto=proyecto, tercero=tercero, periodo=periodo,

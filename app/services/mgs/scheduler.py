@@ -8,7 +8,7 @@ from datetime import datetime
 from threading import Lock, Thread
 
 import pytz
-from sqlalchemy import text
+from sqlalchemy import or_, text
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -125,6 +125,7 @@ def _persist_alarms(alarms: list[Alarm]):
         db.commit()
 
         _auto_create_fallas(db, alarm_ids)
+        _auto_close_fallas(db, alarm_ids)
 
     except Exception:
         db.rollback()
@@ -266,6 +267,95 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
         except Exception:
             db.rollback()
             logger.exception("Failed to auto-create falla for alarm %d", alarm_db_id)
+
+
+def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
+    """Cuando llega una alarma de RECUPERACION, cierra las fallas que el
+    propio sistema creó por pérdida de conectividad (PLANTA_CAIDA/CORTE_ZONA)
+    para ese proyecto -- si no, quedan abiertas para siempre aunque el
+    problema físico ya se resolvió solo. RECUPERACION solo significa "volvió
+    la conectividad" (ver alarm_engine.py: se dispara cuando el estado pasa
+    de NO_DATA/ERROR a OK/WARNING) -- NO significa "ya está generando
+    normal", así que NO toca las fallas de SIN_GENERACION (conectado pero
+    sin generar, ej. un inversor dañado): esas requieren su propia
+    verificación y deben seguir abiertas. Se identifican por el mismo prefijo
+    que ya usa _auto_create_fallas al crearlas (descripcion = "[TIPO] ...").
+    Se cierran (no se borran ni se ocultan): quedan con una nota automática,
+    editable, y se notifica por correo a los contactos operacionales del
+    proyecto para que no pase desapercibido -- cualquiera puede entrar
+    después a comentar o documentar la causa raíz."""
+    from app.models import Falla, FallaCatEstado, FallaSeguimiento
+    from app.api.v1.fallas import _sincronizar_resolucion, _enviar_notificacion
+
+    _TIPOS_CONECTIVIDAD = (AlarmType.PLANTA_CAIDA, AlarmType.CORTE_ZONA)
+
+    for alarm, alarm_db_id in alarm_ids:
+        if alarm.alarm_type != AlarmType.RECUPERACION:
+            continue
+
+        try:
+            proyecto = db.execute(text("""
+                SELECT id FROM proyectos
+                WHERE deleted_at IS NULL
+                  AND (nombre_comercial = :name
+                       OR alias_monitoreo ILIKE :pattern
+                       OR nombre_comercial ILIKE :pattern)
+                LIMIT 1
+            """), {
+                "name": alarm.node_name,
+                "pattern": f"%{alarm.node_name}%",
+            }).mappings().first()
+            if not proyecto:
+                continue
+
+            filtro_tipo = or_(*[
+                Falla.descripcion.ilike(f"%[{t.value}]%") for t in _TIPOS_CONECTIVIDAD
+            ])
+            abiertas = (
+                db.query(Falla)
+                .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+                .filter(
+                    Falla.proyecto_id == proyecto["id"],
+                    Falla.alarma_monitoreo_id.isnot(None),
+                    FallaCatEstado.es_estado_final.is_(False),
+                    Falla.deleted_at.is_(None),
+                    filtro_tipo,
+                )
+                .all()
+            )
+            if not abiertas:
+                continue
+
+            estado_final = (
+                db.query(FallaCatEstado)
+                .filter(FallaCatEstado.es_estado_final.is_(True))
+                .order_by(FallaCatEstado.orden)
+                .first()
+            )
+            if not estado_final:
+                logger.warning("No hay estado final en el catálogo — no se puede auto-cerrar")
+                continue
+
+            for falla in abiertas:
+                _sincronizar_resolucion(falla, estado_final)
+                falla.estado_id = estado_final.id
+                db.add(FallaSeguimiento(
+                    falla_id=falla.id,
+                    usuario_id=falla.registrado_por_id,
+                    nota="Cerrada automáticamente: el proyecto volvió a reportar (recuperación de alarma MGS).",
+                    estado_nuevo_id=estado_final.id,
+                ))
+                db.commit()
+                logger.info("Auto-cerrada falla %s tras recuperación de alarma (%s)",
+                            falla.codigo_interno, alarm.node_name)
+                try:
+                    _enviar_notificacion(falla, accion="cerrada", usuario_nombre="Sistema (auto-cierre MGS)", db=db)
+                except Exception:
+                    logger.exception("No se pudo notificar el auto-cierre de %s", falla.codigo_interno)
+
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to auto-close fallas for recovery alarm %d", alarm_db_id)
 
 
 def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):

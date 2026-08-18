@@ -508,7 +508,7 @@ Devuelve el mismo objeto que el listado. Incluye `seguimientos[]`, `intervalos[]
 
 ### `PATCH /api/v1/fallas/{id}` — actualización parcial
 
-Acepta el mismo conjunto de campos que el create (todos opcionales), más `sla_cumplido` y `pendiente_reclasificar`. **No** acepta `proyecto_id` ni `generar_impacto`.
+Acepta el mismo conjunto de campos que el create (todos opcionales), más `pendiente_reclasificar`. **No** acepta `proyecto_id` ni `generar_impacto`. `sla_cumplido` tampoco se acepta -- es siempre calculado (se sella al pasar a un estado final, comparando `fecha_resolucion` contra `sla_limite_horas`/el default por prioridad).
 
 Solo se aplican los campos presentes en el body. Mandar `categoria_codigo` recalcula toda la clasificación y, si el nuevo subtipo no es de los pendientes, limpia `pendiente_reclasificar` — así se reclasifica una desconexión sin identificar:
 

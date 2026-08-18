@@ -560,6 +560,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_clientes_deleted ON clientes (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_ppa_deleted ON ppa_contratos (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_deleted ON fallas (deleted_at) WHERE deleted_at IS NOT NULL",
+    # el índice de arriba cubre el caso "borrada" (deleted_at IS NOT NULL) --
+    # list_fallas filtra el caso contrario (deleted_at IS NULL) y ordena por
+    # created_at DESC en el 100% de sus páginas, así que necesita su propio índice.
+    "CREATE INDEX IF NOT EXISTS ix_fallas_activas_created ON fallas (created_at DESC) WHERE deleted_at IS NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_deleted ON liquidaciones (deleted_at) WHERE deleted_at IS NOT NULL",
     # migration — PPA tipo_contrato + carpeta_link for purchase contract support
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",

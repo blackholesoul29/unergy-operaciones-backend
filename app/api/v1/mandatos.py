@@ -62,10 +62,13 @@ def listar_correos(limite: int = 100, solo_revision: bool = False,
 @router.post("/correos/{correo_id}/revertir")
 def revertir_correo(correo_id: int, db: Session = Depends(get_db),
                     _=Depends(get_current_user)):
-    """Devuelve al estado previo los mandatos que este correo cambió.
+    """Devuelve a su valor previo todos los campos que este correo cambió en
+    cada mandato: estado, observación, fechas y referencias de correo.
 
-    No borra PDFs guardados ni la fila de bitácora: revertir un estado no
-    des-firma un documento que sí existe.
+    No borra PDFs guardados ni la fila de bitácora, y tampoco desasocia
+    pdf_firmado_ruta/pdf_firmado_nombre: revertir un estado no des-firma un
+    documento que sí existe, así que esos dos campos se dejan intactos a
+    propósito aunque el correo los haya asignado.
     """
     fila = db.get(MandatoCorreo, correo_id)
     if not fila:
@@ -81,6 +84,17 @@ def revertir_correo(correo_id: int, db: Session = Depends(get_db),
         if not m:
             continue
         m.estado = accion["estado_previo"]
+        if "observacion_previa" in accion:
+            m.observacion = accion["observacion_previa"]
+        if "fecha_firmado_previa" in accion:
+            m.fecha_firmado = accion["fecha_firmado_previa"]
+        if "fecha_envio_inversionista_previa" in accion:
+            valor = accion["fecha_envio_inversionista_previa"]
+            m.fecha_envio_inversionista = date.fromisoformat(valor) if valor else None
+        if "correo_ref_envio_previo" in accion:
+            m.correo_ref_envio = accion["correo_ref_envio_previo"]
+        if "correo_ref_revisoria_previo" in accion:
+            m.correo_ref_revisoria = accion["correo_ref_revisoria_previo"]
         revertidos.append(m.cmu)
 
     fila.revertido = True

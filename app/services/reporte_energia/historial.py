@@ -8,6 +8,7 @@ estimacion_consumo.py.
 """
 from __future__ import annotations
 
+import random
 from datetime import date
 
 import pandas as pd
@@ -35,7 +36,18 @@ CASOS_CONFIABLES_GENERACION = {1, 2, 4, 5, 7}
 FP_FIJO: dict[int, float] = {}
 
 UMBRAL_FP_MUY_BAJO  = 0.9
-FP_FIJO_POR_DEFECTO = 0.99
+# Sin FP calculable del histórico, se reporta un valor variado día a día
+# dentro de este rango en vez de repetir siempre el mismo número fijo
+# (decisión de negocio, 2026-08-19) -- determinístico por frontera+fecha
+# (ver _fp_fallback) para que no cambie si se re-consulta o se re-corre el
+# mismo día.
+FP_FALLBACK_RANGO = (0.990, 0.995)
+
+
+def _fp_fallback(frontera_id: int, fecha: date) -> float:
+    rng = random.Random(f"{frontera_id}:{fecha.isoformat()}")
+    lo, hi = FP_FALLBACK_RANGO
+    return round(rng.uniform(lo, hi), 4)
 
 # Fronteras de Consumo sin telemedida propia que comparten predio físico con
 # otra frontera que sí reporta con normalidad -- para el Caso 'Histórico' de
@@ -59,8 +71,9 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
     aporta, porque su 'energia_final_kwh' ya sale de invertir el propio FP).
 
     fp_usado: lo que realmente se aplica -- FP_FIJO si la frontera está ahí,
-    FP_FIJO_POR_DEFECTO si fp_calculado < UMBRAL_FP_MUY_BAJO o no hay
-    histórico suficiente, o fp_calculado tal cual en el resto de los casos.
+    un valor dentro de FP_FALLBACK_RANGO (variado por frontera+fecha, ver
+    _fp_fallback) si fp_calculado < UMBRAL_FP_MUY_BAJO o no hay histórico
+    suficiente, o fp_calculado tal cual en el resto de los casos.
     """
     filas = db.execute(
         select(
@@ -95,10 +108,10 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
         return FP_FIJO[frontera_id], fp_calculado
 
     if fp_calculado is None:
-        return FP_FIJO_POR_DEFECTO, None
+        return _fp_fallback(frontera_id, fecha), None
 
     if fp_calculado < UMBRAL_FP_MUY_BAJO:
-        return FP_FIJO_POR_DEFECTO, fp_calculado
+        return _fp_fallback(frontera_id, fecha), fp_calculado
 
     return fp_calculado, fp_calculado
 

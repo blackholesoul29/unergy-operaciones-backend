@@ -15,7 +15,7 @@ from app.services.mandatos.email_sync import (
 from app.services.mandatos.imap_client import CorreoCrudo
 from tests.fixtures_mandatos_correos import (
     REVISORIA_OBSERVACIONES, REVISORIA_SEGUIMIENTO, REVISORIA_MIXTO,
-    ENVIO_INVERSIONISTA, ENVIO_INVERSIONISTA_ADJUNTOS,
+    ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA,
     LIQUIDACION_PRELIMINAR, LIQUIDACION_PRELIMINAR_ADJUNTOS,
 )
 
@@ -69,12 +69,12 @@ def test_correo_mixto_produce_correcciones_y_firmados():
 
 def test_envio_a_inversionista_desde_los_adjuntos():
     d = decidir_acciones(
-        _correo(ENVIO_INVERSIONISTA, adjuntos=ENVIO_INVERSIONISTA_ADJUNTOS,
+        _correo(ENVIO_INVERSIONISTA, adjuntos=ADJUNTOS_REALES_DRIVE,
                 remitente="jessica@unergy.io"),
         FUENTE_ENVIO,
     )
     assert sorted(a["cmu"] for a in d["acciones"]) == [
-        "CMU1135", "CMU1139", "CMU1141", "CMU1142",
+        "CMU1135", "CMU1140", "CMU1147", "CMU1148",
     ]
     assert all(a["estado_destino"] == "enviado_inversionista" for a in d["acciones"])
 

@@ -18,28 +18,59 @@ from datetime import date
 import pytest
 
 from app.services import finanzas_mandatos_service as svc
-from tests.fixtures_mandatos_correos import ENVIO_INVERSIONISTA_ADJUNTOS
+from app.services.mandatos_service import parsear_nombre_zip
+from tests.fixtures_mandatos_correos import (
+    ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA_ADJUNTOS,
+)
 
 
-# ── El parser de Finanzas sí entiende los adjuntos reales de Jessica ──────────
+# ── Qué SÍ sale del nombre del archivo ────────────────────────────────────────
 
-PDFS_REALES = [n for n in ENVIO_INVERSIONISTA_ADJUNTOS if n.lower().endswith(".pdf")]
-
-
-@pytest.mark.parametrize("nombre", PDFS_REALES)
-def test_adjuntos_reales_rinden_identidad_completa(nombre):
-    """Los cuatro PDFs del correo del 12 ago dan (tipo, cmu, proyecto, tercero)."""
+@pytest.mark.parametrize("nombre", ADJUNTOS_REALES_DRIVE)
+def test_del_nombre_salen_tipo_cmu_y_proyecto(nombre):
     tipo = svc.tipo_de_nombre(nombre)
-    proyecto, tercero = svc.parsear_proyecto_tercero(nombre, tipo)
+    proyecto, _ = svc.parsear_proyecto_tercero(nombre, tipo)
     assert tipo == "costo"
     assert svc.extraer_cmu(nombre) is not None
-    assert proyecto == "Sol de la Sierra"
-    assert tercero == "Bancolombia"
+    assert proyecto.startswith("Minigranja Solar")
 
 
 def test_cada_pdf_real_da_su_propio_cmu():
-    cmus = [svc.extraer_cmu(n) for n in PDFS_REALES]
-    assert cmus == ["CMU1135", "CMU1141", "CMU1139", "CMU1142"]
+    assert [svc.extraer_cmu(n) for n in ADJUNTOS_REALES_DRIVE] == [
+        "CMU1135", "CMU1140", "CMU1147", "CMU1148",
+    ]
+
+
+# ── Qué NO sale del nombre: el tercero ────────────────────────────────────────
+
+@pytest.mark.parametrize("nombre", ADJUNTOS_REALES_DRIVE)
+def test_el_tercero_no_esta_en_el_nombre_del_archivo(nombre):
+    """La convención real es `CMU####-Mandato-Costos-{Proyecto}.pdf` -- tres
+    partes, sin inversionista.
+
+    Consecuencia para la integración: la identidad de Finanzas es
+    (proyecto, tercero, periodo, tipo), pero el adjunto solo aporta proyecto y
+    tipo. El tercero es el P.A. y vive en el CUERPO del correo
+    ("17844 - P.A SOL DE LA SIERRA"). El adaptador tiene que sacarlo de ahí; si
+    se confía en el nombre del archivo, toda la identidad colapsa a tercero=''.
+    """
+    _, tercero = svc.parsear_proyecto_tercero(nombre, svc.tipo_de_nombre(nombre))
+    assert tercero == ""
+
+
+@pytest.mark.parametrize("nombre", ADJUNTOS_REALES_DRIVE)
+def test_el_parser_de_zip_de_fase_a_rechaza_los_nombres_reales(nombre):
+    """BUG EN PRODUCCIÓN, fijado acá para que no se pierda.
+
+    `ZIP_NOMBRE_RE` (mandatos_service.py) exige
+    `CMU####-Mandato-Costos-{Proyecto}-{Inversionista}.pdf`, con un sufijo de
+    inversionista que los archivos reales no tienen. `POST /mandatos/upload-zip`
+    hace `if not parsed: continue`, así que al cargar un ZIP real de Vanessa
+    saltaría TODOS los archivos y reportaría cero detectados.
+
+    Este test pasa mientras el bug exista. Cuando se corrija hay que invertirlo.
+    """
+    assert parsear_nombre_zip(nombre) is None
 
 
 def test_periodo_sale_del_asunto_con_anio_explicito():

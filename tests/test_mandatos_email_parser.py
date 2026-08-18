@@ -5,7 +5,8 @@ from app.services.mandatos.email_parser import (
     html_a_texto, solo_pdfs,
 )
 from tests.fixtures_mandatos_correos import (
-    ENVIO_INVERSIONISTA_ADJUNTOS, LIQUIDACION_PRELIMINAR_ADJUNTOS,
+    ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA_ADJUNTOS,
+    LIQUIDACION_PRELIMINAR_ADJUNTOS,
     REVISORIA_HTML, REVISORIA_MIXTO, REVISORIA_OBSERVACIONES,
     REVISORIA_SEGUIMIENTO,
 )
@@ -138,7 +139,8 @@ def test_extraer_observaciones_sin_cmu():
 # ── adjuntos ──────────────────────────────────────────────────────────────────
 
 def test_cmu_al_inicio_de_nombre_convencion_de_jessica():
-    assert cmu_al_inicio_de_nombre("CMU1135-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf") == "CMU1135"
+    assert cmu_al_inicio_de_nombre(
+        "CMU1135-Mandato-Costos-Minigranja Solar La Paz Levende.pdf") == "CMU1135"
 
 
 def test_cmu_al_inicio_ignora_cmu_en_medio_del_nombre():
@@ -154,10 +156,15 @@ def test_cmu_al_inicio_sin_match():
 
 def test_solo_pdfs_descarta_el_excel():
     assert solo_pdfs(ENVIO_INVERSIONISTA_ADJUNTOS) == [
-        "CMU1135-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-        "CMU1141-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-        "CMU1139-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-        "CMU1142-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+        "CMU1135-Mandato-Costos-Minigranja Solar La Paz Levende.pdf",
+    ]
+
+
+def test_cmu_al_inicio_con_la_convencion_real_de_tres_partes():
+    """Los nombres reales son `CMU####-Mandato-Costos-{Proyecto}.pdf`, sin
+    sufijo de inversionista. El anclaje al inicio funciona igual."""
+    assert [cmu_al_inicio_de_nombre(n) for n in ADJUNTOS_REALES_DRIVE] == [
+        "CMU1135", "CMU1140", "CMU1147", "CMU1148",
     ]
 
 

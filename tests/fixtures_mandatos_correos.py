@@ -84,12 +84,36 @@ La presente es con el fin de informarles que los certificados de mandato de cost
 Cordialmente,
 Jessica Ramirez"""
 
+# Nombres REALES, tomados de la carpeta de Drive "Mandato Costos Sol de la
+# Sierra" (captura 2026-08-18). Convención verificada:
+#
+#     CMU####-Mandato-Costos-{Proyecto}.pdf
+#
+# Tres partes, NO cuatro. **El tercero no está en el nombre del archivo.** El
+# tercero es el P.A. (patrimonio autónomo), que aparece en el CUERPO del correo
+# ("17844 - P.A SOL DE LA SIERRA") y da nombre a la carpeta de Drive. Quien
+# construya la identidad (proyecto, tercero, periodo, tipo) tiene que sacar el
+# tercero del cuerpo, no del adjunto.
+#
+# Una versión anterior de este archivo traía nombres inventados con un sufijo
+# "-Bancolombia", extrapolado del patrón de ZIP_NOMBRE_RE de Fase A en vez de
+# verificado. No existe. Ese mismo error hace que ZIP_NOMBRE_RE no matchee
+# ningún archivo real (ver test_mandatos_integracion_contrato.py).
+ADJUNTOS_REALES_DRIVE = [
+    "CMU1135-Mandato-Costos-Minigranja Solar La Paz Levende.pdf",
+    "CMU1140-Mandato-Costos-Minigranja Solar Merengue.pdf",
+    "CMU1147-Mandato-Costos-Minigranja Solar Cumbia.pdf",
+    "CMU1148-Mandato-Costos-Minigranja Solar Copey.pdf",
+]
+
+# Los adjuntos del correo del 12 ago. El correo declara 8; la captura mostraba 5
+# (1 xlsx + 4 PDFs), y de esos solo CMU1135 se pudo leer completo en Drive. Los
+# nombres de CMU1139/1141/1142 quedaron truncados en ambas capturas, así que NO
+# se incluyen: basta con un PDF real y el xlsx para lo que se ejercita acá --
+# que el xlsx se descarte y que el PDF aporte su CMU.
 ENVIO_INVERSIONISTA_ADJUNTOS = [
     "REGISTRO MANDATOS.xlsx",
-    "CMU1135-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-    "CMU1141-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-    "CMU1139-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
-    "CMU1142-Mandato-Costos-Sol de la Sierra-Bancolombia.pdf",
+    "CMU1135-Mandato-Costos-Minigranja Solar La Paz Levende.pdf",
 ]
 
 # 2026-08-12 5:05 p.m. -- "Liquidación preliminar". Caso NEGATIVO: es de Jessica,

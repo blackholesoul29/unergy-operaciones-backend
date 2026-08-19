@@ -121,3 +121,99 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
         fuente == FUENTE_REVISORIA and clasificacion != CLASIF_MOLDE_SIMPLE)
     return {"clasificacion": clasificacion, "acciones": acciones,
             "requiere_revision": requiere, "sin_identidad": sin_identidad}
+
+
+def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
+    """Aplica una acción y devuelve su registro para la bitácora.
+
+    La validación de transiciones vive acá y no en upsert_mandato: esa función
+    la sigue usando el script de Jessica por /ingest, y meterle una regla nueva
+    podría rechazar algo que ella hace hoy. La red de seguridad va donde está la
+    automatización.
+    """
+    from app.models.finanzas_mandatos import FinanzasMandato
+    from app.services import finanzas_mandatos_service as svc
+    from app.services.finanzas_mandatos_service import transicion_firma_valida
+
+    if not accion.get("periodo"):
+        # Todo lo que viene de la revisoría cae acá: sus correos no traen el
+        # P.A., así que no hay identidad que construir y hay que encontrar la
+        # fila que ya existe. Aplica tanto a las observaciones de texto como a
+        # los PDF firmados.
+        #
+        # Si no existe la fila, NO se crea: significaría que llegó firmado algo
+        # que la plataforma nunca vio salir. Eso es justo la anomalía que la
+        # reconciliación reporta como sin_registro_de_envio, y taparla creando
+        # una fila incompleta la volvería invisible.
+        existente = (db.query(FinanzasMandato)
+                     .filter(FinanzasMandato.cmu == accion["cmu"])
+                     .order_by(FinanzasMandato.periodo.desc()).first())
+        if not existente:
+            return {"cmu": accion["cmu"], "resultado": "cmu_no_encontrado"}
+        destino = accion["estado"]
+        if not transicion_firma_valida(existente.estado, destino):
+            return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
+                    "estado_previo": existente.estado, "estado_destino": destino}
+        previo = existente.estado
+        existente.estado = destino
+        if accion.get("comentario") is not None:
+            existente.comentario = accion["comentario"]
+        existente.correo_ref = correo.message_id
+        if destino == "firmado":
+            existente.fecha_firma = existente.fecha_firma or correo.fecha.date()
+        if accion.get("adjunto"):
+            contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
+            if contenido:
+                from app.services.finanzas_mandatos_drive import subir_pdf
+                sub = f"{existente.periodo.strftime('%Y-%m')}-{existente.tipo}"
+                res = subir_pdf(contenido, accion["adjunto"], sub)
+                existente.drive_file_id, existente.drive_url = res["id"], res["url"]
+        return {"cmu": accion["cmu"], "resultado": "aplicado", "id": existente.id,
+                "estado_previo": previo, "estado_nuevo": destino}
+
+    existente = (db.query(FinanzasMandato)
+                 .filter(FinanzasMandato.proyecto == accion["proyecto"],
+                         FinanzasMandato.tercero == accion["tercero"],
+                         FinanzasMandato.periodo == accion["periodo"],
+                         FinanzasMandato.tipo == accion["tipo"]).first())
+    previo = existente.estado if existente else None
+    destino = accion["estado"]
+    if existente and not transicion_firma_valida(previo, destino):
+        return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
+                "estado_previo": previo, "estado_destino": destino}
+
+    drive_id = drive_url = None
+    if accion.get("adjunto"):
+        contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
+        if contenido:
+            from app.services.finanzas_mandatos_drive import subir_pdf
+            sub = f"{accion['periodo'].strftime('%Y-%m')}-{accion['tipo']}"
+            res = subir_pdf(contenido, accion["adjunto"], sub)
+            drive_id, drive_url = res["id"], res["url"]
+
+    m, creado = svc.upsert_mandato(
+        db, proyecto=accion["proyecto"], tercero=accion["tercero"],
+        periodo=accion["periodo"], tipo=accion["tipo"], cmu=accion["cmu"],
+        estado=destino, comentario=accion.get("comentario"),
+        fecha=correo.fecha.date(), correo_ref=correo.message_id,
+        drive_file_id=drive_id, drive_url=drive_url)
+    return {"cmu": accion["cmu"], "resultado": "aplicado", "id": m.id,
+            "creado": creado, "estado_previo": previo, "estado_nuevo": destino}
+
+
+def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):
+    """Procesa un correo y devuelve su fila de bitácora, sin commit."""
+    from app.models.mandatos import MandatoCorreo
+
+    d = decidir_finanzas(correo, fuente)
+    registros = [_aplicar(db, a, correo) for a in d["acciones"]]
+    aplicado = any(r["resultado"] == "aplicado" for r in registros)
+    problema = any(r["resultado"] != "aplicado" for r in registros)
+    return MandatoCorreo(
+        message_id=correo.message_id, fecha=correo.fecha,
+        remitente=(correo.remitente or "")[:255],
+        asunto=(correo.asunto or "")[:1000], fuente=fuente,
+        clasificacion=d["clasificacion"],
+        resultado="aplicado" if aplicado else "omitido",
+        requiere_revision=d["requiere_revision"] or problema,
+        detalle={"acciones": registros, "sin_identidad": d["sin_identidad"]})

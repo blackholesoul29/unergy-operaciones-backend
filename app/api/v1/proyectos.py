@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Proyecto
-from app.utils.nombre_matching import mejor_candidato
+from app.utils.nombre_matching import mejor_candidato, normalizar
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
@@ -14,7 +14,7 @@ from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
-    ProyectoCreate, ProyectoUpdate, ProyectoOut,
+    ProyectoCreate, ProyectoUpdate, ProyectoOut, ProyectoListaResponse,
     ProyectoInversionistaCreate, ProyectoInversionistaUpdate, ProyectoInversionistaOut,
     ProyectoInfoTecnicaCreate, ProyectoInfoTecnicaOut,
     ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
@@ -356,6 +356,156 @@ def listar_gen_promedio(
         "con_promedio": sum(1 for f in filas if f["gen_mensual_promedio_mwh"] is not None),
         "items": filas,
     }
+
+
+# ── Consulta simple: lista liviana + detalle por nombre ───────────────────────
+# Superficie de solo lectura para una persona con cuenta que consume la API
+# directo (script, Excel, curl, LLM) -- ver docs/API_PROYECTOS.md. El flujo
+# previsto es: /lista -> tomar el `id` -> /{id}. /buscar es el atajo para cuando
+# ya se sabe el nombre del proyecto.
+#
+# Ambas van declaradas ANTES de /{id}: ese path param está tipado `int`, así que
+# si fueran después, FastAPI intentaría convertir "lista" a entero y devolvería
+# 422 en vez de resolver la ruta correcta.
+
+
+def _clave_nombre(texto: str | None) -> str:
+    """Forma comparable de un nombre: sin tildes, en minúsculas, sin caracteres
+    no alfanuméricos y con los espacios colapsados.
+
+    Reusa `normalizar` de app/utils/nombre_matching.py (la misma cadena que
+    reconcilia nombres contra Quoia/Solenium/GESCON), que convierte los
+    caracteres raros en espacios pero no colapsa los espacios internos --
+    de ahí el split/join.
+    """
+    return " ".join(normalizar(texto or "").split())
+
+
+@router.get("/lista", response_model=ProyectoListaResponse)
+def listar_proyectos_simple(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Todos los proyectos vigentes en una sola llamada, con los campos justos
+    para identificarlos y quedarse con el `id`.
+
+    Sin paginar y sin filtros a propósito: es el listado de entrada. Para
+    filtrar o paginar está `GET /proyectos` (que además trae el objeto completo
+    de cada proyecto, y es el que consume el frontend).
+    """
+    filas = (
+        db.query(
+            Proyecto.id,
+            Proyecto.nombre_comercial,
+            Proyecto.estado,
+            Proyecto.tipo_proyecto,
+            Proyecto.municipio,
+            Proyecto.departamento,
+            Proyecto.potencia_instalada_kwp,
+            Proyecto.sub_project,
+            Proyecto.codigo_tsf,
+        )
+        .filter(Proyecto.deleted_at.is_(None))
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    items = [
+        {
+            "id": f.id,
+            "nombre_comercial": f.nombre_comercial,
+            "estado": f.estado,
+            "tipo_proyecto": f.tipo_proyecto,
+            "municipio": f.municipio,
+            "departamento": f.departamento,
+            # Numeric -> Decimal; se pasa a float para que el JSON traiga un
+            # número y no un string.
+            "potencia_instalada_kwp": (
+                float(f.potencia_instalada_kwp) if f.potencia_instalada_kwp is not None else None
+            ),
+            "sub_project": f.sub_project,
+            "codigo_tsf": f.codigo_tsf,
+        }
+        for f in filas
+    ]
+    return {"total": len(items), "items": items}
+
+
+def _resolver_por_nombre(db: Session, nombre: str) -> Proyecto:
+    """Resuelve un nombre a UN proyecto, o lanza un error accionable.
+
+    El match es exacto sobre el nombre normalizado: tolera mayúsculas, tildes,
+    guiones y espacios de más, pero NO es difuso -- un nombre parcial no
+    coincide. Es deliberado: quien consume esto es un script o una persona
+    encadenando llamadas, y devolverle el proyecto equivocado en silencio es
+    peor que devolverle un error. (El matcher permisivo `mejor_candidato` existe
+    y se usa para avisar de duplicados al crear, pero acá no.)
+
+    Dos etapas: primero `nombre_comercial`; solo si ahí no hubo nada, se prueba
+    `nombre_bitacora`/`nombre_clientes`. Un match por nombre comercial siempre
+    gana y la segunda etapa no le suma candidatos.
+    """
+    clave = _clave_nombre(nombre)
+    if not clave:
+        raise HTTPException(422, "El parámetro 'nombre' no puede estar vacío.")
+
+    filas = (
+        db.query(
+            Proyecto.id,
+            Proyecto.nombre_comercial,
+            Proyecto.nombre_bitacora,
+            Proyecto.nombre_clientes,
+        )
+        .filter(Proyecto.deleted_at.is_(None))
+        .all()
+    )
+
+    coincidencias = [f for f in filas if _clave_nombre(f.nombre_comercial) == clave]
+    if not coincidencias:
+        coincidencias = [
+            f for f in filas
+            if clave in (_clave_nombre(f.nombre_bitacora), _clave_nombre(f.nombre_clientes))
+        ]
+
+    if not coincidencias:
+        raise HTTPException(
+            404,
+            f"No existe un proyecto cuyo nombre coincida con '{nombre}'. "
+            f"Consultá GET /api/v1/proyectos/lista para ver los nombres disponibles.",
+        )
+
+    if len(coincidencias) > 1:
+        # `nombre_comercial` no tiene UNIQUE y en producción hay duplicados reales
+        # (de ahí POST /proyectos/{ganador}/merge/{perdedor}). detail estructurado,
+        # igual que el 409 de create_proyecto, para que quien llama pueda elegir
+        # un id y reconsultar el detalle sin parsear un string.
+        raise HTTPException(
+            409,
+            {
+                "mensaje": (
+                    f"Hay {len(coincidencias)} proyectos cuyo nombre coincide con "
+                    f"'{nombre}'. Consultá el detalle por ID."
+                ),
+                "nombre_ambiguo": True,
+                "candidatos": [
+                    {"id": f.id, "nombre_comercial": f.nombre_comercial}
+                    for f in coincidencias
+                ],
+            },
+        )
+
+    return _get_proyecto_or_404(coincidencias[0].id, db)
+
+
+@router.get("/buscar", response_model=ProyectoOut)
+def buscar_proyecto_por_nombre(
+    nombre: str = Query(..., min_length=1, description="Nombre del proyecto. Tolera mayúsculas, tildes, guiones y espacios de más, pero debe ser el nombre completo (no parcial)."),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Detalle de un proyecto buscándolo por nombre. Devuelve exactamente lo
+    mismo que `GET /proyectos/{id}`.
+
+    404 si ningún nombre coincide; 409 con la lista de candidatos si coincide
+    más de un proyecto.
+    """
+    return _resolver_por_nombre(db, nombre)
 
 
 @router.get("/{id}", response_model=ProyectoOut)
@@ -750,7 +900,7 @@ def get_info_tecnica(id: int, db: Session = Depends(get_db), _=Depends(get_curre
 
 @router.put("/{id}/info-tecnica", response_model=ProyectoInfoTecnicaOut)
 def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_proyecto_or_404(id, db)
+    proyecto = _get_proyecto_or_404(id, db)
     it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).first()
     if it:
         for k, v in data.model_dump(exclude_unset=True).items():
@@ -758,6 +908,14 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     else:
         it = ProyectoInfoTecnica(proyecto_id=id, **data.model_dump())
         db.add(it)
+    # capacidad_instalada_kwp (DC) también vive espejada en
+    # proyectos.potencia_instalada_kwp -- el resto del backend (dashboards
+    # Gaia/Solenium, motor de alarmas MGS, impacto de fallas, tsf_sync) todavía
+    # lee esa columna directo en vez de unir con proyecto_info_tecnica. El
+    # espejo se hace aquí (no en el frontend) para que no pueda desincronizarse
+    # sin importar desde dónde se edite info-tecnica.
+    if it.capacidad_instalada_kwp is not None:
+        proyecto.potencia_instalada_kwp = it.capacidad_instalada_kwp
     db.commit()
     db.refresh(it)
     return it

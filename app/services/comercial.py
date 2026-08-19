@@ -1440,11 +1440,12 @@ def _ficha_tecnica(proyecto) -> dict:
         "produccion_especifica_kwh_kwp": _num(proyecto.produccion_especifica_kwh_kwp),
         "tipo_tracker": _it("tipo_tracker"),
         "paneles": {
-            # El conteo del proyecto manda sobre el de la ficha técnica: es el
-            # que mantienen las vistas de operación.
-            "cantidad_total": (proyecto.cantidad_total_paneles
-                               if proyecto.cantidad_total_paneles is not None
-                               else _it("cantidad_total_paneles")),
+            # El conteo vive SOLO en la ficha técnica. Hasta 2026-08-19 estaba
+            # duplicado en `proyectos.cantidad_total_paneles` y acá se elegía uno
+            # de los dos; al eliminarse esa columna duplicada este era el último
+            # lector que quedaba, y leerla tiraba AttributeError en CADA planta
+            # del árbol — es decir, /comercial/proyectos-operando entero.
+            "cantidad_total": _it("cantidad_total_paneles"),
             "marca": _it("marca_paneles"),
             "potencia_panel_kwp": _it("potencia_panel_kwp"),
             "grupos": [

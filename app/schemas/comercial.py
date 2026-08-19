@@ -2,6 +2,8 @@ from datetime import date, datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.proyectos import ProyectoCreate
+
 OrigenClienteLiteral = Literal["prospeccion_propia", "recomendacion", "referido", "otro"]
 # Pipeline de la oferta (2026-08-02). Antes vivía en la oportunidad y se llamaba
 # prospeccion / envio_oferta / negociacion_contrato.
@@ -209,10 +211,22 @@ class RegistroComercialIn(BaseModel):
         return self
 
 
-class ProyectoDesdeCRMIn(BaseModel):
+class ProyectoDesdeCRMIn(ProyectoCreate):
+    """Una planta creada desde el CRM es un Proyecto normal de la plataforma.
+
+    Hereda `ProyectoCreate` — el MISMO esquema del `POST /proyectos` que usa
+    /proyectos — a propósito: el CRM no guarda datos de proyecto propios, lee de
+    la tabla `proyectos` o crea filas ahí. Antes declaraba sus cinco campos a
+    mano (nombre, kWp, departamento, municipio, operador) y descartaba en
+    silencio todo lo demás que trae un proyecto: coordenadas, dirección, tipo,
+    estado, clasificación regulatoria, comunidad energética, códigos de cruce,
+    curvas P50/P90. La planta nacía vacía y `GET /comercial/proyectos-operando`
+    —que resuelve casi toda su ficha desde el Proyecto— devolvía campos nulos.
+
+    Lo único que el CRM endurece sobre el esquema base es el operador de red:
+    ahí es obligatorio (validación bloqueante del CRM, spec §4.2) y en
+    /proyectos es opcional.
+    """
+
     nombre_comercial: str = Field(min_length=1)
-    potencia_instalada_kwp: Optional[float] = None
-    departamento: Optional[str] = None
-    municipio: Optional[str] = None
-    # OBLIGATORIO — validación bloqueante del CRM (spec §4.2).
     operador_red_id: int

@@ -12,7 +12,8 @@ import unicodedata
 from datetime import datetime, date
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
@@ -961,44 +962,104 @@ def add_gestion(
             "fecha": g.fecha, "oferta_id": g.oferta_id}
 
 
+def _sumar_planta_a_oferta(db: Session, oferta: OportunidadOferta, proyecto_id: int) -> None:
+    """Pega la planta a la oferta SIN tocar las que ya tenía.
+
+    Distinto de `_set_plantas`, que reescribe la lista entera: acá se está
+    agregando una planta nueva, y una oferta puede cubrir varias ("Balmora 1 y
+    2"). Reescribir dejaría fuera a sus hermanas.
+
+    `proyecto_id` (la columna vieja, que leen el vinculador, la ficha operativa
+    y proyectos-operando) solo se estampa si estaba vacía: si la oferta ya tenía
+    una planta principal, esta se suma detrás y no la desplaza.
+    """
+    tabla = oportunidad_oferta_proyectos_table
+    ya = {pid for (pid,) in db.execute(
+        select(tabla.c.proyecto_id).where(tabla.c.oferta_id == oferta.id)).all()}
+    if proyecto_id not in ya:
+        db.execute(tabla.insert().values(oferta_id=oferta.id, proyecto_id=proyecto_id))
+    if oferta.proyecto_id is None:
+        oferta.proyecto_id = proyecto_id
+
+
 @router.post("/oportunidades/{id}/proyectos", status_code=201)
 def add_proyecto(
     id: int, data: ProyectoDesdeCRMIn,
     forzar: bool = Query(False, description="true: crear aunque exista un nombre muy parecido"),
+    oferta_id: int | None = Query(
+        None, description="Oferta a la que se le pega la planta recién creada. "
+                          "Se SUMA a las que ya tenga."),
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
     """Agregar proyecto desde el CRM. El proyecto creado ES un Proyecto normal
-    de la plataforma (misma tabla); solo queda vinculado a la oportunidad.
-    Validación bloqueante: operador de red obligatorio y del catálogo."""
+    de la plataforma: misma tabla, mismo esquema (`ProyectoCreate`) y las mismas
+    validaciones de unicidad y de duplicado por nombre que `POST /proyectos`.
+    Validación extra del CRM: operador de red obligatorio y del catálogo.
+
+    Con `oferta_id` la planta queda **vinculada a esa oferta**, que es lo que
+    hace que aparezca en `GET /comercial/proyectos-operando`. Sin ese vínculo la
+    planta existe pero la API de integración no la ve: resuelve las plantas de
+    cada contrato por la M2M de la oferta, no por `Proyecto.oportunidad_id`.
+    """
     _check_comercial(current)
     _get_oportunidad_or_404(id, db)
     operador = db.query(OperadorRed).filter(OperadorRed.id == data.operador_red_id).first()
     if not operador:
         raise HTTPException(422, "Debes seleccionar un operador de red válido del catálogo")
 
-    # Mismo aviso de duplicado por nombre que el POST /proyectos general.
-    from app.api.v1.proyectos import _buscar_duplicado_por_nombre
+    oferta = None
+    if oferta_id is not None:
+        oferta = (
+            db.query(OportunidadOferta)
+            .filter(OportunidadOferta.id == oferta_id,
+                    OportunidadOferta.oportunidad_id == id)
+            .first()
+        )
+        if not oferta:
+            raise HTTPException(422, f"La oferta {oferta_id} no es de esta oportunidad")
+
+    # Las mismas dos validaciones del POST /proyectos general: choque de columna
+    # UNIQUE (mensaje que nombra el proyecto en conflicto) y aviso de duplicado
+    # por nombre. Se reusan y no se reimplementan para que crear desde el CRM y
+    # crear desde /proyectos no puedan divergir.
+    from app.api.v1.proyectos import _buscar_duplicado_por_nombre, _verificar_unicos
+
+    payload = data.model_dump()
+    _verificar_unicos(db, payload)
     if not forzar:
-        duplicado = _buscar_duplicado_por_nombre(db, data.nombre_comercial)
+        duplicado = _buscar_duplicado_por_nombre(
+            db, payload.get("nombre_comercial"), payload.get("tipo_proyecto"))
         if duplicado:
             raise HTTPException(409, {
                 "codigo": "posible_duplicado",
                 "mensaje": f"Ya existe un proyecto con nombre parecido: {duplicado.nombre_comercial}",
                 "proyecto_id": duplicado.id,
+                # Mismas claves que el 409 de POST /proyectos, para que un
+                # cliente que ya lo maneje no tenga que aprender otra forma.
+                "duplicado_nombre": True,
+                "candidato_id": duplicado.id,
+                "candidato_nombre": duplicado.nombre_comercial,
             })
 
-    p = Proyecto(
-        nombre_comercial=data.nombre_comercial,
-        potencia_instalada_kwp=data.potencia_instalada_kwp,
-        departamento=data.departamento,
-        municipio=data.municipio,
-        operador_red_id=operador.id,
-        # Sincroniza el texto legacy para que las vistas viejas lo muestren.
-        operador_red=operador.nombre_comercial or operador.nombre_legal,
-        oportunidad_id=id,
-        origen="manual",
-    )
+    # Sincroniza el texto legacy para que las vistas viejas lo muestren.
+    payload["operador_red"] = operador.nombre_comercial or operador.nombre_legal
+    # El CRM manda estos dos, no el cliente: son de la creación, no del formulario.
+    payload["oportunidad_id"] = id
+    payload["origen"] = "manual"
+
+    p = Proyecto(**payload)
     db.add(p)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "No se pudo guardar: algún valor único (p. ej. API ID Unergy, topic slug, "
+            "ID de Solenium o de Sun Factory) ya está en uso por otro proyecto.",
+        )
+    if oferta is not None:
+        _sumar_planta_a_oferta(db, oferta, p.id)
     db.commit()
     db.refresh(p)
     return _proyecto_out(p)

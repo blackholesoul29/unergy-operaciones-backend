@@ -332,7 +332,11 @@ Es el más lento de la sección: hace fan-out a la API de Unergy por cada proyec
 
 **Contratos sin compromiso cargado** llegan con `energia_minima_mwh: null` y `estado: "sin_compromisos"`. Hay que manejar ese caso: no es cero, es "no hay dato".
 
-**⚠️ Dato sucio conocido — Santa Fe 2.** Ese contrato tiene compromiso mín = máx = **180.000 MWh/mes** (1.080.000 MWh en 2026), contra una planta que genera ~192 MWh/mes. Es ~50× el contrato más grande de la compañía; casi con seguridad se cargaron **kWh en un campo que espera MWh**. Mientras no se corrija, **contamina el bloque `totales`** de `/cumplimiento/ppa/resumen` (el déficit agregado de 178.795 MWh es artificial). Los contratos individuales sí están bien. Si va a construir un tablero con el total, o se excluye ese contrato, o se corrige el dato en la plataforma primero.
+**Santa Fe 2 — dato sucio ya corregido (verificado 2026-08-13).** Este contrato tenía cargado un compromiso mín = máx de **180.000 MWh/mes** (1.080.000 MWh en 2026) contra una planta que genera ~192 MWh/mes: eran **kWh en un campo que espera MWh**, y contaminaban el bloque `totales` de `/cumplimiento/ppa/resumen` con un déficit artificial de ~178.795 MWh. **Ya está corregido**: hoy son **180 MWh/mes** (jul–dic 2026), y el contrato aparece como `excedente` porque genera ~192–210 MWh/mes contra un techo de 180.
+
+Los `totales` ya son confiables. Julio 2026 cierra en 7.293,2 MWh de compromiso mínimo contra 8.658,0 MWh generados, `estado: "ok"`, sin compras en bolsa. Se deja anotado porque **cualquier análisis hecho antes del 2026-08-13 arrastra el déficit falso** — si aparece un déficit agregado de ~178.795 MWh, es este dato, no el negocio.
+
+Regla general que sí sigue vigente: antes de graficar agregados, descarte compromisos con órdenes de magnitud imposibles. Ningún contrato de la compañía supera unos pocos miles de MWh/mes.
 
 **`/proyectos/lista` y `/proyectos/buscar` no están desplegados** (responden 422). Use `/proyectos` o `/monitoreo/_legacy?action=getProjects`.
 

@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     UNERGY_LOGIN: str = ""
     UNERGY_PASSWORD: str = ""
 
+    # API de Liquidaciones (mismo host que UNERGY_API_URL). Requiere una cuenta
+    # que pertenezca al grupo `admin` Y tenga is_staff=True: /api/liquidaciones/*
+    # exige lo primero y /api/admin/* lo segundo. Si se dejan vacías se usan las
+    # credenciales UNERGY_* de arriba.
+    LIQUIDACIONES_LOGIN: str = ""
+    LIQUIDACIONES_PASSWORD: str = ""
+
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
     SUNFACTORY_API_URL: str = "https://sunfactory.solenium.co/api"

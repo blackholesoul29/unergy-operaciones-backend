@@ -686,16 +686,36 @@ def _resolver_cliente(db: Session, cliente_id: int | None, cliente_nuevo,
 
     cn = cliente_nuevo
     if not forzar_duplicado:
-        duplicado = buscar_cliente_duplicado(db, cn.razon_social_nombre)
+        # Fix 2026-08-19: nit_cedula tiene UNIQUE en la base, pero nunca se
+        # revisaba antes de crear -- el choque salia como 500 crudo del
+        # INSERT en vez del 409 amigable de abajo. Un NIT igual es evidencia
+        # mucho mas fuerte que un nombre parecido (practicamente certeza de
+        # que es la misma empresa), asi que se revisa primero y aparte, sin
+        # pasar por el umbral de similitud de nombre.
+        duplicado = None
+        duplicado_por_nit = False
+        nit = (cn.nit_cedula or "").strip()
+        if nit:
+            duplicado = db.query(Cliente).filter(
+                Cliente.nit_cedula == nit, Cliente.deleted_at.is_(None)
+            ).first()
+            duplicado_por_nit = duplicado is not None
+        if not duplicado:
+            duplicado = buscar_cliente_duplicado(db, cn.razon_social_nombre)
         if duplicado:
+            mensaje = (
+                f"Ya existe un cliente con el mismo NIT/cédula: "
+                f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                if duplicado_por_nit else
+                f"Ya existe un cliente con un nombre muy parecido: "
+                f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+            )
             raise HTTPException(
                 409,
                 {
-                    "mensaje": (
-                        f"Ya existe un cliente con un nombre muy parecido: "
-                        f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
-                    ),
-                    "duplicado_nombre": True,
+                    "mensaje": mensaje,
+                    "duplicado_nombre": not duplicado_por_nit,
+                    "duplicado_nit": duplicado_por_nit,
                     "candidato_id": duplicado.id,
                     "candidato_nombre": duplicado.razon_social_nombre,
                 },

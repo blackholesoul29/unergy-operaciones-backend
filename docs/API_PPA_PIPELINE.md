@@ -15,6 +15,13 @@ un árbol:
 > **Cambio de forma (2026-08-18).** Este endpoint devolvía **una fila por planta** en
 > `items[]`. Ahora devuelve **un nodo por PPA** en `ppas[]`. Es un reemplazo, no una
 > variante: `items` ya no existe.
+>
+> **Ficha completa de la planta (2026-08-19), aditivo.** `proyectos[].detalles` trae
+> ahora la planta como está creada en la plataforma: `identificacion` (el id de la planta
+> en cada sistema), `clasificacion`, `tecnica`, `fronteras[]`, `servicios`,
+> `construccion` y `simulacion`, más `direccion` y `url_mapa` dentro de `ubicacion`.
+> **Ningún campo anterior cambió de nombre, de lugar ni de unidad**: quien ya integra
+> sigue leyendo lo mismo y puede ignorar los bloques nuevos.
 
 ---
 
@@ -132,6 +139,23 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
           "nombre": "GD Balmora 1",
           "api_id_unergy": "balmora1",
           "detalles": {
+            "estado_proyecto": "en_operacion",
+            "estado_proyecto_label": "En operación",
+            "potencia_instalada_kwp": 990.0,
+            "potencia_con_cen_mw": 0.9,
+            "ubicacion": {
+              "municipio": "Corozal",
+              "departamento": "Sucre",
+              "texto": "Corozal, Sucre",
+              "latitud": 9.317,
+              "longitud": -75.292,
+              "direccion": "Vereda Las Peñas, km 3",
+              "url_mapa": "https://maps.app.goo.gl/..."
+            },
+            "operador_red": "ELECTRIFICADORA DEL CARIBE S.A. E.S.P.",
+            "operador_red_id": 4,
+            "fecha_entrada_operacion": "2025-03-01",
+            "fecha_inicio_comercializacion": "2025-04-12",
             "energia_promedio_mensual_mwh": 178.412,
             "energia_promedio_mensual_kwh": 178412.0,
             "energia_promedio_origen": "medido",
@@ -140,7 +164,129 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
               "ventana_desde": "2026-07-18",
               "ventana_hasta": "2026-08-17",
               "actualizado_en": "2026-08-17T21:18:45-05:00"
+            },
+            "identificacion": {
+              "nombre_comercial": "GD Balmora 1",
+              "nombre_bitacora": "Balmora 1",
+              "nombre_clientes": "Balmora",
+              "topic_slug": "gd-balmora-1",
+              "sub_project": "balmora1",
+              "alias_monitoreo": null,
+              "codigo_cnd": "CND-0912",
+              "codigo_tsf": "TSF-77",
+              "origina_code": "MF-BAL-1",
+              "project_id_solenium": "SOL-45",
+              "sunfactory_project_id": 310,
+              "codigo_sic_generacion": "AGGE0123",
+              "codigo_sic_consumo": null,
+              "quoia_nodo_id": 8,
+              "quoia_reporte_generacion_id": 91,
+              "quoia_reporte_consumo_id": null,
+              "portafolio_id": 3,
+              "portafolio": "Portafolio Caribe",
+              "proyecto_padre_id": null
+            },
+            "clasificacion": {
+              "clasificacion_regulatoria": "AGGE",
+              "tipo_tecnologia": "solar",
+              "tipo_proyecto": "minigranja",
+              "es_comunidad_energetica": false,
+              "nombre_comunidad": null
+            },
+            "tecnica": {
+              "voltaje_red": "13.2 kV",
+              "tipo_conexion": "trifásica",
+              "potencia_ac_kw": 900.0,
+              "capacidad_instalada_kwp": 990.0,
+              "produccion_especifica_kwh_kwp": 1450.5,
+              "tipo_tracker": "1E",
+              "paneles": {
+                "cantidad_total": 1800,
+                "marca": "Trina",
+                "potencia_panel_kwp": "0.55",
+                "grupos": [
+                  { "marca": "Trina", "modelo": "TSM-550", "potencia_pico_wp": 550.0,
+                    "cantidad": 1800 }
+                ]
+              },
+              "inversores": {
+                "cantidad": 5,
+                "marca": "Huawei",
+                "potencia_kwp": "300",
+                "cantidad_strings": 48,
+                "equipos": [
+                  { "id": 812, "nombre": "Inversor 1", "marca": "Huawei",
+                    "modelo": "SUN2000-300KTL", "potencia_nominal_kw": 300.0,
+                    "tipo": "central", "numero_serie": null }
+                ]
+              },
+              "almacenamiento": {
+                "tiene": false, "capacidad_kwh": null, "marca": null, "modelo": null
+              },
+              "equipos_marcas": {
+                "transformador": "Siemens",
+                "reconectador_rele": "NOJA Power",
+                "totalizador": null,
+                "seguidor_solar": null,
+                "medidores_frontera": "Elster",
+                "modems_frontera": null,
+                "cctv": "Hikvision"
+              },
+              "seguridad_fisica": "Cerco eléctrico",
+              "tiene_internet": "si",
+              "retie_url": "https://drive.google.com/..."
+            },
+            "fronteras": [
+              {
+                "id": 501,
+                "codigo_frontera": "Frt00123",
+                "nombre_frontera": "FN BALMORA 1 GENERACION",
+                "codigo_propio": null,
+                "tipo_frontera": "generacion",
+                "estado": "activa",
+                "nivel_tension_kv": 13.2,
+                "capacidad_transporte_mw": 0.9,
+                "capacidad_efectiva_mw": 0.9,
+                "factor_perdidas": 1.0378,
+                "subestacion": "Corozal",
+                "punto_conexion": "Circuito COR-12",
+                "municipio": "Corozal",
+                "departamento": "Sucre",
+                "operador_red": "ELECTRIFICADORA DEL CARIBE S.A. E.S.P.",
+                "operador_red_id": 4,
+                "representante_frontera": "UNERGY S.A.S.",
+                "fecha_registro_asic": "2025-02-14",
+                "niu": null,
+                "es_agrupadora": false
+              }
+            ],
+            "servicios": {
+              "operacion": true, "representacion": true, "cgm": true, "ppa": true,
+              "promotor": false, "rec": false,
+              "fecha_fin_representacion": "2030-12-31"
+            },
+            "construccion": {
+              "fase": "energizado",
+              "avance_obra_pct": 100.0,
+              "fecha_estimada_energizacion": "2025-02-28",
+              "origen_registro": "tsf_sync"
+            },
+            "simulacion": {
+              "p50_mensual_kwh": [172000, 168000, 181000, 175000, 170000, 165000,
+                                  178000, 182000, 176000, 174000, 171000, 169000],
+              "p90_mensual_kwh": null,
+              "p99_mensual_kwh": null,
+              "p50_anual_kwh": 2081000.0
             }
+          },
+          "fuentes": {
+            "municipio": "proyecto",
+            "departamento": "proyecto",
+            "operador_red": "proyecto",
+            "estado_proyecto": "proyecto",
+            "energia_promedio": "medido",
+            "api_id_unergy": "sub_project",
+            "fecha_inicio_comercializacion": "proyecto"
           }
         }
       ]
@@ -182,6 +328,59 @@ Un PPA puede traer **varias** plantas (`cantidad_proyectos`): hay ofertas que cu
 ("Balmora 1 y 2"). Y puede traer **cero**: hoy el 74% del pipeline no tiene la planta
 vinculada como proyecto en la plataforma, y en esos casos `proyectos` viene vacío con
 `planta_declarada` como único nombre disponible. El nodo existe igual — el negocio existe.
+
+#### La ficha de la planta
+
+`detalles` es la **ficha de la planta**, y es donde vive lo que el nivel PPA no puede
+tener: un contrato de dos plantas no está en un municipio ni tiene un operador de red.
+
+| Campo | Qué es |
+|---|---|
+| `estado_proyecto` · `estado_proyecto_label` | Estado de la PLANTA (`en_desarrollo`, `en_operacion`, `suspendido`, `cancelado`). **No es la etapa comercial** del PPA: uno dice en qué punto está la planta y el otro en qué punto está el negocio, y pueden discrepar. No se los concilia — conciliarlos taparía el dato mal cargado |
+| `potencia_instalada_kwp` | Potencia instalada, en kWp |
+| `potencia_con_cen_mw` | Potencia con CEN, en MW. Otro número y otro papel: no se convierte a una sola unidad |
+| `ubicacion` | `municipio`, `departamento`, `texto` (los dos ya armados), `latitud`, `longitud`, `direccion` (dirección o vereda) y `url_mapa` (el enlace que cargó operaciones — **no** se fabrica uno con lat/lon: null significa que nadie lo cargó) |
+| `operador_red` · `operador_red_id` | Operador de red. El id es del catálogo `operadores_red`, para cruzar |
+| `fecha_entrada_operacion` | Cuándo entró en operación la planta |
+| `fecha_inicio_comercializacion` | **Primer día con generación real**, autoderivado. No es la fecha del contrato (esa está en `condiciones`) ni la de entrada en operación: tres hechos distintos, tres campos |
+
+#### El resto de la ficha del Proyecto
+
+Todo lo que se diligencia al crear una planta en la plataforma. **Los bloques viajan
+siempre**, incluso vacíos: una planta sin ficha técnica cargada es el caso normal, y
+devolver el bloque ausente obligaría a programar dos formas para la misma cosa.
+
+Nada de esto tiene escalón de oferta —una oferta comercial no declara marcas de inversor
+ni códigos SIC—, así que **sale del Proyecto o sale null**, y por eso no aparece en
+`fuentes`.
+
+| Bloque | Qué trae |
+|---|---|
+| `identificacion` | Los tres nombres de la planta (comercial, bitácora, clientes) y **con qué id se cruza en cada sistema**: `sub_project` (API de generación de Unergy), `project_id_solenium` (data.solenium.co), `sunfactory_project_id` (pipeline de obra), `origina_code`, `codigo_cnd`, `codigo_tsf`, los `codigo_sic_*` de liquidación, los ids de Quoia y el portafolio. Son espacios de ids **distintos** aunque los tres se lean como "el id de la planta": el nombre del sistema está en la clave a propósito |
+| `clasificacion` | `clasificacion_regulatoria` (la de la CREG: AGP/AGPE/AGGE/GD/DER — la que manda para el mercado), `tipo_proyecto` (la interna: minigranja/autoconsumo/gd/...), `tipo_tecnologia` y la etiqueta de comunidad energética. Tres ejes independientes: no se derivan uno del otro |
+| `tecnica` | Red (`voltaje_red`, `tipo_conexion`, `potencia_ac_kw` — que es AC, distinta de los kWp DC), paneles, inversores, almacenamiento y marcas de equipos. `paneles.grupos` e `inversores.equipos` son las listas **reales cargadas** —los inversores son los que se usan para reportar fallas por inversor— y `cantidad`/`marca` son el resumen que declaró el diseño: pueden no coincidir, y por eso viajan los dos. Los `equipos` excluyen los dados de baja. **No** salen IPs de módem ni contraseñas de medidor, que están en la misma tabla: esta superficie es de consulta |
+| `fronteras[]` | Las fronteras comerciales: **con qué código se liquida**. No pueden vivir a nivel de PPA (una planta tiene generación y consumo; un contrato de dos plantas tiene las de las dos). Traen código, tipo, estado, nivel de tensión, capacidad, subestación, punto de conexión y el operador de la frontera. Las borradas no salen; las credenciales de medidor tampoco |
+| `servicios` | Qué le presta Unergy a esta planta (`operacion`, `representacion`, `cgm`, `ppa`, `promotor`, `rec`) más `fecha_fin_representacion`. Son los **flags** del Proyecto —qué está activo—, no los contratos que los respaldan, que son otra entidad |
+| `construccion` | `fase` (en_construccion / pruebas / proximo_energizar / energizado), `avance_obra_pct` y `fecha_estimada_energizacion`, de Sun Factory. Complementa `estado_proyecto`, que se queda en `en_desarrollo` toda la obra y no separa una planta en cimientos de una que se energiza la semana entrante |
+| `simulacion` | La curva simulada, 12 valores en kWh con **índice 0 = enero**. Los tres escenarios viajan porque no son intercambiables (el P50 es el esperado; con P90/P99 se estructura el negocio). Es una **proyección**, distinta de `energia_promedio_mensual_*`, que puede ser medida. `p50_anual_kwh` solo se calcula con la serie completa: sumar 7 meses y llamarlo anual sería mentira |
+
+#### `fuentes`
+
+De dónde salió cada campo de la ficha. Sin ese mapa "no aplica" y "todavía no lo
+sabemos" se ven idénticos, y un operador del catálogo se lee igual que uno de texto libre.
+
+| Valor | Qué significa |
+|---|---|
+| `proyecto` | Del Proyecto en la plataforma. Es el bueno |
+| `frontera` | El operador salió de la frontera de la planta, porque el Proyecto no tiene vínculo propio. `operador_red_id` es el de la frontera |
+| `proyecto_legacy` | `proyectos.operador_red`, texto libre sin validar contra el catálogo. Viaja **sin** `operador_red_id`: no se puede cruzar |
+| `oferta` | Lo declaró la oferta comercial porque la planta no lo tiene cargado |
+| `null` | Nadie lo aportó. **No es un error** |
+
+**Lo que declara la oferta es una afirmación sobre la planta que la oferta nombró.** Si un
+PPA cubre dos plantas y la oferta nombró una, la hermana no hereda su municipio, su
+operador ni su energía declarada: sale en null, que es la verdad — nadie declaró nada
+sobre ella.
 
 `energia_promedio_origen` **hay que leerlo siempre**:
 

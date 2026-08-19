@@ -527,8 +527,14 @@ def list_ppas_del_pipeline(
     """Los **contratos de energía** del pipeline: un árbol PPA → PROYECTOS → detalles.
 
     Un nodo por PPA, con las plantas de ese contrato colgando y, en cada planta,
-    su energía promedio mensual. Es la superficie para integrar la plataforma con
-    otra. Ver `docs/API_PPA_PIPELINE.md`.
+    su ficha completa: ubicación (con coordenadas y dirección), operador de red,
+    potencia, estado, energía promedio mensual, y además `identificacion` (con
+    qué id se cruza la planta en cada sistema), `clasificacion` regulatoria,
+    ficha `tecnica` (paneles, inversores cargados, almacenamiento, marcas),
+    `fronteras[]` comerciales, `servicios` activos, `construccion` y la curva
+    `simulacion` P50/P90/P99. `fuentes` dice de dónde salió cada dato de los que
+    se resuelven por cascada Proyecto→oferta. Es la superficie para integrar la
+    plataforma con otra. Ver `docs/API_PPA_PIPELINE.md`.
 
     **Un PPA no firmado no existe como contrato.** La oferta del CRM *es* el PPA
     hasta que se firma, y `ppa.id` lo dice sin ambigüedad:

@@ -1077,6 +1077,8 @@ def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict
         return []
 
     clientes = _clientes_por_oportunidad(db, {o.oportunidad_id for o in ofertas})
+    operadores = _operadores_por_id(
+        db, {o.operador_red_id for o in ofertas if o.operador_red_id})
     de_oferta = _proyectos_de_ofertas(db, ofertas)
     resuelto = _resolver_ppas(db, ofertas, de_oferta, hoy)
     del_ppa = _proyectos_por_ppa(db, {p.id for p, _ in resuelto.values() if p is not None})
@@ -1103,9 +1105,19 @@ def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict
         # borrador todavía no hay contrato, así que son las que declaró la oferta.
         proyectos = (del_ppa.get(ppa.id, []) if ppa is not None
                      else de_oferta.get(principal.id, []))
+        # Qué ofertas del grupo nombraron cada planta. Para un borrador son todas
+        # sus plantas; para un contrato, las plantas del PPA que además alguna
+        # oferta declaró (las demás quedan sin escalón de oferta, que es lo
+        # correcto: nadie declaró nada sobre ellas). En el orden del grupo, así
+        # que la de compra de energía manda.
+        declarantes: dict[int, list] = {}
+        for o in grupo:
+            for p in de_oferta.get(o.id, []):
+                declarantes.setdefault(p.id, []).append(o)
         nodos.append(_nodo_ppa(principal, ppa=ppa, fuente_ppa=fuente,
                                proyectos=proyectos, ofertas=grupo,
-                               cliente=clientes.get(principal.oportunidad_id), hoy=hoy))
+                               cliente=clientes.get(principal.oportunidad_id), hoy=hoy,
+                               declarantes=declarantes, operadores=operadores))
 
     if q:
         aguja = q.strip().lower()
@@ -1156,13 +1168,38 @@ def _proyectos_de_ofertas(db, ofertas) -> dict[int, list]:
     return out
 
 
-def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
-    """Las plantas de cada PPA, en una consulta para todos. Precarga operador y
-    fronteras porque `operador_red_legal` las recorre: sin eso serían dos
-    consultas por planta."""
+def _opciones_proyecto() -> tuple:
+    """Todo lo que la ficha de la planta va a leer, precargado por lotes.
+
+    `selectinload` y no `joinedload`: son colecciones (fronteras, inversores,
+    grupos de panel) y con join se multiplicarían las filas del proyecto. Cada
+    opción cuesta UNA consulta extra para el lote completo, no una por planta —
+    lo que protege el test de N+1: el número de consultas no depende de cuántas
+    plantas traiga la respuesta.
+
+    `operador` y `fronteras.operador` estaban desde el principio porque
+    `operador_red_legal` las recorre; el resto entró con la ficha completa
+    (identificación, técnica, fronteras, portafolio). Sin precargarlas, armar la
+    ficha de 60 plantas costaría ~300 consultas.
+    """
     from sqlalchemy.orm import selectinload
-    from app.models.contratos import ppa_contrato_proyectos_table
     from app.models.fronteras import Frontera
+    from app.models.proyectos import Proyecto
+
+    return (
+        selectinload(Proyecto.operador),
+        selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+        selectinload(Proyecto.info_tecnica),
+        selectinload(Proyecto.inversores),
+        selectinload(Proyecto.grupos_panel),
+        selectinload(Proyecto.portafolio),
+    )
+
+
+def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
+    """Las plantas de cada PPA, en una consulta para todos, con la ficha
+    completa precargada (ver _opciones_proyecto)."""
+    from app.models.contratos import ppa_contrato_proyectos_table
     from app.models.proyectos import Proyecto
 
     if not ppa_ids:
@@ -1171,8 +1208,7 @@ def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
     filas = (
         db.query(ppa_contrato_proyectos_table.c.contrato_id, Proyecto)
         .join(Proyecto, Proyecto.id == ppa_contrato_proyectos_table.c.proyecto_id)
-        .options(selectinload(Proyecto.operador),
-                 selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+        .options(*_opciones_proyecto())
         .filter(ppa_contrato_proyectos_table.c.contrato_id.in_(ppa_ids),
                 Proyecto.deleted_at.is_(None))
         .all()
@@ -1183,15 +1219,12 @@ def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
 
 
 def _proyectos_por_id(db, ids: set[int]) -> dict:
-    from sqlalchemy.orm import selectinload
-    from app.models.fronteras import Frontera
     from app.models.proyectos import Proyecto
 
     if not ids:
         return {}
     return {p.id: p for p in db.query(Proyecto)
-            .options(selectinload(Proyecto.operador),
-                     selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+            .options(*_opciones_proyecto())
             .filter(Proyecto.id.in_(ids), Proyecto.deleted_at.is_(None)).all()}
 
 
@@ -1240,27 +1273,465 @@ def _condiciones(oferta, ppa, hoy=None) -> dict:
     return c
 
 
-def _nodo_proyecto(proyecto, ofertas) -> dict:
+def _operador_red(proyecto, nombre_oferta=None, id_oferta=None):
+    """El operador de red de la planta, su id de catálogo y de dónde salió.
+
+    Es `Proyecto.operador_red_legal` con el id al lado y un escalón más. El id
+    hace falta para cruzar contra `operadores_red`, y devolver el nombre de la
+    frontera junto al `operador_red_id` del proyecto —null justo cuando la planta
+    no tiene vínculo propio— hacía que nombre e id hablaran de cosas distintas.
+    Por eso `frontera` es una fuente aparte de `proyecto`.
+
+    Último escalón: `proyectos.operador_red`, el texto libre legacy. No está
+    validado contra el catálogo y por eso va sin id, pero es mejor que un null y
+    la fuente avisa que con ese valor no se puede cruzar nada.
+
+    Requiere `operador` y `fronteras.operador` precargados (lo hacen las dos
+    funciones que traen los proyectos de este módulo).
+    """
+    if proyecto is not None:
+        if proyecto.operador:
+            return proyecto.operador.nombre_legal, proyecto.operador_red_id, "proyecto"
+        for f in proyecto.fronteras:
+            if f.operador:
+                return f.operador.nombre_legal, f.operador_red_id, "frontera"
+    if nombre_oferta:
+        return nombre_oferta, id_oferta, "oferta"
+    if proyecto is not None and proyecto.operador_red:
+        return proyecto.operador_red, None, "proyecto_legacy"
+    return None, None, None
+
+
+# ── La ficha completa de la planta ───────────────────────────────────────────
+# Los datos con los que se creó el Proyecto en la plataforma: cómo se identifica
+# en cada sistema, su clasificación regulatoria, la ubicación fina, la ficha
+# técnica, las fronteras comerciales, los servicios contratados, el pipeline de
+# obra y la curva simulada.
+#
+# Ninguno de estos campos tiene escalón de oferta —una oferta comercial no
+# declara marcas de inversor ni códigos SIC—, así que salen del Proyecto o salen
+# null, y por eso NO entran a `fuentes`: ese mapa existe para los campos que se
+# resuelven por cascada, y meter ahí veinte entradas con el valor "proyecto"
+# fijo lo volvería ruido.
+#
+# Los bloques viajan siempre, aunque estén vacíos, para que quien integre lea
+# una sola forma: un `tecnica` ausente y uno con todo en null se programan
+# distinto, y la planta sin ficha técnica cargada es el caso normal, no un error.
+
+
+def _num(v):
+    """Decimal de la BD → float del JSON, dejando pasar el null."""
+    return float(v) if v is not None else None
+
+
+def _identificacion(proyecto) -> dict:
+    """Cómo se llama esta planta y con qué código se cruza en cada sistema.
+
+    Van todos los identificadores juntos porque el error clásico de una
+    integración es cruzar por el id equivocado: `sub_project` (API de generación
+    de Unergy), `project_id_solenium` (data.solenium.co) y
+    `sunfactory_project_id` (el pipeline de obra) son tres espacios de ids
+    distintos aunque los tres se lean como "el id de la planta". El nombre del
+    sistema está en la clave a propósito.
+
+    Los tres nombres también son datos distintos: la misma planta se llama de
+    una forma en la bitácora de operación y de otra en los documentos del
+    cliente, y quien integre necesita saber contra cuál está comparando.
+    """
+    return {
+        "nombre_comercial": proyecto.nombre_comercial,
+        "nombre_bitacora": proyecto.nombre_bitacora,
+        "nombre_clientes": proyecto.nombre_clientes,
+        "topic_slug": proyecto.topic_slug,
+        # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo
+        # cuando salió de `sub_project`; acá va crudo, sin el respaldo del alias.
+        "sub_project": proyecto.sub_project,
+        "alias_monitoreo": proyecto.alias_monitoreo,
+        "codigo_cnd": proyecto.codigo_cnd,
+        "codigo_tsf": proyecto.codigo_tsf,
+        "origina_code": proyecto.origina_code,
+        "project_id_solenium": proyecto.project_id_solenium,
+        "sunfactory_project_id": proyecto.sunfactory_project_id,
+        # SIC: con estos se cruzan las liquidaciones. Son de nivel proyecto; el
+        # código de cada frontera va en `fronteras[]`.
+        "codigo_sic_generacion": proyecto.codigo_sic_generacion,
+        "codigo_sic_consumo": proyecto.codigo_sic_consumo,
+        "quoia_nodo_id": proyecto.quoia_nodo_id,
+        "quoia_reporte_generacion_id": proyecto.quoia_reporte_generacion_id,
+        "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,
+        "portafolio_id": proyecto.portafolio_id,
+        "portafolio": proyecto.portafolio.nombre if proyecto.portafolio else None,
+        # Una planta puede ser subproyecto de otra (minigranja partida en varias).
+        "proyecto_padre_id": proyecto.proyecto_padre_id,
+    }
+
+
+def _clasificacion(proyecto) -> dict:
+    """Qué tipo de planta es, en los tres ejes con los que se la clasifica.
+
+    `clasificacion_regulatoria` (AGP/AGPE/AGGE/GD/DER) es la de la CREG y es la
+    que manda para el mercado; `tipo_proyecto` es la interna
+    (minigranja/autoconsumo/gd/...) y `tipo_tecnologia` la fuente. Son ejes
+    independientes y no se derivan uno del otro.
+    """
+    return {
+        "clasificacion_regulatoria": _valor_enum(proyecto.clasificacion_regulatoria),
+        "tipo_tecnologia": _valor_enum(proyecto.tipo_tecnologia),
+        "tipo_proyecto": _valor_enum(proyecto.tipo_proyecto),
+        # Ortogonal a todo lo anterior: cualquier planta puede o no pertenecer a
+        # una comunidad energética.
+        "es_comunidad_energetica": bool(proyecto.es_comunidad_energetica),
+        "nombre_comunidad": proyecto.nombre_comunidad,
+    }
+
+
+def _servicios_planta(proyecto) -> dict:
+    """Qué le presta Unergy a esta planta.
+
+    Son los flags del Proyecto, que dicen qué servicio está ACTIVO — no los
+    contratos que lo respaldan, que son otra entidad (`contratos_servicio`). Se
+    exponen sin el prefijo `srv_` porque afuera el prefijo no significa nada.
+    """
+    return {
+        "operacion": bool(proyecto.srv_operacion),
+        "representacion": bool(proyecto.srv_representacion),
+        "cgm": bool(proyecto.srv_cgm),
+        "ppa": bool(proyecto.srv_ppa),
+        "promotor": bool(proyecto.srv_promotor),
+        "rec": bool(proyecto.srv_rec),
+        # Hasta cuándo la representa Unergy ante el mercado. Va con los
+        # servicios y no con las fechas del contrato de energía: son cosas
+        # distintas y una planta puede tener representación sin PPA.
+        "fecha_fin_representacion": proyecto.fecha_fin_representacion,
+    }
+
+
+def _ficha_tecnica(proyecto) -> dict:
+    """La ficha técnica: red, paneles, inversores, equipos y almacenamiento.
+
+    Casi todo vive en `proyecto_info_tecnica` (una fila por planta) y esa fila
+    **puede no existir**: ahí sus campos salen null y el bloque viaja igual.
+
+    `paneles.grupos` e `inversores.equipos` son las listas REALES cargadas en la
+    plataforma —los inversores son los que se usan para reportar fallas por
+    inversor— y no el conteo de la ficha, que es un resumen escrito a mano y
+    puede no coincidir. Los dos viajan: el conteo dice lo que declaró el
+    diseño, la lista lo que está cargado.
+
+    De los equipos salen las MARCAS y no las IPs ni las contraseñas de módem que
+    están en la misma tabla: son credenciales de acceso al equipo y esta
+    superficie es de consulta.
+    """
+    it = proyecto.info_tecnica
+
+    def _it(attr):
+        return getattr(it, attr, None) if it is not None else None
+
+    inversores = sorted(
+        (i for i in proyecto.inversores if i.activo),
+        key=lambda i: (i.orden if i.orden is not None else 0, i.id))
+    return {
+        "voltaje_red": _it("voltaje_red"),
+        "tipo_conexion": proyecto.tipo_conexion,
+        # Potencia AC (la del punto de conexión) contra kWp instalados (DC): no
+        # son el mismo número y la relación entre las dos es el sobredimensionado.
+        "potencia_ac_kw": _num(_it("potencia_ac_kw")),
+        "capacidad_instalada_kwp": _num(_it("capacidad_instalada_kwp")),
+        "produccion_especifica_kwh_kwp": _num(proyecto.produccion_especifica_kwh_kwp),
+        "tipo_tracker": _it("tipo_tracker"),
+        "paneles": {
+            # El conteo del proyecto manda sobre el de la ficha técnica: es el
+            # que mantienen las vistas de operación.
+            "cantidad_total": (proyecto.cantidad_total_paneles
+                               if proyecto.cantidad_total_paneles is not None
+                               else _it("cantidad_total_paneles")),
+            "marca": _it("marca_paneles"),
+            "potencia_panel_kwp": _it("potencia_panel_kwp"),
+            "grupos": [
+                {
+                    "marca": g.marca,
+                    "modelo": g.modelo,
+                    "potencia_pico_wp": _num(g.potencia_pico_wp),
+                    "cantidad": g.cantidad,
+                }
+                for g in proyecto.grupos_panel
+            ],
+        },
+        "inversores": {
+            "cantidad": _it("cantidad_inversores"),
+            "marca": _it("marca_inversores"),
+            "potencia_kwp": _it("potencia_inversores_kwp"),
+            "cantidad_strings": _it("cantidad_strings"),
+            # Solo los activos: un inversor dado de baja no está en la planta, y
+            # devolverlo haría que la suma de potencias no cuadre.
+            "equipos": [
+                {
+                    "id": i.id,
+                    "nombre": i.nombre,
+                    "marca": i.marca,
+                    "modelo": i.modelo,
+                    "potencia_nominal_kw": _num(i.potencia_nominal_kw),
+                    "tipo": _valor_enum(i.tipo),
+                    "numero_serie": i.numero_serie,
+                }
+                for i in inversores
+            ],
+        },
+        "almacenamiento": {
+            "tiene": bool(_it("tiene_almacenamiento")),
+            "capacidad_kwh": _num(_it("capacidad_almacenamiento_kwh")),
+            "marca": _it("marca_almacenamiento"),
+            "modelo": _it("modelo_almacenamiento"),
+        },
+        "equipos_marcas": {
+            "transformador": _it("marca_transformador"),
+            "reconectador_rele": _it("marca_reconectador_rele"),
+            "totalizador": _it("marca_totalizador"),
+            "seguidor_solar": _it("marca_seguidor_solar"),
+            "medidores_frontera": _it("marca_medidores_frontera"),
+            "modems_frontera": _it("marca_modems_frontera"),
+            "cctv": _it("marca_cctv"),
+        },
+        "seguridad_fisica": _it("seguridad_fisica"),
+        "tiene_internet": _it("tiene_internet"),
+        "retie_url": _it("retie_url"),
+    }
+
+
+def _fronteras_planta(proyecto) -> list[dict]:
+    """Las fronteras comerciales de la planta: con qué código se liquida.
+
+    Es el dato que cruza esta API contra el SIC y contra las liquidaciones, y no
+    puede vivir a nivel de PPA: una planta puede tener frontera de generación y
+    de consumo, y un contrato de dos plantas tiene las de las dos.
+
+    Se omiten las BORRADAS (`deleted_at`): la relación del modelo no filtra el
+    soft delete, así que una frontera dada de baja seguiría saliendo como
+    vigente. Tampoco viajan contraseñas de medidor ni IPs de módem, que están en
+    la misma tabla.
+
+    El operador de la frontera se devuelve del catálogo cuando existe el vínculo
+    y, si no, el texto de GESCON —con `operador_red_id` en null justamente para
+    avisar que con ese valor no se puede cruzar el catálogo.
+    """
+    fronteras = sorted(
+        (f for f in proyecto.fronteras if f.deleted_at is None),
+        key=lambda f: (f.codigo_frontera or "", f.id))
+    return [
+        {
+            "id": f.id,
+            "codigo_frontera": f.codigo_frontera,
+            "nombre_frontera": f.nombre_frontera,
+            "codigo_propio": f.codigo_propio,
+            "tipo_frontera": _valor_enum(f.tipo_frontera),
+            "estado": _valor_enum(f.estado),
+            "nivel_tension_kv": _num(f.nivel_tension_kv),
+            "capacidad_transporte_mw": _num(f.capacidad_transporte_mw),
+            "capacidad_efectiva_mw": _num(f.capacidad_efectiva_mw),
+            "factor_perdidas": _num(f.factor_perdidas),
+            "subestacion": f.subestacion,
+            "punto_conexion": f.punto_conexion,
+            "municipio": f.municipio,
+            "departamento": f.departamento,
+            "operador_red": (f.operador.nombre_legal if f.operador
+                             else f.operador_red),
+            "operador_red_id": f.operador_red_id,
+            "representante_frontera": f.representante_frontera,
+            "fecha_registro_asic": f.fecha_registro_asic,
+            "niu": f.niu,
+            "es_agrupadora": bool(f.es_agrupadora),
+        }
+        for f in fronteras
+    ]
+
+
+def _construccion(proyecto) -> dict:
+    """En qué punto de la obra está la planta (pipeline de Sun Factory).
+
+    Complementa `estado_proyecto`, que se queda en `en_desarrollo` durante toda
+    la construcción y no distingue una planta en cimientos de una que se
+    energiza la semana entrante.
+    """
+    return {
+        "fase": proyecto.fase_construccion,
+        "avance_obra_pct": _num(proyecto.avance_obra_pct),
+        # Siempre la que trae Sun Factory (solo lectura en la plataforma).
+        "fecha_estimada_energizacion": proyecto.fecha_estimada_energizacion,
+        # 'manual' (alta normal) | 'tsf_sync' (auto-importado de Sun Factory).
+        "origen_registro": proyecto.origen,
+    }
+
+
+def _simulacion(proyecto) -> dict:
+    """La curva de generación simulada: 12 valores en kWh, índice 0 = enero.
+
+    Los tres escenarios viajan porque no son intercambiables: el P50 es el
+    esperado y con el P90/P99 se estructura el negocio. Es una PROYECCIÓN del
+    estudio, distinta de `energia_promedio_mensual_*`, que puede ser medida —
+    `energia_promedio_origen` dice cuál de las dos se está mirando.
+
+    `serie_mensual_kwh` absorbe que las filas viejas guarden la lista como texto
+    JSON en vez de array: leerla cruda tumbaba /comercial con un 500.
+    """
+    def _serie(v):
+        return serie_mensual_kwh(v) or None
+
+    p50 = _serie(proyecto.p50_mensual_kwh)
+    return {
+        "p50_mensual_kwh": p50,
+        "p90_mensual_kwh": _serie(proyecto.p90_mensual_kwh),
+        "p99_mensual_kwh": _serie(proyecto.p99_mensual_kwh),
+        # La suma de los 12, para no obligar a sumarla del otro lado. Solo si la
+        # serie está completa: sumar 7 meses y llamarlo anual sería mentira.
+        "p50_anual_kwh": (round(sum(p50), 3) if p50 and len(p50) == 12 else None),
+    }
+
+
+def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
     """Una planta del PPA con sus detalles.
+
+    `detalles` es la ficha de la PLANTA: dónde está, quién le distribuye, qué
+    potencia tiene instalada, en qué estado está y desde cuándo entrega energía.
+    Son los datos con los que se cruza esta API contra otra, y viven en el
+    Proyecto: el nivel PPA no los tiene ni puede tenerlos, porque un contrato de
+    dos plantas no está en un municipio ni tiene un operador.
 
     La energía promedio sale de `_gen_promedio`, la misma cascada
     medido → estimado → declarado que usa proyectos_operando, con su origen al
     lado: un promedio medido y una proyección de ingeniería no valen lo mismo.
     NO se calcula energía acumulada acá — `api_id_unergy` es la llave para que
     quien integre la consulte contra la API de generación cuando la necesite.
+
+    `ofertas` son las que DECLARARON esta planta, no todas las del PPA: lo que
+    cae al escalón de la oferta (ubicación y energía declaradas, operador
+    declarado) son afirmaciones sobre una planta concreta, y aplicárselas a una
+    hermana del mismo contrato le inventaría datos. Puede venir vacía —una planta
+    que el contrato cubre y ninguna oferta nombró— y ahí manda solo el Proyecto.
+
+    `operadores` es `{operador_red_id: nombre_legal}` para el escalón de la
+    oferta, que declara el id y no el nombre. La planta ya trae el suyo
+    precargado y no lo necesita.
+
+    `fuentes` dice de dónde salió cada campo. Sin ese mapa "no aplica" y
+    "todavía no lo sabemos" se ven idénticos, y un operador del catálogo se lee
+    igual que uno de texto libre.
     """
+    from app.models.proyectos import ESTADO_PROYECTO_LABELS  # dict, no toca la BD
+
+    ofertas = list(ofertas)
+    fuentes: dict[str, str | None] = {}
+
+    def _elegir(campo, del_proyecto, de_la_oferta):
+        if del_proyecto not in (None, ""):
+            fuentes[campo] = "proyecto"
+            return del_proyecto
+        if de_la_oferta not in (None, ""):
+            fuentes[campo] = "oferta"
+            return de_la_oferta
+        fuentes[campo] = None
+        return None
+
+    def _declarado(attr):
+        """Primer valor no vacío entre las ofertas que nombraron esta planta."""
+        for o in ofertas:
+            v = getattr(o, attr, None)
+            if v not in (None, ""):
+                return v
+        return None
+
+    # Municipio y departamento se resuelven por separado a propósito: hay filas
+    # con el departamento cargado y el municipio en blanco, y colapsarlos en un
+    # solo campo perdería el que sí está.
+    municipio = _elegir("municipio", proyecto.municipio, _declarado("municipio"))
+    departamento = _elegir("departamento", proyecto.departamento,
+                           _declarado("departamento"))
+    partes = [p for p in (municipio, departamento) if p]
+
+    # El nombre del operador se busca en la MISMA oferta de la que sale el id (la
+    # primera que lo declaró). Resolverlo en la primera que "exista en el
+    # catálogo" podía devolver el nombre de una oferta y el id de otra.
+    con_operador = next((o for o in ofertas if o.operador_red_id is not None), None)
+    operador, operador_id, fuentes["operador_red"] = _operador_red(
+        proyecto,
+        nombre_oferta=((operadores or {}).get(con_operador.operador_red_id)
+                       if con_operador else None),
+        id_oferta=con_operador.operador_red_id if con_operador else None)
+
+    # Estado del PROYECTO (en_desarrollo | en_operacion | suspendido | cancelado),
+    # que no es la etapa comercial del PPA: uno dice en qué punto está la planta y
+    # el otro en qué punto está el negocio. Pueden discrepar (PPA operando y
+    # planta todavía en_desarrollo) y acá NO se los concilia: inventar coherencia
+    # taparía el dato mal cargado en vez de mostrarlo. La etiqueta viaja al lado
+    # para que quien integra la pinte tal cual.
+    estado = _valor_enum(proyecto.estado)
+    fuentes["estado_proyecto"] = "proyecto" if estado else None
+
     mwh, origen, detalle = _gen_promedio(proyecto, ofertas)
-    sub, _fuente = api_id_unergy(proyecto)
+    fuentes["energia_promedio"] = origen
+    sub, fuentes["api_id_unergy"] = api_id_unergy(proyecto)
+
+    # Inicio de comercialización = primer día con generación real (lo autoderiva
+    # app.services.comercializacion). NO se rellena con la fecha del contrato ni
+    # con la entrada en operación: son tres hechos distintos y mezclarlos dejaría
+    # el campo sin poder creerse. Los otros dos viajan aparte —la del contrato en
+    # `condiciones` del PPA, la de operación acá al lado.
+    fuentes["fecha_inicio_comercializacion"] = (
+        "proyecto" if proyecto.fecha_inicio_comercializacion else None)
+
     return {
         "proyecto_id": proyecto.id,
         "nombre": proyecto.nombre_comercial,
         "api_id_unergy": sub,
         "detalles": {
+            "estado_proyecto": estado,
+            "estado_proyecto_label": ESTADO_PROYECTO_LABELS.get(estado),
+            "potencia_instalada_kwp": _num(proyecto.potencia_instalada_kwp),
+            # Potencia con CEN, en MW. Va aparte de la instalada y no se convierte
+            # a una sola unidad: no son el mismo número ni salen del mismo papel.
+            "potencia_con_cen_mw": _num(proyecto.potencia_con_cen_mw),
+            "ubicacion": {
+                "municipio": municipio,
+                "departamento": departamento,
+                # Armado acá para que quien integre no decida el orden ni el
+                # separador; null cuando no hay ninguna de las dos partes.
+                "texto": ", ".join(partes) if partes else None,
+                "latitud": _num(proyecto.latitud),
+                "longitud": _num(proyecto.longitud),
+                # Dirección o vereda: la ubicación fina, que en zona rural es lo
+                # único que hay además de las coordenadas.
+                "direccion": proyecto.direccion_vereda,
+                # El enlace al mapa que cargó operaciones (Google Maps u otro).
+                # No se genera uno a partir de lat/lon: si está en null es que
+                # nadie lo cargó, y fabricarlo taparía la diferencia.
+                "url_mapa": (proyecto.info_tecnica.url_ubicacion
+                             if proyecto.info_tecnica else None),
+            },
+            "operador_red": operador,
+            # Id del catálogo `operadores_red`, para cruzar. Un nombre con id null
+            # es texto libre legacy — lo dice `fuentes.operador_red`.
+            "operador_red_id": operador_id,
+            "fecha_entrada_operacion": proyecto.fecha_entrada_operacion,
+            "fecha_inicio_comercializacion": proyecto.fecha_inicio_comercializacion,
+            # El promedio va en las dos unidades a propósito: la plataforma habla
+            # en MWh y el CRM en kWh, y la conversión hecha en dos integraciones
+            # distintas es un factor 1000 esperando pasar.
             "energia_promedio_mensual_mwh": mwh,
             "energia_promedio_mensual_kwh": round(mwh * 1000, 3) if mwh is not None else None,
             "energia_promedio_origen": origen,
             "energia_promedio_detalle": detalle,
+            # ── El resto de la ficha del Proyecto ─────────────────────────────
+            # Todo lo que se diligencia al crear una planta en la plataforma.
+            # Sale del Proyecto o sale null (no hay escalón de oferta para nada
+            # de esto), y por eso no aparece en `fuentes`.
+            "identificacion": _identificacion(proyecto),
+            "clasificacion": _clasificacion(proyecto),
+            "tecnica": _ficha_tecnica(proyecto),
+            "fronteras": _fronteras_planta(proyecto),
+            "servicios": _servicios_planta(proyecto),
+            "construccion": _construccion(proyecto),
+            "simulacion": _simulacion(proyecto),
         },
+        "fuentes": fuentes,
     }
 
 
@@ -1317,6 +1788,20 @@ def _ppas_de_proyectos(db, proyecto_ids: set[int]) -> dict[int, list]:
     return out
 
 
+def _operadores_por_id(db, ids: set[int]) -> dict[int, str]:
+    """Nombre legal de los operadores declarados en las ofertas, en una consulta.
+
+    Solo hace falta para el escalón `oferta`: la oferta declara el id del
+    catálogo y no el nombre. Las plantas ya traen su operador precargado.
+    """
+    from app.models.operadores_red import OperadorRed
+
+    if not ids:
+        return {}
+    return dict(db.query(OperadorRed.id, OperadorRed.nombre_legal)
+                .filter(OperadorRed.id.in_(ids)).all())
+
+
 def _clientes_por_oportunidad(db, ids: set[int]) -> dict[int, str]:
     """Razón social del dueño del negocio, por oportunidad, en una consulta."""
     from app.models.clientes import Cliente
@@ -1341,7 +1826,7 @@ def _ppas_por_id(db, ids: set[int]) -> dict:
 
 
 def _nodo_ppa(oferta, ppa=None, fuente_ppa=None, proyectos=(), ofertas=None,
-              cliente=None, hoy=None) -> dict:
+              cliente=None, hoy=None, declarantes=None, operadores=None) -> dict:
     """Un PPA (borrador o materializado) con sus plantas.
 
     `ppa is None` ⟺ borrador: la oferta todavía no desembocó en un contrato. No
@@ -1397,5 +1882,10 @@ def _nodo_ppa(oferta, ppa=None, fuente_ppa=None, proyectos=(), ofertas=None,
             "comprador": None if ppa is None else ppa.comprador_nombre,
             "vendedor": None if ppa is None else ppa.vendedor_nombre,
         },
-        "proyectos": [_nodo_proyecto(p, [oferta]) for p in proyectos],
+        # A cada planta se le pasan las ofertas que LA nombraron —no todas las
+        # del contrato— para que los escalones que caen en la oferta no le
+        # atribuyan a una planta lo que se declaró de su hermana.
+        "proyectos": [_nodo_proyecto(p, (declarantes or {}).get(p.id, ()),
+                                     operadores=operadores)
+                      for p in proyectos],
     }

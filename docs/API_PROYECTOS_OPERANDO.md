@@ -1,5 +1,13 @@
 # API de Proyectos Firmados y en Operación
 
+> ⚠️ **Documento histórico.** Describe la forma **anterior** de este endpoint: una fila
+> por planta en `items[]`. Desde el 2026-08-18 la respuesta es un árbol **PPA → PROYECTOS
+> → detalles** en `ppas[]` y `items` ya no existe. La ficha de cada planta creció el
+> 2026-08-19 (identificación, clasificación, técnica, fronteras, servicios, obra,
+> simulación). **La documentación vigente es [`API_PPA_PIPELINE.md`](API_PPA_PIPELINE.md).**
+> Esto se conserva para entender de dónde viene la forma vieja y para quien todavía tenga
+> un integrador escrito contra ella.
+
 Una sola llamada devuelve **todas las plantas con negocio cerrado** — firmadas y operando —
 con estos datos por planta (y con `?todas_las_etapas=true`, todo el pipeline comercial):
 

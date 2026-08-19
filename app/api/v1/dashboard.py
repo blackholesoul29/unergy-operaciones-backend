@@ -12,7 +12,6 @@ from app.core.database import get_db
 from app.models import (
     Proyecto, Cliente, Falla, FallaCatEstado, FallaCatPrioridad,
     Liquidacion, GeneracionDiaria, PPAContrato, PPACompromisoEnergia,
-    CumplimientoMensual,
 )
 from app.services.mgs.solenium_client import SoleniumClient
 
@@ -29,19 +28,27 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    proyectos_total = db.query(func.count(Proyecto.id)).scalar() or 0
+    proyectos_total = db.query(func.count(Proyecto.id)).filter(
+        Proyecto.deleted_at.is_(None)
+    ).scalar() or 0
     proyectos_operacion = db.query(func.count(Proyecto.id)).filter(
-        Proyecto.estado == "en_operacion"
+        Proyecto.estado == "en_operacion", Proyecto.deleted_at.is_(None)
     ).scalar() or 0
 
-    clientes_total = db.query(func.count(Cliente.id)).scalar() or 0
+    clientes_total = db.query(func.count(Cliente.id)).filter(
+        Cliente.deleted_at.is_(None)
+    ).scalar() or 0
 
+    # Fix 2026-08-19: sin filtrar deleted_at, fallas borradas (soft-delete)
+    # en un estado no final seguian contando como "abiertas" -- inflaba el
+    # KPI y disparaba el banner de Alertas Operacionales con fallas que ya
+    # no existen para nadie mas en la plataforma.
     fallas_abiertas = db.query(func.count(Falla.id)).join(
         FallaCatEstado, Falla.estado_id == FallaCatEstado.id
-    ).filter(~FallaCatEstado.es_estado_final).scalar() or 0
+    ).filter(~FallaCatEstado.es_estado_final, Falla.deleted_at.is_(None)).scalar() or 0
 
     liquidaciones_mes = db.query(func.count(Liquidacion.id)).filter(
-        Liquidacion.created_at >= month_start
+        Liquidacion.created_at >= month_start, Liquidacion.deleted_at.is_(None)
     ).scalar() or 0
 
     kwh_mes = db.query(func.sum(GeneracionDiaria.kwh_real)).filter(
@@ -49,7 +56,9 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
     ).scalar()
     mwh_mes = round(float(kwh_mes) / 1000, 1) if kwh_mes else 0
 
-    ppa_activos = db.query(func.count(PPAContrato.id)).scalar() or 0
+    ppa_activos = db.query(func.count(PPAContrato.id)).filter(
+        PPAContrato.deleted_at.is_(None)
+    ).scalar() or 0
 
     precio_bolsa = None
     try:
@@ -59,7 +68,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         if row:
             precio_bolsa = round(float(row[0]), 1)
     except Exception:
-        pass
+        logger.debug("precio_bolsa unavailable", exc_info=True)
 
     mgs_activas = 0
     mgs_criticas = 0
@@ -75,7 +84,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         if row:
             mgs_criticas = row[0]
     except Exception:
-        pass
+        logger.debug("alarmas_monitoreo counts unavailable", exc_info=True)
 
     fleet_power_kw = None
     fleet_online = None
@@ -103,13 +112,13 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
             db.query(FallaCatPrioridad.codigo, func.count(Falla.id))
             .join(FallaCatPrioridad, Falla.prioridad_id == FallaCatPrioridad.id)
             .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
-            .filter(~FallaCatEstado.es_estado_final)
+            .filter(~FallaCatEstado.es_estado_final, Falla.deleted_at.is_(None))
             .group_by(FallaCatPrioridad.codigo)
             .all()
         )
         fallas_por_prioridad = {r[0]: r[1] for r in rows}
     except Exception:
-        pass
+        logger.debug("fallas_por_prioridad unavailable", exc_info=True)
 
     # Critical fallas older than 7 days (stale critical issues)
     fallas_criticas_antiguas = 0
@@ -123,11 +132,12 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
                 ~FallaCatEstado.es_estado_final,
                 FallaCatPrioridad.codigo == "critica",
                 Falla.fecha_identificacion <= cutoff,
+                Falla.deleted_at.is_(None),
             )
             .scalar() or 0
         )
     except Exception:
-        pass
+        logger.debug("fallas_criticas_antiguas unavailable", exc_info=True)
 
     # PPA contracts with commitments this month (lightweight DB-only check)
     today = date.today()
@@ -142,7 +152,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
             .scalar() or 0
         )
     except Exception:
-        pass
+        logger.debug("ppa_con_compromisos unavailable", exc_info=True)
 
     # Liquidaciones: projects pending settlement this month
     liquidaciones_pendientes = 0
@@ -159,12 +169,13 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
             db.query(func.count(Proyecto.id))
             .filter(
                 Proyecto.estado == "en_operacion",
+                Proyecto.deleted_at.is_(None),
                 ~Proyecto.id.in_(db.query(liq_done.c.proyecto_id)),
             )
             .scalar() or 0
         )
     except Exception:
-        pass
+        logger.debug("liquidaciones_pendientes unavailable", exc_info=True)
 
     # Generation data freshness (last Solenium sync)
     gen_last_date = None
@@ -182,49 +193,7 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         if count_row:
             gen_projects_with_data = count_row[0]
     except Exception:
-        pass
-
-    # ── PPA compliance snapshot (current month from cumplimiento_mensual) ────
-    cumplimiento_ppa = {
-        "contratos_con_deficit": 0,
-        "contratos_cumplidos": 0,
-        "exposicion_bolsa_cop": 0,
-        "cobertura_pct": None,
-    }
-    try:
-        cm_rows = (
-            db.query(CumplimientoMensual)
-            .filter(
-                CumplimientoMensual.anio == today.year,
-                CumplimientoMensual.mes == today.month,
-            )
-            .all()
-        )
-        if cm_rows:
-            total_gen = 0.0
-            total_compromiso = 0.0
-            total_exposicion = 0.0
-            for cm in cm_rows:
-                gen = float(cm.gen_total_mwh) if cm.gen_total_mwh is not None else 0
-                comp = float(cm.compromiso_mwh) if cm.compromiso_mwh is not None else None
-                compras_cop = float(cm.compras_bolsa_cop) if cm.compras_bolsa_cop is not None else 0
-
-                if comp is not None:
-                    total_compromiso += comp
-                    total_gen += gen
-                    if gen < comp:
-                        cumplimiento_ppa["contratos_con_deficit"] += 1
-                    else:
-                        cumplimiento_ppa["contratos_cumplidos"] += 1
-                    total_exposicion += compras_cop
-
-            cumplimiento_ppa["exposicion_bolsa_cop"] = round(total_exposicion, 0)
-            if total_compromiso > 0:
-                cumplimiento_ppa["cobertura_pct"] = round(
-                    (total_gen / total_compromiso) * 100, 1,
-                )
-    except Exception:
-        logger.debug("cumplimiento_ppa metrics failed", exc_info=True)
+        logger.debug("generacion freshness unavailable", exc_info=True)
 
     return {
         "proyectos_total": proyectos_total,
@@ -246,5 +215,4 @@ def dashboard_kpis(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "gen_solenium_last_date": gen_last_date,
         "gen_solenium_projects": gen_projects_with_data,
         "liquidaciones_pendientes": liquidaciones_pendientes,
-        "cumplimiento_ppa": cumplimiento_ppa,
     }

@@ -240,7 +240,14 @@ def totales_ac_power() -> dict[str, Any]:
     return {
         "generador": _resumen("from_generator"),
         "comercializador": _resumen("from_commercializer"),
-        "topicos": [p["nombre_topico"] for p in proyectos if p.get("nombre_topico")],
+        # Solo los que reciben algún grupo de conceptos: son los que entran al
+        # divisor de la prorrata, y por tanto los únicos cuya falta de cruce
+        # cambia el reparto. Los demás sin cruce son ruido.
+        "topicos": [
+            p["nombre_topico"] for p in proyectos
+            if p.get("nombre_topico")
+            and (p.get("from_generator") is True or p.get("from_commercializer") is True)
+        ],
     }
 
 

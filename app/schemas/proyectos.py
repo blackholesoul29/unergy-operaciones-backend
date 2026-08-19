@@ -265,6 +265,8 @@ class ProyectoCreate(BaseModel):
     nombre_clientes: Optional[str] = None
     topic_slug: Optional[str] = None
     sub_project: Optional[str] = None
+    # Tópico en la API de Liquidaciones cuando difiere del de generación.
+    topico_liquidaciones: Optional[str] = None
     clasificacion_regulatoria: Optional[str] = None
     tipo_tecnologia: Optional[str] = None
     tipo_proyecto: Optional[str] = None

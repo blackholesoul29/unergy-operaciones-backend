@@ -1150,6 +1150,10 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_finmandato_identidad ON finanzas_mandatos (proyecto, tercero, periodo, tipo)",
     "CREATE INDEX IF NOT EXISTS ix_finmandatos_periodo ON finanzas_mandatos (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_finmandatos_cmu ON finanzas_mandatos (cmu)",
+    # Estados nuevos del ciclo de firma (2026-08-18): corrección y entrega al
+    # inversionista. Ver TRANSICIONES_FIRMA en finanzas_mandatos_service.py.
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'corregido'",
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'enviado_inversionista'",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",

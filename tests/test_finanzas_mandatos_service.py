@@ -2,6 +2,7 @@ from datetime import date
 from app.services.finanzas_mandatos_service import (
     tipo_de_nombre, extraer_cmu, extraer_periodo_de_asunto,
     parsear_proyecto_tercero, estado_por_direccion, detectar_comentario,
+    transicion_firma_valida,
 )
 
 def test_tipo_de_nombre():
@@ -50,3 +51,32 @@ def test_parsear_quita_sufijos_gmail():
     assert terc == "SOLENIUM SAS"
     proj2, _ = parsear_proyecto_tercero("CMU0184 - Mandato-El Llano Sas Bic (1) (1).pdf", "ingreso")
     assert "(1)" not in proj2
+
+
+# ── grafo de transiciones ─────────────────────────────────────────────────────
+
+def test_ciclo_de_correccion():
+    assert transicion_firma_valida("sin_firma", "con_comentarios")
+    assert transicion_firma_valida("con_comentarios", "corregido")
+    assert transicion_firma_valida("corregido", "firmado")
+
+
+def test_entrega_al_inversionista_solo_desde_firmado():
+    assert transicion_firma_valida("firmado", "enviado_inversionista")
+    assert not transicion_firma_valida("sin_firma", "enviado_inversionista")
+
+
+def test_no_se_entrega_un_mandato_con_comentarios_abiertos():
+    """Anomalía real: mandar al inversionista algo que la revisoría objetó.
+    Nunca se aplica solo; tiene que verlo una persona."""
+    assert not transicion_firma_valida("con_comentarios", "enviado_inversionista")
+
+
+def test_enviado_inversionista_es_terminal():
+    for destino in ("sin_firma", "con_comentarios", "corregido", "firmado"):
+        assert not transicion_firma_valida("enviado_inversionista", destino)
+
+
+def test_nunca_se_degrada_un_firmado():
+    assert not transicion_firma_valida("firmado", "sin_firma")
+    assert not transicion_firma_valida("firmado", "con_comentarios")

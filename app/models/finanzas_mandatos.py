@@ -18,6 +18,11 @@ class EstadoFirmaEnum(str, enum.Enum):
     sin_firma = "sin_firma"
     firmado = "firmado"
     con_comentarios = "con_comentarios"
+    # Agregados 2026-08-18 para la integración con Fase B: el ciclo de
+    # corrección y la entrega al inversionista, que el diseño original de
+    # Finanzas dejó fuera de la v1.
+    corregido = "corregido"
+    enviado_inversionista = "enviado_inversionista"
 
 
 class FinanzasMandato(Base):

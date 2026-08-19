@@ -50,7 +50,11 @@ def _origina_conn():
     url = settings.ORIGINA_DATABASE_URL
     if url.startswith("postgresql+psycopg://"):
         url = url.replace("postgresql+psycopg://", "postgresql://", 1)
-    conn = psycopg.connect(url, autocommit=True)
+    # originabotdb vive en infraestructura de Origina, fuera de este proyecto
+    # de Railway -- sin connect_timeout, un corte de red ahi tarda mas de un
+    # minuto en fallar (el psycopg.errors.ConnectionTimeout por defecto es muy
+    # largo) y bloquea la carga del Dashboard entero mientras tanto.
+    conn = psycopg.connect(url, autocommit=True, connect_timeout=5)
     try:
         yield conn
     finally:
@@ -586,10 +590,15 @@ def get_project_cross_view(db: Session, proyecto_id: int) -> dict:
 
 def get_pipeline_overview() -> dict:
     """Get pipeline overview from originabotdb — stages, counts, capacity."""
-    with _origina_conn() as conn:
-        if conn is None:
-            return {"available": False}
-        try:
+    # Fix 2026-08-19: el try/except de abajo protegia la consulta, pero NO la
+    # conexion -- si originabotdb (infraestructura externa a este proyecto de
+    # Railway) no responde, psycopg.connect() truena ANTES de llegar al
+    # try/except, como excepcion sin capturar (500 sin loguear el motivo real,
+    # en vez de {"available": False}).
+    try:
+        with _origina_conn() as conn:
+            if conn is None:
+                return {"available": False}
             cur = conn.execute("""
                 SELECT stage, COUNT(*) as count,
                        SUM(project_installed_power) AS total_kw_ac,
@@ -619,6 +628,6 @@ def get_pipeline_overview() -> dict:
                 "grid_operators": operators,
                 "total_projects": sum(s["count"] for s in stages),
             }
-        except Exception as e:
-            logger.error("pipeline overview failed: %s", e)
-            return {"available": False, "error": str(e)}
+    except Exception as e:
+        logger.error("pipeline overview failed: %s", e)
+        return {"available": False, "error": str(e)}

@@ -6,6 +6,7 @@ Create Date: 2026-07-28
 """
 from alembic import op
 import sqlalchemy as sa
+from alembic_idempotencia import agregar_columna_si_falta
 
 revision = "055"
 down_revision = "054"
@@ -14,7 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("arr_documento", sa.Column("proyecto_id", sa.BigInteger, sa.ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=True))
+    bind = op.get_bind()
+    agregar_columna_si_falta(bind, "arr_documento", sa.Column("proyecto_id", sa.BigInteger, sa.ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=True))
 
 
 def downgrade() -> None:

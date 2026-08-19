@@ -13,6 +13,7 @@ Create Date: 2026-08-09
 """
 from alembic import op
 import sqlalchemy as sa
+from alembic_idempotencia import agregar_columna_si_falta
 
 revision = "058"
 down_revision = "057"
@@ -31,8 +32,9 @@ COLUMNAS = [
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
     for nombre, tipo in COLUMNAS:
-        op.add_column("proyectos", sa.Column(nombre, tipo, nullable=True))
+        agregar_columna_si_falta(bind, "proyectos", sa.Column(nombre, tipo, nullable=True))
 
 
 def downgrade() -> None:

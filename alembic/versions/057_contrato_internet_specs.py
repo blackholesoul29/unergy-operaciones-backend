@@ -6,6 +6,7 @@ Create Date: 2026-08-03
 """
 from alembic import op
 import sqlalchemy as sa
+from alembic_idempotencia import agregar_columna_si_falta
 
 revision = "057"
 down_revision = "056"
@@ -14,9 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("contratos_servicio", sa.Column("plan_datos_gb", sa.String(50), nullable=True))
-    op.add_column("contratos_servicio", sa.Column("velocidad_mbps", sa.Integer, nullable=True))
-    op.add_column("contratos_servicio", sa.Column("tipo_conexion", sa.String(50), nullable=True))
+    bind = op.get_bind()
+    agregar_columna_si_falta(bind, "contratos_servicio", sa.Column("plan_datos_gb", sa.String(50), nullable=True))
+    agregar_columna_si_falta(bind, "contratos_servicio", sa.Column("velocidad_mbps", sa.Integer, nullable=True))
+    agregar_columna_si_falta(bind, "contratos_servicio", sa.Column("tipo_conexion", sa.String(50), nullable=True))
 
 
 def downgrade() -> None:

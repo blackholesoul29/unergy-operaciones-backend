@@ -5,6 +5,7 @@ Revises: 059
 Create Date: 2026-08-11
 """
 from alembic import op
+from alembic_idempotencia import verificar_columnas
 
 revision = "060"
 down_revision = "059"
@@ -13,6 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
     op.execute("""
         CREATE TABLE IF NOT EXISTS polizas (
             id                        BIGSERIAL PRIMARY KEY,
@@ -42,6 +44,14 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS ix_polizas_proyecto_id ON polizas(proyecto_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_polizas_fecha_vencimiento ON polizas(fecha_vencimiento)")
+    verificar_columnas(bind, "polizas", {
+        "id", "proyecto_id", "numero_poliza", "poliza_om", "fecha_vencimiento",
+        "valor_poliza", "mano_obra", "estructura", "paneles", "inversores", "otros",
+        "valor_total_proyecto", "link_estudio_suelos", "ipp_base", "ipp_base_fecha",
+        "ipp_provisional", "ipp_provisional_fecha", "tarifa_base",
+        "generacion_anual_p90_kwh", "valor_lucro_cesante", "created_at",
+        "updated_at", "deleted_at",
+    }, migracion="060")
 
 
 def downgrade() -> None:

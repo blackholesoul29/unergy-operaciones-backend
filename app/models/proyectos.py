@@ -85,6 +85,13 @@ class Proyecto(Base):
     nombre_clientes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     topic_slug: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     sub_project: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
+    # Tópico de la planta en la API de LIQUIDACIONES, cuando difiere del que usa
+    # la API de generación (`sub_project`). Los dos sistemas de Unergy no siempre
+    # nombran igual la misma planta: p. ej. la que aquí es `leyenda` allá es
+    # `mgs18`, y consultar generación con `mgs18` devuelve cero registros. Sin
+    # este campo esas plantas quedan fuera del AC Power total, que es el divisor
+    # de la prorrata del reparto. Vacío = se usa `sub_project`.
+    topico_liquidaciones: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     clasificacion_regulatoria: Mapped[str | None] = mapped_column(SAEnum(ClasificacionRegulatoriaEnum, name="clasificacion_regulatoria_enum"), nullable=True)
     tipo_tecnologia: Mapped[str | None] = mapped_column(SAEnum(TipoTecnologiaEnum, name="tipo_tecnologia_enum"), nullable=True)

@@ -1399,6 +1399,13 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
+    # Tópico en la API de Liquidaciones cuando difiere del de generación
+    # (2026-08-19). Se siembran los tres casos conocidos; el UPDATE es
+    # idempotente porque solo toca las filas que aún no lo tienen.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS topico_liquidaciones VARCHAR(100)",
+    "UPDATE proyectos SET topico_liquidaciones = 'mgs18' WHERE sub_project = 'leyenda' AND topico_liquidaciones IS NULL",
+    "UPDATE proyectos SET topico_liquidaciones = 'mapale' WHERE sub_project = 'MGS Mapale' AND topico_liquidaciones IS NULL",
+    "UPDATE proyectos SET topico_liquidaciones = 'MGS 0012 La Reserva' WHERE sub_project = 'reserva' AND topico_liquidaciones IS NULL",
     # migration — Comercial: envío de la oferta (2026-07-28). fecha_oferta ya
     # existía y guarda el PRIMER envío; aquí viven los toques posteriores, la
     # respuesta del cliente (NULL = nunca respondió) y el PDF en Drive.

@@ -34,19 +34,31 @@ from app.services.liquidaciones_api import LiquidacionesAPIError, VersionLiquida
 router = APIRouter(prefix="/liquidaciones-api", tags=["API Liquidaciones"])
 
 
+def _topico(proy: Proyecto) -> str | None:
+    """Tópico con el que la API de Liquidaciones conoce a esta planta.
+
+    Manda ``topico_liquidaciones`` cuando está: hay plantas que los dos sistemas
+    de Unergy nombran distinto y consultar generación con el tópico de
+    liquidaciones devuelve cero registros, así que no se pueden unificar.
+    """
+    return proy.topico_liquidaciones or proy.sub_project
+
+
 def _nombres_por_topico(db: Session) -> dict[str, str]:
     """Nombre comercial de esta base, indexado por el tópico de la API externa.
 
     La API identifica los proyectos por ``nombre_topico``; en pantalla se muestra
     el nombre con el que el equipo los conoce.
     """
+    filas = (
+        db.query(Proyecto.sub_project, Proyecto.topico_liquidaciones, Proyecto.nombre_comercial)
+        .filter(Proyecto.deleted_at.is_(None))
+        .all()
+    )
     return {
-        topico: nombre
-        for topico, nombre in (
-            db.query(Proyecto.sub_project, Proyecto.nombre_comercial)
-            .filter(Proyecto.sub_project.isnot(None), Proyecto.deleted_at.is_(None))
-            .all()
-        )
+        (liq or sub): nombre
+        for sub, liq, nombre in filas
+        if (liq or sub)
     }
 
 
@@ -76,14 +88,14 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
 
     salida: list[ProyectoLiquidacionesOut] = []
     for proy in proyectos:
-        datos = config.get(proy.sub_project or "", {})
+        datos = config.get(_topico(proy) or "", {})
         salida.append(
             ProyectoLiquidacionesOut(
                 proyecto_id=proy.id,
                 nombre_comercial=proy.nombre_comercial,
                 tipo_proyecto=proy.tipo_proyecto,
                 estado=proy.estado,
-                nombre_topico=proy.sub_project,
+                nombre_topico=_topico(proy),
                 en_api=bool(datos),
                 **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
             )
@@ -103,9 +115,9 @@ def obtener_proyecto(proyecto_id: int, db: Session = Depends(get_db), _=Depends(
         raise HTTPException(404, "Proyecto no encontrado")
 
     datos: dict = {}
-    if proy.sub_project:
+    if _topico(proy):
         try:
-            datos = liquidaciones_api.obtener_proyecto(proy.sub_project)
+            datos = liquidaciones_api.obtener_proyecto(_topico(proy))
         except LiquidacionesAPIError:
             # El proyecto puede no existir en la API; se devuelve sin configuración.
             datos = {}
@@ -115,7 +127,7 @@ def obtener_proyecto(proyecto_id: int, db: Session = Depends(get_db), _=Depends(
         nombre_comercial=proy.nombre_comercial,
         tipo_proyecto=proy.tipo_proyecto,
         estado=proy.estado,
-        nombre_topico=proy.sub_project,
+        nombre_topico=_topico(proy),
         en_api=bool(datos),
         **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
     )
@@ -136,7 +148,7 @@ def actualizar_proyecto(
     )
     if not proy:
         raise HTTPException(404, "Proyecto no encontrado")
-    if not proy.sub_project:
+    if not _topico(proy):
         raise HTTPException(
             400,
             "El proyecto no tiene código base (API ID Unergy) y no se puede "
@@ -148,7 +160,7 @@ def actualizar_proyecto(
         raise HTTPException(400, "No se enviaron campos para actualizar")
 
     try:
-        datos = liquidaciones_api.actualizar_proyecto(proy.sub_project, cambios)
+        datos = liquidaciones_api.actualizar_proyecto(_topico(proy), cambios)
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
 
@@ -157,7 +169,7 @@ def actualizar_proyecto(
         nombre_comercial=proy.nombre_comercial,
         tipo_proyecto=proy.tipo_proyecto,
         estado=proy.estado,
-        nombre_topico=proy.sub_project,
+        nombre_topico=_topico(proy),
         en_api=bool(datos),
         **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
     )

@@ -5,7 +5,11 @@ CMU1287-Mandato-Costos-Minigranja Solar Joropo.pdf (firmado, 2026-08-13). El
 documento no se versiona -- trae valores y nombres reales -- así que lo que se
 conserva es su geometría, que es lo que el detector necesita.
 """
-from app.services.mandatos.firmas import lineas_firmadas, resumir_firmas
+from app.services.mandatos.firmas import (
+    lineas_firmadas,
+    resumir_firmas,
+    verificar_firmas,
+)
 
 
 # Las dos líneas de firma del PDF real. Coordenadas MEDIDAS con pdfplumber, no
@@ -84,3 +88,21 @@ def test_sin_lineas_es_no_verificable_no_sin_firmas():
     que se trate como concluido algo que nadie verificó."""
     assert resumir_firmas([]) == {
         "lineas": 0, "firmadas": 0, "estado": "no_verificable"}
+
+
+# ── verificar_firmas ──────────────────────────────────────────────────────────
+
+def test_verificar_firmas_con_bytes_invalidos_es_no_verificable():
+    """Un adjunto corrupto o que no es PDF no debe reventar el cron ni, peor,
+    reportarse como 'sin firmas' -- que se leería como un problema del documento
+    en vez de un problema al leerlo."""
+    r = verificar_firmas(b"esto no es un pdf")
+    assert r["estado"] == "no_verificable"
+
+
+def test_verificar_firmas_con_bytes_vacios():
+    assert verificar_firmas(b"")["estado"] == "no_verificable"
+
+
+def test_verificar_firmas_con_none():
+    assert verificar_firmas(None)["estado"] == "no_verificable"

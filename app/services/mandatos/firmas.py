@@ -77,3 +77,45 @@ def resumir_firmas(firmadas: list[bool]) -> dict:
     else:
         estado = "parcial"
     return {"lineas": total, "firmadas": n, "estado": estado}
+
+
+def verificar_firmas(contenido: bytes | None) -> dict:
+    """Abre el PDF y devuelve el resumen de resumir_firmas().
+
+    Recorre TODAS las páginas y acumula: la plantilla real tiene una sola, pero
+    un mandato de varias hojas pondría las firmas en la última y buscar solo en
+    la primera daría 'no_verificable' por error.
+
+    Nunca lanza. Un adjunto corrupto, cifrado o que no es PDF devuelve
+    `no_verificable`, nunca `sin_firmas`: no es lo mismo "este documento no está
+    firmado" que "no pude abrirlo", y tratarlos igual convertiría un problema de
+    lectura en una alarma sobre el documento.
+    """
+    if not contenido:
+        return resumir_firmas([])
+
+    import io
+
+    import pdfplumber
+
+    todas: list[bool] = []
+    try:
+        with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+            for pagina in pdf.pages:
+                lineas = [
+                    {"x0": w["x0"], "x1": w["x1"], "top": w["top"]}
+                    for w in pagina.extract_words()
+                    if _LINEA_FIRMA_RE.match(w["text"])
+                ]
+                if not lineas:
+                    continue
+                imagenes = [
+                    {"x0": im["x0"], "x1": im["x1"], "top": im["top"]}
+                    for im in pagina.images
+                ]
+                todas.extend(lineas_firmadas(lineas, imagenes))
+    except Exception as exc:
+        logger.warning("Firmas: no se pudo leer el PDF (%s): %s", type(exc).__name__, exc)
+        return resumir_firmas([])
+
+    return resumir_firmas(todas)

@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import BigInteger, String, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint
+from sqlalchemy import BigInteger, String, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -30,7 +30,13 @@ class Contacto(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     telefono: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoContactoEnum, name="tipo_contacto_enum"), nullable=False)
-    recibe_notificaciones: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # server_default (no solo default=True a nivel Python) -- sin esto, un
+    # INSERT que no pase por el ORM (ej. el backfill de la migración 037)
+    # viola NOT NULL, porque el default de SQLAlchemy solo se aplica cuando
+    # el propio ORM construye el INSERT. Ver alembic/versions/037_contactos_unificados.py.
+    recibe_notificaciones: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

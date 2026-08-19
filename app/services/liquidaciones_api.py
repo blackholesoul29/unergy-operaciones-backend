@@ -15,6 +15,7 @@ Particularidades de la API, verificadas contra producción:
 """
 import logging
 import threading
+import time
 from enum import Enum
 from typing import Any
 
@@ -342,6 +343,33 @@ def subir_facturas_xm(
 
 # ── Datos maestros y catálogos ───────────────────────────────────────────────
 
+# Caché de los listados pesados. `revenue_and_costs` devuelve más de 10.000
+# filas sin paginar y tarda ~15 s: sin esto, cada cambio de filtro en pantalla
+# vuelve a pedirlas enteras. Se invalida al escribir (repartir, subir Excel).
+_CACHE_TTL_SEGUNDOS = 120
+_cache: dict[str, tuple[float, Any]] = {}
+_cache_lock = threading.Lock()
+
+
+def invalidar_cache() -> None:
+    """Descarta lo cacheado. Se llama tras cualquier escritura que lo altere."""
+    with _cache_lock:
+        _cache.clear()
+
+
+def _cacheado(clave: str, calcular):
+    """Devuelve el valor cacheado si sigue vigente; si no, lo recalcula."""
+    ahora = time.monotonic()
+    with _cache_lock:
+        entrada = _cache.get(clave)
+        if entrada and ahora - entrada[0] < _CACHE_TTL_SEGUNDOS:
+            return entrada[1]
+    valor = calcular()
+    with _cache_lock:
+        _cache[clave] = (ahora, valor)
+    return valor
+
+
 def _listar(path: str, **filtros: Any) -> list[dict[str, Any]]:
     """GET de un listado, quitando los filtros vacíos."""
     params = {k: v for k, v in filtros.items() if v not in (None, "")}
@@ -367,8 +395,9 @@ def listar_cantidades(**filtros: Any) -> list[dict[str, Any]]:
 
 
 def listar_costos(**filtros: Any) -> list[dict[str, Any]]:
-    """Costos e ingresos fijos por proyecto (§3.6)."""
-    return _listar(PATH_COSTOS, **filtros)
+    """Costos e ingresos fijos por proyecto (§3.6). Cacheado: son 10.000+ filas."""
+    clave = "costos:" + repr(sorted((k, v) for k, v in filtros.items() if v not in (None, "")))
+    return _cacheado(clave, lambda: _listar(PATH_COSTOS, **filtros))
 
 
 def listar_catalogos() -> dict[str, list[dict[str, Any]]]:
@@ -376,11 +405,11 @@ def listar_catalogos() -> dict[str, list[dict[str, Any]]]:
 
     Son datos fijos: se consultan, nunca se crean.
     """
-    return {
+    return _cacheado("catalogos", lambda: {
         "empresas": _listar(PATH_EMPRESAS),
         "precios_energia": _listar(PATH_PRECIOS_ENERGIA),
         "tipos_costo": _listar(PATH_TIPOS_COSTO),
-    }
+    })
 
 
 def crear_contrato(datos: dict[str, Any]) -> dict[str, Any]:
@@ -462,7 +491,10 @@ def repartir_facturas_xm(
     }
     if last_version:
         cuerpo["last_version"] = last_version
-    return _lanzar("POST", PATH_REPARTIR, json=cuerpo)
+    task_id = _lanzar("POST", PATH_REPARTIR, json=cuerpo)
+    # El reparto reescribe los costos del grupo xm: lo cacheado ya no sirve.
+    invalidar_cache()
+    return task_id
 
 
 def generar_estado_resultados(month: int, year: int, version: str) -> str:
@@ -520,4 +552,6 @@ def subir_excel_costos(nombre: str, contenido: bytes, tipo: str) -> dict[str, An
     data = _request("POST", PATH_COSTOS_XLSX, files={"file": (nombre, contenido, tipo)})
     if not isinstance(data, dict):
         raise LiquidacionesAPIError("La API no confirmó la carga del Excel de costos")
+    # La carga agrega costos: lo cacheado queda viejo.
+    invalidar_cache()
     return data

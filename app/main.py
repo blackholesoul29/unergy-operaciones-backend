@@ -1125,6 +1125,31 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
     "CREATE INDEX IF NOT EXISTS ix_mandato_correos_revision ON mandato_correos (requiere_revision)",
+    # La tabla ya existe en producción, creada por Base.metadata.create_all().
+    # Se declara acá por consistencia con el resto del esquema y para que un
+    # ALTER TYPE sobre su enum (ver más abajo) tenga su tabla al lado. El
+    # IF NOT EXISTS la vuelve un no-op donde ya está.
+    """CREATE TABLE IF NOT EXISTS finanzas_mandatos (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto VARCHAR(255) NOT NULL,
+        tercero VARCHAR(255) NOT NULL DEFAULT '',
+        periodo DATE NOT NULL,
+        tipo tipo_mandato_fin_enum NOT NULL,
+        cmu VARCHAR(20),
+        cmu_anterior VARCHAR(20),
+        estado estado_firma_fin_enum NOT NULL DEFAULT 'sin_firma',
+        comentario TEXT,
+        fecha_envio DATE,
+        fecha_firma DATE,
+        drive_file_id VARCHAR(255),
+        drive_url VARCHAR(1000),
+        correo_ref VARCHAR(500),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_finmandato_identidad ON finanzas_mandatos (proyecto, tercero, periodo, tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_periodo ON finanzas_mandatos (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_cmu ON finanzas_mandatos (cmu)",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",

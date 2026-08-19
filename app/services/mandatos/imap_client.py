@@ -124,8 +124,12 @@ def carpeta_enviados(imap: imaplib.IMAP4_SSL) -> str | None:
     return None
 
 
-def buscar_correos(remitente: str, dias: int = 30) -> list[CorreoCrudo]:
-    """Correos de `remitente` recibidos en los últimos `dias`.
+def buscar_correos(direccion: str, dias: int = 30, *,
+                   carpeta: str = "INBOX", campo: str = "FROM") -> list[CorreoCrudo]:
+    """Correos de/para `direccion` en los últimos `dias`, dentro de `carpeta`.
+
+    `campo` es "FROM" para lo que llega y "TO" para lo que sale. Los salientes
+    viven en la carpeta de Enviados, no en INBOX -- ver carpeta_enviados().
 
     Devuelve [] ante cualquier fallo de conexión, autenticación o búsqueda --
     nunca lanza hacia el llamador, para no tumbar el scheduler.
@@ -144,11 +148,11 @@ def buscar_correos(remitente: str, dias: int = 30) -> list[CorreoCrudo]:
 
     correos: list[CorreoCrudo] = []
     try:
-        imap.select("INBOX", readonly=True)
+        imap.select(carpeta, readonly=True)
         desde = (datetime.now(timezone.utc) - timedelta(days=dias)).strftime("%d-%b-%Y")
-        status, data = imap.search(None, f'(SINCE "{desde}" FROM "{remitente}")')
+        status, data = imap.search(None, f'(SINCE "{desde}" {campo} "{direccion}")')
         if status != "OK":
-            logger.error("IMAP mandatos: búsqueda falló para %s: %s", remitente, data)
+            logger.error("IMAP mandatos: búsqueda falló para %s: %s", direccion, data)
             return []
 
         for uid in (data[0].split() if data and data[0] else []):
@@ -170,13 +174,13 @@ def buscar_correos(remitente: str, dias: int = 30) -> list[CorreoCrudo]:
             correos.append(CorreoCrudo(
                 message_id=message_id,
                 fecha=fecha,
-                remitente=remitente,
+                remitente=_decodifica(msg.get("From")) or direccion,
                 asunto=_decodifica(msg.get("Subject")),
                 cuerpo=_cuerpo_de(msg),
                 adjuntos=_adjuntos_de(msg),
             ))
     except Exception as exc:
-        logger.error("IMAP mandatos: fallo leyendo correos de %s: %s", remitente, exc)
+        logger.error("IMAP mandatos: fallo leyendo correos de %s: %s", direccion, exc)
     finally:
         try:
             imap.close()

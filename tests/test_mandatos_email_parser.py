@@ -2,7 +2,7 @@
 from app.services.mandatos.email_parser import (
     CLASIF_DESCONOCIDO, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO,
     clasificar_correo, cmu_al_inicio_de_nombre, extraer_observaciones,
-    extraer_pa_del_cuerpo, html_a_texto, solo_pdfs,
+    extraer_pa_del_cuerpo, html_a_texto, mandatos_enviados_en_correo, solo_pdfs,
 )
 from tests.fixtures_mandatos_correos import (
     ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA, ENVIO_INVERSIONISTA_ADJUNTOS,
@@ -262,3 +262,31 @@ def test_extraer_pa_repetido_el_mismo_codigo_si_identifica():
               "los certificados del 17844 - P.A SOL DE LA SIERRA del mes de junio")
     assert extraer_pa_del_cuerpo(cuerpo) == {
         "codigo": "17844", "nombre": "P.A SOL DE LA SIERRA"}
+
+
+# ── mandatos_enviados_en_correo ───────────────────────────────────────────────
+
+def test_enviados_saca_un_cmu_por_adjunto():
+    enviados = mandatos_enviados_en_correo(ADJUNTOS_REALES_DRIVE)
+    assert [e["cmu"] for e in enviados] == [
+        "CMU1135", "CMU1140", "CMU1147", "CMU1148"]
+    assert all(e["tipo"] == "costo" for e in enviados)
+
+
+def test_enviados_trae_el_proyecto_de_cada_adjunto():
+    enviados = {e["cmu"]: e["proyecto"] for e in mandatos_enviados_en_correo(ADJUNTOS_REALES_DRIVE)}
+    assert enviados["CMU1140"] == "Minigranja Solar Merengue"
+
+
+def test_enviados_ignora_lo_que_no_es_pdf_de_mandato():
+    assert mandatos_enviados_en_correo(["REGISTRO MANDATOS.xlsx", "foto.png"]) == []
+
+
+def test_enviados_ignora_un_pdf_que_no_es_mandato():
+    """Un PDF suelto sin la convención de nombre no es un mandato enviado.
+    Sin esta guarda, cualquier adjunto inflaría el conteo de la reconciliación."""
+    assert mandatos_enviados_en_correo(["cotizacion.pdf"]) == []
+
+
+def test_enviados_sin_adjuntos():
+    assert mandatos_enviados_en_correo([]) == []

@@ -304,3 +304,34 @@ def extraer_pa_del_cuerpo(cuerpo: str | None) -> dict | None:
         return None
     return {"codigo": m.group(1),
             "nombre": re.sub(r"\s+", " ", m.group(2)).strip()}
+
+
+def mandatos_enviados_en_correo(nombres_adjuntos: list[str]) -> list[dict]:
+    """Los mandatos que salieron en un correo, uno por adjunto reconocible.
+
+    [{'cmu': 'CMU1140', 'proyecto': 'Minigranja Solar Merengue',
+      'inversionista': '', 'tipo': 'costo'}, ...]
+
+    Solo cuenta adjuntos que cumplen la convención de nombre. Un PDF suelto que
+    no la cumple NO entra: esta lista alimenta el conteo de la reconciliación, y
+    un adjunto de más ahí inventa un mandato que nadie envió y que después
+    aparece eternamente como "falta por volver".
+    """
+    from app.services.mandatos_service import parsear_nombre_zip
+
+    salida: list[dict] = []
+    for nombre in solo_pdfs(nombres_adjuntos):
+        parsed = parsear_nombre_zip(nombre)
+        if not parsed:
+            continue
+        salida.append({
+            "cmu": parsed["cmu"],
+            "proyecto": parsed["proyecto"],
+            "inversionista": parsed["inversionista"],
+            # La convención solo distingue Costos; los de ingresos usan otra
+            # palabra en el nombre y hoy no hay muestra real. Se marca 'costo'
+            # porque es lo único verificado -- cuando aparezca un adjunto de
+            # ingresos, agregarlo como fixture y ajustar acá.
+            "tipo": "costo",
+        })
+    return salida

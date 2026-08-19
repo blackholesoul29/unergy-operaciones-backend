@@ -163,7 +163,6 @@ class ClienteBase(BaseModel):
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
     rut_url: Optional[str] = None
-    origina_investment_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

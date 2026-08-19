@@ -433,29 +433,6 @@ async def upload_archivo_documento(
     return doc
 
 
-# ── Fondos de inversión (origina) ────────────────────────────────────────────
-
-
-@router.get("/{id}/fondos")
-def get_client_fund(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Get the investment fund linked to this client (from originabotdb)."""
-    cliente = _get_cliente_or_404(id, db)
-    if not cliente.origina_investment_id:
-        return {"linked": False, "fund": None}
-
-    from app.services.correlation import fetch_origina_investment_detail
-    fund = fetch_origina_investment_detail(cliente.origina_investment_id)
-    if not fund:
-        return {
-            "linked": True,
-            "origina_investment_id": cliente.origina_investment_id,
-            "fund": None,
-            "error": "Fondo no encontrado en Origina (puede haber sido eliminado)",
-        }
-
-    return {"linked": True, "fund": fund}
-
-
 # ── Client linking: Proyectos, Fronteras, Contratos PPA ─────────────────────
 
 @router.get("/{id}/proyectos")
@@ -861,7 +838,7 @@ _MERGE_CLIENTE_COMPOSITE = [
 _MERGE_CLIENTE_SCALAR_UNIQUE = ["nit_cedula"]
 _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY = [
     "telefono_contacto", "direccion", "ciudad", "departamento",
-    "tipo_persona", "representante_legal", "origina_investment_id",
+    "tipo_persona", "representante_legal",
 ]
 
 

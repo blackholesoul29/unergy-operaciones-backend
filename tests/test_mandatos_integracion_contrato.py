@@ -58,17 +58,36 @@ def test_el_tercero_no_esta_en_el_nombre_del_archivo(nombre):
     assert tercero == ""
 
 
+# ── Conviven DOS convenciones de nombre ───────────────────────────────────────
+
+# Cuando el inversionista es una empresa con nombre propio, va en el archivo.
+# Estos vienen de tests/test_mandatos.py, que los trae desde Fase A.
+NOMBRES_CON_INVERSIONISTA = [
+    "CMU0988-Mandato-Costos-Minigranja Solar Uruaco-SUNO ACTIVOS SOSTENIBLES S.A.S..pdf",
+    "CMU1017-Mandato-Costos-Minigranja Solar La Cacica-Solenium S.A.S.pdf",
+    "CMU0001-Mandato-Costos-PSF - Yurbaqua-Enexa S.A.S.pdf",
+]
+
+
+@pytest.mark.parametrize("nombre", NOMBRES_CON_INVERSIONISTA)
+def test_zip_de_fase_a_si_parsea_los_nombres_de_cuatro_partes(nombre):
+    """Con inversionista en el nombre, ZIP_NOMBRE_RE funciona. No está roto."""
+    assert parsear_nombre_zip(nombre) is not None
+
+
 @pytest.mark.parametrize("nombre", ADJUNTOS_REALES_DRIVE)
-def test_el_parser_de_zip_de_fase_a_rechaza_los_nombres_reales(nombre):
-    """BUG EN PRODUCCIÓN, fijado acá para que no se pierda.
+def test_zip_de_fase_a_no_parsea_los_nombres_de_tres_partes(nombre):
+    """LIMITACIÓN REAL de `ZIP_NOMBRE_RE`, fijada para que no se pierda.
 
-    `ZIP_NOMBRE_RE` (mandatos_service.py) exige
-    `CMU####-Mandato-Costos-{Proyecto}-{Inversionista}.pdf`, con un sufijo de
-    inversionista que los archivos reales no tienen. `POST /mandatos/upload-zip`
-    hace `if not parsed: continue`, así que al cargar un ZIP real de Vanessa
-    saltaría TODOS los archivos y reportaría cero detectados.
+    El regex exige `-{Inversionista}` antes del `.pdf`. Cuando el mandante es un
+    P.A. de fiduciaria (carpeta "Mandato Costos Sol de la Sierra") el archivo
+    solo trae `CMU####-Mandato-Costos-{Proyecto}.pdf` y no matchea.
+    `POST /mandatos/upload-zip` hace `if not parsed: continue`, así que esos
+    archivos se saltan en silencio -- no todos los de un ZIP, solo los de P.A.
 
-    Este test pasa mientras el bug exista. Cuando se corrija hay que invertirlo.
+    El arreglo no es corregir el regex sino hacer OPCIONAL la parte del
+    inversionista, para que acepte las dos formas. Cuando se haga, este test
+    hay que invertirlo y el tercero pasa a salir del cuerpo del correo.
     """
     assert parsear_nombre_zip(nombre) is None
 

@@ -179,11 +179,24 @@ en el cuerpo del correo: `17844 - P.A SOL DE LA SIERRA`. El adaptador debe sacar
 de ahí; si confía en el nombre del archivo, `parsear_proyecto_tercero` devuelve
 `tercero=''` y la identidad `(proyecto, tercero, periodo, tipo)` colapsa.
 
-**Consecuencia 2 — bug vivo en Fase A.** `ZIP_NOMBRE_RE` (`mandatos_service.py:9`)
-exige ese sufijo inexistente, y `upload-zip` hace `if not parsed: continue`. Con un
-ZIP real de Vanessa **saltaría todos los archivos y reportaría cero detectados**.
-Fijado en `test_el_parser_de_zip_de_fase_a_rechaza_los_nombres_reales`, que pasa
-mientras el bug exista. Es independiente de esta integración y se puede corregir ya.
+**Consecuencia 2 — conviven DOS convenciones, y `ZIP_NOMBRE_RE` solo acepta una.**
+
+Corrección a una versión anterior de este documento, que afirmaba que el parser de
+Fase A estaba roto y saltaría todos los archivos. Es falso: `tests/test_mandatos.py`
+trae nombres reales de cuatro partes que sí parsean.
+
+    4 partes  CMU0988-...-Minigranja Solar Uruaco-SUNO ACTIVOS SOSTENIBLES S.A.S..pdf   parsea
+    4 partes  CMU1017-...-Minigranja Solar La Cacica-Solenium S.A.S.pdf                 parsea
+    3 partes  CMU1140-Mandato-Costos-Minigranja Solar Merengue.pdf                      NO parsea
+
+Cuando el inversionista es una **empresa con nombre propio** (SUNO, Solenium, Enexa)
+va en el archivo. Cuando el mandante es un **P.A. de fiduciaria** no va, y el P.A.
+queda solo en el cuerpo del correo. `upload-zip` salta en silencio los de tres
+partes -- no todos, solo los de P.A. Por eso Fase A parecía funcionar.
+
+El arreglo es hacer **opcional** la parte del inversionista en el regex, no
+corregirlo. Fijado en `test_zip_de_fase_a_no_parsea_los_nombres_de_tres_partes` y su
+contraparte positiva. Es independiente de esta integración y se puede hacer ya.
 
 ## 5. Propuesta: el esquema de ella, el motor de nosotros
 

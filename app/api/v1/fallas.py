@@ -617,11 +617,17 @@ def list_fallas(
         # en el detalle de un día ya clasificado, las fallas que estaban
         # abiertas EN ESE MOMENTO, no las que están abiertas hoy consultando
         # en vivo (ver Reporte de Energía -> "Fallas activas del proyecto").
-        # Se apoya en fecha_resolucion, ya sincronizada de forma confiable
-        # con el estado (ver _sincronizar_resolucion).
+        # fecha_resolucion NULL solo cuenta como "sigue abierta" si el estado
+        # REAL tampoco es final -- si no, una falla cerrada hace meses sin
+        # fecha_resolucion (dato legacy, ver A4/backfill_sla_cumplido) coló
+        # como "activa" para cualquier fecha que se consultara.
+        if not estado_joined:
+            query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+            estado_joined = True
         query = query.filter(
             Falla.fecha_identificacion <= activa_en_fecha,
-            (Falla.fecha_resolucion.is_(None)) | (func.date(Falla.fecha_resolucion) >= activa_en_fecha),
+            (Falla.fecha_resolucion.is_(None) & ~FallaCatEstado.es_estado_final)
+            | (func.date(Falla.fecha_resolucion) >= activa_en_fecha),
         )
     if solo_activas:
         if not estado_joined:

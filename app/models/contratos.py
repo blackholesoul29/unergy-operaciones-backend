@@ -187,6 +187,11 @@ class PPAContrato(Base):
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Comunidad energética NO es otro tipo de contrato: es una CARACTERISTICA de
+    # este PPA (2026-08-18). Vive en el contrato y no se deriva de la oferta, para
+    # que el dato sobreviva si la oferta se borra. NULL en los PPAs viejos que no
+    # salieron de una oferta: null = no sabemos, distinto de False.
+    es_comunidad_energetica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

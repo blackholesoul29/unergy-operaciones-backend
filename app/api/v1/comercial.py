@@ -27,6 +27,7 @@ from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion, OportunidadOferta,
+    oportunidad_oferta_proyectos_table,
 )
 from app.models.contratos import PPAContrato, PPATarifa
 from app.schemas.comercial import (
@@ -34,9 +35,10 @@ from app.schemas.comercial import (
     OfertaCreate, OfertaUpdate, FirmarOfertaIn,
 )
 from app.services.comercial import (
-    ETAPAS_CONSULTABLES, ETAPAS_ENTREGABLES, UMBRAL_VINCULO,
+    ETAPAS_CON_PPA, ETAPAS_CONSULTABLES, ETAPAS_ENTREGABLES, TIPOS_ENERGIA,
+    UMBRAL_VINCULO,
     ahora_colombia, calcular_alerta, col_now,
-    contexto_ficha, estado_a_resultado, ficha_operativa, proyectos_operando,
+    contexto_ficha, estado_a_resultado, ficha_operativa, ppas_del_pipeline,
     resumen_etapas, vincular_proyectos,
 )
 
@@ -394,101 +396,90 @@ def list_ofertas_todas(
 
 
 @router.get("/proyectos-operando")
-def list_proyectos_operando(
+def list_ppas_del_pipeline(
     estado_pipeline: list[str] | None = Query(
         None,
-        description="Etapas comerciales a devolver. Por defecto firmado y operando. "
-                    "Acepta cualquier etapa del pipeline. Repetible: ?estado_pipeline=operando"),
+        description="Etapas comerciales a devolver. Por defecto las cuatro que "
+                    "producen un PPA. Repetible: ?estado_pipeline=operando"),
     todas_las_etapas: bool = Query(
         False,
-        description="Devolver TODO el pipeline (oportunidad, oferta, contrato, firmado, "
-                    "operando, terminado, declinado). Se ignora si se pasan etapas explícitas"),
-    q: str | None = Query(None, description="Filtra por nombre de planta, cliente o código de seguimiento"),
+        description="Ya es el comportamiento por defecto. Se conserva para no "
+                    "romper las llamadas que lo vienen mandando"),
+    q: str | None = Query(None, description="Filtra por planta, cliente, código de seguimiento o contrato"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Las plantas del pipeline comercial. Por defecto, las de negocio cerrado:
-    **firmadas y operando**.
+    """Los **contratos de energía** del pipeline: un árbol PPA → PROYECTOS → detalles.
 
-    Es la superficie pensada para integrar la plataforma con otra: devuelve una
-    fila por PLANTA (no por oferta) con nombre, ubicación, operador de red,
-    generación mensual promedio, fecha de inicio de comercialización y duración
-    del contrato de energía. Ver `docs/API_PROYECTOS_OPERANDO.md`.
+    Un nodo por PPA, con las plantas de ese contrato colgando y, en cada planta,
+    su energía promedio mensual. Es la superficie para integrar la plataforma con
+    otra. Ver `docs/API_PPA_PIPELINE.md`.
 
-    Cada fila trae **dos estados distintos**, que no hay que confundir:
+    **Un PPA no firmado no existe como contrato.** La oferta del CRM *es* el PPA
+    hasta que se firma, y `ppa.id` lo dice sin ambigüedad:
 
-    **`estado_pipeline`** — la etapa comercial, lo que separa las dos mitades:
+    - `ppa.id === null` → **borrador**. No hay fila en `ppa_contratos`, así que no
+      aparece en `/servicios`. Sus condiciones son las tentativas de la oferta y
+      `condiciones.origen` vale `"oferta"`.
+    - `ppa.id` con valor → el contrato existe. Aparece en `/servicios`, y las
+      condiciones salen del contrato (`condiciones.origen == "contrato"`).
 
-    - `firmado` — hay contrato, el suministro todavía no arrancó. Es normal que
-      no tenga generación promedio: la planta aún no entrega energía.
-    - `operando` — ya está entregando.
+    `aparece_en_servicios` viaja como booleano y es el mismo hecho, para que quien
+    integre no tenga que deducirlo.
 
-    Con `?todas_las_etapas=true` (o repitiendo `?estado_pipeline=`) se pide el
-    pipeline completo: `oportunidad`, `oferta`, `contrato`, `firmado`,
-    `operando`, `terminado` y `declinado`.
+    **`estado_ppa`** resume eso en un slug:
 
-    Cuando una planta tiene varias ofertas, `estado_pipeline` es la etapa **más
-    avanzada** de todas (una con la energía operando y los servicios recién
-    firmados está operando), con una regla: `terminado` y `declinado` son
-    **salidas**, no avances, así que cualquier etapa viva les gana. Una planta
-    que opera y además arrastra un contrato terminado sigue siendo `operando`.
-    El filtro elige por esa etapa resuelta, de modo que cada planta cae en una
-    sola y los conteos suman el total.
+    | Valor | Qué es |
+    |---|---|
+    | `borrador` | Etapa `oferta` o `contrato`: el PPA está en preparación |
+    | `firmado` | El contrato existe en `ppa_contratos` |
+    | `sin_contrato` | **Inconsistencia.** La oferta está `firmado`/`operando` pero no hay PPA cargado: el negocio cerró y el contrato falta |
 
-    La oferta que sostiene esa etapa viaja suelta en **`oferta_vigente`** —lo
-    normal es que haya una sola viva— y es `null` si la planta solo tiene
-    ofertas terminadas o declinadas. `ofertas[]` trae **todas** las de la
-    planta, de todo el pipeline, cada una con su etapa.
+    `sin_contrato` no se rellena inventando un contrato de campos nulos — eso
+    metería compromisos fantasma en Cumplimiento. Se muestra para que se cargue.
 
-    **`estado_proyecto`** — el estado de la planta en la plataforma:
-    `en_desarrollo` · `en_operacion` · `suspendido` · `cancelado`, con su
-    etiqueta en `estado_proyecto_label` ("En operación"). Es `null` cuando la
-    oferta todavía no está vinculada a una planta cargada.
+    **Solo contratos de energía.** `compra_energia` y `comunidad_energetica`; las
+    ofertas de servicios (representación, CGM) desembocan en `contratos_servicio`
+    y no son PPAs. Comunidad energética no es un tipo aparte: es un PPA con
+    `es_comunidad_energetica: true`.
 
-    Los dos estados pueden **discrepar** (una oferta operando sobre un proyecto
-    marcado `en_desarrollo`): son dos hechos, y acá se muestran como están sin
-    conciliarlos.
+    Las **salidas** del pipeline (`declinado`, `terminado`) no producen PPA: un
+    negocio caído no es un contrato en preparación.
 
-    El universo es el mismo que se ve en `/comercial`. Con
-    `?estado_pipeline=operando` se limita a las que ya operan. `GET
-    /comercial/ofertas?estado=…` sigue siendo la vista por OFERTA (y esa sí
-    exige rol comercial).
-
-    A diferencia del resto de `/comercial`, **no exige rol comercial**: es de
-    solo lectura y no expone precios, márgenes ni bitácora comercial. Ojo con
-    esto al pedir el pipeline completo: sin ser datos sensibles de precio, la
-    prospección y los negocios caídos quedan visibles para cualquier cuenta
-    activa de la plataforma (API Key o token).
+    A diferencia del resto de `/comercial`, **no exige rol comercial**: es de solo
+    lectura y no expone precios, márgenes ni bitácora comercial.
     """
-    # Las etapas explícitas mandan sobre `todas_las_etapas`: son más específicas,
-    # y mandar las dos cosas es lo que hace quien está probando la llamada.
     if estado_pipeline:
         etapas = tuple(estado_pipeline)
-    elif todas_las_etapas:
-        etapas = ETAPAS_CONSULTABLES
     else:
-        etapas = ETAPAS_ENTREGABLES
-    invalidas = [e for e in etapas if e not in ETAPAS_CONSULTABLES]
+        etapas = ETAPAS_CON_PPA
+    invalidas = [e for e in etapas if e not in ETAPAS_CON_PPA]
     if invalidas:
-        # 422 explícito y no una lista vacía: pedir una etapa que no existe y
-        # recibir 200 con cero filas se lee como "no hay ninguna", que es otra cosa.
+        # 422 explícito y no una lista vacía: pedir una etapa que no produce PPAs
+        # y recibir 200 con cero filas se lee como "no hay ninguno", que es otra
+        # cosa. Vale también para `declinado`/`terminado`, que existen en el CRM
+        # pero nunca tienen contrato.
         raise HTTPException(
             422,
             f"Etapa no válida: {', '.join(invalidas)}. "
-            f"Las etapas del pipeline son: {', '.join(ETAPAS_CONSULTABLES)}.",
+            f"Las etapas que producen un PPA son: {', '.join(ETAPAS_CON_PPA)}.",
         )
-    items = proyectos_operando(db, q=q, estados=etapas)
+    nodos = ppas_del_pipeline(db, q=q, estados=etapas)
+    por_estado: dict[str, int] = {}
+    for n in nodos:
+        clave = n["ppa"]["estado_ppa"]
+        por_estado[clave] = por_estado.get(clave, 0) + 1
     return {
         # ahora_colombia() y no col_now(): esta fecha viaja hacia afuera y tiene
         # que traer su offset real (-05:00). Ver el docstring de col_now().
         "generado_en": ahora_colombia(),
         "estados_pipeline": list(etapas),
-        "total": len(items),
-        # Cuántas hay de cada etapa comercial, para no tener que contarlas del
-        # lado de quien integra.
-        "por_estado_pipeline": {
-            e: sum(1 for i in items if i["estado_pipeline"] == e) for e in etapas},
-        "items": items,
+        "total": len(nodos),
+        # Cuántos PPAs hay de cada estado, para no tener que contarlos del lado de
+        # quien integra. Solo los estados presentes: un cero explícito de un
+        # estado que no se pidió es ruido.
+        "por_estado_ppa": por_estado,
+        "ppas": nodos,
     }
 
 
@@ -896,10 +887,11 @@ def firmar_oferta(
         raise HTTPException(404, "Oferta no encontrada")
     if o.ppa_contrato_id:
         raise HTTPException(409, f"La oferta ya tiene el contrato PPA {o.ppa_contrato_id}")
-    if _valor(o.tipo) != "compra_energia":
+    if _valor(o.tipo) not in TIPOS_ENERGIA:
         raise HTTPException(
-            422, "Solo las ofertas de compra de energía derivan en un PPA; "
-                 "las de servicios usan el contrato de representación")
+            422, "Solo las ofertas de energía (compra o comunidad energética) "
+                 "derivan en un PPA; las de servicios usan el contrato de "
+                 "representación")
     op = _get_oportunidad_or_404(o.oportunidad_id, db)
     cliente = db.query(Cliente).filter(Cliente.id == op.cliente_id).first()
 
@@ -918,11 +910,14 @@ def firmar_oferta(
         cantidad_minima_kwh_mes=data.cantidad_minima_kwh_mes,
         carpeta_link=data.carpeta_link,
         tipo_contrato="compra",
+        # La característica pasa a vivir en el contrato: si mañana se borra la
+        # oferta, el PPA sigue sabiendo lo que es.
+        es_comunidad_energetica=(_valor(o.tipo) == "comunidad_energetica"),
     )
-    if o.proyecto_id:
-        proyecto = db.query(Proyecto).filter(Proyecto.id == o.proyecto_id).first()
-        if proyecto:
-            contrato.proyectos = [proyecto]
+    # TODAS las plantas de la oferta, no solo la del proyecto_id: una oferta que
+    # cubre dos plantas debe firmar un contrato con las dos, o Cumplimiento mediría
+    # el compromiso entero contra la generación de media planta.
+    contrato.proyectos = _plantas_de_la_oferta(o, db)
     db.add(contrato)
     db.flush()
 
@@ -944,6 +939,22 @@ def firmar_oferta(
     db.refresh(o)
     return {"oferta": _oferta_out(o), "ppa_contrato_id": contrato.id,
             "tarifas_creadas": len(_tarifas_mensuales(data))}
+
+
+def _plantas_de_la_oferta(oferta, db) -> list:
+    """Las plantas asociadas a la oferta: las de la M2M si tiene, y si no la del
+    `proyecto_id` único. Mismo criterio que usa la vista PPA-céntrica, para que lo
+    que se firma sea exactamente lo que se venía mostrando en el borrador."""
+    ids = [pid for (pid,) in db.execute(
+        oportunidad_oferta_proyectos_table.select().with_only_columns(
+            oportunidad_oferta_proyectos_table.c.proyecto_id)
+        .where(oportunidad_oferta_proyectos_table.c.oferta_id == oferta.id)).all()]
+    if not ids and oferta.proyecto_id:
+        ids = [oferta.proyecto_id]
+    if not ids:
+        return []
+    return db.query(Proyecto).filter(Proyecto.id.in_(ids),
+                                     Proyecto.deleted_at.is_(None)).all()
 
 
 def _tarifa_del_primer_anio(data: FirmarOfertaIn) -> float | None:

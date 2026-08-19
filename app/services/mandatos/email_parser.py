@@ -275,6 +275,13 @@ _PA_RE = re.compile(
     re.UNICODE,
 )
 
+# Patrón laxo, solo para CONTAR menciones. _PA_RE es estricto en dónde termina
+# el nombre, así que un P.A. seguido de texto inesperado ("... SIERRA y 18254 ...")
+# simplemente no matchea -- y entonces contar coincidencias de _PA_RE haría creer
+# que el cuerpo menciona un solo patrimonio cuando menciona dos. Para detectar
+# ambigüedad hay que contar candidatos con la manga ancha y extraer con la angosta.
+_PA_CANDIDATO_RE = re.compile(r"(\d{4,6})\s*-\s*P\.?\s?A\.?\s", re.UNICODE)
+
 
 def extraer_pa_del_cuerpo(cuerpo: str | None) -> dict | None:
     """{'codigo': '17844', 'nombre': 'P.A SOL DE LA SIERRA'} o None.
@@ -282,9 +289,18 @@ def extraer_pa_del_cuerpo(cuerpo: str | None) -> dict | None:
     Solo reconoce el patrón `código - NOMBRE`. Si el correo nombra un patrimonio
     sin código, devuelve None: preferimos no identificar a identificar mal, porque
     el tercero es parte de la identidad y equivocarlo crea una fila fantasma.
+
+    Por la misma razón, un cuerpo que menciona DOS códigos distintos devuelve None
+    en vez de elegir uno. Los correos reales nombran un solo P.A., pero sin esta
+    guarda cuál gana lo decidía un accidente del regex (dónde se corta cada
+    captura), no una regla -- y "elegir por accidente" es exactamente identificar
+    mal. Si esto empieza a aparecer, hay que ver correos reales y decidir la regla.
     """
-    m = _PA_RE.search(cuerpo or "")
+    texto = cuerpo or ""
+    if len(set(_PA_CANDIDATO_RE.findall(texto))) > 1:
+        return None
+    m = _PA_RE.search(texto)
     if not m:
         return None
-    nombre = re.sub(r"\s+", " ", m.group(2)).strip()
-    return {"codigo": m.group(1), "nombre": nombre}
+    return {"codigo": m.group(1),
+            "nombre": re.sub(r"\s+", " ", m.group(2)).strip()}

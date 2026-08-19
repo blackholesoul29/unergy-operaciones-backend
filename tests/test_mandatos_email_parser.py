@@ -246,3 +246,19 @@ def test_extraer_pa_en_liquidacion_preliminar_es_none():
 def test_extraer_pa_vacio():
     assert extraer_pa_del_cuerpo("") is None
     assert extraer_pa_del_cuerpo(None) is None
+
+
+def test_extraer_pa_con_dos_codigos_distintos_devuelve_none():
+    """Ambigüedad real: sin esta guarda, cuál de los dos ganaba lo decidía un
+    accidente del regex, no una regla. Elegir por accidente es identificar mal."""
+    cuerpo = "asociados al 17844 - P.A SOL DE LA SIERRA y 18254 - P.A AUTOCONSUMO NESTLE del mes"
+    assert extraer_pa_del_cuerpo(cuerpo) is None
+
+
+def test_extraer_pa_repetido_el_mismo_codigo_si_identifica():
+    """Repetir el MISMO P.A. no es ambiguo -- pasa en correos que lo nombran
+    en el saludo y otra vez en el cuerpo."""
+    cuerpo = ("17844 - P.A SOL DE LA SIERRA,\n"
+              "los certificados del 17844 - P.A SOL DE LA SIERRA del mes de junio")
+    assert extraer_pa_del_cuerpo(cuerpo) == {
+        "codigo": "17844", "nombre": "P.A SOL DE LA SIERRA"}

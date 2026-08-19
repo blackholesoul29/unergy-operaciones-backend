@@ -55,6 +55,7 @@ class FinanzasMandato(Base):
     comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
     fecha_envio: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_firma: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_envio_inversionista: Mapped[date | None] = mapped_column(Date, nullable=True)
     drive_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     drive_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     correo_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)

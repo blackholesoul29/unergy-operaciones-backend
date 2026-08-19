@@ -57,7 +57,6 @@ class ClienteCreate(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
@@ -119,7 +118,6 @@ class ClienteBase(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None

@@ -42,7 +42,6 @@ class Cliente(Base):
     nit_cedula: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo_persona: Mapped[str | None] = mapped_column(SAEnum(TipoPersonaEnum, name="tipo_persona_enum"), nullable=True)
     representante_legal: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)

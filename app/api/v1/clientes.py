@@ -492,7 +492,7 @@ def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_
 @router.get("/{id}/fronteras")
 def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """List fronteras linked to this client via their projects."""
-    from app.models.proyectos import ProyectoInversionista
+    from app.models.proyectos import Proyecto, ProyectoInversionista
     from app.models.fronteras import Frontera
     _get_cliente_or_404(id, db)
 
@@ -507,7 +507,12 @@ def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_
 
     fronteras = (
         db.query(Frontera)
-        .filter(Frontera.proyecto_id.in_(all_project_ids))
+        .join(Proyecto, Proyecto.id == Frontera.proyecto_id)
+        .filter(
+            Frontera.proyecto_id.in_(all_project_ids),
+            Frontera.deleted_at.is_(None),
+            Proyecto.deleted_at.is_(None),
+        )
         .order_by(Frontera.codigo_frontera)
         .all()
     )

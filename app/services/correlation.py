@@ -251,10 +251,14 @@ def fetch_origina_investments() -> list[dict]:
 
 def fetch_origina_investment_detail(investment_id: int) -> dict | None:
     """Fetch a single investment fund with its portfolios and minifarms."""
-    with _origina_conn() as conn:
-        if conn is None:
-            return None
-        try:
+    # Fix 2026-08-19: igual que get_pipeline_overview, el try/except de abajo
+    # protegia la consulta pero no la conexion -- un ConnectionTimeout salia
+    # sin capturar (500 sin loguear el motivo real) en vez de {"linked": ...,
+    # "fund": None}.
+    try:
+        with _origina_conn() as conn:
+            if conn is None:
+                return None
             # Fund info
             cur = conn.execute("""
                 SELECT id, code, name, email, phone, status, rut, business_registry
@@ -315,9 +319,9 @@ def fetch_origina_investment_detail(investment_id: int) -> dict | None:
 
             fund["portfolios"] = list(portfolios.values())
             return fund
-        except Exception as e:
-            logger.error("origina investment detail query failed: %s", e)
-            return None
+    except Exception as e:
+        logger.error("origina investment detail query failed: %s", e)
+        return None
 
 
 def correlate_investments(db: Session) -> dict:

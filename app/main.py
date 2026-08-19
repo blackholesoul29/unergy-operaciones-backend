@@ -2585,15 +2585,23 @@ def _scheduled_excel_terceros_cedillanos():
 
 
 def _scheduled_correos_mandatos():
-    """Lee adhara@unergy.io y actualiza el estado de los mandatos de costos.
+    """MODO DIAGNÓSTICO -- lee el buzón y solo reporta al log. NO escribe nada.
 
-    Cada hora de 7am a 7pm: los correos de la revisoría y los envíos a
-    inversionistas llegan en horario laboral y no son urgentes (a diferencia
-    del de Cedillanos, que debe procesarse antes de las 6am). Sin correos
-    nuevos la corrida es solo un IMAP SEARCH que no toca la base."""
-    from app.services.mandatos.email_sync import revisar_correos_mandatos
+    Provisional y a propósito. La ingesta de Fase B (email_sync) escribe en la
+    tabla `mandatos`, que la integración con Finanzas va a descartar; prenderla
+    ahora significaría procesar 30 días de correo hacia una tabla condenada.
+    Pero apagar el cron del todo tampoco sirve: es lo único que ejercita IMAP en
+    producción, y sin él no hay forma de saber si el App Password funciona ni si
+    la carpeta de Enviados se detecta.
 
-    revisar_correos_mandatos()
+    Así que por ahora conecta, cuenta y reporta. Cuando el Plan 2 esté listo,
+    su Tarea 5 reemplaza el cuerpo de esta función por la ingesta real hacia
+    finanzas_mandatos. Ver
+    docs/superpowers/plans/2026-08-18-mandatos-integracion-02-adaptador.md
+    """
+    from app.services.mandatos.diagnostico import diagnostico_imap
+
+    diagnostico_imap()
 
 
 def _scheduled_cerrar_contratos_vencidos():

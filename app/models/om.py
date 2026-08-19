@@ -1,7 +1,7 @@
 """Modelos para el panel O&M mensual."""
 from __future__ import annotations
 from datetime import date, datetime
-from sqlalchemy import BigInteger, Date, Integer, Numeric, Boolean, String, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import BigInteger, Date, Integer, Numeric, Boolean, String, DateTime, ForeignKey, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -70,8 +70,11 @@ class OMPaginaSinMatch(Base):
     razon:                Mapped[str]             = mapped_column(String(200), nullable=False)
     numero_factura:       Mapped[str | None]      = mapped_column(String(30), nullable=True)
     muestra_texto:        Mapped[str | None]      = mapped_column(String(500), nullable=True)
-    origen:               Mapped[str]             = mapped_column(String(20), default="upload", nullable=False)  # "upload" | "backfill"
-    resuelto:             Mapped[bool]            = mapped_column(Boolean, default=False, nullable=False)
+    # server_default (no solo default= a nivel Python) -- ver contactos.py /
+    # 037_contactos_unificados.py: un INSERT que no pase por el ORM viola
+    # NOT NULL si el default solo vive en Python.
+    origen:               Mapped[str]             = mapped_column(String(20), default="upload", server_default=text("'upload'"), nullable=False)  # "upload" | "backfill"
+    resuelto:             Mapped[bool]            = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     contrato_id_asignado: Mapped[int | None]      = mapped_column(BigInteger, ForeignKey("contratos_servicio.id"), nullable=True)
     asignado_en:          Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at:           Mapped[datetime]        = mapped_column(DateTime(timezone=True), server_default=func.now())

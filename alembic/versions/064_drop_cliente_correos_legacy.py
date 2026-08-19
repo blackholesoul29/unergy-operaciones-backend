@@ -8,6 +8,10 @@ del backend ni del frontend los lee ni los escribe desde entonces.
 Por seguridad, antes de borrar se repite el MISMO backfill de la 037 hacia
 `contactos` (ON CONFLICT DO NOTHING, no duplica nada ya migrado) -- asi
 cualquier valor cargado despues de esa migracion tambien queda a salvo.
+Los tipos 'monitoreo'/'soporte' del backfill original de 037 se mapean
+aqui a 'operacional' -- la migracion 039 (ya aplicada) los quito del
+enum tipo_contacto_enum y reasigno las filas existentes a 'operacional';
+usar los valores originales aqui violaria ese mismo enum.
 
 Revision ID: 064
 Revises: 063
@@ -25,8 +29,8 @@ def upgrade() -> None:
     for columna, tipo in (
         ("correo_operacional", "operacional"),
         ("correo_liquidacion", "liquidacion"),
-        ("correo_monitoreo", "monitoreo"),
-        ("correo_soporte", "soporte"),
+        ("correo_monitoreo", "operacional"),
+        ("correo_soporte", "operacional"),
     ):
         op.execute(f"""
             INSERT INTO contactos (cliente_id, email, tipo)

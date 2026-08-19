@@ -1,0 +1,79 @@
+"""¿Trae este PDF de mandato las dos firmas?
+
+Verificado sobre un PDF real (CMU1287, 2026-08-13): las firmas NO son digitales
+-- el documento no tiene AcroForm, ni campos /Sig, ni anotaciones -- y tampoco
+son texto, porque los nombres y cargos vienen impresos en la plantilla. Son
+IMÁGENES pegadas encima de las líneas `_____`.
+
+Por eso el detector se ancla a las líneas de firma que encuentra en el texto, no
+a coordenadas fijas: si la plantilla cambia de márgenes sigue funcionando.
+
+La decisión (lineas_firmadas) está separada de la lectura del PDF
+(verificar_firmas) para poder probarla con las coordenadas reales sin versionar
+un documento financiero real.
+"""
+from __future__ import annotations
+
+import logging
+import re
+
+logger = logging.getLogger("mandatos.firmas")
+
+# Una línea de firma: cinco guiones bajos o más.
+_LINEA_FIRMA_RE = re.compile(r"^_{5,}$")
+
+# Cuánto por encima de la línea puede empezar la imagen de la firma. En el PDF
+# real las firmas empiezan 29 y 26 pt arriba; 70 deja margen para plantillas algo
+# distintas sin llegar a alcanzar el membrete, que está a 629 pt de distancia.
+_TOLERANCIA_VERTICAL = 70
+
+
+def lineas_firmadas(lineas: list[dict], imagenes: list[dict],
+                    tolerancia: int = _TOLERANCIA_VERTICAL) -> list[bool]:
+    """Por cada línea de firma, si hay una imagen encima que la firme.
+
+    `lineas` e `imagenes` son dicts con x0/x1/top, tal como los da pdfplumber.
+    Una línea cuenta como firmada si existe una imagen que:
+      - se solapa con ella horizontalmente, y
+      - empieza por encima de la línea, dentro de `tolerancia` puntos.
+
+    Las dos condiciones son necesarias: el membrete y el pie de página TAMBIÉN se
+    solapan en horizontal (el pie ocupa el 102% del ancho), y solo la condición
+    vertical los deja fuera.
+    """
+    resultado: list[bool] = []
+    for ln in lineas:
+        firmada = any(
+            im["x1"] > ln["x0"] and im["x0"] < ln["x1"]
+            and im["top"] < ln["top"]
+            and (ln["top"] - im["top"]) <= tolerancia
+            for im in imagenes
+        )
+        resultado.append(firmada)
+    return resultado
+
+
+def resumir_firmas(firmadas: list[bool]) -> dict:
+    """{'lineas': 2, 'firmadas': 2, 'estado': 'firmado_completo'}
+
+    `estado` distingue cuatro casos, y la distinción importa:
+      firmado_completo  todas las líneas tienen firma
+      parcial           algunas sí, otras no
+      sin_firmas        hay líneas y ninguna está firmada
+      no_verificable    NO se encontraron líneas -- no es lo mismo que sin firmar
+
+    Confundir `no_verificable` con `sin_firmas` haría que un PDF con otra
+    plantilla se reporte como no firmado, o que se dé por concluido algo que
+    nadie llegó a mirar.
+    """
+    total = len(firmadas)
+    n = sum(firmadas)
+    if total == 0:
+        estado = "no_verificable"
+    elif n == total:
+        estado = "firmado_completo"
+    elif n == 0:
+        estado = "sin_firmas"
+    else:
+        estado = "parcial"
+    return {"lineas": total, "firmadas": n, "estado": estado}

@@ -75,6 +75,55 @@ def _adjuntos_de(msg: email.message.Message) -> list[tuple[str, bytes]]:
     return salida
 
 
+# Nombres de respaldo, por si el servidor no publica la bandera \Sent. El orden
+# importa: primero los de Gmail, que es lo que usamos.
+_ENVIADOS_CONOCIDOS = (
+    "[Gmail]/Enviados",
+    "[Gmail]/Sent Mail",
+    "[Google Mail]/Enviados",
+    "Enviados",
+    "Sent",
+)
+
+
+def carpeta_enviados(imap: imaplib.IMAP4_SSL) -> str | None:
+    """Nombre de la carpeta de Enviados, o None si no se puede determinar.
+
+    Se busca por la bandera `\\Sent` del RFC 6154, no por nombre: el nombre
+    depende del idioma de la cuenta ("Enviados" vs "Sent Mail") y cambiaría si
+    alguien toca la configuración de Gmail. La bandera no.
+
+    Si el servidor no publica la bandera, se cae a una lista de nombres
+    conocidos. Si tampoco, se devuelve None y el llamador decide -- preferimos
+    no leer nada a leer la carpeta equivocada.
+    """
+    try:
+        status, lineas = imap.list()
+    except Exception as exc:
+        logger.error("IMAP mandatos: no se pudo listar carpetas: %s", exc)
+        return None
+    if status != "OK" or not lineas:
+        return None
+
+    disponibles: list[str] = []
+    for linea in lineas:
+        texto = linea.decode("utf-8", errors="replace") if isinstance(linea, bytes) else str(linea)
+        # Formato: (\HasNoChildren \Sent) "/" "[Gmail]/Enviados"
+        nombre = texto.split(' "/" ')[-1].strip().strip('"')
+        disponibles.append(nombre)
+        if "\\Sent" in texto:
+            return nombre
+
+    for candidato in _ENVIADOS_CONOCIDOS:
+        if candidato in disponibles:
+            logger.info("IMAP mandatos: sin bandera \\Sent, usando %r", candidato)
+            return candidato
+
+    logger.error("IMAP mandatos: no se encontró la carpeta de Enviados. Disponibles: %s",
+                 disponibles)
+    return None
+
+
 def buscar_correos(remitente: str, dias: int = 30) -> list[CorreoCrudo]:
     """Correos de `remitente` recibidos en los últimos `dias`.
 

@@ -45,7 +45,20 @@ leen `ppa_contratos`.
 |---|---|---|
 | `borrador` | Etapa `oferta` o `contrato`: el PPA está en preparación | `id: null`. Condiciones tentativas. Es normal que no haya proyectos vinculados |
 | `firmado` | El contrato existe | `id` poblado, condiciones del contrato |
-| `sin_contrato` | **Inconsistencia.** La oferta está `firmado` u `operando` pero no hay PPA cargado | El negocio cerró y el contrato falta. Es dato por cargar de nuestro lado |
+| `sin_contrato` | **Inconsistencia.** La oferta está `firmado` u `operando` y no hay PPA por ningún camino | El negocio cerró y el contrato falta. Es dato por cargar de nuestro lado |
+
+### De dónde sale el contrato: `fuente_ppa`
+
+El PPA se resuelve por **dos caminos**, y el explícito manda:
+
+| `fuente_ppa` | Cómo se encontró |
+|---|---|
+| `"oferta"` | El enlace que deja `firmar` (`oferta.ppa_contrato_id`) |
+| `"proyecto"` | El PPA vigente **de la planta**. Los contratos anteriores al CRM no están enlazados a ninguna oferta, así que este es hoy el camino normal |
+| `null` | No hay contrato por ningún camino → `estado_ppa: "sin_contrato"` |
+
+Si hay varios contratos en la planta gana el vigente hoy, y entre vigentes el de
+compra. Un contrato vencido de 2021 no le gana al que está corriendo.
 
 `sin_contrato` **no se rellena** inventando un contrato con fechas y tarifas nulas: eso
 metería compromisos fantasma en Cumplimiento. Se muestra para que se corrija. Si te
@@ -106,7 +119,12 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
         "oportunidad_id": 12,
         "tipo_contrato": null,
         "comprador": null,
-        "vendedor": null
+        "vendedor": null,
+        "fuente_ppa": null,
+        "ofertas": [
+          { "oferta_id": 33, "codigo_seguimiento": "OP.COM No.0051-3-2026",
+            "tipo": "compra_energia", "estado": "oferta", "oportunidad_id": 12 }
+        ]
       },
       "proyectos": [
         {
@@ -143,6 +161,16 @@ técnica de la planta. `origen` avisa.
 
 `meses_restantes` de un contrato que todavía no arrancó es su duración completa, nunca la
 distancia hasta el fin. Nunca es mayor que `duracion_meses`.
+
+### `ofertas[]`
+
+**Un PPA es un nodo, aunque lo alimenten varias ofertas.** Si dos ofertas desembocan
+en el mismo contrato, sale **un** nodo con las dos en `ofertas[]` — el `total` cuenta
+contratos, no ofertas. Lo normal es una sola. Los campos de nivel superior
+(`oferta_id`, `codigo_seguimiento`) son los de la oferta principal: manda la de compra
+de energía, que es la que define el negocio.
+
+Un borrador no tiene contrato por el que agrupar, así que cada oferta es su propio nodo.
 
 ### `proyectos[]` y sus `detalles`
 

@@ -1076,20 +1076,36 @@ def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict
     if not ofertas:
         return []
 
-    ppas = _ppas_por_id(db, {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id})
     clientes = _clientes_por_oportunidad(db, {o.oportunidad_id for o in ofertas})
-    del_ppa = _proyectos_por_ppa(db, set(ppas))
     de_oferta = _proyectos_de_ofertas(db, ofertas)
+    resuelto = _resolver_ppas(db, ofertas, de_oferta, hoy)
+    del_ppa = _proyectos_por_ppa(db, {p.id for p, _ in resuelto.values() if p is not None})
+
+    # Un nodo por CONTRATO: si dos ofertas desembocan en el mismo PPA, el PPA
+    # aparecería dos veces y `total` lo contaría doble. Sin contrato todavía no hay
+    # nada por lo que agrupar, así que cada oferta es su propio borrador.
+    grupos: dict[tuple, list] = {}
+    for o in ofertas:
+        ppa, _fuente = resuelto[o.id]
+        clave = ("ppa", ppa.id) if ppa is not None else ("oferta", o.id)
+        grupos.setdefault(clave, []).append(o)
 
     nodos = []
-    for o in ofertas:
-        ppa = ppas.get(o.ppa_contrato_id)
-        # Para un PPA firmado las plantas son las del CONTRATO: esa es la verdad
-        # contractual. Para un borrador todavía no hay contrato, así que son las
-        # que declaró la oferta.
-        proyectos = del_ppa.get(ppa.id, []) if ppa is not None else de_oferta.get(o.id, [])
-        nodos.append(_nodo_ppa(o, ppa=ppa, proyectos=proyectos,
-                               cliente=clientes.get(o.oportunidad_id), hoy=hoy))
+    for grupo in grupos.values():
+        # La oferta que representa al grupo: manda la de compra de energía, que es
+        # la que define el negocio; el id desempata.
+        grupo = sorted(grupo, key=lambda o: (
+            0 if _valor_enum(o.tipo) == "compra_energia" else 1, o.id))
+        principal = grupo[0]
+        ppa, fuente = resuelto[principal.id]
+        # Para un PPA que existe las plantas son las del CONTRATO: esa es la verdad
+        # contractual, y puede cubrir más plantas que una sola oferta. Para un
+        # borrador todavía no hay contrato, así que son las que declaró la oferta.
+        proyectos = (del_ppa.get(ppa.id, []) if ppa is not None
+                     else de_oferta.get(principal.id, []))
+        nodos.append(_nodo_ppa(principal, ppa=ppa, fuente_ppa=fuente,
+                               proyectos=proyectos, ofertas=grupo,
+                               cliente=clientes.get(principal.oportunidad_id), hoy=hoy))
 
     if q:
         aguja = q.strip().lower()
@@ -1248,6 +1264,59 @@ def _nodo_proyecto(proyecto, ofertas) -> dict:
     }
 
 
+def _resolver_ppas(db, ofertas, de_oferta, hoy) -> dict[int, tuple]:
+    """El contrato de cada oferta y de dónde salió: `(ppa, fuente)`.
+
+    Dos caminos, y el explícito manda:
+
+    1. `oferta.ppa_contrato_id` — el enlace que deja `firmar`. fuente `"oferta"`.
+    2. el mejor PPA de las PLANTAS de la oferta. fuente `"proyecto"`.
+
+    El segundo camino no es un lujo: en producción **ningún** PPA está enlazado a
+    su oferta porque los contratos son anteriores al CRM. Sin él, una planta con
+    contrato salía como `sin_contrato` —que significa "falta cargarlo"— y eso es
+    una falsa alarma. Es el mismo doble camino que ya resolvía la vista por planta.
+
+    `(None, None)` cuando no hay contrato por ningún camino: ahí la alarma es real.
+    """
+    enlazados = _ppas_por_id(db, {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id})
+
+    # Solo se buscan los PPAs de las plantas de las ofertas que quedaron sin
+    # enlace: no tiene sentido pagar la consulta por las que ya lo declararon.
+    sin_enlace = [o for o in ofertas if enlazados.get(o.ppa_contrato_id) is None]
+    por_proyecto = _ppas_de_proyectos(
+        db, {p.id for o in sin_enlace for p in de_oferta.get(o.id, [])})
+
+    out = {}
+    for o in ofertas:
+        ppa = enlazados.get(o.ppa_contrato_id)
+        if ppa is not None:
+            out[o.id] = (ppa, "oferta")
+            continue
+        candidatos = [c for p in de_oferta.get(o.id, [])
+                      for c in por_proyecto.get(p.id, [])]
+        mejor = _mejor_ppa(candidatos, hoy)
+        out[o.id] = (mejor, "proyecto" if mejor is not None else None)
+    return out
+
+
+def _ppas_de_proyectos(db, proyecto_ids: set[int]) -> dict[int, list]:
+    """Los contratos de energía de cada planta, en una consulta para todas."""
+    from app.models.contratos import PPAContrato, ppa_contrato_proyectos_table
+
+    if not proyecto_ids:
+        return {}
+    out: dict[int, list] = {}
+    for pid, contrato in (
+        db.query(ppa_contrato_proyectos_table.c.proyecto_id, PPAContrato)
+        .join(PPAContrato, PPAContrato.id == ppa_contrato_proyectos_table.c.contrato_id)
+        .filter(ppa_contrato_proyectos_table.c.proyecto_id.in_(proyecto_ids),
+                PPAContrato.deleted_at.is_(None)).all()
+    ):
+        out.setdefault(pid, []).append(contrato)
+    return out
+
+
 def _clientes_por_oportunidad(db, ids: set[int]) -> dict[int, str]:
     """Razón social del dueño del negocio, por oportunidad, en una consulta."""
     from app.models.clientes import Cliente
@@ -1271,7 +1340,8 @@ def _ppas_por_id(db, ids: set[int]) -> dict:
             .filter(PPAContrato.id.in_(ids), PPAContrato.deleted_at.is_(None)).all()}
 
 
-def _nodo_ppa(oferta, ppa=None, proyectos=(), cliente=None, hoy=None) -> dict:
+def _nodo_ppa(oferta, ppa=None, fuente_ppa=None, proyectos=(), ofertas=None,
+              cliente=None, hoy=None) -> dict:
     """Un PPA (borrador o materializado) con sus plantas.
 
     `ppa is None` ⟺ borrador: la oferta todavía no desembocó en un contrato. No
@@ -1313,6 +1383,12 @@ def _nodo_ppa(oferta, ppa=None, proyectos=(), cliente=None, hoy=None) -> dict:
             # borrador. Nunca se deriva de la oferta si el contrato ya lo dice.
             "es_comunidad_energetica": _es_comunidad(oferta, ppa),
             "cantidad_proyectos": len(proyectos),
+            # De qué camino salió el contrato: `oferta` = enlace explícito de la
+            # firma, `proyecto` = el PPA vigente de la planta, `null` = no hay.
+            "fuente_ppa": fuente_ppa,
+            # TODAS las ofertas que desembocan en este contrato, cada una con su
+            # código y su etapa. Lo normal es una sola.
+            "ofertas": [_oferta_min(o) for o in (ofertas or [oferta])],
             "cliente": cliente,
             "oferta_id": oferta.id,
             "codigo_seguimiento": _codigo_seguimiento(oferta.numero_oferta),

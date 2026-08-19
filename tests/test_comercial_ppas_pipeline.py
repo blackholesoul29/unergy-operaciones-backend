@@ -517,3 +517,103 @@ def test_acotar_la_etapa_no_recorta_el_arbol_de_las_que_quedan(db, client):
 
     assert d["total"] == 1
     assert len(d["ppas"][0]["proyectos"]) == 2
+
+
+# ── El PPA se resuelve por dos caminos, no solo por el enlace de la oferta ────
+
+def test_el_ppa_de_la_planta_cuenta_aunque_la_oferta_no_lo_tenga_enlazado(db):
+    """En producción NINGÚN PPA está enlazado a su oferta: los contratos son
+    anteriores al CRM. Mirar solo `oferta.ppa_contrato_id` marcaba como
+    'sin_contrato' —o sea "falta cargarlo"— a plantas que SÍ tienen contrato. Es
+    el mismo doble camino que ya resolvía la vista por planta."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral", sub_project="catedral")
+    ppa = PPAContrato(numero_codigo_contrato="UNG-2026-014", tipo_contrato="compra",
+                      fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31),
+                      cantidad_minima_kwh_mes=150000)
+    db.add(ppa); db.flush()
+    _enlazar(db, ppa, proy)
+    of = _oferta(db, planta_nombre="Catedral", estado="operando", proyecto_id=proy.id)
+    assert of.ppa_contrato_id is None          # no hay enlace desde la oferta
+    db.commit()
+
+    n = ppas_del_pipeline(db, hoy=HOY)[0]
+
+    assert n["ppa"]["estado_ppa"] == "firmado"
+    assert n["ppa"]["id"] == ppa.id
+    assert n["ppa"]["aparece_en_servicios"] is True
+    # y se distingue de dónde salió, que no es lo mismo que un enlace explícito
+    assert n["ppa"]["fuente_ppa"] == "proyecto"
+    assert n["ppa"]["condiciones"]["origen"] == "contrato"
+    assert n["ppa"]["condiciones"]["energia_kwh_mes"] == 150000.0
+
+
+def test_el_enlace_de_la_oferta_le_gana_al_ppa_del_proyecto(db):
+    """Si la oferta declara su contrato, ese manda: es el vínculo explícito."""
+    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    viejo = PPAContrato(numero_codigo_contrato="VIEJO", tipo_contrato="compra",
+                        fecha_inicio=dt.date(2021, 1, 1), fecha_fin=dt.date(2025, 12, 31))
+    nuevo = PPAContrato(numero_codigo_contrato="ENLAZADO", tipo_contrato="compra",
+                        fecha_inicio=dt.date(2026, 2, 12), fecha_fin=dt.date(2032, 12, 31))
+    db.add_all([viejo, nuevo]); db.flush()
+    _enlazar(db, viejo, proy)
+    _oferta(db, planta_nombre="Catedral", estado="operando", proyecto_id=proy.id,
+            ppa_contrato_id=nuevo.id)
+    db.commit()
+
+    n = ppas_del_pipeline(db, hoy=HOY)[0]
+
+    assert n["ppa"]["numero_codigo_contrato"] == "ENLAZADO"
+    assert n["ppa"]["fuente_ppa"] == "oferta"
+
+
+def test_sin_contrato_por_ningun_camino_sigue_siendo_la_inconsistencia(db):
+    """La alarma tiene que seguir sonando cuando el contrato de verdad no está."""
+    proy = _proyecto(db, nombre_comercial="GD Sin Contrato")
+    _oferta(db, planta_nombre="Sin contrato", estado="operando", proyecto_id=proy.id)
+    db.commit()
+
+    n = ppas_del_pipeline(db, hoy=HOY)[0]
+
+    assert n["ppa"]["estado_ppa"] == "sin_contrato"
+    assert n["ppa"]["fuente_ppa"] is None
+
+
+# ── Un PPA es UN nodo, aunque lo alimenten varias ofertas ────────────────────
+
+def test_dos_ofertas_del_mismo_contrato_dan_un_solo_nodo(db):
+    """El nodo es el PPA. Si dos ofertas desembocan en el mismo contrato y cada
+    una generara su nodo, el contrato aparecería dos veces y `total` lo contaría
+    doble — que es justo lo que una vista PPA-céntrica no puede hacer."""
+    uno = _proyecto(db, nombre_comercial="GD Balmora 1")
+    dos = _proyecto(db, nombre_comercial="GD Balmora 2")
+    ppa = PPAContrato(numero_codigo_contrato="UNG-2026-030", tipo_contrato="compra",
+                      fecha_inicio=dt.date(2026, 1, 1), fecha_fin=dt.date(2032, 12, 31))
+    db.add(ppa); db.flush()
+    _enlazar(db, ppa, uno); _enlazar(db, ppa, dos)
+    op = _oportunidad(db)
+    _oferta(db, oportunidad=op, planta_nombre="Balmora 1", estado="operando",
+            proyecto_id=uno.id, numero_oferta="OF.COM No.001-2026")
+    _oferta(db, oportunidad=op, planta_nombre="Balmora 2", estado="operando",
+            proyecto_id=dos.id, numero_oferta="OF.COM No.002-2026")
+    db.commit()
+
+    nodos = ppas_del_pipeline(db, hoy=HOY)
+
+    assert len(nodos) == 1
+    n = nodos[0]
+    assert n["ppa"]["id"] == ppa.id
+    # las dos ofertas viajan, cada una con su código
+    assert sorted(o["codigo_seguimiento"] for o in n["ppa"]["ofertas"]) == [
+        "OP.COM No.001-2026", "OP.COM No.002-2026"]
+    # y las plantas del contrato son las dos
+    assert [p["nombre"] for p in n["proyectos"]] == ["GD Balmora 1", "GD Balmora 2"]
+
+
+def test_dos_borradores_distintos_no_se_colapsan(db):
+    """Sin contrato no hay nada por lo que agrupar: cada oferta es su propio PPA
+    en preparación."""
+    _oferta(db, planta_nombre="Balmora", estado="oferta")
+    _oferta(db, planta_nombre="Catedral", estado="oferta")
+    db.commit()
+
+    assert len(ppas_del_pipeline(db, hoy=HOY)) == 2

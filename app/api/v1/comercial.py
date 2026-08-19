@@ -23,7 +23,7 @@ from app.models.usuarios import Usuario
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.api.v1.clientes import buscar_cliente_duplicado
-from app.utils.nombre_matching import mejor_candidato
+from app.utils.nombre_matching import mejor_candidato, parece_persona_juridica
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
@@ -725,6 +725,13 @@ def _resolver_cliente(db: Session, cliente_id: int | None, cliente_nuevo,
         nit_cedula=cn.nit_cedula or None,
         origen_tipo=cn.origen_tipo,
         origen_detalle=cn.origen_detalle,
+        # Sugerencia, no certeza: solo se marca "juridica" cuando la razon
+        # social trae un indicador reconocible (S.A.S./LTDA/E.S.P./fiduciaria/
+        # patrimonio autonomo). Nunca se marca "natural" por ausencia de esos
+        # indicadores -- no hay suficientes clientes reales marcados asi en
+        # la plataforma para confiar en ese lado de la regla. Editable despues
+        # desde la ficha del cliente.
+        tipo_persona="juridica" if parece_persona_juridica(cn.razon_social_nombre) else None,
     )
     db.add(cliente)
     db.flush()  # asigna cliente.id sin cerrar la transacción

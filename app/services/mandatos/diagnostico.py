@@ -36,14 +36,18 @@ def _contar(imap: imaplib.IMAP4_SSL, carpeta: str, campo: str, direccion: str) -
         return None
 
 
-def diagnostico_imap() -> None:
-    """Conecta, cuenta lo que encontraría, y lo escribe en el log. No toca la BD.
+def diagnostico_imap() -> dict:
+    """Conecta, cuenta lo que encontraría, y lo devuelve. Escribe al log también.
 
-    Nunca lanza: es un diagnóstico, no puede tumbar el scheduler.
+    Devuelve el mismo resultado que reporta, para que un endpoint pueda
+    dispararlo a demanda en vez de esperar a la próxima corrida del cron.
+
+    Nunca lanza: es un diagnóstico, no puede tumbar el scheduler ni el endpoint.
+    NO toca la base de datos ni modifica el buzón.
     """
     if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
         logger.info("Diagnóstico IMAP: credenciales no configuradas, se omite")
-        return
+        return {"ok": False, "motivo": "credenciales no configuradas"}
 
     try:
         imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
@@ -51,25 +55,34 @@ def diagnostico_imap() -> None:
     except Exception as exc:
         logger.error("Diagnóstico IMAP: AUTENTICACIÓN FALLÓ contra %s como %s: %s",
                      settings.IMAP_HOST, settings.MANDATOS_IMAP_USER, exc)
-        return
+        return {"ok": False, "motivo": "autenticacion fallo",
+                "host": settings.IMAP_HOST, "usuario": settings.MANDATOS_IMAP_USER,
+                "error": str(exc)}
 
     logger.info("Diagnóstico IMAP: autenticado OK como %s", settings.MANDATOS_IMAP_USER)
+    resultado: dict = {"ok": True, "usuario": settings.MANDATOS_IMAP_USER,
+                       "dias": DIAS, "conteos": {}}
     try:
         from app.services.mandatos.imap_client import carpeta_enviados
 
         enviados = carpeta_enviados(imap)
+        resultado["carpeta_enviados"] = enviados
         logger.info("Diagnóstico IMAP: carpeta de Enviados = %r", enviados)
 
         for direccion in REMITENTES:
             n = _contar(imap, "INBOX", "FROM", direccion)
+            resultado["conteos"][f"INBOX FROM {direccion}"] = n
             logger.info("Diagnóstico IMAP: INBOX FROM %s -> %s correos en %d días",
                         direccion, n, DIAS)
 
         if enviados:
             n = _contar(imap, enviados, "TO", REMITENTES[0])
+            resultado["conteos"][f"{enviados} TO {REMITENTES[0]}"] = n
             logger.info("Diagnóstico IMAP: %r TO %s -> %s correos en %d días",
                         enviados, REMITENTES[0], n, DIAS)
         else:
+            resultado["advertencia"] = ("sin carpeta de Enviados, la reconciliación "
+                                        "por conteo no podrá funcionar")
             logger.warning("Diagnóstico IMAP: sin carpeta de Enviados, la "
                            "reconciliación por conteo no podrá funcionar")
     finally:
@@ -81,3 +94,4 @@ def diagnostico_imap() -> None:
             imap.logout()
         except Exception:
             pass
+    return resultado

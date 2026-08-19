@@ -1154,6 +1154,9 @@ _PENDING_DDLS = [
     # inversionista. Ver TRANSICIONES_FIRMA en finanzas_mandatos_service.py.
     "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'corregido'",
     "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'enviado_inversionista'",
+    # fecha_envio_inversionista: se llena cuando el estado pasa a
+    # enviado_inversionista (ver upsert_mandato).
+    "ALTER TABLE finanzas_mandatos ADD COLUMN IF NOT EXISTS fecha_envio_inversionista DATE",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",

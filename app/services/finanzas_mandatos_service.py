@@ -146,6 +146,15 @@ def upsert_mandato(db, *, proyecto, tercero, periodo, tipo, cmu, estado,
         if m.estado != "firmado":
             m.estado = "con_comentarios"
         m.comentario = comentario
+    elif estado == "corregido":
+        # Se rehizo lo que la revisoria objeto; vuelve a estar en juego.
+        m.estado = "corregido"
+        m.comentario = None
+    elif estado == "enviado_inversionista":
+        m.estado = "enviado_inversionista"
+        m.fecha_envio_inversionista = m.fecha_envio_inversionista or hoy
+        if drive_file_id:
+            m.drive_file_id, m.drive_url = drive_file_id, drive_url
     else:  # sin_firma
         m.fecha_envio = m.fecha_envio or hoy
     db.flush()

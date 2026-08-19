@@ -488,18 +488,31 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
     for nombre, contenido in adjuntos:
         if not nombre.lower().endswith(".pdf"):
             continue
-        ident = _identidad(nombre, correo)
-        if not ident:
+        parsed = parsear_nombre_zip(nombre)
+        if not parsed:
             sin_identidad.append(nombre)
             continue
         firmas = verificador(contenido)
         if fuente == FUENTE_ENVIO:
-            # Jessica manda al inversionista lo que ya está firmado.
+            # Jessica manda al inversionista lo que ya está firmado, y su correo
+            # SÍ trae el P.A., así que se puede armar la identidad completa y
+            # crear la fila si no existe.
+            ident = _identidad(nombre, correo)
+            if not ident:
+                sin_identidad.append(nombre)
+                continue
             acciones.append({**ident, "estado": "enviado_inversionista",
-                             "adjunto": nombre, "firmas": firmas})
+                             "adjunto": nombre, "firmas": firmas, "comentario": None})
         elif firmas["estado"] == "firmado_completo":
-            acciones.append({**ident, "estado": "firmado",
-                             "adjunto": nombre, "firmas": firmas})
+            # Los correos de la revisoría NO traen el P.A. -- verificado contra
+            # los tres fixtures reales: extraer_pa_del_cuerpo devuelve None en
+            # todos. Así que acá no se construye identidad, se busca la que ya
+            # existe por CMU (ver _aplicar). Inventar un tercero vacío crearía
+            # una fila paralela a la real y partiría el mandato en dos.
+            acciones.append({"cmu": parsed["cmu"], "proyecto": parsed["proyecto"],
+                             "tipo": tipo_de_nombre(nombre), "tercero": None,
+                             "periodo": None, "pa_codigo": None, "estado": "firmado",
+                             "adjunto": nombre, "firmas": firmas, "comentario": None})
         else:
             # Llegó el PDF pero no está firmado (o no se pudo verificar). No se
             # marca firmado por el mero hecho de que haya adjunto: manda el
@@ -563,7 +576,15 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
     from app.services.finanzas_mandatos_service import transicion_firma_valida
 
     if not accion.get("periodo"):
-        # Observación de texto sin adjunto: se resuelve por CMU.
+        # Todo lo que viene de la revisoría cae acá: sus correos no traen el
+        # P.A., así que no hay identidad que construir y hay que encontrar la
+        # fila que ya existe. Aplica tanto a las observaciones de texto como a
+        # los PDF firmados.
+        #
+        # Si no existe la fila, NO se crea: significaría que llegó firmado algo
+        # que la plataforma nunca vio salir. Eso es justo la anomalía que la
+        # reconciliación reporta como sin_registro_de_envio, y taparla creando
+        # una fila incompleta la volvería invisible.
         existente = (db.query(FinanzasMandato)
                      .filter(FinanzasMandato.cmu == accion["cmu"])
                      .order_by(FinanzasMandato.periodo.desc()).first())
@@ -575,7 +596,18 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                     "estado_previo": existente.estado, "estado_destino": destino}
         previo = existente.estado
         existente.estado = destino
-        existente.comentario = accion.get("comentario")
+        if accion.get("comentario") is not None:
+            existente.comentario = accion["comentario"]
+        existente.correo_ref = correo.message_id
+        if destino == "firmado":
+            existente.fecha_firma = existente.fecha_firma or correo.fecha.date()
+        if accion.get("adjunto"):
+            contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
+            if contenido:
+                from app.services.finanzas_mandatos_drive import subir_pdf
+                sub = f"{existente.periodo.strftime('%Y-%m')}-{existente.tipo}"
+                res = subir_pdf(contenido, accion["adjunto"], sub)
+                existente.drive_file_id, existente.drive_url = res["id"], res["url"]
         return {"cmu": accion["cmu"], "resultado": "aplicado", "id": existente.id,
                 "estado_previo": previo, "estado_nuevo": destino}
 

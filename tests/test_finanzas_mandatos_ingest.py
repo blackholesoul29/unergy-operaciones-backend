@@ -65,3 +65,31 @@ def test_respaldo_por_proyecto_cuando_cmu_corregido(db_session):
                                periodo=date(2026, 2, 1), tipo="costo", cmu="CMU0619", estado="firmado")
     assert creado is False
     assert m.cmu == "CMU0619" and m.cmu_anterior == "CMU0617"
+
+
+def test_upsert_asigna_corregido(db_session):
+    kw = dict(proyecto="P", tercero="T", periodo=date(2026, 7, 1),
+              tipo="costo", cmu="CMU1")
+    upsert_mandato(db_session, estado="con_comentarios", comentario="ajustar", **kw)
+    m, _ = upsert_mandato(db_session, estado="corregido", **kw)
+    assert m.estado == "corregido"
+    assert m.comentario is None
+
+
+def test_upsert_asigna_enviado_inversionista_y_su_fecha(db_session):
+    kw = dict(proyecto="P2", tercero="T", periodo=date(2026, 7, 1),
+              tipo="costo", cmu="CMU2")
+    upsert_mandato(db_session, estado="firmado", **kw)
+    m, _ = upsert_mandato(db_session, estado="enviado_inversionista",
+                          fecha=date(2026, 8, 1), **kw)
+    assert m.estado == "enviado_inversionista"
+    assert m.fecha_envio_inversionista == date(2026, 8, 1)
+
+
+def test_upsert_sigue_sin_degradar_un_firmado(db_session):
+    """Comportamiento existente que NO debe cambiar."""
+    kw = dict(proyecto="P3", tercero="T", periodo=date(2026, 7, 1),
+              tipo="costo", cmu="CMU3")
+    upsert_mandato(db_session, estado="firmado", **kw)
+    m, _ = upsert_mandato(db_session, estado="sin_firma", **kw)
+    assert m.estado == "firmado"

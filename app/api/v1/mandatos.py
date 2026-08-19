@@ -43,6 +43,20 @@ _ZIP_DIR = Path("uploads/mandatos/zips")
 _ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 
+@router.get("/diagnostico-imap")
+def diagnostico_imap_endpoint(_=Depends(get_current_user)):
+    """Prueba la conexión IMAP a demanda y devuelve lo que encontraría.
+
+    Existe porque el cron corre a los :05 y esperar una hora para saber si el
+    App Password sirve es absurdo. Solo lee: no toca la base de datos ni
+    modifica el buzón. Provisional, igual que el módulo que invoca -- se borra
+    junto con él cuando la ingesta real entre en servicio.
+    """
+    from app.services.mandatos.diagnostico import diagnostico_imap
+
+    return diagnostico_imap()
+
+
 @router.get("/correos")
 def listar_correos(limite: int = 100, solo_revision: bool = False,
                    db: Session = Depends(get_db), _=Depends(get_current_user)):

@@ -158,7 +158,13 @@ class OportunidadGestion(Base):
     oferta_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("oportunidad_ofertas.id", ondelete="SET NULL"),
         nullable=True, index=True)
-    tipo: Mapped[str] = mapped_column(SAEnum(TipoGestionEnum, name="tipo_gestion_enum"), nullable=False)
+    # Fix 2026-08-19: "tipo_gestion_enum" ya era el nombre del tipo de
+    # GestionRegistro (app/models/gestion.py, migración 007 -- pqr/preventivo/
+    # correctivo). Como esta tabla nunca tuvo su propia migración (solo
+    # create_all() al arrancar), reusaba ese tipo existente en vez de crear
+    # el suyo -- cualquier insert con llamada/correo/reunion/whatsapp/nota
+    # violaba el enum, asi que oportunidad_gestiones nunca guardo una fila.
+    tipo: Mapped[str] = mapped_column(SAEnum(TipoGestionEnum, name="tipo_gestion_oportunidad_enum"), nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     # Editable: permite registrar hoy una llamada que fue ayer.
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

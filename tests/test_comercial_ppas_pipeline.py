@@ -876,10 +876,13 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     dos viajan: uno es lo que declaró el diseño, el otro lo que está cargado
     (y es lo que se usa para reportar fallas por inversor)."""
     proy = _proyecto(db, nombre_comercial="GD Catedral", tipo_conexion="trifásica",
-                     cantidad_total_paneles=1800,
                      produccion_especifica_kwh_kwp=1450.5)
+    # El conteo de paneles vive en la ficha técnica y solo ahí: hasta 2026-08-19
+    # estaba duplicado en `proyectos.cantidad_total_paneles`, y esa columna se
+    # eliminó.
     _info_tecnica(db, proy, voltaje_red="13.2 kV", potencia_ac_kw=900,
                   capacidad_instalada_kwp=990, tipo_tracker="1E",
+                  cantidad_total_paneles=1800,
                   marca_paneles="Trina", potencia_panel_kwp="0.55",
                   cantidad_inversores=5, marca_inversores="Huawei",
                   cantidad_strings=48, marca_transformador="Siemens",

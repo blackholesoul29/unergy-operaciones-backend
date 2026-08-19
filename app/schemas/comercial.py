@@ -112,6 +112,10 @@ class OfertaCreate(BaseModel):
     tipo: TipoOfertaLiteral
     planta_nombre: Optional[str] = None
     proyecto_id: Optional[int] = None
+    # Plantas de la oferta (M2M). Una oferta puede cubrir varias ("Balmora 1 y 2");
+    # es lo que /firmar pasa al contrato. Si se envía, la primera se copia también
+    # a `proyecto_id`, que es lo que siguen leyendo el vinculador y la ficha.
+    proyecto_ids: Optional[list[int]] = None
     numero_oferta: Optional[str] = None
     precio_detalle: Optional[str] = None
     # `resultado` ya no se envía: se deriva de `estado` (ver estado_a_resultado).
@@ -119,7 +123,9 @@ class OfertaCreate(BaseModel):
     etapa_texto: Optional[str] = None
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
+    fecha_fin_tentativa: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    documento_url: Optional[str] = None
     detalle: Optional[dict] = None
     # ── Ficha operativa declarada (2026-08-03) ───────────────────────────────
     # Solo aplican cuando la planta no existe como Proyecto: si lo tiene, manda
@@ -136,14 +142,29 @@ class OfertaUpdate(BaseModel):
     tipo: Optional[TipoOfertaLiteral] = None
     planta_nombre: Optional[str] = None
     proyecto_id: Optional[int] = None
+    # Ver OfertaCreate.proyecto_ids. Lista vacía = desvincular todas las plantas.
+    proyecto_ids: Optional[list[int]] = None
     numero_oferta: Optional[str] = None
     precio_detalle: Optional[str] = None
     # El estado se cambia por POST /ofertas/{id}/estado, que además deja histórico.
     etapa_texto: Optional[str] = None
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
+    fecha_fin_tentativa: Optional[date] = None
     contrato_firmado: Optional[str] = None
     detalle: Optional[dict] = None
+    # ── Seguimiento del envío (editables desde 2026-08-19) ───────────────────
+    # Antes solo los escribía el import de correos y el +1 de /seguimiento: no
+    # había forma de registrar que el cliente CONTESTÓ, que es lo que apaga la
+    # señal fuerte del tablero. `seguimientos` es editable para corregir un
+    # conteo mal importado, no para reemplazar a POST /ofertas/{id}/seguimiento.
+    fecha_ultima_respuesta: Optional[date] = None
+    seguimientos: Optional[int] = Field(None, ge=0)
+    documento_url: Optional[str] = None
+    # En qué contrato de servicios desembocó. El PPA lo enlaza /firmar solo; los
+    # contratos de representación se crean por su propio wizard, así que el
+    # enlace tiene que poder hacerse a mano o la oferta queda huérfana.
+    contrato_servicio_id: Optional[int] = None
     # Ficha operativa declarada — ver OfertaCreate.
     municipio: Optional[str] = None
     departamento: Optional[str] = None
@@ -160,6 +181,32 @@ class GestionCreate(BaseModel):
     tipo: TipoGestionLiteral
     descripcion: str = Field(min_length=1)
     fecha: Optional[datetime] = None
+    # A cuál oferta se refiere. NULL = gestión del cliente: cuenta para todas
+    # sus ofertas, que es como se comportaban todas antes de 2026-08-19.
+    oferta_id: Optional[int] = None
+
+
+class RegistroComercialIn(BaseModel):
+    """Registro comercial completo en UNA transacción: cliente (nuevo o existente)
+    + oportunidad + sus ofertas.
+
+    Existe porque el registro en dos llamadas dejaba oportunidades sin ofertas, y
+    una oportunidad sin ofertas es INVISIBLE en toda la aplicación: el tablero y la
+    tabla se alimentan de las ofertas. Quien registraba veía "creado con éxito" y
+    después no encontraba nada. Por eso `ofertas` exige al menos una.
+    """
+    cliente_id: Optional[int] = None
+    cliente_nuevo: Optional[ClienteNuevoIn] = None
+    nombre: Optional[str] = None
+    notas: Optional[str] = None
+    forzar_cliente_duplicado: bool = False
+    ofertas: list[OfertaCreate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def exactamente_un_cliente(self):
+        if bool(self.cliente_id) == bool(self.cliente_nuevo):
+            raise ValueError("Envía cliente_id O cliente_nuevo (exactamente uno)")
+        return self
 
 
 class ProyectoDesdeCRMIn(BaseModel):

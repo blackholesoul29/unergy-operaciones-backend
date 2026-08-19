@@ -52,6 +52,12 @@ def add_columns():
         # inicio que ya existía, es lo que permite que un PPA en borrador declare
         # su periodo antes de firmarse.
         "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_fin_tentativa DATE",
+        # oportunidad_gestiones: a cuál oferta se refiere la gestión (2026-08-19).
+        # NULL = del cliente, cuenta para todas sus ofertas (comportamiento viejo,
+        # que es el que conservan las filas existentes).
+        "ALTER TABLE oportunidad_gestiones ADD COLUMN IF NOT EXISTS oferta_id BIGINT",
+        "CREATE INDEX IF NOT EXISTS ix_oportunidad_gestiones_oferta_id "
+        "ON oportunidad_gestiones (oferta_id)",
         # ppa_contratos: tipo_contrato y carpeta_link (migración 009)
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",

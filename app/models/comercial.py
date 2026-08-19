@@ -149,6 +149,15 @@ class OportunidadGestion(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     oportunidad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=False, index=True)
+    # A CUÁL oferta se refiere la gestión (2026-08-19). NULL = gestión del
+    # cliente, que cuenta para todas sus ofertas — así se comportaban todas
+    # antes, y las filas viejas lo conservan. Con la etapa viviendo en la oferta
+    # desde 2026-08-02, una gestión sin dueño apagaba la alerta de las hermanas:
+    # llamar por Margaritas 1 dejaba de avisar que Margaritas 2 seguía muda.
+    # SET NULL al borrar la oferta: la conversación pasó, el registro queda.
+    oferta_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("oportunidad_ofertas.id", ondelete="SET NULL"),
+        nullable=True, index=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoGestionEnum, name="tipo_gestion_enum"), nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     # Editable: permite registrar hoy una llamada que fue ayer.

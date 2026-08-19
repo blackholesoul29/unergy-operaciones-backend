@@ -43,6 +43,8 @@ def db():
         Cliente.__table__, ClienteDocumentoComercial.__table__, Contacto.__table__,
         Proyecto.__table__, Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
+        # Las plantas de la oferta viajan en cada respuesta desde 2026-08-19.
+        Base.metadata.tables["oportunidad_oferta_proyectos"],
     ])
     session = sessionmaker(bind=engine)()
     yield session

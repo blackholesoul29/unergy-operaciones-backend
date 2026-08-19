@@ -58,6 +58,36 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
     return salida
 
 
+@router.get("/proyectos/{proyecto_id}", response_model=ProyectoLiquidacionesOut)
+def obtener_proyecto(proyecto_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Configuración de liquidaciones de un solo proyecto."""
+    proy = (
+        db.query(Proyecto)
+        .filter(Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None))
+        .first()
+    )
+    if not proy:
+        raise HTTPException(404, "Proyecto no encontrado")
+
+    datos: dict = {}
+    if proy.sub_project:
+        try:
+            datos = liquidaciones_api.obtener_proyecto(proy.sub_project)
+        except LiquidacionesAPIError:
+            # El proyecto puede no existir en la API; se devuelve sin configuración.
+            datos = {}
+
+    return ProyectoLiquidacionesOut(
+        proyecto_id=proy.id,
+        nombre_comercial=proy.nombre_comercial,
+        tipo_proyecto=proy.tipo_proyecto,
+        estado=proy.estado,
+        nombre_topico=proy.sub_project,
+        en_api=bool(datos),
+        **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
+    )
+
+
 @router.patch("/proyectos/{proyecto_id}", response_model=ProyectoLiquidacionesOut)
 def actualizar_proyecto(
     proyecto_id: int,

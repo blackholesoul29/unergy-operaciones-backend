@@ -148,6 +148,12 @@ def listar_proyectos() -> list[dict[str, Any]]:
     return [_proyectar(p) for p in data]
 
 
+def obtener_proyecto(topico: str) -> dict[str, Any]:
+    """Configuración de liquidaciones de un solo proyecto, por su tópico."""
+    data = _request("GET", PATH_PROYECTO.format(topico=topico))
+    return _proyectar(data) if isinstance(data, dict) else {}
+
+
 def actualizar_proyecto(topico: str, cambios: dict[str, Any]) -> dict[str, Any]:
     """Actualiza los campos de §3.1 de un proyecto, identificado por su tópico."""
     permitidos = {k: v for k, v in cambios.items() if k in CAMPOS_PROYECTO}

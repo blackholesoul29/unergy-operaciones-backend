@@ -31,13 +31,23 @@ _STOPWORDS = {
 }
 
 
+# Sufijos societarios (razón social de empresa, no de proyecto/frontera) --
+# se quitan ANTES de tirar la puntuación, para que "S.A.S." se reconozca como
+# una sola unidad y no como las letras sueltas "s"/"a"/"s" tras normalizar.
+_SUFIJOS_SOCIETARIOS = re.compile(
+    r"\b(s\.?a\.?s\.?|e\.?s\.?p\.?|s\.?a\.?|ltda\.?|bic)\b", re.IGNORECASE
+)
+
+
 def normalizar(texto: str) -> str:
-    """Quita tildes, pone minúsculas, elimina caracteres no alfanuméricos."""
+    """Quita tildes, pone minúsculas, sufijos societarios (S.A.S./LTDA/E.S.P.)
+    y elimina caracteres no alfanuméricos."""
     if not texto:
         return ""
     nfkd = unicodedata.normalize("NFKD", texto)
-    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9\s]", " ", ascii_str.lower()).strip()
+    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii").lower()
+    ascii_str = _SUFIJOS_SOCIETARIOS.sub(" ", ascii_str)
+    return re.sub(r"[^a-z0-9\s]", " ", ascii_str).strip()
 
 
 def core_tokens(nombre: str) -> set[str]:

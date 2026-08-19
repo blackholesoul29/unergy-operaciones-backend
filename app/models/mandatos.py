@@ -68,3 +68,30 @@ class Mandato(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     inversionista: Mapped["MandatoInversionista | None"] = relationship("MandatoInversionista", back_populates="mandatos")
+
+
+class MandatoCorreo(Base):
+    """Bitácora de correos leídos por IMAP -- procesados y omitidos.
+
+    Una fila por correo, deduplicada por el header Message-ID. Se registra
+    TODO lo que el lector vio, no solo aquello sobre lo que actuó: un correo
+    omitido es información, y sin esta tabla el usuario no tendría cómo saber
+    que existió.
+
+    `detalle` guarda el estado anterior de cada mandato afectado -- de ahí sale
+    la reversión.
+    """
+    __tablename__ = "mandato_correos"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(998), nullable=False, unique=True)
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    remitente: Mapped[str] = mapped_column(String(255), nullable=False)
+    asunto: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    fuente: Mapped[str] = mapped_column(String(20), nullable=False)          # revisoria | envio_inversionista
+    clasificacion: Mapped[str] = mapped_column(String(20), nullable=False)   # molde_simple | seguimiento | desconocido
+    resultado: Mapped[str] = mapped_column(String(20), nullable=False)       # aplicado | omitido | error
+    requiere_revision: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    detalle: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="'{}'::jsonb")
+    revertido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

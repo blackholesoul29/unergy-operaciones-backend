@@ -83,3 +83,20 @@ def resumen(periodo: str = Query(...), db: Session = Depends(get_db),
             "con_comentarios": sum(1 for m in sub if m.estado == "con_comentarios"),
         }
     return {"periodo": periodo, "ingreso": conteo("ingreso"), "costo": conteo("costo")}
+
+
+@router.get("/reconciliacion")
+def reconciliacion(periodo: str = Query(...), tipo: str = Query(None),
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """De los mandatos enviados en el período, cuáles no han vuelto."""
+    from app.services.mandatos.reconciliacion import reconciliar
+
+    try:
+        per = datetime.strptime(periodo.strip()[:7], "%Y-%m").date()
+    except ValueError:
+        raise HTTPException(422, "periodo debe ser YYYY-MM")
+
+    q = db.query(FinanzasMandato).filter(FinanzasMandato.periodo == per)
+    if tipo:
+        q = q.filter(FinanzasMandato.tipo == tipo)
+    return {"periodo": periodo, "tipo": tipo, **reconciliar(q.all())}

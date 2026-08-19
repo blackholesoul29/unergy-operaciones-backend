@@ -15,6 +15,21 @@ _PALABRAS_CORRECCION = (
     "esta mal", "error", "no cuadra", "revisar",
 )
 
+# Transiciones permitidas del estado de firma. Mismo criterio que TRANSICIONES en
+# mandatos_service.py: el grafo es la red de seguridad de la ingesta automática --
+# si un correo propone un salto que no está acá, no se aplica y queda registrado.
+TRANSICIONES_FIRMA = {
+    "sin_firma":             {"con_comentarios", "firmado"},
+    "con_comentarios":       {"corregido"},
+    "corregido":             {"firmado", "sin_firma"},
+    "firmado":               {"enviado_inversionista"},
+    "enviado_inversionista": set(),
+}
+
+
+def transicion_firma_valida(estado_actual: str, estado_nuevo: str) -> bool:
+    return estado_nuevo in TRANSICIONES_FIRMA.get(estado_actual, set())
+
 
 def _norm(s: str) -> str:
     nfkd = unicodedata.normalize("NFKD", s or "")

@@ -1109,6 +1109,51 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
+    """CREATE TABLE IF NOT EXISTS mandato_correos (
+        id BIGSERIAL PRIMARY KEY,
+        message_id VARCHAR(998) NOT NULL UNIQUE,
+        fecha TIMESTAMPTZ NOT NULL,
+        remitente VARCHAR(255) NOT NULL,
+        asunto VARCHAR(1000),
+        fuente VARCHAR(20) NOT NULL,
+        clasificacion VARCHAR(20) NOT NULL,
+        resultado VARCHAR(20) NOT NULL,
+        requiere_revision BOOLEAN NOT NULL DEFAULT FALSE,
+        detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
+        revertido BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_revision ON mandato_correos (requiere_revision)",
+    # La tabla ya existe en producción, creada por Base.metadata.create_all().
+    # Se declara acá por consistencia con el resto del esquema y para que un
+    # ALTER TYPE sobre su enum (ver más abajo) tenga su tabla al lado. El
+    # IF NOT EXISTS la vuelve un no-op donde ya está.
+    """CREATE TABLE IF NOT EXISTS finanzas_mandatos (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto VARCHAR(255) NOT NULL,
+        tercero VARCHAR(255) NOT NULL DEFAULT '',
+        periodo DATE NOT NULL,
+        tipo tipo_mandato_fin_enum NOT NULL,
+        cmu VARCHAR(20),
+        cmu_anterior VARCHAR(20),
+        estado estado_firma_fin_enum NOT NULL DEFAULT 'sin_firma',
+        comentario TEXT,
+        fecha_envio DATE,
+        fecha_firma DATE,
+        drive_file_id VARCHAR(255),
+        drive_url VARCHAR(1000),
+        correo_ref VARCHAR(500),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_finmandato_identidad ON finanzas_mandatos (proyecto, tercero, periodo, tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_periodo ON finanzas_mandatos (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_cmu ON finanzas_mandatos (cmu)",
+    # Estados nuevos del ciclo de firma (2026-08-18): corrección y entrega al
+    # inversionista. Ver TRANSICIONES_FIRMA en finanzas_mandatos_service.py.
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'corregido'",
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'enviado_inversionista'",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",
@@ -2539,6 +2584,26 @@ def _scheduled_excel_terceros_cedillanos():
     revisar_correo_cedillanos()
 
 
+def _scheduled_correos_mandatos():
+    """MODO DIAGNÓSTICO -- lee el buzón y solo reporta al log. NO escribe nada.
+
+    Provisional y a propósito. La ingesta de Fase B (email_sync) escribe en la
+    tabla `mandatos`, que la integración con Finanzas va a descartar; prenderla
+    ahora significaría procesar 30 días de correo hacia una tabla condenada.
+    Pero apagar el cron del todo tampoco sirve: es lo único que ejercita IMAP en
+    producción, y sin él no hay forma de saber si el App Password funciona ni si
+    la carpeta de Enviados se detecta.
+
+    Así que por ahora conecta, cuenta y reporta. Cuando el Plan 2 esté listo,
+    su Tarea 5 reemplaza el cuerpo de esta función por la ingesta real hacia
+    finanzas_mandatos. Ver
+    docs/superpowers/plans/2026-08-18-mandatos-integracion-02-adaptador.md
+    """
+    from app.services.mandatos.diagnostico import diagnostico_imap
+
+    diagnostico_imap()
+
+
 def _scheduled_cerrar_contratos_vencidos():
     """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
 
@@ -3533,6 +3598,14 @@ def _deferred_init():
                     CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
                     id="excel_terceros_cedillanos_6am",
                     name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
+                )
+
+            if settings.MANDATOS_IMAP_USER and settings.MANDATOS_IMAP_PASSWORD:
+                _mgs_scheduler.add_job(
+                    _scheduled_correos_mandatos,
+                    CronTrigger(hour="7-19", minute=5, timezone=settings.TIMEZONE),
+                    id="correos_mandatos",
+                    name="Mandatos -- lectura de correo por IMAP (7am-7pm)",
                 )
 
             # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del

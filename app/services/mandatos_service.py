@@ -6,7 +6,22 @@ import difflib
 from datetime import date
 
 CMU_RE = re.compile(r"CMU\d+")
-ZIP_NOMBRE_RE = re.compile(r"^(CMU\d+)-Mandato-Costos-(.+)-(.+)\.pdf$", re.IGNORECASE)
+# Dos convenciones reales conviven (verificado 2026-08-18):
+#   CMU0988-Mandato-Costos-{Proyecto}-{Inversionista}.pdf   inversionista con nombre
+#   CMU1140-Mandato-Costos-{Proyecto}.pdf                   mandante es un P.A.
+#
+# Hacer opcional el grupo del inversionista no basta: "PSF - Yurbaqua.pdf" es un
+# proyecto con guion adentro y se partiría en ('PSF', 'Yurbaqua'). La señal que
+# los distingue en los nombres reales es el ESPACIADO -- el guion separador del
+# inversionista va pegado ("...Uruaco-SUNO..."), y los guiones internos del
+# nombre del proyecto van con espacios ("PSF - Yurbaqua"). De ahí el lookaround.
+#
+# La distinción es heurística, no garantizada: un proyecto con guion pegado o un
+# inversionista con guion espaciado la romperían. Se acepta porque la fuente
+# autoritativa del tercero pasa a ser el cuerpo del correo (extraer_pa_del_cuerpo),
+# no el nombre del archivo.
+ZIP_NOMBRE_RE = re.compile(
+    r"^(CMU\d+)-Mandato-Costos-(.+?)(?:(?<! )-(?! )([^-]+))?\.pdf$", re.IGNORECASE)
 
 MESES = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
@@ -94,19 +109,18 @@ def calcular_resumen(filas) -> dict:
 
 
 def parsear_nombre_zip(nombre: str) -> dict | None:
-    """'CMU0988-Mandato-Costos-{Proyecto}-{Inversionista}.pdf' → dict | None.
+    """'CMU0988-Mandato-Costos-{Proyecto}[-{Inversionista}].pdf' → dict | None.
 
-    Divide en el último guion: un proyecto con guion (ej. 'PSF - Yurbaqua') queda
-    íntegro y el inversionista en el último segmento.
+    El inversionista es opcional: los mandatos de un P.A. de fiduciaria no lo
+    traen en el nombre (ahí el mandante sale del cuerpo del correo). Cuando
+    falta, se devuelve cadena vacía -- nunca se inventa.
     """
     m = ZIP_NOMBRE_RE.match((nombre or "").strip())
     if not m:
         return None
-    return {
-        "cmu": m.group(1).upper(),
-        "proyecto": m.group(2).strip(),
-        "inversionista": m.group(3).strip(),
-    }
+    return {"cmu": m.group(1).upper(),
+            "proyecto": (m.group(2) or "").strip(),
+            "inversionista": (m.group(3) or "").strip()}
 
 
 def match_inversionista(nombre: str, maestra: list[dict], umbral: float = 0.6):

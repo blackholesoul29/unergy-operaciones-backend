@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     IMAP_HOST: str = "imap.gmail.com"
     IMAP_PORT: int = 993
 
+    # IMAP de mandatos -- buzón adhara@unergy.io, el único en copia de las tres
+    # fuentes de correo de mandatos (revisoría y envíos a inversionistas).
+    # NO reusa SMTP_USER/SMTP_PASSWORD: esas son de operaciones@, otra cuenta.
+    # Requiere App Password propio (verificación en dos pasos activa en la cuenta).
+    MANDATOS_IMAP_USER: str = ""
+    MANDATOS_IMAP_PASSWORD: str = ""
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:

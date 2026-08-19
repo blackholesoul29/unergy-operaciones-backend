@@ -151,12 +151,20 @@ quién le escribe — hoy su script, después el cron.
 parser sirve; pero el cliente IMAP tiene que abrir el ZIP. `POST /mandatos/upload-zip`
 (Fase A) ya tiene esa lógica, se reusa.
 
-### Sigue abierto
+### Resuelto: el script se retira, con una condición
 
-- **¿Jessica quiere dejar de correr su script?** Si existe para organizarle a *ella*
-  los mandatos enviados, puede que no sea un pipeline duplicado sino herramienta
-  personal que la plataforma no reemplaza. La integración correcta entonces no es
-  retirarlo, sino que la plataforma cubra la ingesta automática y él siga a su lado.
+**Jessica quiere dejar de correrlo, siempre que la plataforma haga lo mismo.** Eso
+convierte en requisito lo que parecía opcional: no se puede retirar el script hasta
+que la plataforma cubra **todo** lo que él hace, y eso incluye las dos capacidades
+que hoy solo existen ahí -- verificar las dos firmas abriendo el PDF, y reconciliar
+por conteo contra lo enviado.
+
+Consecuencia en el orden de trabajo: **el Plan 3 (firmas y reconciliación) pasa antes
+del Plan 2 (adaptador de ingesta)**. Así la ingesta automática nace ya con la
+verificación adentro, en vez de prender el cron primero y quedar un tiempo con menos
+garantías que el script que reemplaza.
+
+Orden final: **1 → 3 → 2 → 4 → 5**.
 - **Si los PDFs quedaron realmente cargados en Drive.** El usuario dijo "se supone
   que cargó los PDFs". Conviene confirmarlo antes de construir encima; un endpoint de
   diagnóstico que cuente cuántas filas tienen `drive_url` lo resuelve.

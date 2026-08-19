@@ -462,6 +462,29 @@ class ProyectoOut(BaseModel):
         return v
 
 
+# ── Listado liviano de consulta ────────────────────────────────────────────────
+# Para GET /proyectos/lista: lo justo para identificar un proyecto y quedarse con
+# su `id`, con el que después se pide el detalle completo (ProyectoOut). No trae
+# relaciones anidadas a propósito -- ese es el valor del paso del detalle.
+
+class ProyectoListaOut(BaseModel):
+    id: int
+    nombre_comercial: str
+    estado: str
+    tipo_proyecto: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    potencia_instalada_kwp: Optional[float] = None
+    sub_project: Optional[str] = None   # API ID Unergy
+    codigo_tsf: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class ProyectoListaResponse(BaseModel):
+    total: int
+    items: list[ProyectoListaOut]
+
+
 # ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────
 
 class ProyectoPendienteOut(BaseModel):

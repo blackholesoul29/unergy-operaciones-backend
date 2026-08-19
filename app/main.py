@@ -48,10 +48,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p99_mensual_kwh JSONB",
     # migration 005 — código TSF (frontera CREG) por proyecto
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_tsf VARCHAR(100)",
-    # migration 006 — múltiples correos por cliente (T14)
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
     # impuestos por cliente — reteiva (retención de IVA), separada de reteica
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
     # soportes/comprobantes (archivo Drive) por transacción del panel contable
@@ -399,8 +395,6 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_precio_unitario NUMERIC(12,4)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_vintage VARCHAR(20)",
     "ALTER TYPE servicio_aplica_enum ADD VALUE IF NOT EXISTS 'rec'",
-    # migration 015 — correo_operacional en clientes
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_operacional VARCHAR(255)",
     # MGS alarms table
     """CREATE TABLE IF NOT EXISTS alarmas_monitoreo (
         id BIGSERIAL PRIMARY KEY,

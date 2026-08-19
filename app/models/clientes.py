@@ -1,9 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func, text
+from sqlalchemy.sql import func
 from app.models.base import Base
 
 
@@ -43,12 +42,6 @@ class Cliente(Base):
     nit_cedula: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo_persona: Mapped[str | None] = mapped_column(SAEnum(TipoPersonaEnum, name="tipo_persona_enum"), nullable=True)
     representante_legal: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_liquidacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_operacional: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correos_operacionales: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default=text("'[]'"))
-    correos_cgm: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default=text("'[]'"))
     telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)

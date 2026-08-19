@@ -46,13 +46,29 @@ leen `ppa_contratos`.
 
 ---
 
-## 2. `estado_ppa`
+## 2. `estado`: uno solo
 
-| Valor | Qué significa | Qué esperar |
-|---|---|---|
-| `borrador` | Etapa `oferta` o `contrato`: el PPA está en preparación | `id: null`. Condiciones tentativas. Es normal que no haya proyectos vinculados |
-| `firmado` | El contrato existe | `id` poblado, condiciones del contrato |
-| `sin_contrato` | **Inconsistencia.** La oferta está `firmado` u `operando` y no hay PPA por ningún camino | El negocio cerró y el contrato falta. Es dato por cargar de nuestro lado |
+`estado` es la etapa del pipeline comercial, el mismo vocabulario que se ve en el
+tablero de `/comercial`: `oferta`, `contrato`, `firmado`, `operando` (y
+`terminado` / `declinado` si los pedís por `estado_pipeline`).
+
+**No hay un segundo estado que pueda contradecirlo.** Las tres situaciones que
+importan salen de cruzarlo con `id`:
+
+| `estado` | `id` | Qué significa | Qué esperar |
+|---|---|---|---|
+| `oferta`, `contrato` | `null` | El PPA está **en preparación** | Condiciones tentativas. Es normal que no haya proyectos vinculados |
+| cualquiera | poblado | El **contrato existe** | Condiciones del contrato. Aparece en `/servicios` |
+| `firmado`, `operando` | `null` | **Inconsistencia.** El negocio cerró y no hay PPA por ningún camino | Es dato por cargar de nuestro lado |
+
+> **Cambio incompatible (2026-08-19).** Antes el nodo traía además
+> `etapa_comercial`, `estado_ppa` y `es_borrador`. Ninguno aportaba información
+> propia: los tres eran función de la etapa y de si `id` es `null`. Y `estado_ppa`
+> reusaba la palabra **firmado** con otro significado —"existe la fila en
+> `ppa_contratos`"—, así que un nodo podía traer `estado_ppa: "firmado"` al lado
+> de `etapa_comercial: "oferta"` y leerse como una contradicción. Ahora
+> `etapa_comercial` se llama **`estado`** y los otros dos se derivan de la tabla
+> de arriba. En el sobre, `por_estado_ppa` pasó a **`por_estado`**.
 
 ### De dónde sale el contrato: `fuente_ppa`
 
@@ -62,12 +78,12 @@ El PPA se resuelve por **dos caminos**, y el explícito manda:
 |---|---|
 | `"oferta"` | El enlace que deja `firmar` (`oferta.ppa_contrato_id`) |
 | `"proyecto"` | El PPA vigente **de la planta**. Los contratos anteriores al CRM no están enlazados a ninguna oferta, así que este es hoy el camino normal |
-| `null` | No hay contrato por ningún camino → `estado_ppa: "sin_contrato"` |
+| `null` | No hay contrato por ningún camino. Si además `estado` es `firmado` u `operando`, es la inconsistencia de arriba |
 
 Si hay varios contratos en la planta gana el vigente hoy, y entre vigentes el de
 compra. Un contrato vencido de 2021 no le gana al que está corriendo.
 
-`sin_contrato` **no se rellena** inventando un contrato con fechas y tarifas nulas: eso
+Esa inconsistencia **no se rellena** inventando un contrato con fechas y tarifas nulas: eso
 metería compromisos fantasma en Cumplimiento. Se muestra para que se corrija. Si te
 aparece uno, avisá.
 
@@ -95,15 +111,13 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
   "generado_en": "2026-08-18T14:03:11-05:00",
   "estados_pipeline": ["oferta", "contrato", "firmado", "operando"],
   "total": 61,
-  "por_estado_ppa": { "borrador": 49, "firmado": 5, "sin_contrato": 7 },
+  "por_estado": { "oferta": 44, "contrato": 5, "firmado": 5, "operando": 7 },
   "ppas": [
     {
       "ppa": {
         "id": null,
-        "es_borrador": true,
-        "estado_ppa": "borrador",
+        "estado": "oferta",
         "aparece_en_servicios": false,
-        "etapa_comercial": "oferta",
         "numero_codigo_contrato": null,
         "nombre_interno": null,
         "planta_declarada": "Balmora 1 y 2",
@@ -433,7 +447,7 @@ curl "$BASE/comercial/proyectos-operando?estado_pipeline=oferta&estado_pipeline=
 | 401 | Falta el header `X-API-Key`, o la key no existe / está desactivada |
 | 422 | `estado_pipeline` recibió algo que no es una de las cuatro etapas con PPA (incluye `declinado` y `terminado`, que existen en el CRM pero nunca tienen contrato) |
 
-Un resultado vacío no es un error: 200 con `total: 0`, `ppas` vacío y `por_estado_ppa` vacío.
+Un resultado vacío no es un error: 200 con `total: 0`, `ppas` vacío y `por_estado` vacío.
 
 ---
 

@@ -1,4 +1,5 @@
 """Lógica pura del CRM comercial (testeable sin BD)."""
+import enum
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -787,7 +788,19 @@ def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list
 
 
 def _valor_enum(v):
-    return v if isinstance(v, (str, type(None))) else v.value
+    """Enum de SQLAlchemy → slug; deja pasar lo que ya es str puro o None.
+
+    El `isinstance(v, str)` se chequea DESPUÉS del enum, y no antes, porque los
+    enums del CRM heredan de `str` (`class EstadoComercialEnum(str, Enum)`): con
+    el orden inverso esta función devolvía el miembro del enum tal cual y no
+    normalizaba nada, pese al nombre. Las comparaciones seguían andando —un
+    str-enum es igual a su valor— y FastAPI lo serializaba bien, así que no se
+    notaba; pero cualquier lector en Python recibía `EstadoComercialEnum.firmado`
+    y al imprimirlo o usarlo de clave veía eso mismo en vez de `"firmado"`.
+    """
+    if v is None:
+        return None
+    return v.value if isinstance(v, enum.Enum) else v
 
 
 # Umbral para proponer un vínculo oferta→proyecto. Bastante más alto que el
@@ -1049,10 +1062,6 @@ TIPOS_ENERGIA = ("compra_energia", "comunidad_energetica")
 # salidas (declinado/terminado) porque un negocio caído no es un contrato en
 # preparación: sería basura con forma de PPA.
 ETAPAS_CON_PPA = ("oferta", "contrato", ESTADO_FIRMADO, ESTADO_OPERANDO)
-
-# Las etapas en las que todavía NO debería haber contrato. Fuera de estas, que no
-# haya PPA es dato faltante y no un borrador.
-ETAPAS_ANTES_DE_FIRMAR = ("oferta", "contrato")
 
 
 def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict]:
@@ -1835,24 +1844,27 @@ def _nodo_ppa(oferta, ppa=None, fuente_ppa=None, proyectos=(), ofertas=None,
     oferta sin decirlo — el borrador declara sus condiciones como tentativas.
     """
     etapa = _valor_enum(oferta.estado)
-    # Antes de firmar, "no hay contrato" es lo esperado. Después de firmar, es una
-    # INCONSISTENCIA: el negocio cerró y el PPA no está cargado. Son dos cosas
-    # distintas y se nombran distinto — llamar borrador a la segunda diría que el
-    # contrato está en preparación, y taparía dato faltante.
-    antes_de_firmar = etapa in ETAPAS_ANTES_DE_FIRMAR
-    es_borrador = ppa is None and antes_de_firmar
-    if ppa is not None:
-        estado_ppa = "firmado"
-    elif antes_de_firmar:
-        estado_ppa = "borrador"
-    else:
-        estado_ppa = "sin_contrato"
     return {
         "ppa": {
             "id": None if ppa is None else ppa.id,
-            "es_borrador": es_borrador,
-            "estado_ppa": estado_ppa,
-            "etapa_comercial": etapa,
+            # UN solo estado, y es el del pipeline comercial: oportunidad,
+            # oferta, contrato, firmado, operando, terminado, declinado.
+            #
+            # Antes había dos (`etapa_comercial` y `estado_ppa`) y el segundo no
+            # aportaba nada: era función pura de este estado y de si `id` es
+            # None. Peor, reusaba la palabra «firmado» con OTRO significado —
+            # "existe la fila en ppa_contratos" — así que un nodo podía decir
+            # `estado_ppa: firmado` junto a `etapa_comercial: oferta` y leerse
+            # como una contradicción cuando no lo era.
+            #
+            # Lo que decían los tres valores viejos se lee de `estado` + `id`:
+            #   borrador      → estado en (oferta, contrato) e `id` None
+            #   firmado       → `id` con valor (el contrato existe)
+            #   sin_contrato  → estado en (firmado, operando) e `id` None,
+            #                   que es la INCONSISTENCIA: el negocio cerró y el
+            #                   PPA no está cargado. Sigue viéndose igual de
+            #                   claro, y ahora sin dos vocabularios en pugna.
+            "estado": etapa,
             # El gate explícito, y el mismo hecho que `id is not None`:
             # /servicios lista `ppa_contratos`, así que sin fila no hay nada que
             # listar. Viaja como booleano para que quien integre no tenga que

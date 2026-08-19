@@ -108,9 +108,10 @@ def test_una_oferta_de_energia_sin_contrato_es_un_ppa_borrador(db):
     assert len(nodos) == 1
     ppa = nodos[0]["ppa"]
     assert ppa["id"] is None
-    assert ppa["es_borrador"] is True
     assert ppa["aparece_en_servicios"] is False
-    assert ppa["estado_ppa"] == "borrador"
+    # UN solo estado, el del pipeline. "Borrador" no es un estado aparte: es
+    # este estado con `id` en None.
+    assert ppa["estado"] == "oferta"
 
 
 def test_una_oferta_firmada_con_contrato_es_un_ppa_real(db):
@@ -126,7 +127,7 @@ def test_una_oferta_firmada_con_contrato_es_un_ppa_real(db):
     nodo = ppas_del_pipeline(db, hoy=HOY)[0]["ppa"]
 
     assert nodo["id"] == ppa.id
-    assert nodo["es_borrador"] is False
+    assert nodo["estado"] == "firmado"
     assert nodo["aparece_en_servicios"] is True
     assert nodo["numero_codigo_contrato"] == "UNG-2026-014"
 
@@ -175,22 +176,29 @@ def test_firmado_sin_ppa_no_se_disfraza_de_borrador(db):
 
     estados = {n["ppa"]["planta_declarada"]: n["ppa"] for n in ppas_del_pipeline(db, hoy=HOY)}
 
-    for nombre in ("Firmada sin cargar", "Operando sin cargar"):
-        assert estados[nombre]["estado_ppa"] == "sin_contrato", nombre
-        assert estados[nombre]["es_borrador"] is False, nombre
+    # La inconsistencia no necesita una palabra propia: el negocio dice que
+    # cerro y no hay contrato cargado. `estado` + `id is None` lo dicen entero,
+    # y sin reusar "firmado" con dos significados distintos en el mismo objeto.
+    for nombre, etapa in (("Firmada sin cargar", "firmado"),
+                          ("Operando sin cargar", "operando")):
+        assert estados[nombre]["estado"] == etapa, nombre
+        assert estados[nombre]["id"] is None, nombre
         assert estados[nombre]["aparece_en_servicios"] is False, nombre
 
 
-def test_el_borrador_es_solo_de_las_etapas_previas_a_la_firma(db):
-    """`es_borrador` significa 'contrato en preparación', y eso solo aplica antes
-    de firmar."""
+def test_antes_de_firmar_el_estado_es_la_etapa_y_el_contrato_no_existe(db):
+    """Un PPA en preparacion se reconoce por `id is None` en una etapa previa a
+    la firma. No hace falta un segundo estado que lo diga."""
     _oferta(db, planta_nombre="En oferta", estado="oferta")
     _oferta(db, planta_nombre="En negociación", estado="contrato")
     db.commit()
 
-    for n in ppas_del_pipeline(db, hoy=HOY):
-        assert n["ppa"]["es_borrador"] is True, n["ppa"]["planta_declarada"]
-        assert n["ppa"]["estado_ppa"] == "borrador"
+    estados = {n["ppa"]["planta_declarada"]: n["ppa"] for n in ppas_del_pipeline(db, hoy=HOY)}
+    assert estados["En oferta"]["estado"] == "oferta"
+    assert estados["En negociación"]["estado"] == "contrato"
+    for n in estados.values():
+        assert n["id"] is None, n["planta_declarada"]
+        assert n["aparece_en_servicios"] is False
 
 
 # ── El nivel PROYECTO y sus detalles ─────────────────────────────────────────
@@ -595,8 +603,13 @@ def test_firmar_una_oferta_multi_planta_pasa_TODAS_sus_plantas_al_contrato(db, c
 # ── La ruta ──────────────────────────────────────────────────────────────────
 
 def test_la_ruta_devuelve_el_arbol_de_ppas_con_sus_conteos(db, client):
-    """El sobre trae los conteos por estado_ppa ya hechos: quien integra no tiene
-    que recorrer la lista para saber cuántos borradores hay."""
+    """El sobre trae los conteos por estado ya hechos: quien integra no tiene
+    que recorrer la lista para saber en qué está cada negocio.
+
+    Fijate que la planta con contrato está `operando`, no `firmado`: el conteo
+    viejo (`por_estado_ppa`) la contaba como "firmado" porque ahí esa palabra
+    significaba "existe la fila en ppa_contratos", y perdía que ya está
+    entregando energía. Con un solo vocabulario el conteo dice la verdad."""
     proy = _proyecto(db, nombre_comercial="GD Catedral", sub_project="catedral",
                      gen_mensual_promedio_mwh=178.4, gen_promedio_origen="api",
                      gen_promedio_dias=30)
@@ -613,11 +626,12 @@ def test_la_ruta_devuelve_el_arbol_de_ppas_con_sus_conteos(db, client):
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["total"] == 2
-    assert d["por_estado_ppa"] == {"borrador": 1, "firmado": 1}
-    firmado = next(n for n in d["ppas"] if not n["ppa"]["es_borrador"])
-    assert firmado["ppa"]["id"] == ppa.id
-    assert firmado["proyectos"][0]["api_id_unergy"] == "catedral"
-    assert firmado["proyectos"][0]["detalles"]["energia_promedio_origen"] == "medido"
+    assert d["por_estado"] == {"oferta": 1, "operando": 1}
+    con_contrato = next(n for n in d["ppas"] if n["ppa"]["id"] is not None)
+    assert con_contrato["ppa"]["id"] == ppa.id
+    assert con_contrato["ppa"]["estado"] == "operando"
+    assert con_contrato["proyectos"][0]["api_id_unergy"] == "catedral"
+    assert con_contrato["proyectos"][0]["detalles"]["energia_promedio_origen"] == "medido"
 
 
 def test_la_ruta_serializa_los_enums_como_slugs(db, client):
@@ -628,7 +642,7 @@ def test_la_ruta_serializa_los_enums_como_slugs(db, client):
 
     ppa = client.get("/api/v1/comercial/proyectos-operando").json()["ppas"][0]["ppa"]
 
-    assert ppa["etapa_comercial"] == "oferta"
+    assert ppa["estado"] == "oferta"
     assert ppa["es_comunidad_energetica"] is True
 
 
@@ -665,7 +679,7 @@ def test_sin_datos_la_ruta_devuelve_un_sobre_vacio_no_un_404(db, client):
     r = client.get("/api/v1/comercial/proyectos-operando")
     assert r.status_code == 200
     d = r.json()
-    assert d["total"] == 0 and d["ppas"] == [] and d["por_estado_ppa"] == {}
+    assert d["total"] == 0 and d["ppas"] == [] and d["por_estado"] == {}
 
 
 def test_acotar_la_etapa_no_recorta_el_arbol_de_las_que_quedan(db, client):
@@ -704,7 +718,7 @@ def test_el_ppa_de_la_planta_cuenta_aunque_la_oferta_no_lo_tenga_enlazado(db):
 
     n = ppas_del_pipeline(db, hoy=HOY)[0]
 
-    assert n["ppa"]["estado_ppa"] == "firmado"
+    assert n["ppa"]["id"] is not None
     assert n["ppa"]["id"] == ppa.id
     assert n["ppa"]["aparece_en_servicios"] is True
     # y se distingue de dónde salió, que no es lo mismo que un enlace explícito
@@ -740,7 +754,7 @@ def test_sin_contrato_por_ningun_camino_sigue_siendo_la_inconsistencia(db):
 
     n = ppas_del_pipeline(db, hoy=HOY)[0]
 
-    assert n["ppa"]["estado_ppa"] == "sin_contrato"
+    assert n["ppa"]["id"] is None
     assert n["ppa"]["fuente_ppa"] is None
 
 

@@ -7,6 +7,7 @@ Desde 2026-08-02 la etapa del pipeline es de la OFERTA. El cliente no tiene
 estado propio: el que se muestra en su fila es el de su oferta más avanzada.
 """
 import json
+import enum
 import re
 import unicodedata
 from datetime import datetime, date
@@ -126,8 +127,16 @@ def _gen_codigo(db: Session, tipo: str, fecha) -> str:
 
 
 def _valor(v):
-    """Enum de SQLAlchemy → str; deja pasar lo que ya es str o None."""
-    return v if isinstance(v, (str, type(None))) else v.value
+    """Enum de SQLAlchemy → slug; deja pasar lo que ya es str puro o None.
+
+    El enum se chequea ANTES que el str: los enums del CRM heredan de `str`
+    (`class EstadoComercialEnum(str, Enum)`), así que con el orden inverso esto
+    devolvía el miembro del enum sin normalizar nada. Ver `_valor_enum` en
+    app/services/comercial.py, que tenía el mismo problema.
+    """
+    if v is None:
+        return None
+    return v.value if isinstance(v, enum.Enum) else v
 
 
 def _plantas_de_ofertas(db: Session, ofertas) -> dict[int, list]:
@@ -537,11 +546,16 @@ def list_ppas_del_pipeline(
     se resuelven por cascada Proyecto→oferta. Es la superficie para integrar la
     plataforma con otra. Ver `docs/API_PPA_PIPELINE.md`.
 
+    **Un solo `estado`, el del pipeline comercial.** Vale `oferta`, `contrato`,
+    `firmado` u `operando` (y `terminado`/`declinado` si los pedís por
+    `estado_pipeline`). Es el mismo vocabulario que se ve en el tablero de
+    `/comercial`: no hay un segundo estado que pueda contradecirlo.
+
     **Un PPA no firmado no existe como contrato.** La oferta del CRM *es* el PPA
     hasta que se firma, y `ppa.id` lo dice sin ambigüedad:
 
-    - `ppa.id === null` → **borrador**. No hay fila en `ppa_contratos`, así que no
-      aparece en `/servicios`. Sus condiciones son las tentativas de la oferta y
+    - `ppa.id === null` → no hay fila en `ppa_contratos`, así que no aparece en
+      `/servicios`. Sus condiciones son las tentativas de la oferta y
       `condiciones.origen` vale `"oferta"`.
     - `ppa.id` con valor → el contrato existe. Aparece en `/servicios`, y las
       condiciones salen del contrato (`condiciones.origen == "contrato"`).
@@ -549,16 +563,24 @@ def list_ppas_del_pipeline(
     `aparece_en_servicios` viaja como booleano y es el mismo hecho, para que quien
     integre no tenga que deducirlo.
 
-    **`estado_ppa`** resume eso en un slug:
+    Cruzando los dos campos salen las tres situaciones que importan:
 
-    | Valor | Qué es |
-    |---|---|
-    | `borrador` | Etapa `oferta` o `contrato`: el PPA está en preparación |
-    | `firmado` | El contrato existe en `ppa_contratos` |
-    | `sin_contrato` | **Inconsistencia.** La oferta está `firmado`/`operando` pero no hay PPA cargado: el negocio cerró y el contrato falta |
+    | `estado` | `ppa.id` | Qué es |
+    |---|---|---|
+    | `oferta` / `contrato` | `null` | El PPA está **en preparación**: todavía no se firmó |
+    | cualquiera | con valor | El **contrato existe** en `ppa_contratos` |
+    | `firmado` / `operando` | `null` | **Inconsistencia.** El negocio cerró y el PPA no está cargado |
 
-    `sin_contrato` no se rellena inventando un contrato de campos nulos — eso
-    metería compromisos fantasma en Cumplimiento. Se muestra para que se cargue.
+    Esa última no se rellena inventando un contrato de campos nulos — eso metería
+    compromisos fantasma en Cumplimiento. Se deja ver para que se cargue.
+
+    **Cambio incompatible (2026-08-19).** Hasta esta versión el nodo traía tres
+    campos más — `etapa_comercial`, `estado_ppa` y `es_borrador`— que no
+    aportaban información propia: los tres eran función de `estado` y de si
+    `ppa.id` es `null`. Peor, `estado_ppa` reusaba la palabra «firmado» con otro
+    significado, así que un nodo podía decir `estado_ppa: "firmado"` al lado de
+    `etapa_comercial: "oferta"` y parecer contradictorio. `etapa_comercial` pasó
+    a llamarse **`estado`**; los otros dos se derivan de la tabla de arriba.
 
     **Solo contratos de energía.** `compra_energia` y `comunidad_energetica`; las
     ofertas de servicios (representación, CGM) desembocan en `contratos_servicio`
@@ -589,7 +611,7 @@ def list_ppas_del_pipeline(
     nodos = ppas_del_pipeline(db, q=q, estados=etapas)
     por_estado: dict[str, int] = {}
     for n in nodos:
-        clave = n["ppa"]["estado_ppa"]
+        clave = n["ppa"]["estado"]
         por_estado[clave] = por_estado.get(clave, 0) + 1
     return {
         # ahora_colombia() y no col_now(): esta fecha viaja hacia afuera y tiene
@@ -599,8 +621,9 @@ def list_ppas_del_pipeline(
         "total": len(nodos),
         # Cuántos PPAs hay de cada estado, para no tener que contarlos del lado de
         # quien integra. Solo los estados presentes: un cero explícito de un
-        # estado que no se pidió es ruido.
-        "por_estado_ppa": por_estado,
+        # estado que no se pidió es ruido. Se llamaba `por_estado_ppa` y contaba
+        # el estado derivado; ahora cuenta el único que hay.
+        "por_estado": por_estado,
         "ppas": nodos,
     }
 

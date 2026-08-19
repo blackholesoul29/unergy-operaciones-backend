@@ -638,9 +638,10 @@ def sync_proyectos(
         if kwp is not None and not proj.potencia_instalada_kwp:
             proj.potencia_instalada_kwp = kwp; changed = True
         paneles = row.get("numero_de_paneles")
-        if paneles is not None and not proj.cantidad_total_paneles:
-            proj.cantidad_total_paneles = paneles
-            _upsert_it(proj.id, paneles); changed = True
+        if paneles is not None:
+            it = db.query(ProyectoInfoTecnica).filter(ProyectoInfoTecnica.proyecto_id == proj.id).first()
+            if not (it and it.cantidad_total_paneles):
+                _upsert_it(proj.id, paneles); changed = True
         if changed:
             updated.append(proj.nombre_comercial)
 

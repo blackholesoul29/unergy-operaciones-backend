@@ -1,5 +1,5 @@
 """Backfill de datos técnicos (`ProyectoInfoTecnica` + `Proyecto.operador_red`/
-`potencia_instalada_kwp`/`cantidad_total_paneles`) desde `SoleniumClient.get_project_detail()`.
+`potencia_instalada_kwp`) desde `SoleniumClient.get_project_detail()`.
 
 Probado en vivo (2026-08-11): ese endpoint solo trae datos reales (no
 "Desconocida") para proyectos tipo minigranja -- para el resto (autoconsumo/
@@ -94,11 +94,8 @@ def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: 
 
     paneles = detalle.get("panel_quantity")
     paneles = int(paneles) if isinstance(paneles, (int, float)) or (isinstance(paneles, str) and paneles.isdigit()) else None
-    if paneles is not None:
-        if it.cantidad_total_paneles is None:
-            cambios["info_tecnica.cantidad_total_paneles"] = paneles
-        if proyecto.cantidad_total_paneles is None:
-            cambios["proyecto.cantidad_total_paneles"] = paneles
+    if paneles is not None and it.cantidad_total_paneles is None:
+        cambios["info_tecnica.cantidad_total_paneles"] = paneles
 
     potencia_panel = _texto(detalle.get("panel_power"))
     if potencia_panel is not None and it.potencia_panel_kwp is None:

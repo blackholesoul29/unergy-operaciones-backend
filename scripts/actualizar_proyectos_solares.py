@@ -6,7 +6,6 @@ Campos que se llenan:
   proyectos.departamento           ← json.departamento
   proyectos.municipio              ← json.ciudad
   proyectos.potencia_instalada_kwp ← json.potencia_instalada_dc_kwp
-  proyectos.cantidad_total_paneles ← json.numero_de_paneles
   proyecto_info_tecnica.cantidad_total_paneles ← json.numero_de_paneles
   proyectos.operador_red           ← mapeo OR hardcodeado
 
@@ -183,10 +182,12 @@ def main():
                     proj.potencia_instalada_kwp = kwp
 
             paneles = row.get("numero_de_paneles")
-            if paneles is not None and not proj.cantidad_total_paneles:
+            it_existente = db.query(ProyectoInfoTecnica).filter(
+                ProyectoInfoTecnica.proyecto_id == proj.id
+            ).first()
+            if paneles is not None and not (it_existente and it_existente.cantidad_total_paneles):
                 changes.append(f"paneles={paneles}")
                 if not DRY_RUN:
-                    proj.cantidad_total_paneles = paneles
                     upsert_info_tecnica(db, proj.id, paneles)
 
             if changes:

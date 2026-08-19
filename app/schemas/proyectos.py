@@ -270,7 +270,6 @@ class ProyectoCreate(BaseModel):
     tipo_proyecto: Optional[str] = None
     potencia_instalada_kwp: Optional[float] = None
     potencia_con_cen_mw: Optional[float] = None
-    cantidad_total_paneles: Optional[int] = None
     produccion_especifica_kwh_kwp: Optional[float] = None
     codigo_cnd: Optional[str] = None
     estado: Optional[str] = "en_desarrollo"
@@ -359,7 +358,6 @@ class ProyectoOut(BaseModel):
     tipo_proyecto: Optional[str]
     potencia_instalada_kwp: Optional[float]
     potencia_con_cen_mw: Optional[float]
-    cantidad_total_paneles: Optional[int]
     produccion_especifica_kwh_kwp: Optional[float]
     codigo_cnd: Optional[str]
     estado: str

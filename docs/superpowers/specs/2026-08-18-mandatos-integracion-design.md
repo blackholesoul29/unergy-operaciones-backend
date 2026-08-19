@@ -165,6 +165,17 @@ verificación adentro, en vez de prender el cron primero y quedar un tiempo con 
 garantías que el script que reemplaza.
 
 Orden final: **1 → 3 → 2 → 4 → 5**.
+
+### Trampa detectada para el Plan 2
+
+`upsert_mandato` (`finanzas_mandatos_service.py:106-142`) solo ramifica sobre
+`estado in {"firmado", "con_comentarios"}`. Si le llega `corregido` o
+`enviado_inversionista` —los dos estados que el Plan 1 acaba de agregar— cae en el
+`else` de `sin_firma` y **nunca asigna el estado nuevo**, en silencio.
+
+O sea que `TRANSICIONES_FIRMA` no se puede simplemente "prender": el Plan 2 tiene
+que actualizar también la ramificación de `upsert_mandato`. Se anota ahora para no
+redescubrirlo cuando el cron ya esté escribiendo.
 - **Si los PDFs quedaron realmente cargados en Drive.** El usuario dijo "se supone
   que cargó los PDFs". Conviene confirmarlo antes de construir encima; un endpoint de
   diagnóstico que cuente cuántas filas tienen `drive_url` lo resuelve.

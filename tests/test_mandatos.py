@@ -131,6 +131,29 @@ def test_parsear_nombre_zip_proyecto_con_guion():
 def test_parsear_nombre_zip_no_valido():
     assert parsear_nombre_zip("documento_cualquiera.pdf") is None
 
+def test_parsear_nombre_zip_sin_inversionista_pa_fiduciaria():
+    """Convención de TRES partes: cuando el mandante es un P.A. de fiduciaria,
+    el archivo no trae inversionista (carpeta 'Mandato Costos Sol de la Sierra',
+    captura 2026-08-18). El inversionista queda vacío, no se inventa."""
+    r = parsear_nombre_zip("CMU1140-Mandato-Costos-Minigranja Solar Merengue.pdf")
+    assert r == {"cmu": "CMU1140", "proyecto": "Minigranja Solar Merengue",
+                 "inversionista": ""}
+
+
+def test_parsear_nombre_zip_sin_inversionista_proyecto_con_guion():
+    """El caso que obliga al lookaround: sin la señal del espaciado, esto se
+    partiría en ('PSF', 'Yurbaqua') e inventaría un inversionista."""
+    r = parsear_nombre_zip("CMU0002-Mandato-Costos-PSF - Yurbaqua.pdf")
+    assert r == {"cmu": "CMU0002", "proyecto": "PSF - Yurbaqua",
+                 "inversionista": ""}
+
+
+def test_parsear_nombre_zip_proyecto_con_numero_al_final():
+    """'Valencia Oriente 1' no debe confundirse con un inversionista."""
+    r = parsear_nombre_zip("CMU0003-Mandato-Costos-Minigranja Solar Valencia Oriente 1.pdf")
+    assert r == {"cmu": "CMU0003", "proyecto": "Minigranja Solar Valencia Oriente 1",
+                 "inversionista": ""}
+
 # ── match_inversionista ───────────────────────────────────────────────────────
 MAESTRA_T = [{"id": 13, "nombre": "Suno"}, {"id": 2, "nombre": "Solenium"}, {"id": 7, "nombre": "Credicorp"}]
 

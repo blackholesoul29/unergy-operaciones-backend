@@ -76,20 +76,13 @@ def test_zip_de_fase_a_si_parsea_los_nombres_de_cuatro_partes(nombre):
 
 
 @pytest.mark.parametrize("nombre", ADJUNTOS_REALES_DRIVE)
-def test_zip_de_fase_a_no_parsea_los_nombres_de_tres_partes(nombre):
-    """LIMITACIÓN REAL de `ZIP_NOMBRE_RE`, fijada para que no se pierda.
-
-    El regex exige `-{Inversionista}` antes del `.pdf`. Cuando el mandante es un
-    P.A. de fiduciaria (carpeta "Mandato Costos Sol de la Sierra") el archivo
-    solo trae `CMU####-Mandato-Costos-{Proyecto}.pdf` y no matchea.
-    `POST /mandatos/upload-zip` hace `if not parsed: continue`, así que esos
-    archivos se saltan en silencio -- no todos los de un ZIP, solo los de P.A.
-
-    El arreglo no es corregir el regex sino hacer OPCIONAL la parte del
-    inversionista, para que acepte las dos formas. Cuando se haga, este test
-    hay que invertirlo y el tercero pasa a salir del cuerpo del correo.
-    """
-    assert parsear_nombre_zip(nombre) is None
+def test_zip_ya_parsea_las_dos_convenciones(nombre):
+    """Antes solo aceptaba la forma con inversionista. Ahora acepta ambas y
+    deja el inversionista vacío cuando el mandante es un P.A."""
+    r = parsear_nombre_zip(nombre)
+    assert r is not None
+    assert r["inversionista"] == ""
+    assert r["proyecto"].startswith("Minigranja Solar")
 
 
 def test_periodo_sale_del_asunto_con_anio_explicito():

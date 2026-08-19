@@ -239,3 +239,28 @@ class CatalogosOut(BaseModel):
     empresas: list[dict] = []
     precios_energia: list[dict] = []
     tipos_costo: list[dict] = []
+
+
+# ── AC Power del período ─────────────────────────────────────────────────────
+
+class AcPowerGrupoOut(BaseModel):
+    """Cuántos proyectos reciben un grupo de conceptos y cuánta potencia suman."""
+
+    proyectos: int = 0
+    ac_power: float = 0.0
+    sin_ac_power: int = 0
+
+
+class AcPowerTotalesOut(BaseModel):
+    """Totales de AC Power tal como los ve la API de Liquidaciones.
+
+    Se calculan sobre TODOS los proyectos de esa API, no solo los que cruzan con
+    esta base: ``total_ac_power`` es el divisor de la prorrata del reparto, así
+    que dejar fuera un proyecto le sube el costo a todos los demás.
+    """
+
+    generador: AcPowerGrupoOut
+    comercializador: AcPowerGrupoOut
+    # Tópicos que la API cobra pero que no existen en esta base: se listan para
+    # que se note que falta emparejarlos, en vez de perderlos en silencio.
+    topicos_sin_cruce: list[str] = []

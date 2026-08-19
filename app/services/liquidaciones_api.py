@@ -220,6 +220,30 @@ def listar_proyectos() -> list[dict[str, Any]]:
     return [_proyectar(p) for p in data]
 
 
+def totales_ac_power() -> dict[str, Any]:
+    """Suma el AC Power de los proyectos que reciben cada grupo de conceptos.
+
+    Se calcula sobre TODOS los proyectos de la API, no sobre los que cruzan con
+    esta base: es el divisor de la prorrata del reparto, y dejar uno afuera le
+    sube el costo a todos los demás.
+    """
+    proyectos = listar_proyectos()
+
+    def _resumen(campo: str) -> dict[str, Any]:
+        marcados = [p for p in proyectos if p.get(campo) is True]
+        return {
+            "proyectos": len(marcados),
+            "ac_power": round(sum(p.get("ac_power") or 0 for p in marcados), 4),
+            "sin_ac_power": sum(1 for p in marcados if not p.get("ac_power")),
+        }
+
+    return {
+        "generador": _resumen("from_generator"),
+        "comercializador": _resumen("from_commercializer"),
+        "topicos": [p["nombre_topico"] for p in proyectos if p.get("nombre_topico")],
+    }
+
+
 def obtener_proyecto(topico: str) -> dict[str, Any]:
     """Configuración de liquidaciones de un solo proyecto, por su tópico."""
     data = _request("GET", PATH_PROYECTO.format(topico=topico))

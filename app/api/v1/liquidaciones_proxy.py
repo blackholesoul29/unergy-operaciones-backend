@@ -11,6 +11,7 @@ from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.proyectos import Proyecto
 from app.schemas.liquidaciones_api import (
+    AcPowerTotalesOut,
     CatalogosOut,
     ContratoEnergiaIn,
     ContratoEnergiaOut,
@@ -159,6 +160,27 @@ def actualizar_proyecto(
         nombre_topico=proy.sub_project,
         en_api=bool(datos),
         **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
+    )
+
+
+@router.get("/ac-power", response_model=AcPowerTotalesOut)
+def totales_ac_power(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """AC Power total por grupo, tal como lo ve la API de Liquidaciones.
+
+    No se calcula sumando las filas que se muestran en pantalla: esas salen de
+    cruzar por tópico con esta base, y un proyecto sin cruce quedaría fuera del
+    divisor de la prorrata sin que se note.
+    """
+    try:
+        totales = liquidaciones_api.totales_ac_power()
+    except LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+    conocidos = set(_nombres_por_topico(db))
+    return AcPowerTotalesOut(
+        generador=totales["generador"],
+        comercializador=totales["comercializador"],
+        topicos_sin_cruce=sorted(t for t in totales["topicos"] if t not in conocidos),
     )
 
 

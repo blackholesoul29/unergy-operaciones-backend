@@ -908,14 +908,15 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     else:
         it = ProyectoInfoTecnica(proyecto_id=id, **data.model_dump())
         db.add(it)
-    # capacidad_instalada_kwp (DC) también vive espejada en
-    # proyectos.potencia_instalada_kwp -- el resto del backend (dashboards
-    # Gaia/Solenium, motor de alarmas MGS, impacto de fallas, tsf_sync) todavía
-    # lee esa columna directo en vez de unir con proyecto_info_tecnica. El
-    # espejo se hace aquí (no en el frontend) para que no pueda desincronizarse
-    # sin importar desde dónde se edite info-tecnica.
-    if it.capacidad_instalada_kwp is not None:
-        proyecto.potencia_instalada_kwp = it.capacidad_instalada_kwp
+    # Fix 2026-08-19: pese al nombre, proyectos.potencia_instalada_kwp guarda
+    # históricamente la potencia AC (coincide con potencia_ac_kw en 56 de 66
+    # proyectos verificados), NO la capacidad DC -- confirmado con el usuario.
+    # Antes este bloque espejaba capacidad_instalada_kwp (DC) por error, lo
+    # que corrompió el campo en los proyectos editados desde que existía ese
+    # bug (ver Cedillanos, IML Empaques, Chiriguana N1, Agustín 2/3, Elektra,
+    # Astrea 1/2/3). El espejo correcto es desde potencia_ac_kw.
+    if it.potencia_ac_kw is not None:
+        proyecto.potencia_instalada_kwp = it.potencia_ac_kw
     db.commit()
     db.refresh(it)
     return it

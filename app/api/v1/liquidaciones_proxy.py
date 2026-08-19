@@ -427,14 +427,19 @@ def listar_costos(
     filas que la página no muestra.
     """
     try:
+        # `payment_type` NO se le manda a la API externa: filtrarlo allá devuelve
+        # 500 (bug de ellos, la guía lo documenta como soportado). Se aplica aquí,
+        # que además sale gratis porque el listado ya viene cacheado.
         filas = liquidaciones_api.listar_costos(
             project=project,
-            payment_type=payment_type,
             version=version.value if version else None,
         )
         tipos = {t["name"]: t for t in liquidaciones_api.listar_catalogos()["tipos_costo"]}
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
+
+    if payment_type:
+        filas = [c for c in filas if c.get("payment_type") == payment_type]
 
     if grupo is not None:
         filas = [

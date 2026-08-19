@@ -750,7 +750,7 @@ def get_info_tecnica(id: int, db: Session = Depends(get_db), _=Depends(get_curre
 
 @router.put("/{id}/info-tecnica", response_model=ProyectoInfoTecnicaOut)
 def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_proyecto_or_404(id, db)
+    proyecto = _get_proyecto_or_404(id, db)
     it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).first()
     if it:
         for k, v in data.model_dump(exclude_unset=True).items():
@@ -758,6 +758,14 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     else:
         it = ProyectoInfoTecnica(proyecto_id=id, **data.model_dump())
         db.add(it)
+    # capacidad_instalada_kwp (DC) también vive espejada en
+    # proyectos.potencia_instalada_kwp -- el resto del backend (dashboards
+    # Gaia/Solenium, motor de alarmas MGS, impacto de fallas, tsf_sync) todavía
+    # lee esa columna directo en vez de unir con proyecto_info_tecnica. El
+    # espejo se hace aquí (no en el frontend) para que no pueda desincronizarse
+    # sin importar desde dónde se edite info-tecnica.
+    if it.capacidad_instalada_kwp is not None:
+        proyecto.potencia_instalada_kwp = it.capacidad_instalada_kwp
     db.commit()
     db.refresh(it)
     return it

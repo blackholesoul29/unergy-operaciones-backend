@@ -258,3 +258,33 @@ def cmu_al_inicio_de_nombre(nombre: str | None) -> str | None:
 def solo_pdfs(nombres: list[str]) -> list[str]:
     """Los nombres que terminan en .pdf, conservando el orden."""
     return [n for n in nombres if (n or "").lower().endswith(".pdf")]
+
+
+# El mandante (tercero) de la identidad de Finanzas. En los correos de Jessica
+# aparece como "17844 - P.A SOL DE LA SIERRA": un código numérico seguido del
+# nombre en mayúsculas. El CÓDIGO es lo estable -- los nombres se escriben con
+# y sin tilde, con y sin puntos ("P.A" vs "P.A."), así que cruzar por nombre es
+# frágil y cruzar por código no.
+#
+# El nombre corre hasta que aparece minúscula ("del mes de..."), coma o fin de
+# línea. Exigir el código evita morder el saludo, que nombra a la fiduciaria
+# ("PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA") sin ser la identidad.
+_PA_RE = re.compile(
+    r"(\d{4,6})\s*-\s*(P\.?\s?A\.?\s+[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s\.\-]*?)"
+    r"(?=\s+(?:del|de|para)\s|[,\n]|$)",
+    re.UNICODE,
+)
+
+
+def extraer_pa_del_cuerpo(cuerpo: str | None) -> dict | None:
+    """{'codigo': '17844', 'nombre': 'P.A SOL DE LA SIERRA'} o None.
+
+    Solo reconoce el patrón `código - NOMBRE`. Si el correo nombra un patrimonio
+    sin código, devuelve None: preferimos no identificar a identificar mal, porque
+    el tercero es parte de la identidad y equivocarlo crea una fila fantasma.
+    """
+    m = _PA_RE.search(cuerpo or "")
+    if not m:
+        return None
+    nombre = re.sub(r"\s+", " ", m.group(2)).strip()
+    return {"codigo": m.group(1), "nombre": nombre}

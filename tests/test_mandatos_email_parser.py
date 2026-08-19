@@ -2,11 +2,11 @@
 from app.services.mandatos.email_parser import (
     CLASIF_DESCONOCIDO, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO,
     clasificar_correo, cmu_al_inicio_de_nombre, extraer_observaciones,
-    html_a_texto, solo_pdfs,
+    extraer_pa_del_cuerpo, html_a_texto, solo_pdfs,
 )
 from tests.fixtures_mandatos_correos import (
-    ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA_ADJUNTOS,
-    LIQUIDACION_PRELIMINAR_ADJUNTOS,
+    ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA, ENVIO_INVERSIONISTA_ADJUNTOS,
+    LIQUIDACION_PRELIMINAR, LIQUIDACION_PRELIMINAR_ADJUNTOS,
     REVISORIA_HTML, REVISORIA_MIXTO, REVISORIA_OBSERVACIONES,
     REVISORIA_SEGUIMIENTO,
 )
@@ -218,3 +218,31 @@ def test_extraer_observaciones_sin_cita_no_se_recorta():
     assert [o["cmu"] for o in obs] == [
         "CMU1255", "CMU1266", "CMU1269", "CMU1270", "CMU1271", "CMU1284",
     ]
+
+
+# ── extraer_pa_del_cuerpo ─────────────────────────────────────────────────────
+
+def test_extraer_pa_del_correo_real_de_jessica():
+    assert extraer_pa_del_cuerpo(ENVIO_INVERSIONISTA) == {
+        "codigo": "17844", "nombre": "P.A SOL DE LA SIERRA"}
+
+
+def test_extraer_pa_tolera_puntuacion_y_tildes():
+    cuerpo = "asociados al 18254 - P.A.  AUTOCONSUMO NESTLÉ del mes de julio ya"
+    assert extraer_pa_del_cuerpo(cuerpo) == {
+        "codigo": "18254", "nombre": "P.A. AUTOCONSUMO NESTLÉ"}
+
+
+def test_extraer_pa_no_confunde_el_saludo_sin_codigo():
+    """El saludo nombra la fiduciaria sin código -- no es la identidad."""
+    cuerpo = "Cordial saludo equipo de PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A"
+    assert extraer_pa_del_cuerpo(cuerpo) is None
+
+
+def test_extraer_pa_en_liquidacion_preliminar_es_none():
+    assert extraer_pa_del_cuerpo(LIQUIDACION_PRELIMINAR) is None
+
+
+def test_extraer_pa_vacio():
+    assert extraer_pa_del_cuerpo("") is None
+    assert extraer_pa_del_cuerpo(None) is None

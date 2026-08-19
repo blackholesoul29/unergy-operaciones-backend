@@ -33,6 +33,22 @@ from app.services.liquidaciones_api import LiquidacionesAPIError, VersionLiquida
 router = APIRouter(prefix="/liquidaciones-api", tags=["API Liquidaciones"])
 
 
+def _nombres_por_topico(db: Session) -> dict[str, str]:
+    """Nombre comercial de esta base, indexado por el tópico de la API externa.
+
+    La API identifica los proyectos por ``nombre_topico``; en pantalla se muestra
+    el nombre con el que el equipo los conoce.
+    """
+    return {
+        topico: nombre
+        for topico, nombre in (
+            db.query(Proyecto.sub_project, Proyecto.nombre_comercial)
+            .filter(Proyecto.sub_project.isnot(None), Proyecto.deleted_at.is_(None))
+            .all()
+        )
+    }
+
+
 def _por_topico() -> dict[str, dict]:
     """Configuración de la API externa indexada por ``nombre_topico``."""
     return {
@@ -395,14 +411,20 @@ def listar_costos(
     project: str | None = None,
     payment_type: str | None = None,
     version: VersionLiquidacion | None = None,
+    grupo: liquidaciones_api.GrupoCosto | None = None,
+    mes: int | None = Query(None, ge=1, le=12),
+    anio: int | None = Query(None, ge=2020, le=2100),
     page: int = Query(1, ge=1),
-    size: int = Query(100, ge=1, le=500),
+    size: int = Query(100, ge=1, le=5000),
+    db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Costos e ingresos fijos por proyecto, paginados.
 
     La API externa devuelve la tabla completa (más de 10.000 filas) sin paginar,
-    así que el corte se hace aquí para no mandarle eso al navegador.
+    así que el corte se hace aquí para no mandarle eso al navegador. Por lo mismo
+    el filtro por ``grupo`` se aplica antes de paginar: si no, ``total`` contaría
+    filas que la página no muestra.
     """
     try:
         filas = liquidaciones_api.listar_costos(
@@ -414,6 +436,27 @@ def listar_costos(
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
 
+    if grupo is not None:
+        filas = [
+            c for c in filas
+            if (tipos.get(c.get("payment_type") or "") or {}).get("group") == grupo.value
+        ]
+
+    # Período: se queda el costo cuya vigencia se cruza con el mes/año pedido.
+    # Un costo anual cubre doce meses, así que basta con que haya traslape.
+    if anio is not None:
+        desde = f"{anio}-{mes:02d}-01" if mes else f"{anio}-01-01"
+        hasta = f"{anio}-{mes:02d}-31" if mes else f"{anio}-12-31"
+        filas = [
+            c for c in filas
+            if (c.get("from_date") or "0000-01-01") <= hasta
+            and (c.get("to_date") or "9999-12-31") >= desde
+        ]
+
+    # Lo más reciente primero: es lo que se está liquidando.
+    filas.sort(key=lambda c: (c.get("from_date") or ""), reverse=True)
+
+    nombres = _nombres_por_topico(db)
     inicio = (page - 1) * size
     return CostosOut(
         total=len(filas),
@@ -422,7 +465,8 @@ def listar_costos(
         results=[
             {
                 "id": c.get("id"),
-                "proyecto": c.get("project"),
+                # Nombre de esta base; si el tópico no cruza, se deja el tópico.
+                "proyecto": nombres.get(c.get("project") or "") or c.get("project"),
                 "tipo_pago": c.get("payment_type"),
                 "tipo_pago_nombre": (tipos.get(c.get("payment_type") or "") or {}).get("long_name"),
                 "grupo": (tipos.get(c.get("payment_type") or "") or {}).get("group"),
@@ -449,7 +493,7 @@ def listar_catalogos(_=Depends(get_current_user)):
 
 
 @router.get("/contratos-energia", response_model=list[ContratoEnergiaOut])
-def listar_contratos_energia(_=Depends(get_current_user)):
+def listar_contratos_energia(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Contratos de energía con sus proyectos vinculados.
 
     Se marca por proyecto si ya tiene piso y techo: un contrato PLC sin los dos
@@ -463,6 +507,7 @@ def listar_contratos_energia(_=Depends(get_current_user)):
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
 
+    nombres = _nombres_por_topico(db)
     empresas = {e["id"]: e.get("nombre_empresa") for e in catalogos["empresas"]}
     precios = {p["id"]: p.get("name") for p in catalogos["precios_energia"]}
 
@@ -475,7 +520,8 @@ def listar_contratos_energia(_=Depends(get_current_user)):
         tipos = conceptos.get(v.get("id"), set())
         por_contrato.setdefault(v.get("contract_energy"), []).append({
             "id": v.get("id"),
-            "proyecto": v.get("project"),
+            # Nombre de esta base; si el tópico no cruza, se deja el tópico.
+            "proyecto": nombres.get(v.get("project") or "") or v.get("project"),
             "precio_energia_id": v.get("energy_price"),
             "precio_energia": precios.get(v.get("energy_price")),
             "tiene_piso": "floor" in tipos,

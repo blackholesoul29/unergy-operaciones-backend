@@ -67,6 +67,22 @@ class VersionLiquidacion(str, Enum):
     TX8 = "tx8"
 
 
+class GrupoCosto(str, Enum):
+    """Grupo al que pertenece un tipo de costo o ingreso fijo.
+
+    ``XM`` son los conceptos de comercialización que produce el reparto de las
+    facturas de XM (energía en bolsa, FAZNI, cargo por confiabilidad, servicios
+    de despacho y administración, IVA, arranque y parada). Los demás son costos
+    propios del proyecto y no salen en la vista de comercialización.
+    """
+
+    XM = "xm"
+    OPEX = "opex"
+    INTERESTS = "interests"
+    DISCOUNTS = "discounts"
+    ADJUSTMENT = "adjustment"
+
+
 class EstadoTarea(str, Enum):
     """Estado normalizado de una tarea asíncrona.
 

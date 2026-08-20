@@ -3395,45 +3395,6 @@ def _run_ppa_responsables_seed() -> None:
         db.close()
 
 
-def _run_comercial_import() -> None:
-    """Carga idempotente de las hojas de prospección (Servicios + Energía +
-    Comunidades) al CRM comercial — mismo patrón que los demás *_seed. Corre en
-    el arranque, dentro del contenedor, contra la BD real; no requiere token.
-    Idempotente (por consecutivo o (cliente,tipo,planta)), así que repetir el
-    boot no duplica. Ver data/comercial_seed.json y POST /comercial/importar-hojas."""
-    from types import SimpleNamespace
-    from app.core.database import SessionLocal
-    from app.api.v1.comercial import importar_hojas
-
-    db = SessionLocal()
-    try:
-        from app.models.comercial import OportunidadOferta
-        hay_ofertas = db.query(OportunidadOferta.id).first() is not None
-        hay_detalle = (db.query(OportunidadOferta.id)
-                       .filter(OportunidadOferta.detalle.isnot(None)).first() is not None)
-        if hay_ofertas and hay_detalle:
-            # Ya cargado y enriquecido (la señal se apaga porque las filas de
-            # servicios sí reciben `detalle`). No tocar (evita recrear borradas).
-            print("[startup] comercial_import: ya cargado y enriquecido, se omite")
-            return
-        admin_id = None
-        try:
-            from app.models.usuarios import Usuario
-            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
-            admin_id = adm.id if adm else None
-        except Exception:
-            admin_id = None
-        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
-        # 0 ofertas → carga completa. Ya hay ofertas pero sin detalle → solo
-        # enriquecer (rellena detalle/precio/etc. sin crear ni resucitar borradas).
-        crear = not hay_ofertas
-        res = importar_hojas(dry_run=False, crear_faltantes=crear, db=db, current=current)
-        print(f"[startup] comercial_import (crear_faltantes={crear}): "
-              f"clientes={res['clientes']} ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
-    finally:
-        db.close()
-
-
 def _run_comercial_dedup() -> None:
     """Fusiona clientes-prospecto que el import creó por duplicado cuando ya
     existía el cliente operativo (match por planta→dueño o nombre exacto).
@@ -3518,7 +3479,6 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
-        ("comercial_import", _run_comercial_import),
         ("comercial_dedup", _run_comercial_dedup),
         ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),

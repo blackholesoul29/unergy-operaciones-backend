@@ -28,7 +28,7 @@ from app.models.base import Base
 import app.models  # noqa: F401
 from app.models.clientes import Cliente
 from app.models.proyectos import (
-    Portafolio, Proyecto, ProyectoGrupoPanel, ProyectoInfoTecnica, ProyectoInversor,
+    Portafolio, Proyecto, ProyectoInfoTecnica, ProyectoInversor,
 )
 from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
@@ -62,7 +62,7 @@ def db():
         # La ficha de la planta las precarga con selectinload: sin la tabla, cada
         # consulta revienta con "no such table" aunque el test no las use.
         Portafolio.__table__, ProyectoInfoTecnica.__table__,
-        ProyectoInversor.__table__, ProyectoGrupoPanel.__table__,
+        ProyectoInversor.__table__,
         OperadorRed.__table__, Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
         PPAContrato.__table__, PPATarifa.__table__,
@@ -939,7 +939,6 @@ def test_sin_ficha_tecnica_el_bloque_viaja_igual_todo_en_null(db):
 
     assert t["voltaje_red"] is None
     assert t["potencia_ac_kw"] is None
-    assert t["paneles"]["grupos"] == []
     assert t["inversores"]["equipos"] == []
     # `tiene` es un booleano, no un null: sin ficha, no hay almacenamiento.
     assert t["almacenamiento"]["tiene"] is False

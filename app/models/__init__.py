@@ -2,7 +2,7 @@ from app.models.base import Base
 from app.models.usuarios import Usuario, RolEnum
 from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, ClienteDocumentoComercial
 from app.models.proyectos import (
-    Proyecto, ProyectoInfoTecnica, ProyectoGrupoPanel,
+    Proyecto, ProyectoInfoTecnica,
     ProyectoInversor, ProyectoInversionista, Portafolio,
     ProyectoPendienteIgnorado,
 )
@@ -53,7 +53,7 @@ from app.models.retos import RetoTrimestre, RetoMetrica, RetoValorSemanal
 
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
-    "ProyectoGrupoPanel", "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
+    "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
     "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado", "ServicioOperacion",
     "ServicioRepresentacion",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia", "PPAResponsable",

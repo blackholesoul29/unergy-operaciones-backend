@@ -8,7 +8,7 @@ from app.models import Proyecto
 from app.utils.nombre_matching import mejor_candidato, normalizar
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoGrupoPanel, ProyectoInversor, ProyectoPendienteIgnorado,
+    ProyectoInversor, ProyectoPendienteIgnorado,
 )
 from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
@@ -17,7 +17,6 @@ from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut, ProyectoListaResponse,
     ProyectoInversionistaCreate, ProyectoInversionistaUpdate, ProyectoInversionistaOut,
     ProyectoInfoTecnicaCreate, ProyectoInfoTecnicaOut,
-    ProyectoGrupoPanelCreate, ProyectoGrupoPanelUpdate, ProyectoGrupoPanelOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
     ProyectoAreaContactoSet, ProyectoAreaContactoOut,
     ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
@@ -40,7 +39,6 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
         .options(
             selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
             selectinload(Proyecto.info_tecnica),
-            selectinload(Proyecto.grupos_panel),
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.area_contactos),
             selectinload(Proyecto.servicio_representacion),
@@ -82,7 +80,6 @@ def list_proyectos(
     query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).options(
         selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
         selectinload(Proyecto.info_tecnica),
-        selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.area_contactos),
         selectinload(Proyecto.servicio_representacion),
@@ -705,7 +702,6 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
     # Eliminar sub-recursos directos del proyecto
     db.query(ProyectoInversionista).filter_by(proyecto_id=id).delete()
-    db.query(ProyectoGrupoPanel).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInversor).filter_by(proyecto_id=id).delete()
     db.query(ProyectoAreaContacto).filter_by(proyecto_id=id).delete()
     db.query(ProyectoInfoTecnica).filter_by(proyecto_id=id).delete()
@@ -727,7 +723,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 # project_id_solenium) se copian del perdedor al ganador solo si el ganador los tiene
 # vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
 _MERGE_SIMPLE = [
-    "proyecto_grupos_panel", "proyecto_inversores",
+    "proyecto_inversores",
     "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
     "contratos_servicio", "asic_solicitudes",
     "rec_procesos", "costos_variables",
@@ -942,45 +938,6 @@ def upsert_info_tecnica(id: int, data: ProyectoInfoTecnicaCreate, db: Session = 
     db.commit()
     db.refresh(it)
     return it
-
-
-# ── Grupos Panel ──────────────────────────────────────────────────────────────
-
-@router.get("/{id}/grupos-panel", response_model=list[ProyectoGrupoPanelOut])
-def list_grupos_panel(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_proyecto_or_404(id, db)
-    return db.query(ProyectoGrupoPanel).filter_by(proyecto_id=id).all()
-
-
-@router.post("/{id}/grupos-panel", response_model=ProyectoGrupoPanelOut, status_code=201)
-def add_grupo_panel(id: int, data: ProyectoGrupoPanelCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_proyecto_or_404(id, db)
-    gp = ProyectoGrupoPanel(proyecto_id=id, **data.model_dump())
-    db.add(gp)
-    db.commit()
-    db.refresh(gp)
-    return gp
-
-
-@router.patch("/{id}/grupos-panel/{gp_id}", response_model=ProyectoGrupoPanelOut)
-def update_grupo_panel(id: int, gp_id: int, data: ProyectoGrupoPanelUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    gp = db.query(ProyectoGrupoPanel).filter_by(id=gp_id, proyecto_id=id).first()
-    if not gp:
-        raise HTTPException(404, "Grupo de paneles no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
-        setattr(gp, k, v)
-    db.commit()
-    db.refresh(gp)
-    return gp
-
-
-@router.delete("/{id}/grupos-panel/{gp_id}", status_code=204)
-def delete_grupo_panel(id: int, gp_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    gp = db.query(ProyectoGrupoPanel).filter_by(id=gp_id, proyecto_id=id).first()
-    if not gp:
-        raise HTTPException(404, "Grupo de paneles no encontrado")
-    db.delete(gp)
-    db.commit()
 
 
 # ── Inversores ────────────────────────────────────────────────────────────────

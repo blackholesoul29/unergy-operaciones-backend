@@ -229,7 +229,6 @@ class Proyecto(Base):
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
     subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
-    grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
@@ -318,21 +317,6 @@ class ProyectoInfoTecnica(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="info_tecnica")
-
-
-class ProyectoGrupoPanel(Base):
-    __tablename__ = "proyecto_grupos_panel"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    potencia_pico_wp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    cantidad: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="grupos_panel")
 
 
 class ProyectoInversor(Base):

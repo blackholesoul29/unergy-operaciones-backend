@@ -23,7 +23,7 @@ from app.models.base import Base
 import app.models  # noqa: F401
 from app.models import Proyecto
 from app.models.proyectos import (
-    ProyectoInversionista, ProyectoInfoTecnica, ProyectoGrupoPanel,
+    ProyectoInversionista, ProyectoInfoTecnica,
     ProyectoInversor,
 )
 from app.models.contactos import ProyectoAreaContacto, Contacto
@@ -60,7 +60,7 @@ def db():
         engine,
         tables=[
             Proyecto.__table__, Cliente.__table__, ProyectoInversionista.__table__,
-            ProyectoInfoTecnica.__table__, ProyectoGrupoPanel.__table__,
+            ProyectoInfoTecnica.__table__,
             ProyectoInversor.__table__, ProyectoAreaContacto.__table__, Contacto.__table__,
             ServicioRepresentacion.__table__,
             # _get_proyecto_or_404 hace selectinload(Proyecto.fronteras)

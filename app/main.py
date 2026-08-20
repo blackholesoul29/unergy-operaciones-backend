@@ -3328,6 +3328,18 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
+def _scheduled_ppa_expiration_check():
+    """Corre el job de alertas de vencimiento de PPA (async) desde el scheduler
+    síncrono. Diario a las 08:00 America/Bogota."""
+    import asyncio
+    from app.jobs.ppa_expiration_checker import check_ppa_expirations
+    try:
+        created = asyncio.run(check_ppa_expirations())
+        print(f"[scheduler] ppa_expiration_check: {len(created)} alertas nuevas")
+    except Exception as e:
+        print(f"[scheduler] ppa_expiration_check FAILED: {e}")
+
+
 def _run_ppa_responsables_seed() -> None:
     """Siembra el catálogo de empresas responsables de PPA (Unergy / Externo) y hace
     la clasificación inicial de los contratos. Idempotente; la clasificación es
@@ -3571,6 +3583,13 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="comercializacion_backfill",
                 name="Backfill fecha inicio comercializacion",
+            )
+
+            _mgs_scheduler.add_job(
+                _scheduled_ppa_expiration_check,
+                CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
+                id="ppa_expiration_check",
+                name="Alertas vencimiento contratos PPA",
             )
 
             _mgs_scheduler.add_job(

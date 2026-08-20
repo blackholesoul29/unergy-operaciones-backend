@@ -5,8 +5,8 @@ Añade a ``cumplimiento_mensual`` el origen del cálculo ('manual' vs.
 ``liquidacion_xm_datos`` el enlace al snapshot de cumplimiento que generó cada
 dato XM (para poder regenerarlos de forma idempotente y rastrear su origen).
 
-Revision ID: 065
-Revises: 059
+Revision ID: 068
+Revises: 067
 Create Date: 2026-07-12
 """
 from alembic import op

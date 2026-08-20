@@ -5,7 +5,7 @@ que sale la energía facturada. Un contrato puede cubrir varias fronteras y una
 frontera puede estar en varios contratos (ej. operación y representación sobre
 la misma planta), así que el vínculo va en su propia tabla.
 
-Revision ID: 063
+Revision ID: 067
 Revises: 066
 Create Date: 2026-07-14
 """

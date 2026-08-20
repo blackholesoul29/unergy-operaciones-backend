@@ -424,7 +424,11 @@ def resolver_pendientes(db: Session) -> list[dict]:
     fronteras_vinculadas = {
         (codigo or "").lower(): proyecto_id
         for codigo, proyecto_id in db.query(Frontera.codigo_frontera, Frontera.proyecto_id)
-        .filter(Frontera.proyecto_id.isnot(None), Frontera.codigo_frontera.isnot(None))
+        .filter(
+            Frontera.proyecto_id.isnot(None),
+            Frontera.codigo_frontera.isnot(None),
+            Frontera.deleted_at.is_(None),
+        )
         .all()
     }
 

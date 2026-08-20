@@ -252,6 +252,7 @@ def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto, db: Session)
         db.commit()
         return cambios
     except Exception:
+        db.rollback()
         logger.warning(
             "No se pudo sincronizar info técnica de Solenium para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,

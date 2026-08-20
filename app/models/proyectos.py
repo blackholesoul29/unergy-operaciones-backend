@@ -251,13 +251,14 @@ class Proyecto(Base):
     def operador_red_legal(self) -> str | None:
         """Nombre legal del operador de red (catálogo operadores_red). Primero
         el vínculo propio del proyecto; si no lo tiene, el de la primera
-        frontera que sí lo tenga (caso de datos aún no sincronizados).
+        frontera VIVA que sí lo tenga (caso de datos aún no sincronizados) --
+        una frontera borrada no debe seguir prestando su operador.
         Requiere precargar `operador` y `fronteras.operador` (selectinload)
         para no golpear la BD por cada proyecto."""
         if self.operador:
             return self.operador.nombre_legal
         for f in self.fronteras:
-            if f.operador:
+            if f.deleted_at is None and f.operador:
                 return f.operador.nombre_legal
         return None
 

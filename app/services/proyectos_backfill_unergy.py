@@ -247,6 +247,7 @@ def sincronizar_datos_unergy_si_aplica(proyecto: Proyecto, db: Session) -> str |
         db.commit()
         return topico_asignado
     except Exception:
+        db.rollback()
         logger.warning(
             "No se pudo sincronizar datos de Unergy para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,

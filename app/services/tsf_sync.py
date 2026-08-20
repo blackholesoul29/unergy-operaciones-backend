@@ -990,6 +990,7 @@ def sincronizar_ubicacion_tsf_si_aplica(proyecto: Proyecto, db: Session) -> dict
             db.commit()
         return cambios or None
     except Exception:
+        db.rollback()
         logger.warning(
             "No se pudo sincronizar ubicación/código TSF desde Sun Factory para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,

@@ -270,9 +270,6 @@ class ProyectoCreate(BaseModel):
     operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
-    estado_resultados_url: Optional[str] = None
-    income_distribution_method: Optional[str] = None
-    generar_liquidacion: Optional[bool] = None
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
@@ -361,9 +358,6 @@ class ProyectoOut(BaseModel):
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
-    estado_resultados_url: Optional[str]
-    income_distribution_method: Optional[str]
-    generar_liquidacion: bool
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None

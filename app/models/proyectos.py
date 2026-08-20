@@ -209,11 +209,7 @@ class Proyecto(Base):
     # Origen del registro: 'manual' (alta normal) | 'tsf_sync' (auto-importado).
     origen: Mapped[str | None] = mapped_column(String(20), default="manual", nullable=True)
 
-    # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    income_distribution_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    generar_liquidacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

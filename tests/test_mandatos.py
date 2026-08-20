@@ -154,6 +154,41 @@ def test_parsear_nombre_zip_proyecto_con_numero_al_final():
     assert r == {"cmu": "CMU0003", "proyecto": "Minigranja Solar Valencia Oriente 1",
                  "inversionista": ""}
 
+
+def test_parsear_nombre_zip_convencion_ingresos_sin_costos():
+    """Autoconsumo/ingresos: `CMU####-Mandato-{Proyecto}.pdf`, sin 'Costos'."""
+    r = parsear_nombre_zip("CMU1182-Mandato-Iml Empaques Colombia Sas.pdf")
+    assert r == {"cmu": "CMU1182", "proyecto": "Iml Empaques Colombia Sas",
+                 "inversionista": ""}
+
+
+def test_parsear_nombre_zip_ingresos_con_inversionista():
+    r = parsear_nombre_zip(
+        "CMU1228-Mandato-GD Delta 1-GRANJAS SOLARES DELTA S.A.S. E.S.P.pdf")
+    assert r == {"cmu": "CMU1228", "proyecto": "GD Delta 1",
+                 "inversionista": "GRANJAS SOLARES DELTA S.A.S. E.S.P"}
+
+
+def test_parsear_nombre_zip_proyecto_terminado_en_punto():
+    r = parsear_nombre_zip("CMU0907-Mandato-Arcillas San Simon S.A.S..pdf")
+    assert r == {"cmu": "CMU0907", "proyecto": "Arcillas San Simon S.A.S.",
+                 "inversionista": ""}
+
+
+def test_parsear_nombre_zip_limpia_el_sufijo_de_gmail():
+    """Gmail agrega ' (1)' a los adjuntos repetidos. Sin limpiarlo se cuela en
+    el inversionista y parte la identidad en dos filas distintas."""
+    r = parsear_nombre_zip(
+        "CMU1255-Mandato-Costos-Minigranja Solar Esmeralda-"
+        "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA (1).pdf")
+    assert r["inversionista"] == (
+        "PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA")
+
+
+def test_parsear_nombre_zip_ignora_un_pdf_que_no_es_mandato():
+    """De la primera tanda: una liquidación adjunta en el mismo hilo."""
+    assert parsear_nombre_zip("Liquidacion_CoxEnergy_Jul2026.pdf") is None
+
 # ── match_inversionista ───────────────────────────────────────────────────────
 MAESTRA_T = [{"id": 13, "nombre": "Suno"}, {"id": 2, "nombre": "Solenium"}, {"id": 7, "nombre": "Credicorp"}]
 

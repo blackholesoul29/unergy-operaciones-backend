@@ -232,3 +232,88 @@ def test_password_propia_del_segundo_buzon_manda_sobre_el_fallback(monkeypatch):
     monkeypatch.setattr(settings, "SMTP_USER", "operaciones@unergy.io")
     monkeypatch.setattr(settings, "SMTP_PASSWORD", "clave-smtp")
     assert buzones()[1] == ("operaciones@unergy.io", "clave-propia")
+
+
+# ── clasificación por destino ─────────────────────────────────────────────────
+
+def test_correo_de_jessica_hacia_la_revisoria_es_un_envio():
+    """Caso real: 'Revisión de mandatos autoconsumo - Julio', mandado por Jessica
+    a Vanessa con copia a Adhara. Llega al INBOX como correo de Jessica, así que
+    antes se trataba como envío a inversionista y su envío nunca se registraba
+    -- 80 CMU de julio quedaron sin denominador por esto."""
+    c = _correo("Adjunto los mandatos de autoconsumo para revisión.",
+                [("CMU1182-Mandato-Iml Empaques Colombia Sas-Ayurá S.A.S.pdf", PDF_SIN)],
+                asunto="Revisión de mandatos autoconsumo - Julio",
+                remitente="jessica@unergy.io")
+    c.destinatarios = "vlondono@jbp.com.co, adhara@unergy.io"
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
+    assert [a["estado"] for a in d["acciones"]] == ["sin_firma"]
+
+
+def test_correo_de_jessica_a_un_inversionista_sigue_siendo_envio():
+    """Sin la revisoría entre destinatarios, se comporta como antes."""
+    c = _correo(ENVIO_INVERSIONISTA,
+                [("CMU1135-Mandato-Costos-Minigranja Solar La Paz-Levende.pdf", PDF_FIRMADO)],
+                remitente="jessica@unergy.io")
+    c.destinatarios = "juliana@solenium.co, adhara@unergy.io"
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
+    assert [a["estado"] for a in d["acciones"]] == ["enviado_inversionista"]
+
+
+def test_sin_destinatarios_se_comporta_como_antes():
+    """Los correos ya registrados no traen destinatarios. No deben cambiar de
+    interpretación solo porque el campo llegue vacío."""
+    c = _correo(ENVIO_INVERSIONISTA,
+                [("CMU1135-Mandato-Costos-Minigranja Solar La Paz-Levende.pdf", PDF_FIRMADO)],
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
+    assert [a["estado"] for a in d["acciones"]] == ["enviado_inversionista"]
+
+
+# ── estado `corregido` ────────────────────────────────────────────────────────
+
+def test_un_correo_de_correcciones_marca_corregido():
+    """Confirmado con el usuario: la corrección aplica a los CMU que el correo
+    nombra. Sin esto, con_comentarios era un callejón sin salida -- nada emitía
+    `corregido`, así que un mandato observado no podía volver a firmarse."""
+    c = _correo("Hola Vanessa, te comparto los mandatos con correcciones: "
+                "CMU1255, CMU1266 y CMU1270.",
+                asunto="Re: Revisión mandatos de costos - Julio",
+                remitente="adhara@unergy.io")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert sorted(a["cmu"] for a in d["acciones"]) == ["CMU1255", "CMU1266", "CMU1270"]
+    assert all(a["estado"] == "corregido" for a in d["acciones"])
+
+
+def test_un_saliente_sin_lenguaje_de_correccion_no_marca_corregido():
+    c = _correo("Adjunto los mandatos de julio para su revisión.",
+                [("CMU1255-Mandato-Costos-Esmeralda-STRADA ASOCIADOS S A S.pdf", PDF_SIN)],
+                asunto="Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert [a["estado"] for a in d["acciones"]] == ["sin_firma"]
+
+
+def test_correcciones_sin_cmu_nombrado_no_inventa():
+    """Si el correo dice que comparte correcciones pero no nombra ninguno, no se
+    adivina a cuáles aplica: se deja para revisión."""
+    c = _correo("Te comparto los mandatos con correcciones.",
+                asunto="Re: Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["acciones"] == []
+    assert d["requiere_revision"] is True
+
+
+def test_correcciones_no_toca_los_cmu_citados_del_hilo():
+    """El correo de correcciones casi siempre responde al que traía las
+    observaciones. Sin recortar la cita se marcarían como corregidos CMU que
+    solo aparecen en el historial del hilo."""
+    c = _correo("Te comparto las correcciones de CMU1255.\n"
+                "> CMU1266 no se evidencia contabilizacion\n"
+                "> CMU1270 diferencia en el arriendo\n",
+                asunto="Re: Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert [a["cmu"] for a in d["acciones"]] == ["CMU1255"]

@@ -2,7 +2,8 @@
 from app.services.mandatos.email_parser import (
     CLASIF_DESCONOCIDO, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO,
     clasificar_correo, cmu_al_inicio_de_nombre, extraer_observaciones,
-    extraer_pa_del_cuerpo, html_a_texto, mandatos_enviados_en_correo, solo_pdfs,
+    es_correo_de_correcciones, extraer_pa_del_cuerpo, html_a_texto,
+    mandatos_enviados_en_correo, solo_pdfs,
 )
 from tests.fixtures_mandatos_correos import (
     ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA, ENVIO_INVERSIONISTA_ADJUNTOS,
@@ -356,3 +357,31 @@ def test_conformidad_no_bloquea_una_linea_mixta():
     cuerpo = ("Siguientes observaciones:\n"
               "CMU0920 firmado correctamente pero falta el soporte del predial.\n")
     assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU0920"]
+
+
+# ── es_correo_de_correcciones ─────────────────────────────────────────────────
+
+def test_reconoce_que_se_comparten_correcciones():
+    assert es_correo_de_correcciones(
+        "Hola Vanessa, te comparto los mandatos con correcciones. CMU1255, CMU1266")
+
+
+def test_reconoce_correcciones_de_asientos_contables():
+    assert es_correo_de_correcciones(
+        "Comparto correcciones de los asientos contables para CMU1270")
+
+
+def test_no_confunde_una_observacion_con_una_correccion():
+    """El correo de Vanessa REPORTA diferencias; no las corrige. Confundirlos
+    marcaría como corregido justo lo que acaba de ser observado."""
+    assert not es_correo_de_correcciones(REVISORIA_OBSERVACIONES)
+
+
+def test_no_confunde_pedir_correccion_con_haberla_hecho():
+    assert not es_correo_de_correcciones(
+        "Por favor realizar las correcciones correspondientes en CMU1255")
+
+
+def test_correcciones_vacio():
+    assert not es_correo_de_correcciones("")
+    assert not es_correo_de_correcciones(None)

@@ -218,6 +218,34 @@ def _sin_cita(cuerpo: str) -> str:
     return cuerpo
 
 
+# Frases con las que un correo saliente declara que las correcciones YA se
+# hicieron. Confirmado con el usuario (2026-08-20): tras recibir las
+# observaciones, Adhara o Vanessa Aguirre responden compartiéndolas corregidas,
+# y ese es el paso que faltaba para salir de `con_comentarios`.
+#
+# Cada frase exige un verbo de ENTREGA ("comparto", "envío", "adjunto") junto a
+# la corrección. Buscar solo "correcciones" marcaría también los correos que las
+# PIDEN -- "por favor realizar las correcciones" -- que son lo contrario.
+_SENALES_CORRECCION = (
+    "comparto los mandatos con correcciones",
+    "comparto correcciones",
+    "comparto las correcciones",
+    "envio las correcciones",
+    "adjunto las correcciones",
+    "con las correcciones realizadas",
+    "correcciones de los asientos",
+)
+
+
+def es_correo_de_correcciones(cuerpo: str | None) -> bool:
+    """Si el correo declara que las correcciones ya se hicieron y se comparten.
+
+    Solo tiene sentido sobre correos SALIENTES hacia la revisoría. Un correo de
+    la revisoría que reporta diferencias no es una corrección -- es lo contrario.
+    """
+    return any(s in _normaliza(cuerpo) for s in _SENALES_CORRECCION)
+
+
 # Lenguaje de conformidad: la línea confirma que ese mandato quedó bien, no lo
 # observa. Regla de negocio: un mandato firmado no lleva correcciones, así que
 # una línea así NUNCA debe producir un con_comentarios.

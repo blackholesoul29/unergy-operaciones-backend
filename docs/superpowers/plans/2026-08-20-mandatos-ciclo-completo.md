@@ -84,7 +84,7 @@ escribirse nada malo en la base.
 **Files:**
 - Modify: `app/services/mandatos/imap_client.py`
 
-- [ ] **Step 1: Agregar el campo**
+- [x] **Step 1: Agregar el campo**
 
 En `CorreoCrudo`, después de `remitente`:
 
@@ -97,7 +97,7 @@ preguntar "¿está esta dirección entre los destinatarios?", y sobre una cadena
 es un `in`. Parsear direcciones RFC bien es sorprendentemente peludo (nombres con
 comas, comillas, grupos) y acá no hace falta.
 
-- [ ] **Step 2: Leerlos del mensaje**
+- [x] **Step 2: Leerlos del mensaje**
 
 Donde se construye el `CorreoCrudo`, junto a `remitente`:
 
@@ -119,14 +119,14 @@ def _destinatarios_de(msg: email.message.Message) -> str:
     return " ".join(p for p in partes if p).lower()
 ```
 
-- [ ] **Step 3: Verificar**
+- [x] **Step 3: Verificar**
 
 Run: `python -c "from app.services.mandatos.imap_client import CorreoCrudo; print(CorreoCrudo('<a>', __import__('datetime').datetime.now(), 'x', 'y', 'z').destinatarios == '')"`
 Expected: `True` (el campo por defecto no rompe a los llamadores existentes)
 
 Run: `python -m pytest tests/ -q` → sin fallos.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/services/mandatos/imap_client.py
@@ -144,7 +144,7 @@ adjuntos **es un envío a revisión**, sin importar quién lo firme.
 - Modify: `app/services/mandatos/finanzas_sync.py`
 - Modify: `tests/test_mandatos_finanzas_sync.py`
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 ```python
 def test_correo_de_jessica_hacia_la_revisoria_es_un_envio():
@@ -181,12 +181,12 @@ def test_sin_destinatarios_se_comporta_como_antes():
     assert [a["estado"] for a in d["acciones"]] == ["enviado_inversionista"]
 ```
 
-- [ ] **Step 2: Correr para ver el fallo**
+- [x] **Step 2: Correr para ver el fallo**
 
 Run: `python -m pytest tests/test_mandatos_finanzas_sync.py -k "hacia_la_revisoria" -v`
 Expected: FAIL — devuelve `enviado_inversionista` en vez de `sin_firma`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `decidir_finanzas`, al inicio, antes del bucle de adjuntos:
 
@@ -204,12 +204,12 @@ En `decidir_finanzas`, al inicio, antes del bucle de adjuntos:
         fuente = FUENTE_SALIENTE
 ```
 
-- [ ] **Step 4: Correr los tests**
+- [x] **Step 4: Correr los tests**
 
 Run: `python -m pytest tests/test_mandatos_finanzas_sync.py -v`
 Expected: todos PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/mandatos/finanzas_sync.py tests/test_mandatos_finanzas_sync.py
@@ -224,7 +224,7 @@ git commit -m "fix(mandatos): un correo hacia la revisoria es un envio, lo mande
 - Modify: `app/services/mandatos/email_parser.py`
 - Modify: `tests/test_mandatos_email_parser.py`
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 ```python
 from app.services.mandatos.email_parser import es_correo_de_correcciones
@@ -256,12 +256,12 @@ def test_correcciones_vacio():
     assert not es_correo_de_correcciones(None)
 ```
 
-- [ ] **Step 2: Correr para ver el fallo**
+- [x] **Step 2: Correr para ver el fallo**
 
 Run: `python -m pytest tests/test_mandatos_email_parser.py -k correccion -v`
 Expected: FAIL con `ImportError`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `email_parser.py`:
 
@@ -294,12 +294,12 @@ def es_correo_de_correcciones(cuerpo: str | None) -> bool:
     return any(s in _normaliza(cuerpo) for s in _SENALES_CORRECCION)
 ```
 
-- [ ] **Step 4: Correr los tests**
+- [x] **Step 4: Correr los tests**
 
 Run: `python -m pytest tests/test_mandatos_email_parser.py -v`
 Expected: todos PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/mandatos/email_parser.py tests/test_mandatos_email_parser.py
@@ -314,7 +314,7 @@ git commit -m "feat(mandatos): reconocer un correo que comparte correcciones"
 - Modify: `app/services/mandatos/finanzas_sync.py`
 - Modify: `tests/test_mandatos_finanzas_sync.py`
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 ```python
 def test_un_correo_de_correcciones_marca_corregido():
@@ -351,12 +351,12 @@ def test_correcciones_sin_cmu_nombrado_no_inventa():
     assert d["requiere_revision"] is True
 ```
 
-- [ ] **Step 2: Correr para ver el fallo**
+- [x] **Step 2: Correr para ver el fallo**
 
 Run: `python -m pytest tests/test_mandatos_finanzas_sync.py -k correccion -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `decidir_finanzas`, después del bucle de adjuntos y antes del bloque de
 observaciones de la revisoría:
@@ -387,12 +387,12 @@ Agregar al import de `email_parser` en la cabecera del archivo:
 `extraer_cmus` viene de `mandatos_service` (ya existe); `_sin_cita` es privada de
 `email_parser` pero se usa acá a propósito, por la razón del comentario.
 
-- [ ] **Step 4: Correr los tests**
+- [x] **Step 4: Correr los tests**
 
 Run: `python -m pytest tests/ -q`
 Expected: sin fallos.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/mandatos/finanzas_sync.py tests/test_mandatos_finanzas_sync.py
@@ -415,7 +415,9 @@ Lo que debería moverse:
 |---|---|---|
 | `sin_registro_de_envio` (julio) | 80 | cerca de cero |
 | Acciones `corregido` | 0 | algunas |
-| `transicion_invalida` | 29 | menos, al desbloquearse `con_comentarios → corregido → firmado` |
+| `transicion_invalida` | 29 | cerca de cero |
 
-Los 27 `firmado → con_comentarios` **no van a moverse**: son el problema de
-modelo que queda pendiente de decisión.
+Los 29 `transicion_invalida` deberían casi desaparecer por dos vías distintas:
+los 27 `firmado → con_comentarios` porque ya no se leen (filtro de conformidad
+por línea), y `con_comentarios → firmado` porque se desbloquea el paso
+intermedio `corregido`.

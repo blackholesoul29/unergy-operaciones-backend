@@ -385,3 +385,46 @@ def revisar_correos_finanzas(dias: int = 30) -> dict:
                 "pasadas": len(pasadas), "dias": dias}
     finally:
         db.close()
+
+
+# ── Corrida en segundo plano ──────────────────────────────────────────────────
+#
+# Leer 90 días son minutos de trabajo: cada PDF se abre para revisar firmas y
+# los mandatos nuevos se suben a Drive. El proxy que hay delante del backend
+# corta la conexión mucho antes y devuelve un 502, que parece un fallo cuando en
+# realidad el proceso sigue vivo. Por eso el endpoint responde de inmediato y
+# el trabajo continúa acá.
+_EN_CURSO = False
+
+
+def ingesta_en_curso() -> bool:
+    """Si hay una corrida andando ahora mismo.
+
+    Evita que dos corridas se pisen. La deduplicación por Message-ID hace que
+    dos pasadas simultáneas sean casi inofensivas, pero podrían tomar el mismo
+    correo a la vez y duplicar subidas a Drive -- que es justo lo que no se
+    puede deshacer sin trabajo manual.
+    """
+    return _EN_CURSO
+
+
+def revisar_correos_finanzas_async(dias: int = 30) -> None:
+    """Igual que revisar_correos_finanzas, pensado para BackgroundTasks.
+
+    No devuelve nada porque nadie está escuchando: el resultado se consulta
+    después en la bitácora. Nunca lanza, para que un fallo no quede como una
+    excepción huérfana en el log del servidor sin contexto.
+    """
+    global _EN_CURSO
+    if _EN_CURSO:
+        logger.warning("Finanzas mandatos: ya hay una corrida en curso, se omite")
+        return
+    _EN_CURSO = True
+    try:
+        resultado = revisar_correos_finanzas(dias=dias)
+        logger.info("Finanzas mandatos: corrida en segundo plano terminada -- %s",
+                    resultado)
+    except Exception as exc:
+        logger.error("Finanzas mandatos: la corrida en segundo plano falló: %s", exc)
+    finally:
+        _EN_CURSO = False

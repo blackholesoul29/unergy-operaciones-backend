@@ -180,12 +180,6 @@ class Proyecto(Base):
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # ── IDs de liquidación ──────────────────────────────────────────────────────
-    # Códigos SIC que identifican al proyecto en las liquidaciones (generación y
-    # consumo). Texto libre a nivel de proyecto, editables desde la pestaña
-    # "ID liquidaciones" del detalle.
-    codigo_sic_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    codigo_sic_consumo: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
     # ── IDs de Quoia ────────────────────────────────────────────────────────────
     # IDs de la integración Quoia a nivel de proyecto: los reportes de generación
     # y consumo, y el nodo. Editables desde la pestaña "ID Quoia" del detalle.

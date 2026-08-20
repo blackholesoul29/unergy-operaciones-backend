@@ -1360,10 +1360,6 @@ def _identificacion(proyecto) -> dict:
         "origina_code": proyecto.origina_code,
         "project_id_solenium": proyecto.project_id_solenium,
         "sunfactory_project_id": proyecto.sunfactory_project_id,
-        # SIC: con estos se cruzan las liquidaciones. Son de nivel proyecto; el
-        # código de cada frontera va en `fronteras[]`.
-        "codigo_sic_generacion": proyecto.codigo_sic_generacion,
-        "codigo_sic_consumo": proyecto.codigo_sic_consumo,
         "quoia_nodo_id": proyecto.quoia_nodo_id,
         "quoia_reporte_generacion_id": proyecto.quoia_reporte_generacion_id,
         "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,

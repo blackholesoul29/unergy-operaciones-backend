@@ -69,6 +69,18 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
 
     `verificador` se inyecta para poder probar sin PDFs reales.
     """
+    # Hacia dónde va el correo manda sobre quién lo mandó. Un correo de Jessica
+    # con la revisoría entre destinatarios es una PETICIÓN DE FIRMA, no una
+    # entrega a un inversionista, aunque salga de la misma persona. Clasificar
+    # solo por remitente dejó 80 mandatos de julio (los de ingresos y
+    # autoconsumo) sin registrar su envío.
+    #
+    # Si `destinatarios` viene vacío -- correos leídos antes de que se capturara
+    # el campo -- se conserva la fuente original en vez de adivinar.
+    if (fuente == FUENTE_ENVIO and correo.destinatarios
+            and REMITENTE_REVISORIA in correo.destinatarios):
+        fuente = FUENTE_SALIENTE
+
     adjuntos = expandir_adjuntos(list(correo.adjuntos))
     acciones: list[dict] = []
     sin_identidad: list[str] = []

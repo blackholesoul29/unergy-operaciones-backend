@@ -317,3 +317,51 @@ def test_correcciones_no_toca_los_cmu_citados_del_hilo():
     c.destinatarios = "vlondono@jbp.com.co"
     d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
     assert [a["cmu"] for a in d["acciones"]] == ["CMU1255"]
+
+
+# ── ruido: adjuntos que no son mandatos ───────────────────────────────────────
+
+def test_una_factura_adjunta_no_pide_revision():
+    """Caso real: Jessica manda facturas y comprobantes de pago a los mismos
+    destinatarios. Antes, cualquier PDF que no encajara levantaba la bandera de
+    revisión -- 136 de 385 correos en la corrida del 2026-08-20. El panel se
+    llenaba de facturas y dejaba de servir."""
+    c = _correo("Adjunto la factura por servicios de julio.",
+                [("Factura_UESP2166_Servicios_Nestle.pdf", PDF_SIN)],
+                asunto="18254 - P.A. AUTOCONSUMO NESTLE: Facturas por servicios - Julio",
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
+    assert d["requiere_revision"] is False
+    assert d["sin_identidad"] == []
+    assert d["ignorados"] == ["Factura_UESP2166_Servicios_Nestle.pdf"]
+
+
+def test_un_mandato_ilegible_si_pide_revision():
+    """Lo contrario: el archivo dice ser un mandato pero su nombre no se pudo
+    interpretar. Eso sí hay que mirarlo -- es un mandato que se está perdiendo."""
+    c = _correo("Adjunto el mandato.",
+                [("Mandato costos julio version final.pdf", PDF_SIN)],
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
+    assert d["requiere_revision"] is True
+    assert d["sin_identidad"] == ["Mandato costos julio version final.pdf"]
+
+
+def test_un_pdf_con_cmu_en_el_nombre_pide_revision():
+    """Si trae un CMU, pretende ser un mandato aunque el resto del nombre no
+    siga ninguna convención conocida."""
+    c = _correo("Adjunto.", [("CMU9999 corregido.pdf", PDF_SIN)],
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
+    assert d["sin_identidad"] == ["CMU9999 corregido.pdf"]
+
+
+def test_la_bitacora_guarda_la_fuente_efectiva():
+    """Un correo de Jessica hacia la revisoría se reclasifica; la fuente que se
+    reporta debe ser la reclasificada, no la de la pasada."""
+    c = _correo("Adjunto los mandatos para revisión.",
+                [("CMU1182-Mandato-Iml Empaques Colombia Sas-Ayurá S.A.S.pdf", PDF_SIN)],
+                remitente="jessica@unergy.io")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
+    assert d["fuente_efectiva"] == FUENTE_SALIENTE

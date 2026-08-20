@@ -18,7 +18,7 @@ from app.services.finanzas_mandatos_service import (
 from app.services.mandatos.adjuntos import expandir_adjuntos
 from app.services.mandatos.email_parser import (
     CLASIF_MOLDE_SIMPLE, _sin_cita, clasificar_correo, es_correo_de_correcciones,
-    extraer_observaciones, extraer_pa_del_cuerpo,
+    extraer_observaciones, extraer_pa_del_cuerpo, parece_nombre_de_mandato,
 )
 from app.services.mandatos.firmas import verificar_firmas
 from app.services.mandatos.imap_client import CorreoCrudo
@@ -84,6 +84,9 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
     adjuntos = expandir_adjuntos(list(correo.adjuntos))
     acciones: list[dict] = []
     sin_identidad: list[str] = []
+    # Adjuntos que no pretenden ser mandatos (facturas, comprobantes de pago).
+    # Se anotan para dejar rastro, pero NO piden revisión humana.
+    ignorados: list[str] = []
     clasificacion = clasificar_correo(correo.asunto, correo.cuerpo)
 
     for nombre, contenido in adjuntos:
@@ -91,7 +94,8 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             continue
         parsed = parsear_nombre_zip(nombre)
         if not parsed:
-            sin_identidad.append(nombre)
+            (sin_identidad if parece_nombre_de_mandato(nombre)
+             else ignorados).append(nombre)
             continue
         firmas = verificador(contenido)
         if fuente == FUENTE_SALIENTE:
@@ -165,7 +169,8 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
     requiere = bool(sin_identidad) or (
         fuente == FUENTE_REVISORIA and clasificacion != CLASIF_MOLDE_SIMPLE)
     return {"clasificacion": clasificacion, "acciones": acciones,
-            "requiere_revision": requiere, "sin_identidad": sin_identidad}
+            "requiere_revision": requiere, "sin_identidad": sin_identidad,
+            "ignorados": ignorados, "fuente_efectiva": fuente}
 
 
 def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
@@ -287,11 +292,17 @@ def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):
     return MandatoCorreo(
         message_id=correo.message_id, fecha=correo.fecha,
         remitente=(correo.remitente or "")[:255],
-        asunto=(correo.asunto or "")[:1000], fuente=fuente,
+        asunto=(correo.asunto or "")[:1000],
+        # La fuente EFECTIVA, no la de la pasada: un correo de Jessica hacia la
+        # revisoría se reclasifica dentro de decidir_finanzas, y guardar la de
+        # la pasada hacía que la bitácora dijera `envio_inversionista` sobre un
+        # correo tratado como envío a revisión. Mentira útil para nadie.
+        fuente=d["fuente_efectiva"],
         clasificacion=d["clasificacion"],
         resultado="aplicado" if aplicado else "omitido",
         requiere_revision=d["requiere_revision"] or problema,
-        detalle={"acciones": registros, "sin_identidad": d["sin_identidad"]})
+        detalle={"acciones": registros, "sin_identidad": d["sin_identidad"],
+                 "ignorados": d["ignorados"]})
 
 
 REMITENTE_REVISORIA = "vlondono@jbp.com.co"

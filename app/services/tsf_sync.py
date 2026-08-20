@@ -4,11 +4,12 @@ Copia/actualiza los proyectos del pipeline de construcción de TSF hacia la tabl
 real `proyectos`, para que el equipo pueda relacionarlos con contratos y monitorear
 cumplimiento de energía antes de que la planta opere.
 
-Fuente del pipeline (igual que el endpoint de lectura original):
-  1. originabotdb.minifarm_project (etapa + potencia + ubicación) — fuente base.
-  2. Sun Factory (sunfactory.solenium.co) → fecha de energización (hito RETIE/legalización)
-     + % de avance de obra. Cruce por base_name ↔ minifarm_project.name.
-  3. API de generación Unergy → ¿ya genera? Si sí, está energizada de hecho.
+Fuente del pipeline: Sun Factory (sunfactory.solenium.co) directo -- listado de
+proyectos, fase/estado, ubicación, y fecha de energización (hito RETIE/
+legalización) + % de avance de obra desde sus hitos. No depende de
+originabotdb (retirado 2026-08-20 junto con toda la correlación cross-DB con
+Origina: era inalcanzable desde Railway y el pipeline ya no lo necesitaba
+para nada que Sun Factory no trajera directo).
 
 `sync_tsf_projects(db)` es SOLO de actualización, ya NO crea proyectos:
   - Si encuentra el proyecto (por sunfactory_project_id/origina_code/codigo_tsf),
@@ -29,11 +30,9 @@ import logging
 import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
-import psycopg
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
@@ -44,80 +43,8 @@ from app.core.config import settings
 
 logger = logging.getLogger("tsf_sync")
 
-# Etapas REALES del ciclo de vida de minifarm_project (originabotdb), de la más
-# cercana a energización a la más lejana. El ciclo es:
-#   signed → bt_and_contract → construction → deploy → operation
-# `deploy` (PEM/pruebas) es la última etapa antes de `operation` (ya energizado).
-_PIPELINE_STAGES = ["deploy", "construction", "bt_and_contract"]
-
-# minifarm_project.stage → etiqueta de fase de construcción persistida en
-# `proyectos.fase_construccion` (y consumida por el frontend).
-_STAGE_TO_STATUS = {
-    "deploy": "Próximo a energizar",
-    "construction": "En construcción",
-    "bt_and_contract": "En construcción",
-    "operation": "Energizado",
-}
-
-# Cuando no hay fecha de Sun Factory, estimamos sumando estos días a la fecha del
-# último cambio de etapa. Refleja el tiempo típico restante por etapa.
-_STAGE_OFFSET_DAYS = {
-    "deploy": 30, "construction": 90, "bt_and_contract": 150, "operation": 0,
-}
-
-# Rendimiento específico para proyectar MWh/mes desde la potencia instalada.
-# Caribe colombiano (Cesar, Magdalena, Bolívar…) ronda 4.3–4.8 kWh/kWp/día.
-_DEFAULT_YIELD_KWH_KWP_DAY = 4.3
-
 # El hito de energización en los cronogramas Sun Factory: RETIE/legalización/PEM.
 _ENERG_MILESTONE_RE = re.compile(r"retie|legaliz|energiz|puesta\s+en\s+marcha|\bpem\b|\bpdm\b", re.I)
-
-# Columnas de ubicación que puede tener minifarm_project (se incluyen en el SELECT
-# solo las que existan en el esquema real). Mapa: columna_origen → campo proyectos.
-_LOCATION_CANDIDATES = {
-    "latitude": "latitud", "lat": "latitud",
-    "longitude": "longitud", "lng": "longitud", "lon": "longitud",
-    "municipality": "municipio", "city": "municipio", "municipio": "municipio",
-    "department": "departamento", "state": "departamento", "departamento": "departamento",
-}
-
-
-def _fix_url(url: str) -> str:
-    """Normaliza la URL al esquema que acepta psycopg3 (`postgresql://`)."""
-    if not url:
-        return url
-    if url.startswith("postgresql+psycopg://"):
-        return url.replace("postgresql+psycopg://", "postgresql://", 1)
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql://", 1)
-    return url
-
-
-@contextmanager
-def _oconn():
-    """Conexión read-only a originabotdb (mismo patrón que mapa.py)."""
-    if not settings.ORIGINA_DATABASE_URL:
-        yield None
-        return
-    conn = psycopg.connect(_fix_url(settings.ORIGINA_DATABASE_URL), autocommit=True)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def _estimate_energization(stage: str, last_stage_date) -> date | None:
-    """Estimación de respaldo de la fecha de energización (sin Sun Factory)."""
-    if last_stage_date:
-        base = last_stage_date.date() if isinstance(last_stage_date, datetime) else last_stage_date
-        return base + timedelta(days=_STAGE_OFFSET_DAYS.get(stage, 60))
-    return None
-
-
-def _project_monthly_mwh(installed_power_kwp: float | None, yield_kwh_kwp_day: float) -> float | None:
-    if not installed_power_kwp or installed_power_kwp <= 0:
-        return None
-    return round(installed_power_kwp * yield_kwh_kwp_day * 30 / 1000, 2)
 
 
 def _parse_iso_date(raw: str | None) -> date | None:
@@ -184,24 +111,6 @@ def _tsf_code_from_base_name(base_name: str | None) -> str | None:
     return prefix if re.match(r"^COL[A-Z0-9]+$", prefix) else None
 
 
-# ── Ubicación: introspección del esquema de minifarm_project ────────────────────
-
-def _location_columns(conn) -> dict[str, str]:
-    """{ columna_origen: campo_proyectos } para las columnas de ubicación que
-    REALMENTE existen en minifarm_project. Evita que el SELECT falle si el esquema
-    de originabotdb no trae lat/lon/municipio."""
-    try:
-        rows = conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'minifarm_project'"
-        ).fetchall()
-    except Exception as exc:
-        logger.debug("no se pudo introspeccionar minifarm_project: %s", exc)
-        return {}
-    present = {r[0].lower() for r in rows}
-    return {src: dst for src, dst in _LOCATION_CANDIDATES.items() if src in present}
-
-
 # ── Cronogramas EPC de Sun Factory (Solenium) ───────────────────────────────────
 
 def _sunfactory_token() -> str | None:
@@ -216,26 +125,6 @@ def _sunfactory_token() -> str | None:
         )
         resp.raise_for_status()
         return resp.json()["access"]
-
-
-def _sunfactory_project_map(token: str) -> dict[str, int]:
-    """{ base_name.upper(): project_id } para cruzar con minifarm_project.name."""
-    base = settings.SUNFACTORY_API_URL.rstrip("/")
-    url: str | None = f"{base}/project/?limit=200"
-    out: dict[str, int] = {}
-    with httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}"}) as client:
-        pages = 0
-        while url and pages < 100:
-            resp = client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            rows = data.get("results", []) if isinstance(data, dict) else (data or [])
-            for p in rows:
-                if p.get("base_name"):
-                    out[p["base_name"].upper()] = p["id"]
-            url = data.get("next") if isinstance(data, dict) else None
-            pages += 1
-    return out
 
 
 def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
@@ -286,88 +175,6 @@ def _sunfactory_energization(token: str, project_id: int) -> dict | None:
         logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
         return None
     return _pick_energization_milestone(milestones)
-
-
-def _build_sunfactory_map(token: str, base_names: list[str]) -> dict[str, dict]:
-    """{ base_name.upper(): energización } para los proyectos del pipeline, concurrente."""
-    try:
-        proj_map = _sunfactory_project_map(token)
-    except Exception as exc:
-        logger.warning("Sun Factory project list failed: %s", exc)
-        return {}
-
-    wanted = {bn.upper(): proj_map[bn.upper()] for bn in base_names if bn and bn.upper() in proj_map}
-    if not wanted:
-        return {}
-
-    out: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=min(len(wanted), 12)) as pool:
-        results = pool.map(lambda kv: (kv[0], _sunfactory_energization(token, kv[1])), wanted.items())
-        for bn, energ in results:
-            if energ:
-                out[bn] = energ
-    return out
-
-
-# ── Cruce con la API de generación de Unergy (api.unergy.io) ────────────────────
-
-def _unergy_token() -> str | None:
-    if not (settings.UNERGY_ACCOUNT_ID and settings.UNERGY_LOGIN and settings.UNERGY_PASSWORD):
-        return None
-    with httpx.Client(timeout=30) as client:
-        resp = client.post(
-            f"{settings.UNERGY_API_URL}/api/accounts/{settings.UNERGY_ACCOUNT_ID}/",
-            json={"login": settings.UNERGY_LOGIN, "password": settings.UNERGY_PASSWORD},
-            headers={"User-Agent": "PostmanRuntime/7.50.0"},
-        )
-        resp.raise_for_status()
-        return resp.json()["access"]
-
-
-def _recent_avg_daily_mwh(token: str, sub_project: str, n_days_window: int = 30) -> float | None:
-    """Promedio diario real (MWh) de la API de generación de Unergy. >0 ⇒ ya genera."""
-    now_col = datetime.now(timezone.utc) - timedelta(hours=5)
-    start_utc = (now_col - timedelta(days=n_days_window)) + timedelta(hours=5)
-    end_utc = now_col + timedelta(hours=5)
-    try:
-        with httpx.Client(timeout=60, follow_redirects=True) as client:
-            resp = client.get(
-                f"{settings.UNERGY_API_URL}/api/admin/operations/project_generation/",
-                params={
-                    "time_stamp__gte": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "time_stamp__lte": end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "sub_project": sub_project,
-                    "limit": "10000",
-                },
-                headers={"Authorization": f"Bearer {token}", "User-Agent": "PostmanRuntime/7.50.0"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            records = data if isinstance(data, list) else data.get("results", [])
-    except Exception as exc:
-        logger.debug("Unergy generation cross-check failed for %s: %s", sub_project, exc)
-        return None
-
-    if not records:
-        return None
-    records_sorted = sorted(records, key=lambda r: r.get("time_stamp", ""))
-    diff_kwh = (records_sorted[-1].get("generacion") or 0) - (records_sorted[0].get("generacion") or 0)
-    if diff_kwh <= 0:
-        return None
-    return round((diff_kwh / 1000) / n_days_window, 4)
-
-
-def _build_generation_map(token: str, names: list[str]) -> dict[str, float]:
-    """{ name.upper(): avg_daily_mwh } concurrente. Solo entradas con generación > 0."""
-    targets = [n for n in names if n]
-    if not targets:
-        return {}
-    out: dict[str, float] = {}
-    with ThreadPoolExecutor(max_workers=min(len(targets), 12)) as pool:
-        for name, avg in pool.map(lambda n: (n, _recent_avg_daily_mwh(token, n)), targets):
-            if avg and avg > 0:
-                out[name.upper()] = avg
-    return out
 
 
 # ── Sun Factory como FUENTE PRINCIPAL (la "BD de Solenium/TSF") ─────────────────
@@ -481,132 +288,6 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
             "avance_pct": energ_info.get("avance_pct"),
             "monthly_mwh": None,  # Sun Factory no expone potencia en el listado
         })
-    return projects, warnings
-
-
-# ── Pipeline enriquecido (originabotdb, opcional/legacy) ─────────────────────────
-
-def fetch_pipeline_projects(
-    *,
-    cross_sunfactory: bool = True,
-    cross_generacion: bool = True,
-    yield_kwh_kwp_day: float = _DEFAULT_YIELD_KWH_KWP_DAY,
-) -> tuple[list[dict], list[str]]:
-    """Lee el pipeline de originabotdb y lo enriquece con Sun Factory + generación
-    Unergy. Devuelve `(proyectos, warnings)`. Cada proyecto es un dict normalizado:
-    `{ origina_code, commercial_name, status, stage, energization_date,
-       energization_source, avance_pct, monthly_mwh, installed_power_kwp,
-       already_generating, municipio, departamento, latitud, longitud }`."""
-    warnings: list[str] = []
-    with _oconn() as conn:
-        if conn is None:
-            return [], ["ORIGINA_DATABASE_URL no configurada — pipeline no disponible."]
-
-        loc_cols = _location_columns(conn)
-        loc_select = "".join(f", p.{src} AS loc_{src}" for src in loc_cols)
-        try:
-            cur = conn.execute(
-                f"""
-                SELECT p.id, p.name, p.stage,
-                       p.project_installed_power, p.project_dc_capacity, p.contract_type,
-                       sc.last_stage_date{loc_select}
-                FROM minifarm_project p
-                LEFT JOIN LATERAL (
-                    SELECT c.created_at AS last_stage_date
-                    FROM minifarm_projectstagechange c
-                    WHERE c.project_id = p.id
-                    ORDER BY c.created_at DESC
-                    LIMIT 1
-                ) sc ON TRUE
-                WHERE p.stage = ANY(%s)
-                ORDER BY array_position(%s::text[], p.stage), sc.last_stage_date DESC NULLS LAST
-                """,
-                (_PIPELINE_STAGES, _PIPELINE_STAGES),
-            )
-            col_names = [d.name for d in cur.description]
-            rows = cur.fetchall()
-        except Exception as exc:
-            logger.warning("originabotdb pipeline query failed: %s", exc)
-            return [], ["No se pudo leer el pipeline desde originabotdb — revisar conexión/credenciales."]
-
-    names = [r[1] for r in rows]
-
-    # Sun Factory: fecha de energización real + % avance (prioritario).
-    sf_map: dict[str, dict] = {}
-    if cross_sunfactory:
-        try:
-            sf_token = _sunfactory_token()
-            if sf_token:
-                sf_map = _build_sunfactory_map(sf_token, names)
-            else:
-                warnings.append("Credenciales de Sun Factory no configuradas — fecha de energización estimada.")
-        except Exception as exc:
-            logger.warning("Sun Factory auth/sync failed: %s", exc)
-            warnings.append("Sun Factory no disponible — fecha de energización estimada.")
-
-    # Generación Unergy: ¿ya está generando? (concurrente)
-    gen_map: dict[str, float] = {}
-    if cross_generacion:
-        try:
-            gen_token = _unergy_token()
-            if gen_token:
-                gen_map = _build_generation_map(gen_token, names)
-            else:
-                warnings.append("Credenciales de generación Unergy no configuradas — proyección teórica.")
-        except Exception as exc:
-            logger.warning("Unergy generation auth/sync failed: %s", exc)
-            warnings.append("API de generación Unergy no disponible — proyección teórica.")
-
-    projects: list[dict] = []
-    for r in rows:
-        row = dict(zip(col_names, r))
-        name = row["name"]
-        stage = row["stage"]
-        installed_power = row["project_installed_power"]
-
-        status = _STAGE_TO_STATUS.get(stage, "En construcción")
-        monthly = _project_monthly_mwh(installed_power, yield_kwh_kwp_day)
-        avance_pct = None
-
-        sf = sf_map.get(name.upper()) if name else None
-        if sf and sf.get("energization_date"):
-            energ = sf["energization_date"]
-            energ_source = "sunfactory"
-            avance_pct = sf.get("avance_pct")
-        else:
-            energ = _estimate_energization(stage, row.get("last_stage_date"))
-            energ_source = "estimado" if energ else "desconocido"
-
-        already_generating = False
-        avg = gen_map.get(name.upper()) if name else None
-        if avg and avg > 0:
-            already_generating = True
-            monthly = round(avg * 30, 2)
-            if status != "Energizado":
-                status = "Próximo a energizar"
-
-        # Ubicación: toma las columnas que existieran en minifarm_project.
-        loc: dict[str, object] = {"municipio": None, "departamento": None,
-                                  "latitud": None, "longitud": None}
-        for src, dst in loc_cols.items():
-            val = row.get(f"loc_{src}")
-            if val not in (None, "") and loc.get(dst) is None:
-                loc[dst] = val
-
-        projects.append({
-            "origina_code": name,
-            "commercial_name": _derive_commercial_name(name),
-            "status": status,
-            "stage": stage,
-            "energization_date": energ,
-            "energization_source": energ_source,
-            "avance_pct": avance_pct,
-            "monthly_mwh": monthly,
-            "installed_power_kwp": installed_power,
-            "already_generating": already_generating,
-            **loc,
-        })
-
     return projects, warnings
 
 

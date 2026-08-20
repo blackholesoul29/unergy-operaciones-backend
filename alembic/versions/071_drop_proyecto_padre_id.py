@@ -35,7 +35,9 @@ depends_on = None
 
 
 def upgrade():
-    op.drop_index("ix_proyectos_proyecto_padre_id", table_name="proyectos")
+    # La migracion 007 declaraba un indice "ix_proyectos_proyecto_padre_id" que
+    # nunca llego a existir en produccion (solo quedo el FK constraint) -- no se
+    # intenta borrar un indice que no esta. drop_column se lleva el FK con el.
     op.drop_column("proyectos", "proyecto_padre_id")
 
 
@@ -44,4 +46,3 @@ def downgrade():
         "proyectos",
         sa.Column("proyecto_padre_id", sa.BigInteger(), sa.ForeignKey("proyectos.id"), nullable=True),
     )
-    op.create_index("ix_proyectos_proyecto_padre_id", "proyectos", ["proyecto_padre_id"])

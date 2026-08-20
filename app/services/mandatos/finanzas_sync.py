@@ -268,11 +268,17 @@ REMITENTE_REVISORIA = "vlondono@jbp.com.co"
 REMITENTE_ENVIO = "jessica@unergy.io"
 
 
-def revisar_correos_finanzas() -> dict:
+def revisar_correos_finanzas(dias: int = 30) -> dict:
     """Punto de entrada del cron. Nunca lanza hacia el scheduler.
 
     Devuelve un resumen de la corrida además de loguearla, para que el endpoint
     manual pueda reportar qué pasó sin obligar a ir a buscar en los logs.
+
+    `dias` es la ventana hacia atrás. 30 alcanza para la operación diaria; para
+    recuperar histórico se sube (730 son dos años). Una ventana grande es cara
+    -- cada PDF se abre para revisar firmas -- pero es segura de reintentar: la
+    deduplicación por Message-ID hace que una corrida interrumpida retome donde
+    quedó en vez de rehacer lo ya hecho.
 
     Tres pasadas: lo que llega de la revisoría (INBOX), lo que Jessica manda a
     inversionistas (INBOX, va en copia), y lo que sale hacia la revisoría
@@ -338,8 +344,9 @@ def revisar_correos_finanzas() -> dict:
         resumen: dict = {"aplicado": 0, "omitido": 0, "error": 0}
         para_revisar: list[int] = []
         for direccion, fuente, carpeta, campo, usuario, password in pasadas:
-            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo,
-                                         usuario=usuario, password=password):
+            for correo in buscar_correos(direccion, dias=dias, carpeta=carpeta,
+                                         campo=campo, usuario=usuario,
+                                         password=password):
                 if correo.message_id in vistos:
                     continue
                 try:
@@ -375,6 +382,6 @@ def revisar_correos_finanzas() -> dict:
         return {"ok": True, "correos_nuevos": nuevos, "por_resultado": resumen,
                 "requieren_revision": para_revisar,
                 "buzones": [u for u, _ in creds],
-                "pasadas": len(pasadas)}
+                "pasadas": len(pasadas), "dias": dias}
     finally:
         db.close()

@@ -47,6 +47,7 @@ _ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/ejecutar-ingesta")
 def ejecutar_ingesta(reprocesar_desde: str = Query(None),
+                     dias: int = Query(30, ge=1, le=1825),
                      db: Session = Depends(get_db), _=Depends(_require_admin)):
     """Corre la lectura de correo AHORA, sin esperar al cron de las :05.
 
@@ -63,6 +64,19 @@ def ejecutar_ingesta(reprocesar_desde: str = Query(None),
 
     Volver a correrlo es inofensivo: la deduplicación va por Message-ID, así
     que los correos ya procesados se saltan.
+
+    ── dias=N ───────────────────────────────────────────────────────────────
+    Cuánto mirar hacia atrás. 30 por defecto, que es lo que necesita la
+    operación diaria. Para recuperar histórico se sube: 365 es un año, 730 son
+    dos. El tope de 1825 (cinco años) existe para que un cero de más no dispare
+    una corrida absurda por accidente.
+
+    Una ventana grande es cara -- cada PDF se abre para revisar firmas y los
+    mandatos nuevos se suben a Drive -- pero es segura de reintentar: si la
+    corrida se corta a mitad, la siguiente retoma donde quedó porque la
+    deduplicación va por Message-ID. Conviene subirla por tramos (90, 180, 365)
+    en vez de pedir cinco años de una: así se ve si algo sale raro con menos
+    volumen encima.
 
     ── reprocesar_desde=YYYY-MM-DD ──────────────────────────────────────────
     Borra las filas de bitácora desde esa fecha para que sus correos se vuelvan
@@ -93,7 +107,7 @@ def ejecutar_ingesta(reprocesar_desde: str = Query(None),
                 synchronize_session=False)
         db.commit()
 
-    resultado = revisar_correos_finanzas()
+    resultado = revisar_correos_finanzas(dias=dias)
     if reprocesar_desde:
         resultado["bitacora_borrada"] = borradas
         resultado["reprocesado_desde"] = reprocesar_desde

@@ -192,7 +192,7 @@ Grupos de información que trae:
 | Capacidad | `potencia_instalada_kwp`, `potencia_con_cen_mw`, `cantidad_total_paneles`, `produccion_especifica_kwh_kwp`, y las series `p50_mensual_kwh` / `p90_mensual_kwh` / `p99_mensual_kwh` |
 | Ubicación | `departamento`, `municipio`, `direccion_vereda`, `latitud`, `longitud`, `operador_red`, `tipo_conexion` |
 | Fechas | `fecha_entrada_operacion`, `fecha_inicio_comercializacion`, `fecha_fin_representacion`, `fecha_estimada_energizacion` |
-| Códigos de mercado | `codigo_sic_generacion`, `codigo_sic_consumo`, los IDs de Quoia y `project_id_solenium` |
+| Códigos de mercado | Los IDs de Quoia y `project_id_solenium` (los códigos SIC de generación/consumo viven en la API de Liquidaciones, ver `/liquidaciones-api/proyectos/{id}`) |
 | Servicios contratados | Las banderas `srv_operacion`, `srv_representacion`, `srv_cgm`, `srv_ppa`, `srv_promotor`, `srv_rec` |
 | Relaciones | `info_tecnica`, `inversionistas`, `inversores`, `area_contactos`, `servicio_representacion` |
 

@@ -1371,9 +1371,6 @@ _PENDING_DDLS = [
     # del backend, solo se mostraba/editaba en el frontend; el campo que si
     # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
     "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
-    # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
     # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",

@@ -191,8 +191,6 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
               "origina_code": "MF-BAL-1",
               "project_id_solenium": "SOL-45",
               "sunfactory_project_id": 310,
-              "codigo_sic_generacion": "AGGE0123",
-              "codigo_sic_consumo": null,
               "quoia_nodo_id": 8,
               "quoia_reporte_generacion_id": 91,
               "quoia_reporte_consumo_id": null,

@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 from datetime import date, datetime, timezone
 
 from app.services.mandatos.finanzas_sync import (
-    FUENTE_ENVIO, FUENTE_REVISORIA, _aplicar, decidir_finanzas,
+    FUENTE_ENVIO, FUENTE_REVISORIA, FUENTE_SALIENTE, _aplicar, decidir_finanzas,
 )
 from app.services.mandatos.imap_client import CorreoCrudo
 from tests.fixtures_mandatos_correos import ENVIO_INVERSIONISTA, REVISORIA_SEGUIMIENTO
@@ -116,3 +116,34 @@ def test_reaplicar_el_mismo_estado_no_es_error():
     r = _aplicar(_DBFake(fila), accion, correo)
     assert r["resultado"] == "sin_cambio"
     assert fila.estado == "firmado"
+
+
+def test_saliente_registra_el_envio_aunque_el_pdf_no_este_firmado():
+    """Un mandato que va HACIA la revisoría está sin firmar por definición --
+    justamente se manda para que lo firmen. Antes esto no producía nada y la
+    reconciliación se quedaba sin denominador."""
+    c = _correo("Adjunto los mandatos de julio para revisión.",
+                [("CMU1255-Mandato-Costos-Minigranja Solar Esmeralda-STRADA ASOCIADOS S A S.pdf",
+                  PDF_SIN)],
+                asunto="Revisión mandatos de costos - Julio")
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert len(d["acciones"]) == 1
+    a = d["acciones"][0]
+    assert a["estado"] == "sin_firma"
+    assert a["cmu"] == "CMU1255"
+    assert a["tercero"] == "STRADA ASOCIADOS S A S"
+
+
+def test_saliente_ignora_adjuntos_que_no_son_mandato():
+    c = _correo("Adjunto.", [("Liquidacion_CoxEnergy_Jul2026.pdf", PDF_SIN)],
+                asunto="Revisión mandatos de costos - Julio")
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["acciones"] == []
+
+
+def test_saliente_sin_periodo_en_el_asunto_no_inventa():
+    c = _correo("Adjunto.",
+                [("CMU1255-Mandato-Costos-Esmeralda-STRADA ASOCIADOS S A S.pdf", PDF_SIN)],
+                asunto="Re: sin mes")
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["acciones"] == []

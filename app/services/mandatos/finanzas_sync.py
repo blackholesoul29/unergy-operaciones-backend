@@ -28,6 +28,11 @@ logger = logging.getLogger("mandatos.finanzas_sync")
 
 FUENTE_REVISORIA = "revisoria"
 FUENTE_ENVIO = "envio_inversionista"
+# Lo que SALE hacia la revisoría. Necesita su propia fuente y no reusar
+# FUENTE_REVISORIA: son direcciones opuestas y significan lo contrario. Un
+# mandato entrante firmado dice "ya está listo"; uno saliente dice "acaba de
+# pedirse la firma", y está sin firmar por definición.
+FUENTE_SALIENTE = "saliente_revisoria"
 
 
 def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
@@ -77,7 +82,17 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             sin_identidad.append(nombre)
             continue
         firmas = verificador(contenido)
-        if fuente == FUENTE_ENVIO:
+        if fuente == FUENTE_SALIENTE:
+            # Registrar el envío. No importa si el PDF está firmado -- casi
+            # nunca lo estará. Lo que se registra es que salió, para que la
+            # reconciliación tenga contra qué comparar lo que vuelve.
+            ident = _identidad(nombre, correo)
+            if not ident:
+                sin_identidad.append(nombre)
+                continue
+            acciones.append({**ident, "estado": "sin_firma", "adjunto": None,
+                             "firmas": firmas, "comentario": None})
+        elif fuente == FUENTE_ENVIO:
             # Jessica manda al inversionista lo que ya está firmado, y su correo
             # SÍ trae el P.A., así que se puede armar la identidad completa y
             # crear la fila si no existe.
@@ -187,10 +202,16 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                          FinanzasMandato.tipo == accion["tipo"]).first())
     previo = existente.estado if existente else None
     destino = accion["estado"]
-    if existente and previo == destino:
+    # sin_firma solo estampa fecha_envio: upsert_mandato no toca el estado en esa
+    # rama. Así que registrar un envío nunca puede degradar nada, y no debe pasar
+    # por la validación de transiciones -- si no, un mandato que ya volvió firmado
+    # rechazaría el registro de su propio envío.
+    if destino == "sin_firma":
+        pass
+    elif existente and previo == destino:
         return {"cmu": accion["cmu"], "resultado": "sin_cambio", "estado": destino,
                 "id": existente.id}
-    if existente and not transicion_firma_valida(previo, destino):
+    elif existente and not transicion_firma_valida(previo, destino):
         return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                 "estado_previo": previo, "estado_destino": destino}
 
@@ -289,7 +310,7 @@ def revisar_correos_finanzas() -> dict:
         logger.error("Finanzas mandatos: no se pudo consultar Enviados: %s", exc)
         enviados = None
     if enviados:
-        pasadas.append((REMITENTE_REVISORIA, FUENTE_REVISORIA, enviados, "TO"))
+        pasadas.append((REMITENTE_REVISORIA, FUENTE_SALIENTE, enviados, "TO"))
 
     db = SessionLocal()
     try:

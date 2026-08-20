@@ -12,8 +12,14 @@ Se eliminaron los seis tests que ejercitaban esa función. Uno de ellos,
 `pytest.raises(Exception)` atrapaba el AttributeError de la función inexistente,
 así que reportaba éxito sin probar nada.
 
-Sobrevive la validación de la semilla, que sigue siendo relevante: `app/main.py`
-lee `data/comercial_seed.json` en el arranque.
+`app/main.py` seguía llamando a `importar_hojas` en el arranque (paso
+`_run_comercial_import`) pese a que ya no existía -- fallaba en cada deploy
+desde el commit 4385152, atrapado y logueado como
+"[startup] comercial_import FAILED", sin que nadie lo notara. Se eliminó
+ese paso del arranque el 2026-08-20. `data/comercial_seed.json` ya no tiene
+ningún lector en el código; queda como registro histórico. Este test solo
+valida que el archivo siga bien formado, por si se decide reactivarlo o
+consultarlo manualmente.
 """
 import json
 from pathlib import Path

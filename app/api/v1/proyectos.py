@@ -690,7 +690,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
         or p.asic_solicitudes or p.rec_procesos or p.promotor_seguimientos
         or p.contratos_servicio or p.ppa_contratos
         or p.servicio_operacion or p.servicio_representacion
-        or p.fronteras or p.subproyectos
+        or p.fronteras
     )
     if business_records:
         raise HTTPException(
@@ -816,11 +816,6 @@ def merge_proyectos(
     if asic_orig or asic_nuevo:
         movimientos.append({"tabla": "asic_cambios_contratos", "a_mover": asic_orig + asic_nuevo, "descartadas_por_colision": 0})
 
-    # subproyectos (self-ref proyecto_padre_id)
-    n_subp = _scalar(db, "SELECT count(*) FROM proyectos WHERE proyecto_padre_id=:loser AND id<>:keeper", p)
-    if n_subp:
-        movimientos.append({"tabla": "proyectos (subproyectos)", "a_mover": n_subp, "descartadas_por_colision": 0})
-
     # Campos escalares vacíos en el ganador: qué se copiaría del perdedor
     campos_copiados = []
     for f in _MERGE_SCALAR_UNIQUE + _MERGE_SCALAR_FILL_IF_EMPTY:
@@ -848,11 +843,7 @@ def merge_proyectos(
         db.execute(text("UPDATE asic_cambios_contratos SET proyecto_original_id=:keeper WHERE proyecto_original_id=:loser"), p)
         db.execute(text("UPDATE asic_cambios_contratos SET proyecto_nuevo_id=:keeper WHERE proyecto_nuevo_id=:loser"), p)
 
-        # 2) Subproyectos (self-ref). Evita dejar al ganador como su propio padre.
-        db.execute(text("UPDATE proyectos SET proyecto_padre_id=:keeper WHERE proyecto_padre_id=:loser AND id<>:keeper"), p)
-        db.execute(text("UPDATE proyectos SET proyecto_padre_id=NULL WHERE id=:keeper AND proyecto_padre_id=:loser"), p)
-
-        # 3) Tablas con unique compuesto: descartar colisiones, repuntar el resto
+        # 2) Tablas con unique compuesto: descartar colisiones, repuntar el resto
         for t, keys in _MERGE_COMPOSITE:
             cond = " AND ".join(f"k.{c} = {t}.{c}" for c in keys)
             db.execute(text(
@@ -860,18 +851,18 @@ def merge_proyectos(
                 f"(SELECT 1 FROM {t} k WHERE k.proyecto_id=:keeper AND {cond})"), p)
             db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
 
-        # 4) Tablas 1-a-1: si el ganador ya tiene, descartar la del perdedor; mover el resto
+        # 3) Tablas 1-a-1: si el ganador ya tiene, descartar la del perdedor; mover el resto
         for t in _MERGE_ONE_TO_ONE:
             db.execute(text(
                 f"DELETE FROM {t} WHERE proyecto_id=:loser AND EXISTS "
                 f"(SELECT 1 FROM {t} k WHERE k.proyecto_id=:keeper)"), p)
             db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
 
-        # 5) Tablas simples
+        # 4) Tablas simples
         for t in _MERGE_SIMPLE:
             db.execute(text(f"UPDATE {t} SET proyecto_id=:keeper WHERE proyecto_id=:loser"), p)
 
-        # 6) Campos escalares únicos: liberar del perdedor y copiar al ganador si está vacío
+        # 5) Campos escalares únicos: liberar del perdedor y copiar al ganador si está vacío
         for f in _MERGE_SCALAR_UNIQUE:
             db.execute(text(f"UPDATE proyectos SET {f}=NULL WHERE id=:loser"), p)
         for c in campos_copiados:
@@ -880,7 +871,7 @@ def merge_proyectos(
                 {**p, "val": c["valor"]},
             )
 
-        # 7) Borrar el perdedor (ya sin hijos colgando)
+        # 6) Borrar el perdedor
         db.execute(text("DELETE FROM proyectos WHERE id=:loser"), p)
 
         db.commit()

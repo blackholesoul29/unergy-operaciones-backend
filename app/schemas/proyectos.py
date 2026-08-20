@@ -236,7 +236,6 @@ class ProyectoPPAResumenOut(BaseModel):
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
     portafolio_id: Optional[int] = None
-    proyecto_padre_id: Optional[int] = None
     nombre_bitacora: Optional[str] = None
     nombre_clientes: Optional[str] = None
     topic_slug: Optional[str] = None
@@ -319,7 +318,6 @@ class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
     portafolio_id: Optional[int]
-    proyecto_padre_id: Optional[int]
     nombre_bitacora: Optional[str]
     nombre_clientes: Optional[str]
     topic_slug: Optional[str]

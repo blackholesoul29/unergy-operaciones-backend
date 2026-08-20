@@ -3,6 +3,7 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,6 +27,29 @@ from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
+
+# Un solo GaiaClient/SoleniumClient por proceso, reusado entre requests --
+# ambos ya manejan su propio refresh de token internamente (ver
+# GaiaClient._ensure_token / SoleniumClient._ensure_token); instanciar uno
+# nuevo en cada clic del detalle de frontera forzaba un login OAuth completo
+# contra Quoia y otro contra Solenium en cada apertura de la vista, mismo
+# patrón ya usado en app/services/mgs/scheduler.py.
+_gaia_client: GaiaClient | None = None
+_solenium_client: SoleniumClient | None = None
+
+
+def _get_gaia_client() -> GaiaClient:
+    global _gaia_client
+    if _gaia_client is None:
+        _gaia_client = GaiaClient()
+    return _gaia_client
+
+
+def _get_solenium_client() -> SoleniumClient:
+    global _solenium_client
+    if _solenium_client is None:
+        _solenium_client = SoleniumClient()
+    return _solenium_client
 
 
 def _semaforo(caso, revisar: bool) -> str:
@@ -128,38 +152,56 @@ def _fila_por_id(db: Session, frontera_id: int, fecha: date):
     return front, rep, Modelo
 
 
-def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFronteraReporte:
-    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    es_generacion = Modelo is ReporteEnergiaGeneracion
-
-    # Curvas de referencia (medidor, Solenium) siempre en vivo, sin importar
-    # qué Caso ganó -- para que el revisor pueda comparar visualmente.
-    curva_medidor_ppal = curva_medidor_resp = curva_sol = None
+def _fetch_curvas_medidor(front: Frontera, fecha: date) -> tuple[list | None, list | None]:
     try:
-        gaia = GaiaClient()
+        gaia = _get_gaia_client()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
         # veces por sesión solo para mostrar curvas de referencia, no hace
         # falta traer el catálogo completo de Quoia en cada clic.
         mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
         borders = curvas.construir_mapa_borders(gaia)
         meta = borders.get((front.codigo_frontera or "").strip().lower())
-        if meta:
-            c = curvas.curvas_de_frontera(
-                gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-                str(fecha), front.codigo_frontera,
-                recuperar=False,  # esto es solo para mostrar una curva de referencia --
-                                  # no tiene sentido interrogar el medidor (hasta 90s) por eso
-            )
-            curva_medidor_ppal = curva_a_lista(c["curva_ppal"])
-            curva_medidor_resp = curva_a_lista(c["curva_resp"])
-        if es_generacion and front.proyecto_id:
-            proyecto = db.get(Proyecto, front.proyecto_id)
-            if proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit():
-                sol = SoleniumClient()
-                curva_s, _ = solenium_svc.curva_generacion(sol, int(proyecto.project_id_solenium), str(fecha))
-                curva_sol = curva_a_lista(curva_s)
+        if not meta:
+            return None, None
+        c = curvas.curvas_de_frontera(
+            gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
+            str(fecha), front.codigo_frontera,
+            recuperar=False,  # esto es solo para mostrar una curva de referencia --
+                              # no tiene sentido interrogar el medidor (hasta 90s) por eso
+        )
+        return curva_a_lista(c["curva_ppal"]), curva_a_lista(c["curva_resp"])
     except Exception:
-        pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
+        return None, None  # curva de referencia informativa -- si falla, se muestra igual el resultado ya guardado
+
+
+def _fetch_curva_solenium(db: Session, front: Frontera, es_generacion: bool, fecha: date) -> list | None:
+    if not (es_generacion and front.proyecto_id):
+        return None
+    try:
+        proyecto = db.get(Proyecto, front.proyecto_id)
+        if not (proyecto and proyecto.project_id_solenium and proyecto.project_id_solenium.isdigit()):
+            return None
+        sol = _get_solenium_client()
+        curva_s, _ = solenium_svc.curva_generacion(sol, int(proyecto.project_id_solenium), str(fecha))
+        return curva_a_lista(curva_s)
+    except Exception:
+        return None  # curva de referencia informativa -- si falla, se muestra igual el resultado ya guardado
+
+
+def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFronteraReporte:
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
+
+    # Curvas de referencia (medidor, Solenium) siempre en vivo, sin importar
+    # qué Caso ganó -- para que el revisor pueda comparar visualmente. Quoia
+    # y Solenium son fuentes independientes entre sí, así que se piden en
+    # paralelo (antes eran secuenciales, y si Quoia fallaba primero ni
+    # siquiera se llegaba a intentar Solenium al compartir un solo try/except).
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_medidor = ex.submit(_fetch_curvas_medidor, front, fecha)
+        fut_sol = ex.submit(_fetch_curva_solenium, db, front, es_generacion, fecha)
+        curva_medidor_ppal, curva_medidor_resp = fut_medidor.result()
+        curva_sol = fut_sol.result()
 
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=front.nombre_frontera,

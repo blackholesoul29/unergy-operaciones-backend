@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.contratos import ContratoServicio, PagoServicio
 from app.models.clientes import Cliente
+from app.models.fronteras import Frontera
 from app.schemas.contratos_servicio import (
     ContratoServicioCreate, ContratoServicioUpdate, ContratoServicioOut,
     PagoServicioCreate, PagoServicioUpdate, PagoServicioOut,
@@ -19,6 +20,7 @@ def _load_options():
     return [
         selectinload(ContratoServicio.contratante),
         selectinload(ContratoServicio.prestador),
+        selectinload(ContratoServicio.fronteras),
     ]
 
 
@@ -27,6 +29,26 @@ def _get_or_404(id: int, db: Session) -> ContratoServicio:
     if not c:
         raise HTTPException(404, "Contrato no encontrado")
     return c
+
+
+def _resolve_fronteras(frontera_ids: list[int], db: Session) -> list[Frontera]:
+    """Resuelve los ids a fronteras vivas, o 400 si alguno no existe.
+
+    Se llama ANTES de insertar/mutar el contrato: si el payload trae una frontera
+    inválida, la petición falla sin haber escrito nada. Los ids repetidos colapsan
+    al resolverlos contra la BD, así no se viola uq_contrato_frontera.
+    """
+    if not frontera_ids:
+        return []
+    fronteras = (
+        db.query(Frontera)
+        .filter(Frontera.id.in_(set(frontera_ids)), Frontera.deleted_at.is_(None))
+        .all()
+    )
+    faltantes = set(frontera_ids) - {f.id for f in fronteras}
+    if faltantes:
+        raise HTTPException(400, f"Fronteras no encontradas: {sorted(faltantes)}")
+    return fronteras
 
 
 def _sync_partes(contrato: ContratoServicio, db: Session):
@@ -96,10 +118,13 @@ def create_contrato(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    contrato = ContratoServicio(**data.model_dump())
+    payload = data.model_dump()
+    fronteras = _resolve_fronteras(payload.pop("frontera_ids", []) or [], db)
+    contrato = ContratoServicio(**payload)
     db.add(contrato)
     db.flush()
     _sync_partes(contrato, db)
+    contrato.fronteras = fronteras
     db.commit()
     return _get_or_404(contrato.id, db)
 
@@ -166,9 +191,17 @@ def update_contrato(
     _=Depends(get_current_user),
 ):
     contrato = _get_or_404(id, db)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    # None/ausente = no tocar las fronteras actuales; [] = desvincular todas
+    frontera_ids = payload.pop("frontera_ids", None)
+    fronteras = None if frontera_ids is None else _resolve_fronteras(frontera_ids, db)
+    for k, v in payload.items():
         setattr(contrato, k, v)
     _sync_partes(contrato, db)
+    if fronteras is not None:
+        # Asignar deja que SQLAlchemy calcule el diff: borra los vínculos que
+        # sobran e inserta los nuevos.
+        contrato.fronteras = fronteras
     db.commit()
     return _get_or_404(id, db)
 

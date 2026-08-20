@@ -27,7 +27,7 @@ import app.models  # noqa: F401
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.models.proyectos import (
-    Portafolio, Proyecto, ProyectoGrupoPanel, ProyectoInfoTecnica, ProyectoInversor,
+    Portafolio, Proyecto, ProyectoInfoTecnica, ProyectoInversor,
 )
 from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
@@ -62,7 +62,7 @@ def db():
         # Las precarga _opciones_proyecto() al armar la ficha de cada planta:
         # sin la tabla, la consulta revienta con "no such table".
         Portafolio.__table__, ProyectoInfoTecnica.__table__,
-        ProyectoInversor.__table__, ProyectoGrupoPanel.__table__,
+        ProyectoInversor.__table__,
         GeneracionDiaria.__table__,
         Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,

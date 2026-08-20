@@ -28,7 +28,7 @@ from app.models.base import Base
 import app.models  # noqa: F401
 from app.models.clientes import Cliente
 from app.models.proyectos import (
-    Portafolio, Proyecto, ProyectoGrupoPanel, ProyectoInfoTecnica, ProyectoInversor,
+    Portafolio, Proyecto, ProyectoInfoTecnica, ProyectoInversor,
 )
 from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
@@ -62,7 +62,7 @@ def db():
         # La ficha de la planta las precarga con selectinload: sin la tabla, cada
         # consulta revienta con "no such table" aunque el test no las use.
         Portafolio.__table__, ProyectoInfoTecnica.__table__,
-        ProyectoInversor.__table__, ProyectoGrupoPanel.__table__,
+        ProyectoInversor.__table__,
         OperadorRed.__table__, Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
         PPAContrato.__table__, PPATarifa.__table__,
@@ -848,7 +848,6 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
                      sub_project="catedral", codigo_cnd="CND-0912",
                      codigo_tsf="TSF-77", project_id_solenium="SOL-45",
                      sunfactory_project_id=310, origina_code="MF-CAT",
-                     codigo_sic_generacion="SIC-GEN-1", codigo_sic_consumo="SIC-CON-1",
                      quoia_nodo_id=8, quoia_reporte_generacion_id=91,
                      portafolio_id=porta.id)
     _con_contrato(db, proy)
@@ -862,7 +861,6 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
     assert ident["project_id_solenium"] == "SOL-45"
     assert ident["sunfactory_project_id"] == 310
     assert ident["codigo_cnd"] == "CND-0912"
-    assert ident["codigo_sic_generacion"] == "SIC-GEN-1"
     assert ident["quoia_nodo_id"] == 8
     # El portafolio viaja con nombre y con id: el nombre para leerlo, el id para
     # agrupar sin depender de cómo esté escrito.
@@ -939,7 +937,6 @@ def test_sin_ficha_tecnica_el_bloque_viaja_igual_todo_en_null(db):
 
     assert t["voltaje_red"] is None
     assert t["potencia_ac_kw"] is None
-    assert t["paneles"]["grupos"] == []
     assert t["inversores"]["equipos"] == []
     # `tiene` es un booleano, no un null: sin ficha, no hay almacenamiento.
     assert t["almacenamiento"]["tiene"] is False

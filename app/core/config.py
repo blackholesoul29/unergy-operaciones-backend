@@ -109,10 +109,6 @@ class Settings(BaseSettings):
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""
 
-    # External databases (read-only correlation)
-    ORIGINA_DATABASE_URL: str = ""
-    REQUESTSDB_DATABASE_URL: str = ""
-
     # SMTP — envío de informes aprobados
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

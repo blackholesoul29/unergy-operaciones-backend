@@ -167,10 +167,18 @@ def backfill_fecha_entrada_operacion_unergy(db: Session, apply: bool = False) ->
 
     for p in sin_fecha:
         # Si ya tiene sub_project, el vínculo con Unergy ya está confirmado --
-        # no hace falta (ni conviene) volver a emparejar por nombre.
-        item = por_topico.get(p.sub_project) if p.sub_project else None
+        # no hace falta (ni conviene) volver a emparejar por nombre. Antes, si
+        # ese tópico no aparecía en el listado ACTUAL de Unergy (ausencia
+        # temporal, filtro distinto, etc.), el código caía igual al fallback
+        # difuso por nombre e ignoraba el vínculo ya confirmado -- podía
+        # asignar la fecha de un proyecto distinto en vez de reportar
+        # simplemente que Unergy no trajo dato para ese sub_project.
         motivo = None
-        if item is None:
+        if p.sub_project:
+            item = por_topico.get(p.sub_project)
+            if item is None:
+                motivo = f"sub_project '{p.sub_project}' ya vinculado, pero Unergy no lo trae en el listado actual"
+        else:
             topico, _unergy_nombre, _score, motivo = _buscar_topico_seguro(p.nombre_comercial, p.id, candidatos, db)
             item = por_topico.get(topico) if topico else None
 
@@ -247,6 +255,7 @@ def sincronizar_datos_unergy_si_aplica(proyecto: Proyecto, db: Session) -> str |
         db.commit()
         return topico_asignado
     except Exception:
+        db.rollback()
         logger.warning(
             "No se pudo sincronizar datos de Unergy para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,

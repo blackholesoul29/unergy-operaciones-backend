@@ -180,12 +180,6 @@ class Proyecto(Base):
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # ── IDs de liquidación ──────────────────────────────────────────────────────
-    # Códigos SIC que identifican al proyecto en las liquidaciones (generación y
-    # consumo). Texto libre a nivel de proyecto, editables desde la pestaña
-    # "ID liquidaciones" del detalle.
-    codigo_sic_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    codigo_sic_consumo: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
     # ── IDs de Quoia ────────────────────────────────────────────────────────────
     # IDs de la integración Quoia a nivel de proyecto: los reportes de generación
     # y consumo, y el nodo. Editables desde la pestaña "ID Quoia" del detalle.
@@ -229,7 +223,6 @@ class Proyecto(Base):
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
     subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
-    grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
@@ -251,13 +244,14 @@ class Proyecto(Base):
     def operador_red_legal(self) -> str | None:
         """Nombre legal del operador de red (catálogo operadores_red). Primero
         el vínculo propio del proyecto; si no lo tiene, el de la primera
-        frontera que sí lo tenga (caso de datos aún no sincronizados).
+        frontera VIVA que sí lo tenga (caso de datos aún no sincronizados) --
+        una frontera borrada no debe seguir prestando su operador.
         Requiere precargar `operador` y `fronteras.operador` (selectinload)
         para no golpear la BD por cada proyecto."""
         if self.operador:
             return self.operador.nombre_legal
         for f in self.fronteras:
-            if f.operador:
+            if f.deleted_at is None and f.operador:
                 return f.operador.nombre_legal
         return None
 
@@ -317,21 +311,6 @@ class ProyectoInfoTecnica(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="info_tecnica")
-
-
-class ProyectoGrupoPanel(Base):
-    __tablename__ = "proyecto_grupos_panel"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    potencia_pico_wp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    cantidad: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="grupos_panel")
 
 
 class ProyectoInversor(Base):

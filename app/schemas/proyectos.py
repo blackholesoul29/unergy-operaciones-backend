@@ -96,30 +96,6 @@ class ProyectoInfoTecnicaOut(ProyectoInfoTecnicaCreate):
     model_config = {"from_attributes": True}
 
 
-# ── Grupos Panel ──────────────────────────────────────────────────────────────
-
-class ProyectoGrupoPanelCreate(BaseModel):
-    marca: Optional[str] = None
-    modelo: Optional[str] = None
-    potencia_pico_wp: Optional[float] = None
-    cantidad: Optional[int] = None
-
-
-class ProyectoGrupoPanelUpdate(BaseModel):
-    marca: Optional[str] = None
-    modelo: Optional[str] = None
-    potencia_pico_wp: Optional[float] = None
-    cantidad: Optional[int] = None
-
-
-class ProyectoGrupoPanelOut(ProyectoGrupoPanelCreate):
-    id: int
-    proyecto_id: int
-    created_at: datetime
-    updated_at: datetime
-    model_config = {"from_attributes": True}
-
-
 # ── Inversores ────────────────────────────────────────────────────────────────
 
 class ProyectoInversorCreate(BaseModel):
@@ -301,9 +277,6 @@ class ProyectoCreate(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
-    # IDs de liquidación (códigos SIC de generación y consumo)
-    codigo_sic_generacion: Optional[str] = None
-    codigo_sic_consumo: Optional[str] = None
     # IDs de Quoia (reportes de generación/consumo y nodo)
     quoia_reporte_generacion_id: Optional[int] = None
     quoia_reporte_consumo_id: Optional[int] = None
@@ -395,8 +368,6 @@ class ProyectoOut(BaseModel):
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
-    codigo_sic_generacion: Optional[str] = None
-    codigo_sic_consumo: Optional[str] = None
     quoia_reporte_generacion_id: Optional[int] = None
     quoia_reporte_consumo_id: Optional[int] = None
     quoia_nodo_id: Optional[int] = None
@@ -421,7 +392,6 @@ class ProyectoOut(BaseModel):
     ppa_contratos: list[ProyectoPPAResumenOut] = []
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
-    grupos_panel: list[ProyectoGrupoPanelOut] = []
     inversores: list[ProyectoInversorOut] = []
     area_contactos: list[ProyectoAreaContactoOut] = []
     created_at: datetime
@@ -429,7 +399,7 @@ class ProyectoOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", "grupos_panel", "inversores", "area_contactos", mode="before")
+    @field_validator("inversionistas", "inversores", "area_contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:

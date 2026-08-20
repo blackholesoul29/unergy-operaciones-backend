@@ -1200,7 +1200,6 @@ def _opciones_proyecto() -> tuple:
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.inversores),
-        selectinload(Proyecto.grupos_panel),
         selectinload(Proyecto.portafolio),
     )
 
@@ -1361,10 +1360,6 @@ def _identificacion(proyecto) -> dict:
         "origina_code": proyecto.origina_code,
         "project_id_solenium": proyecto.project_id_solenium,
         "sunfactory_project_id": proyecto.sunfactory_project_id,
-        # SIC: con estos se cruzan las liquidaciones. Son de nivel proyecto; el
-        # código de cada frontera va en `fronteras[]`.
-        "codigo_sic_generacion": proyecto.codigo_sic_generacion,
-        "codigo_sic_consumo": proyecto.codigo_sic_consumo,
         "quoia_nodo_id": proyecto.quoia_nodo_id,
         "quoia_reporte_generacion_id": proyecto.quoia_reporte_generacion_id,
         "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,
@@ -1421,11 +1416,14 @@ def _ficha_tecnica(proyecto) -> dict:
     Casi todo vive en `proyecto_info_tecnica` (una fila por planta) y esa fila
     **puede no existir**: ahí sus campos salen null y el bloque viaja igual.
 
-    `paneles.grupos` e `inversores.equipos` son las listas REALES cargadas en la
-    plataforma —los inversores son los que se usan para reportar fallas por
-    inversor— y no el conteo de la ficha, que es un resumen escrito a mano y
-    puede no coincidir. Los dos viajan: el conteo dice lo que declaró el
-    diseño, la lista lo que está cargado.
+    `inversores.equipos` es la lista REAL cargada en la plataforma —los
+    inversores son los que se usan para reportar fallas por inversor— y no el
+    conteo de la ficha, que es un resumen escrito a mano y puede no coincidir.
+    Los dos viajan: el conteo dice lo que declaró el diseño, la lista lo que
+    está cargado. (`paneles.grupos` existió con el mismo propósito para
+    paneles -- ProyectoGrupoPanel, retirado 2026-08-20 por cero adopción real
+    en toda la plataforma; el conteo/marca/potencia de paneles sigue viniendo
+    de proyecto_info_tecnica.)
 
     De los equipos salen las MARCAS y no las IPs ni las contraseñas de módem que
     están en la misma tabla: son credenciales de acceso al equipo y esta
@@ -1457,15 +1455,6 @@ def _ficha_tecnica(proyecto) -> dict:
             "cantidad_total": _it("cantidad_total_paneles"),
             "marca": _it("marca_paneles"),
             "potencia_panel_kwp": _it("potencia_panel_kwp"),
-            "grupos": [
-                {
-                    "marca": g.marca,
-                    "modelo": g.modelo,
-                    "potencia_pico_wp": _num(g.potencia_pico_wp),
-                    "cantidad": g.cantidad,
-                }
-                for g in proyecto.grupos_panel
-            ],
         },
         "inversores": {
             "cantidad": _it("cantidad_inversores"),

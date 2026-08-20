@@ -408,10 +408,9 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_created ON alarmas_monitoreo (created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_severity ON alarmas_monitoreo (severity) WHERE resolved_at IS NULL",
-    # Cross-database correlation columns
+    # origina_code: sigue vivo, lo llena tsf_sync.py desde Sun Factory (no
+    # depende de la correlacion cross-DB con Origina, ya retirada).
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS requestsdb_supply_id BIGINT",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_node_name VARCHAR(255)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     # migration 016 — informes_guardados: flujo editorial de informes operacionales
     """CREATE TABLE IF NOT EXISTS informes_guardados (
@@ -707,17 +706,6 @@ _PENDING_DDLS = [
     # migration — reporte_energia_consumo: horas rellenadas con el OTRO
     # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo)
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
-    # migration — correlation_sync_log: track sync runs
-    """CREATE TABLE IF NOT EXISTS correlation_sync_log (
-        id BIGSERIAL PRIMARY KEY,
-        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        projects_processed INTEGER NOT NULL DEFAULT 0,
-        correlations_updated INTEGER NOT NULL DEFAULT 0,
-        origina_found INTEGER NOT NULL DEFAULT 0,
-        requestsdb_found INTEGER NOT NULL DEFAULT 0,
-        error TEXT
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_correlation_sync_at ON correlation_sync_log (synced_at DESC)",
     # migration — ASIC porcentaje_despacho domain constraint (fix bad data first)
     "UPDATE asic_solicitudes SET porcentaje_despacho = porcentaje_despacho / 100.0 WHERE porcentaje_despacho > 1.0",
     "ALTER TABLE asic_solicitudes ADD CONSTRAINT chk_porcentaje_despacho CHECK (porcentaje_despacho >= 0 AND porcentaje_despacho <= 1.0)",
@@ -1383,9 +1371,6 @@ _PENDING_DDLS = [
     # del backend, solo se mostraba/editaba en el frontend; el campo que si
     # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
     "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
-    # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
     # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
@@ -2506,31 +2491,6 @@ def _scheduled_bolsa_ingest():
         print(f"[bolsa_ingest] Failed: {e}")
 
 
-def _scheduled_correlation_sync():
-    """Daily cross-database correlation sync."""
-    try:
-        db = SessionLocal()
-        try:
-            from app.services.correlation import correlate_projects
-            result = correlate_projects(db)
-            print(f"[correlation_sync] OK — {result.get('correlations_updated', 0)} updated")
-        except Exception as e:
-            print(f"[correlation_sync] Failed: {e}")
-            # Log error
-            try:
-                db.execute(text(
-                    "INSERT INTO correlation_sync_log (synced_at, projects_processed, correlations_updated, error) "
-                    "VALUES (NOW(), 0, 0, :err)"
-                ), {"err": str(e)})
-                db.commit()
-            except Exception:
-                db.rollback()
-        finally:
-            db.close()
-    except Exception as e:
-        print(f"[correlation_sync] Failed to get DB session: {e}")
-
-
 def _scheduled_comercializacion_backfill():
     """Rellena la fecha de inicio de comercialización (primer día con generación
     real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
@@ -3553,13 +3513,6 @@ def _deferred_init():
                     id="evo_forecast_ingest",
                     name="Daily EVO forecast ingest",
                 )
-
-            _mgs_scheduler.add_job(
-                _scheduled_correlation_sync,
-                CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
-                id="correlation_sync",
-                name="Daily correlation sync",
-            )
 
             _mgs_scheduler.add_job(
                 _scheduled_representacion_alertas,

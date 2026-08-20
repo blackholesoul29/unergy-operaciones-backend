@@ -161,7 +161,7 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         existente.correo_ref = correo.message_id
         if destino == "firmado":
             existente.fecha_firma = existente.fecha_firma or correo.fecha.date()
-        if accion.get("adjunto"):
+        if accion.get("adjunto") and not existente.drive_url:
             contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
             if contenido:
                 from app.services.finanzas_mandatos_drive import subir_pdf
@@ -169,7 +169,8 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                 res = subir_pdf(contenido, accion["adjunto"], sub)
                 existente.drive_file_id, existente.drive_url = res["id"], res["url"]
         return {"cmu": accion["cmu"], "resultado": "aplicado", "id": existente.id,
-                "estado_previo": previo, "estado_nuevo": destino}
+                "estado_previo": previo, "estado_nuevo": destino,
+                "pdf_ya_en_drive": bool(accion.get("adjunto") and existente.drive_url)}
 
     existente = (db.query(FinanzasMandato)
                  .filter(FinanzasMandato.proyecto == accion["proyecto"],
@@ -182,8 +183,19 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                 "estado_previo": previo, "estado_destino": destino}
 
+    # No re-subir lo que ya está en Drive. `subir_pdf` siempre hace
+    # files().create(): no deduplica ni por nombre ni por contenido. Sin esta
+    # guarda, la primera corrida (que barre 30 días hacia atrás, ~93 correos)
+    # volvería a subir todos los PDFs que el script de Jessica ya subió, dejando
+    # duplicados en Drive y apuntando cada fila a la copia nueva en vez de la
+    # original. Limpiar eso después es trabajo manual archivo por archivo.
+    #
+    # Si algún día hace falta reemplazar un PDF ya guardado (una reexpedición,
+    # por ejemplo), se hace explícitamente -- no como efecto colateral de
+    # reprocesar un correo viejo.
     drive_id = drive_url = None
-    if accion.get("adjunto"):
+    ya_tenia_pdf = bool(existente and existente.drive_url)
+    if accion.get("adjunto") and not ya_tenia_pdf:
         contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
         if contenido:
             from app.services.finanzas_mandatos_drive import subir_pdf
@@ -198,6 +210,7 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         fecha=correo.fecha.date(), correo_ref=correo.message_id,
         drive_file_id=drive_id, drive_url=drive_url)
     return {"cmu": accion["cmu"], "resultado": "aplicado", "id": m.id,
+            "pdf_ya_en_drive": ya_tenia_pdf,
             "creado": creado, "estado_previo": previo, "estado_nuevo": destino}
 
 

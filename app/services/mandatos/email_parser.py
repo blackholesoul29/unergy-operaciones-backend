@@ -218,6 +218,20 @@ def _sin_cita(cuerpo: str) -> str:
     return cuerpo
 
 
+def parece_nombre_de_mandato(nombre: str | None) -> bool:
+    """Si el archivo pretende ser un mandato, aunque no se pueda interpretar.
+
+    Sirve para separar dos cosas que no valen lo mismo: "esto parece un mandato
+    pero no pude leer su nombre" (hay que revisarlo) y "esto es una factura
+    adjunta a un correo de Jessica" (no tiene nada que ver). Sin la distinción,
+    cualquier PDF suelto levantaba la bandera de revisión y el panel se llenaba
+    de facturas y comprobantes de pago -- 136 de 385 correos en la corrida del
+    2026-08-20. Un panel que grita por todo no lo mira nadie.
+    """
+    n = _normaliza(nombre)
+    return "mandato" in n or "certificado" in n or bool(CMU_RE.search(n.upper()))
+
+
 # Frases con las que un correo saliente declara que las correcciones YA se
 # hicieron. Confirmado con el usuario (2026-08-20): tras recibir las
 # observaciones, Adhara o Vanessa Aguirre responden compartiéndolas corregidas,

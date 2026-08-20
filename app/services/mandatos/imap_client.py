@@ -127,16 +127,39 @@ def carpeta_enviados(imap: imaplib.IMAP4_SSL) -> str | None:
 def buzones() -> list[tuple[str, str]]:
     """[(usuario, password)] de los buzones configurados, en orden.
 
-    Son dos porque el correo de mandatos no pasa todo por una sola cuenta: parte
-    de los envíos a la revisoría salen desde la cuenta de Jessica, y esos viven
-    en SU carpeta de Enviados. El mismo correo visto desde los dos buzones se
-    procesa una sola vez -- la deduplicación va por Message-ID, no por buzón.
+    Son varios porque el correo de mandatos no pasa todo por una sola cuenta:
+    hay hilos donde va una y no la otra. El mismo correo visto desde dos buzones
+    se procesa UNA vez -- la deduplicación es por Message-ID, no por buzón.
+
+    Para el segundo buzón, `MANDATOS_IMAP_PASSWORD_2` se puede dejar VACÍO si la
+    cuenta es la misma que `SMTP_USER`: entonces se reusa `SMTP_PASSWORD`, que
+    ya está configurada para enviar correo. Así el secreto vive en un solo
+    lugar y no hay dos copias que se puedan desincronizar al rotarla.
+
+    El fallback exige que el usuario COINCIDA, y eso es deliberado. Si mañana
+    alguien cambia la cuenta de envío a otra dirección, deja de coincidir, el
+    fallback no aplica y el diagnóstico reporta que falta la contraseña. Es
+    preferible a heredar la cuenta nueva en silencio y ponerse a leer un buzón
+    que nadie eligió -- un fallo ruidoso se arregla, uno callado se arrastra.
     """
     creds = []
     if settings.MANDATOS_IMAP_USER and settings.MANDATOS_IMAP_PASSWORD:
         creds.append((settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD))
-    if settings.MANDATOS_IMAP_USER_2 and settings.MANDATOS_IMAP_PASSWORD_2:
-        creds.append((settings.MANDATOS_IMAP_USER_2, settings.MANDATOS_IMAP_PASSWORD_2))
+
+    usuario2 = (settings.MANDATOS_IMAP_USER_2 or "").strip()
+    if usuario2:
+        password2 = settings.MANDATOS_IMAP_PASSWORD_2
+        if not password2 and usuario2.lower() == (settings.SMTP_USER or "").strip().lower():
+            password2 = settings.SMTP_PASSWORD
+            logger.info("IMAP mandatos: %s reusa SMTP_PASSWORD (misma cuenta de envío)",
+                        usuario2)
+        if password2:
+            creds.append((usuario2, password2))
+        else:
+            logger.warning(
+                "IMAP mandatos: %s configurado sin contraseña y no coincide con "
+                "SMTP_USER (%r), así que no se puede reusar SMTP_PASSWORD. Ese "
+                "buzón se omite.", usuario2, settings.SMTP_USER)
     return creds
 
 

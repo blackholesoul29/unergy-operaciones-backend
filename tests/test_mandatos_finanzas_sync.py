@@ -186,3 +186,49 @@ def test_buzones_vacio_sin_credenciales(monkeypatch):
               "MANDATOS_IMAP_USER_2", "MANDATOS_IMAP_PASSWORD_2"):
         monkeypatch.setattr(settings, k, "")
     assert buzones() == []
+
+
+def test_segundo_buzon_reusa_smtp_password_si_es_la_misma_cuenta(monkeypatch):
+    """Sin duplicar el secreto: si el segundo buzón ES la cuenta de envío, se
+    reusa SMTP_PASSWORD. Dos copias de la misma contraseña se desincronizan al
+    rotarla y una de las dos deja de servir sin que nadie lo note."""
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER", "adhara@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD", "clave-adhara")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER_2", "operaciones@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD_2", "")
+    monkeypatch.setattr(settings, "SMTP_USER", "operaciones@unergy.io")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "clave-operaciones")
+    assert buzones() == [("adhara@unergy.io", "clave-adhara"),
+                         ("operaciones@unergy.io", "clave-operaciones")]
+
+
+def test_no_hereda_la_cuenta_de_envio_si_cambio(monkeypatch):
+    """El fallback exige que el usuario coincida. Si alguien mueve el envío a
+    otra dirección, el buzón se omite y el log lo dice -- en vez de ponerse a
+    leer calladito una cuenta que nadie eligió."""
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER", "adhara@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD", "clave-adhara")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER_2", "operaciones@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD_2", "")
+    monkeypatch.setattr(settings, "SMTP_USER", "noreply@unergy.io")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "clave-de-otra-cuenta")
+    assert buzones() == [("adhara@unergy.io", "clave-adhara")]
+
+
+def test_password_propia_del_segundo_buzon_manda_sobre_el_fallback(monkeypatch):
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER", "adhara@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD", "clave-adhara")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER_2", "operaciones@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD_2", "clave-propia")
+    monkeypatch.setattr(settings, "SMTP_USER", "operaciones@unergy.io")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "clave-smtp")
+    assert buzones()[1] == ("operaciones@unergy.io", "clave-propia")

@@ -70,6 +70,20 @@ REVISORIA_HTML = """<div dir="ltr"><p>Buenas tardes Adhara,</p>
 <p>3. Certificado CMU1284 no se evidencia contabilizaci&oacute;n</p>
 <p>Cordialmente</p></div>"""
 
+# 2026-06-01 10:10 a.m. -- respuesta en hilo que SÍ es segura de interpretar:
+# los cuatro CMU listados tienen el mismo problema, ninguno está resuelto.
+# Contrasta con REVISORIA_SEGUIMIENTO, donde uno sí quedó bien. La diferencia
+# no es que sea una respuesta, es si atribuye resolución a algún CMU.
+REVISORIA_RESPUESTA_UNIFORME = """Hola Adhara,
+
+Espero que te encuentres muy bien.
+
+En respuesta a tu consulta sobre los mandatos CMU0746, CMU0747, CMU0748 y CMU0749, te informo que estos aún presentan diferencias en los valores de mantenimiento e IVA. Aunque el pasado viernes enviaron un auxiliar contable para corregir las inconsistencias, el error persiste.
+
+
+Cordialmente
+Vanessa Londoño Sánchez"""
+
 # ── Fuente 3 -- envío a inversionistas (jessica@unergy.io) ────────────────────
 
 # 2026-08-12 8:14 a.m. -- el correo real declara 8 adjuntos; acá van los 5

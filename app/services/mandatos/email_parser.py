@@ -106,28 +106,36 @@ CLASIF_MOLDE_SIMPLE = "molde_simple"
 CLASIF_SEGUIMIENTO = "seguimiento"
 CLASIF_DESCONOCIDO = "desconocido"
 
-# Señales de que el correo responde sobre observaciones previas. Un CMU
-# mencionado acá puede estar resuelto, no con novedad -- ver el correo del
-# 2026-08-10 5:50 p.m. en los fixtures.
+# Señales de que el correo declara ALGÚN CMU como resuelto. Solo estas bloquean
+# la interpretación, porque solo estas crean ambigüedad sobre a cuáles aplica la
+# observación. Correo real del 2026-08-10 5:50 p.m.: "Agradezco su respuesta y
+# los ajustes realizados para el mandato CMU1255. Sin embargo, para los mandatos
+# CMU1266... siguen siendo las mismas" -- ahí CMU1255 quedó bien y los otros no.
+#
+# NO van acá los marcadores de simple respuesta ("en respuesta a", "su
+# respuesta"): decir que hay hilo no dice que algo se haya resuelto. Un correo
+# que responde afirmando un problema uniforme -- "los mandatos CMU0746...
+# CMU0749 aún presentan diferencias" -- es seguro de interpretar.
 _SENALES_SEGUIMIENTO = (
     "agradezco",
     "sin embargo",
-    "siguen siendo las mismas",
     "ajustes realizados",
-    "su respuesta",
-    "en respuesta a",
+    "ya se encuentra",
+    "quedo corregido",
+    "fueron corregid",
 )
 
-# Frases que abren un listado de observaciones nuevas.
+# Frases que introducen o afirman observaciones. Ampliadas con la redacción real
+# vista en la bitácora de la primera corrida.
 _SENALES_MOLDE = (
     "siguientes observaciones",
     "siguientes diferencias",
     "siguientes novedades",
     "siguientes inconsistencias",
     "diferencias identificadas",
+    "presentan diferencias",
+    "no se evidencia",
 )
-
-_PREFIJOS_RESPUESTA = ("re:", "rv:", "fwd:", "rw:")
 
 
 def clasificar_correo(asunto: str | None, cuerpo: str | None) -> str:
@@ -142,10 +150,18 @@ def clasificar_correo(asunto: str | None, cuerpo: str | None) -> str:
     empujando el correo a seguimiento es un resultado seguro: en el peor caso
     exige revisión manual. Clasificar de más (leer de más) no corrompe nada acá;
     extraer de más sí. Por eso una función es permisiva y la otra estricta.
+
+    `asunto` se conserva en la firma -- otras partes del código lo pasan y
+    puede volver a hacer falta -- pero ya no se lee: el prefijo "Re:" dejó de
+    ser señal (ver más abajo).
     """
-    a = _normaliza(asunto)
+    # El prefijo "Re:" ya NO se usa como señal, así que `asunto` no se
+    # normaliza ni se consulta acá: todos los correos reales de la revisoría
+    # son respuestas dentro de un hilo, y esa regla sola clasificó 94 de 94
+    # como seguimiento, dejando la Fuente 1 sin ejecutarse nunca. Lo que
+    # importa no es si es respuesta, sino si declara algún CMU resuelto.
     c = _normaliza(cuerpo)
-    if a.startswith(_PREFIJOS_RESPUESTA) or any(s in c for s in _SENALES_SEGUIMIENTO):
+    if any(s in c for s in _SENALES_SEGUIMIENTO):
         return CLASIF_SEGUIMIENTO
     if any(s in c for s in _SENALES_MOLDE):
         return CLASIF_MOLDE_SIMPLE

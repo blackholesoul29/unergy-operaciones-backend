@@ -1,7 +1,10 @@
 """Decisión de qué escribir en finanzas_mandatos a partir de un correo. Pura."""
+from types import SimpleNamespace as NS
 from datetime import date, datetime, timezone
 
-from app.services.mandatos.finanzas_sync import FUENTE_ENVIO, FUENTE_REVISORIA, decidir_finanzas
+from app.services.mandatos.finanzas_sync import (
+    FUENTE_ENVIO, FUENTE_REVISORIA, _aplicar, decidir_finanzas,
+)
 from app.services.mandatos.imap_client import CorreoCrudo
 from tests.fixtures_mandatos_correos import ENVIO_INVERSIONISTA, REVISORIA_SEGUIMIENTO
 
@@ -76,3 +79,40 @@ def test_sin_periodo_en_el_asunto_no_se_inventa():
                 asunto="RE: sin mes", remitente="jessica@unergy.io")
     d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
     assert d["acciones"] == []
+
+
+class _DBFake:
+    """Sesión mínima: devuelve la fila que se le configure."""
+
+    def __init__(self, fila):
+        self._fila = fila
+
+    def query(self, _modelo):
+        return self
+
+    def filter(self, *a, **k):
+        return self
+
+    def order_by(self, *a, **k):
+        return self
+
+    def first(self):
+        return self._fila
+
+
+def test_reaplicar_el_mismo_estado_no_es_error():
+    """Caso real: 40 de 61 acciones de la primera tanda eran firmado→firmado.
+
+    Volver a recibir el PDF firmado de un mandato ya firmado es idempotencia,
+    no un conflicto. Reportarlo como transicion_invalida llena el panel de
+    revisión de ruido y esconde los conflictos reales.
+    """
+    fila = NS(id=7, cmu="CMU1270", estado="firmado", periodo=None, tipo="costo",
+              drive_url="https://drive/x", comentario=None, correo_ref=None,
+              fecha_firma=None)
+    accion = {"cmu": "CMU1270", "estado": "firmado", "periodo": None,
+              "adjunto": None, "comentario": None}
+    correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
+    r = _aplicar(_DBFake(fila), accion, correo)
+    assert r["resultado"] == "sin_cambio"
+    assert fila.estado == "firmado"

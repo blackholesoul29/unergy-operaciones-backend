@@ -151,6 +151,14 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         if not existente:
             return {"cmu": accion["cmu"], "resultado": "cmu_no_encontrado"}
         destino = accion["estado"]
+        if existente.estado == destino:
+            # Idempotencia, no conflicto: llegó otra vez lo mismo. Pasa seguido
+            # -- la revisoría reenvía el hilo con los mismos adjuntos. Marcarlo
+            # como transición inválida llenaba el panel de revisión de ruido
+            # (40 de 61 acciones en la primera tanda) y escondía los conflictos
+            # de verdad.
+            return {"cmu": accion["cmu"], "resultado": "sin_cambio",
+                    "estado": destino}
         if not transicion_firma_valida(existente.estado, destino):
             return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                     "estado_previo": existente.estado, "estado_destino": destino}
@@ -179,6 +187,9 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                          FinanzasMandato.tipo == accion["tipo"]).first())
     previo = existente.estado if existente else None
     destino = accion["estado"]
+    if existente and previo == destino:
+        return {"cmu": accion["cmu"], "resultado": "sin_cambio", "estado": destino,
+                "id": existente.id}
     if existente and not transicion_firma_valida(previo, destino):
         return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                 "estado_previo": previo, "estado_destino": destino}
@@ -221,7 +232,7 @@ def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):
     d = decidir_finanzas(correo, fuente)
     registros = [_aplicar(db, a, correo) for a in d["acciones"]]
     aplicado = any(r["resultado"] == "aplicado" for r in registros)
-    problema = any(r["resultado"] != "aplicado" for r in registros)
+    problema = any(r["resultado"] not in ("aplicado", "sin_cambio") for r in registros)
     return MandatoCorreo(
         message_id=correo.message_id, fecha=correo.fecha,
         remitente=(correo.remitente or "")[:255],

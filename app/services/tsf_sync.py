@@ -733,7 +733,7 @@ def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
     projects, warnings = fetch_sunfactory_projects(enrich_dates=enrich_dates)
     stats = {"creados": 0, "actualizados": 0, "sin_cambios": 0, "errores": 0, "sin_match": 0,
              "total_pipeline": len(projects), "warnings": warnings, "fuente": "sunfactory",
-             "sugerencias_vinculo": []}
+             "sugerencias_vinculo": [], "ambiguos": []}
 
     for p in projects:
         code = p["origina_code"]
@@ -754,7 +754,12 @@ def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
             tsf_code = p.get("tsf_code")
             base_name = p.get("base_name")
             solenium_pipeline_id = p.get("solenium_id")
-            existing = db.execute(
+            # Sin LIMIT 1: si origina_code/codigo_tsf no son UNIQUE en el modelo,
+            # más de un proyecto en BD puede compartir el mismo código (caso real:
+            # "Astrea 1 (Calipso)" duplicado, ids 274/275, mismo codigo_tsf). Antes
+            # esto elegía uno en silencio con LIMIT 1 y el otro quedaba huérfano de
+            # las actualizaciones de Sun Factory sin que nadie se enterara.
+            matches = db.execute(
                 text("""
                     SELECT id, estado FROM proyectos
                     WHERE deleted_at IS NULL AND (
@@ -765,10 +770,22 @@ def sync_tsf_projects(db: Session, enrich_dates: bool = True) -> dict:
                         OR (CAST(:bn  AS text) <> '' AND codigo_tsf = CAST(:bn  AS text))
                     )
                     ORDER BY (sunfactory_project_id = CAST(:sol_id AS integer)) DESC NULLS LAST, id
-                    LIMIT 1
                 """),
                 {"sol_id": solenium_pipeline_id, "code": code, "tsf": tsf_code or "", "bn": base_name or ""},
-            ).first()
+            ).all()
+            if len(matches) > 1:
+                stats["ambiguos"].append({
+                    "origina_code": code,
+                    "codigo_tsf": tsf_code,
+                    "sunfactory_project_id": solenium_pipeline_id,
+                    "candidatos_ids": [m.id for m in matches],
+                    "motivo": (
+                        "más de un proyecto en BD comparte este código -- se actualizó "
+                        "solo el primero (menor id); revisar si son duplicados "
+                        "(POST /proyectos/{ganador}/merge/{perdedor})"
+                    ),
+                })
+            existing = matches[0] if matches else None
 
             fase = _STATUS_TO_FASE.get(p["status"], "en_construccion")
             energ = p["energization_date"]

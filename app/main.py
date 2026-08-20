@@ -3398,7 +3398,7 @@ def _run_ppa_responsables_seed() -> None:
 def _run_comercial_dedup() -> None:
     """Fusiona clientes-prospecto que el import creó por duplicado cuando ya
     existía el cliente operativo (match por planta→dueño o nombre exacto).
-    Conservador + soft-delete (reversible) + idempotente. Corre tras el import."""
+    Conservador + soft-delete (reversible) + idempotente. El import histórico (eliminado en 4385152) ya cargó los datos."""
     from types import SimpleNamespace
     from app.core.database import SessionLocal
     from app.api.v1.comercial import dedup_clientes

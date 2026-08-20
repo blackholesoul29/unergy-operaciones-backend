@@ -171,8 +171,6 @@ class Proyecto(Base):
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Monitoreo
-    alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P50/P90/P99 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
     p90_mensual_kwh = mapped_column(JSONB, nullable=True)
     p50_mensual_kwh = mapped_column(JSONB, nullable=True)
@@ -205,15 +203,10 @@ class Proyecto(Base):
     # % de avance de obra (Sun Factory).
     avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Proyección de generación mensual (MWh), editable por operaciones.
-    mwh_mes_estimado: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Origen del registro: 'manual' (alta normal) | 'tsf_sync' (auto-importado).
     origen: Mapped[str | None] = mapped_column(String(20), default="manual", nullable=True)
 
-    # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    income_distribution_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    generar_liquidacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

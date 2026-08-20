@@ -45,7 +45,7 @@ class GeneracionDiariaOut(BaseModel):
 
 class GeneracionDiariaBulkItem(BaseModel):
     """Un registro dentro del bulk. Si proyecto_nombre_externo no coincide
-    se intenta matching fuzzy con nombre_comercial y alias_monitoreo."""
+    se intenta matching fuzzy con nombre_comercial."""
     proyecto_id: Optional[int] = None
     proyecto_nombre_externo: Optional[str] = None  # fallback fuzzy
     fecha: date

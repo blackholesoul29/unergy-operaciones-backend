@@ -26,7 +26,6 @@ _PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls JSONB",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
     """CREATE TABLE IF NOT EXISTS generacion_diaria (
         id BIGSERIAL PRIMARY KEY,
         proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
@@ -998,7 +997,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
     # migration — Clasificación de liquidación por período (normal | neu | nitro)
     """CREATE TABLE IF NOT EXISTS clasificacion_liquidacion (

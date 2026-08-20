@@ -93,10 +93,6 @@ def find_proj(db, keyword: str):
     r = db.query(Proyecto).filter(Proyecto.nombre_bitacora.ilike(f"%{kw}%")).first()
     if r:
         return r
-    # 4. Intenta con alias_monitoreo
-    r = db.query(Proyecto).filter(Proyecto.alias_monitoreo.ilike(f"%{kw}%")).first()
-    if r:
-        return r
     return None
 
 

@@ -125,10 +125,9 @@ def test_los_ceros_reales_si_cuentan():
 # ── manual vs. api ───────────────────────────────────────────────────────────
 
 class ProyFalso:
-    def __init__(self, origen=None, sub="algo", alias=None):
+    def __init__(self, origen=None, sub="algo"):
         self.gen_promedio_origen = origen
         self.sub_project = sub
-        self.alias_monitoreo = alias
 
 
 def test_no_se_pisa_un_valor_cargado_a_mano():
@@ -141,10 +140,6 @@ def test_con_force_si_se_pisa():
 
 def test_una_planta_sin_identificador_de_monitoreo_se_manda_a_carga_manual():
     assert "a mano" in gp.decidir(ProyFalso(sub=None), force=False)
-
-
-def test_el_alias_de_monitoreo_sirve_como_identificador():
-    assert gp.decidir(ProyFalso(sub=None, alias="otro_nombre"), force=False) is None
 
 
 def test_un_valor_de_api_se_recalcula_sin_force():

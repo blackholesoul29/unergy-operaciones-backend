@@ -138,7 +138,7 @@ def decidir(proyecto: Proyecto, force: bool) -> str | None:
     """¿Hay que saltarse este proyecto? Devuelve el motivo, o None si se procesa."""
     if proyecto.gen_promedio_origen == ORIGEN_MANUAL and not force:
         return "valor manual (usar force=true para pisarlo)"
-    if not (proyecto.sub_project or proyecto.alias_monitoreo):
+    if not proyecto.sub_project:
         return "sin identificador de monitoreo: cargar el promedio a mano"
     return None
 
@@ -198,7 +198,7 @@ async def recalcular(
         sem = asyncio.Semaphore(8)   # mismo orden de paralelismo que el resto del módulo
 
         async def uno(p: Proyecto):
-            sub = p.sub_project or p.alias_monitoreo
+            sub = p.sub_project
             async with sem:
                 try:
                     lecturas = await _fetch_unergy_raw(token, sub, fetch_from, fetch_to, verified_only=True)

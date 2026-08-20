@@ -71,18 +71,15 @@ def test_continuacion_entre_bloques_con_prev_cum():
 def test_identificador_monitoreo_coalesce():
     class P:
         sub_project = None
-        alias_monitoreo = None
         topic_slug = "sabana_de_torres"
     assert identificador_monitoreo(P()) == "sabana_de_torres"
 
     class Q:
         sub_project = "sp_x"
-        alias_monitoreo = "alias_y"
         topic_slug = "slug_z"
     assert identificador_monitoreo(Q()) == "sp_x"
 
     class R:
         sub_project = None
-        alias_monitoreo = None
         topic_slug = None
     assert identificador_monitoreo(R()) is None

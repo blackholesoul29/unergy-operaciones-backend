@@ -83,7 +83,6 @@ def _proyecto_out(p: Proyecto) -> dict:
         "estado": p.estado if isinstance(p.estado, str) else p.estado.value,
         "fecha_estimada_energizacion": p.fecha_estimada_energizacion,
         "fecha_inicio_comercializacion": p.fecha_inicio_comercializacion,
-        "mwh_mes_estimado": float(p.mwh_mes_estimado) if p.mwh_mes_estimado is not None else None,
     }
 
 

@@ -21,7 +21,8 @@ import zipfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
+                     Query, UploadFile)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,7 +47,8 @@ _ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/ejecutar-ingesta")
-def ejecutar_ingesta(reprocesar_desde: str = Query(None),
+def ejecutar_ingesta(tareas: BackgroundTasks,
+                     reprocesar_desde: str = Query(None),
                      dias: int = Query(30, ge=1, le=1825),
                      db: Session = Depends(get_db), _=Depends(_require_admin)):
     """Corre la lectura de correo AHORA, sin esperar al cron de las :05.
@@ -94,7 +96,13 @@ def ejecutar_ingesta(reprocesar_desde: str = Query(None),
     Pide fecha explícita a propósito, en vez de un `todo=true`: obliga a
     declarar el alcance y hace imposible vaciar la tabla entera por descuido.
     """
-    from app.services.mandatos.finanzas_sync import revisar_correos_finanzas
+    from app.services.mandatos.finanzas_sync import (
+        ingesta_en_curso, revisar_correos_finanzas_async,
+    )
+
+    if ingesta_en_curso():
+        raise HTTPException(409, "Ya hay una corrida en curso. Espera a que "
+                                 "termine antes de lanzar otra.")
 
     borradas = 0
     if reprocesar_desde:
@@ -107,11 +115,18 @@ def ejecutar_ingesta(reprocesar_desde: str = Query(None),
                 synchronize_session=False)
         db.commit()
 
-    resultado = revisar_correos_finanzas(dias=dias)
-    if reprocesar_desde:
-        resultado["bitacora_borrada"] = borradas
-        resultado["reprocesado_desde"] = reprocesar_desde
-    return resultado
+    # En segundo plano a propósito. Leer 90 días son minutos de trabajo -- cada
+    # PDF se abre para revisar firmas -- y el proxy de Vercel corta la conexión
+    # mucho antes, devolviendo un 502 que parece un fallo del backend cuando en
+    # realidad el proceso sigue corriendo. Respondiendo de una, el cliente sabe
+    # que arrancó y consulta el avance en /mandatos/correos.
+    tareas.add_task(revisar_correos_finanzas_async, dias)
+    return {"ok": True, "estado": "arrancó en segundo plano",
+            "dias": dias,
+            "bitacora_borrada": borradas if reprocesar_desde else 0,
+            "reprocesado_desde": reprocesar_desde,
+            "como_ver_avance": "GET /api/v1/mandatos/correos?limite=500 "
+                               "-- el conteo va subiendo mientras procesa"}
 
 
 @router.get("/diagnostico-imap")

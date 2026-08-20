@@ -338,6 +338,17 @@ def editar_curva(
     # genérico "Editado manualmente".
     FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico"}
     rep.medidor_usado = body.fuente if body.fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
+    # Si la fuente elegida es un medidor, lo que se acaba de guardar pasa a
+    # ser el nuevo snapshot de ESE medidor -- si no se actualiza, 'Detalle de
+    # las fuentes' y el aviso 'el medidor muestra un valor distinto en Quoia'
+    # seguian comparando contra el numero congelado de la clasificacion
+    # original, aunque la persona ya hubiera adoptado la opcion '(actualizado)'
+    # de 'Reportar con otra fuente' (esa opcion cambia curva_final pero nunca
+    # tocaba curva_medidor_principal/respaldo, ver captura 2026-08-20).
+    if body.fuente == "principal":
+        rep.curva_medidor_principal = rep.curva_final
+    elif body.fuente == "respaldo":
+        rep.curva_medidor_respaldo = rep.curva_final
     # Si la persona confirma que el MEDIDOR (no una estimación) es la
     # fuente correcta, 'caso' se actualiza para que esta fila SÍ pueda
     # alimentar la mediana/forma histórica de días futuros -- antes quedaba

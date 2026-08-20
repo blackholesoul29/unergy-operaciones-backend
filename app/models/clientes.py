@@ -1,9 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func, text
+from sqlalchemy.sql import func
 from app.models.base import Base
 
 
@@ -43,13 +42,6 @@ class Cliente(Base):
     nit_cedula: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo_persona: Mapped[str | None] = mapped_column(SAEnum(TipoPersonaEnum, name="tipo_persona_enum"), nullable=True)
     representante_legal: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_liquidacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_monitoreo: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_soporte: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correo_operacional: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    correos_operacionales: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default=text("'[]'"))
-    correos_cgm: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list, server_default=text("'[]'"))
-    telefono_contacto: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -72,7 +64,6 @@ class Cliente(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    origina_investment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     participaciones: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
     servicios: Mapped[list["ClienteServicio"]] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)

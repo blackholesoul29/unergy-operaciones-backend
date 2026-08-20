@@ -99,8 +99,19 @@ def servicios_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[s
                       .filter(ClienteServicio.cliente_id.in_(cliente_ids)).all()):
         res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
 
-    for cid, tipo in (db.query(ContratoServicio.contratante_id, ContratoServicio.servicio_aplica)
-                      .filter(ContratoServicio.contratante_id.in_(cliente_ids)).all()):
+    # Fix 2026-08-19: el panel 360 (clientes.py::get_panel) tambien cuenta los
+    # contratos donde el cliente es prestador, no solo contratante -- sin esto,
+    # un cliente que presta un servicio (no solo lo contrata) salia con menos
+    # servicios aca que en su propio detalle.
+    for cid, tipo in (
+        db.query(ContratoServicio.contratante_id, ContratoServicio.servicio_aplica)
+        .filter(ContratoServicio.contratante_id.in_(cliente_ids)).all()
+    ):
+        res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
+    for cid, tipo in (
+        db.query(ContratoServicio.prestador_id, ContratoServicio.servicio_aplica)
+        .filter(ContratoServicio.prestador_id.in_(cliente_ids)).all()
+    ):
         res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
 
     filas_ppa = (

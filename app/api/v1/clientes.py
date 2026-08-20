@@ -433,29 +433,6 @@ async def upload_archivo_documento(
     return doc
 
 
-# ── Fondos de inversión (origina) ────────────────────────────────────────────
-
-
-@router.get("/{id}/fondos")
-def get_client_fund(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Get the investment fund linked to this client (from originabotdb)."""
-    cliente = _get_cliente_or_404(id, db)
-    if not cliente.origina_investment_id:
-        return {"linked": False, "fund": None}
-
-    from app.services.correlation import fetch_origina_investment_detail
-    fund = fetch_origina_investment_detail(cliente.origina_investment_id)
-    if not fund:
-        return {
-            "linked": True,
-            "origina_investment_id": cliente.origina_investment_id,
-            "fund": None,
-            "error": "Fondo no encontrado en Origina (puede haber sido eliminado)",
-        }
-
-    return {"linked": True, "fund": fund}
-
-
 # ── Client linking: Proyectos, Fronteras, Contratos PPA ─────────────────────
 
 @router.get("/{id}/proyectos")
@@ -492,7 +469,7 @@ def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_
 @router.get("/{id}/fronteras")
 def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """List fronteras linked to this client via their projects."""
-    from app.models.proyectos import ProyectoInversionista
+    from app.models.proyectos import Proyecto, ProyectoInversionista
     from app.models.fronteras import Frontera
     _get_cliente_or_404(id, db)
 
@@ -507,7 +484,12 @@ def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_
 
     fronteras = (
         db.query(Frontera)
-        .filter(Frontera.proyecto_id.in_(all_project_ids))
+        .join(Proyecto, Proyecto.id == Frontera.proyecto_id)
+        .filter(
+            Frontera.proyecto_id.in_(all_project_ids),
+            Frontera.deleted_at.is_(None),
+            Proyecto.deleted_at.is_(None),
+        )
         .order_by(Frontera.codigo_frontera)
         .all()
     )
@@ -855,8 +837,8 @@ _MERGE_CLIENTE_COMPOSITE = [
 # copiarse al ganador (mismo tratamiento que sunfactory_project_id en proyectos).
 _MERGE_CLIENTE_SCALAR_UNIQUE = ["nit_cedula"]
 _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY = [
-    "telefono_contacto", "direccion", "ciudad", "departamento",
-    "tipo_persona", "representante_legal", "origina_investment_id",
+    "direccion", "ciudad", "departamento",
+    "tipo_persona", "representante_legal",
 ]
 
 

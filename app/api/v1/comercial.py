@@ -9,7 +9,6 @@ estado propio: el que se muestra en su fila es el de su oferta más avanzada.
 import json
 import enum
 import re
-import unicodedata
 from datetime import datetime, date
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,7 +23,7 @@ from app.models.usuarios import Usuario
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.api.v1.clientes import buscar_cliente_duplicado
-from app.utils.nombre_matching import mejor_candidato
+from app.utils.nombre_matching import mejor_candidato, parece_persona_juridica
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
@@ -687,16 +686,36 @@ def _resolver_cliente(db: Session, cliente_id: int | None, cliente_nuevo,
 
     cn = cliente_nuevo
     if not forzar_duplicado:
-        duplicado = buscar_cliente_duplicado(db, cn.razon_social_nombre)
+        # Fix 2026-08-19: nit_cedula tiene UNIQUE en la base, pero nunca se
+        # revisaba antes de crear -- el choque salia como 500 crudo del
+        # INSERT en vez del 409 amigable de abajo. Un NIT igual es evidencia
+        # mucho mas fuerte que un nombre parecido (practicamente certeza de
+        # que es la misma empresa), asi que se revisa primero y aparte, sin
+        # pasar por el umbral de similitud de nombre.
+        duplicado = None
+        duplicado_por_nit = False
+        nit = (cn.nit_cedula or "").strip()
+        if nit:
+            duplicado = db.query(Cliente).filter(
+                Cliente.nit_cedula == nit, Cliente.deleted_at.is_(None)
+            ).first()
+            duplicado_por_nit = duplicado is not None
+        if not duplicado:
+            duplicado = buscar_cliente_duplicado(db, cn.razon_social_nombre)
         if duplicado:
+            mensaje = (
+                f"Ya existe un cliente con el mismo NIT/cédula: "
+                f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                if duplicado_por_nit else
+                f"Ya existe un cliente con un nombre muy parecido: "
+                f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+            )
             raise HTTPException(
                 409,
                 {
-                    "mensaje": (
-                        f"Ya existe un cliente con un nombre muy parecido: "
-                        f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
-                    ),
-                    "duplicado_nombre": True,
+                    "mensaje": mensaje,
+                    "duplicado_nombre": not duplicado_por_nit,
+                    "duplicado_nit": duplicado_por_nit,
                     "candidato_id": duplicado.id,
                     "candidato_nombre": duplicado.razon_social_nombre,
                 },
@@ -706,6 +725,13 @@ def _resolver_cliente(db: Session, cliente_id: int | None, cliente_nuevo,
         nit_cedula=cn.nit_cedula or None,
         origen_tipo=cn.origen_tipo,
         origen_detalle=cn.origen_detalle,
+        # Sugerencia, no certeza: solo se marca "juridica" cuando la razon
+        # social trae un indicador reconocible (S.A.S./LTDA/E.S.P./fiduciaria/
+        # patrimonio autonomo). Nunca se marca "natural" por ausencia de esos
+        # indicadores -- no hay suficientes clientes reales marcados asi en
+        # la plataforma para confiar en ese lado de la regla. Editable despues
+        # desde la ficha del cliente.
+        tipo_persona="juridica" if parece_persona_juridica(cn.razon_social_nombre) else None,
     )
     db.add(cliente)
     db.flush()  # asigna cliente.id sin cerrar la transacción
@@ -1366,261 +1392,6 @@ def backfill(
         db.commit()
     resumen["dry_run"] = dry_run
     return resumen
-
-
-# ── Importación de las hojas de prospección (Google Sheets → CRM) ──────────────
-_SEED_PATH = Path("data/comercial_seed.json")
-
-_ETAPA_A_RESULTADO = {
-    "aprobado": "aceptado",
-    "denegado": "declinado",
-    "propuesta enviada": "pendiente",
-    "sin respuesta": "pendiente",
-}
-
-
-def _norm_nombre(s: str | None) -> str:
-    """Normaliza razón social / nombre de planta para matching: sin tildes,
-    minúsculas, sin sufijos societarios, solo alfanumérico."""
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
-    s = re.sub(r"\b(s\.?a\.?s\.?|e\.?s\.?p\.?|s\.?a\.?|bic|ltda)\b", " ", s)
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
-
-
-def _parse_fecha(s):
-    if not s:
-        return None
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(str(s).strip(), fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _etapa_global(resultados: set[str]) -> str:
-    if "aceptado" in resultados:
-        return "operando"
-    if resultados & {"pendiente"}:
-        return "oferta"
-    return "oportunidad"
-
-
-def _etapa_de_resultado(resultado: str) -> str:
-    """Etapa inicial de una oferta importada de las hojas, donde lo único que
-    hay es el resultado. 'aceptado' entra como operando porque las hojas solo
-    marcaban así lo que ya estaba andando."""
-    return {"aceptado": "operando", "declinado": "declinado"}.get(resultado, "oferta")
-
-
-def _build_detalle(row: dict) -> dict | None:
-    """Detalle crudo de la hoja para la sub-oferta. Para servicios_operacionales
-    parsea 'Servicios buscados' (viñetas) en una lista para identificar cada
-    servicio; agrega FPO y, si vinieran, tiempo/tipo de contrato de energía."""
-    d: dict = {}
-    sb = row.get("servicios_buscados")
-    if sb:
-        servicios = [s.strip(" •").strip() for s in str(sb).split("•") if s.strip(" •").strip()]
-        if servicios:
-            d["servicios"] = servicios
-        d["servicios_texto"] = sb
-    for k in ("fpo", "tiempo", "tipo_contrato"):
-        if row.get(k):
-            d[k] = row[k]
-    return d or None
-
-
-@router.post("/importar-hojas")
-def importar_hojas(
-    dry_run: bool = Query(True),
-    crear_faltantes: bool = Query(True, description="false: solo enriquece ofertas ya existentes, no crea nuevas"),
-    db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
-):
-    """Carga/sincroniza las hojas de prospección (Servicios Operacionales +
-    Comercialización de Energía + Comunidades) al CRM. Una oportunidad por
-    cliente (find-or-create); cada fila de hoja = una sub-oferta. Upsert por
-    `numero_oferta` o, si falta, por (cliente, tipo, planta): si la oferta ya
-    existe, RELLENA los campos vacíos (detalle/precio/contrato/planta/fecha) sin
-    pisar `resultado`/`etapa`. `crear_faltantes=false` solo enriquece. Solo
-    admin; `dry_run=true` no escribe."""
-    if current.rol.value != "admin":
-        raise HTTPException(403, "Solo admin")
-    if not _SEED_PATH.exists():
-        raise HTTPException(500, f"No se encontró la semilla en {_SEED_PATH}")
-    seed = json.loads(_SEED_PATH.read_text(encoding="utf-8"))
-
-    # Índices para matching.
-    proy_idx = {}
-    for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all():
-        if nom:
-            proy_idx.setdefault(_norm_nombre(nom), pid)
-
-    # planta→empresa dueña (para cruzar la hoja de energía, cuya 'empresa' a veces
-    # es el nombre de la planta) usando las filas de servicios como referencia.
-    planta_a_empresa = {}
-    for row in seed:
-        if row.get("planta_nombre"):
-            planta_a_empresa[_norm_nombre(row["planta_nombre"])] = row["empresa"]
-
-    cli_idx = {}
-    for c in db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all():
-        cli_idx.setdefault(_norm_nombre(c.razon_social_nombre), c)
-
-    op_por_cliente = {}
-    for op in db.query(Oportunidad).filter(Oportunidad.deleted_at.is_(None)).all():
-        op_por_cliente.setdefault(op.cliente_id, op)
-
-    # Clave de dedup/upsert: por numero_oferta si existe; si no, (cliente, tipo, planta).
-    of_por_key = {}
-    existentes = (
-        db.query(OportunidadOferta, Cliente.razon_social_nombre)
-        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
-        .join(Cliente, Cliente.id == Oportunidad.cliente_id).all()
-    )
-    for o, razon in existentes:
-        t = o.tipo if isinstance(o.tipo, str) else o.tipo.value
-        k = o.numero_oferta if o.numero_oferta else (_norm_nombre(razon), t, _norm_nombre(o.planta_nombre))
-        of_por_key.setdefault(k, o)
-    seen_run = set()   # dedup dentro del propio seed
-
-    res = {
-        "dry_run": dry_run,
-        "clientes": {"a_crear": 0, "reusados": 0},
-        "ofertas": {"creadas": 0, "enriquecidas": 0, "sin_cambio": 0, "faltantes_no_creadas": 0},
-        "sin_empresa": 0,
-        "detalle": {"clientes_nuevos": [], "sin_match_planta": [], "fusionados_por_similitud": []},
-    }
-    ahora = col_now()
-    # Acumula resultados por cliente para derivar la etapa global de la oportunidad.
-    resultados_por_cli: dict = {}
-    # Oportunidades creadas en ESTE import (solo a estas se les fija la etapa global;
-    # las preexistentes conservan su estado).
-    ops_creadas: set = set()
-
-    def resolver_cliente(empresa_raw):
-        """Cliente EXISTENTE que corresponde a esta empresa, de forma DETERMINISTA
-        (exacto por nombre normalizado, o planta→dueño), o None si habría que
-        crearlo. Puro: no crea ni cuenta. NO usa match difuso a propósito: el fuzzy
-        cambia entre corridas (crece el set de candidatos) y rompería la
-        idempotencia del import; los duplicados por similitud los limpia después
-        la tarea `dedup_clientes` (con guarda de ambigüedad y reversible)."""
-        key = _norm_nombre(empresa_raw)
-        if key in cli_idx:
-            return cli_idx[key]
-        dueno = planta_a_empresa.get(key)
-        if dueno and _norm_nombre(dueno) in cli_idx:
-            return cli_idx[_norm_nombre(dueno)]
-        return None
-
-    def oportunidad_para(cliente):
-        if cliente is None:
-            return None
-        op = op_por_cliente.get(cliente.id)
-        if op:
-            return op
-        op = Oportunidad(cliente_id=cliente.id, estado="oportunidad",
-                         estado_desde=ahora, es_migrada=True,
-                         creado_por_usuario_id=current.id)
-        db.add(op)
-        db.flush()
-        db.add(OportunidadEstadoHistorial(
-            oportunidad_id=op.id, estado_anterior=None,
-            estado_nuevo="oportunidad", usuario_id=current.id))
-        op_por_cliente[cliente.id] = op
-        ops_creadas.add(op.id)
-        return op
-
-    for row in seed:
-        empresa = (row.get("empresa") or "").strip()
-        if not empresa:
-            res["sin_empresa"] += 1
-            continue
-        tipo = row["tipo"]
-        num = row.get("numero_oferta")
-        planta = row.get("planta_nombre") or (empresa if tipo == "compra_energia" else None)
-        # Clave de dedup coherente con el preload: por consecutivo, o por
-        # (razón del cliente RESUELTO, tipo, planta). Usar el razón del cliente
-        # resuelto (no el de la hoja) mantiene la idempotencia cuando el match es
-        # difuso (empresa de la hoja ≠ razón social del cliente existente).
-        resuelto = resolver_cliente(empresa)
-        razon_key = _norm_nombre(resuelto.razon_social_nombre) if resuelto else _norm_nombre(empresa)
-        key = num if num else (razon_key, tipo, _norm_nombre(planta))
-        etapa = (row.get("etapa_texto") or "").strip().lower()
-        resultado = _ETAPA_A_RESULTADO.get(etapa, "pendiente")
-        proj_id = proy_idx.get(_norm_nombre(planta)) if planta else None
-        if planta and proj_id is None:
-            res["detalle"]["sin_match_planta"].append(planta)
-        detalle = _build_detalle(row)
-
-        existente = of_por_key.get(key)
-        if existente is not None:
-            # Enriquecer: rellenar SOLO los campos vacíos; nunca pisar resultado/etapa.
-            if not dry_run:
-                campos = {
-                    "detalle": detalle, "precio_detalle": row.get("precio_detalle"),
-                    "contrato_firmado": row.get("contrato_firmado"), "planta_nombre": planta,
-                    "proyecto_id": proj_id, "fecha_oferta": _parse_fecha(row.get("fecha_oferta")),
-                }
-                cambio = False
-                for campo, val in campos.items():
-                    if val is not None and getattr(existente, campo) in (None, "", {}):
-                        setattr(existente, campo, val)
-                        cambio = True
-                res["ofertas"]["enriquecidas" if cambio else "sin_cambio"] += 1
-            else:
-                res["ofertas"]["enriquecidas"] += 1
-            continue
-
-        if key in seen_run:      # duplicado dentro del propio seed
-            res["ofertas"]["sin_cambio"] += 1
-            continue
-        seen_run.add(key)
-
-        if not crear_faltantes:
-            res["ofertas"]["faltantes_no_creadas"] += 1
-            continue
-
-        # Resolver-o-crear el cliente (ya pasado el dedup, solo al crear la oferta).
-        if resuelto is not None:
-            cliente = resuelto
-            res["clientes"]["reusados"] += 1
-            if _norm_nombre(empresa) != _norm_nombre(cliente.razon_social_nombre):
-                res["detalle"]["fusionados_por_similitud"].append(
-                    {"empresa_hoja": empresa, "cliente_existente": cliente.razon_social_nombre})
-        else:
-            res["clientes"]["a_crear"] += 1
-            res["detalle"]["clientes_nuevos"].append(empresa)
-            cliente = None
-            if not dry_run:
-                cliente = Cliente(razon_social_nombre=empresa)
-                db.add(cliente)
-                db.flush()
-                cli_idx[_norm_nombre(empresa)] = cliente
-        if not dry_run and cliente is not None:
-            op = oportunidad_para(cliente)
-            if op is not None:
-                nueva = OportunidadOferta(
-                    oportunidad_id=op.id, tipo=tipo, planta_nombre=planta,
-                    proyecto_id=proj_id, numero_oferta=num,
-                    precio_detalle=row.get("precio_detalle"), resultado=resultado,
-                    estado=_etapa_de_resultado(resultado), estado_desde=col_now(),
-                    etapa_texto=row.get("etapa_texto"),
-                    contrato_firmado=row.get("contrato_firmado"),
-                    fecha_oferta=_parse_fecha(row.get("fecha_oferta")),
-                    detalle=detalle)
-                db.add(nueva)
-                of_por_key[key] = nueva
-                resultados_por_cli.setdefault(cliente.id, set()).add(resultado)
-        res["ofertas"]["creadas"] += 1
-
-    # Etapa global solo de las oportunidades creadas en este import.
-    if not dry_run:
-        for cli_id, resultados in resultados_por_cli.items():
-            op = op_por_cliente.get(cli_id)
-            if op and op.id in ops_creadas:
-                op.estado = _etapa_global(resultados)
-        db.commit()
-    return res
 
 
 @router.post("/dedup-clientes")

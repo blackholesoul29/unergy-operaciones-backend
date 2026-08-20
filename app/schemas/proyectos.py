@@ -355,6 +355,7 @@ class ProyectoOut(BaseModel):
     nombre_clientes: Optional[str]
     topic_slug: Optional[str]
     sub_project: Optional[str]
+    topico_liquidaciones: Optional[str] = None
     clasificacion_regulatoria: Optional[str]
     tipo_tecnologia: Optional[str]
     tipo_proyecto: Optional[str]

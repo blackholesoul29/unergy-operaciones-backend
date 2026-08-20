@@ -361,11 +361,18 @@ def subir_facturas_xm(
             f"La API acepta máximo {MAX_FACTURAS_POR_LOTE} facturas por lote"
         )
 
+    # La API acepta una clave de Gemini propia para leer los PDF (§ campo
+    # `api_key`, opcional). Solo se manda si está configurada en el servidor; si
+    # no, esa API usa la suya. Nunca viaja desde el navegador: es un secreto.
+    formulario: dict[str, str] = {"version": version}
+    if settings.LIQUIDACIONES_GEMINI_API_KEY:
+        formulario["api_key"] = settings.LIQUIDACIONES_GEMINI_API_KEY
+
     data = _request(
         "POST",
         PATH_FACTURAS_XM,
         files=[("files", (nombre, contenido, tipo)) for nombre, contenido, tipo in archivos],
-        data={"version": version},
+        data=formulario,
     )
     if not isinstance(data, dict):
         raise LiquidacionesAPIError("La API de Liquidaciones no confirmó la subida")

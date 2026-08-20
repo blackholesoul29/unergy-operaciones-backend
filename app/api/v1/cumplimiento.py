@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -32,6 +32,7 @@ from app.schemas.cumplimiento import (
     CumplimientoMensualOut, CerrarPeriodoRequest, CerrarPeriodoResponse,
     FacturarRequest,
 )
+from app.schemas.pipeline_cumplimiento import PipelineRunRequest, PipelineRunResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cumplimiento", tags=["Cumplimiento"])
@@ -3237,6 +3238,49 @@ def cerrar_periodo(
         "contratos_cumplidos": n_cumplidos,
         "registros": registros,
     }
+
+
+def _run_pipeline_cumplimiento_bg(anio: int, mes: int) -> None:
+    """Ejecuta el pipeline en segundo plano con su propia sesión de DB.
+
+    La sesión inyectada por Depends(get_db) se cierra al devolver la respuesta,
+    así que la BackgroundTask debe abrir la suya propia (SessionLocal).
+    """
+    from app.services.pipeline_cumplimiento import run_pipeline_mensual
+
+    db = SessionLocal()
+    try:
+        result = run_pipeline_mensual(db, anio, mes)
+        logger.info("Pipeline cumplimiento %s-%02d: %s", anio, mes, result.get("message"))
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Pipeline cumplimiento %s-%02d FALLÓ: %s", anio, mes, exc)
+    finally:
+        db.close()
+
+
+@router.post("/pipeline/run", response_model=PipelineRunResponse)
+def run_pipeline(
+    body: PipelineRunRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Dispara el pipeline mensual de cumplimiento + liquidación para (anio, mes).
+
+    El cruce contrato/lecturas/generación puede tardar, así que se ejecuta en
+    segundo plano (BackgroundTasks) y se responde de inmediato con la confirmación.
+    """
+    background_tasks.add_task(_run_pipeline_cumplimiento_bg, body.anio, body.mes)
+    return PipelineRunResponse(
+        status="scheduled",
+        message=(
+            f"Pipeline de cumplimiento encolado para {body.anio}-{body.mes:02d}. "
+            "Los resultados se persistirán en cumplimiento_mensual y liquidacion_xm_datos."
+        ),
+        anio=body.anio,
+        mes=body.mes,
+    )
 
 
 @router.get("/historico")

@@ -741,6 +741,12 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_liq ON liquidacion_xm_datos (liquidacion_id)",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_frt ON liquidacion_xm_datos (frontera_id) WHERE frontera_id IS NOT NULL",
+    # migration 051 — pipeline mensual de cumplimiento: origen/fecha_calculo del
+    # snapshot y enlace del dato XM al cumplimiento que lo generó.
+    "ALTER TABLE cumplimiento_mensual ADD COLUMN IF NOT EXISTS origen VARCHAR NOT NULL DEFAULT 'manual'",
+    "ALTER TABLE cumplimiento_mensual ADD COLUMN IF NOT EXISTS fecha_calculo TIMESTAMPTZ DEFAULT NOW()",
+    "ALTER TABLE liquidacion_xm_datos ADD COLUMN IF NOT EXISTS cumplimiento_mensual_id BIGINT REFERENCES cumplimiento_mensual(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_dato_cumplimiento_id ON liquidacion_xm_datos (cumplimiento_mensual_id) WHERE cumplimiento_mensual_id IS NOT NULL",
     # migration — fecha_fin_representacion en proyectos
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_fin_representacion DATE",
     # migration (058) — generación mensual promedio por proyecto, para no depender
@@ -2970,6 +2976,34 @@ def _scheduled_om_ipc_check():
         db.close()
 
 
+def _scheduled_cumplimiento_pipeline():
+    """
+    Corre el día PIPELINE_CUMPLIMIENTO_RUN_DAY de cada mes a las 02:00.
+    Procesa el MES ANTERIOR (ya cerrado): cruza contratos PPA, lecturas de
+    frontera y generación diaria → snapshot de cumplimiento (origen='automatico')
+    y datos XM de liquidación.
+    """
+    from datetime import datetime
+    from sqlalchemy.orm import sessionmaker
+    from app.services.pipeline_cumplimiento import run_pipeline_mensual
+
+    hoy = datetime.now()
+    # Mes anterior al actual.
+    anio = hoy.year if hoy.month > 1 else hoy.year - 1
+    mes = hoy.month - 1 if hoy.month > 1 else 12
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        result = run_pipeline_mensual(db, anio, mes)
+        print(f"[cumplimiento_pipeline] {anio}-{mes:02d}: {result.get('message')}")
+    except Exception as e:
+        db.rollback()
+        print(f"[cumplimiento_pipeline] ERROR {anio}-{mes:02d}: {e}")
+    finally:
+        db.close()
+
+
 _ARR_IPC_SEED = [
     {"año": 2023, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
     {"año": 2024, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
@@ -3644,12 +3678,26 @@ def _deferred_init():
                 name="Check IPC anual O&M",
             )
 
+            # Pipeline mensual de cumplimiento PPA: corre el día configurado a las
+            # 02:00 y procesa el mes anterior (contratos → lecturas/generación →
+            # cumplimiento_mensual + liquidacion_xm_datos).
             _mgs_scheduler.add_job(
-                _scheduled_tsf_sync,
-                IntervalTrigger(hours=6),
-                id="tsf_sync",
-                name="Sync pipeline TSF -> proyectos",
+                _scheduled_cumplimiento_pipeline,
+                CronTrigger(
+                    day=settings.PIPELINE_CUMPLIMIENTO_RUN_DAY,
+                    hour=2, minute=0, timezone=settings.TIMEZONE,
+                ),
+                id="cumplimiento_pipeline",
+                name="Pipeline mensual de cumplimiento PPA",
             )
+
+            if settings.ORIGINA_DATABASE_URL:
+                _mgs_scheduler.add_job(
+                    _scheduled_tsf_sync,
+                    IntervalTrigger(hours=6),
+                    id="tsf_sync",
+                    name="Sync pipeline TSF -> proyectos",
+                )
 
             _mgs_scheduler.start()
             poll_once_async()

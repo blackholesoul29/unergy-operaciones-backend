@@ -167,10 +167,19 @@ class LiquidacionXMDato(Base):
     valor_bruto_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     referencia_factura_xm: Mapped[str | None] = mapped_column(String(100), nullable=True)
     fecha_factura_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Vínculo al snapshot de cumplimiento que generó este dato (pipeline mensual).
+    # NULL para los datos XM cargados manualmente en el módulo de liquidaciones.
+    cumplimiento_mensual_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("cumplimiento_mensual.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="xm_datos")
     frontera: Mapped["Frontera | None"] = relationship("Frontera", back_populates="xm_datos")
+    cumplimiento: Mapped["CumplimientoMensual | None"] = relationship(
+        "CumplimientoMensual", back_populates="liquidaciones_xm",
+    )
 
 
 class LiquidacionMandato(Base):

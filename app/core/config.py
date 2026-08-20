@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
     # CRM comercial: días sin respuesta antes de alertar (configurable por env).
     COMERCIAL_ALERTA_DIAS: int = 5
+    # Pipeline mensual de cumplimiento PPA: día del mes en que corre el scheduler
+    # (procesa el mes anterior). Configurable por env para poder adelantarlo/
+    # atrasarlo sin tocar código.
+    PIPELINE_CUMPLIMIENTO_RUN_DAY: int = 5
     # La actualización comercial de julio 2026 se aplica UNA vez y se marca sola
     # (ver app/services/comercial_actualizacion.MARCA_VERSION). Poner esto en
     # true fuerza a reaplicarla, pisando lo que se haya cambiado a mano después.

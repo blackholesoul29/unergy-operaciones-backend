@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # credenciales UNERGY_* de arriba.
     LIQUIDACIONES_LOGIN: str = ""
     LIQUIDACIONES_PASSWORD: str = ""
+    # Clave de Gemini con la que la API lee los PDF de las facturas de XM para
+    # sacarles mes y año. Es OPCIONAL: si se deja vacía, esa API usa la suya.
+    # Va aquí y no en un campo de la pantalla porque es un secreto: puesto en el
+    # navegador quedaría a la vista de cualquiera que abra la página.
+    LIQUIDACIONES_GEMINI_API_KEY: str = ""
 
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).

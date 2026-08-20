@@ -6,22 +6,25 @@ import difflib
 from datetime import date
 
 CMU_RE = re.compile(r"CMU\d+")
-# Dos convenciones reales conviven (verificado 2026-08-18):
-#   CMU0988-Mandato-Costos-{Proyecto}-{Inversionista}.pdf   inversionista con nombre
-#   CMU1140-Mandato-Costos-{Proyecto}.pdf                   mandante es un P.A.
+# Tres convenciones reales conviven (verificadas contra la bitácora de la
+# primera corrida, 2026-08-19):
+#   CMU0988-Mandato-Costos-{Proyecto}-{Inversionista}.pdf   costos, con inversionista
+#   CMU1140-Mandato-Costos-{Proyecto}.pdf                   costos, mandante es un P.A.
+#   CMU1182-Mandato-{Proyecto}.pdf                          ingresos/autoconsumo
 #
-# Hacer opcional el grupo del inversionista no basta: "PSF - Yurbaqua.pdf" es un
-# proyecto con guion adentro y se partiría en ('PSF', 'Yurbaqua'). La señal que
-# los distingue en los nombres reales es el ESPACIADO -- el guion separador del
-# inversionista va pegado ("...Uruaco-SUNO..."), y los guiones internos del
-# nombre del proyecto van con espacios ("PSF - Yurbaqua"). De ahí el lookaround.
-#
-# La distinción es heurística, no garantizada: un proyecto con guion pegado o un
-# inversionista con guion espaciado la romperían. Se acepta porque la fuente
-# autoritativa del tercero pasa a ser el cuerpo del correo (extraer_pa_del_cuerpo),
-# no el nombre del archivo.
+# "Costos-" es opcional; su ausencia es justamente lo que distingue un mandato
+# de ingresos (ver tipo_de_nombre). El inversionista también es opcional, y se
+# reconoce por el ESPACIADO del guion: pegado cuando separa al inversionista
+# ("...Uruaco-SUNO..."), con espacios cuando es parte del nombre del proyecto
+# ("PSF - Yurbaqua"). Heurística, no garantía -- documentada en el spec.
 ZIP_NOMBRE_RE = re.compile(
-    r"^(CMU\d+)-Mandato-Costos-(.+?)(?:(?<! )-(?! )([^-]+))?\.pdf$", re.IGNORECASE)
+    r"^(CMU\d+)-Mandato-(?:Costos-)?(.+?)(?:(?<! )-(?! )([^-]+))?\.pdf$",
+    re.IGNORECASE)
+
+# Gmail renombra los adjuntos repetidos agregando " (1)", " (2)". Sin quitarlo,
+# el sufijo termina dentro del nombre del inversionista y la misma entidad
+# genera dos identidades distintas.
+_SUFIJO_GMAIL_RE = re.compile(r"\s\(\d+\)(?=\.pdf$)", re.IGNORECASE)
 
 MESES = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
@@ -115,7 +118,7 @@ def parsear_nombre_zip(nombre: str) -> dict | None:
     traen en el nombre (ahí el mandante sale del cuerpo del correo). Cuando
     falta, se devuelve cadena vacía -- nunca se inventa.
     """
-    m = ZIP_NOMBRE_RE.match((nombre or "").strip())
+    m = ZIP_NOMBRE_RE.match(_SUFIJO_GMAIL_RE.sub("", (nombre or "").strip()))
     if not m:
         return None
     return {"cmu": m.group(1).upper(),

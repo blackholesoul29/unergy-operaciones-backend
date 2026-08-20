@@ -28,6 +28,11 @@ logger = logging.getLogger("mandatos.finanzas_sync")
 
 FUENTE_REVISORIA = "revisoria"
 FUENTE_ENVIO = "envio_inversionista"
+# Lo que SALE hacia la revisoría. Necesita su propia fuente y no reusar
+# FUENTE_REVISORIA: son direcciones opuestas y significan lo contrario. Un
+# mandato entrante firmado dice "ya está listo"; uno saliente dice "acaba de
+# pedirse la firma", y está sin firmar por definición.
+FUENTE_SALIENTE = "saliente_revisoria"
 
 
 def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
@@ -77,7 +82,17 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             sin_identidad.append(nombre)
             continue
         firmas = verificador(contenido)
-        if fuente == FUENTE_ENVIO:
+        if fuente == FUENTE_SALIENTE:
+            # Registrar el envío. No importa si el PDF está firmado -- casi
+            # nunca lo estará. Lo que se registra es que salió, para que la
+            # reconciliación tenga contra qué comparar lo que vuelve.
+            ident = _identidad(nombre, correo)
+            if not ident:
+                sin_identidad.append(nombre)
+                continue
+            acciones.append({**ident, "estado": "sin_firma", "adjunto": None,
+                             "firmas": firmas, "comentario": None})
+        elif fuente == FUENTE_ENVIO:
             # Jessica manda al inversionista lo que ya está firmado, y su correo
             # SÍ trae el P.A., así que se puede armar la identidad completa y
             # crear la fila si no existe.
@@ -151,6 +166,14 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         if not existente:
             return {"cmu": accion["cmu"], "resultado": "cmu_no_encontrado"}
         destino = accion["estado"]
+        if existente.estado == destino:
+            # Idempotencia, no conflicto: llegó otra vez lo mismo. Pasa seguido
+            # -- la revisoría reenvía el hilo con los mismos adjuntos. Marcarlo
+            # como transición inválida llenaba el panel de revisión de ruido
+            # (40 de 61 acciones en la primera tanda) y escondía los conflictos
+            # de verdad.
+            return {"cmu": accion["cmu"], "resultado": "sin_cambio",
+                    "estado": destino}
         if not transicion_firma_valida(existente.estado, destino):
             return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                     "estado_previo": existente.estado, "estado_destino": destino}
@@ -179,7 +202,16 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                          FinanzasMandato.tipo == accion["tipo"]).first())
     previo = existente.estado if existente else None
     destino = accion["estado"]
-    if existente and not transicion_firma_valida(previo, destino):
+    # sin_firma solo estampa fecha_envio: upsert_mandato no toca el estado en esa
+    # rama. Así que registrar un envío nunca puede degradar nada, y no debe pasar
+    # por la validación de transiciones -- si no, un mandato que ya volvió firmado
+    # rechazaría el registro de su propio envío.
+    if destino == "sin_firma":
+        pass
+    elif existente and previo == destino:
+        return {"cmu": accion["cmu"], "resultado": "sin_cambio", "estado": destino,
+                "id": existente.id}
+    elif existente and not transicion_firma_valida(previo, destino):
         return {"cmu": accion["cmu"], "resultado": "transicion_invalida",
                 "estado_previo": previo, "estado_destino": destino}
 
@@ -221,7 +253,7 @@ def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):
     d = decidir_finanzas(correo, fuente)
     registros = [_aplicar(db, a, correo) for a in d["acciones"]]
     aplicado = any(r["resultado"] == "aplicado" for r in registros)
-    problema = any(r["resultado"] != "aplicado" for r in registros)
+    problema = any(r["resultado"] not in ("aplicado", "sin_cambio") for r in registros)
     return MandatoCorreo(
         message_id=correo.message_id, fecha=correo.fecha,
         remitente=(correo.remitente or "")[:255],
@@ -258,27 +290,46 @@ def revisar_correos_finanzas() -> dict:
     from app.core.config import settings
     from app.core.database import SessionLocal
     from app.models.mandatos import MandatoCorreo
-    from app.services.mandatos.imap_client import buscar_correos, carpeta_enviados
+    from app.services.mandatos.imap_client import buscar_correos, buzones, carpeta_enviados
 
-    if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
+    creds = buzones()
+    if not creds:
         logger.info("Finanzas mandatos: credenciales no configuradas, se omite")
         return {"ok": False, "motivo": "credenciales no configuradas"}
 
-    pasadas = [(REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM"),
-               (REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM")]
+    # Una tanda de pasadas por cada buzón configurado. Parte del correo de
+    # mandatos no pasa por adhara@: Jessica manda algunos a la revisoría desde
+    # su propia cuenta, y esos viven en SU carpeta de Enviados. Sin leerlos, la
+    # reconciliación nunca se entera de que esos mandatos salieron.
+    #
+    # Los correos que están en los dos buzones (adhara suele ir en copia) se
+    # procesan UNA sola vez: la deduplicación va por Message-ID, que es el mismo
+    # mensaje mirado desde dos lados, no dos mensajes.
+    pasadas = []
+    for usuario, password in creds:
+        pasadas.append((REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM",
+                        usuario, password))
+        pasadas.append((REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM",
+                        usuario, password))
 
-    # La carpeta de Enviados hay que preguntarla al servidor: su nombre depende
-    # del idioma de la cuenta, por eso se busca por la bandera \Sent.
-    try:
-        imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
-        imap.login(settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD)
-        enviados = carpeta_enviados(imap)
-        imap.logout()
-    except Exception as exc:
-        logger.error("Finanzas mandatos: no se pudo consultar Enviados: %s", exc)
-        enviados = None
-    if enviados:
-        pasadas.append((REMITENTE_REVISORIA, FUENTE_REVISORIA, enviados, "TO"))
+        # La carpeta de Enviados hay que preguntarla a cada servidor: su nombre
+        # depende del idioma de la cuenta, por eso se busca por la bandera \Sent.
+        try:
+            imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
+            imap.login(usuario, password)
+            enviados = carpeta_enviados(imap)
+            imap.logout()
+        except Exception as exc:
+            logger.error("Finanzas mandatos: no se pudo consultar Enviados de %s: %s",
+                         usuario, exc)
+            enviados = None
+        if enviados:
+            pasadas.append((REMITENTE_REVISORIA, FUENTE_SALIENTE, enviados, "TO",
+                            usuario, password))
+        else:
+            logger.warning("Finanzas mandatos: sin carpeta de Enviados en %s -- "
+                           "no se registrarán los envíos hechos desde ese buzón",
+                           usuario)
 
     db = SessionLocal()
     try:
@@ -286,8 +337,9 @@ def revisar_correos_finanzas() -> dict:
         nuevos = 0
         resumen: dict = {"aplicado": 0, "omitido": 0, "error": 0}
         para_revisar: list[int] = []
-        for direccion, fuente, carpeta, campo in pasadas:
-            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo):
+        for direccion, fuente, carpeta, campo, usuario, password in pasadas:
+            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo,
+                                         usuario=usuario, password=password):
                 if correo.message_id in vistos:
                     continue
                 try:
@@ -322,6 +374,7 @@ def revisar_correos_finanzas() -> dict:
                     nuevos, resumen)
         return {"ok": True, "correos_nuevos": nuevos, "por_resultado": resumen,
                 "requieren_revision": para_revisar,
-                "carpeta_enviados": enviados}
+                "buzones": [u for u, _ in creds],
+                "pasadas": len(pasadas)}
     finally:
         db.close()

@@ -18,7 +18,7 @@ Endpoints:
 from __future__ import annotations
 import io
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
@@ -46,7 +46,8 @@ _ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/ejecutar-ingesta")
-def ejecutar_ingesta(_=Depends(_require_admin)):
+def ejecutar_ingesta(reprocesar_desde: str = Query(None),
+                     db: Session = Depends(get_db), _=Depends(_require_admin)):
     """Corre la lectura de correo AHORA, sin esperar al cron de las :05.
 
     **Esto escribe.** Hace exactamente lo mismo que el cron: lee el buzón,
@@ -62,10 +63,41 @@ def ejecutar_ingesta(_=Depends(_require_admin)):
 
     Volver a correrlo es inofensivo: la deduplicación va por Message-ID, así
     que los correos ya procesados se saltan.
+
+    ── reprocesar_desde=YYYY-MM-DD ──────────────────────────────────────────
+    Borra las filas de bitácora desde esa fecha para que sus correos se vuelvan
+    a leer. Sirve cuando el parser mejoró y hay que reinterpretar lo ya visto.
+
+    **Destruye información que no se puede reconstruir.** Cada fila guarda en
+    `detalle` el `estado_previo` de los mandatos que ese correo cambió, y de ahí
+    sale el botón de revertir. Al reprocesar, lo que ya está aplicado dará
+    `sin_cambio` -- correcto, pero sin capturar un estado previo, porque ya no
+    cambia nada. O sea que se pierde la constancia de cómo estaban los mandatos
+    antes de que la automatización los tocara.
+
+    Exportar la bitácora antes: `GET /mandatos/correos?limite=500`.
+
+    Pide fecha explícita a propósito, en vez de un `todo=true`: obliga a
+    declarar el alcance y hace imposible vaciar la tabla entera por descuido.
     """
     from app.services.mandatos.finanzas_sync import revisar_correos_finanzas
 
-    return revisar_correos_finanzas()
+    borradas = 0
+    if reprocesar_desde:
+        try:
+            desde = datetime.strptime(reprocesar_desde.strip()[:10], "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(422, "reprocesar_desde debe ser YYYY-MM-DD")
+        borradas = db.query(MandatoCorreo).filter(
+            MandatoCorreo.fecha >= desde.replace(tzinfo=timezone.utc)).delete(
+                synchronize_session=False)
+        db.commit()
+
+    resultado = revisar_correos_finanzas()
+    if reprocesar_desde:
+        resultado["bitacora_borrada"] = borradas
+        resultado["reprocesado_desde"] = reprocesar_desde
+    return resultado
 
 
 @router.get("/diagnostico-imap")

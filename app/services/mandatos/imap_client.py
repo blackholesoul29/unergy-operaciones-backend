@@ -124,26 +124,49 @@ def carpeta_enviados(imap: imaplib.IMAP4_SSL) -> str | None:
     return None
 
 
+def buzones() -> list[tuple[str, str]]:
+    """[(usuario, password)] de los buzones configurados, en orden.
+
+    Son dos porque el correo de mandatos no pasa todo por una sola cuenta: parte
+    de los envíos a la revisoría salen desde la cuenta de Jessica, y esos viven
+    en SU carpeta de Enviados. El mismo correo visto desde los dos buzones se
+    procesa una sola vez -- la deduplicación va por Message-ID, no por buzón.
+    """
+    creds = []
+    if settings.MANDATOS_IMAP_USER and settings.MANDATOS_IMAP_PASSWORD:
+        creds.append((settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD))
+    if settings.MANDATOS_IMAP_USER_2 and settings.MANDATOS_IMAP_PASSWORD_2:
+        creds.append((settings.MANDATOS_IMAP_USER_2, settings.MANDATOS_IMAP_PASSWORD_2))
+    return creds
+
+
 def buscar_correos(direccion: str, dias: int = 30, *,
-                   carpeta: str = "INBOX", campo: str = "FROM") -> list[CorreoCrudo]:
+                   carpeta: str = "INBOX", campo: str = "FROM",
+                   usuario: str | None = None,
+                   password: str | None = None) -> list[CorreoCrudo]:
     """Correos de/para `direccion` en los últimos `dias`, dentro de `carpeta`.
 
     `campo` es "FROM" para lo que llega y "TO" para lo que sale. Los salientes
     viven en la carpeta de Enviados, no en INBOX -- ver carpeta_enviados().
 
+    `usuario`/`password` eligen el buzón; sin ellos se usa el principal. Ver
+    buzones().
+
     Devuelve [] ante cualquier fallo de conexión, autenticación o búsqueda --
     nunca lanza hacia el llamador, para no tumbar el scheduler.
     """
-    if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
+    usuario = usuario or settings.MANDATOS_IMAP_USER
+    password = password or settings.MANDATOS_IMAP_PASSWORD
+    if not usuario or not password:
         logger.info("IMAP mandatos: credenciales no configuradas, se omite la revisión")
         return []
 
     try:
         imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
-        imap.login(settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD)
+        imap.login(usuario, password)
     except Exception as exc:
-        logger.error("IMAP mandatos: no se pudo conectar/autenticar contra %s: %s",
-                     settings.IMAP_HOST, exc)
+        logger.error("IMAP mandatos: no se pudo conectar/autenticar como %s contra %s: %s",
+                     usuario, settings.IMAP_HOST, exc)
         return []
 
     correos: list[CorreoCrudo] = []

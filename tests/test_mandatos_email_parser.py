@@ -8,7 +8,7 @@ from tests.fixtures_mandatos_correos import (
     ADJUNTOS_REALES_DRIVE, ENVIO_INVERSIONISTA, ENVIO_INVERSIONISTA_ADJUNTOS,
     LIQUIDACION_PRELIMINAR, LIQUIDACION_PRELIMINAR_ADJUNTOS,
     REVISORIA_HTML, REVISORIA_MIXTO, REVISORIA_OBSERVACIONES,
-    REVISORIA_SEGUIMIENTO,
+    REVISORIA_RESPUESTA_UNIFORME, REVISORIA_SEGUIMIENTO,
 )
 
 
@@ -85,10 +85,6 @@ def test_clasificar_seguimiento_no_se_interpreta():
     assert clasificar_correo("Mandatos de costos julio", REVISORIA_SEGUIMIENTO) == CLASIF_SEGUIMIENTO
 
 
-def test_clasificar_asunto_re_es_seguimiento():
-    assert clasificar_correo("RE: Certificados", "encuentro las siguientes observaciones: CMU1000 mal") == CLASIF_SEGUIMIENTO
-
-
 def test_seguimiento_gana_sobre_molde_simple():
     """Ante señales de ambos, gana seguimiento -- falla hacia el lado seguro."""
     cuerpo = "Agradezco su respuesta. Encuentro las siguientes observaciones: CMU1000 mal"
@@ -97,6 +93,35 @@ def test_seguimiento_gana_sobre_molde_simple():
 
 def test_clasificar_correo_sin_senales_es_desconocido():
     assert clasificar_correo("Hola", "Buenas tardes, quedo atenta.") == CLASIF_DESCONOCIDO
+
+
+def test_una_respuesta_uniforme_si_se_interpreta():
+    """Correo real del 1 jun. Es una respuesta en hilo, pero los cuatro CMU
+    tienen el mismo problema y ninguno está resuelto: no hay ambigüedad."""
+    assert clasificar_correo(
+        "Re: Revisión mandatos de costos - Junio",
+        REVISORIA_RESPUESTA_UNIFORME) == CLASIF_MOLDE_SIMPLE
+
+
+def test_el_asunto_re_por_si_solo_ya_no_bloquea():
+    """TODOS los asuntos reales empiezan por Re:, porque son hilos. Esa regla
+    sola clasificó 94 de 94 correos como seguimiento y dejó la Fuente 1 muerta."""
+    assert clasificar_correo(
+        "Re: Revisión mandatos de costos - Julio",
+        REVISORIA_OBSERVACIONES) == CLASIF_MOLDE_SIMPLE
+
+
+def test_el_correo_con_un_cmu_resuelto_sigue_bloqueado():
+    """La regresión que importa: si esto se rompe, CMU1255 vuelve a marcarse
+    con correcciones siendo el único que quedó bien."""
+    assert clasificar_correo(
+        "Re: Revisión mandatos de costos - Julio",
+        REVISORIA_SEGUIMIENTO) == CLASIF_SEGUIMIENTO
+
+
+def test_extrae_los_cuatro_cmu_de_la_respuesta_uniforme():
+    obs = extraer_observaciones(REVISORIA_RESPUESTA_UNIFORME)
+    assert [o["cmu"] for o in obs] == ["CMU0746", "CMU0747", "CMU0748", "CMU0749"]
 
 
 # ── extraer_observaciones ─────────────────────────────────────────────────────

@@ -197,6 +197,7 @@ def listar_proyectos_pendientes(db: Session = Depends(get_db), _=Depends(get_cur
 def confirmar_proyecto_pendiente(
     clave: str,
     body: ProyectoPendienteConfirmar,
+    forzar: bool = Query(False, description="true: crear igual aunque exista un proyecto con nombre muy parecido"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -227,6 +228,27 @@ def confirmar_proyecto_pendiente(
             "origen": "pendientes",
         }
         payload = {k: v for k, v in payload.items() if v is not None}
+
+        # Mismo chequeo que create_proyecto -- sin esto, dos candidatos "pendientes"
+        # distintos (p. ej. Sun Factory listó el mismo proyecto dos veces, como pasó
+        # con Monterrubio) se podían confirmar por separado y crear proyectos
+        # duplicados sin ningún aviso (caso real: "Astrea 1 (Calipso)", IDs 274/275).
+        if not forzar:
+            duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"), payload.get("tipo_proyecto"))
+            if duplicado:
+                raise HTTPException(
+                    409,
+                    {
+                        "mensaje": (
+                            f"Ya existe un proyecto con un nombre muy parecido: "
+                            f"'{duplicado.nombre_comercial}' (ID {duplicado.id})."
+                        ),
+                        "duplicado_nombre": True,
+                        "candidato_id": duplicado.id,
+                        "candidato_nombre": duplicado.nombre_comercial,
+                    },
+                )
+
         proyecto = Proyecto(**payload)
         db.add(proyecto)
         try:

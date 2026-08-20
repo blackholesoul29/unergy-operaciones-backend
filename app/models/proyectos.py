@@ -171,8 +171,6 @@ class Proyecto(Base):
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Monitoreo
-    alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P50/P90/P99 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
     p90_mensual_kwh = mapped_column(JSONB, nullable=True)
     p50_mensual_kwh = mapped_column(JSONB, nullable=True)
@@ -205,7 +203,6 @@ class Proyecto(Base):
     # % de avance de obra (Sun Factory).
     avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Proyección de generación mensual (MWh), editable por operaciones.
-    mwh_mes_estimado: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Origen del registro: 'manual' (alta normal) | 'tsf_sync' (auto-importado).
     origen: Mapped[str | None] = mapped_column(String(20), default="manual", nullable=True)
 

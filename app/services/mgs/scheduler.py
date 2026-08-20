@@ -158,12 +158,11 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
             continue
 
         try:
-            # Resolve project by name (using alias_monitoreo or nombre_comercial)
+            # Resolve project by name
             proyecto = db.execute(text("""
                 SELECT id FROM proyectos
                 WHERE deleted_at IS NULL
                   AND (nombre_comercial = :name
-                       OR alias_monitoreo ILIKE :pattern
                        OR nombre_comercial ILIKE :pattern)
                 LIMIT 1
             """), {
@@ -298,7 +297,6 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 SELECT id FROM proyectos
                 WHERE deleted_at IS NULL
                   AND (nombre_comercial = :name
-                       OR alias_monitoreo ILIKE :pattern
                        OR nombre_comercial ILIKE :pattern)
                 LIMIT 1
             """), {
@@ -383,7 +381,6 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
                     SELECT id FROM proyectos
                     WHERE deleted_at IS NULL
                       AND (nombre_comercial = :name
-                           OR alias_monitoreo ILIKE :pattern
                            OR nombre_comercial ILIKE :pattern)
                     LIMIT 1
                 """), {

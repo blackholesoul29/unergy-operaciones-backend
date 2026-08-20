@@ -218,15 +218,12 @@ def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
     # proyecto habla en MWh/mes; el CRM en kWh/mes, como cantidad_minima_kwh_mes.
     promedio_proyecto = None
     if proyecto is not None:
-        if proyecto.mwh_mes_estimado is not None:
-            promedio_proyecto = float(proyecto.mwh_mes_estimado) * 1000
-        else:
-            # Ojo: el p50 llega como lista o como texto JSON según la antigüedad
-            # de la fila (ver serie_mensual_kwh). Leerlo crudo tumbaba la lista
-            # entera de /comercial/ofertas con un 500.
-            vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
-            if vals:
-                promedio_proyecto = sum(vals) / len(vals)
+        # Ojo: el p50 llega como lista o como texto JSON según la antigüedad
+        # de la fila (ver serie_mensual_kwh). Leerlo crudo tumbaba la lista
+        # entera de /comercial/ofertas con un 500.
+        vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
+        if vals:
+            promedio_proyecto = sum(vals) / len(vals)
     energia_promedio = _elegir(
         "energia_promedio_kwh_mes", promedio_proyecto,
         float(oferta.energia_promedio_kwh_mes)
@@ -328,7 +325,7 @@ def etapa_de_la_planta(estados) -> str:
 # en qué tabla vive.
 GEN_MEDIDO = "medido"        # ventana móvil de 30 días de generación real
 GEN_MANUAL = "manual"        # lo cargó una persona (planta sin histórico)
-GEN_ESTIMADO = "estimado"    # proyección del proyecto (mwh_mes_estimado / p50)
+GEN_ESTIMADO = "estimado"    # proyección del proyecto (promedio de la curva p50)
 GEN_DECLARADO = "declarado"  # lo declaró la oferta comercial (planta sin Proyecto)
 
 
@@ -390,7 +387,7 @@ def _gen_promedio(proyecto, ofertas) -> tuple[float | None, str | None, dict]:
     proyección de ingeniería no son el mismo dato aunque ocupen la misma casilla.
 
         medido/manual (proyectos.gen_mensual_promedio_mwh)
-          → estimado (mwh_mes_estimado, si no el promedio de la curva p50)
+          → estimado (promedio de la curva p50)
           → declarado en la oferta (planta que todavía no existe como Proyecto)
     """
     detalle: dict = {"dias_con_datos": None, "ventana_desde": None,
@@ -408,8 +405,6 @@ def _gen_promedio(proyecto, ofertas) -> tuple[float | None, str | None, dict]:
         return float(proyecto.gen_mensual_promedio_mwh), origen, detalle
 
     if proyecto is not None:
-        if proyecto.mwh_mes_estimado is not None:
-            return float(proyecto.mwh_mes_estimado), GEN_ESTIMADO, detalle
         # El p50 llega como lista o como texto JSON según la antigüedad de la
         # fila; serie_mensual_kwh() absorbe las dos formas.
         vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
@@ -503,18 +498,12 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
 
     # Identificador de la planta en la API de Unergy: es el `sub_project` que se
     # manda como parámetro a /project_generation/ (ver monitoreo._fetch_unergy_raw)
-    # y con el que se calcula la generación promedio. `alias_monitoreo` es el
-    # respaldo histórico —el mismo `sub_project or alias_monitoreo` que usan las
-    # otras seis llamadas del repo—, y se marca como tal: no es el campo canónico.
+    # y con el que se calcula la generación promedio.
     api_id_unergy = None
     fuentes["api_id_unergy"] = None
-    if proyecto is not None:
-        if proyecto.sub_project:
-            api_id_unergy = proyecto.sub_project
-            fuentes["api_id_unergy"] = "sub_project"
-        elif proyecto.alias_monitoreo:
-            api_id_unergy = proyecto.alias_monitoreo
-            fuentes["api_id_unergy"] = "alias_monitoreo"
+    if proyecto is not None and proyecto.sub_project:
+        api_id_unergy = proyecto.sub_project
+        fuentes["api_id_unergy"] = "sub_project"
 
     # Estado del PROYECTO (en_desarrollo | en_operacion | suspendido | cancelado),
     # que no es la etapa comercial y por eso viaja aparte de `estado_pipeline`:
@@ -1238,15 +1227,11 @@ def _proyectos_por_id(db, ids: set[int]) -> dict:
 
 def api_id_unergy(proyecto) -> tuple[str | None, str | None]:
     """Con qué id se consulta esta planta en la API de Unergy, y de qué campo
-    salió. `alias_monitoreo` es el respaldo histórico y se marca como tal: no es
-    el campo canónico. Es el mismo `sub_project or alias_monitoreo` que usan las
-    otras llamadas del repo, en un solo lugar."""
+    salió."""
     if proyecto is None:
         return None, None
     if proyecto.sub_project:
         return proyecto.sub_project, "sub_project"
-    if proyecto.alias_monitoreo:
-        return proyecto.alias_monitoreo, "alias_monitoreo"
     return None, None
 
 
@@ -1351,10 +1336,8 @@ def _identificacion(proyecto) -> dict:
         "nombre_bitacora": proyecto.nombre_bitacora,
         "nombre_clientes": proyecto.nombre_clientes,
         "topic_slug": proyecto.topic_slug,
-        # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo
-        # cuando salió de `sub_project`; acá va crudo, sin el respaldo del alias.
+        # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo.
         "sub_project": proyecto.sub_project,
-        "alias_monitoreo": proyecto.alias_monitoreo,
         "codigo_cnd": proyecto.codigo_cnd,
         "codigo_tsf": proyecto.codigo_tsf,
         "origina_code": proyecto.origina_code,

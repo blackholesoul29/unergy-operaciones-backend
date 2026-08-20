@@ -117,7 +117,7 @@ def _oferta(**kw):
 def _proyecto(**kw):
     base = dict(nombre_comercial=None, municipio=None, departamento=None,
                 operador_red_id=None, operador_red_legal=None,
-                mwh_mes_estimado=None, p50_mensual_kwh=None)
+                p50_mensual_kwh=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
 
@@ -159,13 +159,6 @@ def test_la_cascada_es_por_campo_no_por_entidad():
 
     assert f["municipio"] == "Corozal" and f["fuentes"]["municipio"] == "proyecto"
     assert f["departamento"] == "Sucre" and f["fuentes"]["departamento"] == "oferta"
-
-
-def test_energia_promedio_del_proyecto_se_convierte_de_mwh_a_kwh():
-    """`proyectos.mwh_mes_estimado` está en MWh; el CRM habla en kWh."""
-    f = ficha_operativa(_oferta(), proyecto=_proyecto(mwh_mes_estimado=185.5))
-    assert f["energia_promedio_kwh_mes"] == 185500.0
-    assert f["fuentes"]["energia_promedio_kwh_mes"] == "proyecto"
 
 
 def test_sin_estimado_la_energia_promedio_cae_al_p50():
@@ -491,8 +484,7 @@ def test_toda_lectura_de_una_oferta_trae_su_ficha(db):
 
 def _oferta_completa(db, op_id, i):
     """Una oferta con proyecto, contrato y generación propios."""
-    proy = Proyecto(nombre_comercial=f"Planta {i}", municipio="Corozal",
-                    mwh_mes_estimado=100 + i)
+    proy = Proyecto(nombre_comercial=f"Planta {i}", municipio="Corozal")
     db.add(proy); db.flush()
     _generacion(db, proy.id, 2026, 7, 31)
     ppa = PPAContrato(fecha_inicio=dt.date(2026, 1, 1), fecha_fin=dt.date(2030, 12, 31))

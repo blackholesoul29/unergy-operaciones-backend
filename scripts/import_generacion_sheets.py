@@ -23,8 +23,7 @@ Variables de entorno necesarias:
 
 Estrategia de matching de proyectos:
     1. Exacto sobre nombre_comercial
-    2. Exacto sobre alias_monitoreo (separados por |)
-    3. Partial / fuzzy (SequenceMatcher >= 0.75)
+    2. Partial / fuzzy (SequenceMatcher >= 0.75)
 """
 import argparse
 import os

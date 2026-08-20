@@ -137,17 +137,16 @@ def _es_remitente(u: Usuario) -> bool:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _get_proyecto_id_por_sub_project(db: Session, sub_project: str) -> Optional[int]:
-    """Resuelve el proyecto asociado a un sub_project/nombre/alias de monitoreo."""
+    """Resuelve el proyecto asociado a un sub_project/nombre."""
     row = db.execute(
         text("""
             SELECT p.id
             FROM proyectos p
             WHERE p.sub_project = :sp
                OR p.nombre_comercial = :sp
-               OR p.alias_monitoreo ILIKE :sp_like
             LIMIT 1
         """),
-        {"sp": sub_project, "sp_like": f"%{sub_project}%"},
+        {"sp": sub_project},
     ).fetchone()
     return row[0] if row else None
 

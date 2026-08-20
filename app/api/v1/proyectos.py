@@ -368,7 +368,7 @@ def listar_gen_promedio(
             "gen_promedio_hasta": p.gen_promedio_hasta,
             "gen_promedio_actualizado_en": p.gen_promedio_actualizado_en,
             # Sin identificador de monitoreo la API no lo resuelve: carga manual sí o sí.
-            "requiere_carga_manual": not (p.sub_project or p.alias_monitoreo),
+            "requiere_carga_manual": not p.sub_project,
         })
     return {
         "total": len(filas),

@@ -293,7 +293,6 @@ class ProyectoCreate(BaseModel):
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     avance_obra_pct: Optional[float] = None
-    mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
@@ -380,7 +379,6 @@ class ProyectoOut(BaseModel):
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     avance_obra_pct: Optional[float] = None
-    mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
     servicio_representacion: Optional[ServicioRepresentacionOut] = None
     ppa_contratos: list[ProyectoPPAResumenOut] = []

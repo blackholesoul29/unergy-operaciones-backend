@@ -312,10 +312,10 @@ def _py(**kw):
                 gen_mensual_promedio_mwh=None, gen_promedio_origen=None,
                 gen_promedio_dias=None, gen_promedio_desde=None,
                 gen_promedio_hasta=None, gen_promedio_actualizado_en=None,
-                mwh_mes_estimado=None, p50_mensual_kwh=None,
+                p50_mensual_kwh=None,
                 fecha_inicio_comercializacion=None, fecha_entrada_operacion=None,
                 latitud=None, longitud=None, potencia_instalada_kwp=None,
-                sub_project=None, alias_monitoreo=None, estado=None)
+                sub_project=None, estado=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
 
@@ -515,22 +515,6 @@ def test_el_api_id_unergy_es_el_sub_project():
     assert f["fuentes"]["api_id_unergy"] == "sub_project"
 
 
-def test_sin_sub_project_vale_el_alias_de_monitoreo_pero_se_marca():
-    """`sub_project or alias_monitoreo` es el respaldo que usan las otras seis
-    llamadas del repo. Se marca la fuente porque el alias no es el campo
-    canónico y puede no estar validado."""
-    f = fila_operando([_of()], proyecto=_py(alias_monitoreo="la_catedral_1"), hoy=HOY)
-
-    assert f["api_id_unergy"] == "la_catedral_1"
-    assert f["fuentes"]["api_id_unergy"] == "alias_monitoreo"
-
-
-def test_el_sub_project_le_gana_al_alias():
-    f = fila_operando([_of()], proyecto=_py(sub_project="catedral",
-                                            alias_monitoreo="viejo"), hoy=HOY)
-    assert f["api_id_unergy"] == "catedral"
-
-
 def test_sin_identificador_de_monitoreo_el_api_id_es_null():
     """Juan: "si lo tiene, si no entregarlo como nulo por ahora"."""
     f = fila_operando([_of()], proyecto=_py(), hoy=HOY)
@@ -656,12 +640,6 @@ def test_un_promedio_cargado_a_mano_se_marca_manual():
     assert f["gen_promedio_origen"] == "manual"
 
 
-def test_sin_promedio_medido_cae_a_la_proyeccion_del_proyecto():
-    f = fila_operando([_of()], proyecto=_py(mwh_mes_estimado=120.5), hoy=HOY)
-    assert f["gen_promedio_mensual_mwh"] == 120.5
-    assert f["gen_promedio_origen"] == "estimado"
-
-
 def test_sin_proyeccion_cae_al_promedio_de_la_curva_p50():
     """p50_mensual_kwh son 12 valores mensuales en kWh; el resultado va en MWh."""
     f = fila_operando([_of()], proyecto=_py(p50_mensual_kwh=[100_000.0] * 12), hoy=HOY)
@@ -693,7 +671,6 @@ def test_el_promedio_medido_le_gana_a_la_proyeccion(db):
     f = fila_operando([_of(energia_promedio_kwh_mes=999_000)],
                       proyecto=_py(gen_mensual_promedio_mwh=178.4,
                                    gen_promedio_origen="api",
-                                   mwh_mes_estimado=200.0,
                                    p50_mensual_kwh=[300_000.0] * 12), hoy=HOY)
     assert f["gen_promedio_mensual_mwh"] == 178.4
 

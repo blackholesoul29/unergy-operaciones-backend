@@ -332,7 +332,7 @@ Sin este mapa, un dato que no aplica y un dato que falta se ven idénticos (los 
 | `"oferta"` | Lo declaró la oferta comercial (la planta aún no existe como proyecto) |
 | `"contrato"` | Salió del contrato PPA |
 | `"medido"` / `"manual"` / `"estimado"` / `"declarado"` | Solo para `gen_promedio_mensual`, ver arriba |
-| `"sub_project"` / `"alias_monitoreo"` | Solo para `api_id_unergy`: de qué campo salió el id. `alias_monitoreo` es el respaldo histórico y puede no estar validado |
+| `"sub_project"` | Solo para `api_id_unergy`: de qué campo salió el id |
 | `null` | **Nadie lo aportó todavía.** No es un error |
 
 `fuentes` siempre trae estas 9 llaves: `nombre`, `municipio`, `departamento`, `operador_red`,

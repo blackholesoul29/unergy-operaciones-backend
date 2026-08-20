@@ -185,7 +185,6 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
               "nombre_clientes": "Balmora",
               "topic_slug": "gd-balmora-1",
               "sub_project": "balmora1",
-              "alias_monitoreo": null,
               "codigo_cnd": "CND-0912",
               "codigo_tsf": "TSF-77",
               "origina_code": "MF-BAL-1",

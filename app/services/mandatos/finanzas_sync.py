@@ -230,3 +230,85 @@ def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):
         resultado="aplicado" if aplicado else "omitido",
         requiere_revision=d["requiere_revision"] or problema,
         detalle={"acciones": registros, "sin_identidad": d["sin_identidad"]})
+
+
+REMITENTE_REVISORIA = "vlondono@jbp.com.co"
+REMITENTE_ENVIO = "jessica@unergy.io"
+
+
+def revisar_correos_finanzas() -> None:
+    """Punto de entrada del cron. Nunca lanza hacia el scheduler.
+
+    Tres pasadas: lo que llega de la revisoría (INBOX), lo que Jessica manda a
+    inversionistas (INBOX, va en copia), y lo que sale hacia la revisoría
+    (Enviados) -- esta última es la que permite saber cuántos se enviaron, sin
+    lo cual la reconciliación no puede detectar los que nunca volvieron.
+
+    Transacción POR CORREO: uno que reviente no arrastra a los demás, y la
+    corrida siguiente retoma donde quedó porque la deduplicación va por
+    Message-ID contra lo ya registrado.
+    """
+    import imaplib
+
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.core.database import SessionLocal
+    from app.models.mandatos import MandatoCorreo
+    from app.services.mandatos.imap_client import buscar_correos, carpeta_enviados
+
+    if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
+        logger.info("Finanzas mandatos: credenciales no configuradas, se omite")
+        return
+
+    pasadas = [(REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM"),
+               (REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM")]
+
+    # La carpeta de Enviados hay que preguntarla al servidor: su nombre depende
+    # del idioma de la cuenta, por eso se busca por la bandera \Sent.
+    try:
+        imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
+        imap.login(settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD)
+        enviados = carpeta_enviados(imap)
+        imap.logout()
+    except Exception as exc:
+        logger.error("Finanzas mandatos: no se pudo consultar Enviados: %s", exc)
+        enviados = None
+    if enviados:
+        pasadas.append((REMITENTE_REVISORIA, FUENTE_REVISORIA, enviados, "TO"))
+
+    db = SessionLocal()
+    try:
+        vistos = {mid for (mid,) in db.execute(select(MandatoCorreo.message_id)).all()}
+        nuevos = 0
+        for direccion, fuente, carpeta, campo in pasadas:
+            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo):
+                if correo.message_id in vistos:
+                    continue
+                try:
+                    fila = procesar_correo_finanzas(db, correo, fuente)
+                    db.add(fila)
+                    db.commit()
+                    vistos.add(correo.message_id)
+                    nuevos += 1
+                    logger.info("Finanzas mandatos: %s -- %s/%s, %d acciones",
+                                correo.message_id, fila.clasificacion, fila.resultado,
+                                len(fila.detalle.get("acciones", [])))
+                except Exception as exc:
+                    db.rollback()
+                    logger.error("Finanzas mandatos: fallo en %s: %s",
+                                 correo.message_id, exc)
+                    try:
+                        db.add(MandatoCorreo(
+                            message_id=correo.message_id, fecha=correo.fecha,
+                            remitente=(correo.remitente or "")[:255],
+                            asunto=(correo.asunto or "")[:1000], fuente=fuente,
+                            clasificacion="desconocido", resultado="error",
+                            requiere_revision=True, detalle={"error": str(exc)}))
+                        db.commit()
+                        vistos.add(correo.message_id)
+                    except Exception:
+                        db.rollback()
+        logger.info("Finanzas mandatos: corrida terminada, %d correos nuevos", nuevos)
+    finally:
+        db.close()

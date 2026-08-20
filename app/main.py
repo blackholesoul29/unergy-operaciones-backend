@@ -2595,23 +2595,28 @@ def _scheduled_excel_terceros_cedillanos():
 
 
 def _scheduled_correos_mandatos():
-    """MODO DIAGNÓSTICO -- lee el buzón y solo reporta al log. NO escribe nada.
+    """Lee el buzón de mandatos y alimenta finanzas_mandatos.
 
-    Provisional y a propósito. La ingesta de Fase B (email_sync) escribe en la
-    tabla `mandatos`, que la integración con Finanzas va a descartar; prenderla
-    ahora significaría procesar 30 días de correo hacia una tabla condenada.
-    Pero apagar el cron del todo tampoco sirve: es lo único que ejercita IMAP en
-    producción, y sin él no hay forma de saber si el App Password funciona ni si
-    la carpeta de Enviados se detecta.
+    Cada hora de 7am a 7pm: los correos de la revisoría y los envíos a
+    inversionistas llegan en horario laboral. Sin correos nuevos la corrida es
+    solo un IMAP SEARCH que no toca la base.
 
-    Así que por ahora conecta, cuenta y reporta. Cuando el Plan 2 esté listo,
-    su Tarea 5 reemplaza el cuerpo de esta función por la ingesta real hacia
-    finanzas_mandatos. Ver
-    docs/superpowers/plans/2026-08-18-mandatos-integracion-02-adaptador.md
+    Tres pasadas -- lo que llega de la revisoría, lo que Jessica manda a los
+    inversionistas, y lo que sale hacia la revisoría (carpeta Enviados, la que
+    permite saber cuántos mandatos se enviaron). Transacción por correo, y la
+    deduplicación va por Message-ID, así que una corrida interrumpida retoma
+    donde quedó.
+
+    El buzón es de una persona y nunca se modifica: todo `select` va con
+    readonly=True y no se marca nada como leído.
+
+    Reemplaza al diagnóstico que corrió mientras se verificaba la conexión
+    (app/services/mandatos/diagnostico.py, que ya se puede borrar). El endpoint
+    GET /mandatos/diagnostico-imap sigue disponible para probar a demanda.
     """
-    from app.services.mandatos.diagnostico import diagnostico_imap
+    from app.services.mandatos.finanzas_sync import revisar_correos_finanzas
 
-    diagnostico_imap()
+    revisar_correos_finanzas()
 
 
 def _scheduled_cerrar_contratos_vencidos():

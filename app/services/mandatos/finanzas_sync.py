@@ -290,27 +290,46 @@ def revisar_correos_finanzas() -> dict:
     from app.core.config import settings
     from app.core.database import SessionLocal
     from app.models.mandatos import MandatoCorreo
-    from app.services.mandatos.imap_client import buscar_correos, carpeta_enviados
+    from app.services.mandatos.imap_client import buscar_correos, buzones, carpeta_enviados
 
-    if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
+    creds = buzones()
+    if not creds:
         logger.info("Finanzas mandatos: credenciales no configuradas, se omite")
         return {"ok": False, "motivo": "credenciales no configuradas"}
 
-    pasadas = [(REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM"),
-               (REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM")]
+    # Una tanda de pasadas por cada buzón configurado. Parte del correo de
+    # mandatos no pasa por adhara@: Jessica manda algunos a la revisoría desde
+    # su propia cuenta, y esos viven en SU carpeta de Enviados. Sin leerlos, la
+    # reconciliación nunca se entera de que esos mandatos salieron.
+    #
+    # Los correos que están en los dos buzones (adhara suele ir en copia) se
+    # procesan UNA sola vez: la deduplicación va por Message-ID, que es el mismo
+    # mensaje mirado desde dos lados, no dos mensajes.
+    pasadas = []
+    for usuario, password in creds:
+        pasadas.append((REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM",
+                        usuario, password))
+        pasadas.append((REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM",
+                        usuario, password))
 
-    # La carpeta de Enviados hay que preguntarla al servidor: su nombre depende
-    # del idioma de la cuenta, por eso se busca por la bandera \Sent.
-    try:
-        imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
-        imap.login(settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD)
-        enviados = carpeta_enviados(imap)
-        imap.logout()
-    except Exception as exc:
-        logger.error("Finanzas mandatos: no se pudo consultar Enviados: %s", exc)
-        enviados = None
-    if enviados:
-        pasadas.append((REMITENTE_REVISORIA, FUENTE_SALIENTE, enviados, "TO"))
+        # La carpeta de Enviados hay que preguntarla a cada servidor: su nombre
+        # depende del idioma de la cuenta, por eso se busca por la bandera \Sent.
+        try:
+            imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
+            imap.login(usuario, password)
+            enviados = carpeta_enviados(imap)
+            imap.logout()
+        except Exception as exc:
+            logger.error("Finanzas mandatos: no se pudo consultar Enviados de %s: %s",
+                         usuario, exc)
+            enviados = None
+        if enviados:
+            pasadas.append((REMITENTE_REVISORIA, FUENTE_SALIENTE, enviados, "TO",
+                            usuario, password))
+        else:
+            logger.warning("Finanzas mandatos: sin carpeta de Enviados en %s -- "
+                           "no se registrarán los envíos hechos desde ese buzón",
+                           usuario)
 
     db = SessionLocal()
     try:
@@ -318,8 +337,9 @@ def revisar_correos_finanzas() -> dict:
         nuevos = 0
         resumen: dict = {"aplicado": 0, "omitido": 0, "error": 0}
         para_revisar: list[int] = []
-        for direccion, fuente, carpeta, campo in pasadas:
-            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo):
+        for direccion, fuente, carpeta, campo, usuario, password in pasadas:
+            for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo,
+                                         usuario=usuario, password=password):
                 if correo.message_id in vistos:
                     continue
                 try:
@@ -354,6 +374,7 @@ def revisar_correos_finanzas() -> dict:
                     nuevos, resumen)
         return {"ok": True, "correos_nuevos": nuevos, "por_resultado": resumen,
                 "requieren_revision": para_revisar,
-                "carpeta_enviados": enviados}
+                "buzones": [u for u, _ in creds],
+                "pasadas": len(pasadas)}
     finally:
         db.close()

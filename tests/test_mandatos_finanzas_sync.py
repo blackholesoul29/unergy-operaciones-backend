@@ -147,3 +147,42 @@ def test_saliente_sin_periodo_en_el_asunto_no_inventa():
                 asunto="Re: sin mes")
     d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
     assert d["acciones"] == []
+
+
+# ── buzones múltiples ─────────────────────────────────────────────────────────
+
+def test_buzones_lista_los_configurados(monkeypatch):
+    """Parte del correo de mandatos no pasa por adhara@: algunos envíos a la
+    revisoría salen de la cuenta de Jessica y viven en SU carpeta de Enviados.
+    Sin leer ese buzón, la reconciliación nunca sabe que salieron."""
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER", "adhara@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD", "x")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER_2", "jessica@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD_2", "y")
+    assert buzones() == [("adhara@unergy.io", "x"), ("jessica@unergy.io", "y")]
+
+
+def test_buzones_omite_el_segundo_si_no_esta_configurado(monkeypatch):
+    """El segundo buzón es opcional: sin él todo funciona igual, solo con
+    menos cobertura."""
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER", "adhara@unergy.io")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD", "x")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_USER_2", "")
+    monkeypatch.setattr(settings, "MANDATOS_IMAP_PASSWORD_2", "")
+    assert buzones() == [("adhara@unergy.io", "x")]
+
+
+def test_buzones_vacio_sin_credenciales(monkeypatch):
+    from app.core.config import settings
+    from app.services.mandatos.imap_client import buzones
+
+    for k in ("MANDATOS_IMAP_USER", "MANDATOS_IMAP_PASSWORD",
+              "MANDATOS_IMAP_USER_2", "MANDATOS_IMAP_PASSWORD_2"):
+        monkeypatch.setattr(settings, k, "")
+    assert buzones() == []

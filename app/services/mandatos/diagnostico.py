@@ -37,6 +37,19 @@ def _contar(imap: imaplib.IMAP4_SSL, carpeta: str, campo: str, direccion: str) -
 
 
 def diagnostico_imap() -> dict:
+    """Revisa TODOS los buzones configurados. Ver _diagnosticar_buzon."""
+    from app.services.mandatos.imap_client import buzones
+
+    creds = buzones()
+    if not creds:
+        logger.info("Diagnóstico IMAP: credenciales no configuradas, se omite")
+        return {"ok": False, "motivo": "credenciales no configuradas"}
+    resultados = [_diagnosticar_buzon(u, p) for u, p in creds]
+    return {"ok": all(r.get("ok") for r in resultados),
+            "buzones": resultados}
+
+
+def _diagnosticar_buzon(usuario: str, password: str) -> dict:
     """Conecta, cuenta lo que encontraría, y lo devuelve. Escribe al log también.
 
     Devuelve el mismo resultado que reporta, para que un endpoint pueda
@@ -45,22 +58,18 @@ def diagnostico_imap() -> dict:
     Nunca lanza: es un diagnóstico, no puede tumbar el scheduler ni el endpoint.
     NO toca la base de datos ni modifica el buzón.
     """
-    if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
-        logger.info("Diagnóstico IMAP: credenciales no configuradas, se omite")
-        return {"ok": False, "motivo": "credenciales no configuradas"}
-
     try:
         imap = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
-        imap.login(settings.MANDATOS_IMAP_USER, settings.MANDATOS_IMAP_PASSWORD)
+        imap.login(usuario, password)
     except Exception as exc:
         logger.error("Diagnóstico IMAP: AUTENTICACIÓN FALLÓ contra %s como %s: %s",
-                     settings.IMAP_HOST, settings.MANDATOS_IMAP_USER, exc)
+                     settings.IMAP_HOST, usuario, exc)
         return {"ok": False, "motivo": "autenticacion fallo",
-                "host": settings.IMAP_HOST, "usuario": settings.MANDATOS_IMAP_USER,
+                "host": settings.IMAP_HOST, "usuario": usuario,
                 "error": str(exc)}
 
-    logger.info("Diagnóstico IMAP: autenticado OK como %s", settings.MANDATOS_IMAP_USER)
-    resultado: dict = {"ok": True, "usuario": settings.MANDATOS_IMAP_USER,
+    logger.info("Diagnóstico IMAP: autenticado OK como %s", usuario)
+    resultado: dict = {"ok": True, "usuario": usuario,
                        "dias": DIAS, "conteos": {}}
     try:
         from app.services.mandatos.imap_client import carpeta_enviados
@@ -72,8 +81,8 @@ def diagnostico_imap() -> dict:
         for direccion in REMITENTES:
             n = _contar(imap, "INBOX", "FROM", direccion)
             resultado["conteos"][f"INBOX FROM {direccion}"] = n
-            logger.info("Diagnóstico IMAP: INBOX FROM %s -> %s correos en %d días",
-                        direccion, n, DIAS)
+            logger.info("Diagnóstico IMAP [%s]: INBOX FROM %s -> %s correos en %d días",
+                        usuario, direccion, n, DIAS)
 
         if enviados:
             n = _contar(imap, enviados, "TO", REMITENTES[0])

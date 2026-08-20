@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     # Requiere App Password propio (verificación en dos pasos activa en la cuenta).
     MANDATOS_IMAP_USER: str = ""
     MANDATOS_IMAP_PASSWORD: str = ""
+    # Segundo buzón, opcional. Parte del correo de mandatos no pasa por
+    # adhara@: Jessica manda algunos a la revisoría desde su propia cuenta, y
+    # esos viven en SU carpeta de Enviados. Sin leerlos, la reconciliación no
+    # puede saber que esos mandatos salieron. Si queda vacío, se lee un solo
+    # buzón y todo funciona igual, solo con menos cobertura.
+    MANDATOS_IMAP_USER_2: str = ""
+    MANDATOS_IMAP_PASSWORD_2: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

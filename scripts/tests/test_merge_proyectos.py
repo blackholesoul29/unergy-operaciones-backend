@@ -40,7 +40,6 @@ def test_config_referencia_tablas_y_columnas_reales():
     assert {"proyecto_original_id", "proyecto_nuevo_id"} <= asic
 
     proy = cols("proyectos")
-    assert "proyecto_padre_id" in proy
     for f in _MERGE_SCALAR_UNIQUE:
         assert f in proy, f"proyectos sin campo escalar único '{f}'"
 

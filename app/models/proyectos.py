@@ -78,7 +78,6 @@ class Proyecto(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
-    proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
 
     nombre_comercial: Mapped[str] = mapped_column(String(255), nullable=False)
     nombre_bitacora: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -214,7 +213,6 @@ class Proyecto(Base):
 
     # Relaciones
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
-    subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)

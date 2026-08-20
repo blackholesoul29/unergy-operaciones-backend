@@ -174,7 +174,7 @@ Modern FastAPI backend. The operational hub for day-to-day Unergy work: project 
 #### Projects (46 cols — richest entity)
 ```
 proyectos:
-  id, cliente_id→clientes, portafolio_id→portafolios, proyecto_padre_id→proyectos,
+  id, cliente_id→clientes, portafolio_id→portafolios,
   nombre_comercial, nombre_bitacora, nombre_clientes, topic_slug,
   clasificacion_regulatoria (AGP/AGPE/AGGE/GD/DER),
   tipo_proyecto (minigranja/autoconsumo/gd/movilidad_electrica/otro),

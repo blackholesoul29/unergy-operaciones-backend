@@ -1348,8 +1348,6 @@ def _identificacion(proyecto) -> dict:
         "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,
         "portafolio_id": proyecto.portafolio_id,
         "portafolio": proyecto.portafolio.nombre if proyecto.portafolio else None,
-        # Una planta puede ser subproyecto de otra (minigranja partida en varias).
-        "proyecto_padre_id": proyecto.proyecto_padre_id,
     }
 
 

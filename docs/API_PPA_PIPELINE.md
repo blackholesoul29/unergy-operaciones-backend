@@ -194,8 +194,7 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
               "quoia_reporte_generacion_id": 91,
               "quoia_reporte_consumo_id": null,
               "portafolio_id": 3,
-              "portafolio": "Portafolio Caribe",
-              "proyecto_padre_id": null
+              "portafolio": "Portafolio Caribe"
             },
             "clasificacion": {
               "clasificacion_regulatoria": "AGGE",

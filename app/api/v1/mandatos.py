@@ -9,6 +9,8 @@ Endpoints:
   POST   /mandatos/upload-firmado           → subir PDF firmado (asocia por CMU del nombre)
   POST   /mandatos/{id}/asociar-pdf         → asociar PDF subido a un CMU manualmente
   DELETE /mandatos/{id}                     → eliminar
+  POST   /mandatos/ejecutar-ingesta         → correr la lectura de correo AHORA (admin)
+  GET    /mandatos/diagnostico-imap          → probar la conexión IMAP (solo lee)
   GET    /mandatos/correos                  → bitácora de correos leídos por IMAP
   POST   /mandatos/correos/{id}/revertir    → revertir cambios de un correo
   GET    /mandato-inversionistas            → tabla maestra
@@ -24,7 +26,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import _require_admin, get_current_user
 from app.core.database import get_db
 from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum, MandatoCorreo
 from app.schemas.mandatos import MandatoCrear, MandatoActualizar, InversionistaOut
@@ -41,6 +43,29 @@ _PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 _ZIP_DIR = Path("uploads/mandatos/zips")
 _ZIP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/ejecutar-ingesta")
+def ejecutar_ingesta(_=Depends(_require_admin)):
+    """Corre la lectura de correo AHORA, sin esperar al cron de las :05.
+
+    **Esto escribe.** Hace exactamente lo mismo que el cron: lee el buzón,
+    aplica lo que encuentra a finanzas_mandatos y registra todo en la bitácora.
+
+    Existe porque el cron solo corre de 7am a 7pm; sin esto, una primera tanda
+    que caiga fuera de esa ventana se procesaría de madrugada sin nadie
+    mirando. Correrlo cuando alguien está pendiente es más seguro.
+
+    Es POST y no GET a propósito: un GET se dispara con solo abrir la URL, y
+    con un prefetch del navegador podría ejecutarse sin que nadie lo pidiera.
+    Pide rol admin por la misma razón -- no es una consulta, es una acción.
+
+    Volver a correrlo es inofensivo: la deduplicación va por Message-ID, así
+    que los correos ya procesados se saltan.
+    """
+    from app.services.mandatos.finanzas_sync import revisar_correos_finanzas
+
+    return revisar_correos_finanzas()
 
 
 @router.get("/diagnostico-imap")

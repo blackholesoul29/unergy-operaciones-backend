@@ -236,8 +236,11 @@ REMITENTE_REVISORIA = "vlondono@jbp.com.co"
 REMITENTE_ENVIO = "jessica@unergy.io"
 
 
-def revisar_correos_finanzas() -> None:
+def revisar_correos_finanzas() -> dict:
     """Punto de entrada del cron. Nunca lanza hacia el scheduler.
+
+    Devuelve un resumen de la corrida además de loguearla, para que el endpoint
+    manual pueda reportar qué pasó sin obligar a ir a buscar en los logs.
 
     Tres pasadas: lo que llega de la revisoría (INBOX), lo que Jessica manda a
     inversionistas (INBOX, va en copia), y lo que sale hacia la revisoría
@@ -259,7 +262,7 @@ def revisar_correos_finanzas() -> None:
 
     if not settings.MANDATOS_IMAP_USER or not settings.MANDATOS_IMAP_PASSWORD:
         logger.info("Finanzas mandatos: credenciales no configuradas, se omite")
-        return
+        return {"ok": False, "motivo": "credenciales no configuradas"}
 
     pasadas = [(REMITENTE_REVISORIA, FUENTE_REVISORIA, "INBOX", "FROM"),
                (REMITENTE_ENVIO, FUENTE_ENVIO, "INBOX", "FROM")]
@@ -281,6 +284,8 @@ def revisar_correos_finanzas() -> None:
     try:
         vistos = {mid for (mid,) in db.execute(select(MandatoCorreo.message_id)).all()}
         nuevos = 0
+        resumen: dict = {"aplicado": 0, "omitido": 0, "error": 0}
+        para_revisar: list[int] = []
         for direccion, fuente, carpeta, campo in pasadas:
             for correo in buscar_correos(direccion, carpeta=carpeta, campo=campo):
                 if correo.message_id in vistos:
@@ -291,6 +296,9 @@ def revisar_correos_finanzas() -> None:
                     db.commit()
                     vistos.add(correo.message_id)
                     nuevos += 1
+                    resumen[fila.resultado] = resumen.get(fila.resultado, 0) + 1
+                    if fila.requiere_revision:
+                        para_revisar.append(fila.id)
                     logger.info("Finanzas mandatos: %s -- %s/%s, %d acciones",
                                 correo.message_id, fila.clasificacion, fila.resultado,
                                 len(fila.detalle.get("acciones", [])))
@@ -307,8 +315,13 @@ def revisar_correos_finanzas() -> None:
                             requiere_revision=True, detalle={"error": str(exc)}))
                         db.commit()
                         vistos.add(correo.message_id)
+                        resumen["error"] += 1
                     except Exception:
                         db.rollback()
-        logger.info("Finanzas mandatos: corrida terminada, %d correos nuevos", nuevos)
+        logger.info("Finanzas mandatos: corrida terminada, %d correos nuevos -- %s",
+                    nuevos, resumen)
+        return {"ok": True, "correos_nuevos": nuevos, "por_resultado": resumen,
+                "requieren_revision": para_revisar,
+                "carpeta_enviados": enviados}
     finally:
         db.close()

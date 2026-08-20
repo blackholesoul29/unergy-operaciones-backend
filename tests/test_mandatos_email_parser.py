@@ -315,3 +315,44 @@ def test_enviados_ignora_un_pdf_que_no_es_mandato():
 
 def test_enviados_sin_adjuntos():
     assert mandatos_enviados_en_correo([]) == []
+
+
+# ── líneas de conformidad: NO son observaciones ───────────────────────────────
+# Regla de negocio (Adhara, 2026-08-20): "un mandato firmado no debe tener
+# correcciones". Vanessa manda correos mixtos: una observación real y, en otra
+# línea, la confirmación de los mandatos que sí quedaron bien. Antes, toda línea
+# con un CMU se convertía en observación y esos CMU conformes terminaban
+# marcados con_comentarios (27 casos reales en la corrida del 2026-08-20).
+
+def test_linea_que_confirma_firmados_no_genera_observacion():
+    cuerpo = (
+        "Revisando encuentro las siguientes observaciones:\n"
+        "CMU1255 no se evidencia contabilizacion del arriendo.\n"
+        "Los certificados CMU1160, CMU1161 y CMU1163 se encuentran "
+        "debidamente firmados y sin novedad.\n"
+        "Cordialmente")
+    assert extraer_observaciones(cuerpo) == [
+        {"cmu": "CMU1255", "observacion": "no se evidencia contabilizacion del arriendo"}]
+
+
+def test_conformidad_antes_del_cmu_tambien_se_descarta():
+    cuerpo = ("Se presentan diferencias.\n"
+              "CMU0900 diferencia de 1.200.000 en el arriendo.\n"
+              "Debidamente firmados y aprobados: CMU0901, CMU0902.\n")
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU0900"]
+
+
+def test_conformidad_negada_si_es_observacion():
+    """'no está firmado' es una observación real, no una confirmación.
+    Sin la excepción por negación, el filtro se comería el hallazgo."""
+    cuerpo = ("Se presentan diferencias.\n"
+              "CMU0910 el mandato no esta firmado por el inversionista.\n")
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU0910"]
+
+
+def test_conformidad_no_bloquea_una_linea_mixta():
+    """Si una misma línea confirma y observa, se extrae: perder una
+    observación real es peor que dejar pasar un CMU conforme."""
+    cuerpo = ("Siguientes observaciones:\n"
+              "CMU0920 firmado correctamente pero falta el soporte del predial.\n")
+    assert [o["cmu"] for o in extraer_observaciones(cuerpo)] == ["CMU0920"]

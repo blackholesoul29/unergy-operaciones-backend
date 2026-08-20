@@ -218,6 +218,44 @@ def _sin_cita(cuerpo: str) -> str:
     return cuerpo
 
 
+# Lenguaje de conformidad: la línea confirma que ese mandato quedó bien, no lo
+# observa. Regla de negocio: un mandato firmado no lleva correcciones, así que
+# una línea así NUNCA debe producir un con_comentarios.
+#
+# Es una lista de bloqueo (no de permiso) a propósito: las formas de decir "este
+# quedó bien" son pocas y formulaicas, mientras que las de reportar un problema
+# son infinitas. Una lista de permiso se comería hallazgos reales.
+_SENALES_CONFORME = (
+    "debidamente firmad",
+    "se encuentran firmad",
+    "se encuentra firmad",
+    "sin novedad",
+    "sin observacion",
+    "sin ninguna observacion",
+    "conforme",
+    "aprobad",
+)
+
+# Cancelan la conformidad: "el mandato NO está firmado" es un hallazgo, no una
+# confirmación. Ante la duda se extrae — perder una observación real es peor
+# que dejar pasar un CMU conforme.
+_NIEGAN_CONFORMIDAD = (
+    "no ",
+    "sin firma",
+    "falta",
+    "pendiente",
+    "pero ",
+    "salvo",
+)
+
+
+def _linea_confirma_conformidad(linea: str) -> bool:
+    n = _normaliza(linea)
+    if not any(s in n for s in _SENALES_CONFORME):
+        return False
+    return not any(s in n for s in _NIEGAN_CONFORMIDAD)
+
+
 def extraer_observaciones(cuerpo: str | None) -> list[dict]:
     """[{'cmu': 'CMU1255', 'observacion': '...'}] en orden de aparición.
 
@@ -225,6 +263,11 @@ def extraer_observaciones(cuerpo: str | None) -> list[dict]:
     (correo real: "Certificados CMU1266,CMU1269,CMU1270 y CMU1271 no se
     evidencia contabilización..."). La observación es lo que sigue al ÚLTIMO
     CMU de la línea. Un CMU repetido conserva su primera observación.
+
+    Descarta las líneas que confirman conformidad ("los certificados CMU1160,
+    CMU1161 se encuentran debidamente firmados"): un correo mixto trae la
+    observación real y, aparte, el visto bueno de los demás. Ver
+    _linea_confirma_conformidad().
 
     Solo debe llamarse con cuerpos clasificados CLASIF_MOLDE_SIMPLE. Trabaja
     sobre el cuerpo recortado por _sin_cita() -- ver el comentario ahí y el
@@ -244,6 +287,8 @@ def extraer_observaciones(cuerpo: str | None) -> list[dict]:
             break
         cmus = CMU_RE.findall(linea)
         if not cmus:
+            continue
+        if _linea_confirma_conformidad(linea):
             continue
         corte = linea.rfind(cmus[-1]) + len(cmus[-1])
         observacion = linea[corte:].strip().strip(".,:;-–—").strip()

@@ -57,11 +57,15 @@ sin_firma → con_comentarios → corregido → firmado → enviado_inversionist
 
 ## Fuera de alcance
 
-Los **27 casos de `firmado → con_comentarios`** siguen sin resolver. Vanessa firma
-y luego encuentra diferencias; el modelo no admite que un mandato esté firmado y
-observado a la vez porque `estado` mezcla dos hechos distintos (¿está firmado? y
-¿tiene observaciones pendientes?). Separarlos toca el esquema de Finanzas y la
-vista, así que es decisión del usuario y Jessica, no de este plan.
+Los **27 casos de `firmado → con_comentarios`** ya se resolvieron: eran un defecto
+del extractor, no una decisión de modelado. Un mandato firmado no lleva
+correcciones (regla de negocio, Adhara 2026-08-20), así que esas 27 lecturas
+estaban mal. Causa: el filtro de "este correo trae observaciones" era por correo
+completo, y una vez pasado, toda línea con un CMU se volvía observación —
+incluida la línea de cierre en la que Vanessa confirma cuáles sí quedaron bien.
+Corregido con un filtro por línea (`_linea_confirma_conformidad`). La máquina de
+estados había bloqueado las 27 como `transicion_invalida`, así que no llegó a
+escribirse nada malo en la base.
 
 ## Estructura de archivos
 

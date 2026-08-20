@@ -31,6 +31,12 @@ class CorreoCrudo:
     asunto: str
     cuerpo: str                                    # texto plano ya resuelto
     adjuntos: list[tuple[str, bytes]] = field(default_factory=list)
+    # To + Cc concatenados, en minúsculas. Va como una sola cadena y no como
+    # lista a propósito: lo único que se necesita preguntar es "¿está esta
+    # dirección entre los destinatarios?", y sobre una cadena eso es un `in`.
+    # Parsear direcciones RFC bien es peludo (nombres con comas, comillas,
+    # grupos) y acá no hace falta.
+    destinatarios: str = ""
 
 
 def _decodifica(valor: str | None) -> str:
@@ -41,6 +47,17 @@ def _decodifica(valor: str | None) -> str:
         return str(make_header(decode_header(valor)))
     except Exception:
         return valor
+
+
+def _destinatarios_de(msg: email.message.Message) -> str:
+    """To + Cc en una sola cadena en minúsculas, para buscar por substring.
+
+    Se usa para saber HACIA DÓNDE va un correo, que es lo que distingue un envío
+    a la revisoría de uno a un inversionista cuando ambos salen de la misma
+    persona. Mirar solo el remitente no alcanza.
+    """
+    partes = [_decodifica(msg.get(cab)) for cab in ("To", "Cc")]
+    return " ".join(p for p in partes if p).lower()
 
 
 def _cuerpo_de(msg: email.message.Message) -> str:
@@ -224,6 +241,7 @@ def buscar_correos(direccion: str, dias: int = 30, *,
                 asunto=_decodifica(msg.get("Subject")),
                 cuerpo=_cuerpo_de(msg),
                 adjuntos=_adjuntos_de(msg),
+                destinatarios=_destinatarios_de(msg),
             ))
     except Exception as exc:
         logger.error("IMAP mandatos: fallo leyendo correos de %s: %s", direccion, exc)

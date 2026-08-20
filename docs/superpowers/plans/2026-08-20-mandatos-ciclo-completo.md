@@ -415,7 +415,9 @@ Lo que debería moverse:
 |---|---|---|
 | `sin_registro_de_envio` (julio) | 80 | cerca de cero |
 | Acciones `corregido` | 0 | algunas |
-| `transicion_invalida` | 29 | menos, al desbloquearse `con_comentarios → corregido → firmado` |
+| `transicion_invalida` | 29 | cerca de cero |
 
-Los 27 `firmado → con_comentarios` **no van a moverse**: son el problema de
-modelo que queda pendiente de decisión.
+Los 29 `transicion_invalida` deberían casi desaparecer por dos vías distintas:
+los 27 `firmado → con_comentarios` porque ya no se leen (filtro de conformidad
+por línea), y `con_comentarios → firmado` porque se desbloquea el paso
+intermedio `corregido`.

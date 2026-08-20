@@ -1,5 +1,5 @@
-"""Backfill de datos técnicos (`ProyectoInfoTecnica` + `Proyecto.operador_red`/
-`potencia_instalada_kwp`) desde `SoleniumClient.get_project_detail()`.
+"""Backfill de datos técnicos (`ProyectoInfoTecnica` + `Proyecto.operador_red`)
+desde `SoleniumClient.get_project_detail()`.
 
 Probado en vivo (2026-08-11): ese endpoint solo trae datos reales (no
 "Desconocida") para proyectos tipo minigranja -- para el resto (autoconsumo/
@@ -77,12 +77,15 @@ def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: 
     la respuesta de get_project_detail()['results']."""
     cambios: dict = {}
 
+    # `installed_capacity` de Solenium es capacidad DC. Antes esto también
+    # pisaba `proyecto.potencia_instalada_kwp` (que es AC, pese al nombre --
+    # ver fix 2026-08-19 en upsert_info_tecnica) con este mismo valor DC, el
+    # mismo error que ya se corrigió del lado manual. Este endpoint de
+    # Solenium no expone un valor AC separado, así que simplemente no se
+    # escribe -- mejor vacío que un DC mal etiquetado como AC.
     capacidad = _num(detalle.get("installed_capacity"))
-    if capacidad is not None:
-        if it.capacidad_instalada_kwp is None:
-            cambios["info_tecnica.capacidad_instalada_kwp"] = capacidad
-        if proyecto.potencia_instalada_kwp is None:
-            cambios["proyecto.potencia_instalada_kwp"] = capacidad
+    if capacidad is not None and it.capacidad_instalada_kwp is None:
+        cambios["info_tecnica.capacidad_instalada_kwp"] = capacidad
 
     voltaje = _texto(detalle.get("grid_voltage"))
     if voltaje is not None and it.voltaje_red is None:
@@ -252,6 +255,7 @@ def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto, db: Session)
         db.commit()
         return cambios
     except Exception:
+        db.rollback()
         logger.warning(
             "No se pudo sincronizar info técnica de Solenium para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,

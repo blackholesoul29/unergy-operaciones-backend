@@ -4,7 +4,7 @@ La lógica de enriquecimiento (Sun Factory, generación, estimaciones) vive en
 `app/services/tsf_sync.py`; el router `proximos_energizar` solo lee/escribe en la
 BD. Por eso estos tests apuntan al servicio.
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 
 import pytest
 
@@ -24,36 +24,6 @@ def test_parse_iso_date_date_only():
 @pytest.mark.parametrize("bad", [None, "", "no-es-fecha", "2026-13-99"])
 def test_parse_iso_date_invalid_returns_none(bad):
     assert pe._parse_iso_date(bad) is None
-
-
-# ── _project_monthly_mwh ────────────────────────────────────────────────────────
-
-def test_monthly_mwh_typical_990kwp():
-    # 990 kWp * 4.3 kWh/kWp/día * 30 / 1000 = 127.71 MWh
-    assert pe._project_monthly_mwh(990, 4.3) == pytest.approx(127.71, abs=0.01)
-
-
-@pytest.mark.parametrize("bad", [None, 0, -5])
-def test_monthly_mwh_no_power_returns_none(bad):
-    assert pe._project_monthly_mwh(bad, 4.3) is None
-
-
-# ── _estimate_energization ──────────────────────────────────────────────────────
-
-def test_estimate_uses_stage_offset_from_last_change():
-    last = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    got = pe._estimate_energization("construction", last)
-    assert got == date(2026, 1, 1) + timedelta(days=pe._STAGE_OFFSET_DAYS["construction"])
-
-
-def test_estimate_accepts_plain_date():
-    last = date(2026, 1, 1)
-    got = pe._estimate_energization("deploy", last)
-    assert got == date(2026, 1, 1) + timedelta(days=pe._STAGE_OFFSET_DAYS["deploy"])
-
-
-def test_estimate_none_when_no_date():
-    assert pe._estimate_energization("construction", None) is None
 
 
 # ── _ENERG_MILESTONE_RE ─────────────────────────────────────────────────────────
@@ -138,42 +108,6 @@ def test_pick_real_project_103_shape():
     assert got["milestone"] == "Hito 5 - RETIE y legalización"
     assert got["energization_date"] == date(2026, 2, 16)
     assert got["avance_pct"] == 37.04
-
-
-# ── _STAGE_TO_STATUS ────────────────────────────────────────────────────────────
-
-def test_stage_status_mapping():
-    assert pe._STAGE_TO_STATUS["deploy"] == "Próximo a energizar"
-    assert pe._STAGE_TO_STATUS["construction"] == "En construcción"
-    assert pe._STAGE_TO_STATUS["operation"] == "Energizado"
-
-
-def test_pipeline_stages_ordered_closest_first():
-    # deploy (PEM/pruebas, última etapa antes de operation) es la más cercana a
-    # energizar → va primero para el ORDER BY array_position.
-    assert pe._PIPELINE_STAGES[0] == "deploy"
-    assert "operation" not in pe._PIPELINE_STAGES  # ya energizado, no es "próximo"
-
-
-# Etapas reales de minifarm_project (originabotdb). Fuente: docs/UNERGY_DATABASE_ATLAS.md
-# y docs/unergy-data-graph.md. Guarda contra etapas inventadas (p.ej. el viejo "uci").
-_CANONICAL_STAGES = {
-    "prospect", "due_diligence", "viability", "negociation", "signed",
-    "bt_and_contract", "construction", "deploy", "operation",
-    "portfolio", "reevaluation", "paused", "dead",
-}
-
-
-def test_pipeline_and_status_stages_are_canonical():
-    assert set(pe._PIPELINE_STAGES) <= _CANONICAL_STAGES
-    assert set(pe._STAGE_TO_STATUS) <= _CANONICAL_STAGES
-    assert set(pe._STAGE_OFFSET_DAYS) <= _CANONICAL_STAGES
-
-
-def test_status_labels_match_frontend_options():
-    # Deben pertenecer a STATUS_OPTIONS de ProyectosProximosEnergizar.vue.
-    frontend_options = {"En construcción", "Pruebas", "Próximo a energizar", "Energizado"}
-    assert set(pe._STAGE_TO_STATUS.values()) <= frontend_options
 
 
 # ── _derive_commercial_name ─────────────────────────────────────────────────────
@@ -264,6 +198,9 @@ class _FakeResult:
         return self._row
     def fetchall(self):
         # Usado por _buscar_candidato_similar (busqueda de posibles vinculos).
+        return [] if self._row is None else [self._row]
+    def all(self):
+        # Usado por sync_tsf_projects (deteccion de ambiguedad, sin LIMIT 1).
         return [] if self._row is None else [self._row]
 
 

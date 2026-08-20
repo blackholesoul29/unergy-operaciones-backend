@@ -176,7 +176,6 @@ Devuelve un objeto grande (~60 campos escalares más varias relaciones). Recorta
   "inversores": [
     { "id": 301, "nombre": "Inversor 1", "potencia_nominal_kw": 300.0 }
   ],
-  "grupos_panel": [],
   "area_contactos": [],
   "servicio_representacion": null,
   "created_at": "2024-08-01T14:22:10Z",
@@ -195,7 +194,7 @@ Grupos de información que trae:
 | Fechas | `fecha_entrada_operacion`, `fecha_inicio_comercializacion`, `fecha_fin_representacion`, `fecha_estimada_energizacion` |
 | Códigos de mercado | `codigo_sic_generacion`, `codigo_sic_consumo`, los IDs de Quoia y `project_id_solenium` |
 | Servicios contratados | Las banderas `srv_operacion`, `srv_representacion`, `srv_cgm`, `srv_ppa`, `srv_promotor`, `srv_rec` |
-| Relaciones | `info_tecnica`, `inversionistas`, `inversores`, `grupos_panel`, `area_contactos`, `servicio_representacion` |
+| Relaciones | `info_tecnica`, `inversionistas`, `inversores`, `area_contactos`, `servicio_representacion` |
 
 **404** si el `id` no existe: `{"detail": "Proyecto no encontrado"}`
 

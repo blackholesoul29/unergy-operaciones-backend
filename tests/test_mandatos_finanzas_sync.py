@@ -268,3 +268,52 @@ def test_sin_destinatarios_se_comporta_como_antes():
                 remitente="jessica@unergy.io")
     d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
     assert [a["estado"] for a in d["acciones"]] == ["enviado_inversionista"]
+
+
+# ── estado `corregido` ────────────────────────────────────────────────────────
+
+def test_un_correo_de_correcciones_marca_corregido():
+    """Confirmado con el usuario: la corrección aplica a los CMU que el correo
+    nombra. Sin esto, con_comentarios era un callejón sin salida -- nada emitía
+    `corregido`, así que un mandato observado no podía volver a firmarse."""
+    c = _correo("Hola Vanessa, te comparto los mandatos con correcciones: "
+                "CMU1255, CMU1266 y CMU1270.",
+                asunto="Re: Revisión mandatos de costos - Julio",
+                remitente="adhara@unergy.io")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert sorted(a["cmu"] for a in d["acciones"]) == ["CMU1255", "CMU1266", "CMU1270"]
+    assert all(a["estado"] == "corregido" for a in d["acciones"])
+
+
+def test_un_saliente_sin_lenguaje_de_correccion_no_marca_corregido():
+    c = _correo("Adjunto los mandatos de julio para su revisión.",
+                [("CMU1255-Mandato-Costos-Esmeralda-STRADA ASOCIADOS S A S.pdf", PDF_SIN)],
+                asunto="Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert [a["estado"] for a in d["acciones"]] == ["sin_firma"]
+
+
+def test_correcciones_sin_cmu_nombrado_no_inventa():
+    """Si el correo dice que comparte correcciones pero no nombra ninguno, no se
+    adivina a cuáles aplica: se deja para revisión."""
+    c = _correo("Te comparto los mandatos con correcciones.",
+                asunto="Re: Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["acciones"] == []
+    assert d["requiere_revision"] is True
+
+
+def test_correcciones_no_toca_los_cmu_citados_del_hilo():
+    """El correo de correcciones casi siempre responde al que traía las
+    observaciones. Sin recortar la cita se marcarían como corregidos CMU que
+    solo aparecen en el historial del hilo."""
+    c = _correo("Te comparto las correcciones de CMU1255.\n"
+                "> CMU1266 no se evidencia contabilizacion\n"
+                "> CMU1270 diferencia en el arriendo\n",
+                asunto="Re: Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert [a["cmu"] for a in d["acciones"]] == ["CMU1255"]

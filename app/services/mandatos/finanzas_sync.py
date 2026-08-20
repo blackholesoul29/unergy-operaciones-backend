@@ -17,12 +17,12 @@ from app.services.finanzas_mandatos_service import (
 )
 from app.services.mandatos.adjuntos import expandir_adjuntos
 from app.services.mandatos.email_parser import (
-    CLASIF_MOLDE_SIMPLE, clasificar_correo, extraer_observaciones,
-    extraer_pa_del_cuerpo,
+    CLASIF_MOLDE_SIMPLE, _sin_cita, clasificar_correo, es_correo_de_correcciones,
+    extraer_observaciones, extraer_pa_del_cuerpo,
 )
 from app.services.mandatos.firmas import verificar_firmas
 from app.services.mandatos.imap_client import CorreoCrudo
-from app.services.mandatos_service import parsear_nombre_zip
+from app.services.mandatos_service import extraer_cmus, parsear_nombre_zip
 
 logger = logging.getLogger("mandatos.finanzas_sync")
 
@@ -129,6 +129,24 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             # marca firmado por el mero hecho de que haya adjunto: manda el
             # documento, no el sobre.
             sin_identidad.append(f"{nombre} ({firmas['estado']})")
+
+    # Correcciones compartidas hacia la revisoría → `corregido`, para los CMU
+    # que el correo nombra. Se leen del cuerpo SIN la cita del hilo: un correo
+    # de correcciones casi siempre responde al que traía las observaciones, y
+    # sin recortar se marcarían como corregidos los CMU citados de ese hilo.
+    if fuente == FUENTE_SALIENTE and es_correo_de_correcciones(correo.cuerpo):
+        con_pdf = {a["cmu"] for a in acciones}
+        nombrados = [c for c in extraer_cmus(_sin_cita(correo.cuerpo or ""))
+                     if c not in con_pdf]
+        for cmu in nombrados:
+            acciones.append({"cmu": cmu, "estado": "corregido", "comentario": None,
+                             "adjunto": None, "proyecto": None, "tercero": None,
+                             "tipo": None, "periodo": None, "pa_codigo": None,
+                             "firmas": None})
+        if not nombrados and not acciones:
+            # Dice que comparte correcciones pero no nombra ninguno. No se
+            # adivina el lote: se deja visible para que alguien lo mire.
+            sin_identidad.append("correo de correcciones sin CMU identificable")
 
     # Observaciones de texto, solo si el correo encaja en el molde conocido.
     if fuente == FUENTE_REVISORIA and clasificacion == CLASIF_MOLDE_SIMPLE:

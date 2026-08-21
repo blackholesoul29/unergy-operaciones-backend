@@ -24,25 +24,27 @@ def test_excluye_comercializador_completo():
     assert costo_regulatorio_de_facturas(facturas) == 999626.0
 
 
-def test_excluye_energia_en_bolsa_y_subtotales():
+def test_excluye_energia_en_bolsa_arranque_y_subtotales():
     facturas = [_factura("ASIC3", "GENERADOR", [
-        ("Arranque y parada", 9658866.0),
+        ("Arranque y parada", 9658866.0),    # excluido: XM no lo mete en el Valor Garantía
         ("Cargo por confiabilidad", 19933106.0),
         ("Energia en bolsa", 110102600.0),   # excluido: es "compras"
         ("Valor total", 139694572.0),         # subtotal: no sumar
     ])]
-    assert costo_regulatorio_de_facturas(facturas) == 29591972.0
+    # solo el cargo por confiabilidad
+    assert costo_regulatorio_de_facturas(facturas) == 19933106.0
 
 
-def test_iva_generador_si_entra_y_total_servicios_no():
+def test_iva_generador_no_entra_y_total_servicios_no():
     facturas = [_factura("ASIC4", "GENERADOR", [
-        ("+ i.v.a. (19%)", 1742857.0),
+        ("+ i.v.a. (19%)", 1742857.0),       # excluido: XM usa cargos base sin IVA
         ("Servicios de administracion sic", 9172932.0),
         ("Servicios despacho y coordinacion cnd", 25684211.0),
         ("Total servicios de administracion sic", 10915789.0),  # subtotal: no sumar
         ("Valor total", 36600000.0),                            # subtotal: no sumar
     ])]
-    assert costo_regulatorio_de_facturas(facturas) == 36600000.0
+    # servicios admin SIC + despacho CND, sin IVA
+    assert costo_regulatorio_de_facturas(facturas) == 34857143.0
 
 
 def test_total_julio_2026_reproduce_valor_referencia():
@@ -60,7 +62,9 @@ def test_total_julio_2026_reproduce_valor_referencia():
             ("Servicios despacho y coordinacion cnd", 25684211.0),
             ("Total servicios de administracion sic", 10915789.0), ("Valor total", 36600000.0)]),
     ]
-    assert costo_regulatorio_de_facturas(facturas) == 67191598.0
+    # Regla calibrada: GENERADOR sin energía-en-bolsa, sin arranque/parada, sin IVA.
+    # FAZNI 999.626 + Confiab 19.933.106 + (admin 9.172.932 + despacho 25.684.211) = 55.789.875
+    assert costo_regulatorio_de_facturas(facturas) == 55789875.0
 
 
 import openpyxl
@@ -110,8 +114,9 @@ _ARCHIVO_JULIO = r"C:\Users\jessi\OneDrive\Documentos\Estado Resultados\2026\07_
 
 @pytest.mark.skipif(not os.path.exists(_ARCHIVO_JULIO),
                     reason="archivo Cruce facturas de julio no disponible (CI)")
-def test_archivo_real_julio_reproduce_67_191_598():
-    assert costo_regulatorio_de_archivo(_ARCHIVO_JULIO) == 67191598.0
+def test_archivo_real_julio_reproduce_55_789_875():
+    # Regla calibrada vs garantías XM: sin arranque/parada ni IVA (antes daba 67.191.598).
+    assert costo_regulatorio_de_archivo(_ARCHIVO_JULIO) == 55789875.0
 
 
 import io

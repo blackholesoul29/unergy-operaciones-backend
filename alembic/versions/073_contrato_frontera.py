@@ -5,14 +5,14 @@ que sale la energía facturada. Un contrato puede cubrir varias fronteras y una
 frontera puede estar en varios contratos (ej. operación y representación sobre
 la misma planta), así que el vínculo va en su propia tabla.
 
-Revision ID: 067
-Revises: 066
+Revision ID: 073
+Revises: 072
 Create Date: 2026-07-14
 """
 from alembic import op
 
-revision = "067"
-down_revision = "066"
+revision = "073"
+down_revision = "072"
 branch_labels = None
 depends_on = None
 

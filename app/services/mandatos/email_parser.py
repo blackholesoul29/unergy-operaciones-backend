@@ -240,15 +240,19 @@ def parece_nombre_de_mandato(nombre: str | None) -> bool:
 # Cada frase exige un verbo de ENTREGA ("comparto", "envío", "adjunto") junto a
 # la corrección. Buscar solo "correcciones" marcaría también los correos que las
 # PIDEN -- "por favor realizar las correcciones" -- que son lo contrario.
-_SENALES_CORRECCION = (
-    "comparto los mandatos con correcciones",
-    "comparto correcciones",
-    "comparto las correcciones",
-    "envio las correcciones",
-    "adjunto las correcciones",
-    "con las correcciones realizadas",
-    "correcciones de los asientos",
-)
+# Se exige un verbo de ENTREGA y una palabra de corrección. Buscar solo la
+# corrección marcaría también los correos que la PIDEN ("por favor realizar las
+# correcciones"), que son lo contrario.
+_VERBOS_ENTREGA = ("comparto", "envio", "adjunto", "remito", "reenvio")
+
+# Correos reales de Adhara (2026-08-20): "Comparto los mandatos faltantes y
+# CORREGIDOS", "los mandatos y los apuntes contables ya CORREGIDOS". Usa el
+# adjetivo, no el sustantivo -- la primera versión buscaba "correcciones" y no
+# encontró ninguno en 90 días de correo.
+#
+# "corregid" no captura "corregir", y eso es a propósito: "por favor corregir"
+# es una petición, no una entrega.
+_PALABRAS_CORRECCION = ("corregid", "correccion")
 
 
 def es_correo_de_correcciones(cuerpo: str | None) -> bool:
@@ -257,7 +261,9 @@ def es_correo_de_correcciones(cuerpo: str | None) -> bool:
     Solo tiene sentido sobre correos SALIENTES hacia la revisoría. Un correo de
     la revisoría que reporta diferencias no es una corrección -- es lo contrario.
     """
-    return any(s in _normaliza(cuerpo) for s in _SENALES_CORRECCION)
+    n = _normaliza(cuerpo)
+    return (any(v in n for v in _VERBOS_ENTREGA)
+            and any(p in n for p in _PALABRAS_CORRECCION))
 
 
 # Lenguaje de conformidad: la línea confirma que ese mandato quedó bien, no lo

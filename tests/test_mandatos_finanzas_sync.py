@@ -142,11 +142,21 @@ def test_saliente_ignora_adjuntos_que_no_son_mandato():
 
 
 def test_saliente_sin_periodo_en_el_asunto_no_inventa():
+    """Sin periodo no se puede construir identidad, y no se inventa.
+
+    Antes esto se comprobaba exigiendo CERO acciones. Ya no: los correos de
+    lote hacia la revisoría tampoco traen identidad y sí deben registrar su
+    envío (ver test_lote_sin_pa_registra_el_envio_por_cmu). Lo que se garantiza
+    hoy es lo mismo de siempre, pero comprobado donde de verdad importa: la
+    acción sale SIN periodo, y una acción sin periodo nunca crea una fila --
+    _aplicar solo busca la existente y responde cmu_no_encontrado si no está.
+    """
     c = _correo("Adjunto.",
                 [("CMU1255-Mandato-Costos-Esmeralda-STRADA ASOCIADOS S A S.pdf", PDF_SIN)],
                 asunto="Re: sin mes")
     d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
-    assert d["acciones"] == []
+    assert [a["periodo"] for a in d["acciones"]] == [None]
+    assert [a["tercero"] for a in d["acciones"]] == [None]
 
 
 # ── buzones múltiples ─────────────────────────────────────────────────────────
@@ -365,3 +375,71 @@ def test_la_bitacora_guarda_la_fuente_efectiva():
     c.destinatarios = "vlondono@jbp.com.co"
     d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(False))
     assert d["fuente_efectiva"] == FUENTE_SALIENTE
+
+
+# ── correos de LOTE hacia la revisoría (sin P.A.) ─────────────────────────────
+
+def test_lote_sin_pa_registra_el_envio_por_cmu():
+    """Caso real: 'Revisión de mandatos autoconsumo - Julio' lleva 23 mandatos
+    de 23 empresas distintas y por eso NO trae P.A. Exigir identidad completa
+    dejó 27 mandatos de julio sin registrar su envío."""
+    c = _correo("Adjunto los mandatos de autoconsumo para revisión.",
+                [("CMU1170-Mandato-Edificio Torre Almagran Propiedad Horizontal.pdf", PDF_SIN),
+                 ("CMU1160-Mandato-Almacen Amc Sas.pdf", PDF_SIN)],
+                asunto="Revisión de mandatos autoconsumo - Julio")
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["sin_identidad"] == []
+    assert sorted(a["cmu"] for a in d["acciones"]) == ["CMU1160", "CMU1170"]
+    assert all(a["estado"] == "sin_firma" for a in d["acciones"])
+    # Sin periodo: _aplicar debe resolverlas por CMU contra la fila existente.
+    assert all(a["periodo"] is None for a in d["acciones"])
+
+
+def test_lote_de_correcciones_propone_corregido_con_alterno():
+    """'Comparto los mandatos faltantes y corregidos' mezcla las dos cosas: se
+    propone `corregido` y se deja `sin_firma` de alterno para los faltantes."""
+    c = _correo("Comparto los mandatos faltantes y corregidos, así como, el "
+                "apunte contable.",
+                [("CMU1255-Mandato-Costos-Esmeralda.pdf", PDF_SIN)],
+                asunto="Re: Revisión mandatos de costos - Julio")
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    a = d["acciones"][0]
+    assert (a["estado"], a["estado_alterno"]) == ("corregido", "sin_firma")
+
+
+def test_accion_sin_periodo_de_un_cmu_inexistente_no_crea_nada():
+    """La garantía de fondo del lote sin P.A.: si el CMU no existe, se reporta
+    y no se crea nada. Es la anomalía que la reconciliación llama
+    sin_registro_de_envio, y taparla con una fila incompleta la escondería."""
+    correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
+    accion = {"cmu": "CMU9999", "estado": "sin_firma", "periodo": None,
+              "adjunto": None, "comentario": None}
+    db = _DBFake(None)
+    r = _aplicar(db, accion, correo)
+    assert r == {"cmu": "CMU9999", "resultado": "cmu_no_encontrado"}
+    assert not hasattr(db, "_agregado")
+
+
+def test_estado_alterno_se_usa_cuando_el_destino_no_cabe():
+    """Un 'faltante' dentro de un correo de correcciones: está en sin_firma,
+    `corregido` no cabe desde ahí, y el alterno sin_firma sí -- ya registrado,
+    así que sin_cambio. Sin el alterno saldría transicion_invalida."""
+    fila = NS(id=9, cmu="CMU1300", estado="sin_firma", periodo=None, tipo="costo",
+              drive_url=None, comentario=None, correo_ref=None, fecha_firma=None)
+    accion = {"cmu": "CMU1300", "estado": "corregido", "estado_alterno": "sin_firma",
+              "periodo": None, "adjunto": None, "comentario": None}
+    correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
+    assert _aplicar(_DBFake(fila), accion, correo)["resultado"] == "sin_cambio"
+
+
+def test_estado_alterno_no_estorba_cuando_el_destino_si_cabe():
+    """Un mandato observado sí puede pasar a corregido: el alterno no debe
+    desviarlo."""
+    fila = NS(id=9, cmu="CMU1287", estado="con_comentarios", periodo=None,
+              tipo="costo", drive_url=None, comentario="falta soporte",
+              correo_ref=None, fecha_firma=None)
+    accion = {"cmu": "CMU1287", "estado": "corregido", "estado_alterno": "sin_firma",
+              "periodo": None, "adjunto": None, "comentario": None}
+    correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
+    r = _aplicar(_DBFake(fila), accion, correo)
+    assert (r["resultado"], fila.estado) == ("aplicado", "corregido")

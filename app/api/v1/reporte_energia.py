@@ -26,7 +26,7 @@ from app.schemas.reporte_energia import (
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse,
 )
-from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador
+from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
 from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
 from app.services.reporte_energia.clasificador_consumo import rellenar_horas_faltantes_consumo
@@ -224,38 +224,35 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
-    # Escopado al medidor REALMENTE usado (medidor_usado), no "cualquiera de
-    # los dos" -- antes comparaba ambos (any()) y el aviso podía disparar por
-    # un cambio en el medidor que NO se usa para el reporte, mostrando encima
-    # "X ahora vs X al momento de clasificar" (redundante) si el medidor SÍ
-    # usado nunca tuvo curva_bd persistida (cae a la viva para los dos lados
-    # de la comparación, ver Detalle de las fuentes 2026-08-12).
-    mu = rep.medidor_usado or ""
-    if mu.startswith("principal"):
-        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
-    elif mu.startswith("respaldo"):
-        medidor_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
-    else:
-        medidor_actualizado_en_quoia = False
+    # Por medidor, no solo el que ganó como medidor_usado (2026-08-20): si
+    # el clasificador usó 'Histórico' porque el medidor estaba mal en ese
+    # momento, y luego alguien recupera el medidor (a mano en Quoia, o con
+    # el botón "Recuperar medidor"), esto tiene que poder avisarlo igual --
+    # antes, al estar escopado solo al medidor usado, ese caso quedaba
+    # invisible: ni el aviso ni la opción "(actualizado)" aparecían nunca.
+    principal_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
+    respaldo_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
     curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
     curva_sol = curva_sol_bd
 
-    # Curva y total EN VIVO de la fuente que realmente se usó (medidor_usado)
-    # -- para el aviso "el medidor ya muestra un valor distinto en Quoia"
-    # (curva_medidor_principal/respaldo ya muestran lo persistido) y para que
-    # 'Reportar con otra fuente' pueda ofrecer directamente ese valor
-    # actualizado, sin que la persona tenga que copiarlo a mano (pedido
-    # 2026-08-12).
-    energia_actual_kwh = None
-    curva_actual: list | None = None
-    if medidor_actualizado_en_quoia:
-        if mu.startswith("principal") and curva_medidor_ppal_viva is not None:
-            curva_actual = curva_medidor_ppal_viva
-        elif mu.startswith("respaldo") and curva_medidor_resp_viva is not None:
-            curva_actual = curva_medidor_resp_viva
-        if curva_actual is not None:
-            energia_actual_kwh = sum(v for v in curva_actual if v is not None)
+    # Curva y total EN VIVO de cada medidor -- para el aviso "el medidor ya
+    # muestra un valor distinto en Quoia" (curva_medidor_principal/respaldo
+    # ya muestran lo persistido) y para que 'Reportar con otra fuente'
+    # pueda ofrecer directamente ese valor actualizado, sin que la persona
+    # tenga que copiarlo a mano (pedido 2026-08-12; ampliado a ambos
+    # medidores 2026-08-20).
+    principal_energia_actual_kwh = None
+    principal_curva_actual: list | None = None
+    if principal_actualizado_en_quoia and curva_medidor_ppal_viva is not None:
+        principal_curva_actual = curva_medidor_ppal_viva
+        principal_energia_actual_kwh = sum(v for v in principal_curva_actual if v is not None)
+
+    respaldo_energia_actual_kwh = None
+    respaldo_curva_actual: list | None = None
+    if respaldo_actualizado_en_quoia and curva_medidor_resp_viva is not None:
+        respaldo_curva_actual = curva_medidor_resp_viva
+        respaldo_energia_actual_kwh = sum(v for v in respaldo_curva_actual if v is not None)
 
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
@@ -286,9 +283,12 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_medidor_respaldo=curva_medidor_resp,
         curva_solenium=curva_sol,
         curva_reconectador=curva_reconectador_bd,
-        medidor_actualizado_en_quoia=medidor_actualizado_en_quoia,
-        energia_actual_kwh=round(energia_actual_kwh, 4) if energia_actual_kwh is not None else None,
-        curva_actual=curva_actual,
+        principal_actualizado_en_quoia=principal_actualizado_en_quoia,
+        principal_energia_actual_kwh=round(principal_energia_actual_kwh, 4) if principal_energia_actual_kwh is not None else None,
+        principal_curva_actual=principal_curva_actual,
+        respaldo_actualizado_en_quoia=respaldo_actualizado_en_quoia,
+        respaldo_energia_actual_kwh=round(respaldo_energia_actual_kwh, 4) if respaldo_energia_actual_kwh is not None else None,
+        respaldo_curva_actual=respaldo_curva_actual,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
     )
@@ -505,6 +505,61 @@ def deshacer_relleno(
         rep.curva_reconectador_referencia = None
     if rep.medidor_usado == "relleno_horario":
         rep.medidor_usado = "revisar"
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.post("/fronteras/{frontera_id}/recuperar-medidor", response_model=DetalleFronteraReporte)
+def recuperar_medidor(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Dispara a demanda la misma recuperación activa (interrogar el medidor
+    por WebSocket, hasta 90s) que la corrida diaria dispara sola bajo
+    ciertas condiciones (curvas.curvas_de_frontera, TOLERANCIA_VALOR_
+    SOSPECHOSO) -- pero para AMBOS medidores y sin ese filtro: acá es una
+    decisión explícita de la persona, no necesita el gate de "incompleto o
+    sospechoso".
+
+    Solo pide la recuperación y registra el resultado en
+    recuperacion_datos -- no relee la curva a mano: _construir_detalle()
+    ya hace su propia lectura en vivo cada vez que se llama, así que el
+    dato recuperado se refleja solo al volver a leer el detalle (este
+    mismo return).
+
+    No toca curva_final/medidor_usado/caso/editado_manualmente -- por eso
+    no necesita ningún guard de "no pisar lo ya editado/validado": solo
+    refresca datos de referencia (alternativa más chica que reclasificar
+    la frontera completa, decidido 2026-08-20).
+    """
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    fecha_str = str(fecha)
+
+    gaia = GaiaClient()
+    try:
+        borders = curvas.construir_mapa_borders(gaia)
+    except Exception as e:
+        raise HTTPException(502, f"No se pudo consultar Quoia: {e}")
+
+    meta = borders.get((front.codigo_frontera or "").strip().lower())
+    main_meter_id = meta.get("main_meter") if meta else None
+    backup_meter_id = meta.get("backup_meter") if meta else None
+    if not main_meter_id and not backup_meter_id:
+        raise HTTPException(400, "Esta frontera no tiene medidor principal ni respaldo configurado en Quoia")
+
+    def _recuperar(meter_id: int, etiqueta: str) -> str:
+        resultado = recuperacion.recuperar_datos_medidor(int(meter_id), fecha_str, fecha_str)
+        return f"{etiqueta}: {'éxito' if recuperacion.fue_exitosa(resultado) else 'falló'}"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futuros = []
+        if main_meter_id:
+            futuros.append(executor.submit(_recuperar, main_meter_id, "principal"))
+        if backup_meter_id:
+            futuros.append(executor.submit(_recuperar, backup_meter_id, "respaldo"))
+        intentos = [f.result() for f in futuros]
+
+    rep.recuperacion_datos = ", ".join(intentos) or None
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
 

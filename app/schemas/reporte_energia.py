@@ -76,19 +76,25 @@ class DetalleFronteraReporte(BaseModel):
     # llenó si el reconectador se consultó ese día (medidor+inversores ya
     # dejaron huecos sin cubrir). Solo aplica a Generación.
     curva_reconectador: list[float | None] | None = None
-    # True si el valor EN VIVO de Quoia (medidor o Solenium) ya difiere del
-    # que quedó guardado al momento de clasificar -- señal de que conviene
-    # re-correr el clasificador para este día (ver MGS 0032 El Paso Norte
-    # 2026-08-05). None-safe: si la fila es de antes de este fix (sin curva
-    # persistida), no hay base de comparación y queda en False.
-    medidor_actualizado_en_quoia: bool = False
-    # Total y curva EN VIVO de la fuente que realmente se usó (medidor_usado)
-    # -- solo presentes cuando medidor_actualizado_en_quoia=True. energia_
-    # actual_kwh alimenta el aviso "X kWh ahora vs Y kWh al momento de
-    # clasificar"; curva_actual permite reportar directamente con ese valor
-    # actualizado desde "Reportar con otra fuente" (front).
-    energia_actual_kwh: float | None = None
-    curva_actual: list[float | None] | None = None
+    # True si el valor EN VIVO de Quoia de ESE medidor ya difiere del que
+    # quedó guardado al momento de clasificar -- señal de que conviene
+    # recuperar/revisar (ver MGS 0032 El Paso Norte 2026-08-05). Por
+    # medidor, no solo el que ganó como medidor_usado (2026-08-20): si el
+    # clasificador usó 'Histórico' porque el medidor estaba mal, y luego se
+    # recupera el medidor, esto tiene que poder avisarlo igual. None-safe:
+    # si la fila es de antes de este fix (sin curva persistida), no hay
+    # base de comparación y queda en False.
+    principal_actualizado_en_quoia: bool = False
+    respaldo_actualizado_en_quoia: bool = False
+    # Total y curva EN VIVO de cada medidor -- solo presentes cuando su
+    # *_actualizado_en_quoia=True. *_energia_actual_kwh alimenta el aviso
+    # "X kWh ahora vs Y kWh al momento de clasificar"; *_curva_actual
+    # permite reportar directamente con ese valor desde "Reportar con otra
+    # fuente" (front), sin importar cuál medidor esté en uso hoy.
+    principal_energia_actual_kwh: float | None = None
+    principal_curva_actual: list[float | None] | None = None
+    respaldo_energia_actual_kwh: float | None = None
+    respaldo_curva_actual: list[float | None] | None = None
     # Curva 'Backup' del Excel de terceros (FRONTERAS_TERCEROS) -- distinta
     # de curva_medidor_respaldo (esa es telemetría en vivo del medidor de
     # nodo, que para estas fronteras no existe).

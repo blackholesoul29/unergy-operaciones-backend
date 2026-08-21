@@ -478,3 +478,37 @@ def test_con_pa_sigue_armando_la_identidad_completa():
     a = d["acciones"][0]
     assert a["tercero"] == "P.A SOL DE LA SIERRA"
     assert a["periodo"] == date(2026, 6, 1)
+
+
+# ── firma incompleta devuelta por la revisoría ────────────────────────────────
+
+def _firmas_parciales():
+    return lambda _c: {"lineas": 2, "firmadas": 1, "estado": "parcial",
+                       "tipo": "ingreso"}
+
+
+def test_devuelto_firmado_pero_le_falta_una_firma_queda_observado():
+    """Caso real: CMU1168 - Dual Cross S.A.S. volvió en el correo del 12 de
+    agosto como firmado, pero el PDF trae 1 de 2 firmas. Antes solo caía en la
+    lista de revisión del correo y se perdía; ahora queda pegado al mandato."""
+    c = _correo("Adjunto los certificados firmados.",
+                [("CMU1168-Mandato-Dual Cross S.A.S.pdf", PDF_SIN)])
+    d = decidir_finanzas(c, FUENTE_REVISORIA, verificador=_firmas_parciales())
+    a = d["acciones"][0]
+    assert (a["cmu"], a["estado"]) == ("CMU1168", "con_comentarios")
+    assert "1 de 2 firmas" in a["comentario"]
+    # No se sube a Drive un documento incompleto.
+    assert a["adjunto"] is None
+    # Ya no ensucia la lista de revisión: el hallazgo tiene dónde vivir.
+    assert d["sin_identidad"] == []
+
+
+def test_un_pdf_ilegible_de_la_revisoria_sigue_pidiendo_revision():
+    """'No pude abrirlo' no es 'le falta una firma'. Sin conclusión posible
+    sobre el mandato, se marca para que alguien lo mire."""
+    c = _correo("Adjunto.", [("CMU1168-Mandato-Dual Cross S.A.S.pdf", PDF_SIN)])
+    verificador = lambda _c: {"lineas": 0, "firmadas": 0,
+                              "estado": "no_verificable", "tipo": "costo"}
+    d = decidir_finanzas(c, FUENTE_REVISORIA, verificador=verificador)
+    assert d["acciones"] == []
+    assert d["requiere_revision"] is True

@@ -80,3 +80,21 @@ def test_enviado_inversionista_es_terminal():
 def test_nunca_se_degrada_un_firmado():
     assert not transicion_firma_valida("firmado", "sin_firma")
     assert not transicion_firma_valida("firmado", "con_comentarios")
+
+
+def test_un_mandato_corregido_puede_volver_a_ser_observado():
+    """Ciclo real: la revisoría revisa lo corregido y le encuentra algo nuevo
+    (3 casos en la corrida del 2026-08-20). No contradice la regla de que un
+    mandato FIRMADO no lleva correcciones: corregido todavía no está firmado."""
+    from app.services.finanzas_mandatos_service import transicion_firma_valida
+    assert transicion_firma_valida("corregido", "con_comentarios")
+    assert transicion_firma_valida("con_comentarios", "corregido")
+
+
+def test_un_mandato_firmado_sigue_sin_admitir_correcciones():
+    """La regla de Adhara, intacta: el lazo nuevo no abre la puerta a degradar
+    un mandato ya cerrado."""
+    from app.services.finanzas_mandatos_service import transicion_firma_valida
+    assert not transicion_firma_valida("firmado", "con_comentarios")
+    assert not transicion_firma_valida("firmado", "corregido")
+    assert not transicion_firma_valida("enviado_inversionista", "firmado")

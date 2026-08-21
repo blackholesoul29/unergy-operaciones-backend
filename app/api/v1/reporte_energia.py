@@ -847,8 +847,8 @@ def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
     """Envía UNA fila a Quoia (gaia.post_report) -- factorizado para
     reusarse tanto en /enviar (todas las fronteras del día) como en
-    /fronteras/{id}/enviar (una sola, envío controlado de prueba antes de
-    confiar en el envío masivo -- ver ADVERTENCIA en gaia_client.post_report).
+    /reportar-manual (una lista explícita de fronteras fuera del
+    clasificador). Ver ADVERTENCIA en gaia_client.post_report.
 
     Retorna (resultado, motivo):
     - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
@@ -892,45 +892,6 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
     rep.enviado_quoia_ok = ok
     rep.enviado_quoia_error = motivo
     return ok, motivo
-
-
-@router.post("/fronteras/{frontera_id}/enviar", response_model=EnviarReporteEnergiaResponse)
-def enviar_frontera(
-    frontera_id: int, fecha: date = Query(...),
-    db: Session = Depends(get_db), _=Depends(get_current_user),
-):
-    """Envío controlado de UNA sola frontera a Quoia -- pensado para probar
-    gaia.post_report() contra Quoia real (nunca se ha hecho, ver ADVERTENCIA
-    en gaia_client.py) antes de confiar en el envío masivo (POST /enviar),
-    que manda TODAS las fronteras del día de una sola vez. Misma lógica de
-    bloqueo y de "ya válido en Quoia" que el envío masivo, escopada a esta
-    fila -- así la prueba de mañana refleja fielmente lo que haría el botón
-    real.
-    """
-    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    es_generacion = Modelo is ReporteEnergiaGeneracion
-
-    if rep.revisar_manualmente:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[], bloqueado=True,
-            motivo_bloqueo="Esta frontera tiene Revisar Manualmente pendiente.",
-        )
-
-    gaia = GaiaClient()
-    borders = resolver_borders(gaia, {front.codigo_frontera}) if front.codigo_frontera else {}
-    resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
-    db.commit()
-
-    if resultado is None:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[], bloqueado=False,
-            motivo_bloqueo="Quoia ya tenía el dato correcto (CGM válido) -- no hacía falta enviar nada.",
-        )
-    if resultado is False:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[f"{_nombre_frontera(front)} — {motivo}"], bloqueado=False,
-        )
-    return EnviarReporteEnergiaResponse(fecha=fecha, enviados=1, fallidos=[], bloqueado=False)
 
 
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)

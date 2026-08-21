@@ -191,10 +191,31 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
                              "tipo": tipo, "tercero": None,
                              "periodo": None, "pa_codigo": None, "estado": "firmado",
                              "adjunto": nombre, "firmas": firmas, "comentario": None})
+        elif firmas["estado"] == "parcial":
+            # La revisoría lo devolvió como firmado, pero al PDF le falta una de
+            # las dos firmas (caso real: CMU1168 - Dual Cross S.A.S., 2026-08-12).
+            # Eso es un hallazgo sobre el documento y tiene que quedar pegado al
+            # mandato, no solo en la bitácora del correo: ahí se pierde apenas
+            # pasa la corrida, y nadie se entera.
+            #
+            # Va como `con_comentarios` y no como estado propio a propósito: es
+            # exactamente el ciclo que le toca -- vuelve a la revisoría, se
+            # corrige y se firma -- y no obliga a tocar un enum que comparte el
+            # módulo de Finanzas. El comentario dice de qué se trata para que no
+            # se confunda con una observación contable.
+            faltan = firmas["lineas"] - firmas["firmadas"]
+            acciones.append({
+                "cmu": parsed["cmu"], "estado": "con_comentarios",
+                "comentario": (f"Devuelto como firmado, pero el PDF trae "
+                               f"{firmas['firmadas']} de {firmas['lineas']} "
+                               f"firmas (falta {faltan})."),
+                "proyecto": parsed["proyecto"], "tipo": tipo, "tercero": None,
+                "periodo": None, "pa_codigo": None, "adjunto": None,
+                "estado_alterno": None, "firmas": firmas})
         else:
-            # Llegó el PDF pero no está firmado (o no se pudo verificar). No se
-            # marca firmado por el mero hecho de que haya adjunto: manda el
-            # documento, no el sobre.
+            # Ni firmado ni parcial: o llegó sin ninguna firma, o no se pudo
+            # abrir el PDF. No hay conclusión que sacar sobre el mandato, así
+            # que se marca para que alguien lo mire.
             sin_identidad.append(f"{nombre} ({firmas['estado']})")
 
     # Correcciones compartidas hacia la revisoría → `corregido`, para los CMU

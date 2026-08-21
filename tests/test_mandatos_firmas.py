@@ -106,3 +106,41 @@ def test_verificar_firmas_con_bytes_vacios():
 
 def test_verificar_firmas_con_none():
     assert verificar_firmas(None)["estado"] == "no_verificable"
+
+
+# ── tipo por contenido ────────────────────────────────────────────────────────
+# Regla del usuario (2026-08-20): el mandato de INGRESOS trae la leyenda de
+# exclusión de IVA al pie del cuadro de valores; el de costos no. Hace falta
+# porque un lote de autoconsumo trae ingresos y costos con la MISMA convención
+# de nombre, y el tipo es parte de la identidad única del mandato.
+
+from app.services.mandatos.firmas import tipo_por_contenido
+
+
+def test_la_leyenda_de_iva_marca_ingreso():
+    assert tipo_por_contenido(
+        "Concepto Valor Ingreso Bruto (COP) $ 4,912,355 ... (**) LOS INGRESOS "
+        "DE VENTA DE ENERGÍA SON EXCLUIDOS DE IVA SEGÚN EL NUMERAL 11 DEL "
+        "ARTÍCULO 476 DEL E.T.") == "ingreso"
+
+
+def test_la_leyenda_partida_en_dos_renglones_sigue_contando():
+    """pdfplumber devuelve el texto con los saltos de línea del PDF, y la
+    leyenda real viene partida ('... DEL ARTÍCULO\n476 DEL E.T.')."""
+    assert tipo_por_contenido(
+        "(**) LOS INGRESOS DE VENTA DE ENERGÍA SON EXCLUIDOS\nDE IVA SEGÚN EL "
+        "NUMERAL 11 DEL ARTÍCULO\n476 DEL E.T.") == "ingreso"
+
+
+def test_sin_la_leyenda_es_costo():
+    """Los mandatos de costos no mencionan la palabra 'costo' en el texto
+    -- verificado sobre los lotes reales -- así que la ausencia de la leyenda
+    es el único discriminador disponible."""
+    assert tipo_por_contenido(
+        "CERTIFICACIÓN DEL REPRESENTANTE LEGAL Y REVISOR FISCAL SOBRE CONTRATO "
+        "DE MANDATO. Concepto Valor a pagar (COP) $ 1,200,000") == "costo"
+
+
+def test_texto_vacio_es_costo():
+    assert tipo_por_contenido("") == "costo"
+    assert tipo_por_contenido(None) == "costo"

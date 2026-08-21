@@ -52,22 +52,20 @@ def _mes_siguiente(anio: int, mes: int) -> tuple[int, int]:
 def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
                  plantas_nuevas: int = 0,
                  kwh_planta_nueva: float = KWH_PLANTA_NUEVA_DEFAULT) -> dict:
-    """Las dos estimaciones de garantía al corte `hoy`. Todas las dependencias externas
-    (balance, precio, regulatorio) se inyectan para poder testear sin BD ni red.
-
-    Ambas ventanas salen del balance del MES ACTUAL (calcular_balance da ceros a futuro):
-    resto del mes = campo 'proyectado'; mes siguiente = campo 'total' (proxy).
-    """
+    """Las dos estimaciones al corte `hoy`. Cada ventana pide su balance a SU mes:
+    resto del mes actual = campo 'proyectado' del mes actual; mes siguiente = campo
+    'total' del balance (proyectado) del mes siguiente. Deps inyectadas."""
     anio_act, mes_act = hoy.year, hoy.month
-    balance = calcular_balance_fn(anio_act, mes_act)["balance"]
     precio = precio_fn()
-
     a_prev, m_prev = _mes_anterior(anio_act, mes_act)
     a_sig, m_sig = _mes_siguiente(anio_act, mes_act)
+
+    bal_actual = calcular_balance_fn(anio_act, mes_act)["balance"]
+    bal_sig = calcular_balance_fn(a_sig, m_sig)["balance"]
     reg_actual = regulatorio_fn(a_prev, m_prev)
     reg_siguiente = regulatorio_fn(anio_act, mes_act)
 
-    def ventana(clave, anio, mes, campo, reg):
+    def ventana(clave, anio, mes, balance, campo, reg):
         neto = neto_de_balance(balance, campo)
         calc = calcular_garantia(neto, precio, (reg or {}).get("valor") or 0.0,
                                  plantas_nuevas, kwh_planta_nueva)
@@ -83,8 +81,8 @@ def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
         "plantas_nuevas": plantas_nuevas,
         "kwh_planta_nueva": kwh_planta_nueva,
         "ventanas": [
-            ventana("resto_mes_actual", anio_act, mes_act, "proyectado", reg_actual),
-            ventana("mes_siguiente", a_sig, m_sig, "total", reg_siguiente),
+            ventana("resto_mes_actual", anio_act, mes_act, bal_actual, "proyectado", reg_actual),
+            ventana("mes_siguiente", a_sig, m_sig, bal_sig, "total", reg_siguiente),
         ],
     }
 
@@ -123,7 +121,11 @@ def filas_snapshot(resultado: dict) -> list:
 
 
 def _balance_fn(db, anio: int, mes: int) -> dict:
-    from app.services.balance_energia import calcular_balance
+    from datetime import date as _d
+    from app.services.balance_energia import calcular_balance, calcular_balance_proyectado
+    hoy = _d.today()
+    if (anio, mes) > (hoy.year, hoy.month):
+        return calcular_balance_proyectado(db, anio, mes)
     return calcular_balance(db, anio, mes)
 
 

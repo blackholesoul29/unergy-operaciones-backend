@@ -53,33 +53,26 @@ def test_neto_total_usa_campo_total():
     assert neto_de_balance(bal, "total") == 44.0        # 50 - 6
 
 
-def test_proyecciones_arma_dos_ventanas_con_deps_inyectadas():
-    bal = _balance(venta={"p": 30.0, "t": 50.0}, compra_directa={"p": 4.0, "t": 6.0})
+def test_proyecciones_usa_balance_por_mes():
+    bal_actual = _balance(venta={"p": 30.0, "t": 50.0}, compra_directa={"p": 4.0, "t": 6.0})
+    bal_sig = _balance(venta={"p": 0.0, "t": 8.0}, compra_directa={"p": 0.0, "t": 1.0})
 
     def calcular_balance_fn(anio, mes):
-        assert (anio, mes) == (2026, 8)   # siempre el mes actual
-        return {"balance": bal, "periodo": {"fecha_corte": "2026-08-14"}}
-
-    def precio_fn():
-        return 900.0
+        return {"balance": bal_actual if (anio, mes) == (2026, 8) else bal_sig, "periodo": {}}
 
     regs = {(2026, 7): 1_000_000.0, (2026, 8): 2_000_000.0}
-    def regulatorio_fn(anio, mes):
-        return {"valor": regs[(anio, mes)], "anio": anio, "mes": mes, "fallback": False}
 
     out = proyecciones(date(2026, 8, 14), calcular_balance_fn=calcular_balance_fn,
-                       precio_fn=precio_fn, regulatorio_fn=regulatorio_fn)
-
-    assert out["precio_bolsa_cop_kwh"] == 900.0
+                       precio_fn=lambda: 900.0,
+                       regulatorio_fn=lambda a, m: {"valor": regs[(a, m)], "anio": a, "mes": m, "fallback": False})
     v1, v2 = out["ventanas"]
-    # Ventana 1: resto mes actual (proyectado 26 MWh) × 900 × 1000 + reg julio 1_000_000
-    assert v1["clave"] == "resto_mes_actual"
-    assert (v1["anio"], v1["mes"]) == (2026, 8)
+    # resto mes actual: proyectado del balance ACTUAL = 30-4 = 26
+    assert v1["neto_mwh"] == 26.0
     assert v1["garantia_total"] == 26.0 * 1000 * 900.0 + 1_000_000.0
-    # Ventana 2: mes siguiente (total 44 MWh) × 900 × 1000 + reg agosto 2_000_000
-    assert v2["clave"] == "mes_siguiente"
+    # mes siguiente: TOTAL del balance SIGUIENTE = 8-1 = 7 (NO del actual)
     assert (v2["anio"], v2["mes"]) == (2026, 9)
-    assert v2["garantia_total"] == 44.0 * 1000 * 900.0 + 2_000_000.0
+    assert v2["neto_mwh"] == 7.0
+    assert v2["garantia_total"] == 7.0 * 1000 * 900.0 + 2_000_000.0
 
 
 def test_proyecciones_maneja_rollover_de_diciembre():

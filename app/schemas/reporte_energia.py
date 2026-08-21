@@ -145,6 +145,27 @@ class EnviarReporteEnergiaResponse(BaseModel):
     motivo_bloqueo: str | None = None
 
 
+class EstadoXMFrontera(BaseModel):
+    """Una fila enviada que XM ya resolvió con error -- para poder ir
+    directo a esa frontera desde el contador."""
+    frontera_id: int
+    nombre_proyecto: str
+    tipo: str  # "generacion" | "consumo"
+
+
+class EstadoXMResponse(BaseModel):
+    """Resultado de revisar en Quoia si XM ya resolvió los reportes
+    enviados ese día -- distinto de EnviarReporteEnergiaResponse (que es
+    sobre si el POST a Quoia salió bien, no sobre la aprobación de XM)."""
+    fecha: date
+    total: int
+    en_espera: int
+    exitoso: int
+    exitoso_con_alerta: int
+    error: int
+    fallidas: list[EstadoXMFrontera]
+
+
 class EstadoCorridaResponse(BaseModel):
     """Resultado de la última vez que se corrió /ejecutar para esta fecha --
     null (terminado_en=None) si nunca se ha corrido o todavía está en curso."""

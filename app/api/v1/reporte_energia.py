@@ -24,7 +24,7 @@ from app.schemas.reporte_energia import (
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
-    CargaExcelTercerosResponse,
+    CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
@@ -953,5 +953,90 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
     db.commit()
     return EnviarReporteEnergiaResponse(fecha=fecha, enviados=enviados, fallidos=fallidos, bloqueado=False)
+
+
+def _fronteras_enviadas(db: Session, fecha: date) -> list[tuple]:
+    """(rep, front, tipo) de toda fila con enviado_quoia_en no nulo para la
+    fecha -- las que de verdad se intentaron mandar a Quoia."""
+    gen_filas = db.execute(
+        select(ReporteEnergiaGeneracion, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha == fecha, ReporteEnergiaGeneracion.enviado_quoia_en.is_not(None))
+    ).all()
+    con_filas = db.execute(
+        select(ReporteEnergiaConsumo, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaConsumo.frontera_id)
+        .where(ReporteEnergiaConsumo.fecha == fecha, ReporteEnergiaConsumo.enviado_quoia_en.is_not(None))
+    ).all()
+    return [(rep, front, "generacion") for rep, front in gen_filas] + \
+           [(rep, front, "consumo") for rep, front in con_filas]
+
+
+def _etiqueta_xm(rep) -> str:
+    """Traduce xm_exitoso/xm_estado (o su ausencia) a la misma etiqueta que
+    muestra el dashboard de Quoia. xm_exitoso=None (sin respuesta todavía
+    de get_border_report_status) es 'en_espera' -- así se ve en Quoia antes
+    de que XM lo resuelva. Mapeo de 'exitoso_con_alerta' inferido (no
+    confirmado con un caso real 2026-08-21): xm_exitoso=True pero
+    xm_estado distinto de 'OK' (ej. 'WARNING')."""
+    if rep.xm_exitoso is None:
+        return "en_espera"
+    if rep.xm_exitoso is False:
+        return "error"
+    return "exitoso" if (rep.xm_estado or "").upper() == "OK" else "exitoso_con_alerta"
+
+
+@router.get("/estado-quoia", response_model=EstadoXMResponse)
+def estado_quoia_actual(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Estado de aprobación de XM YA GUARDADO -- sin volver a consultar
+    Quoia (rápido, seguro de llamar al abrir la vista). Para forzar una
+    revisión en vivo contra Quoia, usar POST /estado-quoia."""
+    filas = _fronteras_enviadas(db, fecha)
+    conteos = {"en_espera": 0, "exitoso": 0, "exitoso_con_alerta": 0, "error": 0}
+    fallidas: list[EstadoXMFrontera] = []
+    for rep, front, tipo in filas:
+        etiqueta = _etiqueta_xm(rep)
+        conteos[etiqueta] += 1
+        if etiqueta == "error":
+            fallidas.append(EstadoXMFrontera(frontera_id=front.id, nombre_proyecto=_nombre_frontera(front), tipo=tipo))
+    return EstadoXMResponse(fecha=fecha, total=len(filas), fallidas=fallidas, **conteos)
+
+
+@router.post("/estado-quoia", response_model=EstadoXMResponse)
+def estado_quoia_revisar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Revisa en Quoia si XM ya resolvió los reportes ENVIADOS ese día
+    (enviado_quoia_en no nulo) -- distinto de 'estado_reporte' (que se
+    llena UNA VEZ al clasificar, ANTES de enviar, y sirve para decidir si
+    el CGM automático de Quoia es válido como fuente). Solo vuelve a
+    golpear Quoia para las que aún no tienen respuesta (xm_exitoso=None) --
+    pensado para dispararse justo después de /enviar y llamarse de nuevo
+    cada tanto desde el frontend hasta que nadie quede 'en_espera'."""
+    filas = _fronteras_enviadas(db, fecha)
+    pendientes = [(rep, front, tipo) for rep, front, tipo in filas if rep.xm_exitoso is None]
+
+    if pendientes:
+        gaia = GaiaClient()
+        frt_codes = {f.codigo_frontera for _, f, _ in pendientes if f.codigo_frontera}
+        borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
+        ahora = datetime.now(timezone.utc)
+        for rep, front, _tipo in pendientes:
+            meta = borders.get((front.codigo_frontera or "").strip().lower())
+            border_id = meta.get("id") if meta else None
+            estado_raw = gaia.get_border_report_status(border_id, str(fecha)) if border_id else None
+            rep.xm_verificado_en = ahora
+            if estado_raw:
+                rep.xm_process_id = estado_raw.get("xm_process_id")
+                rep.xm_estado = estado_raw.get("status")
+                rep.xm_exitoso = estado_raw.get("success")
+        db.commit()
+
+    conteos = {"en_espera": 0, "exitoso": 0, "exitoso_con_alerta": 0, "error": 0}
+    fallidas: list[EstadoXMFrontera] = []
+    for rep, front, tipo in filas:
+        etiqueta = _etiqueta_xm(rep)
+        conteos[etiqueta] += 1
+        if etiqueta == "error":
+            fallidas.append(EstadoXMFrontera(frontera_id=front.id, nombre_proyecto=_nombre_frontera(front), tipo=tipo))
+    return EstadoXMResponse(fecha=fecha, total=len(filas), fallidas=fallidas, **conteos)
 
 

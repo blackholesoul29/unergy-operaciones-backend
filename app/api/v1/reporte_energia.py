@@ -724,6 +724,17 @@ def rellenar_horario(
         else:
             curva_actual, horas_historico = rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
 
+    # La curva de referencia del reconectador se guarda en cuanto se
+    # consultó y respondió algo -- independiente de si alguna de sus horas
+    # terminó usándose para rellenar 'curva_final'. Antes solo se guardaba
+    # si el relleno completo tenía éxito (ver el 400 de abajo), así que un
+    # reconectador que respondió pero cuyas horas ya estaban cubiertas por
+    # otra fuente (o fuera de HORAS_RECONECTADOR) nunca se guardaba ni se
+    # veía en el chart aunque el dato existiera (pedido 2026-08-21).
+    if es_generacion and curva_reconectador_ref is not None:
+        rep.curva_reconectador_referencia = curva_a_lista(curva_reconectador_ref)
+        db.commit()
+
     if not (horas_medidor_cruzado or horas_reconectador or horas_solenium_h or horas_historico):
         raise HTTPException(400, "Ninguna fuente tenía dato para las horas faltantes")
 

@@ -87,6 +87,8 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
     # Adjuntos que no pretenden ser mandatos (facturas, comprobantes de pago).
     # Se anotan para dejar rastro, pero NO piden revisión humana.
     ignorados: list[str] = []
+    es_correcciones = (fuente == FUENTE_SALIENTE
+                       and es_correo_de_correcciones(correo.cuerpo))
     clasificacion = clasificar_correo(correo.asunto, correo.cuerpo)
 
     for nombre, contenido in adjuntos:
@@ -102,12 +104,36 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             # Registrar el envío. No importa si el PDF está firmado -- casi
             # nunca lo estará. Lo que se registra es que salió, para que la
             # reconciliación tenga contra qué comparar lo que vuelve.
+            #
+            # Si el correo comparte correcciones, lo que sale no es un envío
+            # nuevo sino la respuesta a unas observaciones: el destino natural
+            # es `corregido`. Pero un mismo correo mezcla las dos cosas ("los
+            # mandatos FALTANTES y corregidos"), y desde el texto no hay cómo
+            # saber cuál es cuál. Se propone `corregido` y se deja `sin_firma`
+            # como alterno: manda el estado en que esté el mandato, que es lo
+            # único que distingue un faltante de un corregido.
+            estado = "corregido" if es_correcciones else "sin_firma"
+            alterno = "sin_firma" if es_correcciones else None
             ident = _identidad(nombre, correo)
-            if not ident:
-                sin_identidad.append(nombre)
-                continue
-            acciones.append({**ident, "estado": "sin_firma", "adjunto": None,
-                             "firmas": firmas, "comentario": None})
+            if ident:
+                acciones.append({**ident, "estado": estado, "adjunto": None,
+                                 "estado_alterno": alterno,
+                                 "firmas": firmas, "comentario": None})
+            else:
+                # Los correos de LOTE hacia la revisoría ("Revisión de mandatos
+                # autoconsumo - Julio") no traen P.A.: llevan 23 mandatos de 23
+                # empresas distintas, no hay un patrimonio autónomo que poner.
+                # Exigir identidad completa acá dejó 27 mandatos de julio sin
+                # registrar su envío. Se emite la acción solo con el CMU y la
+                # resuelve _aplicar contra la fila que ya exista; si no existe,
+                # responde cmu_no_encontrado, que es la verdad.
+                acciones.append({"cmu": parsed["cmu"], "estado": estado,
+                                 "estado_alterno": alterno,
+                                 "proyecto": parsed["proyecto"],
+                                 "tipo": tipo_de_nombre(nombre), "tercero": None,
+                                 "periodo": None, "pa_codigo": None,
+                                 "adjunto": None, "firmas": firmas,
+                                 "comentario": None})
         elif fuente == FUENTE_ENVIO:
             # Jessica manda al inversionista lo que ya está firmado, y su correo
             # SÍ trae el P.A., así que se puede armar la identidad completa y
@@ -138,7 +164,7 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
     # que el correo nombra. Se leen del cuerpo SIN la cita del hilo: un correo
     # de correcciones casi siempre responde al que traía las observaciones, y
     # sin recortar se marcarían como corregidos los CMU citados de ese hilo.
-    if fuente == FUENTE_SALIENTE and es_correo_de_correcciones(correo.cuerpo):
+    if es_correcciones:
         con_pdf = {a["cmu"] for a in acciones}
         nombrados = [c for c in extraer_cmus(_sin_cita(correo.cuerpo or ""))
                      if c not in con_pdf]
@@ -201,6 +227,16 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         if not existente:
             return {"cmu": accion["cmu"], "resultado": "cmu_no_encontrado"}
         destino = accion["estado"]
+        # Estado alterno: la acción propone un destino pero admite otro si el
+        # primero no cabe desde donde está el mandato. Lo usa el correo de
+        # correcciones, que mezcla mandatos corregidos con mandatos que salen
+        # por primera vez y no puede distinguirlos desde el texto.
+        alterno = accion.get("estado_alterno")
+        if (alterno and existente.estado != destino
+                and not transicion_firma_valida(existente.estado, destino)
+                and (existente.estado == alterno
+                     or transicion_firma_valida(existente.estado, alterno))):
+            destino = alterno
         if existente.estado == destino:
             # Idempotencia, no conflicto: llegó otra vez lo mismo. Pasa seguido
             # -- la revisoría reenvía el hilo con los mismos adjuntos. Marcarlo

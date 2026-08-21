@@ -385,3 +385,25 @@ def test_no_confunde_pedir_correccion_con_haberla_hecho():
 def test_correcciones_vacio():
     assert not es_correo_de_correcciones("")
     assert not es_correo_de_correcciones(None)
+
+
+# ── correos de correcciones REALES (Adhara → Vanessa, 2026-08-20) ─────────────
+
+def test_correo_real_mandatos_faltantes_y_corregidos():
+    assert es_correo_de_correcciones(
+        "Espero te encuentres muy bien. Comparto los mandatos faltantes y "
+        "corregidos, así como, el apunte contable. Estoy atenta a tus "
+        "comentarios. Muchas gracias")
+
+
+def test_correo_real_apuntes_ya_corregidos():
+    assert es_correo_de_correcciones(
+        "Muchas gracias por la información. Te comparto nuevamente los mandatos "
+        "y los apuntes contables ya corregidos.")
+
+
+def test_pedir_corregir_no_es_entregar_corregido():
+    """'corregir' es una petición; 'corregido' es una entrega. La diferencia
+    está en dos letras y separa dos hechos opuestos."""
+    assert not es_correo_de_correcciones(
+        "Adjunto el certificado. Por favor corregir el arriendo de CMU1255.")

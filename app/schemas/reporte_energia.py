@@ -166,6 +166,56 @@ class EstadoXMResponse(BaseModel):
     fallidas: list[EstadoXMFrontera]
 
 
+class DistribucionFuenteItem(BaseModel):
+    """Cuántas veces se usó cada fuente en el rango -- 'etiqueta' es
+    medidor_usado (Generación) o caso (Consumo); los vocabularios de los
+    dos árboles no son comparables 1:1, por eso van en listas separadas."""
+    etiqueta: str
+    total: int
+
+
+class RankingIncompletoItem(BaseModel):
+    """Solo Generación -- Consumo no tiene medidor_principal_completo/
+    respaldo_completo/solenium_completo (no hay inversores contra qué
+    comparar)."""
+    frontera_id: int
+    nombre_proyecto: str
+    veces_medidor_principal_incompleto: int
+    veces_medidor_respaldo_incompleto: int
+    veces_solenium_incompleto: int
+    dias_con_fila: int
+
+
+class RankingIntervencionItem(BaseModel):
+    frontera_id: int
+    nombre_proyecto: str
+    tipo: str  # "generacion" | "consumo"
+    veces_revisar_manualmente: int
+    veces_editado_manualmente: int
+    dias_con_fila: int
+
+
+class RecuperacionActivaItem(BaseModel):
+    """Cuenta de intentos/éxitos de recuperación activa por medidor,
+    parseado de recuperacion_datos (texto libre, ver curvas.py)."""
+    frontera_id: int
+    nombre_proyecto: str
+    intentos_principal: int
+    exitos_principal: int
+    intentos_respaldo: int
+    exitos_respaldo: int
+
+
+class ResumenHistoricoResponse(BaseModel):
+    desde: date
+    hasta: date
+    distribucion_fuente_generacion: list[DistribucionFuenteItem]
+    distribucion_fuente_consumo: list[DistribucionFuenteItem]
+    incompletos: list[RankingIncompletoItem]
+    intervencion_manual: list[RankingIntervencionItem]
+    recuperacion_activa: list[RecuperacionActivaItem]
+
+
 class EstadoCorridaResponse(BaseModel):
     """Resultado de la última vez que se corrió /ejecutar para esta fecha --
     null (terminado_en=None) si nunca se ha corrido o todavía está en curso."""

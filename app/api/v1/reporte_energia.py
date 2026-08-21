@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -25,6 +26,8 @@ from app.schemas.reporte_energia import (
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
+    DistribucionFuenteItem, RankingIncompletoItem, RankingIntervencionItem,
+    RecuperacionActivaItem, ResumenHistoricoResponse,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
@@ -78,6 +81,135 @@ def resumen(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(g
     return ResumenReporteEnergia(
         fecha=fecha, total=total, revisar=revisar, corregido_automatico=corregido,
         confiado=confiado, puede_enviar=(revisar == 0 and total > 0),
+    )
+
+
+_RECUPERACION_RE = {
+    "principal": re.compile(r"principal:\s*(éxito|falló)", re.IGNORECASE),
+    "respaldo": re.compile(r"respaldo:\s*(éxito|falló)", re.IGNORECASE),
+}
+
+
+@router.get("/resumen-historico", response_model=ResumenHistoricoResponse)
+def resumen_historico(
+    desde: date = Query(...), hasta: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Patrones a través de varios días, por frontera -- distinto de
+    /resumen (un solo día). Responde: qué tan seguido se usa cada fuente,
+    qué medidores tienen datos incompletos/comunicación intermitente, si
+    la recuperación activa de verdad funciona (y qué medidor le falla), y
+    qué fronteras caen en Revisar Manualmente/corrección manual una y otra
+    vez (2026-08-21)."""
+    if hasta < desde:
+        raise HTTPException(422, "'hasta' no puede ser anterior a 'desde'")
+
+    # 1) Distribución de fuente -- medidor_usado (Generación, caso ya es
+    # int ahí) y caso (Consumo, ya es texto). Vocabularios no comparables
+    # 1:1 entre árboles, por eso van separados.
+    gen_dist = db.execute(
+        select(ReporteEnergiaGeneracion.medidor_usado, func.count())
+        .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaGeneracion.medidor_usado)
+    ).all()
+    con_dist = db.execute(
+        select(ReporteEnergiaConsumo.caso, func.count())
+        .where(ReporteEnergiaConsumo.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaConsumo.caso)
+    ).all()
+
+    # 2) Datos incompletos -- solo Generación (Consumo no tiene inversores
+    # contra qué comparar, así que no tiene estas 3 columnas).
+    incompletos_rows = db.execute(
+        select(
+            ReporteEnergiaGeneracion.frontera_id,
+            Frontera.nombre_frontera,
+            func.sum(case((ReporteEnergiaGeneracion.medidor_principal_completo.is_(False), 1), else_=0)),
+            func.sum(case((ReporteEnergiaGeneracion.medidor_respaldo_completo.is_(False), 1), else_=0)),
+            func.sum(case((ReporteEnergiaGeneracion.solenium_completo.is_(False), 1), else_=0)),
+            func.count(),
+        )
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera)
+    ).all()
+    incompletos = [
+        RankingIncompletoItem(
+            frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre),
+            veces_medidor_principal_incompleto=int(v_ppal or 0),
+            veces_medidor_respaldo_incompleto=int(v_resp or 0),
+            veces_solenium_incompleto=int(v_sol or 0),
+            dias_con_fila=dias,
+        )
+        for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
+    ]
+
+    # 3) Intervención manual -- ambos árboles, señales distintas
+    # (revisar_manualmente=pendiente, editado_manualmente=ya corregido).
+    def _intervencion(Modelo, tipo):
+        filas = db.execute(
+            select(
+                Modelo.frontera_id, Frontera.nombre_frontera,
+                func.sum(case((Modelo.revisar_manualmente.is_(True), 1), else_=0)),
+                func.sum(case((Modelo.editado_manualmente.is_(True), 1), else_=0)),
+                func.count(),
+            )
+            .join(Frontera, Frontera.id == Modelo.frontera_id)
+            .where(Modelo.fecha.between(desde, hasta))
+            .group_by(Modelo.frontera_id, Frontera.nombre_frontera)
+        ).all()
+        return [
+            RankingIntervencionItem(
+                frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre), tipo=tipo,
+                veces_revisar_manualmente=int(v_rev or 0), veces_editado_manualmente=int(v_edit or 0),
+                dias_con_fila=dias,
+            )
+            for fid, nombre, v_rev, v_edit, dias in filas
+        ]
+    intervencion_manual = _intervencion(ReporteEnergiaGeneracion, "generacion") + \
+        _intervencion(ReporteEnergiaConsumo, "consumo")
+
+    # 4) Recuperación activa -- recuperacion_datos es texto libre (ver
+    # curvas.py:298-315), no hay columna estructurada por medidor -- se
+    # trae solo lo no-nulo (pocas filas) y se parsea acá.
+    def _recuperacion_filas(Modelo):
+        return db.execute(
+            select(Modelo.frontera_id, Frontera.nombre_frontera, Modelo.recuperacion_datos)
+            .join(Frontera, Frontera.id == Modelo.frontera_id)
+            .where(Modelo.fecha.between(desde, hasta), Modelo.recuperacion_datos.is_not(None))
+        ).all()
+
+    conteos: dict[int, dict] = {}
+    for fid, nombre, texto in _recuperacion_filas(ReporteEnergiaGeneracion) + _recuperacion_filas(ReporteEnergiaConsumo):
+        c = conteos.setdefault(fid, {
+            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
+            "intentos_principal": 0, "exitos_principal": 0,
+            "intentos_respaldo": 0, "exitos_respaldo": 0,
+        })
+        for medidor in ("principal", "respaldo"):
+            m = _RECUPERACION_RE[medidor].search(texto or "")
+            if m:
+                c[f"intentos_{medidor}"] += 1
+                if m.group(1).lower() == "éxito":
+                    c[f"exitos_{medidor}"] += 1
+    recuperacion_activa = [
+        RecuperacionActivaItem(frontera_id=fid, nombre_proyecto=c["nombre"], **{
+            k: v for k, v in c.items() if k != "nombre"
+        })
+        for fid, c in conteos.items()
+    ]
+
+    return ResumenHistoricoResponse(
+        desde=desde, hasta=hasta,
+        distribucion_fuente_generacion=[
+            DistribucionFuenteItem(etiqueta=etq or "sin dato", total=n) for etq, n in gen_dist
+        ],
+        distribucion_fuente_consumo=[
+            DistribucionFuenteItem(etiqueta=etq or "sin dato", total=n) for etq, n in con_dist
+        ],
+        incompletos=incompletos,
+        intervencion_manual=intervencion_manual,
+        recuperacion_activa=recuperacion_activa,
     )
 
 

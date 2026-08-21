@@ -21,7 +21,7 @@ from __future__ import annotations
 import traceback
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
@@ -60,7 +60,13 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
     """(Frontera, project_id_solenium) de las fronteras que de verdad
     reportan al ASIC -- 'activa' es solo el estado de la FRONTERA; hace
     falta ADEMÁS que el PROYECTO esté en operación y tenga el servicio de
-    CGM contratado (confirmado con el equipo 2026-07-28/29)."""
+    CGM contratado (confirmado con el equipo 2026-07-28/29).
+
+    Excepción: Proyecto.reportar_asic_forzado -- proyectos que ya tienen
+    frontera registrada en Quoia pero siguen en_desarrollo/sin CGM
+    contratado, y que igual deben reportarse (ver GD Isabela, Los Taurus...
+    2026-08-21). No es un atajo a matriz de ceros -- corren el mismo árbol
+    de decisión que cualquier otra frontera."""
     filas = db.execute(
         select(Frontera, Proyecto.project_id_solenium)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
@@ -68,8 +74,10 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
             Frontera.estado == EstadoFronteraEnum.activa,
             Frontera.codigo_frontera.is_not(None),
             Frontera.deleted_at.is_(None),
-            Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.srv_cgm.is_(True),
+            or_(
+                and_(Proyecto.estado == EstadoProyectoEnum.en_operacion, Proyecto.srv_cgm.is_(True)),
+                Proyecto.reportar_asic_forzado.is_(True),
+            ),
         )
     ).all()
     return [(f, sid) for f, sid in filas]

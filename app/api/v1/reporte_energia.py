@@ -27,7 +27,8 @@ from app.schemas.reporte_energia import (
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
     DistribucionFuenteItem, RankingIncompletoItem, RankingIntervencionItem,
-    RecuperacionActivaItem, ResumenHistoricoResponse,
+    RecuperacionActivaItem, ResumenHistoricoResponse, DesgloseFuenteItem,
+    DetalleFuenteFronteraItem, ResumenCallout,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
@@ -89,6 +90,99 @@ _RECUPERACION_RE = {
     "respaldo": re.compile(r"respaldo:\s*(éxito|falló)", re.IGNORECASE),
 }
 
+# Agrupación de fuente para el Resumen histórico (decidido con el usuario
+# 2026-08-21) -- los vocabularios crudos de medidor_usado/caso tienen
+# demasiadas variantes técnicas para leerse como KPI de negocio. "Sin
+# fuente" queda separado de "Estimación" a propósito: son casos donde no
+# se pudo usar NADA (pendiente de revisar manualmente), no un dato
+# sustituto real como histórico/apagado. "Excluida" no se cuenta -- ese
+# día no se reportó a propósito, no es una fuente.
+_GRUPO_FUENTE_GENERACION = {
+    "cgm": "medidor", "principal": "medidor", "respaldo": "medidor",
+    "principal_sin_cgm": "medidor", "respaldo_sin_cgm": "medidor",
+    "principal_sin_historico": "medidor", "respaldo_sin_historico": "medidor",
+    "reconectador": "medidor", "excel_terceros": "medidor", "externo": "medidor",
+    "inversores": "inversor", "crudos": "inversor", "crudos_parcial": "inversor",
+    "solenium_power": "inversor",
+    "historico": "estimacion", "historico_vecino": "estimacion", "ninguno": "estimacion",
+    "editado_manualmente": "estimacion", "relleno_horario": "estimacion",
+    "revisar": "sin_fuente",
+}
+_GRUPO_FUENTE_CONSUMO = {
+    "cgm": "medidor", "medidor": "medidor",
+    "histórico": "estimacion",
+    "sin dato": "sin_fuente", "error": "sin_fuente",
+}
+_ETIQUETA_GRUPO_FUENTE = {
+    "medidor": "Medidor", "inversor": "Inversor",
+    "estimacion": "Estimación", "sin_fuente": "Sin fuente", "otro": "Otro",
+}
+_ORDEN_GRUPO_FUENTE = ["medidor", "inversor", "estimacion", "sin_fuente", "otro"]
+
+# Etiquetas legibles para el desglose del drill-down (Generación) -- mismo
+# vocabulario que ETIQUETAS_FUENTE en ReporteEnergiaDetalleTab.vue, para no
+# mostrarle a la usuaria el nombre crudo de medidor_usado.
+_ETIQUETA_FUENTE_CRUDA_GENERACION = {
+    "cgm": "CGM", "principal": "Medidor principal", "respaldo": "Medidor respaldo",
+    "principal_sin_cgm": "Medidor principal", "respaldo_sin_cgm": "Medidor respaldo",
+    "principal_sin_historico": "Medidor principal", "respaldo_sin_historico": "Medidor respaldo",
+    "reconectador": "Reconectador", "excel_terceros": "Excel de terceros", "externo": "Reporta otra empresa",
+    "inversores": "Inversores × FP", "crudos": "Datos crudos", "crudos_parcial": "Datos crudos (parcial)",
+    "solenium_power": "Inversores (power)",
+    "historico": "Histórico propio", "historico_vecino": "Histórico (vecino de predio)",
+    "ninguno": "Apagado", "editado_manualmente": "Editado manualmente", "relleno_horario": "Relleno horario",
+    "revisar": "Sin fuente",
+}
+
+
+def _distribucion_y_detalle(
+    filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
+    etiquetas_legibles: dict[str, str] | None = None,
+) -> tuple[list[DistribucionFuenteItem], list[DetalleFuenteFronteraItem]]:
+    """A partir de (frontera_id, nombre_frontera, etiqueta_cruda, n) --
+    devuelve (a) el total agrupado global (para las tarjetas KPI) y (b) el
+    detalle por frontera+grupo con desglose de fuentes crudas (para el
+    drill-down al hacer clic en una tarjeta). 'excluida' no se cuenta como
+    fuente, pero SÍ cuenta en dias_totales (ese día sí tuvo fila, solo que
+    a propósito no se reportó)."""
+    conteos_globales: dict[str, int] = {}
+    por_frontera: dict[int, dict] = {}
+    for fid, nombre, etiqueta_cruda, n in filas:
+        info = por_frontera.setdefault(fid, {
+            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre), "dias_totales": 0, "grupos": {},
+        })
+        info["dias_totales"] += n
+        if etiqueta_cruda is None:
+            grupo, etq_legible = "sin_fuente", "Sin fuente"
+        else:
+            low = etiqueta_cruda.strip().lower()
+            if low == "excluida":
+                continue  # no es una fuente -- ese día no se reportó a propósito
+            grupo = mapa.get(low, "otro")
+            etq_legible = (etiquetas_legibles or {}).get(low, etiqueta_cruda)
+        conteos_globales[grupo] = conteos_globales.get(grupo, 0) + n
+        g = info["grupos"].setdefault(grupo, {"dias": 0, "desglose": {}})
+        g["dias"] += n
+        g["desglose"][etq_legible] = g["desglose"].get(etq_legible, 0) + n
+
+    global_dist = [
+        DistribucionFuenteItem(etiqueta=_ETIQUETA_GRUPO_FUENTE[g], total=conteos_globales[g])
+        for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales
+    ]
+    detalle = [
+        DetalleFuenteFronteraItem(
+            frontera_id=fid, nombre_proyecto=info["nombre"], grupo=_ETIQUETA_GRUPO_FUENTE[grupo],
+            dias_totales=info["dias_totales"], dias_grupo=g["dias"],
+            desglose=[
+                DesgloseFuenteItem(etiqueta=e, dias=n)
+                for e, n in sorted(g["desglose"].items(), key=lambda kv: -kv[1])
+            ],
+        )
+        for fid, info in por_frontera.items()
+        for grupo, g in info["grupos"].items()
+    ]
+    return global_dist, detalle
+
 
 @router.get("/resumen-historico", response_model=ResumenHistoricoResponse)
 def resumen_historico(
@@ -104,19 +198,27 @@ def resumen_historico(
     if hasta < desde:
         raise HTTPException(422, "'hasta' no puede ser anterior a 'desde'")
 
-    # 1) Distribución de fuente -- medidor_usado (Generación, caso ya es
-    # int ahí) y caso (Consumo, ya es texto). Vocabularios no comparables
-    # 1:1 entre árboles, por eso van separados.
-    gen_dist = db.execute(
-        select(ReporteEnergiaGeneracion.medidor_usado, func.count())
+    # 1) Distribución de fuente -- agrupada en Medidor/Inversor/Estimación/
+    # Sin fuente (decidido con el usuario 2026-08-21: el vocabulario crudo
+    # de medidor_usado/caso tiene demasiadas variantes técnicas para leerse
+    # como KPI). Se trae por frontera (no solo el total) para poder armar
+    # el drill-down al hacer clic en una tarjeta.
+    gen_filas = db.execute(
+        select(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera,
+               ReporteEnergiaGeneracion.medidor_usado, func.count())
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
         .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
-        .group_by(ReporteEnergiaGeneracion.medidor_usado)
+        .group_by(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera, ReporteEnergiaGeneracion.medidor_usado)
     ).all()
-    con_dist = db.execute(
-        select(ReporteEnergiaConsumo.caso, func.count())
+    con_filas = db.execute(
+        select(ReporteEnergiaConsumo.frontera_id, Frontera.nombre_frontera,
+               ReporteEnergiaConsumo.caso, func.count())
+        .join(Frontera, Frontera.id == ReporteEnergiaConsumo.frontera_id)
         .where(ReporteEnergiaConsumo.fecha.between(desde, hasta))
-        .group_by(ReporteEnergiaConsumo.caso)
+        .group_by(ReporteEnergiaConsumo.frontera_id, Frontera.nombre_frontera, ReporteEnergiaConsumo.caso)
     ).all()
+    dist_gen, detalle_gen = _distribucion_y_detalle(gen_filas, _GRUPO_FUENTE_GENERACION, _ETIQUETA_FUENTE_CRUDA_GENERACION)
+    dist_con, detalle_con = _distribucion_y_detalle(con_filas, _GRUPO_FUENTE_CONSUMO)
 
     # 2) Datos incompletos -- solo Generación (Consumo no tiene inversores
     # contra qué comparar, así que no tiene estas 3 columnas).
@@ -143,6 +245,18 @@ def resumen_historico(
         )
         for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
     ]
+    _con_incompletos = [i for i in incompletos if i.dias_con_fila and (
+        i.veces_medidor_principal_incompleto or i.veces_medidor_respaldo_incompleto or i.veces_solenium_incompleto
+    )]
+    _con_incompletos_graves = [
+        i for i in _con_incompletos
+        if max(i.veces_medidor_principal_incompleto, i.veces_medidor_respaldo_incompleto, i.veces_solenium_incompleto)
+        / i.dias_con_fila > 0.3
+    ]
+    incompletos_callouts = [
+        ResumenCallout(valor=str(len(_con_incompletos)), etiqueta="fronteras con al menos un día de datos incompletos"),
+        ResumenCallout(valor=str(len(_con_incompletos_graves)), etiqueta="con más del 30% de sus días afectados"),
+    ]
 
     # 3) Intervención manual -- ambos árboles, señales distintas
     # (revisar_manualmente=pendiente, editado_manualmente=ya corregido).
@@ -168,6 +282,16 @@ def resumen_historico(
         ]
     intervencion_manual = _intervencion(ReporteEnergiaGeneracion, "generacion") + \
         _intervencion(ReporteEnergiaConsumo, "consumo")
+    intervencion_manual_callouts = [
+        ResumenCallout(
+            valor=str(sum(1 for i in intervencion_manual if i.veces_revisar_manualmente > 0)),
+            etiqueta="fronteras necesitaron revisión manual",
+        ),
+        ResumenCallout(
+            valor=str(sum(1 for i in intervencion_manual if i.veces_editado_manualmente > 0)),
+            etiqueta="ya corregidas a mano al menos una vez",
+        ),
+    ]
 
     # 4) Recuperación activa -- recuperacion_datos es texto libre (ver
     # curvas.py:298-315), no hay columna estructurada por medidor -- se
@@ -198,18 +322,33 @@ def resumen_historico(
         })
         for fid, c in conteos.items()
     ]
+    _intentos_totales = sum(r.intentos_principal + r.intentos_respaldo for r in recuperacion_activa)
+    _exitos_totales = sum(r.exitos_principal + r.exitos_respaldo for r in recuperacion_activa)
+    _tasa_global = round(_exitos_totales / _intentos_totales * 100) if _intentos_totales else 0
+    # "Casi nunca responde" -- al menos 2 intentos (para no juzgar con una
+    # sola muestra) y menos de 1 de cada 3 exitosos.
+    _medidores_problema = sum(
+        1 for r in recuperacion_activa for intentos, exitos in (
+            (r.intentos_principal, r.exitos_principal), (r.intentos_respaldo, r.exitos_respaldo),
+        ) if intentos >= 2 and exitos / intentos < 0.34
+    )
+    recuperacion_activa_callouts = [
+        ResumenCallout(valor=f"{_tasa_global}%", etiqueta="tasa de éxito global de la recuperación activa"),
+        ResumenCallout(valor=str(_medidores_problema), etiqueta="medidores que casi nunca responden"),
+    ]
 
     return ResumenHistoricoResponse(
         desde=desde, hasta=hasta,
-        distribucion_fuente_generacion=[
-            DistribucionFuenteItem(etiqueta=etq or "sin dato", total=n) for etq, n in gen_dist
-        ],
-        distribucion_fuente_consumo=[
-            DistribucionFuenteItem(etiqueta=etq or "sin dato", total=n) for etq, n in con_dist
-        ],
+        distribucion_fuente_generacion=dist_gen,
+        distribucion_fuente_consumo=dist_con,
+        detalle_fuente_generacion=detalle_gen,
+        detalle_fuente_consumo=detalle_con,
         incompletos=incompletos,
+        incompletos_callouts=incompletos_callouts,
         intervencion_manual=intervencion_manual,
+        intervencion_manual_callouts=intervencion_manual_callouts,
         recuperacion_activa=recuperacion_activa,
+        recuperacion_activa_callouts=recuperacion_activa_callouts,
     )
 
 

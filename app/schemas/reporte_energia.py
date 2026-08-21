@@ -206,14 +206,47 @@ class RecuperacionActivaItem(BaseModel):
     exitos_respaldo: int
 
 
+class DesgloseFuenteItem(BaseModel):
+    """Una fuente cruda (ej. 'Inversores × FP') y cuántos días aportó --
+    el detalle detrás del número agrupado de una tarjeta KPI."""
+    etiqueta: str
+    dias: int
+
+
+class DetalleFuenteFronteraItem(BaseModel):
+    """Una fila del drill-down por frontera al hacer clic en una tarjeta
+    KPI de distribución de fuente -- 'grupo' es el mismo agrupado
+    (Medidor/Inversor/Estimación/Sin fuente) que la tarjeta."""
+    frontera_id: int
+    nombre_proyecto: str
+    grupo: str
+    dias_totales: int
+    dias_grupo: int
+    desglose: list[DesgloseFuenteItem]
+
+
+class ResumenCallout(BaseModel):
+    """Una métrica de una sola línea para mostrar arriba de una tabla de
+    ranking (ej. '9 fronteras con datos incompletos') -- 'valor' ya viene
+    formateado (número o porcentaje) para que el frontend no tenga que
+    decidir el formato caso por caso."""
+    valor: str
+    etiqueta: str
+
+
 class ResumenHistoricoResponse(BaseModel):
     desde: date
     hasta: date
     distribucion_fuente_generacion: list[DistribucionFuenteItem]
     distribucion_fuente_consumo: list[DistribucionFuenteItem]
+    detalle_fuente_generacion: list[DetalleFuenteFronteraItem]
+    detalle_fuente_consumo: list[DetalleFuenteFronteraItem]
     incompletos: list[RankingIncompletoItem]
+    incompletos_callouts: list[ResumenCallout]
     intervencion_manual: list[RankingIntervencionItem]
+    intervencion_manual_callouts: list[ResumenCallout]
     recuperacion_activa: list[RecuperacionActivaItem]
+    recuperacion_activa_callouts: list[ResumenCallout]
 
 
 class EstadoCorridaResponse(BaseModel):

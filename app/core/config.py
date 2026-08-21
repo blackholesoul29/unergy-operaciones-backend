@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     MOBILE_JWT_EXPIRE_MINUTES: int = 43200
     # CRM comercial: días sin respuesta antes de alertar (configurable por env).
     COMERCIAL_ALERTA_DIAS: int = 5
+    # Pipeline mensual de cumplimiento PPA: día del mes en que corre el scheduler
+    # (procesa el mes anterior). Configurable por env para poder adelantarlo/
+    # atrasarlo sin tocar código.
+    PIPELINE_CUMPLIMIENTO_RUN_DAY: int = 5
     # La actualización comercial de julio 2026 se aplica UNA vez y se marca sola
     # (ver app/services/comercial_actualizacion.MARCA_VERSION). Poner esto en
     # true fuerza a reaplicarla, pisando lo que se haya cambiado a mano después.
@@ -104,6 +108,14 @@ class Settings(BaseSettings):
     MGS_ENABLED: bool = True
     MGS_POLL_INTERVAL_MINUTES: int = 15
     TIMEZONE: str = "America/Bogota"
+
+    # Alertas proactivas de vencimiento de contratos PPA.
+    # Lista separada por comas de días de antelación en que se dispara una alerta
+    # (ej. "90,60,30" → alerta a 90, 60 y 30 días del fin del contrato).
+    PPA_ALERT_DAYS: str = "90,60,30"
+    # Webhook de Slack para el canal de operaciones (notificaciones de alertas).
+    # Vacío ⇒ no se envían notificaciones a Slack (la alerta igual se persiste).
+    SLACK_WEBHOOK_URL_OPERATIONS: str | None = None
 
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""

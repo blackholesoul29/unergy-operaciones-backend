@@ -59,6 +59,13 @@ class CumplimientoMensual(Base):
         BigInteger, ForeignKey("liquidaciones.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # Origen del cálculo: 'manual' (cerrar-periodo desde la UI) o 'automatico'
+    # (pipeline mensual). Permite distinguir/depurar los snapshots del scheduler.
+    origen: Mapped[str] = mapped_column(String, nullable=False, server_default="manual", default="manual")
+    # Momento del último recálculo (se estampa en cada corrida del pipeline).
+    fecha_calculo: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),
     )
@@ -69,3 +76,7 @@ class CumplimientoMensual(Base):
     contrato_ppa: Mapped["PPAContrato"] = relationship("PPAContrato")
     proyecto: Mapped["Proyecto | None"] = relationship("Proyecto")
     liquidacion: Mapped["Liquidacion | None"] = relationship("Liquidacion")
+    # Datos XM (por frontera) generados por el pipeline a partir de este snapshot.
+    liquidaciones_xm: Mapped[list["LiquidacionXMDato"]] = relationship(
+        "LiquidacionXMDato", back_populates="cumplimiento",
+    )

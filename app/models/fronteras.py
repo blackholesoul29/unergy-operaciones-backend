@@ -6,6 +6,7 @@ from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+from app.models.contrato_frontera import ContratoFrontera
 
 
 class TipoFronteraEnum(str, enum.Enum):
@@ -175,6 +176,11 @@ class Frontera(Base):
     lecturas: Mapped[list["FronteraLectura"]] = relationship("FronteraLectura", back_populates="frontera")
     xm_datos: Mapped[list["LiquidacionXMDato"]] = relationship("LiquidacionXMDato", back_populates="frontera")
     operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="fronteras")
+    # ContratoServicio no tiene soft-delete (se borra en duro y la FK cascadea),
+    # así que aquí no hay nada que filtrar.
+    contratos: Mapped[list["ContratoServicio"]] = relationship(
+        "ContratoServicio", secondary=ContratoFrontera.__tablename__, back_populates="fronteras",
+    )
 
 
 class FronteraLectura(Base):

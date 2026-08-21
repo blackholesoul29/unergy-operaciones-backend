@@ -14,15 +14,18 @@ planta reubicada de contrato aparecía "activa en 2+ contratos a la vez".)
 """
 from datetime import date
 from collections import defaultdict
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.crud import crud_alertas
 from app.models.proyectos import Proyecto
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.models.alerta import Alerta
+from app.schemas.alerta import Alerta as AlertaOut
 from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
@@ -228,3 +231,30 @@ def alertas_cumplimiento_ppa(
         "total_alertas": len(alertas),
         "alertas": alertas,
     }
+
+
+# ── Alertas persistentes (tabla `alertas`) — vencimiento proactivo de PPA ─────
+@router.get("", response_model=list[AlertaOut])
+def list_alertas(
+    status: str | None = Query(None, description="Filtra por estado (new, in_progress, ...)"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Lista las alertas persistidas por el job de vencimiento de PPA."""
+    q = db.query(Alerta)
+    if status:
+        q = q.filter(Alerta.status == status)
+    return q.order_by(Alerta.due_date.asc(), Alerta.id.desc()).all()
+
+
+@router.post("/{alert_id}/actions/start_renewal", response_model=AlertaOut)
+def start_renewal(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Marca una alerta como en proceso de renovación ('in_progress')."""
+    alerta = crud_alertas.update_alerta_status(db, alert_id, "in_progress")
+    if alerta is None:
+        raise HTTPException(404, "Alerta no encontrada")
+    return alerta

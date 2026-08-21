@@ -38,11 +38,16 @@ FUENTE_SALIENTE = "saliente_revisoria"
 def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
     """(cmu, proyecto, tercero, tipo, periodo) o None si falta algo.
 
-    El tercero NO está en el nombre del archivo cuando el mandante es un P.A.:
-    sale del cuerpo. Si falta el tercero o el período, se devuelve None en vez de
-    completar con un valor por defecto -- la identidad es la llave única de la
-    tabla, y una identidad inventada crea una fila fantasma que después nadie
-    reconoce ni limpia.
+    Devolver None es lo NORMAL, no un error: la mayoría de los mandatos no
+    tienen tercero. El tercero solo existe si el nombre del archivo trae
+    inversionista o si el cuerpo trae un P.A., y el P.A. es un solo caso (Sol
+    de la Sierra, 8 proyectos; verificado con el usuario 2026-08-20). En
+    autoconsumo la empresa que firma ES el proyecto.
+
+    Cuando devuelve None, quien llama debe resolver por CMU (ver _por_cmu), no
+    descartar el adjunto. Lo que nunca se hace es completar el tercero con un
+    valor por defecto: la identidad es la llave única de la tabla, y una
+    identidad inventada crea una fila fantasma que después nadie reconoce.
     """
     parsed = parsear_nombre_zip(nombre_archivo)
     if not parsed:
@@ -62,6 +67,31 @@ def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
         "periodo": periodo,
         "pa_codigo": pa["codigo"] if pa else None,
     }
+
+
+def _por_cmu(parsed: dict, nombre: str, estado: str, firmas: dict | None,
+             *, estado_alterno: str | None = None, adjunto: str | None = None) -> dict:
+    """Acción identificada SOLO por el CMU, que _aplicar resuelve contra la fila
+    que ya exista.
+
+    Es el camino normal, no la excepción. La identidad completa necesita un
+    tercero, y el tercero solo aparece cuando el nombre del archivo trae
+    inversionista o cuando el cuerpo trae un P.A. Verificado con el usuario
+    (2026-08-20): el P.A. es UN caso -- Sol de la Sierra, con 8 proyectos. Todo
+    lo demás son empresas individuales, y en autoconsumo la empresa que firma ES
+    el proyecto, no hay un tercero aparte.
+
+    Exigir identidad completa dejaba sin registrar todo lo que no encajara en
+    esa excepción. El CMU ya es el número único del certificado: se resuelve por
+    ahí en vez de inventar un tercero. Si la fila no existe, _aplicar responde
+    cmu_no_encontrado y la reconciliación lo reporta -- que es justo la anomalía
+    que hay que ver, no tapar con una fila a medias.
+    """
+    return {"cmu": parsed["cmu"], "estado": estado,
+            "estado_alterno": estado_alterno,
+            "proyecto": parsed["proyecto"], "tipo": tipo_de_nombre(nombre),
+            "tercero": None, "periodo": None, "pa_codigo": None,
+            "adjunto": adjunto, "firmas": firmas, "comentario": None}
 
 
 def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_firmas) -> dict:
@@ -120,30 +150,23 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
                                  "estado_alterno": alterno,
                                  "firmas": firmas, "comentario": None})
             else:
-                # Los correos de LOTE hacia la revisoría ("Revisión de mandatos
-                # autoconsumo - Julio") no traen P.A.: llevan 23 mandatos de 23
-                # empresas distintas, no hay un patrimonio autónomo que poner.
-                # Exigir identidad completa acá dejó 27 mandatos de julio sin
-                # registrar su envío. Se emite la acción solo con el CMU y la
-                # resuelve _aplicar contra la fila que ya exista; si no existe,
-                # responde cmu_no_encontrado, que es la verdad.
-                acciones.append({"cmu": parsed["cmu"], "estado": estado,
-                                 "estado_alterno": alterno,
-                                 "proyecto": parsed["proyecto"],
-                                 "tipo": tipo_de_nombre(nombre), "tercero": None,
-                                 "periodo": None, "pa_codigo": None,
-                                 "adjunto": None, "firmas": firmas,
-                                 "comentario": None})
+                acciones.append(_por_cmu(parsed, nombre, estado, firmas,
+                                         estado_alterno=alterno))
         elif fuente == FUENTE_ENVIO:
-            # Jessica manda al inversionista lo que ya está firmado, y su correo
-            # SÍ trae el P.A., así que se puede armar la identidad completa y
-            # crear la fila si no existe.
+            # Cuando el correo trae P.A. o el archivo trae inversionista se
+            # arma la identidad completa y se puede CREAR la fila. Cuando no
+            # -- que es lo normal, ver _por_cmu -- se resuelve por CMU y no se
+            # crea nada: un mandato que llega al inversionista sin haberse
+            # registrado nunca es la anomalía que hay que ver, no una fila que
+            # inventar.
             ident = _identidad(nombre, correo)
-            if not ident:
-                sin_identidad.append(nombre)
-                continue
-            acciones.append({**ident, "estado": "enviado_inversionista",
-                             "adjunto": nombre, "firmas": firmas, "comentario": None})
+            if ident:
+                acciones.append({**ident, "estado": "enviado_inversionista",
+                                 "adjunto": nombre, "firmas": firmas,
+                                 "comentario": None})
+            else:
+                acciones.append(_por_cmu(parsed, nombre, "enviado_inversionista",
+                                         firmas, adjunto=nombre))
         elif firmas["estado"] == "firmado_completo":
             # Los correos de la revisoría NO traen el P.A. -- verificado contra
             # los tres fixtures reales: extraer_pa_del_cuerpo devuelve None en

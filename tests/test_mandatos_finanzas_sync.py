@@ -63,14 +63,20 @@ def test_envio_a_inversionista_usa_el_pa_del_cuerpo_como_tercero():
 
 
 def test_sin_pa_en_el_cuerpo_no_se_inventa_identidad():
-    """Sin tercero no hay identidad completa. Antes que adivinar, se marca para
-    revisión: una identidad equivocada crea una fila fantasma que nadie limpia."""
+    """Sin tercero no hay identidad completa, y no se inventa una.
+
+    Antes esto se comprobaba exigiendo CERO acciones, porque se creía que el
+    P.A. era el caso normal. No lo es: es UNO (Sol de la Sierra, 8 proyectos).
+    La mayoría de los mandatos no tiene tercero, así que descartar el adjunto
+    dejaba sin registrar casi todo. Hoy se resuelve por CMU, y la garantía se
+    comprueba donde importa: sin tercero ni periodo, _aplicar no crea filas.
+    """
     c = _correo("Adjunto los certificados de junio.",
                 [("CMU1135-Mandato-Costos-X.pdf", PDF_FIRMADO)],
                 remitente="jessica@unergy.io")
     d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
-    assert d["acciones"] == []
-    assert d["requiere_revision"] is True
+    assert [(a["cmu"], a["tercero"], a["periodo"]) for a in d["acciones"]] == [
+        ("CMU1135", None, None)]
 
 
 def test_sin_periodo_en_el_asunto_no_se_inventa():
@@ -78,7 +84,7 @@ def test_sin_periodo_en_el_asunto_no_se_inventa():
                 [("CMU1135-Mandato-Costos-X.pdf", PDF_FIRMADO)],
                 asunto="RE: sin mes", remitente="jessica@unergy.io")
     d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
-    assert d["acciones"] == []
+    assert [a["periodo"] for a in d["acciones"]] == [None]
 
 
 class _DBFake:
@@ -443,3 +449,32 @@ def test_estado_alterno_no_estorba_cuando_el_destino_si_cabe():
     correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
     r = _aplicar(_DBFake(fila), accion, correo)
     assert (r["resultado"], fila.estado) == ("aplicado", "corregido")
+
+
+def test_autoconsumo_sin_tercero_registra_el_envio_al_inversionista():
+    """En autoconsumo la empresa que firma ES el proyecto: no hay tercero, y el
+    correo tampoco trae P.A. Exigirlo dejaba estos mandatos sin registrar."""
+    c = _correo("Adjunto el certificado firmado.",
+                [("CMU1170-Mandato-Edificio Torre Almagran Propiedad Horizontal.pdf",
+                  PDF_FIRMADO)],
+                asunto="Certificado de mandato Autoconsumo - Julio",
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
+    assert d["sin_identidad"] == []
+    a = d["acciones"][0]
+    assert (a["cmu"], a["estado"], a["tercero"]) == (
+        "CMU1170", "enviado_inversionista", None)
+    # El adjunto se conserva: es el PDF firmado que va a Drive.
+    assert a["adjunto"] == "CMU1170-Mandato-Edificio Torre Almagran Propiedad Horizontal.pdf"
+
+
+def test_con_pa_sigue_armando_la_identidad_completa():
+    """Sol de la Sierra es el caso que SÍ tiene P.A. No debe perder identidad
+    por el camino nuevo."""
+    c = _correo(ENVIO_INVERSIONISTA,
+                [("CMU1135-Mandato-Costos-Minigranja Solar La Paz.pdf", PDF_FIRMADO)],
+                remitente="jessica@unergy.io")
+    d = decidir_finanzas(c, FUENTE_ENVIO, verificador=_firmas_fake(True))
+    a = d["acciones"][0]
+    assert a["tercero"] == "P.A SOL DE LA SIERRA"
+    assert a["periodo"] == date(2026, 6, 1)

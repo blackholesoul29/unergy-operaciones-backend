@@ -24,7 +24,7 @@ from app.schemas.reporte_energia import (
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
-    CargaExcelTercerosResponse,
+    CargaExcelTercerosResponse, ReportarManualRequest, ReportarManualResponse,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
@@ -992,3 +992,81 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
     db.commit()
     return EnviarReporteEnergiaResponse(fecha=fecha, enviados=enviados, fallidos=fallidos, bloqueado=False)
+
+
+@router.post("/reportar-manual", response_model=ReportarManualResponse)
+def reportar_manual(
+    body: ReportarManualRequest, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Para fronteras que el clasificador NUNCA toca -- proyecto todavía
+    'en_desarrollo' o sin 'srv_cgm' contratado (ver filtro de
+    orquestador._fronteras_con_reporte) -- pero que igual deben quedar
+    reportadas con matriz de ceros ante Quoia/ASIC (ej. GD Isabela, Los
+    Taurus, Mandarino... 2026-08-21, ninguna tenía fila para su fecha).
+
+    Crea la fila del día si no existe (curva_final=[0]*24, medidor_usado=
+    'editado_manualmente', revisar_manualmente=False) y la envía de
+    inmediato -- en un solo paso, y SOLO para los códigos de la lista.
+    A diferencia de /enviar (que manda TODAS las filas existentes para la
+    fecha), esto no toca ninguna otra frontera del día -- pensado
+    explícitamente para no reenviar de más lo que ya se mandó por separado.
+    """
+    creadas: list[str] = []
+    ya_existian: list[str] = []
+    no_encontrados: list[str] = []
+    fronteras_a_enviar: list[tuple] = []  # (rep, front, es_generacion)
+    ahora = datetime.now(timezone.utc)
+    curva_cero = [0.0] * 24
+
+    for codigo in body.frontera_codigos:
+        codigo_norm = codigo.strip()
+        if not codigo_norm:
+            continue
+        front = db.execute(
+            select(Frontera).where(Frontera.codigo_frontera == codigo_norm)
+        ).scalar_one_or_none()
+        if front is None:
+            no_encontrados.append(codigo_norm)
+            continue
+        es_generacion = front.tipo_frontera == TipoFronteraEnum.generacion
+        Modelo = ReporteEnergiaGeneracion if es_generacion else ReporteEnergiaConsumo
+        rep = db.execute(
+            select(Modelo).where(Modelo.frontera_id == front.id, Modelo.fecha == fecha)
+        ).scalar_one_or_none()
+        if rep is None:
+            rep = Modelo(
+                frontera_id=front.id, fecha=fecha,
+                caso=6 if es_generacion else "Editado manualmente",
+                medidor_usado="editado_manualmente",
+                energia_final_kwh=0,
+                curva_final=curva_cero,
+                revisar_manualmente=False,
+                editado_manualmente=True,
+                created_at=ahora, updated_at=ahora,
+            )
+            db.add(rep)
+            db.flush()
+            creadas.append(codigo_norm)
+        else:
+            ya_existian.append(codigo_norm)
+        fronteras_a_enviar.append((rep, front, es_generacion))
+
+    gaia = GaiaClient()
+    frt_codes = {f.codigo_frontera for _, f, _ in fronteras_a_enviar if f.codigo_frontera}
+    borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
+
+    enviados = 0
+    fallidos: list[str] = []
+    for rep, front, es_generacion in fronteras_a_enviar:
+        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+        if resultado is True:
+            enviados += 1
+        elif resultado is False:
+            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
+
+    db.commit()
+    return ReportarManualResponse(
+        fecha=fecha, creadas=creadas, ya_existian=ya_existian,
+        no_encontrados=no_encontrados, enviados=enviados, fallidos=fallidos,
+    )

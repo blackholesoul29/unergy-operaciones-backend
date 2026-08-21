@@ -145,6 +145,22 @@ class EnviarReporteEnergiaResponse(BaseModel):
     motivo_bloqueo: str | None = None
 
 
+class ReportarManualRequest(BaseModel):
+    """Códigos de frontera (ej. 'frt0108448') a reportar con matriz de
+    ceros -- para plantas que el clasificador nunca toca (proyecto en
+    desarrollo o sin srv_cgm) pero que igual deben quedar reportadas."""
+    frontera_codigos: list[str]
+
+
+class ReportarManualResponse(BaseModel):
+    fecha: date
+    creadas: list[str]
+    ya_existian: list[str]
+    no_encontrados: list[str]
+    enviados: int
+    fallidos: list[str]
+
+
 class EstadoCorridaResponse(BaseModel):
     """Resultado de la última vez que se corrió /ejecutar para esta fecha --
     null (terminado_en=None) si nunca se ha corrido o todavía está en curso."""

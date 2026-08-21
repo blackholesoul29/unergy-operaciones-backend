@@ -26,6 +26,21 @@ ZIP_NOMBRE_RE = re.compile(
 # genera dos identidades distintas.
 _SUFIJO_GMAIL_RE = re.compile(r"\s\(\d+\)(?=\.pdf$)", re.IGNORECASE)
 
+# Cuarta convención, vista en el lote real de Sol de la Sierra (2026-08-20):
+# "...-{Inversionista} - 17844 SOL DE LA SIERRA.pdf". El P.A. va al final,
+# precedido de guion CON espacios y encabezado por su código numérico.
+#
+# Sin quitarlo antes, la regla principal no encuentra dónde cortar --  el
+# inversionista no puede contener guiones y el separador espaciado no cumple
+# los lookarounds -- así que el proyecto se tragaba TODO el resto:
+# "Minigranja Solar Merengue-PATRIMONIOS AUTONOMOS ... - 17844 SOL DE LA
+# SIERRA". Esa identidad falsa creaba una fila fantasma por cada mandato.
+#
+# Se ancla al CÓDIGO numérico y no al guion espaciado a propósito: un proyecto
+# sí puede llevar " - " en su nombre ("PSF - Yurbaqua"), y recortar por el
+# guion solo le comería el nombre.
+_SUFIJO_PA_RE = re.compile(r"\s-\s(\d{4,6})\s+(.+?)(?=\.pdf$)", re.IGNORECASE)
+
 MESES = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
     "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
@@ -117,13 +132,23 @@ def parsear_nombre_zip(nombre: str) -> dict | None:
     El inversionista es opcional: los mandatos de un P.A. de fiduciaria no lo
     traen en el nombre (ahí el mandante sale del cuerpo del correo). Cuando
     falta, se devuelve cadena vacía -- nunca se inventa.
+
+    Devuelve además `pa_codigo` y `pa_nombre` cuando el nombre trae el P.A. al
+    final (ver _SUFIJO_PA_RE); son cadena vacía cuando no.
     """
-    m = ZIP_NOMBRE_RE.match(_SUFIJO_GMAIL_RE.sub("", (nombre or "").strip()))
+    limpio = _SUFIJO_GMAIL_RE.sub("", (nombre or "").strip())
+    pa_codigo = pa_nombre = ""
+    pa = _SUFIJO_PA_RE.search(limpio)
+    if pa:
+        pa_codigo, pa_nombre = pa.group(1), pa.group(2).strip()
+        limpio = limpio[:pa.start()] + ".pdf"
+    m = ZIP_NOMBRE_RE.match(limpio)
     if not m:
         return None
     return {"cmu": m.group(1).upper(),
             "proyecto": (m.group(2) or "").strip(),
-            "inversionista": (m.group(3) or "").strip()}
+            "inversionista": (m.group(3) or "").strip(),
+            "pa_codigo": pa_codigo, "pa_nombre": pa_nombre}
 
 
 def match_inversionista(nombre: str, maestra: list[dict], umbral: float = 0.6):

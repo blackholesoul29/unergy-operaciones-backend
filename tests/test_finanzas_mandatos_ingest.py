@@ -93,3 +93,19 @@ def test_upsert_sigue_sin_degradar_un_firmado(db_session):
     upsert_mandato(db_session, estado="firmado", **kw)
     m, _ = upsert_mandato(db_session, estado="sin_firma", **kw)
     assert m.estado == "firmado"
+
+
+def test_registrar_envio_no_degrada_un_mandato_ya_entregado(db_session):
+    """Caso real (CMU1180, corrida del 2026-08-20): un mandato ya entregado al
+    inversionista vuelve a aparecer en el correo de lote que lo mandó a
+    revisión. Registrar ese envío estampa fecha_envio y nada más: el estado NO
+    retrocede. La bitácora debe reportar el estado que quedó, no el que se pidió
+    -- reportar 'sin_firma' ahí hacía ver un retroceso que nunca ocurrió.
+    """
+    kw = dict(proyecto="Iml Empaques", tercero="Ayurá S.A.S",
+              periodo=date(2026, 7, 1), tipo="ingreso", cmu="CMU1180")
+    upsert_mandato(db_session, estado="enviado_inversionista", **kw)
+    m, creado = upsert_mandato(db_session, estado="sin_firma", **kw)
+    assert creado is False
+    assert m.estado == "enviado_inversionista"
+    assert m.fecha_envio is not None

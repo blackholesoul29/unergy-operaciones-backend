@@ -137,7 +137,8 @@ def test_parsear_nombre_zip_sin_inversionista_pa_fiduciaria():
     captura 2026-08-18). El inversionista queda vacío, no se inventa."""
     r = parsear_nombre_zip("CMU1140-Mandato-Costos-Minigranja Solar Merengue.pdf")
     assert r == {"cmu": "CMU1140", "proyecto": "Minigranja Solar Merengue",
-                 "inversionista": ""}
+                 "inversionista": "",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_sin_inversionista_proyecto_con_guion():
@@ -145,34 +146,39 @@ def test_parsear_nombre_zip_sin_inversionista_proyecto_con_guion():
     partiría en ('PSF', 'Yurbaqua') e inventaría un inversionista."""
     r = parsear_nombre_zip("CMU0002-Mandato-Costos-PSF - Yurbaqua.pdf")
     assert r == {"cmu": "CMU0002", "proyecto": "PSF - Yurbaqua",
-                 "inversionista": ""}
+                 "inversionista": "",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_proyecto_con_numero_al_final():
     """'Valencia Oriente 1' no debe confundirse con un inversionista."""
     r = parsear_nombre_zip("CMU0003-Mandato-Costos-Minigranja Solar Valencia Oriente 1.pdf")
     assert r == {"cmu": "CMU0003", "proyecto": "Minigranja Solar Valencia Oriente 1",
-                 "inversionista": ""}
+                 "inversionista": "",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_convencion_ingresos_sin_costos():
     """Autoconsumo/ingresos: `CMU####-Mandato-{Proyecto}.pdf`, sin 'Costos'."""
     r = parsear_nombre_zip("CMU1182-Mandato-Iml Empaques Colombia Sas.pdf")
     assert r == {"cmu": "CMU1182", "proyecto": "Iml Empaques Colombia Sas",
-                 "inversionista": ""}
+                 "inversionista": "",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_ingresos_con_inversionista():
     r = parsear_nombre_zip(
         "CMU1228-Mandato-GD Delta 1-GRANJAS SOLARES DELTA S.A.S. E.S.P.pdf")
     assert r == {"cmu": "CMU1228", "proyecto": "GD Delta 1",
-                 "inversionista": "GRANJAS SOLARES DELTA S.A.S. E.S.P"}
+                 "inversionista": "GRANJAS SOLARES DELTA S.A.S. E.S.P",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_proyecto_terminado_en_punto():
     r = parsear_nombre_zip("CMU0907-Mandato-Arcillas San Simon S.A.S..pdf")
     assert r == {"cmu": "CMU0907", "proyecto": "Arcillas San Simon S.A.S.",
-                 "inversionista": ""}
+                 "inversionista": "",
+                 "pa_codigo": "", "pa_nombre": ""}
 
 
 def test_parsear_nombre_zip_limpia_el_sufijo_de_gmail():
@@ -218,3 +224,34 @@ def test_mandato_to_dict_pdf_zip():
 def test_mandato_to_dict_sin_pdf_zip():
     out = mandato_to_dict(_row())
     assert out["tiene_pdf_zip"] is False
+
+
+# ── cuarta convención: el P.A. al final del nombre ────────────────────────────
+# Lote real de Sol de la Sierra (2026-08-20). Antes, el proyecto se tragaba todo
+# el resto del nombre y el inversionista salía vacío: una identidad falsa por
+# cada mandato.
+
+def test_nombre_con_pa_al_final_separa_las_tres_partes():
+    from app.services.mandatos_service import parsear_nombre_zip
+    p = parsear_nombre_zip(
+        "CMU1140-Mandato-Costos-Minigranja Solar Merengue-PATRIMONIOS AUTONOMOS "
+        "FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA - 17844 SOL DE LA SIERRA.pdf")
+    assert p["cmu"] == "CMU1140"
+    assert p["proyecto"] == "Minigranja Solar Merengue"
+    assert p["inversionista"].startswith("PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA")
+    assert (p["pa_codigo"], p["pa_nombre"]) == ("17844", "SOL DE LA SIERRA")
+
+
+def test_un_proyecto_con_guion_espaciado_no_se_confunde_con_un_pa():
+    """El recorte se ancla al CÓDIGO numérico, no al guion espaciado: un
+    proyecto sí puede llevar ' - ' en su nombre."""
+    from app.services.mandatos_service import parsear_nombre_zip
+    p = parsear_nombre_zip("CMU0500-Mandato-Costos-PSF - Yurbaqua.pdf")
+    assert p["proyecto"] == "PSF - Yurbaqua"
+    assert p["pa_codigo"] == ""
+
+
+def test_nombre_sin_pa_deja_los_campos_vacios():
+    from app.services.mandatos_service import parsear_nombre_zip
+    p = parsear_nombre_zip("CMU1170-Mandato-Edificio Torre Almagran Propiedad Horizontal.pdf")
+    assert (p["pa_codigo"], p["pa_nombre"], p["inversionista"]) == ("", "", "")

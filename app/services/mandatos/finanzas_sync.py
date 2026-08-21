@@ -56,6 +56,11 @@ def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
     if not periodo:
         return None
     pa = extraer_pa_del_cuerpo(correo.cuerpo)
+    if not pa and parsed.get("pa_codigo"):
+        # El lote de Sol de la Sierra trae el P.A. en el NOMBRE del archivo
+        # ("... - 17844 SOL DE LA SIERRA.pdf"). Es la misma fuente de verdad y
+        # llega igual aunque el cuerpo del correo no lo mencione.
+        pa = {"codigo": parsed["pa_codigo"], "nombre": parsed["pa_nombre"]}
     tercero = parsed["inversionista"] or (pa["nombre"] if pa else "")
     if not tercero:
         return None
@@ -335,9 +340,15 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
         estado=destino, comentario=accion.get("comentario"),
         fecha=correo.fecha.date(), correo_ref=correo.message_id,
         drive_file_id=drive_id, drive_url=drive_url)
+    # El estado que se REPORTA es el que quedó, no el que se pidió. Con
+    # `sin_firma`, upsert_mandato solo estampa fecha_envio y deja el estado
+    # quieto (ver su rama `else`); reportar el destino hacía que la bitácora
+    # dijera "enviado_inversionista → sin_firma" sobre un mandato que no se
+    # movió. Un registro que miente sobre lo que pasó es peor que no tenerlo.
     return {"cmu": accion["cmu"], "resultado": "aplicado", "id": m.id,
-            "pdf_ya_en_drive": ya_tenia_pdf,
-            "creado": creado, "estado_previo": previo, "estado_nuevo": destino}
+            "pdf_ya_en_drive": ya_tenia_pdf, "creado": creado,
+            "estado_previo": previo, "estado_nuevo": m.estado,
+            "solo_fecha_envio": destino == "sin_firma" and m.estado != "sin_firma"}
 
 
 def procesar_correo_finanzas(db, correo: CorreoCrudo, fuente: str):

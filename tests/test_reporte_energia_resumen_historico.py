@@ -148,6 +148,36 @@ def test_incompletos_solo_cuenta_los_false_y_da_dias_con_fila(db):
     assert callouts["con más del 30% de sus días afectados"] == "1"  # 2/3 = 67%
 
 
+def test_incompletos_sin_ningun_problema_no_aparece_en_la_tabla(db):
+    _frontera(db, 1, "Planta perfecta")
+    _gen(db, 1, 1, date(2026, 8, 1), medidor_principal_completo=True, medidor_respaldo_completo=True, solenium_completo=True)
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 1), db=db, _=None)
+    assert resp.incompletos == []
+    callouts = {c.etiqueta: c.valor for c in resp.incompletos_callouts}
+    assert callouts["fronteras con al menos un día de datos incompletos"] == "0"
+
+
+def test_incompletos_se_ordena_de_mas_a_menos_critico(db):
+    _frontera(db, 1, "Poco afectada")
+    _frontera(db, 2, "Muy afectada")
+    # Poco afectada: 1 de 4 dias con medidor principal incompleto (25%)
+    _gen(db, 1, 1, date(2026, 8, 1), medidor_principal_completo=False, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 2, 1, date(2026, 8, 2), medidor_principal_completo=True, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 3, 1, date(2026, 8, 3), medidor_principal_completo=True, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 4, 1, date(2026, 8, 4), medidor_principal_completo=True, medidor_respaldo_completo=True, solenium_completo=True)
+    # Muy afectada: 4 de 4 dias con medidor principal incompleto (100%)
+    _gen(db, 5, 2, date(2026, 8, 1), medidor_principal_completo=False, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 6, 2, date(2026, 8, 2), medidor_principal_completo=False, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 7, 2, date(2026, 8, 3), medidor_principal_completo=False, medidor_respaldo_completo=True, solenium_completo=True)
+    _gen(db, 8, 2, date(2026, 8, 4), medidor_principal_completo=False, medidor_respaldo_completo=True, solenium_completo=True)
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 4), db=db, _=None)
+    assert [i.frontera_id for i in resp.incompletos] == [2, 1]
+
+
 def test_intervencion_manual_combina_generacion_y_consumo(db):
     _frontera(db, 1, "Planta A")
     _frontera(db, 2, "Planta A Consumo", tipo=TipoFronteraEnum.consumo_auxiliar)
@@ -166,6 +196,28 @@ def test_intervencion_manual_combina_generacion_y_consumo(db):
     callouts = {c.etiqueta: c.valor for c in resp.intervencion_manual_callouts}
     assert callouts["fronteras necesitaron revisión manual"] == "1"  # solo generación
     assert callouts["ya corregidas a mano al menos una vez"] == "2"  # generación + consumo
+
+
+def test_intervencion_manual_sin_ninguna_bandera_no_aparece(db):
+    _frontera(db, 1, "Planta perfecta")
+    _gen(db, 1, 1, date(2026, 8, 1), revisar_manualmente=False, editado_manualmente=False)
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 1), db=db, _=None)
+    assert resp.intervencion_manual == []
+
+
+def test_intervencion_manual_se_ordena_de_mas_a_menos_critico(db):
+    _frontera(db, 1, "Poco afectada")
+    _frontera(db, 2, "Muy afectada")
+    _gen(db, 1, 1, date(2026, 8, 1), revisar_manualmente=True, editado_manualmente=False)
+    _gen(db, 2, 1, date(2026, 8, 2), revisar_manualmente=False, editado_manualmente=False)
+    _gen(db, 3, 2, date(2026, 8, 1), revisar_manualmente=True, editado_manualmente=False)
+    _gen(db, 4, 2, date(2026, 8, 2), revisar_manualmente=True, editado_manualmente=False)
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 2), db=db, _=None)
+    assert [i.frontera_id for i in resp.intervencion_manual] == [2, 1]
 
 
 def test_recuperacion_activa_parsea_principal_y_respaldo_por_separado(db):
@@ -199,3 +251,16 @@ def test_medidor_con_dos_o_mas_intentos_y_baja_tasa_cuenta_como_problema(db):
     resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 3), db=db, _=None)
     callouts = {c.etiqueta: c.valor for c in resp.recuperacion_activa_callouts}
     assert callouts["medidores que casi nunca responden"] == "1"  # 1/3 = 33% < 34%, 3 intentos
+
+
+def test_recuperacion_activa_se_ordena_de_menor_a_mayor_tasa_de_exito(db):
+    _frontera(db, 1, "Casi siempre falla")
+    _frontera(db, 2, "Casi siempre funciona")
+    _gen(db, 1, 1, date(2026, 8, 1), recuperacion_datos="principal: falló")
+    _gen(db, 2, 1, date(2026, 8, 2), recuperacion_datos="principal: falló")
+    _gen(db, 3, 2, date(2026, 8, 1), recuperacion_datos="principal: éxito")
+    _gen(db, 4, 2, date(2026, 8, 2), recuperacion_datos="principal: éxito")
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 2), db=db, _=None)
+    assert [i.frontera_id for i in resp.recuperacion_activa] == [1, 2]

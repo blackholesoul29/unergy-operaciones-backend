@@ -235,31 +235,42 @@ def resumen_historico(
         .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
         .group_by(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera)
     ).all()
-    incompletos = [
-        RankingIncompletoItem(
-            frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre),
-            veces_medidor_principal_incompleto=int(v_ppal or 0),
-            veces_medidor_respaldo_incompleto=int(v_resp or 0),
-            veces_solenium_incompleto=int(v_sol or 0),
-            dias_con_fila=dias,
-        )
-        for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
-    ]
-    _con_incompletos = [i for i in incompletos if i.dias_con_fila and (
-        i.veces_medidor_principal_incompleto or i.veces_medidor_respaldo_incompleto or i.veces_solenium_incompleto
-    )]
-    _con_incompletos_graves = [
-        i for i in _con_incompletos
+    # Solo fronteras con AL MENOS un día incompleto -- mostrar también las
+    # que están perfectas (0% en las 3 columnas) es ruido, no información
+    # (pedido 2026-08-21: "MGS 0042 San Martín Norte"/"GD Taurus VIII" con
+    # 0%/0%/0% aparecían igual). Ordenadas de más a menos crítico (mayor %
+    # de días afectados en cualquiera de las 3 fuentes primero).
+    incompletos = sorted(
+        (
+            RankingIncompletoItem(
+                frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre),
+                veces_medidor_principal_incompleto=int(v_ppal or 0),
+                veces_medidor_respaldo_incompleto=int(v_resp or 0),
+                veces_solenium_incompleto=int(v_sol or 0),
+                dias_con_fila=dias,
+            )
+            for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
+            if v_ppal or v_resp or v_sol
+        ),
+        key=lambda i: max(
+            i.veces_medidor_principal_incompleto, i.veces_medidor_respaldo_incompleto, i.veces_solenium_incompleto,
+        ) / i.dias_con_fila,
+        reverse=True,
+    )
+    _incompletos_graves = [
+        i for i in incompletos
         if max(i.veces_medidor_principal_incompleto, i.veces_medidor_respaldo_incompleto, i.veces_solenium_incompleto)
         / i.dias_con_fila > 0.3
     ]
     incompletos_callouts = [
-        ResumenCallout(valor=str(len(_con_incompletos)), etiqueta="fronteras con al menos un día de datos incompletos"),
-        ResumenCallout(valor=str(len(_con_incompletos_graves)), etiqueta="con más del 30% de sus días afectados"),
+        ResumenCallout(valor=str(len(incompletos)), etiqueta="fronteras con al menos un día de datos incompletos"),
+        ResumenCallout(valor=str(len(_incompletos_graves)), etiqueta="con más del 30% de sus días afectados"),
     ]
 
     # 3) Intervención manual -- ambos árboles, señales distintas
     # (revisar_manualmente=pendiente, editado_manualmente=ya corregido).
+    # Mismo criterio que incompletos: sin ninguna de las dos banderas es
+    # ruido, no se muestra.
     def _intervencion(Modelo, tipo):
         filas = db.execute(
             select(
@@ -279,9 +290,12 @@ def resumen_historico(
                 dias_con_fila=dias,
             )
             for fid, nombre, v_rev, v_edit, dias in filas
+            if v_rev or v_edit
         ]
-    intervencion_manual = _intervencion(ReporteEnergiaGeneracion, "generacion") + \
-        _intervencion(ReporteEnergiaConsumo, "consumo")
+    intervencion_manual = sorted(
+        _intervencion(ReporteEnergiaGeneracion, "generacion") + _intervencion(ReporteEnergiaConsumo, "consumo"),
+        key=lambda i: i.veces_revisar_manualmente / i.dias_con_fila, reverse=True,
+    )
     intervencion_manual_callouts = [
         ResumenCallout(
             valor=str(sum(1 for i in intervencion_manual if i.veces_revisar_manualmente > 0)),
@@ -316,12 +330,22 @@ def resumen_historico(
                 c[f"intentos_{medidor}"] += 1
                 if m.group(1).lower() == "éxito":
                     c[f"exitos_{medidor}"] += 1
-    recuperacion_activa = [
-        RecuperacionActivaItem(frontera_id=fid, nombre_proyecto=c["nombre"], **{
-            k: v for k, v in c.items() if k != "nombre"
-        })
-        for fid, c in conteos.items()
-    ]
+    # Más crítico primero = menor tasa de éxito (a la que le falla más la
+    # recuperación); una fila sin ningún intento real (regex no matcheó
+    # nada del texto libre) se manda al final, no arriba como si fuera la
+    # peor.
+    def _tasa_exito(r):
+        total = r.intentos_principal + r.intentos_respaldo
+        return (r.exitos_principal + r.exitos_respaldo) / total if total else 1.0
+    recuperacion_activa = sorted(
+        (
+            RecuperacionActivaItem(frontera_id=fid, nombre_proyecto=c["nombre"], **{
+                k: v for k, v in c.items() if k != "nombre"
+            })
+            for fid, c in conteos.items()
+        ),
+        key=_tasa_exito,
+    )
     _intentos_totales = sum(r.intentos_principal + r.intentos_respaldo for r in recuperacion_activa)
     _exitos_totales = sum(r.exitos_principal + r.exitos_respaldo for r in recuperacion_activa)
     _tasa_global = round(_exitos_totales / _intentos_totales * 100) if _intentos_totales else 0

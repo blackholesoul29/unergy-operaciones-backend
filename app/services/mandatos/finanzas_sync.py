@@ -35,7 +35,8 @@ FUENTE_ENVIO = "envio_inversionista"
 FUENTE_SALIENTE = "saliente_revisoria"
 
 
-def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
+def _identidad(nombre_archivo: str, correo: CorreoCrudo,
+               tipo: str | None = None) -> dict | None:
     """(cmu, proyecto, tercero, tipo, periodo) o None si falta algo.
 
     Devolver None es lo NORMAL, no un error: la mayoría de los mandatos no
@@ -68,14 +69,15 @@ def _identidad(nombre_archivo: str, correo: CorreoCrudo) -> dict | None:
         "cmu": parsed["cmu"],
         "proyecto": parsed["proyecto"],
         "tercero": tercero,
-        "tipo": tipo_de_nombre(nombre_archivo),
+        "tipo": tipo or tipo_de_nombre(nombre_archivo),
         "periodo": periodo,
         "pa_codigo": pa["codigo"] if pa else None,
     }
 
 
 def _por_cmu(parsed: dict, nombre: str, estado: str, firmas: dict | None,
-             *, estado_alterno: str | None = None, adjunto: str | None = None) -> dict:
+             *, estado_alterno: str | None = None, adjunto: str | None = None,
+             tipo: str | None = None) -> dict:
     """Acción identificada SOLO por el CMU, que _aplicar resuelve contra la fila
     que ya exista.
 
@@ -94,7 +96,8 @@ def _por_cmu(parsed: dict, nombre: str, estado: str, firmas: dict | None,
     """
     return {"cmu": parsed["cmu"], "estado": estado,
             "estado_alterno": estado_alterno,
-            "proyecto": parsed["proyecto"], "tipo": tipo_de_nombre(nombre),
+            "proyecto": parsed["proyecto"],
+            "tipo": tipo or tipo_de_nombre(nombre),
             "tercero": None, "periodo": None, "pa_codigo": None,
             "adjunto": adjunto, "firmas": firmas, "comentario": None}
 
@@ -135,6 +138,12 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
              else ignorados).append(nombre)
             continue
         firmas = verificador(contenido)
+        # El tipo sale del CONTENIDO del PDF, no del nombre: un lote de
+        # autoconsumo trae ingresos y costos con la misma convención de archivo
+        # ("CMU####-Mandato-{Empresa}.pdf"), y el tipo es parte de la identidad
+        # única. Clasificarlos igual los haría chocar en la misma fila. Si el
+        # verificador no lo trae (tests con doble), se cae al nombre.
+        tipo = firmas.get("tipo") or tipo_de_nombre(nombre)
         if fuente == FUENTE_SALIENTE:
             # Registrar el envío. No importa si el PDF está firmado -- casi
             # nunca lo estará. Lo que se registra es que salió, para que la
@@ -149,14 +158,14 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             # único que distingue un faltante de un corregido.
             estado = "corregido" if es_correcciones else "sin_firma"
             alterno = "sin_firma" if es_correcciones else None
-            ident = _identidad(nombre, correo)
+            ident = _identidad(nombre, correo, tipo)
             if ident:
                 acciones.append({**ident, "estado": estado, "adjunto": None,
                                  "estado_alterno": alterno,
                                  "firmas": firmas, "comentario": None})
             else:
                 acciones.append(_por_cmu(parsed, nombre, estado, firmas,
-                                         estado_alterno=alterno))
+                                         estado_alterno=alterno, tipo=tipo))
         elif fuente == FUENTE_ENVIO:
             # Cuando el correo trae P.A. o el archivo trae inversionista se
             # arma la identidad completa y se puede CREAR la fila. Cuando no
@@ -164,14 +173,14 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             # crea nada: un mandato que llega al inversionista sin haberse
             # registrado nunca es la anomalía que hay que ver, no una fila que
             # inventar.
-            ident = _identidad(nombre, correo)
+            ident = _identidad(nombre, correo, tipo)
             if ident:
                 acciones.append({**ident, "estado": "enviado_inversionista",
                                  "adjunto": nombre, "firmas": firmas,
                                  "comentario": None})
             else:
                 acciones.append(_por_cmu(parsed, nombre, "enviado_inversionista",
-                                         firmas, adjunto=nombre))
+                                         firmas, adjunto=nombre, tipo=tipo))
         elif firmas["estado"] == "firmado_completo":
             # Los correos de la revisoría NO traen el P.A. -- verificado contra
             # los tres fixtures reales: extraer_pa_del_cuerpo devuelve None en
@@ -179,7 +188,7 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
             # existe por CMU (ver _aplicar). Inventar un tercero vacío crearía
             # una fila paralela a la real y partiría el mandato en dos.
             acciones.append({"cmu": parsed["cmu"], "proyecto": parsed["proyecto"],
-                             "tipo": tipo_de_nombre(nombre), "tercero": None,
+                             "tipo": tipo, "tercero": None,
                              "periodo": None, "pa_codigo": None, "estado": "firmado",
                              "adjunto": nombre, "firmas": firmas, "comentario": None})
         else:

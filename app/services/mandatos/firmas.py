@@ -99,16 +99,18 @@ def verificar_firmas(contenido: bytes | None) -> dict:
     import pdfplumber
 
     todas: list[bool] = []
+    texto: list[str] = []
     try:
         with pdfplumber.open(io.BytesIO(contenido)) as pdf:
             for pagina in pdf.pages:
+                texto.append(pagina.extract_text() or "")
                 lineas = [
                     {"x0": w["x0"], "x1": w["x1"], "top": w["top"]}
                     for w in pagina.extract_words()
                     if _LINEA_FIRMA_RE.match(w["text"])
                 ]
                 if not lineas:
-                    continue
+                    continue  # sigue acumulando texto de las demás páginas
                 imagenes = [
                     {"x0": im["x0"], "x1": im["x1"], "top": im["top"]}
                     for im in pagina.images
@@ -118,4 +120,30 @@ def verificar_firmas(contenido: bytes | None) -> dict:
         logger.warning("Firmas: no se pudo leer el PDF (%s): %s", type(exc).__name__, exc)
         return resumir_firmas([])
 
-    return resumir_firmas(todas)
+    return {**resumir_firmas(todas), "tipo": tipo_por_contenido(" ".join(texto))}
+
+
+# Regla dada por el usuario (2026-08-20): un mandato de INGRESOS trae esta
+# leyenda al pie del cuadro de valores; uno de costos no. Los de costos no
+# mencionan la palabra "costo" en ninguna parte del texto -- verificado sobre
+# los lotes reales -- así que el discriminador tiene que ser la leyenda.
+#
+# Se busca un fragmento corto y sin tildes ni saltos de línea: el texto real
+# viene partido en dos renglones ("... DEL ARTÍCULO\n476 DEL E.T.") y con
+# acentos que dependen de cómo extraiga pdfplumber.
+_LEYENDA_INGRESOS = "ingresos de venta de energia son excluidos de iva"
+
+
+def tipo_por_contenido(texto: str | None) -> str:
+    """'ingreso' si el texto trae la leyenda de exclusión de IVA; si no 'costo'.
+
+    Hace falta porque el NOMBRE no alcanza: un lote de autoconsumo puede traer
+    ingresos y costos con la misma convención de archivo
+    ("CMU####-Mandato-{Empresa}.pdf"), y el tipo es parte de la identidad única
+    del mandato. Clasificar los dos igual los haría chocar en la misma fila.
+    """
+    from app.services.mandatos.email_parser import _normaliza
+
+    # Sin saltos de línea: la leyenda viene partida en dos renglones.
+    return ("ingreso" if _LEYENDA_INGRESOS in re.sub(r"\s+", " ", _normaliza(texto))
+            else "costo")

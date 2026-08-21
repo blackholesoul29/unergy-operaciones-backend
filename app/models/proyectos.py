@@ -166,16 +166,6 @@ class Proyecto(Base):
     srv_operacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_representacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_cgm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Excepción al filtro normal del clasificador de Reporte de Energía
-    # (orquestador._fronteras_con_reporte, que solo procesa proyectos
-    # en_operacion + srv_cgm). Para proyectos que ya tienen frontera
-    # registrada en Quoia pero siguen en desarrollo/sin CGM contratado, y
-    # que igual deben reportarse (aunque sea con matriz de ceros) --
-    # reemplaza tener que reportarlos a mano cada día (ver GD Isabela, Los
-    # Taurus... 2026-08-21). Corre el árbol de decisión real igual que
-    # cualquier otra frontera; si no hay dato, cae en 'Sin dato' como
-    # siempre, pendiente de revisar manualmente.
-    reportar_asic_forzado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_ppa: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

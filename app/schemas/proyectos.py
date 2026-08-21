@@ -280,10 +280,6 @@ class ProyectoCreate(BaseModel):
     srv_operacion: Optional[bool] = None
     srv_representacion: Optional[bool] = None
     srv_cgm: Optional[bool] = None
-    # Excepcion al filtro del clasificador de Reporte de Energia (que solo
-    # procesa en_operacion+srv_cgm) -- para proyectos con frontera ya
-    # registrada en Quoia pero aun en desarrollo/sin CGM contratado.
-    reportar_asic_forzado: Optional[bool] = None
     srv_ppa: Optional[bool] = None
     srv_promotor: Optional[bool] = None
     srv_rec: Optional[bool] = None
@@ -369,7 +365,6 @@ class ProyectoOut(BaseModel):
     srv_operacion: bool
     srv_representacion: bool
     srv_cgm: bool
-    reportar_asic_forzado: bool
     srv_ppa: bool
     srv_promotor: bool
     srv_rec: bool

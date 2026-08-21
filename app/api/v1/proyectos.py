@@ -8,13 +8,11 @@ from app.models import Proyecto
 from app.utils.nombre_matching import mejor_candidato, normalizar
 from app.models.proyectos import (
     ProyectoInversionista, ProyectoInfoTecnica,
-    ProyectoInversor, ProyectoPendienteIgnorado, EstadoProyectoEnum,
+    ProyectoInversor, ProyectoPendienteIgnorado,
 )
 from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
-from app.models.fronteras import Frontera, TipoFronteraEnum
-from app.models.reporte_energia import ReporteEnergiaGeneracion
-from app.api.v1.fronteras import CORRIDAS_VENTANA_GENERANDO
+from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut, ProyectoListaResponse,
     ProyectoInversionistaCreate, ProyectoInversionistaUpdate, ProyectoInversionistaOut,
@@ -593,48 +591,6 @@ _UNIQUE_COLS = {
 }
 
 
-def _proyecto_generando(db: Session, proyecto_id: int) -> bool:
-    """Mismo criterio que 'generando_actual' en fronteras.py: entre las
-    últimas CORRIDAS_VENTANA_GENERANDO corridas de cualquier frontera de
-    generación de este proyecto, ¿alguna reportó energía > 0? Usado para
-    decidir si Proyecto.reportar_asic_forzado ya no hace falta aunque el
-    campo 'estado' administrativo todavía no se haya pasado a mano a
-    en_operacion (2026-08-21)."""
-    frontera_ids = [
-        f.id for f in db.query(Frontera.id).filter(
-            Frontera.proyecto_id == proyecto_id, Frontera.tipo_frontera == TipoFronteraEnum.generacion,
-        ).all()
-    ]
-    if not frontera_ids:
-        return False
-    filas = (
-        db.query(ReporteEnergiaGeneracion)
-        .filter(ReporteEnergiaGeneracion.frontera_id.in_(frontera_ids))
-        .order_by(ReporteEnergiaGeneracion.frontera_id, ReporteEnergiaGeneracion.fecha.desc())
-        .all()
-    )
-    contadas: dict[int, int] = {}
-    for fila in filas:
-        vistas = contadas.get(fila.frontera_id, 0)
-        if vistas >= CORRIDAS_VENTANA_GENERANDO:
-            continue
-        contadas[fila.frontera_id] = vistas + 1
-        if fila.energia_final_kwh is not None and fila.energia_final_kwh > 0:
-            return True
-    return False
-
-
-def _limpiar_reportar_asic_forzado_si_ya_no_hace_falta(db: Session, p: Proyecto) -> None:
-    """reportar_asic_forzado deja de hacer falta en cuanto el proyecto ya
-    cumple el filtro normal del clasificador (srv_cgm + en_operacion) O ya
-    se ve generando de verdad aunque 'estado' siga sin actualizarse a mano
-    -- dejarla prendida sin propósito solo confunde (decidido 2026-08-21)."""
-    if not p.reportar_asic_forzado or not p.srv_cgm:
-        return
-    if p.estado == EstadoProyectoEnum.en_operacion or _proyecto_generando(db, p.id):
-        p.reportar_asic_forzado = False
-
-
 def _verificar_unicos(db: Session, payload: dict, excluir_id: int | None = None) -> None:
     """Chequeo proactivo de columnas UNIQUE: da un mensaje accionable que nombra el
     proyecto en conflicto, en vez de un IntegrityError opaco (usado en create y update)."""
@@ -683,8 +639,6 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
 
     for k, v in payload.items():
         setattr(p, k, v)
-
-    _limpiar_reportar_asic_forzado_si_ya_no_hace_falta(db, p)
 
     try:
         db.commit()
@@ -939,8 +893,6 @@ def toggle_servicios(id: int, data: dict, db: Session = Depends(get_db), _=Depen
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)
-
-    _limpiar_reportar_asic_forzado_si_ya_no_hace_falta(db, p)
 
     db.commit()
     return _get_proyecto_or_404(id, db)

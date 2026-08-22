@@ -728,7 +728,7 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_liq ON liquidacion_xm_datos (liquidacion_id)",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_frt ON liquidacion_xm_datos (frontera_id) WHERE frontera_id IS NOT NULL",
-    # migration 051 — pipeline mensual de cumplimiento: origen/fecha_calculo del
+    # migration 077 — pipeline mensual de cumplimiento: origen/fecha_calculo del
     # snapshot y enlace del dato XM al cumplimiento que lo generó.
     "ALTER TABLE cumplimiento_mensual ADD COLUMN IF NOT EXISTS origen VARCHAR NOT NULL DEFAULT 'manual'",
     "ALTER TABLE cumplimiento_mensual ADD COLUMN IF NOT EXISTS fecha_calculo TIMESTAMPTZ DEFAULT NOW()",

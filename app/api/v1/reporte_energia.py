@@ -3,7 +3,6 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
-import json
 import random
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +22,7 @@ from app.models.usuarios import Usuario
 from app.schemas.reporte_energia import (
     FronteraReporteItem, ResumenReporteEnergia, DetalleFronteraReporte,
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
-    EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
+    EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
     DistribucionFuenteItem, RankingIncompletoItem, RankingIntervencionItem,
@@ -715,10 +714,19 @@ def rellenar_horario(
                 fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
 
             sol = SoleniumClient()
+            # Si la clasificación diaria ya consultó y guardó el
+            # reconectador (ver clasificar_generacion), se reusa en vez de
+            # volver a pedirlo a Solenium -- evita una llamada duplicada
+            # cuando "Rellenar horas" se usa el mismo día (2026-08-21).
+            curva_reconectador_conocida = (
+                lista_a_curva(rep.curva_reconectador_referencia)
+                if rep.curva_reconectador_referencia is not None else None
+            )
             curva_actual, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
                 reconectador.rellenar_horas_faltantes(
                     db, sol, curva_actual, project_id_solenium, str(fecha),
                     frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
+                    curva_reconectador_conocida=curva_reconectador_conocida,
                 )
             )
         else:
@@ -962,41 +970,6 @@ def curva_tipica(
     return CurvaTipicaResponse(
         curva=curva_a_lista(curva), energia_total_kwh=float(mediana), dias_usados=dias_usados,
     )
-
-
-@router.get("/fronteras/{frontera_id}/ediciones", response_model=list[EdicionAuditoria])
-def ediciones_frontera(
-    frontera_id: int, fecha: date = Query(...),
-    db: Session = Depends(get_db), _=Depends(get_current_user),
-):
-    """Historial de correcciones manuales (audit_log) para esta fila
-    puntual -- quién la editó, cuándo, y el diff de qué campos cambiaron.
-    Más reciente primero.
-
-    usuario_id IS NOT NULL filtra las corridas automáticas del clasificador
-    (ejecutar_dia_background corre en un hilo de fondo sin usuario
-    autenticado, así que su UPDATE también queda en audit_log pero con
-    usuario_id/usuario_nombre en NULL) -- sin este filtro, cada re-corrida
-    del clasificador aparecía en este historial como si fuera una edición
-    manual de alguien."""
-    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    filas = db.execute(
-        text(
-            "SELECT usuario_nombre, created_at, cambios FROM audit_log "
-            "WHERE tabla = :tabla AND registro_id = :registro_id AND accion = 'UPDATE' "
-            "AND usuario_id IS NOT NULL "
-            "ORDER BY created_at DESC"
-        ),
-        {"tabla": Modelo.__tablename__, "registro_id": rep.id},
-    ).fetchall()
-    return [
-        EdicionAuditoria(
-            usuario_nombre=f.usuario_nombre,
-            created_at=f.created_at,
-            cambios=json.loads(f.cambios) if isinstance(f.cambios, str) else f.cambios,
-        )
-        for f in filas
-    ]
 
 
 @router.post("/fronteras/{frontera_id}/validar", response_model=ValidarResponse)

@@ -107,3 +107,48 @@ def test_reconectador_sin_dato_deja_referencia_en_none(db, monkeypatch):
     )
 
     assert resultado["curva_reconectador_referencia"] is None
+
+
+class _GaiaStubInvalido:
+    def get_border_report_status(self, border_id, fecha_str):
+        return {"status": "ERROR", "reported_data_main": None}
+
+
+def test_caso7_reusa_la_misma_curva_sin_consultar_dos_veces(db, monkeypatch):
+    """Cuando el reconectador es la fuente COMPLETA del día (Caso 7 --
+    sin CGM, sin medidor, sin inversores), clasificar_generacion() no debe
+    volver a consultarlo al final: ya se consultó dentro de _decidir_caso
+    y ese mismo resultado debe reusarse. Antes se consultaba una SEGUNDA
+    vez, con riesgo de devolver algo distinto y contradecir "Fuente usada"
+    (ver MGS 0033 Sabana de Torres 2026-08-18/21: "Fuente usada:
+    Reconectador" pero "Detalle de las fuentes" mostraba "Sin dato")."""
+    monkeypatch.setattr(clasificador.solenium_svc, "curva_generacion", lambda *a, **kw: (pd.Series([None] * 24, dtype=float), False))
+    monkeypatch.setattr(
+        clasificador.curvas, "curvas_de_frontera",
+        lambda *a, **kw: {
+            "node_ppal": None, "node_resp": None,
+            "curva_ppal": pd.Series([None] * 24, dtype=float), "curva_resp": pd.Series([None] * 24, dtype=float),
+            "ppal_completo": False, "resp_completo": False,
+            "consumo_ppal": None, "consumo_resp": None,
+            "consumo_ppal_completo": False, "consumo_resp_completo": False,
+            "recuperacion_datos": None,
+        },
+    )
+    llamados = []
+
+    def _fake_reconectador(sol, id_solenium, fecha_str):
+        llamados.append((id_solenium, fecha_str))
+        return pd.Series([20.0] * 24, dtype=float)
+    monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", _fake_reconectador)
+
+    resultado = clasificador.clasificar_generacion(
+        db, _GaiaStubInvalido(), sol=object(), frontera_id=1, frt_code="frt001",
+        border_meta={"border_id": 1, "main_meter": None, "backup_meter": None},
+        project_id_solenium=123, mapa_medidor_nodo={}, fecha=FECHA,
+    )
+
+    assert resultado["caso"] == 7
+    assert resultado["medidor_usado"] == "reconectador"
+    assert len(llamados) == 1  # una sola consulta, no dos
+    assert resultado["curva_reconectador_referencia"] == [20.0] * 24
+    assert resultado["curva_reconectador_referencia"] == resultado["curva_final"].tolist()

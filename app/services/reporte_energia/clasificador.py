@@ -229,6 +229,12 @@ def _decidir_caso(
                         "caso": 5, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
                         "curva_final": curva_reconectador, "medidor_usado": "reconectador",
                         "revisar_manualmente": True,
+                        # Ya se consultó arriba -- se reusa como referencia
+                        # para no volver a pedirla al final de
+                        # clasificar_generacion() (evita una segunda
+                        # llamada que podría devolver algo distinto y
+                        # contradecir "Fuente usada" en el front).
+                        "curva_reconectador_referencia": curva_a_lista(curva_reconectador),
                     }
             return {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
 
@@ -349,6 +355,12 @@ def _decidir_caso(
                 "caso": 7, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
                 "curva_final": curva_reconectador, "medidor_usado": "reconectador",
                 "revisar_manualmente": True,
+                # Ya se consultó arriba -- se reusa como referencia para no
+                # volver a pedirla al final de clasificar_generacion()
+                # (evita una segunda llamada que podría devolver algo
+                # distinto y contradecir "Fuente usada" en el front -- ver
+                # MGS 0033 Sabana de Torres 2026-08-18/21).
+                "curva_reconectador_referencia": curva_a_lista(curva_reconectador),
             }
 
     crudos = datos_crudos.get_datos_crudos(gaia, node_ppal, fecha_str) if node_ppal else pd.DataFrame()
@@ -589,16 +601,21 @@ def clasificar_generacion(
     # "Detalle de las fuentes" lo muestre como una fuente más sin tener que
     # volver a pedirlo en vivo cada vez que se abre el panel (pedido
     # 2026-08-21: "no quiero que persista el criterio de rellenar horas").
-    # None si el proyecto no tiene reconectador instalado o la consulta
-    # falla -- get_curva_reconectador() ya maneja eso, no hace falta
-    # try/except acá (mismo patrón que curva_solenium arriba).
-    curva_reconectador_ref = (
-        reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str)
-        if project_id_solenium is not None else None
-    )
-    resultado["curva_reconectador_referencia"] = (
-        curva_a_lista(curva_reconectador_ref) if curva_reconectador_ref is not None else None
-    )
+    # Si Caso 5/7 ya la consultó (medidor_usado == "reconectador", el
+    # reconectador fue la fuente COMPLETA del día) no se vuelve a pedir --
+    # una segunda llamada podía devolver algo distinto y contradecir
+    # "Fuente usada" (ver MGS 0033 Sabana de Torres 2026-08-18/21: decía
+    # "Fuente usada: Reconectador" pero "Detalle de las fuentes" mostraba
+    # "Sin dato"). None si el proyecto no tiene reconectador instalado o la
+    # consulta falla -- get_curva_reconectador() ya maneja eso.
+    if "curva_reconectador_referencia" not in resultado:
+        curva_reconectador_ref = (
+            reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str)
+            if project_id_solenium is not None else None
+        )
+        resultado["curva_reconectador_referencia"] = (
+            curva_a_lista(curva_reconectador_ref) if curva_reconectador_ref is not None else None
+        )
     resultado.setdefault("fp", None)
     resultado.setdefault("fp_calculada", None)
     resultado.setdefault("error_final_pct", None)

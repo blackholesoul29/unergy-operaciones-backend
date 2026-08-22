@@ -85,6 +85,21 @@ def test_distribucion_de_fuente_agrupa_medidor_inversor_estimacion(db):
     assert con_map == {"Medidor": 1, "Estimación": 1}
 
 
+def test_datos_crudos_van_en_estimacion_no_en_inversor(db):
+    """'crudos'/'crudos_parcial' salen del nodo del medidor (telemetría
+    cruda), no de los inversores -- con problemas de precisión conocidos,
+    van con la misma incertidumbre que histórico/relleno horario."""
+    _frontera(db, 1, "Planta A")
+    _gen(db, 1, 1, date(2026, 8, 1), medidor_usado="crudos")
+    _gen(db, 2, 1, date(2026, 8, 2), medidor_usado="crudos_parcial")
+    _gen(db, 3, 1, date(2026, 8, 3), medidor_usado="solenium_power")
+    db.commit()
+
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 3), db=db, _=None)
+    gen_map = {i.etiqueta: i.total for i in resp.distribucion_fuente_generacion}
+    assert gen_map == {"Estimación": 2, "Inversor": 1}
+
+
 def test_excluida_no_cuenta_como_fuente_pero_si_en_dias_totales(db):
     _frontera(db, 1, "Planta A")
     _gen(db, 1, 1, date(2026, 8, 1), medidor_usado="cgm")

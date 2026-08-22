@@ -103,8 +103,14 @@ _GRUPO_FUENTE_GENERACION = {
     "principal_sin_cgm": "medidor", "respaldo_sin_cgm": "medidor",
     "principal_sin_historico": "medidor", "respaldo_sin_historico": "medidor",
     "reconectador": "medidor", "excel_terceros": "medidor", "externo": "medidor",
-    "inversores": "inversor", "crudos": "inversor", "crudos_parcial": "inversor",
-    "solenium_power": "inversor",
+    "inversores": "inversor", "solenium_power": "inversor",
+    # "crudos"/"crudos_parcial" NO son lectura de inversores -- salen del
+    # nodo del medidor en Quoia (telemetría cruda "ap", integrada con
+    # Riemann), con problemas de precisión documentados (San Pelayo ~14%
+    # por debajo del medidor; Polaris 1/2, ~1.150x por error de escala de
+    # unidades) -- son una reconstrucción con incertidumbre real, igual
+    # que histórico/relleno horario (pedido 2026-08-21).
+    "crudos": "estimacion", "crudos_parcial": "estimacion",
     "historico": "estimacion", "historico_vecino": "estimacion",
     "editado_manualmente": "estimacion", "relleno_horario": "estimacion",
     # "Apagado" es un estado CONFIRMADO (el proyecto no está generando),

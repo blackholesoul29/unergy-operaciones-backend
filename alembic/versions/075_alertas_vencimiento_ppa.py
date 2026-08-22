@@ -11,8 +11,8 @@ correrlo dos veces no duplica la alerta de la misma ventana.
 IF NOT EXISTS en cada paso para que reintentar la migración desde cero sea seguro
 si un deploy se corta a medias (mismo criterio que 034_maintenance_impact).
 
-Revision ID: 072
-Revises: 071
+Revision ID: 075
+Revises: 074
 Create Date: 2026-07-08
 """
 from __future__ import annotations
@@ -20,8 +20,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "072"
-down_revision = "071"
+revision = "075"
+down_revision = "074"
 branch_labels = None
 depends_on = None
 

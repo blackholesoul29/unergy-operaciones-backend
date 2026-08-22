@@ -93,6 +93,7 @@ def rellenar_horas_faltantes(
     frontera_id: int | None = None,
     curva_solenium: pd.Series | None = None,
     fp: float | None = None,
+    curva_reconectador_conocida: pd.Series | None = None,
 ) -> tuple[pd.Series, set[int], set[int], set[int], pd.Series | None]:
     """Rellena las horas en NaN de `curva` en tres pasos, en orden:
 
@@ -108,6 +109,12 @@ def rellenar_horas_faltantes(
     de esas horas la generación real ya se espera en ~0, así que rellenar
     ahí no protege nada y solo arriesga meter ruido de telemetría nocturna
     como si fuera dato real (ver MGS 0022 La Cumbia 2026-08-05).
+
+    `curva_reconectador_conocida` -- si el llamador YA tiene la curva del
+    reconectador a mano (ej. clasificar_generacion() la consulta y persiste
+    siempre, ver curva_reconectador_referencia), se reusa en vez de volver
+    a pedirla a Solenium -- evita una consulta duplicada cuando "Rellenar
+    horas" se usa el mismo día que ya se clasificó (2026-08-21).
 
     Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico,
     curva_reconectador) -- este último es la curva CRUDA del reconectador tal
@@ -137,7 +144,10 @@ def rellenar_horas_faltantes(
         horas_faltantes -= horas_solenium
 
     if horas_faltantes and id_solenium is not None:
-        curva_relay = get_curva_reconectador(sol, int(id_solenium), fecha_str)
+        curva_relay = (
+            curva_reconectador_conocida if curva_reconectador_conocida is not None
+            else get_curva_reconectador(sol, int(id_solenium), fecha_str)
+        )
         if curva_relay is not None:
             curva_reconectador_ref = curva_relay
             for h in list(horas_faltantes):

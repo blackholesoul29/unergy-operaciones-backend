@@ -94,8 +94,10 @@ _RECUPERACION_RE = {
 # demasiadas variantes técnicas para leerse como KPI de negocio. "Sin
 # fuente" queda separado de "Estimación" a propósito: son casos donde no
 # se pudo usar NADA (pendiente de revisar manualmente), no un dato
-# sustituto real como histórico/apagado. "Excluida" no se cuenta -- ese
-# día no se reportó a propósito, no es una fuente.
+# sustituto real como histórico. "Apagado" también queda separado de
+# "Estimación": es un estado CONFIRMADO (el proyecto no está generando),
+# no un dato que se tuvo que adivinar. "Excluida" no se cuenta -- ese día
+# no se reportó a propósito, no es una fuente.
 _GRUPO_FUENTE_GENERACION = {
     "cgm": "medidor", "principal": "medidor", "respaldo": "medidor",
     "principal_sin_cgm": "medidor", "respaldo_sin_cgm": "medidor",
@@ -103,8 +105,13 @@ _GRUPO_FUENTE_GENERACION = {
     "reconectador": "medidor", "excel_terceros": "medidor", "externo": "medidor",
     "inversores": "inversor", "crudos": "inversor", "crudos_parcial": "inversor",
     "solenium_power": "inversor",
-    "historico": "estimacion", "historico_vecino": "estimacion", "ninguno": "estimacion",
+    "historico": "estimacion", "historico_vecino": "estimacion",
     "editado_manualmente": "estimacion", "relleno_horario": "estimacion",
+    # "Apagado" es un estado CONFIRMADO (el proyecto no está generando),
+    # no una estimación de un dato faltante -- categoría propia, distinta
+    # de Estimación (pedido 2026-08-21: se veía como si "apagado" fuera lo
+    # mismo que "no sabemos y adivinamos").
+    "ninguno": "apagado",
     "revisar": "sin_fuente",
 }
 _GRUPO_FUENTE_CONSUMO = {
@@ -113,10 +120,10 @@ _GRUPO_FUENTE_CONSUMO = {
     "sin dato": "sin_fuente", "error": "sin_fuente",
 }
 _ETIQUETA_GRUPO_FUENTE = {
-    "medidor": "Medidor", "inversor": "Inversor",
-    "estimacion": "Estimación", "sin_fuente": "Sin fuente", "otro": "Otro",
+    "medidor": "Medidor", "inversor": "Inversor", "estimacion": "Estimación",
+    "apagado": "Apagado", "sin_fuente": "Sin fuente", "otro": "Otro",
 }
-_ORDEN_GRUPO_FUENTE = ["medidor", "inversor", "estimacion", "sin_fuente", "otro"]
+_ORDEN_GRUPO_FUENTE = ["medidor", "inversor", "estimacion", "apagado", "sin_fuente", "otro"]
 
 # Etiquetas legibles para el desglose del drill-down (Generación) -- mismo
 # vocabulario que ETIQUETAS_FUENTE en ReporteEnergiaDetalleTab.vue, para no

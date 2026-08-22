@@ -73,13 +73,14 @@ def test_distribucion_de_fuente_agrupa_medidor_inversor_estimacion(db):
     _gen(db, 3, 1, date(2026, 8, 3), medidor_usado="inversores")    # Inversor
     _gen(db, 4, 1, date(2026, 8, 4), medidor_usado="historico")     # Estimación
     _gen(db, 5, 1, date(2026, 8, 5), medidor_usado="revisar")       # Sin fuente
+    _gen(db, 6, 1, date(2026, 8, 6), medidor_usado="ninguno")       # Apagado
     _con(db, 1, 2, date(2026, 8, 1), caso="CGM")                    # Medidor
     _con(db, 2, 2, date(2026, 8, 2), caso="Histórico")              # Estimación
     db.commit()
 
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 5), db=db, _=None)
+    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 6), db=db, _=None)
     gen_map = {i.etiqueta: i.total for i in resp.distribucion_fuente_generacion}
-    assert gen_map == {"Medidor": 2, "Inversor": 1, "Estimación": 1, "Sin fuente": 1}
+    assert gen_map == {"Medidor": 2, "Inversor": 1, "Estimación": 1, "Apagado": 1, "Sin fuente": 1}
     con_map = {i.etiqueta: i.total for i in resp.distribucion_fuente_consumo}
     assert con_map == {"Medidor": 1, "Estimación": 1}
 

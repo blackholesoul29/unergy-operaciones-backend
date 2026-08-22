@@ -512,3 +512,40 @@ def test_un_pdf_ilegible_de_la_revisoria_sigue_pidiendo_revision():
     d = decidir_finanzas(c, FUENTE_REVISORIA, verificador=verificador)
     assert d["acciones"] == []
     assert d["requiere_revision"] is True
+
+
+def test_registrar_envio_por_cmu_no_degrada_un_mandato_firmado():
+    """46 envíos se rechazaron como 'firmado → sin_firma' en la corrida del
+    2026-08-20. Un mandato ya firmado que reaparece en el correo de lote que lo
+    mandó a revisión sigue firmado: lo que se anota es que salió."""
+    fila = NS(id=11, cmu="CMU1255", estado="firmado", periodo=None, tipo="costo",
+              drive_url=None, comentario=None, correo_ref=None,
+              fecha_firma=None, fecha_envio=None)
+    accion = {"cmu": "CMU1255", "estado": "sin_firma", "periodo": None,
+              "adjunto": None, "comentario": None}
+    correo = NS(message_id="<x@test>", fecha=AHORA, adjuntos=[])
+    r = _aplicar(_DBFake(fila), accion, correo)
+    assert r["resultado"] == "aplicado"
+    assert r["solo_fecha_envio"] is True
+    assert fila.estado == "firmado"          # no retrocede
+    assert fila.fecha_envio == AHORA.date()  # pero queda registrado el envío
+
+
+def test_registrar_envio_por_cmu_no_pisa_una_fecha_de_envio_previa():
+    fila = NS(id=11, cmu="CMU1255", estado="firmado", periodo=None, tipo="costo",
+              drive_url=None, comentario=None, correo_ref=None, fecha_firma=None,
+              fecha_envio=date(2026, 7, 1))
+    accion = {"cmu": "CMU1255", "estado": "sin_firma", "periodo": None,
+              "adjunto": None, "comentario": None}
+    _aplicar(_DBFake(fila), accion, NS(message_id="<x@test>", fecha=AHORA, adjuntos=[]))
+    assert fila.fecha_envio == date(2026, 7, 1)
+
+
+def test_un_cmu_nombrado_en_un_correo_de_correcciones_lleva_alterno():
+    """Sin alterno, un CMU nombrado en el texto que aún está en sin_firma
+    salía rechazado como 'sin_firma → corregido'."""
+    c = _correo("Te comparto los mandatos ya corregidos: CMU1300.",
+                asunto="Re: Revisión mandatos de costos - Julio")
+    c.destinatarios = "vlondono@jbp.com.co"
+    d = decidir_finanzas(c, FUENTE_SALIENTE, verificador=_firmas_fake(False))
+    assert d["acciones"][0]["estado_alterno"] == "sin_firma"

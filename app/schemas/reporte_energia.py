@@ -145,6 +145,110 @@ class EnviarReporteEnergiaResponse(BaseModel):
     motivo_bloqueo: str | None = None
 
 
+class EstadoXMFrontera(BaseModel):
+    """Una fila enviada que XM ya resolvió con error -- para poder ir
+    directo a esa frontera desde el contador."""
+    frontera_id: int
+    nombre_proyecto: str
+    tipo: str  # "generacion" | "consumo"
+
+
+class EstadoXMResponse(BaseModel):
+    """Resultado de revisar en Quoia si XM ya resolvió los reportes
+    enviados ese día -- distinto de EnviarReporteEnergiaResponse (que es
+    sobre si el POST a Quoia salió bien, no sobre la aprobación de XM)."""
+    fecha: date
+    total: int
+    en_espera: int
+    exitoso: int
+    exitoso_con_alerta: int
+    error: int
+    fallidas: list[EstadoXMFrontera]
+
+
+class DistribucionFuenteItem(BaseModel):
+    """Cuántas veces se usó cada fuente en el rango -- 'etiqueta' es
+    medidor_usado (Generación) o caso (Consumo); los vocabularios de los
+    dos árboles no son comparables 1:1, por eso van en listas separadas."""
+    etiqueta: str
+    total: int
+
+
+class RankingIncompletoItem(BaseModel):
+    """Solo Generación -- Consumo no tiene medidor_principal_completo/
+    respaldo_completo/solenium_completo (no hay inversores contra qué
+    comparar)."""
+    frontera_id: int
+    nombre_proyecto: str
+    veces_medidor_principal_incompleto: int
+    veces_medidor_respaldo_incompleto: int
+    veces_solenium_incompleto: int
+    dias_con_fila: int
+
+
+class RankingIntervencionItem(BaseModel):
+    frontera_id: int
+    nombre_proyecto: str
+    tipo: str  # "generacion" | "consumo"
+    veces_revisar_manualmente: int
+    veces_editado_manualmente: int
+    dias_con_fila: int
+
+
+class RecuperacionActivaItem(BaseModel):
+    """Cuenta de intentos/éxitos de recuperación activa por medidor,
+    parseado de recuperacion_datos (texto libre, ver curvas.py)."""
+    frontera_id: int
+    nombre_proyecto: str
+    intentos_principal: int
+    exitos_principal: int
+    intentos_respaldo: int
+    exitos_respaldo: int
+
+
+class DesgloseFuenteItem(BaseModel):
+    """Una fuente cruda (ej. 'Inversores × FP') y cuántos días aportó --
+    el detalle detrás del número agrupado de una tarjeta KPI."""
+    etiqueta: str
+    dias: int
+
+
+class DetalleFuenteFronteraItem(BaseModel):
+    """Una fila del drill-down por frontera al hacer clic en una tarjeta
+    KPI de distribución de fuente -- 'grupo' es el mismo agrupado
+    (Medidor/Inversor/Estimación/Sin fuente) que la tarjeta."""
+    frontera_id: int
+    nombre_proyecto: str
+    grupo: str
+    dias_totales: int
+    dias_grupo: int
+    desglose: list[DesgloseFuenteItem]
+
+
+class ResumenCallout(BaseModel):
+    """Una métrica de una sola línea para mostrar arriba de una tabla de
+    ranking (ej. '9 fronteras con datos incompletos') -- 'valor' ya viene
+    formateado (número o porcentaje) para que el frontend no tenga que
+    decidir el formato caso por caso."""
+    valor: str
+    etiqueta: str
+
+
+class ResumenHistoricoResponse(BaseModel):
+    desde: date
+    hasta: date
+    distribucion_fuente_generacion: list[DistribucionFuenteItem]
+    distribucion_fuente_consumo: list[DistribucionFuenteItem]
+    detalle_fuente_generacion: list[DetalleFuenteFronteraItem]
+    detalle_fuente_consumo: list[DetalleFuenteFronteraItem]
+    incompletos: list[RankingIncompletoItem]
+    incompletos_callouts: list[ResumenCallout]
+    intervencion_manual: list[RankingIntervencionItem]
+    intervencion_manual_callouts: list[ResumenCallout]
+    recuperacion_activa: list[RecuperacionActivaItem]
+    recuperacion_activa_callouts: list[ResumenCallout]
+
+
 class EstadoCorridaResponse(BaseModel):
     """Resultado de la última vez que se corrió /ejecutar para esta fecha --
     null (terminado_en=None) si nunca se ha corrido o todavía está en curso."""

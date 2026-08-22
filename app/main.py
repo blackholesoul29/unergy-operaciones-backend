@@ -3544,7 +3544,14 @@ def _deferred_init():
 
             _mgs_scheduler.add_job(
                 _scheduled_reporte_energia,
-                CronTrigger(hour=4, minute=0, timezone=settings.TIMEZONE),
+                # Adelantado de 4:00am a 3:30am (2026-08-21): la corrida del
+                # 20-ago tardó >45 min sin terminar (vs. 23-50 min los 10
+                # días previos, siempre completando las 106 filas) -- media
+                # hora más de margen antes de que alguien la revise en la
+                # mañana. Contrapartida asumida a propósito: lee el CGM de
+                # Quoia un poco menos asentado que a las 4am (ver docstring
+                # de _scheduled_reporte_energia).
+                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
             )

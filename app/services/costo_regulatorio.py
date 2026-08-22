@@ -3,16 +3,25 @@
 AISLADO: no toca modelos, tablas ni endpoints. Dos capas: `extraer_facturas_xm` lee la
 hoja (openpyxl); `costo_regulatorio_de_facturas` calcula sobre estructuras simples.
 
-Regla (confirmada): sumar los conceptos de las facturas GENERADOR, excluyendo "Energía en
-bolsa" (eso es compras) y excluyendo las facturas COMERCIALIZADOR. No sumar subtotales
-('Valor total', 'Total servicios ...'). El IVA de generador sí entra.
+Regla (calibrada contra el archivo real de garantías de XM, 2026-08): el Valor Garantía de
+XM = Exposición Energía + Cargo por Confiabilidad + Servicios CND-SIC-FAZNI. Por eso, del
+Cruce facturas GENERADOR se suman Cargo por confiabilidad + Servicios (administración SIC,
+despacho y coordinación CND) + FAZNI, y se EXCLUYEN:
+  - "Energía en bolsa" (es la compra/exposición, va aparte),
+  - "Arranque y parada" (XM no lo mete en el Valor Garantía),
+  - el IVA (las columnas de XM son cargos base sin IVA),
+  - las facturas COMERCIALIZADOR completas,
+  - los subtotales ('Valor total', 'Total servicios ...').
+
+Para volver a meter el IVA, sacar `_es_iva` del filtro (una línea).
 """
 from __future__ import annotations
 
 import unicodedata
 
-# Concepto que es "compras", no regulatorio.
-_CONCEPTO_COMPRAS = "energia en bolsa"
+# Conceptos que NO entran a la garantía: "energia en bolsa" es la compra/exposición;
+# "arranque y parada" XM no lo incluye en el Valor Garantía.
+_CONCEPTOS_EXCLUIDOS = {"energia en bolsa", "arranque y parada"}
 # Tipo de factura que se excluye por completo.
 _TIPO_EXCLUIDO = "comercializador"
 
@@ -31,6 +40,11 @@ def _es_subtotal(concepto_norm: str) -> bool:
     return concepto_norm.startswith("valor total") or concepto_norm.startswith("total ")
 
 
+def _es_iva(concepto_norm: str) -> bool:
+    """La línea de IVA (p. ej. '+ i.v.a. (19%)'); XM no la mete en el Valor Garantía."""
+    return "i.v.a" in concepto_norm or concepto_norm.startswith("iva")
+
+
 def costo_regulatorio_de_facturas(facturas: list[dict]) -> float:
     """facturas = [{'asic','tipo','lineas':[(concepto, monto), ...]}] -> total regulatorio."""
     total = 0.0
@@ -39,7 +53,7 @@ def costo_regulatorio_de_facturas(facturas: list[dict]) -> float:
             continue
         for concepto, monto in f.get("lineas", []):
             cn = _norm(concepto)
-            if _es_subtotal(cn) or cn == _CONCEPTO_COMPRAS:
+            if _es_subtotal(cn) or cn in _CONCEPTOS_EXCLUIDOS or _es_iva(cn):
                 continue
             try:
                 total += float(monto)

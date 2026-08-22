@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -24,7 +25,10 @@ from app.schemas.reporte_energia import (
     EditarCurvaRequest, ValidarResponse, EjecutarDiaResponse, EnviarReporteEnergiaResponse,
     EdicionAuditoria, EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
-    CargaExcelTercerosResponse,
+    CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
+    DistribucionFuenteItem, RankingIncompletoItem, RankingIntervencionItem,
+    RecuperacionActivaItem, ResumenHistoricoResponse, DesgloseFuenteItem,
+    DetalleFuenteFronteraItem, ResumenCallout,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
 from app.services.reporte_energia import excel_terceros
@@ -78,6 +82,297 @@ def resumen(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(g
     return ResumenReporteEnergia(
         fecha=fecha, total=total, revisar=revisar, corregido_automatico=corregido,
         confiado=confiado, puede_enviar=(revisar == 0 and total > 0),
+    )
+
+
+_RECUPERACION_RE = {
+    "principal": re.compile(r"principal:\s*(éxito|falló)", re.IGNORECASE),
+    "respaldo": re.compile(r"respaldo:\s*(éxito|falló)", re.IGNORECASE),
+}
+
+# Agrupación de fuente para el Resumen histórico (decidido con el usuario
+# 2026-08-21) -- los vocabularios crudos de medidor_usado/caso tienen
+# demasiadas variantes técnicas para leerse como KPI de negocio. "Sin
+# fuente" queda separado de "Estimación" a propósito: son casos donde no
+# se pudo usar NADA (pendiente de revisar manualmente), no un dato
+# sustituto real como histórico/apagado. "Excluida" no se cuenta -- ese
+# día no se reportó a propósito, no es una fuente.
+_GRUPO_FUENTE_GENERACION = {
+    "cgm": "medidor", "principal": "medidor", "respaldo": "medidor",
+    "principal_sin_cgm": "medidor", "respaldo_sin_cgm": "medidor",
+    "principal_sin_historico": "medidor", "respaldo_sin_historico": "medidor",
+    "reconectador": "medidor", "excel_terceros": "medidor", "externo": "medidor",
+    "inversores": "inversor", "crudos": "inversor", "crudos_parcial": "inversor",
+    "solenium_power": "inversor",
+    "historico": "estimacion", "historico_vecino": "estimacion", "ninguno": "estimacion",
+    "editado_manualmente": "estimacion", "relleno_horario": "estimacion",
+    "revisar": "sin_fuente",
+}
+_GRUPO_FUENTE_CONSUMO = {
+    "cgm": "medidor", "medidor": "medidor",
+    "histórico": "estimacion",
+    "sin dato": "sin_fuente", "error": "sin_fuente",
+}
+_ETIQUETA_GRUPO_FUENTE = {
+    "medidor": "Medidor", "inversor": "Inversor",
+    "estimacion": "Estimación", "sin_fuente": "Sin fuente", "otro": "Otro",
+}
+_ORDEN_GRUPO_FUENTE = ["medidor", "inversor", "estimacion", "sin_fuente", "otro"]
+
+# Etiquetas legibles para el desglose del drill-down (Generación) -- mismo
+# vocabulario que ETIQUETAS_FUENTE en ReporteEnergiaDetalleTab.vue, para no
+# mostrarle a la usuaria el nombre crudo de medidor_usado.
+_ETIQUETA_FUENTE_CRUDA_GENERACION = {
+    "cgm": "CGM", "principal": "Medidor principal", "respaldo": "Medidor respaldo",
+    "principal_sin_cgm": "Medidor principal", "respaldo_sin_cgm": "Medidor respaldo",
+    "principal_sin_historico": "Medidor principal", "respaldo_sin_historico": "Medidor respaldo",
+    "reconectador": "Reconectador", "excel_terceros": "Excel de terceros", "externo": "Reporta otra empresa",
+    "inversores": "Inversores × FP", "crudos": "Datos crudos", "crudos_parcial": "Datos crudos (parcial)",
+    "solenium_power": "Inversores (power)",
+    "historico": "Histórico propio", "historico_vecino": "Histórico (vecino de predio)",
+    "ninguno": "Apagado", "editado_manualmente": "Editado manualmente", "relleno_horario": "Relleno horario",
+    "revisar": "Sin fuente",
+}
+
+
+def _distribucion_y_detalle(
+    filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
+    etiquetas_legibles: dict[str, str] | None = None,
+) -> tuple[list[DistribucionFuenteItem], list[DetalleFuenteFronteraItem]]:
+    """A partir de (frontera_id, nombre_frontera, etiqueta_cruda, n) --
+    devuelve (a) el total agrupado global (para las tarjetas KPI) y (b) el
+    detalle por frontera+grupo con desglose de fuentes crudas (para el
+    drill-down al hacer clic en una tarjeta). 'excluida' no se cuenta como
+    fuente, pero SÍ cuenta en dias_totales (ese día sí tuvo fila, solo que
+    a propósito no se reportó)."""
+    conteos_globales: dict[str, int] = {}
+    por_frontera: dict[int, dict] = {}
+    for fid, nombre, etiqueta_cruda, n in filas:
+        info = por_frontera.setdefault(fid, {
+            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre), "dias_totales": 0, "grupos": {},
+        })
+        info["dias_totales"] += n
+        if etiqueta_cruda is None:
+            grupo, etq_legible = "sin_fuente", "Sin fuente"
+        else:
+            low = etiqueta_cruda.strip().lower()
+            if low == "excluida":
+                continue  # no es una fuente -- ese día no se reportó a propósito
+            grupo = mapa.get(low, "otro")
+            etq_legible = (etiquetas_legibles or {}).get(low, etiqueta_cruda)
+        conteos_globales[grupo] = conteos_globales.get(grupo, 0) + n
+        g = info["grupos"].setdefault(grupo, {"dias": 0, "desglose": {}})
+        g["dias"] += n
+        g["desglose"][etq_legible] = g["desglose"].get(etq_legible, 0) + n
+
+    global_dist = [
+        DistribucionFuenteItem(etiqueta=_ETIQUETA_GRUPO_FUENTE[g], total=conteos_globales[g])
+        for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales
+    ]
+    detalle = [
+        DetalleFuenteFronteraItem(
+            frontera_id=fid, nombre_proyecto=info["nombre"], grupo=_ETIQUETA_GRUPO_FUENTE[grupo],
+            dias_totales=info["dias_totales"], dias_grupo=g["dias"],
+            desglose=[
+                DesgloseFuenteItem(etiqueta=e, dias=n)
+                for e, n in sorted(g["desglose"].items(), key=lambda kv: -kv[1])
+            ],
+        )
+        for fid, info in por_frontera.items()
+        for grupo, g in info["grupos"].items()
+    ]
+    return global_dist, detalle
+
+
+@router.get("/resumen-historico", response_model=ResumenHistoricoResponse)
+def resumen_historico(
+    desde: date = Query(...), hasta: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Patrones a través de varios días, por frontera -- distinto de
+    /resumen (un solo día). Responde: qué tan seguido se usa cada fuente,
+    qué medidores tienen datos incompletos/comunicación intermitente, si
+    la recuperación activa de verdad funciona (y qué medidor le falla), y
+    qué fronteras caen en Revisar Manualmente/corrección manual una y otra
+    vez (2026-08-21)."""
+    if hasta < desde:
+        raise HTTPException(422, "'hasta' no puede ser anterior a 'desde'")
+
+    # 1) Distribución de fuente -- agrupada en Medidor/Inversor/Estimación/
+    # Sin fuente (decidido con el usuario 2026-08-21: el vocabulario crudo
+    # de medidor_usado/caso tiene demasiadas variantes técnicas para leerse
+    # como KPI). Se trae por frontera (no solo el total) para poder armar
+    # el drill-down al hacer clic en una tarjeta.
+    gen_filas = db.execute(
+        select(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera,
+               ReporteEnergiaGeneracion.medidor_usado, func.count())
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera, ReporteEnergiaGeneracion.medidor_usado)
+    ).all()
+    con_filas = db.execute(
+        select(ReporteEnergiaConsumo.frontera_id, Frontera.nombre_frontera,
+               ReporteEnergiaConsumo.caso, func.count())
+        .join(Frontera, Frontera.id == ReporteEnergiaConsumo.frontera_id)
+        .where(ReporteEnergiaConsumo.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaConsumo.frontera_id, Frontera.nombre_frontera, ReporteEnergiaConsumo.caso)
+    ).all()
+    dist_gen, detalle_gen = _distribucion_y_detalle(gen_filas, _GRUPO_FUENTE_GENERACION, _ETIQUETA_FUENTE_CRUDA_GENERACION)
+    dist_con, detalle_con = _distribucion_y_detalle(con_filas, _GRUPO_FUENTE_CONSUMO)
+
+    # 2) Datos incompletos -- solo Generación (Consumo no tiene inversores
+    # contra qué comparar, así que no tiene estas 3 columnas).
+    incompletos_rows = db.execute(
+        select(
+            ReporteEnergiaGeneracion.frontera_id,
+            Frontera.nombre_frontera,
+            func.sum(case((ReporteEnergiaGeneracion.medidor_principal_completo.is_(False), 1), else_=0)),
+            func.sum(case((ReporteEnergiaGeneracion.medidor_respaldo_completo.is_(False), 1), else_=0)),
+            func.sum(case((ReporteEnergiaGeneracion.solenium_completo.is_(False), 1), else_=0)),
+            func.count(),
+        )
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha.between(desde, hasta))
+        .group_by(ReporteEnergiaGeneracion.frontera_id, Frontera.nombre_frontera)
+    ).all()
+    # Solo fronteras con AL MENOS un día incompleto -- mostrar también las
+    # que están perfectas (0% en las 3 columnas) es ruido, no información
+    # (pedido 2026-08-21: "MGS 0042 San Martín Norte"/"GD Taurus VIII" con
+    # 0%/0%/0% aparecían igual). Ordenadas de más a menos crítico (mayor %
+    # de días afectados en cualquiera de las 3 fuentes primero).
+    incompletos = sorted(
+        (
+            RankingIncompletoItem(
+                frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre),
+                veces_medidor_principal_incompleto=int(v_ppal or 0),
+                veces_medidor_respaldo_incompleto=int(v_resp or 0),
+                veces_solenium_incompleto=int(v_sol or 0),
+                dias_con_fila=dias,
+            )
+            for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
+            if v_ppal or v_resp or v_sol
+        ),
+        key=lambda i: max(
+            i.veces_medidor_principal_incompleto, i.veces_medidor_respaldo_incompleto, i.veces_solenium_incompleto,
+        ) / i.dias_con_fila,
+        reverse=True,
+    )
+    _incompletos_graves = [
+        i for i in incompletos
+        if max(i.veces_medidor_principal_incompleto, i.veces_medidor_respaldo_incompleto, i.veces_solenium_incompleto)
+        / i.dias_con_fila > 0.3
+    ]
+    incompletos_callouts = [
+        ResumenCallout(valor=str(len(incompletos)), etiqueta="fronteras con al menos un día de datos incompletos"),
+        ResumenCallout(valor=str(len(_incompletos_graves)), etiqueta="con más del 30% de sus días afectados"),
+    ]
+
+    # 3) Intervención manual -- ambos árboles, señales distintas
+    # (revisar_manualmente=pendiente, editado_manualmente=ya corregido).
+    # Mismo criterio que incompletos: sin ninguna de las dos banderas es
+    # ruido, no se muestra.
+    def _intervencion(Modelo, tipo):
+        filas = db.execute(
+            select(
+                Modelo.frontera_id, Frontera.nombre_frontera,
+                func.sum(case((Modelo.revisar_manualmente.is_(True), 1), else_=0)),
+                func.sum(case((Modelo.editado_manualmente.is_(True), 1), else_=0)),
+                func.count(),
+            )
+            .join(Frontera, Frontera.id == Modelo.frontera_id)
+            .where(Modelo.fecha.between(desde, hasta))
+            .group_by(Modelo.frontera_id, Frontera.nombre_frontera)
+        ).all()
+        return [
+            RankingIntervencionItem(
+                frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre), tipo=tipo,
+                veces_revisar_manualmente=int(v_rev or 0), veces_editado_manualmente=int(v_edit or 0),
+                dias_con_fila=dias,
+            )
+            for fid, nombre, v_rev, v_edit, dias in filas
+            if v_rev or v_edit
+        ]
+    intervencion_manual = sorted(
+        _intervencion(ReporteEnergiaGeneracion, "generacion") + _intervencion(ReporteEnergiaConsumo, "consumo"),
+        key=lambda i: i.veces_revisar_manualmente / i.dias_con_fila, reverse=True,
+    )
+    intervencion_manual_callouts = [
+        ResumenCallout(
+            valor=str(sum(1 for i in intervencion_manual if i.veces_revisar_manualmente > 0)),
+            etiqueta="fronteras necesitaron revisión manual",
+        ),
+        ResumenCallout(
+            valor=str(sum(1 for i in intervencion_manual if i.veces_editado_manualmente > 0)),
+            etiqueta="ya corregidas a mano al menos una vez",
+        ),
+    ]
+
+    # 4) Recuperación activa -- recuperacion_datos es texto libre (ver
+    # curvas.py:298-315), no hay columna estructurada por medidor -- se
+    # trae solo lo no-nulo (pocas filas) y se parsea acá.
+    def _recuperacion_filas(Modelo):
+        return db.execute(
+            select(Modelo.frontera_id, Frontera.nombre_frontera, Modelo.recuperacion_datos)
+            .join(Frontera, Frontera.id == Modelo.frontera_id)
+            .where(Modelo.fecha.between(desde, hasta), Modelo.recuperacion_datos.is_not(None))
+        ).all()
+
+    conteos: dict[int, dict] = {}
+    for fid, nombre, texto in _recuperacion_filas(ReporteEnergiaGeneracion) + _recuperacion_filas(ReporteEnergiaConsumo):
+        c = conteos.setdefault(fid, {
+            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
+            "intentos_principal": 0, "exitos_principal": 0,
+            "intentos_respaldo": 0, "exitos_respaldo": 0,
+        })
+        for medidor in ("principal", "respaldo"):
+            m = _RECUPERACION_RE[medidor].search(texto or "")
+            if m:
+                c[f"intentos_{medidor}"] += 1
+                if m.group(1).lower() == "éxito":
+                    c[f"exitos_{medidor}"] += 1
+    # Más crítico primero = menor tasa de éxito (a la que le falla más la
+    # recuperación); una fila sin ningún intento real (regex no matcheó
+    # nada del texto libre) se manda al final, no arriba como si fuera la
+    # peor.
+    def _tasa_exito(r):
+        total = r.intentos_principal + r.intentos_respaldo
+        return (r.exitos_principal + r.exitos_respaldo) / total if total else 1.0
+    recuperacion_activa = sorted(
+        (
+            RecuperacionActivaItem(frontera_id=fid, nombre_proyecto=c["nombre"], **{
+                k: v for k, v in c.items() if k != "nombre"
+            })
+            for fid, c in conteos.items()
+        ),
+        key=_tasa_exito,
+    )
+    _intentos_totales = sum(r.intentos_principal + r.intentos_respaldo for r in recuperacion_activa)
+    _exitos_totales = sum(r.exitos_principal + r.exitos_respaldo for r in recuperacion_activa)
+    _tasa_global = round(_exitos_totales / _intentos_totales * 100) if _intentos_totales else 0
+    # "Casi nunca responde" -- al menos 2 intentos (para no juzgar con una
+    # sola muestra) y menos de 1 de cada 3 exitosos.
+    _medidores_problema = sum(
+        1 for r in recuperacion_activa for intentos, exitos in (
+            (r.intentos_principal, r.exitos_principal), (r.intentos_respaldo, r.exitos_respaldo),
+        ) if intentos >= 2 and exitos / intentos < 0.34
+    )
+    recuperacion_activa_callouts = [
+        ResumenCallout(valor=f"{_tasa_global}%", etiqueta="tasa de éxito global de la recuperación activa"),
+        ResumenCallout(valor=str(_medidores_problema), etiqueta="medidores que casi nunca responden"),
+    ]
+
+    return ResumenHistoricoResponse(
+        desde=desde, hasta=hasta,
+        distribucion_fuente_generacion=dist_gen,
+        distribucion_fuente_consumo=dist_con,
+        detalle_fuente_generacion=detalle_gen,
+        detalle_fuente_consumo=detalle_con,
+        incompletos=incompletos,
+        incompletos_callouts=incompletos_callouts,
+        intervencion_manual=intervencion_manual,
+        intervencion_manual_callouts=intervencion_manual_callouts,
+        recuperacion_activa=recuperacion_activa,
+        recuperacion_activa_callouts=recuperacion_activa_callouts,
     )
 
 
@@ -428,6 +723,17 @@ def rellenar_horario(
             )
         else:
             curva_actual, horas_historico = rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
+
+    # La curva de referencia del reconectador se guarda en cuanto se
+    # consultó y respondió algo -- independiente de si alguna de sus horas
+    # terminó usándose para rellenar 'curva_final'. Antes solo se guardaba
+    # si el relleno completo tenía éxito (ver el 400 de abajo), así que un
+    # reconectador que respondió pero cuyas horas ya estaban cubiertas por
+    # otra fuente (o fuera de HORAS_RECONECTADOR) nunca se guardaba ni se
+    # veía en el chart aunque el dato existiera (pedido 2026-08-21).
+    if es_generacion and curva_reconectador_ref is not None:
+        rep.curva_reconectador_referencia = curva_a_lista(curva_reconectador_ref)
+        db.commit()
 
     if not (horas_medidor_cruzado or horas_reconectador or horas_solenium_h or horas_historico):
         raise HTTPException(400, "Ninguna fuente tenía dato para las horas faltantes")
@@ -847,8 +1153,8 @@ def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
     """Envía UNA fila a Quoia (gaia.post_report) -- factorizado para
     reusarse tanto en /enviar (todas las fronteras del día) como en
-    /fronteras/{id}/enviar (una sola, envío controlado de prueba antes de
-    confiar en el envío masivo -- ver ADVERTENCIA en gaia_client.post_report).
+    /reportar-manual (una lista explícita de fronteras fuera del
+    clasificador). Ver ADVERTENCIA en gaia_client.post_report.
 
     Retorna (resultado, motivo):
     - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
@@ -892,45 +1198,6 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
     rep.enviado_quoia_ok = ok
     rep.enviado_quoia_error = motivo
     return ok, motivo
-
-
-@router.post("/fronteras/{frontera_id}/enviar", response_model=EnviarReporteEnergiaResponse)
-def enviar_frontera(
-    frontera_id: int, fecha: date = Query(...),
-    db: Session = Depends(get_db), _=Depends(get_current_user),
-):
-    """Envío controlado de UNA sola frontera a Quoia -- pensado para probar
-    gaia.post_report() contra Quoia real (nunca se ha hecho, ver ADVERTENCIA
-    en gaia_client.py) antes de confiar en el envío masivo (POST /enviar),
-    que manda TODAS las fronteras del día de una sola vez. Misma lógica de
-    bloqueo y de "ya válido en Quoia" que el envío masivo, escopada a esta
-    fila -- así la prueba de mañana refleja fielmente lo que haría el botón
-    real.
-    """
-    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    es_generacion = Modelo is ReporteEnergiaGeneracion
-
-    if rep.revisar_manualmente:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[], bloqueado=True,
-            motivo_bloqueo="Esta frontera tiene Revisar Manualmente pendiente.",
-        )
-
-    gaia = GaiaClient()
-    borders = resolver_borders(gaia, {front.codigo_frontera}) if front.codigo_frontera else {}
-    resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
-    db.commit()
-
-    if resultado is None:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[], bloqueado=False,
-            motivo_bloqueo="Quoia ya tenía el dato correcto (CGM válido) -- no hacía falta enviar nada.",
-        )
-    if resultado is False:
-        return EnviarReporteEnergiaResponse(
-            fecha=fecha, enviados=0, fallidos=[f"{_nombre_frontera(front)} — {motivo}"], bloqueado=False,
-        )
-    return EnviarReporteEnergiaResponse(fecha=fecha, enviados=1, fallidos=[], bloqueado=False)
 
 
 @router.post("/enviar", response_model=EnviarReporteEnergiaResponse)
@@ -992,3 +1259,90 @@ def enviar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(ge
 
     db.commit()
     return EnviarReporteEnergiaResponse(fecha=fecha, enviados=enviados, fallidos=fallidos, bloqueado=False)
+
+
+def _fronteras_enviadas(db: Session, fecha: date) -> list[tuple]:
+    """(rep, front, tipo) de toda fila con enviado_quoia_en no nulo para la
+    fecha -- las que de verdad se intentaron mandar a Quoia."""
+    gen_filas = db.execute(
+        select(ReporteEnergiaGeneracion, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaGeneracion.frontera_id)
+        .where(ReporteEnergiaGeneracion.fecha == fecha, ReporteEnergiaGeneracion.enviado_quoia_en.is_not(None))
+    ).all()
+    con_filas = db.execute(
+        select(ReporteEnergiaConsumo, Frontera)
+        .join(Frontera, Frontera.id == ReporteEnergiaConsumo.frontera_id)
+        .where(ReporteEnergiaConsumo.fecha == fecha, ReporteEnergiaConsumo.enviado_quoia_en.is_not(None))
+    ).all()
+    return [(rep, front, "generacion") for rep, front in gen_filas] + \
+           [(rep, front, "consumo") for rep, front in con_filas]
+
+
+def _etiqueta_xm(rep) -> str:
+    """Traduce xm_exitoso/xm_estado (o su ausencia) a la misma etiqueta que
+    muestra el dashboard de Quoia. xm_exitoso=None (sin respuesta todavía
+    de get_border_report_status) es 'en_espera' -- así se ve en Quoia antes
+    de que XM lo resuelva. Mapeo de 'exitoso_con_alerta' inferido (no
+    confirmado con un caso real 2026-08-21): xm_exitoso=True pero
+    xm_estado distinto de 'OK' (ej. 'WARNING')."""
+    if rep.xm_exitoso is None:
+        return "en_espera"
+    if rep.xm_exitoso is False:
+        return "error"
+    return "exitoso" if (rep.xm_estado or "").upper() == "OK" else "exitoso_con_alerta"
+
+
+@router.get("/estado-quoia", response_model=EstadoXMResponse)
+def estado_quoia_actual(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Estado de aprobación de XM YA GUARDADO -- sin volver a consultar
+    Quoia (rápido, seguro de llamar al abrir la vista). Para forzar una
+    revisión en vivo contra Quoia, usar POST /estado-quoia."""
+    filas = _fronteras_enviadas(db, fecha)
+    conteos = {"en_espera": 0, "exitoso": 0, "exitoso_con_alerta": 0, "error": 0}
+    fallidas: list[EstadoXMFrontera] = []
+    for rep, front, tipo in filas:
+        etiqueta = _etiqueta_xm(rep)
+        conteos[etiqueta] += 1
+        if etiqueta == "error":
+            fallidas.append(EstadoXMFrontera(frontera_id=front.id, nombre_proyecto=_nombre_frontera(front), tipo=tipo))
+    return EstadoXMResponse(fecha=fecha, total=len(filas), fallidas=fallidas, **conteos)
+
+
+@router.post("/estado-quoia", response_model=EstadoXMResponse)
+def estado_quoia_revisar(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Revisa en Quoia si XM ya resolvió los reportes ENVIADOS ese día
+    (enviado_quoia_en no nulo) -- distinto de 'estado_reporte' (que se
+    llena UNA VEZ al clasificar, ANTES de enviar, y sirve para decidir si
+    el CGM automático de Quoia es válido como fuente). Solo vuelve a
+    golpear Quoia para las que aún no tienen respuesta (xm_exitoso=None) --
+    pensado para dispararse justo después de /enviar y llamarse de nuevo
+    cada tanto desde el frontend hasta que nadie quede 'en_espera'."""
+    filas = _fronteras_enviadas(db, fecha)
+    pendientes = [(rep, front, tipo) for rep, front, tipo in filas if rep.xm_exitoso is None]
+
+    if pendientes:
+        gaia = GaiaClient()
+        frt_codes = {f.codigo_frontera for _, f, _ in pendientes if f.codigo_frontera}
+        borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
+        ahora = datetime.now(timezone.utc)
+        for rep, front, _tipo in pendientes:
+            meta = borders.get((front.codigo_frontera or "").strip().lower())
+            border_id = meta.get("id") if meta else None
+            estado_raw = gaia.get_border_report_status(border_id, str(fecha)) if border_id else None
+            rep.xm_verificado_en = ahora
+            if estado_raw:
+                rep.xm_process_id = estado_raw.get("xm_process_id")
+                rep.xm_estado = estado_raw.get("status")
+                rep.xm_exitoso = estado_raw.get("success")
+        db.commit()
+
+    conteos = {"en_espera": 0, "exitoso": 0, "exitoso_con_alerta": 0, "error": 0}
+    fallidas: list[EstadoXMFrontera] = []
+    for rep, front, tipo in filas:
+        etiqueta = _etiqueta_xm(rep)
+        conteos[etiqueta] += 1
+        if etiqueta == "error":
+            fallidas.append(EstadoXMFrontera(frontera_id=front.id, nombre_proyecto=_nombre_frontera(front), tipo=tipo))
+    return EstadoXMResponse(fecha=fecha, total=len(filas), fallidas=fallidas, **conteos)
+
+

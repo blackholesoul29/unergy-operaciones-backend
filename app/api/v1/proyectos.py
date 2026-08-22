@@ -639,6 +639,7 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
 
     for k, v in payload.items():
         setattr(p, k, v)
+
     try:
         db.commit()
     except IntegrityError:
@@ -892,6 +893,7 @@ def toggle_servicios(id: int, data: dict, db: Session = Depends(get_db), _=Depen
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)
+
     db.commit()
     return _get_proyecto_or_404(id, db)
 

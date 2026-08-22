@@ -21,7 +21,12 @@ _PALABRAS_CORRECCION = (
 TRANSICIONES_FIRMA = {
     "sin_firma":             {"con_comentarios", "firmado"},
     "con_comentarios":       {"corregido"},
-    "corregido":             {"firmado", "sin_firma"},
+    # `con_comentarios` desde `corregido` cierra el lazo observar → corregir →
+    # volver a observar, que en la práctica ocurre: la revisoría revisa lo
+    # corregido y a veces le encuentra algo nuevo (3 casos en la corrida del
+    # 2026-08-20). Un mandato corregido todavía NO está firmado, así que no
+    # contradice la regla de que un mandato firmado no lleva correcciones.
+    "corregido":             {"firmado", "sin_firma", "con_comentarios"},
     "firmado":               {"enviado_inversionista"},
     "enviado_inversionista": set(),
 }

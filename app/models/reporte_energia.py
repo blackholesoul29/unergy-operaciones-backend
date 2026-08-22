@@ -109,6 +109,16 @@ class ReporteEnergiaGeneracion(Base):
     enviado_quoia_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     enviado_quoia_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Aprobación de XM sobre el reporte YA enviado (distinto de enviado_quoia_ok,
+    # que solo dice si el POST llegó bien) -- se llena al revisar
+    # gaia.get_border_report_status() después de enviar. xm_process_id/xm_estado
+    # quedan null mientras XM no ha resuelto todavía ("En espera" en el
+    # dashboard de Quoia); 2026-08-21.
+    xm_process_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    xm_estado: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    xm_exitoso: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    xm_verificado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -193,6 +203,11 @@ class ReporteEnergiaConsumo(Base):
     enviado_quoia_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     enviado_quoia_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     enviado_quoia_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    xm_process_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    xm_estado: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    xm_exitoso: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    xm_verificado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

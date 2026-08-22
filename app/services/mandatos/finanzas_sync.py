@@ -227,7 +227,10 @@ def decidir_finanzas(correo: CorreoCrudo, fuente: str, *, verificador=verificar_
         nombrados = [c for c in extraer_cmus(_sin_cita(correo.cuerpo or ""))
                      if c not in con_pdf]
         for cmu in nombrados:
+            # Mismo alterno que los CMU que vienen como adjunto: el correo
+            # mezcla corregidos con faltantes y desde el texto no se distinguen.
             acciones.append({"cmu": cmu, "estado": "corregido", "comentario": None,
+                             "estado_alterno": "sin_firma",
                              "adjunto": None, "proyecto": None, "tercero": None,
                              "tipo": None, "periodo": None, "pa_codigo": None,
                              "firmas": None})
@@ -295,6 +298,20 @@ def _aplicar(db, accion: dict, correo: CorreoCrudo) -> dict:
                 and (existente.estado == alterno
                      or transicion_firma_valida(existente.estado, alterno))):
             destino = alterno
+        if destino == "sin_firma" and existente.estado != "sin_firma":
+            # Registrar un envío NUNCA degrada: solo estampa fecha_envio. Un
+            # mandato ya firmado que reaparece en el correo de lote que lo mandó
+            # a revisión sigue firmado -- lo que se anota es que salió, para que
+            # la reconciliación tenga denominador.
+            #
+            # La ruta con identidad completa ya tenía esta excepción; a la ruta
+            # por CMU se le olvidó, y rechazó 46 envíos como
+            # "firmado → sin_firma" en la corrida del 2026-08-20.
+            existente.fecha_envio = existente.fecha_envio or correo.fecha.date()
+            existente.correo_ref = correo.message_id
+            return {"cmu": accion["cmu"], "resultado": "aplicado",
+                    "id": existente.id, "estado_previo": existente.estado,
+                    "estado_nuevo": existente.estado, "solo_fecha_envio": True}
         if existente.estado == destino:
             # Idempotencia, no conflicto: llegó otra vez lo mismo. Pasa seguido
             # -- la revisoría reenvía el hilo con los mismos adjuntos. Marcarlo

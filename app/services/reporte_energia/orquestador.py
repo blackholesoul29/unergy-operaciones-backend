@@ -6,9 +6,10 @@ Quoia y mapear por nombre (mapeo.py), itera las fronteras YA registradas en
 la base de datos de Operaciones (fuente de verdad: fronteras.proyecto_id +
 proyectos.project_id_solenium, ya reconciliados por el equipo).
 
-Solo se procesan fronteras de proyectos con el servicio de CGM contratado
-(Proyecto.srv_cgm) -- son las únicas que de verdad reportan al ASIC;
-confirmado con el equipo 2026-07-28 (104 de 139 fronteras activas).
+Solo se procesan fronteras cuyo codigo_frontera está registrado en Quoia
+(ver _fronteras_con_reporte) -- Quoia es la fuente de verdad de qué debe
+reportarse al ASIC, no un campo propio de Proyecto (decidido 2026-08-21,
+tras encontrar huecos reales en la regla propia anterior).
 
 'consumo_auxiliar' y 'consumo_propio' se tratan igual que 'consumo' -- en
 los datos reales no existe ninguna frontera con el tipo 'consumo' puro,
@@ -25,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
-from app.models.proyectos import Proyecto, EstadoProyectoEnum
+from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solenium_client import SoleniumClient
@@ -56,11 +57,21 @@ def cancelar_corrida(fecha: date) -> None:
     _CANCELAR[str(fecha)] = True
 
 
-def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
+def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[Frontera, str | None]]:
     """(Frontera, project_id_solenium) de las fronteras que de verdad
-    reportan al ASIC -- 'activa' es solo el estado de la FRONTERA; hace
-    falta ADEMÁS que el PROYECTO esté en operación y tenga el servicio de
-    CGM contratado (confirmado con el equipo 2026-07-28/29)."""
+    reportan al ASIC -- 'activa'/'deleted_at' son nuestro propio control de
+    desactivación (una frontera que marcamos inactiva no reporta aunque
+    Quoia la siga teniendo registrada).
+
+    Para decidir SI reporta, la fuente de verdad es Quoia mismo:
+    codigos_quoia es el conjunto de frt_code (lowercase) que trae
+    gaia.get_all_borders() -- lo mismo que alimenta la vista "Reportes" de
+    Quoia Manager. Antes se usaba una regla propia (Proyecto.estado ==
+    en_operacion AND srv_cgm, con una excepción manual
+    reportar_asic_forzado) -- se descartó 2026-08-21 tras comparar ambos
+    conjuntos contra datos reales: 0 fronteras se habrían perdido, y esa
+    regla propia SÍ tenía huecos reales (GD Piojó, GD La Hormiguita: ya
+    registradas en Quoia pero nunca marcadas a mano)."""
     filas = db.execute(
         select(Frontera, Proyecto.project_id_solenium)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
@@ -68,11 +79,12 @@ def _fronteras_con_reporte(db: Session) -> list[tuple[Frontera, str | None]]:
             Frontera.estado == EstadoFronteraEnum.activa,
             Frontera.codigo_frontera.is_not(None),
             Frontera.deleted_at.is_(None),
-            Proyecto.estado == EstadoProyectoEnum.en_operacion,
-            Proyecto.srv_cgm.is_(True),
         )
     ).all()
-    return [(f, sid) for f, sid in filas]
+    return [
+        (f, sid) for f, sid in filas
+        if f.codigo_frontera.strip().lower() in codigos_quoia
+    ]
 
 
 def _exclusion_activa(db: Session, frontera_id: int, fecha: date) -> ReporteEnergiaExclusion | None:
@@ -236,7 +248,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     omitidas: list[str] = []
     fallidas: list[str] = []
 
-    fronteras = _fronteras_con_reporte(db)
+    fronteras = _fronteras_con_reporte(db, set(bordes.keys()))
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
 
     _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior

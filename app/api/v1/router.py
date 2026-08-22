@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, mgs, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, costos_variables, polizas, starlink, inicio_operacion, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, finanzas_mandatos, retos
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, polizas, starlink, inicio_operacion, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, finanzas_mandatos, retos
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -21,7 +21,6 @@ api_router.include_router(alertas.router)
 api_router.include_router(contratos_servicio.router)
 api_router.include_router(informes.router)
 api_router.include_router(cumplimiento.router)
-api_router.include_router(mgs.router)
 api_router.include_router(evo_proxy.router)
 api_router.include_router(solar.router)
 api_router.include_router(generacion_solar.router)
@@ -33,10 +32,8 @@ api_router.include_router(representacion.router)
 api_router.include_router(reconectadores.router)
 api_router.include_router(om.router)
 api_router.include_router(arriendos.router)
-api_router.include_router(costos_variables.router)
 api_router.include_router(polizas.router)
 api_router.include_router(starlink.router)
-api_router.include_router(inicio_operacion.router)
 api_router.include_router(informe_om.router)
 api_router.include_router(panel_contable.router)
 api_router.include_router(facturacion.router)

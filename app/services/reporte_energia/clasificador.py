@@ -584,6 +584,21 @@ def clasificar_generacion(
     resultado["curva_solenium_referencia"] = (
         curva_a_lista(curva_solenium) if isinstance(curva_solenium, pd.Series) else None
     )
+    # Reconectador de referencia -- mismo trato que medidor/Solenium arriba:
+    # se consulta SIEMPRE en la clasificación diaria y se guarda, para que
+    # "Detalle de las fuentes" lo muestre como una fuente más sin tener que
+    # volver a pedirlo en vivo cada vez que se abre el panel (pedido
+    # 2026-08-21: "no quiero que persista el criterio de rellenar horas").
+    # None si el proyecto no tiene reconectador instalado o la consulta
+    # falla -- get_curva_reconectador() ya maneja eso, no hace falta
+    # try/except acá (mismo patrón que curva_solenium arriba).
+    curva_reconectador_ref = (
+        reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str)
+        if project_id_solenium is not None else None
+    )
+    resultado["curva_reconectador_referencia"] = (
+        curva_a_lista(curva_reconectador_ref) if curva_reconectador_ref is not None else None
+    )
     resultado.setdefault("fp", None)
     resultado.setdefault("fp_calculada", None)
     resultado.setdefault("error_final_pct", None)

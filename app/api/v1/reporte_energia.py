@@ -476,34 +476,10 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     curva_medidor_ppal_bd = rep.curva_medidor_principal
     curva_medidor_resp_bd = rep.curva_medidor_respaldo
     curva_sol_bd = rep.curva_solenium_referencia if es_generacion else None
-    # Igual que Solenium -- se prefiere lo persistido, sin re-consultar en
-    # vivo por defecto (sería una llamada más a la API de Solenium en cada
-    # apertura del panel). Pero si la curva final TIENE huecos y no hay
-    # nada persistido, sí vale la pena consultarlo en vivo: es justo el
-    # caso donde "Rellenar horas" tendría sentido, y así el reconectador
-    # aparece como una fuente más sin que nadie tenga que hacer clic
-    # primero (pedido 2026-08-21). No se persiste ni toca curva_final --
-    # es solo de referencia, igual que curva_medidor_.../curva_solenium.
-    curva_reconectador_bd = rep.curva_reconectador_referencia if es_generacion else None
-    curva_reconectador_viva = None
-    if (
-        es_generacion and curva_reconectador_bd is None
-        and any(v is None for v in (rep.curva_final or [None] * 24))
-    ):
-        proyecto = front.proyecto
-        project_id_solenium = (
-            int(proyecto.project_id_solenium)
-            if proyecto and proyecto.project_id_solenium and str(proyecto.project_id_solenium).isdigit()
-            else None
-        )
-        if project_id_solenium is not None:
-            try:
-                curva_rel = reconectador.get_curva_reconectador(SoleniumClient(), project_id_solenium, str(fecha))
-                if curva_rel is not None:
-                    curva_reconectador_viva = curva_a_lista(curva_rel)
-            except Exception:
-                pass  # informativo -- si falla, simplemente no se muestra
-    curva_reconectador = curva_reconectador_bd if curva_reconectador_bd is not None else curva_reconectador_viva
+    # Igual que Solenium -- se consulta SIEMPRE durante la clasificación
+    # diaria (ver clasificador.clasificar_generacion) y queda persistida
+    # ahí, no se vuelve a pedir en vivo cada vez que se abre el panel.
+    curva_reconectador = rep.curva_reconectador_referencia if es_generacion else None
 
     # Solenium ya NO se consulta en vivo acá -- costaba ~2s en cada apertura
     # del panel, solo para detectar si Solenium cambió desde que se

@@ -174,6 +174,38 @@ class TestAnalizar:
                 final = r["valores"].get(campo, getattr(conservado, campo, None))
                 assert final not in (None, ""), f"se perdio {campo}={valor!r}"
 
+    def test_conflicto_en_un_campo_de_lista_no_revienta(self):
+        """MGS Naos 3: dos registros con indexaciones distintas.
+
+        `indexacion_cgm` es una lista de dicts. Deduplicar los valores en
+        conflicto con `set`/`dict.fromkeys` lanzaba TypeError (una lista no es
+        hashable) y el endpoint devolvia 500, asi que el aviso de duplicados
+        nunca aparecia en la ficha.
+        """
+        a = reg(60, inv="GD EL REMOLINO 1 S.A.S. E.S.P", pid=26,
+                indexacion_cgm=[{"año": 2024, "valor": 7.0, "esBase": True}])
+        b = reg(61, inv="GD EL REMOLINO 1 S.A.S. E.S.P", pid=26,
+                indexacion_cgm=[{"año": 2025, "valor": 7.364, "ipc": 5.2}])
+        r = analizar([a, b])
+        assert r["fusionable"] is False
+        assert [c["campo"] for c in r["conflictos"]] == ["indexacion_cgm"]
+        assert len(r["conflictos"][0]["valores"]) == 2
+        # y el informe completo tambien sobrevive
+        assert len(revisar([a, b])["grupos_con_conflicto"]) == 1
+
+    def test_valores_largos_se_recortan(self):
+        larga = [{"año": 2000 + i, "valor": i * 1.5, "ipc": 5.0} for i in range(20)]
+        a = reg(1, inv="X S.A.S", pid=4, indexacion_cgm=larga)
+        b = reg(2, inv="X S.A.S", pid=4, indexacion_cgm=[{"año": 2024, "valor": 1}])
+        r = analizar([a, b])
+        assert all(len(v) <= 161 for v in r["conflictos"][0]["valores"])
+
+    def test_indexaciones_iguales_no_son_conflicto(self):
+        idx = [{"año": 2024, "valor": 7.0, "esBase": True}]
+        a = reg(1, inv="X S.A.S", pid=4, indexacion_cgm=list(idx))
+        b = reg(2, inv="X S.A.S", pid=4, indexacion_cgm=list(idx))
+        assert analizar([a, b])["fusionable"] is True
+
     def test_conflicto_real_bloquea_la_fusion(self):
         a = reg(1, inv="X S.A.S", pid=4, numero="AAA-1", tarifa_cgm=6.0)
         b = reg(2, inv="X S.A.S", pid=4, numero="BBB-2", tarifa_cgm=6.0)

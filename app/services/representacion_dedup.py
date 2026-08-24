@@ -83,6 +83,30 @@ def _iguales(a: Any, b: Any) -> bool:
     return a == b
 
 
+_TOPE_TEXTO = 160
+
+
+def _describir(valores: list[Any]) -> list[str]:
+    """Vuelve los valores en conflicto texto legible, sin repetir.
+
+    No se puede deduplicar con `set` ni con `dict.fromkeys`: dos de los campos en
+    juego —`indexacion_cgm` y `indexacion_representacion`— son listas de dicts, y
+    una lista no es hashable. Eso reventaba con TypeError en cuanto dos registros
+    traian indexaciones distintas, que es justo el caso de MGS Naos 3.
+
+    Tambien se recorta: una indexacion de diez aniversarios convertida a texto
+    haria ilegible el informe.
+    """
+    salida: list[str] = []
+    for v in valores:
+        t = str(v)
+        if len(t) > _TOPE_TEXTO:
+            t = t[:_TOPE_TEXTO] + "…"
+        if t not in salida:
+            salida.append(t)
+    return salida
+
+
 def _valor(reg: Any, campo: str) -> Any:
     return reg.get(campo) if isinstance(reg, dict) else getattr(reg, campo, None)
 
@@ -152,10 +176,7 @@ def analizar(grupo: list[Any]) -> dict:
         base = presentes[0][1]
         discrepa = [v for _, v in presentes[1:] if not _iguales(base, v)]
         if discrepa and campo not in CAMPOS_BLANDOS:
-            conflictos.append({
-                "campo": campo,
-                "valores": [str(v) for v in dict.fromkeys([base, *discrepa])],
-            })
+            conflictos.append({"campo": campo, "valores": _describir([base, *discrepa])})
             continue
         # Sin contradiccion: si al que se conserva le falta, se completa.
         if _vacio(_valor(conservar, campo)):

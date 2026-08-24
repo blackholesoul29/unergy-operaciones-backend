@@ -2243,6 +2243,80 @@ _CGM_CONTRATOS = [
          tarifa_cgm=6.0,
          indexacion_cgm=[{"año":2024,"ipc":None,"valor":6.0,"esBase":True}],
          indexacion_representacion=[]),
+
+    # ── Ayura 1: inversionistas que solo estaban en data/DataCGM.json ────────
+    # Migrados al repo al eliminar esos JSON. Mismo portafolio, tarifas y firma
+    # que los demas contratos de Ayura 1: cambia el inversionista.
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="SUNO ACTIVOS SOSTENIBLES S.A.S.",
+         tarifa_admin=0.038,
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="RODRIGUEZ VELEZ BEATRIZ",
+         tarifa_admin=0.038,
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0004 - Valle de Gandalf", codigo_sun_factory="COLCEST61P3",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0005 - Canahuate", codigo_sun_factory="COLCEST61P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0006 - Perija", codigo_sun_factory="COLCEST58P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0007 - La Paz Vallenata", codigo_sun_factory="COLCEST9P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0008 - La Paz Verso", codigo_sun_factory="COLCEST2P3",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0009 - El Molino", codigo_sun_factory="COLLAGT19P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0010 - Villanueva", codigo_sun_factory="COLLAGT27P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0013 - La Mesa", codigo_sun_factory="COLSANT10P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0014 - El Olimpo", codigo_sun_factory="COLSANT4P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="Minigranja 0016 - La Puya", codigo_sun_factory="COLCEST45P5",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0017 - La Paz Esmeralda", codigo_sun_factory="COLCEST17P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
 ]
 
 
@@ -2751,9 +2825,7 @@ def _scheduled_representacion_alertas():
     Envía email 30 y 15 días antes del aniversario a _ALERTA_EMAILS.
     Corre diariamente a las 08:00.
     """
-    import json as _json
     from datetime import date, timedelta
-    from pathlib import Path as _Path
 
     try:
         from app.services.email_service import _smtp_send, _log_send
@@ -2764,9 +2836,30 @@ def _scheduled_representacion_alertas():
         if not _s.SMTP_HOST:
             return
 
-        data_dir = _Path(__file__).parent.parent / "data"
-        raw = _json.loads((data_dir / "DataCGM.json").read_text(encoding="utf-8"))
-        contratos = raw.get("Indexación", [])
+        # Antes esto leía data/DataCGM.json. Ahora la fuente es la tabla, que es
+        # lo que la plataforma muestra y deja editar: un cambio de tarifa o de
+        # fecha de firma hecho en la UI se refleja en la alerta.
+        from sqlalchemy.orm import sessionmaker
+        from app.models.contratos import ContratoServicio
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            filas = db.query(ContratoServicio).filter(
+                ContratoServicio.servicio_aplica == "representacion",
+                ContratoServicio.fecha_firma_contrato.isnot(None),
+            ).all()
+            contratos = [{
+                "Firma contrato": r.fecha_firma_contrato.isoformat(),
+                "Proyecto": r.nombre_proyecto_ref or (
+                    r.proyecto.nombre_comercial if r.proyecto else ""),
+                "Inversionista": r.inversionista_nombre or "",
+                "Tarifa CGM (kWh)": float(r.tarifa_cgm) if r.tarifa_cgm is not None else 0,
+                "Tarifa Representación (kWh)": (
+                    float(r.tarifa_representacion) if r.tarifa_representacion is not None else 0),
+            } for r in filas]
+        finally:
+            db.close()
 
         today = date.today()
         alertas_enviadas = 0

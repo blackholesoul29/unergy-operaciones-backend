@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, representacion, reconectadores, om, polizas, starlink, inicio_operacion, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, finanzas_mandatos, retos
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, reconectadores, om, polizas, starlink, inicio_operacion, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, finanzas_mandatos, retos
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -28,7 +28,6 @@ api_router.include_router(garantias_ajustes.router)
 api_router.include_router(notificaciones.router)
 api_router.include_router(mapa.router)
 api_router.include_router(proximos_energizar.router)
-api_router.include_router(representacion.router)
 api_router.include_router(reconectadores.router)
 api_router.include_router(om.router)
 api_router.include_router(arriendos.router)

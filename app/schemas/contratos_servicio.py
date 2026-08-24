@@ -46,6 +46,11 @@ class ClienteBasico(BaseModel):
 class ProyectoBasico(BaseModel):
     id: int
     nombre_comercial: str
+    # `tipo_proyecto` viaja acá para que el listado de contratos pueda decir a
+    # qué clase de planta pertenece cada uno (minigranja / autoconsumo / gd)
+    # sin tener que cargar además todo /proyectos.
+    tipo_proyecto: Optional[str] = None
+    codigo_tsf: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -169,6 +174,10 @@ class ContratoServicioUpdate(BaseModel):
 class ContratoServicioOut(BaseModel):
     id: int
     proyecto_id: Optional[int] = None
+    # La planta a la que pertenece el contrato. `proyecto_id` sola no le sirve a
+    # ninguna tabla: obliga a cruzar contra /proyectos en el cliente. Va anidada
+    # y NULL cuando el contrato quedó huérfano, que es justo el caso a corregir.
+    proyecto: Optional[ProyectoBasico] = None
     servicio_aplica: str
     contratante_id: Optional[int] = None
     prestador_id: Optional[int] = None

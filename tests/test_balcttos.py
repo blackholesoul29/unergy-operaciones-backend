@@ -7,6 +7,7 @@ from app.services.balcttos import (
     _norm,
     neto_compras_bolsa,
     neto_compras_bolsa_de_bytes,
+    proyectar_neto_mwh,
 )
 
 
@@ -62,3 +63,15 @@ def _xlsx_balcttos_bytes():
 def test_lee_xlsx_en_memoria():
     out = neto_compras_bolsa_de_bytes(_xlsx_balcttos_bytes())
     assert out["total_mwh"] == 24.0
+
+
+def test_proyectar_neto_extrapola_tasa_diaria_real():
+    # 245.2 MWh reales en 19 días -> tasa 12.905/día
+    # proyectar a 30 días (septiembre) = 12.905 * 30
+    assert proyectar_neto_mwh(245.2, 19, 30) == 245.2 / 19 * 30
+    # a los días que faltan del mes (ej. 12) = tasa * 12
+    assert proyectar_neto_mwh(245.2, 19, 12) == 245.2 / 19 * 12
+
+
+def test_proyectar_neto_sin_dato_es_cero():
+    assert proyectar_neto_mwh(0.0, 0, 30) == 0.0

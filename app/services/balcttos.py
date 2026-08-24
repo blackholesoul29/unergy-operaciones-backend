@@ -44,6 +44,21 @@ def neto_compras_bolsa(filas: list[dict]) -> dict:
     return {"total_mwh": sum(por_dia.values()), "por_dia": por_dia}
 
 
+def proyectar_neto_mwh(neto_mwh: float, dias_con_dato: int, dias_objetivo: int) -> float:
+    """Proyecta el neto de compras en bolsa a `dias_objetivo` usando la tasa diaria REAL
+    observada en el BalCttos (`neto_mwh` / `dias_con_dato`).
+
+    Es el ancla de la proyección: en vez de proyectar generación bruta (que da el signo y
+    la magnitud mal), se extrapola la compra neta real por día. `dias_objetivo` = días de la
+    ventana a estimar (resto del mes = días que faltan; mes siguiente = días del mes).
+    Devuelve 0 si aún no hay días con dato.
+    """
+    if dias_con_dato <= 0:
+        return 0.0
+    tasa_diaria = neto_mwh / dias_con_dato
+    return tasa_diaria * dias_objetivo
+
+
 def _filas_de_worksheet(ws) -> list[dict]:
     """Convierte la hoja del BalCttos en filas {fecha, concepto, horas}. Salta el header."""
     filas = []

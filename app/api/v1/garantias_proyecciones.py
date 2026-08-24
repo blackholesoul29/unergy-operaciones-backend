@@ -1,11 +1,13 @@
 """Proyecciones de garantía (precobro XM): cálculo en vivo + snapshot semanal."""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.core.database import get_db
+from app.services.balcttos import neto_compras_bolsa_de_bytes
 from app.services.garantias_proyecciones import (
     construir_proyecciones_live,
+    guardar_balcttos_neto,
     guardar_snapshot,
     historial_snapshots,
     pagado_por_periodo,
@@ -75,3 +77,26 @@ def put_pagado(
     """Fija (upsert) el monto pagado de un período."""
     set_pagado(db, anio, mes, valor)
     return {"anio": anio, "mes": mes, "valor": valor}
+
+
+def ingerir_balcttos(*, anio: int, mes: int, archivo_bytes: bytes, db: Session, _=None) -> dict:
+    """Parsea el BalCttos y guarda su neto real. Lógica pura (testeable sin multipart)."""
+    parsed = neto_compras_bolsa_de_bytes(archivo_bytes)
+    dias = sorted(parsed["por_dia"])
+    dia_corte = int(dias[-1][8:10]) if dias else 0
+    guardar_balcttos_neto(db, anio, mes, dia_corte=dia_corte, neto_mwh=parsed["total_mwh"])
+    return {"anio": anio, "mes": mes, "dia_corte": dia_corte, "neto_mwh": parsed["total_mwh"]}
+
+
+@router.post("/balcttos")
+async def post_balcttos(
+    anio: int = Query(..., ge=2020, le=2050),
+    mes: int = Query(..., ge=1, le=12),
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Recibe el BalCttos (lo empuja el agente local), parsea el NETO DE COMPRAS EN BOLSA
+    y guarda el neto real del período."""
+    contenido = await archivo.read()
+    return ingerir_balcttos(anio=anio, mes=mes, archivo_bytes=contenido, db=db, _=_)

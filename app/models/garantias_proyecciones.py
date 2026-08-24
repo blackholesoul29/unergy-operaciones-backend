@@ -43,3 +43,19 @@ class GarantiaPagado(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (UniqueConstraint("anio", "mes", name="uq_garantia_pagado_periodo"),)
+
+
+class BalCttosNeto(Base):
+    """Neto real de compras en bolsa del BalCttos de XM, por período (MWh). `dia_corte` =
+    último día con dato real del archivo (para proyectar el resto a esa tasa diaria)."""
+    __tablename__ = "balcttos_neto"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    anio: Mapped[int] = mapped_column(Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(Integer, nullable=False)
+    dia_corte: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    neto_mwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("anio", "mes", name="uq_balcttos_neto_periodo"),)

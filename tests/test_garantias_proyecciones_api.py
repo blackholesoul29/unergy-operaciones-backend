@@ -1,5 +1,6 @@
 """Persistencia + endpoint de proyecciones de garantía. Harness sqlite; se invocan las
 funciones del router directamente (auth stubeada en conftest). Deps externas mockeadas."""
+import calendar
 import types
 from datetime import date
 
@@ -11,8 +12,11 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
 import app.models  # noqa: F401  (registra todos los modelos)
-from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado
-from app.services.garantias_proyecciones import filas_snapshot, pagado_por_periodo, set_pagado
+from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado, BalCttosNeto
+from app.services.garantias_proyecciones import (
+    filas_snapshot, pagado_por_periodo, set_pagado,
+    guardar_balcttos_neto, balcttos_neto_de_periodo, neto_ventana_balcttos,
+)
 from app.services import garantias_proyecciones as svc
 from app.api.v1 import garantias_proyecciones as api
 
@@ -161,3 +165,60 @@ def test_endpoint_put_y_get_pagado(db):
     api.put_pagado(anio=2026, mes=8, valor=80_000_000.0, db=db, _=USER)
     out = api.get_pagado(db=db, _=USER)
     assert out["pagado"] == [{"anio": 2026, "mes": 8, "valor": 80_000_000.0}]
+
+
+def test_guardar_y_leer_balcttos_neto(db):
+    db.add(BalCttosNeto(anio=2026, mes=8, dia_corte=19, neto_mwh=245.2))
+    db.commit()
+    r = db.query(BalCttosNeto).one()
+    assert r.anio == 2026 and r.dia_corte == 19 and float(r.neto_mwh) == 245.2
+
+
+def test_guardar_balcttos_upsert(db):
+    guardar_balcttos_neto(db, 2026, 8, dia_corte=19, neto_mwh=245.2)
+    guardar_balcttos_neto(db, 2026, 8, dia_corte=20, neto_mwh=260.0)  # reemplaza
+    r = balcttos_neto_de_periodo(db, 2026, 8)
+    assert r["dia_corte"] == 20 and r["neto_mwh"] == 260.0
+
+
+def test_neto_ventana_proyecta_a_tasa_diaria(db):
+    guardar_balcttos_neto(db, 2026, 8, dia_corte=19, neto_mwh=245.2)
+    # resto del mes actual: agosto tiene 31 días, quedan 31-19=12 -> tasa*12
+    neto = neto_ventana_balcttos(db, 2026, 8, dias_objetivo=12)
+    assert neto == 245.2 / 19 * 12
+    # sin dato -> None
+    assert neto_ventana_balcttos(db, 2026, 9, dias_objetivo=30) is None
+
+
+def test_construir_live_usa_balcttos_si_hay(db, monkeypatch):
+    # balance mockeado (para que NO se use si hay BalCttos)
+    bal = {"balance": {"ungg": {
+        "venta_bolsa": {"real": 0.0, "proyectado": 999.0, "total": 999.0, "n_plantas": 1},
+        "compra_bolsa_directa": {"real": 0.0, "proyectado": 0.0, "total": 0.0, "n_plantas": 1},
+    }}, "periodo": {}}
+    monkeypatch.setattr(svc, "_balance_fn", lambda db_, a, m: bal)
+    monkeypatch.setattr(svc, "_precio_fn", lambda: 900.0)
+    monkeypatch.setattr(svc, "_regulatorio_fn", lambda a, m: {"valor": 0.0, "anio": a, "mes": m, "fallback": False})
+    # BalCttos de agosto: 245.2 MWh en 19 días
+    guardar_balcttos_neto(db, 2026, 8, dia_corte=19, neto_mwh=245.2)
+
+    res = svc.construir_proyecciones_live(db, hoy=date(2026, 8, 21))
+    v1 = res["ventanas"][0]  # resto mes actual
+    # agosto: 31 días, corte 21 -> quedan 10 -> neto = 245.2/19*10 (NO el 999 del balance)
+    quedan = calendar.monthrange(2026, 8)[1] - 21
+    assert v1["neto_mwh"] == 245.2 / 19 * quedan
+    assert v1["fuente_neto"] == "balcttos"
+
+
+def test_endpoint_ingesta_balcttos(db):
+    # xlsx mínimo del BalCttos: 1 fila NETO DE COMPRAS EN BOLSA, 24 horas de 1000 kWh = 24 MWh
+    import io, openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["FechaDocumento","CONCEPTO","MERCADO","CC","COMP","VEND","TD","TA"] + [f"HORA {h:02d}" for h in range(1,25)])
+    ws.append(["2026-08-05","NETO DE COMPRAS EN BOLSA","NAL","C","X","UNGG","d","a"] + [1000.0]*24)
+    buf = io.BytesIO(); wb.save(buf)
+    out = api.ingerir_balcttos(anio=2026, mes=8, archivo_bytes=buf.getvalue(), db=db, _=USER)
+    assert out["neto_mwh"] == 24.0 and out["dia_corte"] == 5
+    # quedó guardado
+    from app.services.garantias_proyecciones import balcttos_neto_de_periodo
+    assert balcttos_neto_de_periodo(db, 2026, 8)["neto_mwh"] == 24.0

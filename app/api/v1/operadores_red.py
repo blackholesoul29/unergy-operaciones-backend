@@ -90,6 +90,7 @@ def create_operador(
 @router.patch("/{operador_id}", response_model=OperadorRedOut)
 def update_operador(
     operador_id: int, data: OperadorRedUpdate,
+    forzar: bool = Query(False, description="true: guardar igual aunque quede muy parecido a otro operador"),
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
     op = _get_operador_or_404(operador_id, db)
@@ -105,6 +106,24 @@ def update_operador(
         )
         if duplicado:
             raise HTTPException(409, f"Ya existe otro operador de red con ese nombre legal (ID {duplicado.id})")
+
+    nombre_a_comparar = cambios.get("nombre_comercial") or cambios.get("nombre_legal")
+    if not forzar and nombre_a_comparar:
+        parecido = _buscar_duplicado_parecido(db, nombre_a_comparar, excluir_id=operador_id)
+        if parecido:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe un operador con un nombre muy parecido: "
+                        f"'{parecido.nombre_comercial or parecido.nombre_legal}' (ID {parecido.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": parecido.id,
+                    "candidato_nombre": parecido.nombre_comercial or parecido.nombre_legal,
+                },
+            )
+
     for k, v in cambios.items():
         setattr(op, k, v)
     db.commit()

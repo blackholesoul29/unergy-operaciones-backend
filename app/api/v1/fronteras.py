@@ -1,7 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 import io
 import time
-import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -626,28 +625,27 @@ def backfill_medidor(
     return _backfill_medidor_info(db, dry_run=dry_run)
 
 
-def _normalizar_nombre_operador(s: str | None) -> str:
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return s.strip().lower()
-
-
 def _backfill_operador_red_info(db: Session, dry_run: bool = True) -> dict:
     """Vincula al catálogo (`operadores_red`) los proyectos cuyo
-    `operador_red` de texto libre YA diligenciado coincide (normalizado, sin
-    tildes/mayúsculas) con el `nombre_legal`/`nombre_comercial` de un
-    operador -- y cascada el vínculo hacia sus fronteras que todavía no lo
-    tengan. Nunca pisa un `operador_red_id` ya diligenciado en ningún lado.
-    Sin botón en el frontend a propósito (mismo criterio que
-    backfill-medidor): se corre puntualmente cuando haga falta."""
+    `operador_red` de texto libre YA diligenciado coincide con el
+    `nombre_legal`/`nombre_comercial` de un operador -- y cascada el vínculo
+    hacia sus fronteras que todavía no lo tengan. Nunca pisa un
+    `operador_red_id` ya diligenciado en ningún lado. Sin botón en el
+    frontend a propósito (mismo criterio que backfill-medidor): se corre
+    puntualmente cuando haga falta.
+
+    El match usa `mejor_candidato` (mismo algoritmo de
+    app/utils/nombre_matching.py que ya usa el aviso de duplicados de
+    Operadores de Red/Proyectos/Fronteras), no una coincidencia exacta de
+    texto normalizado -- así variantes de puntuación o espacios ("S.A.S."
+    vs "SAS") sí matchean, sin perder la cautela de "mejor no adivinar que
+    adivinar mal" que ya trae incorporada `mejor_candidato` (no acepta un
+    match ambiguo entre 2 candidatos con score parecido)."""
     catalogo = db.query(OperadorRed).all()
-    por_nombre: dict[str, int] = {}
-    for o in catalogo:
-        por_nombre[_normalizar_nombre_operador(o.nombre_legal)] = o.id
-        if o.nombre_comercial:
-            por_nombre[_normalizar_nombre_operador(o.nombre_comercial)] = o.id
+    candidatos = [
+        (o, [n for n in (o.nombre_legal, o.nombre_comercial) if n])
+        for o in catalogo
+    ]
 
     proyectos = (
         db.query(Proyecto)
@@ -659,17 +657,20 @@ def _backfill_operador_red_info(db: Session, dry_run: bool = True) -> dict:
     actualizados = []
     sin_match = []
     for p in proyectos:
-        operador_id = por_nombre.get(_normalizar_nombre_operador(p.operador_red))
-        if operador_id is None:
-            sin_match.append({"id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red})
+        operador, score = mejor_candidato(p.operador_red, candidatos)
+        if operador is None:
+            sin_match.append({
+                "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
+                "mejor_score": score,
+            })
             continue
         fronteras_afectadas = [f.id for f in p.fronteras if f.operador_red_id is None]
         actualizados.append({
             "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
-            "operador_red_id": operador_id, "fronteras_afectadas": fronteras_afectadas,
+            "operador_red_id": operador.id, "score": score, "fronteras_afectadas": fronteras_afectadas,
         })
         if not dry_run:
-            p.operador_red_id = operador_id
+            p.operador_red_id = operador.id
             sincronizar_operador_red(db, p)
 
     if not dry_run and actualizados:

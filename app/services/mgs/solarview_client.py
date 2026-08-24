@@ -7,6 +7,7 @@ SoleniumClient, que usa JWT con /token/ + /token/refresh/).
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
@@ -16,6 +17,7 @@ logger = logging.getLogger("mgs.solarview")
 
 RETRY_MAX = 2
 TIMEOUT = 30.0
+BACKOFF_SECONDS = 2.0
 
 
 class SolarViewClient:
@@ -40,6 +42,19 @@ class SolarViewClient:
                 if resp.status_code == 404:
                     return None
                 if resp.status_code in (429, 503) and attempt < RETRY_MAX:
+                    # Reintentar de inmediato ante rate limiting no sirve de
+                    # nada -- con ~37 fronteras y hasta 2 llamadas cada una en
+                    # la corrida diaria, un 429 sin espera probablemente
+                    # vuelva a chocar con el mismo límite. Se respeta
+                    # Retry-After si la API lo manda, si no una pausa fija.
+                    espera = BACKOFF_SECONDS
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            espera = max(espera, float(retry_after))
+                        except ValueError:
+                            pass
+                    time.sleep(espera)
                     continue
                 resp.raise_for_status()
                 return resp.json()

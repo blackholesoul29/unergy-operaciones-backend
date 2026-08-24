@@ -4,6 +4,7 @@ inversor (con total_power=1 la API ya entrega la potencia sumada, ver
 SolarViewClient.get_power)."""
 import pandas as pd
 
+from app.services.mgs import solarview_client as sv_client_module
 from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia.solarview import curva_de_power
 
@@ -77,3 +78,46 @@ def test_curva_de_power_vacia_si_no_hay_power():
     curva, horas_con_dato = curva_de_power({"results": {}})
     assert horas_con_dato == set()
     assert curva.isna().all()
+
+
+class _RespuestaFalsa:
+    def __init__(self, status_code, headers=None, data=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._data = data or {}
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._data
+
+
+def test_reintenta_ante_429_con_pausa(monkeypatch):
+    client = _cliente()
+    respuestas = [
+        _RespuestaFalsa(429, headers={"Retry-After": "5"}),
+        _RespuestaFalsa(200, data={"ok": True}),
+    ]
+    client._http = type("_HttpFalso", (), {"get": lambda self, url, headers=None, params=None: respuestas.pop(0)})()
+
+    esperas = []
+    monkeypatch.setattr(sv_client_module.time, "sleep", lambda s: esperas.append(s))
+
+    resultado = client._get("https://api.sole.tech/solarview/measurements/generation/")
+
+    assert resultado == {"ok": True}
+    assert esperas == [5.0]  # respeta Retry-After en vez de la pausa fija
+
+
+def test_429_sin_retry_after_usa_pausa_fija(monkeypatch):
+    client = _cliente()
+    respuestas = [_RespuestaFalsa(429), _RespuestaFalsa(200, data={"ok": True})]
+    client._http = type("_HttpFalso", (), {"get": lambda self, url, headers=None, params=None: respuestas.pop(0)})()
+
+    esperas = []
+    monkeypatch.setattr(sv_client_module.time, "sleep", lambda s: esperas.append(s))
+
+    client._get("https://api.sole.tech/solarview/measurements/generation/")
+
+    assert esperas == [sv_client_module.BACKOFF_SECONDS]

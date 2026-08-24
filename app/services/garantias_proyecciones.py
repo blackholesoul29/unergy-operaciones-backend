@@ -142,10 +142,47 @@ def _regulatorio_fn(anio: int, mes: int) -> dict:
     return costo_regulatorio_del_mes(anio, mes)
 
 
+def guardar_balcttos_neto(db, anio: int, mes: int, *, dia_corte: int, neto_mwh: float):
+    """Upsert del neto real del BalCttos para un período."""
+    from app.models.garantias_proyecciones import BalCttosNeto
+    fila = db.query(BalCttosNeto).filter_by(anio=anio, mes=mes).one_or_none()
+    if fila is None:
+        fila = BalCttosNeto(anio=anio, mes=mes, dia_corte=dia_corte, neto_mwh=neto_mwh)
+        db.add(fila)
+    else:
+        fila.dia_corte = dia_corte
+        fila.neto_mwh = neto_mwh
+    db.commit()
+    return fila
+
+
+def balcttos_neto_de_periodo(db, anio: int, mes: int) -> dict | None:
+    """{'dia_corte', 'neto_mwh'} del BalCttos guardado, o None si no hay."""
+    from app.models.garantias_proyecciones import BalCttosNeto
+    fila = db.query(BalCttosNeto).filter_by(anio=anio, mes=mes).one_or_none()
+    if fila is None:
+        return None
+    return {"dia_corte": fila.dia_corte, "neto_mwh": float(fila.neto_mwh)}
+
+
+def neto_ventana_balcttos(db, anio: int, mes: int, dias_objetivo: int) -> float | None:
+    """Neto (MWh) de una ventana proyectando la tasa diaria real del BalCttos del período.
+    None si no hay BalCttos guardado para ese (anio, mes)."""
+    from app.services.balcttos import proyectar_neto_mwh
+    dato = balcttos_neto_de_periodo(db, anio, mes)
+    if dato is None or not dato["dia_corte"]:
+        return None
+    return proyectar_neto_mwh(dato["neto_mwh"], dato["dia_corte"], dias_objetivo)
+
+
 def construir_proyecciones_live(db, hoy: date | None = None, *, plantas_nuevas: int = 0,
                                 kwh_planta_nueva: float = KWH_PLANTA_NUEVA_DEFAULT) -> dict:
     """Calcula las dos ventanas cableando las dependencias reales (balance, precio SIMEM,
-    costo regulatorio de Drive). Los `_*_fn` de módulo son mockeables en tests."""
+    costo regulatorio de Drive). Los `_*_fn` de módulo son mockeables en tests. Si hay
+    BalCttos guardado para el período de una ventana, sobrescribe su neto con el real
+    proyectado a la tasa diaria (fuente_neto='balcttos'); si no, queda la proyección
+    del balance (fuente_neto='proyeccion')."""
+    import calendar
     if hoy is None:
         hoy = date.today()
     resultado = proyecciones(
@@ -155,6 +192,23 @@ def construir_proyecciones_live(db, hoy: date | None = None, *, plantas_nuevas: 
         regulatorio_fn=_regulatorio_fn,
         plantas_nuevas=plantas_nuevas, kwh_planta_nueva=kwh_planta_nueva,
     )
+    precio = resultado.get("precio_bolsa_cop_kwh")
+    for v in resultado["ventanas"]:
+        # días de la ventana: resto del mes actual = días que faltan; mes siguiente = mes completo
+        if v["clave"] == "resto_mes_actual":
+            dias_obj = calendar.monthrange(v["anio"], v["mes"])[1] - hoy.day
+        else:
+            dias_obj = calendar.monthrange(v["anio"], v["mes"])[1]
+        neto_bc = neto_ventana_balcttos(db, v["anio"], v["mes"], dias_obj)
+        if neto_bc is None:
+            v["fuente_neto"] = "proyeccion"
+            continue
+        # recomputar la garantía con el neto real del BalCttos (mantiene plantas nuevas y regulatorio)
+        recal = calcular_garantia(neto_bc, precio or 0.0, v.get("costo_regulatorio") or 0.0,
+                                  plantas_nuevas, kwh_planta_nueva)
+        v.update(recal)
+        v["neto_mwh"] = neto_bc
+        v["fuente_neto"] = "balcttos"
     return aplicar_pagado(resultado, pagado_por_periodo(db))
 
 

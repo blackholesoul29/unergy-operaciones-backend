@@ -2246,13 +2246,120 @@ _CGM_CONTRATOS = [
 ]
 
 
+def _cgm_norm(s: str | None) -> str:
+    """Normaliza un nombre para comparar: sin tildes, sin puntuacion, sin dobles
+    espacios, en mayusculas.
+
+    El dedup del seed comparaba strings exactos y los dos seeds escriben el mismo
+    inversionista de dos formas ("SOMOS BOGOTA USME SAS" vs "SOMOS BOGOTÁ USME
+    SAS", "Ayura" vs "Ayurá", "FEM ENERGIA" vs "FEM ENERGÍA"): cada variante
+    creaba un contrato duplicado en produccion.
+    """
+    import re as _re
+    import unicodedata as _ud
+
+    s = _ud.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not _ud.combining(c))
+    return _re.sub(r"[^A-Z0-9]+", " ", s.upper()).strip()
+
+
+def _cgm_buscar_proyecto(nombre: str, sf: str | None,
+                         por_nombre: dict, por_tsf: dict) -> int | None:
+    """Resuelve a que planta pertenece un contrato del seed CGM.
+
+    Tres criterios, ninguno de los cuales adivina:
+      1. codigo Sun Factory == codigo_tsf del proyecto.
+      2. nombre de referencia == nombre de la planta, normalizados (exacto).
+      3. el numero de 4 digitos del nombre (ej. "0010" de "MGS 0010 - Villanueva"),
+         y solo si aparece en UNA sola planta.
+
+    Antes habia un cuarto criterio que tomaba la primera palabra de mas de 4
+    letras del nombre y devolvia el PRIMER proyecto que la contuviera como
+    substring. Acertaba cuando el nombre del contrato ya era el de la planta
+    (para eso esta ahora el criterio 2, que no depende del orden de la consulta),
+    pero tambien metia contratos en plantas ajenas: "GD Yuan Solar" caia en
+    "Minigranja Solar Baraya" por la palabra "solar", y con nombres de planta sin
+    numero era el criterio que decidia casi todos. Un contrato sin planta es un
+    pendiente visible que se resuelve a mano en Servicios > Representacion; un
+    contrato en la planta equivocada es un dato falso que nadie detecta.
+    """
+    import re as _re
+
+    if sf:
+        pid = por_tsf.get(_cgm_norm(sf))
+        if pid is not None:
+            return pid
+
+    pid = por_nombre.get(_cgm_norm(nombre))
+    if pid is not None:
+        return pid
+
+    for num in _re.findall(r"\d{4}", nombre or ""):
+        # Coincidencia unica: si el numero aparece en dos plantas no hay forma de
+        # saber cual es, y elegir la primera es arbitrario.
+        candidatos = {pid for db_n, pid in por_nombre.items() if num in db_n}
+        if len(candidatos) == 1:
+            return candidatos.pop()
+
+    return None
+
+
+class _CgmIndice:
+    """Indice de los contratos de representacion ya existentes, para decidir si
+    una entrada del seed ya esta en la base.
+
+    Tres entradas al mismo registro, porque cada fuente historica dejo una pista
+    distinta:
+      - por codigo Sun Factory : lo que sembro el seed de arranque.
+      - por nombre de referencia: idem, cuando el contrato no trae codigo.
+      - por proyecto_id        : lo que sembro scripts/seed_contratos_cgm.py, que
+        hace `c.pop("proyecto_nombre")` y nunca guarda nombre_proyecto_ref. Sin
+        esta entrada, los 34 contratos sin codigo Sun Factory eran invisibles al
+        dedup y se duplicaban.
+
+    Los contratos sin inversionista quedan FUERA del indice a proposito: son los
+    creados a mano en el wizard, y emparejarlos con una entrada del seed exigiria
+    adivinar (una planta puede tener varios inversionistas). Se revisan a mano en
+    Servicios > Representacion.
+    """
+
+    def __init__(self):
+        self.por_sf, self.por_ref, self.por_pid = {}, {}, {}
+
+    def indexar(self, reg) -> None:
+        inv_n = _cgm_norm(reg.inversionista_nombre)
+        if not inv_n:
+            return
+        if reg.codigo_sun_factory:
+            self.por_sf.setdefault((inv_n, _cgm_norm(reg.codigo_sun_factory)), reg)
+        if reg.nombre_proyecto_ref:
+            self.por_ref.setdefault((inv_n, _cgm_norm(reg.nombre_proyecto_ref)), reg)
+        if reg.proyecto_id is not None:
+            self.por_pid.setdefault((inv_n, reg.proyecto_id), reg)
+
+    def buscar(self, inv, nombre, sf, pid):
+        """Devuelve el registro que ya representa este contrato, o None."""
+        inv_n = _cgm_norm(inv)
+        if not inv_n:
+            return None
+        if sf:
+            hit = self.por_sf.get((inv_n, _cgm_norm(sf)))
+            if hit is not None:
+                return hit
+        hit = self.por_ref.get((inv_n, _cgm_norm(nombre)))
+        if hit is not None:
+            return hit
+        if pid is not None:
+            return self.por_pid.get((inv_n, pid))
+        return None
+
+
 def _run_cgm_seed() -> None:
     """
     Carga y mantiene contratos CGM/Representacion.
-    Idempotente: usa (inversionista + codigo_sun_factory) como clave de dedup.
+    Idempotente: dedupea por (inversionista + planta) con nombres normalizados.
     Corre en cada startup: inserta nuevos y repara proyecto_id NULL.
     """
-    import re as _re
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.contratos import ContratoServicio
@@ -2264,51 +2371,47 @@ def _run_cgm_seed() -> None:
         proyectos_rows = db.execute(
             text("SELECT id, nombre_comercial, codigo_tsf FROM proyectos")
         ).fetchall()
-        por_nombre = {(r[1] or "").lower(): r[0] for r in proyectos_rows if r[1]}
-        por_tsf    = {(r[2] or "").lower(): r[0] for r in proyectos_rows if r[2]}
+        por_nombre = {_cgm_norm(r[1]): r[0] for r in proyectos_rows if r[1]}
+        por_tsf    = {_cgm_norm(r[2]): r[0] for r in proyectos_rows if r[2]}
 
         def _buscar(nombre, sf):
-            # 1. Por codigo Sun Factory == codigo_tsf del proyecto
-            if sf and sf.lower() in por_tsf:
-                return por_tsf[sf.lower()]
-            # 2. Por numero de 4 digitos (ej. "0010" de "MGS 0010 - Villanueva")
-            for num in _re.findall(r'\d{4}', nombre):
-                for db_n, db_id in por_nombre.items():
-                    if num in db_n:
-                        return db_id
-            # 3. Por palabras clave largas
-            clean = _re.sub(r'[-()]', ' ', nombre)
-            for p in [w.lower() for w in clean.split() if len(w) > 4]:
-                for db_n, db_id in por_nombre.items():
-                    if p in db_n:
-                        return db_id
-            return None
+            return _cgm_buscar_proyecto(nombre, sf, por_nombre, por_tsf)
 
         # ── Paso 1: insertar contratos faltantes ─────────────────────────────────
+        # El dedup se hace en memoria y no con un filtro SQL: hay que comparar
+        # nombres normalizados, y hay que poder reconocer un contrato por su
+        # proyecto_id cuando le falta el nombre de referencia. Son ~112 filas.
+        existentes = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "representacion"
+        ).all()
+
+        indice = _CgmIndice()
+        for reg in existentes:
+            indice.indexar(reg)
+
         insertados = 0
         for c in _CGM_CONTRATOS:
             nombre  = c.get("proyecto_nombre", "")
             inv     = c.get("inversionista_nombre")
             sf      = c.get("codigo_sun_factory")
+            pid     = _buscar(nombre, sf)
 
-            # Dedup por (inversionista + codigo_sun_factory) o (inversionista + nombre_ref)
-            filtros = [
-                ContratoServicio.servicio_aplica == "representacion",
-                ContratoServicio.inversionista_nombre == inv,
-                ContratoServicio.codigo_sun_factory == sf if sf
-                    else ContratoServicio.nombre_proyecto_ref == nombre,
-            ]
-            ya = db.query(ContratoServicio).filter(*filtros).first()
-            if ya:
+            ya = indice.buscar(inv, nombre, sf, pid)
+            if ya is not None:
+                # Retroalimentar los campos que el registro no traia, para que la
+                # proxima corrida lo encuentre por cualquiera de los tres indices.
                 if not ya.nombre_proyecto_ref:
-                    ya.nombre_proyecto_ref = nombre  # retroalimentar registros viejos
+                    ya.nombre_proyecto_ref = nombre
+                if sf and not ya.codigo_sun_factory:
+                    ya.codigo_sun_factory = sf
+                indice.indexar(ya)
                 continue
 
             fecha_str = c.get("fecha_firma_contrato")
             fecha = date.fromisoformat(fecha_str) if fecha_str else None
 
-            db.add(ContratoServicio(
-                proyecto_id=_buscar(nombre, sf),
+            nuevo = ContratoServicio(
+                proyecto_id=pid,
                 servicio_aplica="representacion",
                 estado="vigente",
                 inversionista_nombre=inv,
@@ -2322,7 +2425,12 @@ def _run_cgm_seed() -> None:
                 indexacion_representacion=c.get("indexacion_representacion") or [],
                 fecha_firma_contrato=fecha,
                 enlace_drive=c.get("enlace_drive"),
-            ))
+            )
+            db.add(nuevo)
+            # Indexar el recien creado: si el propio seed repite la misma dupla
+            # (inversionista + planta), la segunda vuelta lo encuentra en vez de
+            # insertar otra copia.
+            indice.indexar(nuevo)
             insertados += 1
 
         db.commit()
@@ -2330,6 +2438,11 @@ def _run_cgm_seed() -> None:
             print(f"[cgm seed] {insertados} contratos nuevos insertados")
 
         # ── Paso 2: reparar proyecto_id = NULL en registros existentes ────────────
+        # Repara menos que antes, a proposito: _cgm_buscar_proyecto ya no adivina
+        # por palabras. Lo que no se resuelve por codigo Sun Factory o por numero
+        # de planta se queda en NULL y sale como "Sin proyecto" en
+        # Servicios > Representacion, donde se asigna a mano. Este paso nunca
+        # toca un proyecto_id ya asignado.
         sin_pid = db.execute(text("""
             SELECT id, codigo_sun_factory, nombre_proyecto_ref
             FROM contratos_servicio

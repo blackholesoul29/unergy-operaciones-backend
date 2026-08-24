@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
 
+    # SolarView API (reemplazo de Solenium, Fase 1: solo Reporte de Energía)
+    # — token estático por header, sin login/refresh.
+    SOLARVIEW_BASE_URL: str = "https://api.sole.tech"
+    SOLARVIEW_TOKEN: str = ""
+
     # Quoia CGM API (fronteras / medidores) — legacy token auth
     QUOIA_API_TOKEN: str = ""
     QUOIA_BASE_URL: str = "https://gaia.quoia.energy/api"

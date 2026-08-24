@@ -1,0 +1,79 @@
+"""SolarViewClient (Fase 1 de la migración de Solenium a SolarView) --
+auth por token estático, y curva_de_power() sin el loop de suma manual por
+inversor (con total_power=1 la API ya entrega la potencia sumada, ver
+SolarViewClient.get_power)."""
+import pandas as pd
+
+from app.services.mgs.solarview_client import SolarViewClient
+from app.services.reporte_energia.solarview import curva_de_power
+
+
+def _cliente(token="abc123"):
+    client = SolarViewClient.__new__(SolarViewClient)
+    client._base_url = "https://api.sole.tech"
+    client._token = token
+    return client
+
+
+def test_headers_usan_token_estatico_sin_bearer():
+    client = _cliente()
+    assert client._headers() == {"Authorization": "Token abc123"}
+
+
+def test_enabled_es_falso_sin_token():
+    client = _cliente(token="")
+    assert client.enabled is False
+
+
+def test_get_power_pide_total_power_1():
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_power(7, "2026-08-20", "2026-08-20")
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/measurements/power/")
+    assert params["total_power"] == 1
+    assert params["project_id"] == 7
+
+
+def test_get_relay_historical_usa_recloser_como_nombre_de_parametro():
+    """El parámetro se llama 'recloser' pero recibe el project_id (mismo
+    gotcha que ya existía en la API vieja) -- ver plan de migración."""
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_relay_historical(7, "2026-08-20 00:00:00", "2026-08-20 23:59:59")
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/config/recloser/historical/")
+    assert params["recloser"] == 7
+    assert params["start_date"] == "2026-08-20 00:00:00"
+
+
+def test_curva_de_power_ya_viene_sumada_sin_loop_por_inversor():
+    """Con total_power=1, resp['results']['power'] es {ts: kw} plano --
+    a diferencia de la API vieja de Solenium ({inversor: {ts: kw}})."""
+    resp = {
+        "message": "OK", "error": None, "success": True,
+        "results": {
+            "unit": "kW",
+            "power": {
+                "2026-08-20 10:00": 100.0,
+                "2026-08-20 11:00": 200.0,
+            },
+        },
+    }
+    curva, horas_con_dato = curva_de_power(resp)
+
+    assert horas_con_dato == {10, 11}
+    # Riemann con 1h de separación entre los dos puntos: 100 kW * 1h = 100 kWh en la hora 10
+    assert curva[10] == 100.0
+
+
+def test_curva_de_power_vacia_si_no_hay_power():
+    curva, horas_con_dato = curva_de_power({"results": {}})
+    assert horas_con_dato == set()
+    assert curva.isna().all()

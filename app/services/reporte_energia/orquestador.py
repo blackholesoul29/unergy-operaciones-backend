@@ -4,7 +4,7 @@ process/src/main.py (repo Reporte-Energia).
 Reemplaza el loop de main.py: en vez de recorrer el catálogo completo de
 Quoia y mapear por nombre (mapeo.py), itera las fronteras YA registradas en
 la base de datos de Operaciones (fuente de verdad: fronteras.proyecto_id +
-proyectos.project_id_solenium, ya reconciliados por el equipo).
+proyectos.project_id_solarview, ya reconciliados por el equipo).
 
 Solo se procesan fronteras cuyo codigo_frontera está registrado en Quoia
 (ver _fronteras_con_reporte) -- Quoia es la fuente de verdad de qué debe
@@ -29,7 +29,7 @@ from app.models.fronteras import Frontera, TipoFronteraEnum, EstadoFronteraEnum
 from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
 from app.services.reporte_energia.utils import curva_a_lista
 
@@ -58,7 +58,7 @@ def cancelar_corrida(fecha: date) -> None:
 
 
 def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[Frontera, str | None]]:
-    """(Frontera, project_id_solenium) de las fronteras que de verdad
+    """(Frontera, project_id_solarview) de las fronteras que de verdad
     reportan al ASIC -- 'activa'/'deleted_at' son nuestro propio control de
     desactivación (una frontera que marcamos inactiva no reporta aunque
     Quoia la siga teniendo registrada).
@@ -73,7 +73,7 @@ def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[F
     regla propia SÍ tenía huecos reales (GD Piojó, GD La Hormiguita: ya
     registradas en Quoia pero nunca marcadas a mano)."""
     filas = db.execute(
-        select(Frontera, Proyecto.project_id_solenium)
+        select(Frontera, Proyecto.project_id_solarview)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
         .where(
             Frontera.estado == EstadoFronteraEnum.activa,
@@ -243,7 +243,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     por caso, para log/depuración -- el detalle real vive en la BD.
     """
     gaia = GaiaClient()
-    sol = SoleniumClient()
+    sv = SolarViewClient()
 
     bordes = curvas.construir_mapa_borders(gaia)
     mapa_medidor_nodo = curvas.construir_mapa_medidor_nodo(gaia)
@@ -259,7 +259,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior
     cancelado = False
 
-    for i, (frontera, project_id_solenium) in enumerate(fronteras, start=1):
+    for i, (frontera, project_id_solarview) in enumerate(fronteras, start=1):
         if _CANCELAR.get(str(fecha)):
             print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
             cancelado = True
@@ -267,7 +267,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
 
         frt_code = frontera.codigo_frontera.strip().lower()
         border_meta = bordes.get(frt_code)
-        pid_solenium = int(project_id_solenium) if project_id_solenium and project_id_solenium.isdigit() else None
+        pid_solarview = int(project_id_solarview) if project_id_solarview and project_id_solarview.isdigit() else None
 
         excl = _exclusion_activa(db, frontera.id, fecha)
         if excl is not None:
@@ -308,7 +308,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
         try:
             if frontera.tipo_frontera in TIPOS_GENERACION:
                 resultado = clasificador.clasificar_generacion(
-                    db, gaia, sol, frontera.id, frt_code, border_meta, pid_solenium, mapa_medidor_nodo, fecha,
+                    db, gaia, sv, frontera.id, frt_code, border_meta, pid_solarview, mapa_medidor_nodo, fecha,
                     capacidad_efectiva_mw=(
                         float(frontera.capacidad_efectiva_mw) if frontera.capacidad_efectiva_mw is not None else None
                     ),

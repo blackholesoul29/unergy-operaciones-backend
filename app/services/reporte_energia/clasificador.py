@@ -28,8 +28,8 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solenium_client import SoleniumClient
-from app.services.reporte_energia import curvas, datos_crudos, solenium as solenium_svc, reconectador, historial
+from app.services.mgs.solarview_client import SolarViewClient
+from app.services.reporte_energia import curvas, datos_crudos, solarview as solarview_svc, reconectador, historial
 from app.services.reporte_energia.utils import (
     CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
 )
@@ -76,21 +76,21 @@ def _error_con_curva(e_inv: float, curva: pd.Series) -> float | None:
     return (e_inv - e_nodo) / e_inv * 100
 
 
-def _error_ventana_solar(curva_referencia: pd.Series, curva_solenium: pd.Series) -> float | None:
-    """Compara curva_referencia (CGM o medidor) contra Solenium, ambas
+def _error_ventana_solar(curva_referencia: pd.Series, curva_solarview: pd.Series) -> float | None:
+    """Compara curva_referencia (CGM o medidor) contra SolarView, ambas
     restringidas a la ventana solar (HORAS_SOLARES) -- las horas que
-    Solenium no reportó DENTRO de esa ventana cuentan como 0 en la
+    SolarView no reportó DENTRO de esa ventana cuentan como 0 en la
     comparación (no se excluyen, a diferencia de las horas fuera de la
     ventana, que nunca importan). Antes se comparaba solo contra las horas
     que Solenium sí tenía, sin importar dónde cayeran -- si esas horas eran
     un pedazo angosto y no representativo del día (ver MGS Gandalf
     2026-08-10: Solenium solo reportó 12h-23h, sin la mañana completa), la
     comparación pasaba "bien" sin haber validado nada real. Con esta
-    ventana fija, un hueco de generación real que Solenium se perdió sí se
+    ventana fija, un hueco de generación real que SolarView se perdió sí se
     nota (ver MGS 0025 El Copey Occidente 2026-08-05, que sigue pasando
     limpio -- su hueco real era de madrugada, fuera de la ventana)."""
     ref_ventana = float(curva_referencia.reindex(HORAS_SOLARES).fillna(0).sum())
-    sol_ventana = float(curva_solenium.reindex(HORAS_SOLARES).fillna(0).sum())
+    sol_ventana = float(curva_solarview.reindex(HORAS_SOLARES).fillna(0).sum())
     if sol_ventana == 0:
         return None
     return (sol_ventana - ref_ventana) / sol_ventana * 100
@@ -134,11 +134,11 @@ def _decidir_caso(
     completo_resp: bool,
     e_inv: float,
     e_inv_incompleto: float | None,
-    curva_solenium: pd.Series,
-    id_solenium: int | None,
+    curva_solarview: pd.Series,
+    id_solarview: int | None,
     node_ppal: int | None,
     gaia: GaiaClient,
-    sol: SoleniumClient,
+    sv: SolarViewClient,
     capacidad_efectiva_mw: float | None = None,
 ) -> dict:
     """Puerto de _clasificar_fila(). Devuelve {'caso', 'energia_final_kwh',
@@ -172,7 +172,7 @@ def _decidir_caso(
                     "medidor_usado": "revisar", "error_final_pct": error_ref,
                 }
             e_fp = e_inv * fp_val
-            curva_inv = escalar_curva(curva_solenium, e_fp) if isinstance(curva_solenium, pd.Series) else CURVA_CERO.copy()
+            curva_inv = escalar_curva(curva_solarview, e_fp) if isinstance(curva_solarview, pd.Series) else CURVA_CERO.copy()
             return {
                 "caso": 3, "energia_final_kwh": e_fp, "curva_final": curva_inv,
                 "fp": fp_val, "fp_calculada": fp_calc, "medidor_usado": "inversores",
@@ -189,18 +189,18 @@ def _decidir_caso(
     if e_inv == 0 and e_cgm > 0:
         if reporte_valido:
             resultado_cgm = {"caso": 5, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
-            # Solenium reportó parcial ese día (e_inv_incompleto) -- no se
+            # SolarView reportó parcial ese día (e_inv_incompleto) -- no se
             # descarta solo por estar incompleto, se usa igual como chequeo
             # de plausibilidad: se compara CGM contra inversores dentro de
-            # la ventana solar (huecos de Solenium ahí cuentan como 0, ver
+            # la ventana solar (huecos de SolarView ahí cuentan como 0, ver
             # _error_ventana_solar) -- no el total del día completo, que
             # siempre se vería "mal" contra un total parcial. Si coincide
             # dentro del rango normal, no hace falta Revisar Manualmente
             # solo porque hubo un hueco en un dato que ni siquiera se usó
             # para el número reportado (se sigue confiando en CGM en ambos
             # casos -- esto solo decide la bandera).
-            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
-                error_parcial = _error_ventana_solar(curva_cgm, curva_solenium)
+            if e_inv_incompleto and isinstance(curva_solarview, pd.Series):
+                error_parcial = _error_ventana_solar(curva_cgm, curva_solarview)
                 resultado_cgm["error_final_pct"] = error_parcial
                 en_rango = _en_rango(error_parcial)
                 resultado_cgm["revisar_manualmente"] = not en_rango
@@ -230,16 +230,16 @@ def _decidir_caso(
             # recurso si ninguno de los dos tiene nada.
             if e_inv_incompleto:
                 fp_val, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
-                if fp_val is not None and isinstance(curva_solenium, pd.Series):
+                if fp_val is not None and isinstance(curva_solarview, pd.Series):
                     e_fp = e_inv_incompleto * fp_val
                     return {
                         "caso": 5, "energia_final_kwh": e_fp,
-                        "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                        "curva_final": escalar_curva_con_huecos(curva_solarview, e_fp),
                         "fp": fp_val, "fp_calculada": fp_calc,
                         "medidor_usado": "inversores", "revisar_manualmente": True,
                     }
-            if id_solenium is not None:
-                curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
+            if id_solarview is not None:
+                curva_reconectador = reconectador.get_curva_reconectador(sv, int(id_solarview), fecha_str, capacidad_efectiva_mw)
                 if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
                     return {
                         "caso": 5, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
@@ -282,8 +282,8 @@ def _decidir_caso(
             # Revisar Manualmente a ciegas). Sin inversores con qué
             # comparar, se mantiene el criterio de siempre: queda marcado.
             error_parcial = None
-            if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
-                error_parcial = _error_ventana_solar(curva, curva_solenium)
+            if e_inv_incompleto and isinstance(curva_solarview, pd.Series):
+                error_parcial = _error_ventana_solar(curva, curva_solarview)
 
                 # Si el elegido por defecto (siempre principal, mientras
                 # tenga dato) falla la comparación contra inversores pero el
@@ -295,7 +295,7 @@ def _decidir_caso(
                 # YA están dentro de rango, se mantiene principal -- no
                 # cambia solo porque el otro tenga un error un poco menor.
                 if not _en_rango(error_parcial) and curva is curva_ppal and _tiene_dato(curva_resp):
-                    error_resp = _error_ventana_solar(curva_resp, curva_solenium)
+                    error_resp = _error_ventana_solar(curva_resp, curva_solarview)
                     if error_resp is not None and _en_rango(error_resp):
                         curva, error_parcial = curva_resp, error_resp
 
@@ -315,7 +315,7 @@ def _decidir_caso(
                         e_fp = e_inv_incompleto * fp_val
                         return {
                             "caso": 5, "energia_final_kwh": e_fp,
-                            "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                            "curva_final": escalar_curva_con_huecos(curva_solarview, e_fp),
                             "fp": fp_val, "fp_calculada": fp_calc, "error_final_pct": error_parcial,
                             "medidor_usado": "inversores", "revisar_manualmente": True,
                         }
@@ -341,11 +341,11 @@ def _decidir_caso(
         # Cañahuate 2026-08-05: "revisar" + relleno 8h-23h, cuando en
         # realidad solo faltaban 6h y 7h -- el resto ya era dato real).
         fp_val, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
-        if fp_val is not None and isinstance(curva_solenium, pd.Series):
+        if fp_val is not None and isinstance(curva_solarview, pd.Series):
             e_fp = e_inv_incompleto * fp_val
             return {
                 "caso": 3, "energia_final_kwh": e_fp,
-                "curva_final": escalar_curva_con_huecos(curva_solenium, e_fp),
+                "curva_final": escalar_curva_con_huecos(curva_solarview, e_fp),
                 "fp": fp_val, "fp_calculada": fp_calc,
                 "medidor_usado": "inversores", "revisar_manualmente": True,
             }
@@ -364,8 +364,8 @@ def _decidir_caso(
     # reporta en W en vez de kW). Se marca 'Revisar Manualmente' siempre
     # que se use: un proyecto que llega hasta acá no tiene ninguna otra
     # fuente para confirmar el signo/magnitud del reconectador.
-    if id_solenium is not None:
-        curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
+    if id_solarview is not None:
+        curva_reconectador = reconectador.get_curva_reconectador(sv, int(id_solarview), fecha_str, capacidad_efectiva_mw)
         if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
             return {
                 "caso": 7, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
@@ -383,13 +383,13 @@ def _decidir_caso(
 
     if not datos_crudos.proyecto_generando(crudos):
         # Ya se intentó el reconectador arriba -- si llegamos acá es porque
-        # no tenía nada (o no hay id_solenium). Último recurso antes de
-        # confirmar apagado: sumar todos los inversores de Solenium /power/
+        # no tenía nada (o no hay id_solarview). Último recurso antes de
+        # confirmar apagado: sumar todos los inversores de SolarView /power/
         # e integrar. Se reporta DIRECTO, sin FP (no es "inversores vs
         # medidor", es la única lectura de generación disponible).
-        if id_solenium is not None:
-            resp_power = sol.get_power(int(id_solenium), fecha_str, fecha_str)
-            curva_power, _ = solenium_svc.curva_de_power(resp_power)
+        if id_solarview is not None:
+            resp_power = sv.get_power(int(id_solarview), fecha_str, fecha_str)
+            curva_power, _ = solarview_svc.curva_de_power(resp_power)
             if curva_power.fillna(0).sum() > 0:
                 return {
                     "caso": 7, "energia_final_kwh": float(curva_power.fillna(0).sum()),
@@ -429,11 +429,11 @@ def _decidir_caso(
 def clasificar_generacion(
     db: Session,
     gaia: GaiaClient,
-    sol: SoleniumClient,
+    sv: SolarViewClient,
     frontera_id: int,
     frt_code: str,
     border_meta: dict | None,
-    project_id_solenium: int | None,
+    project_id_solarview: int | None,
     mapa_medidor_nodo: dict[int, int],
     fecha: date,
     capacidad_efectiva_mw: float | None = None,
@@ -471,12 +471,12 @@ def clasificar_generacion(
         curva_cgm = CURVA_CERO.copy()
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    # --- Solenium (inversores) -- ANTES del medidor a propósito, ver abajo ---
-    curva_solenium, solenium_completo = solenium_svc.curva_generacion(sol, project_id_solenium, fecha_str)
-    e_inv_original = float(curva_solenium.fillna(0).sum())
+    # --- SolarView (inversores) -- ANTES del medidor a propósito, ver abajo ---
+    curva_solarview, solarview_completo = solarview_svc.curva_generacion(sv, project_id_solarview, fecha_str)
+    e_inv_original = float(curva_solarview.fillna(0).sum())
 
-    # Un hueco de telemetría en Solenium hace que e_inv_original sea un total
-    # parcial -- de acá en adelante Solenium ya no es confiable para validar
+    # Un hueco de telemetría en SolarView hace que e_inv_original sea un total
+    # parcial -- de acá en adelante SolarView ya no es confiable para validar
     # cruzado, se trata como si no hubiera inversores en absoluto (e_inv=0)
     # para caer en la misma cadena de respaldo (CGM -> medidor -> datos
     # crudos). El total parcial se guarda aparte (e_inv_incompleto) por si
@@ -484,7 +484,7 @@ def clasificar_generacion(
     # _decidir_caso.
     e_inv = e_inv_original
     e_inv_incompleto = None
-    if e_inv > 0 and not solenium_completo:
+    if e_inv > 0 and not solarview_completo:
         e_inv_incompleto = e_inv
         e_inv = 0.0
 
@@ -525,15 +525,15 @@ def clasificar_generacion(
         db, frontera_id, fecha, fecha_str,
         e_cgm, curva_cgm, reporte_valido,
         curva_ppal, curva_resp, completo_ppal, completo_resp,
-        e_inv, e_inv_incompleto, curva_solenium,
-        project_id_solenium, c["node_ppal"], gaia, sol,
+        e_inv, e_inv_incompleto, curva_solarview,
+        project_id_solarview, c["node_ppal"], gaia, sv,
         capacidad_efectiva_mw=capacidad_efectiva_mw,
     )
     revisar = resultado.get("revisar_manualmente", False)
     if frontera_id in FRONTERAS_MEDIDOR_SOSPECHOSO:
         revisar = True
 
-    # Un hueco de telemetría en Solenium marca revisión manual (no hay forma
+    # Un hueco de telemetría en SolarView marca revisión manual (no hay forma
     # de recuperarlo como con los medidores) -- excepto cuando el resultado
     # ya viene de un camino de Caso 5 que YA comparó contra el total parcial
     # de inversores (_error_ventana_solar) y decidió su propia bandera con
@@ -543,7 +543,7 @@ def clasificar_generacion(
     # por no ser exactamente 'cgm').
     if (
         resultado.get("medidor_usado") not in ("cgm", "principal_sin_cgm", "respaldo_sin_cgm")
-        and e_inv_original > 0 and not solenium_completo
+        and e_inv_original > 0 and not solarview_completo
     ):
         revisar = True
 
@@ -557,7 +557,7 @@ def clasificar_generacion(
     # reusa reconectador.rellenar_horas_faltantes() sobre lo que haya
     # quedado acá.
     curva_actual = resultado.get("curva_final")
-    horas_reconectador, horas_solenium_h, horas_historico = set(), set(), set()
+    horas_reconectador, horas_solarview_h, horas_historico = set(), set(), set()
     horas_fuera_ventana_directo: set[int] = set()
     if (
         resultado["caso"] in CASOS_CON_RELLENO_HORARIO
@@ -589,19 +589,19 @@ def clasificar_generacion(
 
     resultado["revisar_manualmente"] = revisar
     resultado["horas_rellenadas_reconectador"] = sorted(horas_reconectador) or None
-    resultado["horas_rellenadas_solenium"] = sorted(horas_solenium_h) or None
+    resultado["horas_rellenadas_solenium"] = sorted(horas_solarview_h) or None
     resultado["horas_rellenadas_historico"] = sorted(horas_historico) or None
     resultado["energia_cgm_kwh"] = e_cgm
     resultado["estado_reporte"] = estado_reporte
     resultado["energia_solenium_kwh"] = e_inv_original
-    resultado["solenium_completo"] = bool(solenium_completo)
-    resultado["nota_solenium"] = "Sin registro en API Solenium" if project_id_solenium is None else None
+    resultado["solenium_completo"] = bool(solarview_completo)
+    resultado["nota_solenium"] = "Sin registro en API SolarView" if project_id_solarview is None else None
     resultado["energia_medidor_principal_kwh"] = float(curva_ppal.fillna(0).sum())
     resultado["energia_medidor_respaldo_kwh"] = float(curva_resp.fillna(0).sum())
     resultado["medidor_principal_completo"] = bool(completo_ppal)
     resultado["medidor_respaldo_completo"] = bool(completo_resp)
     resultado["recuperacion_datos"] = c.get("recuperacion_datos")
-    # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
+    # Curvas de referencia (medidor/SolarView) tal como estaban AL MOMENTO de
     # clasificar -- antes solo se guardaba el total (energia_medidor_..._kwh),
     # la curva completa se volvía a pedir en vivo cada vez que se abría el
     # detalle, lo que podía mostrar un valor distinto al que realmente se usó
@@ -612,7 +612,7 @@ def clasificar_generacion(
     resultado["curva_medidor_principal"] = curva_a_lista(curva_ppal)
     resultado["curva_medidor_respaldo"] = curva_a_lista(curva_resp)
     resultado["curva_solenium_referencia"] = (
-        curva_a_lista(curva_solenium) if isinstance(curva_solenium, pd.Series) else None
+        curva_a_lista(curva_solarview) if isinstance(curva_solarview, pd.Series) else None
     )
     # Reconectador de referencia -- mismo trato que medidor/Solenium arriba:
     # se consulta SIEMPRE en la clasificación diaria y se guarda, para que
@@ -628,8 +628,8 @@ def clasificar_generacion(
     # consulta falla -- get_curva_reconectador() ya maneja eso.
     if "curva_reconectador_referencia" not in resultado:
         curva_reconectador_ref = (
-            reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str, capacidad_efectiva_mw)
-            if project_id_solenium is not None else None
+            reconectador.get_curva_reconectador(sv, project_id_solarview, fecha_str, capacidad_efectiva_mw)
+            if project_id_solarview is not None else None
         )
         resultado["curva_reconectador_referencia"] = (
             curva_a_lista(curva_reconectador_ref) if curva_reconectador_ref is not None else None

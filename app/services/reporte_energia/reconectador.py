@@ -26,7 +26,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import historial
 from app.services.reporte_energia.utils import HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva
 
@@ -58,7 +58,7 @@ def _limite_plausible_kwh(capacidad_efectiva_mw: float | None) -> float | None:
 
 
 def get_curva_reconectador(
-    sol: SoleniumClient, id_solenium: int, fecha_str: str,
+    sv: SolarViewClient, id_solarview: int, fecha_str: str,
     capacidad_efectiva_mw: float | None = None,
 ) -> pd.Series | None:
     """Curva horaria (kWh) del reconectador para un proyecto y fecha (YYYY-MM-DD).
@@ -70,8 +70,8 @@ def get_curva_reconectador(
     MULTIPLICADOR_MAX_PLAUSIBLE arriba). Quien llama debe seguir con el
     flujo normal sin este relleno.
     """
-    resp = sol.get_relay_historical(
-        id_solenium, f"{fecha_str} 00:00:00", f"{fecha_str} 23:59:59", variables="kw",
+    resp = sv.get_relay_historical(
+        id_solarview, f"{fecha_str} 00:00:00", f"{fecha_str} 23:59:59", variables="kw",
     )
     puntos = resp.get("results") if isinstance(resp, dict) else None
     if not puntos:
@@ -115,12 +115,12 @@ def get_curva_reconectador(
 
 def rellenar_horas_faltantes(
     db: Session,
-    sol: SoleniumClient,
+    sv: SolarViewClient,
     curva: pd.Series,
-    id_solenium: int | None,
+    id_solarview: int | None,
     fecha_str: str,
     frontera_id: int | None = None,
-    curva_solenium: pd.Series | None = None,
+    curva_solarview: pd.Series | None = None,
     fp: float | None = None,
     curva_reconectador_conocida: pd.Series | None = None,
     capacidad_efectiva_mw: float | None = None,
@@ -143,7 +143,7 @@ def rellenar_horas_faltantes(
     `curva_reconectador_conocida` -- si el llamador YA tiene la curva del
     reconectador a mano (ej. clasificar_generacion() la consulta y persiste
     siempre, ver curva_reconectador_referencia), se reusa en vez de volver
-    a pedirla a Solenium -- evita una consulta duplicada cuando "Rellenar
+    a pedirla a SolarView -- evita una consulta duplicada cuando "Rellenar
     horas" se usa el mismo día que ya se clasificó (2026-08-21).
 
     `capacidad_efectiva_mw` -- se pasa a get_curva_reconectador() cuando SÍ
@@ -167,20 +167,20 @@ def rellenar_horas_faltantes(
     curva = curva.copy()
     horas_faltantes = set(curva[curva.isna()].index)
 
-    if curva_solenium is not None and fp is not None:
+    if curva_solarview is not None and fp is not None:
         for h in list(horas_faltantes):
             if h not in HORAS_SOLARES:
                 continue
-            valor_inv = curva_solenium.get(h) if isinstance(curva_solenium, pd.Series) else None
+            valor_inv = curva_solarview.get(h) if isinstance(curva_solarview, pd.Series) else None
             if pd.notna(valor_inv):
                 curva[h] = valor_inv * fp
                 horas_solenium.add(h)
         horas_faltantes -= horas_solenium
 
-    if horas_faltantes and id_solenium is not None:
+    if horas_faltantes and id_solarview is not None:
         curva_relay = (
             curva_reconectador_conocida if curva_reconectador_conocida is not None
-            else get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
+            else get_curva_reconectador(sv, int(id_solarview), fecha_str, capacidad_efectiva_mw)
         )
         if curva_relay is not None:
             curva_reconectador_ref = curva_relay

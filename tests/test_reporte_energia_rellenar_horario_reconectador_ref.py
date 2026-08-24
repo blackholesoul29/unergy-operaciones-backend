@@ -45,7 +45,7 @@ FECHA = date(2026, 8, 1)
 
 
 def test_curva_reconectador_se_guarda_aunque_nada_se_haya_rellenado(db, monkeypatch):
-    db.add(Proyecto(id=1, nombre_comercial="Test", project_id_solenium="123"))
+    db.add(Proyecto(id=1, nombre_comercial="Test", project_id_solarview="123"))
     db.add(Frontera(
         id=1, proyecto_id=1, nombre_frontera="Test",
         tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001",
@@ -59,7 +59,7 @@ def test_curva_reconectador_se_guarda_aunque_nada_se_haya_rellenado(db, monkeypa
     db.add(rep)
     db.commit()
 
-    monkeypatch.setattr(re_api, "SoleniumClient", lambda: object())
+    monkeypatch.setattr(re_api, "SolarViewClient", lambda: object())
     # El reconectador SÍ respondió (curva_reconectador_ref no es None), pero
     # ninguna hora quedó marcada como rellenada por él ni por ninguna otra
     # fuente -- simula sus horas ya cubiertas o fuera de la ventana esperada.
@@ -79,7 +79,7 @@ def test_curva_reconectador_se_guarda_aunque_nada_se_haya_rellenado(db, monkeypa
 
 
 def test_sin_respuesta_del_reconectador_no_guarda_nada(db, monkeypatch):
-    db.add(Proyecto(id=1, nombre_comercial="Test", project_id_solenium="123"))
+    db.add(Proyecto(id=1, nombre_comercial="Test", project_id_solarview="123"))
     db.add(Frontera(
         id=1, proyecto_id=1, nombre_frontera="Test",
         tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001",
@@ -93,7 +93,7 @@ def test_sin_respuesta_del_reconectador_no_guarda_nada(db, monkeypatch):
     db.add(rep)
     db.commit()
 
-    monkeypatch.setattr(re_api, "SoleniumClient", lambda: object())
+    monkeypatch.setattr(re_api, "SolarViewClient", lambda: object())
     monkeypatch.setattr(
         re_api.reconectador, "rellenar_horas_faltantes",
         lambda *a, **kw: (pd.Series(curva_incompleta), set(), set(), set(), None),

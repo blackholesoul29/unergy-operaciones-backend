@@ -30,7 +30,7 @@ def test_reusa_curva_conocida_sin_volver_a_consultar():
 
     curva_conocida = pd.Series([55.0] * 24, dtype=float)
     resultado, horas_rec, horas_sol, horas_hist, curva_ref = reconectador.rellenar_horas_faltantes(
-        db=None, sol=_SolFalso(), curva=curva, id_solenium=123, fecha_str=FECHA_STR,
+        db=None, sv=_SolFalso(), curva=curva, id_solarview=123, fecha_str=FECHA_STR,
         curva_reconectador_conocida=curva_conocida,
     )
 
@@ -52,7 +52,7 @@ def test_sin_curva_conocida_si_consulta_a_solenium():
             return {"results": {"2026-08-20T10:00:00": {"kw": 55.0}}}
 
     resultado, horas_rec, horas_sol, horas_hist, curva_ref = reconectador.rellenar_horas_faltantes(
-        db=None, sol=_SolFalso(), curva=curva, id_solenium=123, fecha_str=FECHA_STR,
+        db=None, sv=_SolFalso(), curva=curva, id_solarview=123, fecha_str=FECHA_STR,
     )
 
     assert llamados == [1]  # sin curva conocida, sí consulta

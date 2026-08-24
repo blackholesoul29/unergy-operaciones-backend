@@ -1,5 +1,5 @@
-"""Generación horaria por proyecto reportada en Solenium.
-Endpoint principal: GET /project/{id}/generation/?start_date=...&end_date=...
+"""Generación horaria por proyecto reportada en SolarView (antes Solenium).
+Endpoint principal: GET /solarview/measurements/generation/?project_id=...
 
 Puerto de process/src/internals/energia_solenium.py (repo Reporte-Energia).
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia.curvas import dia_completo
 
 HORAS = list(range(24))
@@ -32,19 +32,18 @@ def _curva_de_resp(resp: dict) -> pd.Series:
 
 
 def curva_de_power(resp: dict) -> tuple[pd.Series, set[int]]:
-    """Reconstruye la curva horaria sumando la potencia de TODOS los
-    inversores de /power/ (5 min) e integrando por Riemann -- respaldo
-    cuando /generation/ viene vacío."""
+    """Reconstruye la curva horaria a partir de /power/ (5 min) e integrando
+    por Riemann -- respaldo cuando /generation/ viene vacío.
+
+    Se pide con total_power=1 (ver SolarViewClient.get_power), así que
+    `results.power` ya viene sumado entre todos los inversores -- a
+    diferencia de la API vieja de Solenium, que devolvía potencia por
+    inversor (`{inversor: {ts: kw}}`) y había que sumar acá."""
     power = resp.get("results", {}).get("power", {}) if isinstance(resp, dict) else {}
     if not power:
         return pd.Series([None] * 24, index=HORAS, dtype=float), set()
 
-    combinado: dict[str, float] = {}
-    for _, curva_inv in power.items():
-        for ts, val in curva_inv.items():
-            if val is None:
-                continue
-            combinado[ts] = combinado.get(ts, 0.0) + float(val)
+    combinado = {ts: float(val) for ts, val in power.items() if val is not None}
 
     if not combinado:
         return pd.Series([None] * 24, index=HORAS, dtype=float), set()
@@ -92,17 +91,17 @@ def _horas_reportadas(gen_kwh: dict) -> set[int]:
     return horas
 
 
-def curva_generacion(sol: SoleniumClient, project_id_solenium: int | None, fecha_str: str) -> tuple[pd.Series, bool]:
-    """(curva horaria kWh, completo) de generación Solenium para un proyecto y fecha.
+def curva_generacion(sv: SolarViewClient, project_id_solarview: int | None, fecha_str: str) -> tuple[pd.Series, bool]:
+    """(curva horaria kWh, completo) de generación SolarView para un proyecto y fecha.
 
     Un hueco en inversores entiende el total por debajo de lo real (fillna(0)
     en la suma), y ese total se usa como referencia para validar CGM y
     medidores -- por eso importa saber si es confiable ('completo').
     """
     vacia = pd.Series([None] * 24, index=HORAS, dtype=float)
-    if project_id_solenium is None:
+    if project_id_solarview is None:
         return vacia, False
-    resp = sol.get_generation(int(project_id_solenium), fecha_str, fecha_str)
+    resp = sv.get_generation(int(project_id_solarview), fecha_str, fecha_str)
     if not resp:
         return vacia, False
     curva = _curva_de_resp(resp)

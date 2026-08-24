@@ -44,7 +44,7 @@ def _preparar_caso1(monkeypatch):
     """Fuerza Caso 1 (CGM válido == inversores, en rango) -- el camino más
     corto en _decidir_caso, así no hace falta mockear medidor/histórico
     también."""
-    monkeypatch.setattr(clasificador.solenium_svc, "curva_generacion", lambda *a, **kw: (CURVA_10.copy(), True))
+    monkeypatch.setattr(clasificador.solarview_svc, "curva_generacion", lambda *a, **kw: (CURVA_10.copy(), True))
     monkeypatch.setattr(
         clasificador.curvas, "curvas_de_frontera",
         lambda *a, **kw: {
@@ -65,15 +65,15 @@ def test_reconectador_se_consulta_y_persiste_con_curva_final_completa(db, monkey
     _preparar_caso1(monkeypatch)
     llamados = []
 
-    def _fake_reconectador(sol, id_solenium, fecha_str, capacidad_efectiva_mw=None):
-        llamados.append((id_solenium, fecha_str))
+    def _fake_reconectador(sv, id_solarview, fecha_str, capacidad_efectiva_mw=None):
+        llamados.append((id_solarview, fecha_str))
         return pd.Series([5.0] * 24, dtype=float)
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", _fake_reconectador)
 
     resultado = clasificador.clasificar_generacion(
-        db, _GaiaStub(), sol=object(), frontera_id=1, frt_code="frt001",
+        db, _GaiaStub(), sv=object(), frontera_id=1, frt_code="frt001",
         border_meta={"border_id": 1, "main_meter": None, "backup_meter": None},
-        project_id_solenium=123, mapa_medidor_nodo={}, fecha=FECHA,
+        project_id_solarview=123, mapa_medidor_nodo={}, fecha=FECHA,
     )
 
     assert llamados == [(123, str(FECHA))]
@@ -81,15 +81,15 @@ def test_reconectador_se_consulta_y_persiste_con_curva_final_completa(db, monkey
     assert resultado["caso"] == 1  # confirma que sí se tomó el camino corto esperado
 
 
-def test_sin_project_id_solenium_no_consulta_reconectador(db, monkeypatch):
+def test_sin_project_id_solarview_no_consulta_reconectador(db, monkeypatch):
     _preparar_caso1(monkeypatch)
     llamados = []
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", lambda *a, **kw: llamados.append(1))
 
     resultado = clasificador.clasificar_generacion(
-        db, _GaiaStub(), sol=object(), frontera_id=1, frt_code="frt001",
+        db, _GaiaStub(), sv=object(), frontera_id=1, frt_code="frt001",
         border_meta={"border_id": 1, "main_meter": None, "backup_meter": None},
-        project_id_solenium=None, mapa_medidor_nodo={}, fecha=FECHA,
+        project_id_solarview=None, mapa_medidor_nodo={}, fecha=FECHA,
     )
 
     assert llamados == []
@@ -101,9 +101,9 @@ def test_reconectador_sin_dato_deja_referencia_en_none(db, monkeypatch):
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", lambda *a, **kw: None)
 
     resultado = clasificador.clasificar_generacion(
-        db, _GaiaStub(), sol=object(), frontera_id=1, frt_code="frt001",
+        db, _GaiaStub(), sv=object(), frontera_id=1, frt_code="frt001",
         border_meta={"border_id": 1, "main_meter": None, "backup_meter": None},
-        project_id_solenium=123, mapa_medidor_nodo={}, fecha=FECHA,
+        project_id_solarview=123, mapa_medidor_nodo={}, fecha=FECHA,
     )
 
     assert resultado["curva_reconectador_referencia"] is None
@@ -122,7 +122,7 @@ def test_caso7_reusa_la_misma_curva_sin_consultar_dos_veces(db, monkeypatch):
     vez, con riesgo de devolver algo distinto y contradecir "Fuente usada"
     (ver MGS 0033 Sabana de Torres 2026-08-18/21: "Fuente usada:
     Reconectador" pero "Detalle de las fuentes" mostraba "Sin dato")."""
-    monkeypatch.setattr(clasificador.solenium_svc, "curva_generacion", lambda *a, **kw: (pd.Series([None] * 24, dtype=float), False))
+    monkeypatch.setattr(clasificador.solarview_svc, "curva_generacion", lambda *a, **kw: (pd.Series([None] * 24, dtype=float), False))
     monkeypatch.setattr(
         clasificador.curvas, "curvas_de_frontera",
         lambda *a, **kw: {
@@ -136,15 +136,15 @@ def test_caso7_reusa_la_misma_curva_sin_consultar_dos_veces(db, monkeypatch):
     )
     llamados = []
 
-    def _fake_reconectador(sol, id_solenium, fecha_str, capacidad_efectiva_mw=None):
-        llamados.append((id_solenium, fecha_str))
+    def _fake_reconectador(sv, id_solarview, fecha_str, capacidad_efectiva_mw=None):
+        llamados.append((id_solarview, fecha_str))
         return pd.Series([20.0] * 24, dtype=float)
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", _fake_reconectador)
 
     resultado = clasificador.clasificar_generacion(
-        db, _GaiaStubInvalido(), sol=object(), frontera_id=1, frt_code="frt001",
+        db, _GaiaStubInvalido(), sv=object(), frontera_id=1, frt_code="frt001",
         border_meta={"border_id": 1, "main_meter": None, "backup_meter": None},
-        project_id_solenium=123, mapa_medidor_nodo={}, fecha=FECHA,
+        project_id_solarview=123, mapa_medidor_nodo={}, fecha=FECHA,
     )
 
     assert resultado["caso"] == 7

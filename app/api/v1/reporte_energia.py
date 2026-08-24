@@ -36,7 +36,7 @@ from app.services.reporte_energia.clasificador_consumo import rellenar_horas_fal
 from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
 
@@ -691,7 +691,7 @@ def rellenar_horario(
 
     1. El OTRO medidor (el que no ganó como medidor_usado) -- mismo
        consumo/generación física, dato real, no una estimación.
-    2. Generación: reconectador, luego Solenium × FP.
+    2. Generación: reconectador, luego SolarView × FP.
     3. Histórico propio (mediana × forma) -- último recurso en ambos árboles.
 
     Aplica a Generación y Consumo. No fuerza revisar_manualmente -- es una
@@ -715,21 +715,21 @@ def rellenar_horario(
     if curva_actual.isna().any():
         if es_generacion:
             proyecto = front.proyecto
-            project_id_solenium = (
-                int(proyecto.project_id_solenium)
-                if proyecto and proyecto.project_id_solenium and str(proyecto.project_id_solenium).isdigit()
+            project_id_solarview = (
+                int(proyecto.project_id_solarview)
+                if proyecto and proyecto.project_id_solarview and str(proyecto.project_id_solarview).isdigit()
                 else None
             )
-            curva_solenium = lista_a_curva(rep.curva_solenium_referencia) if rep.curva_solenium_referencia else None
+            curva_solarview = lista_a_curva(rep.curva_solenium_referencia) if rep.curva_solenium_referencia else None
             if rep.fp is not None:
                 fp, fp_calc = float(rep.fp), float(rep.fp_calculada) if rep.fp_calculada is not None else None
             else:
                 fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
 
-            sol = SoleniumClient()
+            sv = SolarViewClient()
             # Si la clasificación diaria ya consultó y guardó el
             # reconectador (ver clasificar_generacion), se reusa en vez de
-            # volver a pedirlo a Solenium -- evita una llamada duplicada
+            # volver a pedirlo a SolarView -- evita una llamada duplicada
             # cuando "Rellenar horas" se usa el mismo día (2026-08-21).
             curva_reconectador_conocida = (
                 lista_a_curva(rep.curva_reconectador_referencia)
@@ -737,8 +737,8 @@ def rellenar_horario(
             )
             curva_actual, horas_reconectador, horas_solenium_h, horas_historico, curva_reconectador_ref = (
                 reconectador.rellenar_horas_faltantes(
-                    db, sol, curva_actual, project_id_solenium, str(fecha),
-                    frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
+                    db, sv, curva_actual, project_id_solarview, str(fecha),
+                    frontera_id=frontera_id, curva_solarview=curva_solarview, fp=fp,
                     curva_reconectador_conocida=curva_reconectador_conocida,
                     capacidad_efectiva_mw=(
                         float(front.capacidad_efectiva_mw) if front.capacidad_efectiva_mw is not None else None

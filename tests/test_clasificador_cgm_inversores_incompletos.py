@@ -28,7 +28,7 @@ def _curva_pareja(valor_horas_solares):
     return pd.Series(data, dtype=float)
 
 
-def _decidir(reporte_valido, e_inv_incompleto, curva_solenium, curva_cgm):
+def _decidir(reporte_valido, e_inv_incompleto, curva_solarview, curva_cgm):
     e_cgm = float(curva_cgm.sum())
     curva_vacia = pd.Series([None] * 24, dtype=float)
     return clasificador._decidir_caso(
@@ -36,8 +36,8 @@ def _decidir(reporte_valido, e_inv_incompleto, curva_solenium, curva_cgm):
         e_cgm=e_cgm, curva_cgm=curva_cgm, reporte_valido=reporte_valido,
         curva_ppal=curva_vacia, curva_resp=curva_vacia,
         completo_ppal=False, completo_resp=False,
-        e_inv=0.0, e_inv_incompleto=e_inv_incompleto, curva_solenium=curva_solenium,
-        id_solenium=123, node_ppal=None, gaia=object(), sol=object(),
+        e_inv=0.0, e_inv_incompleto=e_inv_incompleto, curva_solarview=curva_solarview,
+        id_solarview=123, node_ppal=None, gaia=object(), sv=object(),
     )
 
 

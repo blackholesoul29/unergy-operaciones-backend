@@ -151,6 +151,11 @@ class Proyecto(Base):
     # Nunca se pisa un valor ya diligenciado en ningún lado (ver proyectos.py).
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     project_id_solenium: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    # ID del proyecto en la API nueva de SolarView -- NO coincide con
+    # project_id_solenium (esquema de IDs completamente distinto entre las
+    # dos APIs). Se usa solo desde Reporte de Energía por ahora (Fase 1 de
+    # la migración); los demás módulos siguen con project_id_solenium.
+    project_id_solarview: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
 
     # ── CRM comercial ────────────────────────────────────────────────────────
     # Oportunidad (pipeline comercial) a la que pertenece este proyecto.

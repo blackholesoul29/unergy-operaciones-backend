@@ -19,6 +19,9 @@ def _load_options():
     return [
         selectinload(ContratoServicio.contratante),
         selectinload(ContratoServicio.prestador),
+        # Sin esto el listado dispara un SELECT por fila para pintar el nombre
+        # del proyecto (112 contratos de representación = 112 queries).
+        selectinload(ContratoServicio.proyecto),
     ]
 
 

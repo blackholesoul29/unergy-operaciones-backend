@@ -740,6 +740,9 @@ def rellenar_horario(
                     db, sol, curva_actual, project_id_solenium, str(fecha),
                     frontera_id=frontera_id, curva_solenium=curva_solenium, fp=fp,
                     curva_reconectador_conocida=curva_reconectador_conocida,
+                    capacidad_efectiva_mw=(
+                        float(front.capacidad_efectiva_mw) if front.capacidad_efectiva_mw is not None else None
+                    ),
                 )
             )
         else:

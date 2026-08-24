@@ -139,6 +139,7 @@ def _decidir_caso(
     node_ppal: int | None,
     gaia: GaiaClient,
     sol: SoleniumClient,
+    capacidad_efectiva_mw: float | None = None,
 ) -> dict:
     """Puerto de _clasificar_fila(). Devuelve {'caso', 'energia_final_kwh',
     'curva_final', 'medidor_usado', ...}."""
@@ -223,7 +224,7 @@ def _decidir_caso(
                         "medidor_usado": "inversores", "revisar_manualmente": True,
                     }
             if id_solenium is not None:
-                curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str)
+                curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
                 if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
                     return {
                         "caso": 5, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
@@ -349,7 +350,7 @@ def _decidir_caso(
     # que se use: un proyecto que llega hasta acá no tiene ninguna otra
     # fuente para confirmar el signo/magnitud del reconectador.
     if id_solenium is not None:
-        curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str)
+        curva_reconectador = reconectador.get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
         if curva_reconectador is not None and curva_reconectador.fillna(0).sum() > 0:
             return {
                 "caso": 7, "energia_final_kwh": float(curva_reconectador.fillna(0).sum()),
@@ -420,6 +421,7 @@ def clasificar_generacion(
     project_id_solenium: int | None,
     mapa_medidor_nodo: dict[int, int],
     fecha: date,
+    capacidad_efectiva_mw: float | None = None,
 ) -> dict:
     """Clasifica una frontera de Generación para un día. Punto de entrada
     público -- puerto del bloque centralizado de clasificar() (repo
@@ -510,6 +512,7 @@ def clasificar_generacion(
         curva_ppal, curva_resp, completo_ppal, completo_resp,
         e_inv, e_inv_incompleto, curva_solenium,
         project_id_solenium, c["node_ppal"], gaia, sol,
+        capacidad_efectiva_mw=capacidad_efectiva_mw,
     )
     revisar = resultado.get("revisar_manualmente", False)
     if frontera_id in FRONTERAS_MEDIDOR_SOSPECHOSO:
@@ -610,7 +613,7 @@ def clasificar_generacion(
     # consulta falla -- get_curva_reconectador() ya maneja eso.
     if "curva_reconectador_referencia" not in resultado:
         curva_reconectador_ref = (
-            reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str)
+            reconectador.get_curva_reconectador(sol, project_id_solenium, fecha_str, capacidad_efectiva_mw)
             if project_id_solenium is not None else None
         )
         resultado["curva_reconectador_referencia"] = (

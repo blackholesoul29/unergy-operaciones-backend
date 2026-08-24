@@ -309,6 +309,9 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
             if frontera.tipo_frontera in TIPOS_GENERACION:
                 resultado = clasificador.clasificar_generacion(
                     db, gaia, sol, frontera.id, frt_code, border_meta, pid_solenium, mapa_medidor_nodo, fecha,
+                    capacidad_efectiva_mw=(
+                        float(frontera.capacidad_efectiva_mw) if frontera.capacidad_efectiva_mw is not None else None
+                    ),
                 )
                 _upsert_generacion(db, frontera.id, fecha, resultado)
                 clave = str(resultado["caso"])

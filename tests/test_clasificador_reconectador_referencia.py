@@ -65,7 +65,7 @@ def test_reconectador_se_consulta_y_persiste_con_curva_final_completa(db, monkey
     _preparar_caso1(monkeypatch)
     llamados = []
 
-    def _fake_reconectador(sol, id_solenium, fecha_str):
+    def _fake_reconectador(sol, id_solenium, fecha_str, capacidad_efectiva_mw=None):
         llamados.append((id_solenium, fecha_str))
         return pd.Series([5.0] * 24, dtype=float)
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", _fake_reconectador)
@@ -136,7 +136,7 @@ def test_caso7_reusa_la_misma_curva_sin_consultar_dos_veces(db, monkeypatch):
     )
     llamados = []
 
-    def _fake_reconectador(sol, id_solenium, fecha_str):
+    def _fake_reconectador(sol, id_solenium, fecha_str, capacidad_efectiva_mw=None):
         llamados.append((id_solenium, fecha_str))
         return pd.Series([20.0] * 24, dtype=float)
     monkeypatch.setattr(clasificador.reconectador, "get_curva_reconectador", _fake_reconectador)

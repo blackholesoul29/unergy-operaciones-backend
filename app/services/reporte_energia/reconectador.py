@@ -34,18 +34,41 @@ HORAS = list(range(24))
 HORA_INICIO_GENERACION = 5   # 5 am
 HORA_FIN_GENERACION    = 18  # 6 pm (exclusiva -- la hora 17 sí cuenta, la 18 no)
 
+# Un panel solar puede superar brevemente su capacidad nominal (irradiancia
+# alta + temperatura baja), pero no por un margen enorme -- un multiplicador
+# generoso (3x) sigue descartando lecturas físicamente imposibles sin
+# arriesgar falsos positivos sobre picos reales. Ver MGS 0033 Sabana de
+# Torres 2026-08-21: el reconectador reportó ~235.000 kWh en una sola hora
+# para una frontera de 0,99 MW -- ~237x su capacidad, un error de escala de
+# unidades del dispositivo, no generación real. Ese valor absurdo se
+# guardaba igual (como fuente completa en Caso 5/7, o como referencia para
+# el gráfico), y en el front inflaba la escala del eje Y hasta aplastar la
+# curva real.
+MULTIPLICADOR_MAX_PLAUSIBLE = 3.0
+
 
 def _potencia_kw(punto: dict) -> float:
     return abs(float(punto.get("kw") or 0))
 
 
-def get_curva_reconectador(sol: SoleniumClient, id_solenium: int, fecha_str: str) -> pd.Series | None:
+def _limite_plausible_kwh(capacidad_efectiva_mw: float | None) -> float | None:
+    if capacidad_efectiva_mw is None or capacidad_efectiva_mw <= 0:
+        return None
+    return capacidad_efectiva_mw * 1000 * MULTIPLICADOR_MAX_PLAUSIBLE
+
+
+def get_curva_reconectador(
+    sol: SoleniumClient, id_solenium: int, fecha_str: str,
+    capacidad_efectiva_mw: float | None = None,
+) -> pd.Series | None:
     """Curva horaria (kWh) del reconectador para un proyecto y fecha (YYYY-MM-DD).
 
     Retorna pd.Series[0..23] con NaN en las horas sin ningún punto real.
-    Retorna None si el proyecto no tiene reconectador instalado, o si la
-    consulta falla -- quien llama debe seguir con el flujo normal sin este
-    relleno.
+    Retorna None si el proyecto no tiene reconectador instalado, si la
+    consulta falla, o si -- pasando capacidad_efectiva_mw -- ninguna hora
+    quedó dentro de un rango físicamente plausible para esa frontera (ver
+    MULTIPLICADOR_MAX_PLAUSIBLE arriba). Quien llama debe seguir con el
+    flujo normal sin este relleno.
     """
     resp = sol.get_relay_historical(
         id_solenium, f"{fecha_str} 00:00:00", f"{fecha_str} 23:59:59", variables="kw",
@@ -81,6 +104,12 @@ def get_curva_reconectador(sol: SoleniumClient, id_solenium: int, fecha_str: str
             curva[h] = 0.0
         elif h not in horas_con_dato:
             curva[h] = None
+
+    limite = _limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        curva[curva.abs() > limite] = None
+        if curva.fillna(0).abs().sum() == 0:
+            return None
     return curva
 
 
@@ -94,6 +123,7 @@ def rellenar_horas_faltantes(
     curva_solenium: pd.Series | None = None,
     fp: float | None = None,
     curva_reconectador_conocida: pd.Series | None = None,
+    capacidad_efectiva_mw: float | None = None,
 ) -> tuple[pd.Series, set[int], set[int], set[int], pd.Series | None]:
     """Rellena las horas en NaN de `curva` en tres pasos, en orden:
 
@@ -115,6 +145,10 @@ def rellenar_horas_faltantes(
     siempre, ver curva_reconectador_referencia), se reusa en vez de volver
     a pedirla a Solenium -- evita una consulta duplicada cuando "Rellenar
     horas" se usa el mismo día que ya se clasificó (2026-08-21).
+
+    `capacidad_efectiva_mw` -- se pasa a get_curva_reconectador() cuando SÍ
+    hace falta consultar (curva_reconectador_conocida es None) para
+    descartar lecturas físicamente imposibles (ver ese docstring).
 
     Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico,
     curva_reconectador) -- este último es la curva CRUDA del reconectador tal
@@ -146,7 +180,7 @@ def rellenar_horas_faltantes(
     if horas_faltantes and id_solenium is not None:
         curva_relay = (
             curva_reconectador_conocida if curva_reconectador_conocida is not None
-            else get_curva_reconectador(sol, int(id_solenium), fecha_str)
+            else get_curva_reconectador(sol, int(id_solenium), fecha_str, capacidad_efectiva_mw)
         )
         if curva_relay is not None:
             curva_reconectador_ref = curva_relay

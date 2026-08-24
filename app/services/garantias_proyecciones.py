@@ -9,7 +9,16 @@ Funciones puras (`calcular_garantia`, `neto_de_balance`) separadas de la orquest
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+# Colombia = UTC-5 sin horario de verano. El contenedor corre en UTC, así que
+# date.today() se adelanta un día entre las 19:00 y medianoche de Bogotá — y ahora
+# hoy.day maneja los días restantes de la ventana, así que importa.
+_COL_TZ = timezone(timedelta(hours=-5))
+
+
+def _hoy_col() -> date:
+    return datetime.now(_COL_TZ).date()
 
 MWH_A_KWH = 1000.0
 KWH_PLANTA_NUEVA_DEFAULT = 180.0
@@ -184,7 +193,7 @@ def construir_proyecciones_live(db, hoy: date | None = None, *, plantas_nuevas: 
     del balance (fuente_neto='proyeccion')."""
     import calendar
     if hoy is None:
-        hoy = date.today()
+        hoy = _hoy_col()
     resultado = proyecciones(
         hoy,
         calcular_balance_fn=lambda a, m: _balance_fn(db, a, m),

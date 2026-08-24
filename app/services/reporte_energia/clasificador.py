@@ -202,7 +202,22 @@ def _decidir_caso(
             if e_inv_incompleto and isinstance(curva_solenium, pd.Series):
                 error_parcial = _error_ventana_solar(curva_cgm, curva_solenium)
                 resultado_cgm["error_final_pct"] = error_parcial
-                resultado_cgm["revisar_manualmente"] = not _en_rango(error_parcial)
+                en_rango = _en_rango(error_parcial)
+                resultado_cgm["revisar_manualmente"] = not en_rango
+                # Si la comparación (aunque con inversores parciales) coincide
+                # dentro de rango, es funcionalmente lo mismo que Caso 1 --
+                # se confía en CGM sin necesidad de revisión, la única
+                # diferencia es que el chequeo fue con datos incompletos en
+                # vez del día completo. Se reclasifica a Caso 1 para que
+                # "Revisión de hoy" no lo muestre como "Corregido
+                # automático" (ámbar) cuando en realidad no se corrigió nada
+                # -- 'solenium_completo' sigue registrando que los
+                # inversores estuvieron incompletos ese día, independiente
+                # del número de Caso (pedido 2026-08-21). Si el error SÍ se
+                # sale de rango, se queda en Caso 5 + revisar_manualmente,
+                # sin cambios.
+                if en_rango:
+                    resultado_cgm["caso"] = 1
             return resultado_cgm
 
         curva = _principal_o_respaldo(curva_ppal, curva_resp)

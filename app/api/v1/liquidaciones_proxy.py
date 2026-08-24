@@ -13,18 +13,22 @@ from app.models.proyectos import Proyecto
 from app.schemas.liquidaciones_api import (
     AcPowerTotalesOut,
     CatalogosOut,
+    ConsumoOut,
     ContratoEnergiaIn,
     ContratoEnergiaOut,
     CostosOut,
     DespachosLiquidadosOut,
     DiagnosticoIn,
     FacturasXmOut,
+    IppHistoricoOut,
     IppOut,
     PeriodoIn,
     ProyectoLiquidacionesOut,
     ProyectoLiquidacionesUpdate,
     RepartoIn,
     SubidaFacturasXmOut,
+    SubproyectoQuoiaOut,
+    SubproyectoQuoiaUpdate,
     TareaEstadoOut,
     TareaLanzadaOut,
 )
@@ -98,6 +102,7 @@ def listar_proyectos(db: Session = Depends(get_db), _=Depends(get_current_user))
                 nombre_topico=_topico(proy),
                 en_api=bool(datos),
                 **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
+                subproyectos=datos.get("subproyectos") or [],
             )
         )
     return salida
@@ -130,6 +135,7 @@ def obtener_proyecto(proyecto_id: int, db: Session = Depends(get_db), _=Depends(
         nombre_topico=_topico(proy),
         en_api=bool(datos),
         **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
+        subproyectos=datos.get("subproyectos") or [],
     )
 
 
@@ -172,7 +178,50 @@ def actualizar_proyecto(
         nombre_topico=_topico(proy),
         en_api=bool(datos),
         **{campo: datos.get(campo) for campo in liquidaciones_api.CAMPOS_PROYECTO},
+        subproyectos=datos.get("subproyectos") or [],
     )
+
+
+# ── Subproyectos e ids de Quoia ──────────────────────────────────────────────
+# Los tres ids de Quoia dejaron de ser un campo que se teclea en esta base: la
+# API de Liquidaciones ya los guarda y los devuelve resueltos. Los dos de
+# reporte son de cada subproyecto y el del nodo vive en su medidor de generación
+# de prioridad 1.
+
+@router.get("/subproyectos", response_model=list[SubproyectoQuoiaOut])
+def listar_subproyectos(
+    project: str | None = Query(None, description="Tópico del proyecto en la API"),
+    topic: str | None = Query(None, description="Tópico del subproyecto"),
+    _=Depends(get_current_user),
+):
+    """Subproyectos con sus tres ids de Quoia."""
+    try:
+        return liquidaciones_api.listar_subproyectos(project=project, topic=topic)
+    except LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.patch("/subproyectos/{topico:path}", response_model=SubproyectoQuoiaOut)
+def actualizar_subproyecto(
+    topico: str,
+    data: SubproyectoQuoiaUpdate,
+    _=Depends(get_current_user),
+):
+    """Escribe los ids de Quoia de un subproyecto.
+
+    Se manda solo lo que venga en el cuerpo (``exclude_unset``): en esta API
+    enviar ``null`` **borra** el id, así que un campo omitido y un campo vacío
+    no significan lo mismo.
+
+    El tópico va como ``path`` porque varios traen espacios (``MGS Mapale``).
+    """
+    cambios = data.model_dump(exclude_unset=True)
+    if not cambios:
+        raise HTTPException(400, "No se enviaron ids para actualizar")
+    try:
+        return liquidaciones_api.actualizar_subproyecto(topico, cambios)
+    except LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
 
 
 @router.get("/ac-power", response_model=AcPowerTotalesOut)
@@ -403,39 +452,137 @@ def listar_despachos(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2020, le=2100),
     version: VersionLiquidacion = VersionLiquidacion.TXF,
+    data_type: str | None = Query(None, description="dispatch | purchase | dispatch_fazni"),
+    project: str | None = Query(None, description="Tópico del proyecto en la API"),
+    db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Líneas de ingreso ya liquidadas del período.
+    """Despachos ya liquidados del período, día por día y por contrato.
 
-    La API no expone un listado crudo de MarketSettlement, así que la tabla se
-    arma con el detalle de ingresos del estado de resultados: es el mismo dato
-    liquidado, agregado por proyecto y concepto.
+    Sale del histórico de liquidaciones de mercado, que es el dato crudo que
+    produce «Liquidar». Antes se armaba aplanando el estado de resultados, que
+    venía consolidado por mes: así se recuperan la fecha, el precio y el código
+    del contrato, que ahí no estaban.
     """
     try:
-        data = liquidaciones_api.estado_resultados_json(month, year, version.value)
+        filas = liquidaciones_api.listar_liquidaciones_mercado(
+            year=year, month=month, version=version.value,
+            data_type=data_type, project=project,
+        )
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
 
-    proyectos = data.get("results") or []
-    filas = [
-        {
-            "proyecto": p.get("project"),
-            "proyecto_nombre": p.get("project_name"),
-            "concepto": d.get("concepto"),
-            "tipo_dato": d.get("data_type"),
-            "energia_kwh": d.get("energia_kwh"),
-            "valor": d.get("valor"),
-            "version": p.get("version"),
-        }
-        for p in proyectos
-        for d in (p.get("ingresos_detalle") or [])
+    nombres = _nombres_por_topico(db)
+    # Lo más reciente primero, que es lo que se está revisando.
+    filas.sort(key=lambda f: (str(f.get("date") or ""), str(f.get("project") or "")), reverse=True)
+
+    return DespachosLiquidadosOut(
+        count=len(filas),
+        results=[
+            {
+                "id": f.get("id"),
+                "topico": f.get("project"),
+                # Nombre de esta base; si el tópico no cruza, se deja el tópico.
+                "proyecto": nombres.get(f.get("project") or "") or f.get("project"),
+                "fecha": f.get("date"),
+                "tipo_dato": f.get("data_type"),
+                "energia_kwh": f.get("energy"),
+                "valor": f.get("price"),
+                "codigo_contrato": f.get("contract_code"),
+                "contrato_proyecto_id": f.get("contract_energy_project"),
+                "version": f.get("version"),
+            }
+            for f in filas
+        ],
+    )
+
+
+# ── Consumo (energía contratada por hora) ────────────────────────────────────
+
+@router.get("/consumo", response_model=ConsumoOut)
+def listar_consumo(
+    month: int = Query(..., ge=1, le=12),
+    year: int = Query(..., ge=2020, le=2100),
+    version: VersionLiquidacion = VersionLiquidacion.TXF,
+    project: str | None = Query(None, description="Tópico del proyecto en la API"),
+    fecha: str | None = Query(None, description="Día exacto, YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Energía contratada hora por hora, tal como la trae el FTP de XM.
+
+    Son las columnas ``con_hour01``..``con_hour24`` en kWh. El total diario se
+    calcula aquí y no se pide a la API: ese campo no existe allá.
+    """
+    try:
+        filas = liquidaciones_api.listar_contratos_despachados(
+            year=year, month=month, version=version.value,
+            project=project, date=fecha,
+        )
+    except LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+    nombres = _nombres_por_topico(db)
+    filas.sort(key=lambda f: (str(f.get("date") or ""), str(f.get("project") or "")), reverse=True)
+
+    resultados = []
+    for f in filas:
+        horas = [f.get(f"con_hour{h:02d}") for h in range(1, 25)]
+        resultados.append({
+            "id": f.get("id"),
+            "topico": f.get("project"),
+            "proyecto": nombres.get(f.get("project") or "") or f.get("project"),
+            "fecha": f.get("date"),
+            "version": f.get("version"),
+            "horas": horas,
+            "total_diario": round(sum(h for h in horas if h is not None), 4),
+        })
+    return ConsumoOut(count=len(resultados), results=resultados)
+
+
+# ── IPP histórico ────────────────────────────────────────────────────────────
+
+@router.get("/ipp", response_model=list[IppHistoricoOut])
+def listar_ipp(
+    year: int | None = Query(None, ge=2020, le=2100),
+    month: int | None = Query(None, ge=1, le=12),
+    _=Depends(get_current_user),
+):
+    """IPP del DANE ya consultados, del más reciente al más antiguo.
+
+    Responde «dónde quedó el IPP que consulté»: `fetch_monthly_ipp` lo guarda,
+    pero devuelve solo el número. Puede haber más de una fila por mes -- cada
+    consulta al DANE deja la suya -- y manda la de fecha más reciente, que es la
+    que viene marcada como ``vigente``.
+    """
+    try:
+        filas = liquidaciones_api.listar_ipp_historico(year=year, month=month)
+    except LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+    # Por período, la consulta más reciente es la que vale.
+    vigentes: dict[tuple, str] = {}
+    for f in filas:
+        clave = (f.get("year"), f.get("month"))
+        fecha = str(f.get("date") or "")
+        if fecha >= vigentes.get(clave, ""):
+            vigentes[clave] = fecha
+
+    return [
+        IppHistoricoOut(
+            id=f.get("id"),
+            anio=f.get("year"),
+            mes=f.get("month"),
+            ipp=f.get("ipp"),
+            consultado_el=f.get("date"),
+            vigente=str(f.get("date") or "") == vigentes.get((f.get("year"), f.get("month"))),
+        )
+        for f in sorted(
+            filas,
+            key=lambda f: (f.get("year") or 0, f.get("month") or 0, str(f.get("date") or "")),
+            reverse=True,
+        )
     ]
-    avisos = [
-        {"proyecto": p.get("project_name") or p.get("project"), "avisos": p["warnings"]}
-        for p in proyectos
-        if p.get("warnings")
-    ]
-    return DespachosLiquidadosOut(count=len(filas), results=filas, avisos=avisos)
 
 
 # ── Costos e ingresos fijos ──────────────────────────────────────────────────
@@ -461,19 +608,16 @@ def listar_costos(
     filas que la página no muestra.
     """
     try:
-        # `payment_type` NO se le manda a la API externa: filtrarlo allá devuelve
-        # 500 (bug de ellos, la guía lo documenta como soportado). Se aplica aquí,
-        # que además sale gratis porque el listado ya viene cacheado.
+        # `payment_type` ya se puede filtrar en la API (antes daba 500). Mandarlo
+        # allá evita traer las 10.000 filas enteras, que son 22 páginas de 500.
         filas = liquidaciones_api.listar_costos(
             project=project,
+            payment_type=payment_type,
             version=version.value if version else None,
         )
         tipos = {t["name"]: t for t in liquidaciones_api.listar_catalogos()["tipos_costo"]}
     except LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
-
-    if payment_type:
-        filas = [c for c in filas if c.get("payment_type") == payment_type]
 
     if grupo is not None:
         filas = [

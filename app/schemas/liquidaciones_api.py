@@ -23,6 +23,10 @@ class ProyectoLiquidacionesOut(BaseModel):
     from_generator: Optional[bool] = None
     from_commercializer: Optional[bool] = None
 
+    # Los ids de Quoia no son del proyecto: son de cada subproyecto. Un proyecto
+    # puede tener varios, así que vienen como lista y no como tres campos.
+    subproyectos: list["SubproyectoQuoiaOut"] = []
+
 
 class ProyectoLiquidacionesUpdate(BaseModel):
     """Campos editables de la configuración de liquidaciones (§3.1 de la guía)."""
@@ -146,14 +150,19 @@ class DiagnosticoIn(PeriodoIn):
 # ── Despachos liquidados ─────────────────────────────────────────────────────
 
 class DespachoLiquidadoOut(BaseModel):
-    """Una línea de ingreso ya liquidada de un proyecto en el período."""
+    """Un despacho liquidado: un día, un contrato, un tipo de dato."""
 
-    proyecto: str
-    proyecto_nombre: Optional[str] = None
-    concepto: Optional[str] = None
+    id: Optional[int] = None
+    # Nombre de esta base; cae al tópico si el proyecto no cruza.
+    proyecto: Optional[str] = None
+    topico: Optional[str] = None
+    fecha: Optional[str] = None
+    # dispatch | purchase | dispatch_fazni
     tipo_dato: Optional[str] = None
     energia_kwh: Optional[float] = None
     valor: Optional[float] = None
+    codigo_contrato: Optional[str] = None
+    contrato_proyecto_id: Optional[int] = None
     version: Optional[str] = None
 
 
@@ -162,6 +171,65 @@ class DespachosLiquidadosOut(BaseModel):
     results: list[DespachoLiquidadoOut]
     # Proyectos cuyas cifras están incompletas, con el motivo.
     avisos: list[dict] = []
+
+
+# ── Consumo (energía contratada por hora) ────────────────────────────────────
+
+class ConsumoDiaOut(BaseModel):
+    """Las 24 horas de energía contratada de un proyecto en un día, en kWh."""
+
+    id: Optional[int] = None
+    proyecto: Optional[str] = None
+    topico: Optional[str] = None
+    fecha: Optional[str] = None
+    version: Optional[str] = None
+    # 24 valores, de la hora 1 a la 24. Puede haber huecos (None).
+    horas: list[Optional[float]] = []
+    # Calculado aquí: la API no expone un total.
+    total_diario: Optional[float] = None
+
+
+class ConsumoOut(BaseModel):
+    count: int
+    results: list[ConsumoDiaOut]
+
+
+# ── IPP histórico ────────────────────────────────────────────────────────────
+
+class IppHistoricoOut(BaseModel):
+    """Un IPP consultado al DANE.
+
+    Puede haber varias filas del mismo período: se guarda una por consulta, con
+    la fecha en que se hizo. ``vigente`` marca la más reciente de cada mes.
+    """
+
+    id: Optional[int] = None
+    anio: Optional[int] = None
+    mes: Optional[int] = None
+    ipp: Optional[float] = None
+    consultado_el: Optional[str] = None
+    vigente: bool = False
+
+
+# ── Subproyectos e ids de Quoia ──────────────────────────────────────────────
+
+class SubproyectoQuoiaOut(BaseModel):
+    """Los tres ids de Quoia de un subproyecto, tal como los guarda la API."""
+
+    topic: str
+    name: Optional[str] = None
+    quoia_report_gen_id: Optional[str] = None
+    quoia_report_con_id: Optional[str] = None
+    quoia_node_id: Optional[str] = None
+
+
+class SubproyectoQuoiaUpdate(BaseModel):
+    """PATCH parcial: lo que no se envía no se toca, y ``null`` **borra** el id."""
+
+    # Máximo 4 caracteres los de reporte, 50 el del nodo (lo valida el servicio).
+    quoia_report_gen_id: Optional[str] = None
+    quoia_report_con_id: Optional[str] = None
+    quoia_node_id: Optional[str] = None
 
 
 # ── Costos e ingresos fijos ──────────────────────────────────────────────────
@@ -264,3 +332,9 @@ class AcPowerTotalesOut(BaseModel):
     # Tópicos que la API cobra pero que no existen en esta base: se listan para
     # que se note que falta emparejarlos, en vez de perderlos en silencio.
     topicos_sin_cruce: list[str] = []
+
+
+# `ProyectoLiquidacionesOut` referencia `SubproyectoQuoiaOut`, que se define más
+# abajo: hay que resolver la referencia adelantada antes de que FastAPI arme el
+# esquema de respuesta.
+ProyectoLiquidacionesOut.model_rebuild()

@@ -27,10 +27,21 @@ logger = logging.getLogger("liquidaciones_api")
 
 # Rutas de la API externa (sin hardcodearlas en los endpoints que las consumen).
 PATH_LOGIN = "/api/accounts/{account_id}/"
-PATH_PROYECTOS = "/api/admin/project/"
-PATH_PROYECTO = "/api/admin/project/{topico}/"
+# Proyectos: se migró de `/api/admin/project/` (que además exigía `is_staff`) a
+# la ruta de liquidaciones, que basta con el grupo `admin` y sí expone los
+# subproyectos con sus ids de Quoia.
+PATH_PROYECTOS = "/api/liquidaciones/projects/"
+PATH_PROYECTO = "/api/liquidaciones/projects/{topico}/"
+PATH_SUBPROYECTOS = "/api/liquidaciones/subprojects/"
+PATH_SUBPROYECTO = "/api/liquidaciones/subprojects/{topico}/"
 PATH_TAREA = "/api/liquidaciones/task_status/{task_id}/"
 PATH_FACTURAS_XM = "/api/liquidaciones/xm-invoices/"
+
+# Históricos, solo lectura (5.3). Sirven para auditar los insumos y los
+# resultados intermedios del ciclo sin entrar al Django admin.
+PATH_IPP_HISTORICO = "/api/liquidaciones/monthly_ipps/"
+PATH_LIQUIDACIONES_MERCADO = "/api/liquidaciones/market_settlements/"
+PATH_CONTRATOS_DESPACHADOS = "/api/liquidaciones/disp_contracts_ftp_xm/"
 
 # Datos maestros (3 de la guia).
 PATH_CONTRATOS = "/api/liquidaciones/contract_energies/"
@@ -112,6 +123,16 @@ CAMPOS_PROYECTO = (
     "from_generator",
     "from_commercializer",
 )
+
+# Ids de Quoia. No son campos del proyecto: viven en cada subproyecto (§3.1).
+# Los dos de reporte admiten máximo 4 caracteres; el del nodo, 50.
+CAMPOS_QUOIA = (
+    "quoia_report_gen_id",
+    "quoia_report_con_id",
+    "quoia_node_id",
+)
+MAX_LARGO_REPORTE_QUOIA = 4
+MAX_LARGO_NODO_QUOIA = 50
 
 _TIMEOUT = httpx.Timeout(15.0, read=60.0)
 _USER_AGENT = "PostmanRuntime/7.50.0"
@@ -209,15 +230,19 @@ def _proyectar(proyecto: dict[str, Any]) -> dict[str, Any]:
     datos = {campo: proyecto.get(campo) for campo in CAMPOS_PROYECTO}
     datos["nombre_topico"] = proyecto.get("nombre_topico")
     datos["nombre_proyecto"] = proyecto.get("nombre_proyecto")
+    # Los tres ids de Quoia no son del proyecto: dos son de cada subproyecto y
+    # el del nodo vive en su medidor de generación de prioridad 1. La API ya los
+    # devuelve resueltos aquí, así que no hay que consultarlos aparte.
+    datos["subproyectos"] = [
+        {campo: s.get(campo) for campo in ("topic", "name", *CAMPOS_QUOIA)}
+        for s in (proyecto.get("subprojects") or [])
+    ]
     return datos
 
 
 def listar_proyectos() -> list[dict[str, Any]]:
-    """Configuración de liquidaciones de todos los proyectos, en una sola llamada."""
-    data = _request("GET", PATH_PROYECTOS)
-    if not isinstance(data, list):
-        raise LiquidacionesAPIError("Se esperaba una lista de proyectos")
-    return [_proyectar(p) for p in data]
+    """Configuración de liquidaciones de todos los proyectos."""
+    return [_proyectar(p) for p in _listar(PATH_PROYECTOS)]
 
 
 def totales_ac_power() -> dict[str, Any]:
@@ -264,6 +289,83 @@ def actualizar_proyecto(topico: str, cambios: dict[str, Any]) -> dict[str, Any]:
         raise LiquidacionesAPIError("No hay campos válidos para actualizar")
     data = _request("PATCH", PATH_PROYECTO.format(topico=topico), json=permitidos)
     return _proyectar(data) if isinstance(data, dict) else {}
+
+
+# ── Subproyectos e ids de Quoia ──────────────────────────────────────────────
+
+def listar_subproyectos(**filtros: Any) -> list[dict[str, Any]]:
+    """Subproyectos con sus tres ids de Quoia. Filtros: ``project``, ``topic``."""
+    return _listar(PATH_SUBPROYECTOS, **filtros)
+
+
+def actualizar_subproyecto(topico: str, cambios: dict[str, Any]) -> dict[str, Any]:
+    """Escribe los ids de Quoia de un subproyecto.
+
+    Es un PATCH parcial de verdad: lo que no se manda no se toca, y mandar
+    ``None`` **borra** el id. Por eso quien llame debe filtrar por
+    ``exclude_unset`` y no por "campo vacío".
+
+    El ``quoia_node_id`` se guarda en el medidor de generación de prioridad 1
+    del subproyecto; si ese medidor no existe, la API lo crea.
+    """
+    permitidos = {k: v for k, v in cambios.items() if k in CAMPOS_QUOIA}
+    if not permitidos:
+        raise LiquidacionesAPIError("No hay ids de Quoia para actualizar")
+
+    for campo in ("quoia_report_gen_id", "quoia_report_con_id"):
+        valor = permitidos.get(campo)
+        if valor is not None and len(str(valor)) > MAX_LARGO_REPORTE_QUOIA:
+            raise LiquidacionesAPIError(
+                f"«{campo}» admite máximo {MAX_LARGO_REPORTE_QUOIA} caracteres"
+            )
+    nodo = permitidos.get("quoia_node_id")
+    if nodo is not None and len(str(nodo)) > MAX_LARGO_NODO_QUOIA:
+        raise LiquidacionesAPIError(
+            f"«quoia_node_id» admite máximo {MAX_LARGO_NODO_QUOIA} caracteres"
+        )
+
+    data = _request("PATCH", PATH_SUBPROYECTO.format(topico=topico), json=permitidos)
+    return data if isinstance(data, dict) else {}
+
+
+# ── Históricos del ciclo (§5.3) ──────────────────────────────────────────────
+
+def listar_ipp_historico(**filtros: Any) -> list[dict[str, Any]]:
+    """IPP del DANE ya consultados, de más reciente a más antiguo.
+
+    Puede traer más de una fila por mes: el registro se guarda con la fecha en
+    que se consultó al DANE, no con el día 1. Para un valor único por mes hay
+    que quedarse con el de ``date`` más reciente -- eso lo hace :func:`ipp_del_mes`.
+    """
+    return _listar(PATH_IPP_HISTORICO, **filtros)
+
+
+def ipp_del_mes(year: int, month: int) -> dict[str, Any] | None:
+    """El IPP vigente de un mes: el consultado más recientemente."""
+    filas = listar_ipp_historico(year=year, month=month)
+    if not filas:
+        return None
+    return max(filas, key=lambda f: str(f.get("date") or ""))
+
+
+def listar_liquidaciones_mercado(**filtros: Any) -> list[dict[str, Any]]:
+    """Despachos ya liquidados (§4.5), por día y contrato.
+
+    Filtros: ``year``, ``month``, ``version``, ``data_type``, ``project``
+    (nombre_topico) y ``contract_energy_project`` (id).
+    """
+    return _listar(PATH_LIQUIDACIONES_MERCADO, **filtros)
+
+
+def listar_contratos_despachados(**filtros: Any) -> list[dict[str, Any]]:
+    """Energía **contratada** por hora que trae el FTP de XM (§4.2).
+
+    ``con_hour01``..``con_hour24`` son las 24 horas en kWh. Las columnas de
+    energía despachada (``disp_hour*``) no se exponen en este endpoint.
+
+    Filtros: ``year``, ``month``, ``date`` (día exacto), ``project``, ``version``.
+    """
+    return _listar(PATH_CONTRATOS_DESPACHADOS, **filtros)
 
 
 # ── Tareas asíncronas ────────────────────────────────────────────────────────
@@ -385,6 +487,9 @@ def subir_facturas_xm(
 # filas sin paginar y tarda ~15 s: sin esto, cada cambio de filtro en pantalla
 # vuelve a pedirlas enteras. Se invalida al escribir (repartir, subir Excel).
 _CACHE_TTL_SEGUNDOS = 120
+# Los costos aguantan más: traerlos todos son 22 páginas de 500 (~27 s) y solo
+# cambian cuando se reparte o se sube un Excel, y las dos cosas invalidan.
+_CACHE_TTL_COSTOS = 600
 _cache: dict[str, tuple[float, Any]] = {}
 _cache_lock = threading.Lock()
 
@@ -395,12 +500,12 @@ def invalidar_cache() -> None:
         _cache.clear()
 
 
-def _cacheado(clave: str, calcular):
+def _cacheado(clave: str, calcular, ttl: int = _CACHE_TTL_SEGUNDOS):
     """Devuelve el valor cacheado si sigue vigente; si no, lo recalcula."""
     ahora = time.monotonic()
     with _cache_lock:
         entrada = _cache.get(clave)
-        if entrada and ahora - entrada[0] < _CACHE_TTL_SEGUNDOS:
+        if entrada and ahora - entrada[0] < ttl:
             return entrada[1]
     valor = calcular()
     with _cache_lock:
@@ -408,13 +513,46 @@ def _cacheado(clave: str, calcular):
     return valor
 
 
+# Paginación de los listados. Desde agosto de 2026 la API devuelve un sobre
+# ``{count, next, previous, results}`` en vez de la lista pelada; sin recorrer
+# ``next`` solo se verían los primeros registros. El máximo por página es 500.
+_LIMITE_PAGINA = 500
+# Tope de seguridad: `participants` tiene 26.000 filas y nadie quiere traerlas
+# enteras por accidente. Si un listado lo supera, se corta y se avisa al log.
+_MAX_PAGINAS = 60
+
+
 def _listar(path: str, **filtros: Any) -> list[dict[str, Any]]:
-    """GET de un listado, quitando los filtros vacíos."""
+    """GET de un listado completo, recorriendo la paginación.
+
+    Acepta las dos formas: el sobre paginado y la lista pelada de las rutas
+    viejas que todavía no lo devuelven (``/api/admin/project/``).
+    """
     params = {k: v for k, v in filtros.items() if v not in (None, "")}
-    data = _request("GET", path, params=params)
-    if not isinstance(data, list):
-        raise LiquidacionesAPIError(f"Se esperaba una lista en {path}")
-    return data
+    params.setdefault("limit", _LIMITE_PAGINA)
+
+    acumulado: list[dict[str, Any]] = []
+    offset = 0
+    for pagina in range(_MAX_PAGINAS):
+        data = _request("GET", path, params={**params, "offset": offset})
+
+        # Rutas que aún responden sin sobre: vienen completas de una.
+        if isinstance(data, list):
+            return data
+        if not isinstance(data, dict) or "results" not in data:
+            raise LiquidacionesAPIError(f"Se esperaba un listado en {path}")
+
+        filas = data.get("results") or []
+        acumulado.extend(filas)
+        if not data.get("next") or not filas:
+            return acumulado
+        offset += len(filas)
+    else:
+        logger.warning(
+            "%s superó %s páginas (%s filas): el listado se truncó",
+            path, _MAX_PAGINAS, len(acumulado),
+        )
+    return acumulado
 
 
 def listar_contratos() -> list[dict[str, Any]]:
@@ -433,9 +571,13 @@ def listar_cantidades(**filtros: Any) -> list[dict[str, Any]]:
 
 
 def listar_costos(**filtros: Any) -> list[dict[str, Any]]:
-    """Costos e ingresos fijos por proyecto (§3.6). Cacheado: son 10.000+ filas."""
+    """Costos e ingresos fijos por proyecto (§3.6). Cacheado: son 10.000+ filas.
+
+    Filtros: ``project``, ``payment_type`` (el ``name`` del tipo) y ``version``.
+    Traerlos todos cuesta 22 páginas de 500, de ahí la caché.
+    """
     clave = "costos:" + repr(sorted((k, v) for k, v in filtros.items() if v not in (None, "")))
-    return _cacheado(clave, lambda: _listar(PATH_COSTOS, **filtros))
+    return _cacheado(clave, lambda: _listar(PATH_COSTOS, **filtros), ttl=_CACHE_TTL_COSTOS)
 
 
 def listar_catalogos() -> dict[str, list[dict[str, Any]]]:

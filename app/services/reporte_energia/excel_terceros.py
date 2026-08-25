@@ -97,18 +97,29 @@ def parse_excel_terceros(contenido: bytes) -> dict[date, dict]:
 
 
 def aplicar_excel_terceros(db: Session, frontera_id: int, contenido: bytes) -> list[date]:
-    """Parsea `contenido` y aplica cada fila 'Primary' a ReporteEnergiaGeneracion
-    -- misma lógica para el upload manual (POST /cargar-excel-terceros) y la
-    lectura automática de correo (excel_terceros_email.py). Retorna las
-    fechas efectivamente cargadas (puede ser varias si el Excel trae más de
-    un día). Lanza ValueError si el archivo no tiene el formato esperado."""
+    """Parsea `contenido` y aplica cada día a ReporteEnergiaGeneracion -- misma
+    lógica para el upload manual (POST /cargar-excel-terceros) y la lectura
+    automática de correo (excel_terceros_email.py). Retorna las fechas
+    efectivamente cargadas (puede ser varias si el Excel trae más de un día).
+    Lanza ValueError si el archivo no tiene el formato esperado.
+
+    Si llegan las dos filas (Primary y Backup) se reportan ambas tal cual.
+    Si solo llega una (falla real 2026-08-25: un día el Excel solo trajo
+    Backup), esa se usa como curva_final y curva_respaldo_terceros queda en
+    None -- _enviar_a_quoia() ya sabe estimar el respaldo con la fórmula ±1%
+    cuando no hay dato real de terceros, así que no hace falta duplicar esa
+    lógica acá."""
     por_fecha = parse_excel_terceros(contenido)
 
     fechas_cargadas: list[date] = []
     for fecha, datos in por_fecha.items():
         principal = datos["principal"]
-        if principal is None:
-            continue  # sin fila 'Primary' para ese día -- nada que reportar
+        respaldo = datos["respaldo"]
+        if principal is None and respaldo is None:
+            continue  # ni Primary ni Backup para ese día -- nada que reportar
+
+        curva_final = principal if principal is not None else respaldo
+        curva_respaldo_terceros = respaldo if principal is not None else None
 
         rep = db.execute(
             select(ReporteEnergiaGeneracion).where(
@@ -122,9 +133,9 @@ def aplicar_excel_terceros(db: Session, frontera_id: int, contenido: bytes) -> l
 
         rep.caso = 0
         rep.medidor_usado = "excel_terceros"
-        rep.curva_final = principal
-        rep.energia_final_kwh = round(sum(v for v in principal if v is not None), 4)
-        rep.curva_respaldo_terceros = datos["respaldo"]
+        rep.curva_final = curva_final
+        rep.energia_final_kwh = round(sum(v for v in curva_final if v is not None), 4)
+        rep.curva_respaldo_terceros = curva_respaldo_terceros
         rep.revisar_manualmente = False
         rep.editado_manualmente = True
         fechas_cargadas.append(fecha)

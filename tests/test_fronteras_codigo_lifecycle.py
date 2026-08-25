@@ -312,3 +312,37 @@ def test_confirmar_devuelve_503_si_quoia_esta_caido_en_vez_de_404(db, monkeypatc
     with pytest.raises(HTTPException) as exc:
         api.confirmar_frontera_quoia("frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id), db=db, _=ADMIN)
     assert exc.value.status_code == 503
+
+
+# ── Default de tipo_frontera al confirmar un border de consumo (2026-08-25) ────
+
+def test_confirmar_border_de_consumo_sin_tipo_explicito_cae_en_consumo_generico(db, monkeypatch):
+    """Antes caía en 'consumo_auxiliar' -- un subtipo que nadie pidió."""
+    proy = _proyecto(db)
+    monkeypatch.setattr(
+        api, "_get_gaia",
+        lambda: _GaiaFalso(_border("frt00123", categoria="frt_consumption", nombre="Planta X")),
+    )
+    monkeypatch.setattr(api, "get_frt_meter_info", lambda gaia, code: (None, None))
+
+    out = api.confirmar_frontera_quoia(
+        "frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id), db=db, _=ADMIN,
+    )
+
+    assert out.tipo_frontera == "consumo"
+
+
+def test_confirmar_respeta_el_tipo_explicito_del_body(db, monkeypatch):
+    proy = _proyecto(db)
+    monkeypatch.setattr(
+        api, "_get_gaia",
+        lambda: _GaiaFalso(_border("frt00123", categoria="frt_consumption", nombre="Planta X")),
+    )
+    monkeypatch.setattr(api, "get_frt_meter_info", lambda gaia, code: (None, None))
+
+    out = api.confirmar_frontera_quoia(
+        "frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id, tipo_frontera="consumo_auxiliar"),
+        db=db, _=ADMIN,
+    )
+
+    assert out.tipo_frontera == "consumo_auxiliar"

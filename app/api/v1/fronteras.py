@@ -476,7 +476,11 @@ def confirmar_frontera_quoia(
 
     nombre_base = body.nombre_frontera or nombre_quoia or frt_code
     nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
-    tipo_efectivo = body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar")
+    # "consumo_auxiliar"/"consumo_propio" son subtipos que alguien tiene que
+    # elegir a propósito (ver TipoFronteraEnum) -- sin nada explícito del
+    # body, el default correcto para un border de consumo es el tipo
+    # genérico "consumo", no un subtipo específico que nadie pidió.
+    tipo_efectivo = body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo")
 
     if not forzar:
         duplicado = _buscar_duplicado_frontera(db, nombre_default, tipo_efectivo)

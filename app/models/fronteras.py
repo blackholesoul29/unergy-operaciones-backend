@@ -57,7 +57,6 @@ class Frontera(Base):
     tipo_frontera: Mapped[str] = mapped_column(SAEnum(TipoFronteraEnum, name="tipo_frontera_enum"), nullable=False)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoFronteraEnum, name="estado_frontera_enum"), nullable=False, default="en_registro")
     fecha_registro_asic: Mapped[date | None] = mapped_column(Date, nullable=True)
-    fecha_primer_registro_asic: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Clasificación técnica
     tipo_punto_medicion: Mapped[int | None] = mapped_column(Integer, nullable=True)

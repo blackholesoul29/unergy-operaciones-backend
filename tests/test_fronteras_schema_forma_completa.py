@@ -23,7 +23,7 @@ _CAMPOS_ESPERADOS = {
     "factor_psf", "fecha_actualizacion_ppal", "fecha_actualizacion_resp",
     "fecha_calibracion_med_ppal", "fecha_calibracion_med_resp",
     "fecha_cambio_med_ppal", "fecha_cambio_med_resp",
-    "fecha_inicio_representacion", "fecha_primer_registro_asic",
+    "fecha_inicio_representacion",
     "fecha_registro_asic", "fecha_ultima_generacion", "generando_actual",
     "id", "latitud", "longitud", "marca_med_ppal", "marca_med_resp",
     "modelo_med_ppal", "modelo_med_resp", "municipio", "niu",

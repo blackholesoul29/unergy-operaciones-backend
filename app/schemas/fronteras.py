@@ -13,7 +13,6 @@ class FronteraBase(BaseModel):
     estado: Optional[EstadoFronteraEnum] = EstadoFronteraEnum.activa
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
-    fecha_primer_registro_asic: Optional[date] = None
 
     # Registro ASIC
     registrada_por: Optional[str] = None
@@ -110,7 +109,6 @@ class FronteraUpdate(BaseModel):
     estado: Optional[EstadoFronteraEnum] = None
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
-    fecha_primer_registro_asic: Optional[date] = None
 
     # Registro ASIC
     registrada_por: Optional[str] = None

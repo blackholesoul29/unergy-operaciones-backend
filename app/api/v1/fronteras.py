@@ -25,6 +25,7 @@ router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
 _quoia: QuoiaClient | None = None
 _gaia: GaiaClient | None = None
+_COL_TZ = timezone(timedelta(hours=-5))  # Colombia (UTC-5, sin horario de verano)
 
 
 def _sync_operador_red_para_proyecto(db: Session, proyecto_id: int | None) -> None:
@@ -453,11 +454,14 @@ def get_lecturas(
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
 
+    # Colombia (UTC-5) explícito -- fecha_hora es DateTime(timezone=True), y un
+    # datetime naive se interpretaría según la zona horaria de la sesión de
+    # Postgres (no necesariamente Colombia), corriendo el límite del rango.
     q = db.query(FronteraLectura).filter(FronteraLectura.frontera_id == frontera_id)
     if desde:
-        q = q.filter(FronteraLectura.fecha_hora >= datetime.combine(desde, datetime.min.time()))
+        q = q.filter(FronteraLectura.fecha_hora >= datetime.combine(desde, datetime.min.time(), tzinfo=_COL_TZ))
     if hasta:
-        q = q.filter(FronteraLectura.fecha_hora <= datetime.combine(hasta, datetime.max.time()))
+        q = q.filter(FronteraLectura.fecha_hora <= datetime.combine(hasta, datetime.max.time(), tzinfo=_COL_TZ))
     return q.order_by(FronteraLectura.fecha_hora.desc()).limit(limit).all()
 
 

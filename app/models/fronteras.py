@@ -45,7 +45,6 @@ class Frontera(Base):
     nivel_tension_kv: Mapped[float | None] = mapped_column(Numeric(8, 3), nullable=True)
     punto_conexion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     capacidad_transporte_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
-    capacidad_transporte_compartida_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     capacidad_efectiva_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     factor_perdidas: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     clase_ct: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -63,7 +62,6 @@ class Frontera(Base):
 
     # Registro ASIC
     registrada_por: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     nivel_tension: Mapped[int | None] = mapped_column(Integer, nullable=True)
     transferencia_maxima_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     representante_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -72,13 +70,8 @@ class Frontera(Base):
     # integración del reporte CGM, ver operadores_red_contactos para los correos.
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    predio_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    nombre_predio: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    representante_ddv: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Agentes
-    nit_rf: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    nit_cgm: Mapped[str | None] = mapped_column(String(20), nullable=True)
     representante_anterior: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agente_exportador: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agente_importador: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -86,16 +79,11 @@ class Frontera(Base):
     clasificacion_recurso: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Datos operativos
-    consumo_promedio_mensual_mwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
-    relacion_transformacion_ct: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    relacion_transformacion_pt: Mapped[str | None] = mapped_column(String(100), nullable=True)
     niu: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Códigos SIC
-    codigo_sic_ddv: Mapped[str | None] = mapped_column(String(50), nullable=True)
     codigo_sic_submercado_exportador: Mapped[str | None] = mapped_column(String(20), nullable=True)
     codigo_sic_submercado_consumo: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    codigo_sic_submercado_usuario: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Medidor principal
     nro_serie_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)

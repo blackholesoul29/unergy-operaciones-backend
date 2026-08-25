@@ -18,7 +18,6 @@ class FronteraBase(BaseModel):
 
     # Registro ASIC
     registrada_por: Optional[str] = None
-    nit: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
     transferencia_maxima_kwh: Optional[float] = None
@@ -26,22 +25,16 @@ class FronteraBase(BaseModel):
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
     nombre_cgm: Optional[str] = None
-    predio_id: Optional[str] = None
-    nombre_predio: Optional[str] = None
-    representante_ddv: Optional[str] = None
 
     # Técnico
     tipo_punto_medicion: Optional[int] = None
     capacidad_transporte_mw: Optional[float] = None
-    capacidad_transporte_compartida_mw: Optional[float] = None
     capacidad_efectiva_mw: Optional[float] = None
     factor_perdidas: Optional[float] = None
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
 
     # Agentes
-    nit_rf: Optional[str] = None
-    nit_cgm: Optional[str] = None
     representante_anterior: Optional[str] = None
     agente_exportador: Optional[str] = None
     agente_importador: Optional[str] = None
@@ -50,9 +43,6 @@ class FronteraBase(BaseModel):
 
     # Operativo
     niu: Optional[str] = None
-    consumo_promedio_mensual_mwh: Optional[float] = None
-    relacion_transformacion_ct: Optional[str] = None
-    relacion_transformacion_pt: Optional[str] = None
 
     # Ubicación
     municipio: Optional[str] = None
@@ -66,10 +56,8 @@ class FronteraBase(BaseModel):
     altitud_msnm: Optional[int] = None
 
     # Códigos SIC
-    codigo_sic_ddv: Optional[str] = None
     codigo_sic_submercado_exportador: Optional[str] = None
     codigo_sic_submercado_consumo: Optional[str] = None
-    codigo_sic_submercado_usuario: Optional[str] = None
     codigo_sic_frontera_generacion: Optional[str] = None
     codigo_sic_frontera_usuario: Optional[str] = None
     potencia_maxima_declarada: Optional[float] = None
@@ -128,7 +116,6 @@ class FronteraUpdate(BaseModel):
 
     # Registro ASIC
     registrada_por: Optional[str] = None
-    nit: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
     transferencia_maxima_kwh: Optional[float] = None
@@ -136,22 +123,16 @@ class FronteraUpdate(BaseModel):
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
     nombre_cgm: Optional[str] = None
-    predio_id: Optional[str] = None
-    nombre_predio: Optional[str] = None
-    representante_ddv: Optional[str] = None
 
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
     capacidad_transporte_mw: Optional[float] = None
-    capacidad_transporte_compartida_mw: Optional[float] = None
     capacidad_efectiva_mw: Optional[float] = None
     factor_perdidas: Optional[float] = None
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
 
     # Agentes
-    nit_rf: Optional[str] = None
-    nit_cgm: Optional[str] = None
     representante_anterior: Optional[str] = None
     agente_exportador: Optional[str] = None
     agente_importador: Optional[str] = None
@@ -160,9 +141,6 @@ class FronteraUpdate(BaseModel):
 
     # Operativo
     niu: Optional[str] = None
-    consumo_promedio_mensual_mwh: Optional[float] = None
-    relacion_transformacion_ct: Optional[str] = None
-    relacion_transformacion_pt: Optional[str] = None
 
     # Ubicacion
     municipio: Optional[str] = None
@@ -176,10 +154,8 @@ class FronteraUpdate(BaseModel):
     altitud_msnm: Optional[int] = None
 
     # Codigos SIC
-    codigo_sic_ddv: Optional[str] = None
     codigo_sic_submercado_exportador: Optional[str] = None
     codigo_sic_submercado_consumo: Optional[str] = None
-    codigo_sic_submercado_usuario: Optional[str] = None
     codigo_sic_frontera_generacion: Optional[str] = None
     codigo_sic_frontera_usuario: Optional[str] = None
     potencia_maxima_declarada: Optional[float] = None

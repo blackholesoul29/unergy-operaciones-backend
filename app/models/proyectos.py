@@ -139,11 +139,6 @@ class Proyecto(Base):
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # Legacy (texto libre, sin validar contra el catálogo) -- preferir
-    # `operador_red_id` para datos nuevos. Se mantiene por compatibilidad con
-    # registros ya diligenciados y como respaldo si el catálogo no tiene el
-    # operador todavía.
-    operador_red: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
     # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene
     # valor, se rellena desde la primera frontera que sí lo tenga; si se edita

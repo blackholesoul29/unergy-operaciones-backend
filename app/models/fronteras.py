@@ -73,11 +73,8 @@ class Frontera(Base):
     transferencia_maxima_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     representante_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fecha_inicio_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
-    operador_red: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    operador_red_zona: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Vínculo estructurado hacia el catálogo de operadores (operador_red arriba
-    # sigue siendo el texto de GESCON; este FK es para la integración del
-    # reporte CGM -- ver operadores_red_contactos para los correos).
+    # Vínculo estructurado hacia el catálogo de operadores -- para la
+    # integración del reporte CGM, ver operadores_red_contactos para los correos.
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
     predio_id: Mapped[str | None] = mapped_column(String(50), nullable=True)

@@ -265,7 +265,6 @@ class ProyectoCreate(BaseModel):
     latitud: Optional[float] = None
     longitud: Optional[float] = None
     tipo_conexion: Optional[str] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
@@ -350,7 +349,6 @@ class ProyectoOut(BaseModel):
     latitud: Optional[float]
     longitud: Optional[float]
     tipo_conexion: Optional[str]
-    operador_red: Optional[str]
     operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]

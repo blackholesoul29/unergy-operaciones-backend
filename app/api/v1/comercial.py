@@ -25,6 +25,7 @@ from app.models.contactos import Contacto
 from app.api.v1.clientes import buscar_cliente_duplicado
 from app.utils.nombre_matching import mejor_candidato, parece_persona_juridica
 from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion, OportunidadOferta,
@@ -78,7 +79,7 @@ def _proyecto_out(p: Proyecto) -> dict:
         "potencia_instalada_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp is not None else None,
         "departamento": p.departamento,
         "municipio": p.municipio,
-        "operador_red": p.operador_red,
+        "operador_red": p.operador_red_legal,
         "operador_red_id": p.operador_red_id,
         "estado": p.estado if isinstance(p.estado, str) else p.estado.value,
         "fecha_estimada_energizacion": p.fecha_estimada_energizacion,
@@ -162,8 +163,10 @@ def _plantas_de_ofertas(db: Session, ofertas) -> dict[int, list]:
     if not todos:
         return {}
     proyectos = {
-        p.id: p for p in db.query(Proyecto).filter(
-            Proyecto.id.in_(todos), Proyecto.deleted_at.is_(None)).all()
+        p.id: p for p in db.query(Proyecto)
+        .options(selectinload(Proyecto.operador),
+                 selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+        .filter(Proyecto.id.in_(todos), Proyecto.deleted_at.is_(None)).all()
     }
     return {
         oid: [_proyecto_out(proyectos[pid]) for pid in lista if pid in proyectos]
@@ -820,7 +823,9 @@ def get_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario = D
         db.query(Oportunidad)
         .options(
             selectinload(Oportunidad.cliente).selectinload(Cliente.contactos),
-            selectinload(Oportunidad.proyectos),
+            selectinload(Oportunidad.proyectos).selectinload(Proyecto.operador),
+            selectinload(Oportunidad.proyectos)
+            .selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
             selectinload(Oportunidad.gestiones),
             selectinload(Oportunidad.historial),
             selectinload(Oportunidad.documentos),
@@ -1089,8 +1094,6 @@ def add_proyecto(
                 "candidato_nombre": duplicado.nombre_comercial,
             })
 
-    # Sincroniza el texto legacy para que las vistas viejas lo muestren.
-    payload["operador_red"] = operador.nombre_comercial or operador.nombre_legal
     # El CRM manda estos dos, no el cliente: son de la creación, no del formulario.
     payload["oportunidad_id"] = id
     payload["origen"] = "manual"

@@ -7,7 +7,6 @@ Campos que se llenan:
   proyectos.municipio              ← json.ciudad
   proyectos.potencia_instalada_kwp ← json.potencia_instalada_dc_kwp
   proyecto_info_tecnica.cantidad_total_paneles ← json.numero_de_paneles
-  proyectos.operador_red           ← mapeo OR hardcodeado
 
 Uso:
     cd unergy-operaciones-backend
@@ -24,35 +23,6 @@ from app.core.database import SessionLocal
 from app.models.proyectos import Proyecto, ProyectoInfoTecnica
 
 DRY_RUN = "--dry-run" in sys.argv
-
-# -- Operadores de Red ----------------------------------------------------------
-OR_MAP = {
-    "Perija":             "Afinia",
-    "El son":             "Afinia",
-    "Molino":             "Air-e",
-    "Puya":               "Afinia",
-    "Villanueva":         "Air-e",
-    "Reserva":            "ESSA",
-    "Cañahuate":          "Afinia",
-    "La Paz Leyenda":     "Afinia",
-    "La Paz Verso":       "Afinia",
-    "San Pedro":          "Afinia",
-    "La Paz Vallenata":   "Afinia",
-    "Gandalf":            "Afinia",
-    "Uruaco":             "Air-e",
-    "Baraya":             "Afinia",
-    "Esmeralda":          "Afinia",
-    "El merengue":        "Afinia",
-    "El Olimpo":          "ESSA",
-    "Ibirico":            "Afinia",
-    "La Mesa":            "ESSA",
-    "San Diego Sur":      "Afinia",
-    "La Cacica 2":        "Afinia",
-    "La Molina":          "Afinia",
-    "La Cumbia":          "Afinia",
-    "Valencia 1":         "Afinia",
-    "Valencia 2":         "Afinia",
-}
 
 # -- Mapa explícito nombre_topico -> keyword de búsqueda en DB ------------------
 # Para proyectos cuyo nombre en el JSON no coincide con nombre_comercial en DB.
@@ -137,7 +107,7 @@ def main():
         with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
 
-        print(f"\n{'[DRY-RUN] ' if DRY_RUN else ''}Procesando {len(data)} entradas JSON + {len(OR_MAP)} OR...\n")
+        print(f"\n{'[DRY-RUN] ' if DRY_RUN else ''}Procesando {len(data)} entradas JSON...\n")
 
         # -- Paso 1: actualizar desde JSON --------------------------------------
         print("PASO 1 -- Desde proyectos_solares_completo.json:\n")
@@ -194,34 +164,6 @@ def main():
 
             print(f"  {nombre:<38} {proj.nombre_comercial:<28} {estado}")
 
-        # -- Paso 2: Operadores de Red ------------------------------------------
-        print(f"\n  " + "-" * 78)
-        print("\nPASO 2 -- Operadores de Red:\n")
-        print(f"  {'Keyword':<25} {'Proyecto DB':<28} {'OR':<10} Estado")
-        print("  " + "-" * 78)
-
-        or_updated = []
-        or_notfound = []
-
-        for proj_kw, operador in OR_MAP.items():
-            proj = find_proj(db, proj_kw)
-
-            if not proj:
-                print(f"  {proj_kw:<25} {'- no encontrado -':<28} {operador:<10} WARN SALTADO")
-                or_notfound.append(proj_kw)
-                continue
-
-            if proj.operador_red and proj.operador_red.strip() == operador:
-                estado = "- ya correcto"
-            else:
-                prev = proj.operador_red or "None"
-                estado = f"OK {prev!r} -> {operador!r}"
-                if not DRY_RUN:
-                    proj.operador_red = operador
-                or_updated.append(proj.nombre_comercial)
-
-            print(f"  {proj_kw:<25} {proj.nombre_comercial:<28} {operador:<10} {estado}")
-
         # -- Commit y resumen ---------------------------------------------------
         if not DRY_RUN:
             db.commit()
@@ -230,16 +172,12 @@ def main():
         if DRY_RUN:
             print(f"\n[DRY-RUN] Se actualizarían:")
             print(f"  JSON -> {len(json_updated)} proyecto(s): {json_updated}")
-            print(f"  OR   -> {len(or_updated)} proyecto(s): {or_updated}")
         else:
             print(f"\nOK Completado:")
             print(f"  JSON -> {len(json_updated)} proyecto(s) actualizados")
-            print(f"  OR   -> {len(or_updated)} proyecto(s) actualizados")
 
         if json_notfound:
             print(f"\n  WARN No encontrados (JSON): {json_notfound}")
-        if or_notfound:
-            print(f"  WARN No encontrados (OR):   {or_notfound}")
 
     except Exception:
         db.rollback()

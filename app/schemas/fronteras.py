@@ -22,9 +22,7 @@ class FronteraBase(BaseModel):
     transferencia_maxima_kwh: Optional[float] = None
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
-    operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
     nombre_predio: Optional[str] = None
@@ -146,9 +144,7 @@ class FronteraUpdate(BaseModel):
     transferencia_maxima_kwh: Optional[float] = None
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
-    operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
     nombre_predio: Optional[str] = None

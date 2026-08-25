@@ -1,5 +1,5 @@
-"""Backfill de datos técnicos (`ProyectoInfoTecnica` + `Proyecto.operador_red`)
-desde `SoleniumClient.get_project_detail()`.
+"""Backfill de datos técnicos (`ProyectoInfoTecnica`) desde
+`SoleniumClient.get_project_detail()`.
 
 Probado en vivo (2026-08-11): ese endpoint solo trae datos reales (no
 "Desconocida") para proyectos tipo minigranja -- para el resto (autoconsumo/
@@ -90,10 +90,6 @@ def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: 
     voltaje = _texto(detalle.get("grid_voltage"))
     if voltaje is not None and it.voltaje_red is None:
         cambios["info_tecnica.voltaje_red"] = voltaje
-
-    operador = _texto(detalle.get("grid_operator"))
-    if operador is not None and not proyecto.operador_red:
-        cambios["proyecto.operador_red"] = operador
 
     paneles = detalle.get("panel_quantity")
     paneles = int(paneles) if isinstance(paneles, (int, float)) or (isinstance(paneles, str) and paneles.isdigit()) else None

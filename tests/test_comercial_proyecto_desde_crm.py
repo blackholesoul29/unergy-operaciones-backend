@@ -139,7 +139,7 @@ def test_crear_proyecto_desde_crm_guarda_todos_los_campos(db, operador, negocio)
     assert guardado.nombre_comunidad == "Comunidad Monteria Norte"
     # Y sigue valiendo lo que ya hacia.
     assert guardado.operador_red_id == operador.id
-    assert guardado.operador_red == "AFINIA"
+    assert guardado.operador_red_legal == "AFINIA S.A. E.S.P."
     assert guardado.oportunidad_id == negocio["id"]
 
 

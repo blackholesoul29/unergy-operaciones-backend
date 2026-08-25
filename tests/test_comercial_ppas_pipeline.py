@@ -358,21 +358,6 @@ def test_el_operador_de_la_frontera_viaja_con_el_id_de_la_frontera(db):
     assert d["fuentes"]["operador_red"] == "frontera"
 
 
-def test_el_operador_de_texto_libre_legacy_viaja_sin_id(db):
-    """`proyectos.operador_red` es texto libre sin validar contra el catálogo:
-    se devuelve porque es mejor que un null, pero sin id y con la fuente marcada
-    para que nadie intente cruzarlo."""
-    proy = _proyecto(db, nombre_comercial="GD Yuan", operador_red="EPM")
-    _oferta(db, planta_nombre="Yuan", estado="operando", proyecto_id=proy.id)
-    db.commit()
-
-    d = ppas_del_pipeline(db, hoy=HOY)[0]["proyectos"][0]
-
-    assert d["detalles"]["operador_red"] == "EPM"
-    assert d["detalles"]["operador_red_id"] is None
-    assert d["fuentes"]["operador_red"] == "proyecto_legacy"
-
-
 def test_la_oferta_rellena_la_ubicacion_y_el_operador_que_la_planta_no_tiene(db):
     """La oferta declara ubicación y operador para las plantas que todavía no los
     tienen cargados. Es el último escalón antes del null, y `fuentes` avisa que
@@ -958,7 +943,7 @@ def test_las_fronteras_traen_su_codigo_y_no_las_credenciales(db):
                  ip_modem_ppal="10.0.0.5"),
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral CON",
                  codigo_frontera="Frt00124", tipo_frontera="consumo",
-                 estado="activa", operador_red="AFINIA (texto GESCON)"),
+                 estado="activa"),
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Borrada",
                  codigo_frontera="Frt00099", tipo_frontera="generacion",
                  deleted_at=dt.datetime(2026, 1, 1)),
@@ -979,9 +964,9 @@ def test_las_fronteras_traen_su_codigo_y_no_las_credenciales(db):
     assert gen["operador_red"] == "ELECTRIFICADORA DEL CARIBE S.A. E.S.P."
     assert gen["operador_red_id"] == op.id
     assert not [k for k in gen if "password" in k or "ip_modem" in k]
-    # El operador de texto libre viaja sin id, justamente para avisar que con
-    # ese valor no se puede cruzar el catálogo.
-    assert fronteras[1]["operador_red"] == "AFINIA (texto GESCON)"
+    # Sin operador_red_id vinculado, esta frontera no tiene operador -- ya no
+    # hay texto libre de respaldo.
+    assert fronteras[1]["operador_red"] is None
     assert fronteras[1]["operador_red_id"] is None
 
 

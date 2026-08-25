@@ -198,8 +198,6 @@ def main():
             "representante_frontera": str(representante).strip() if representante else None,
             "fecha_inicio_representacion": safe_date(f_inicio_rep),
             "representante_anterior": str(rep_anterior).strip() if rep_anterior else None,
-            "operador_red": str(op_red).strip() if op_red else None,
-            "operador_red_zona": str(op_red_zona).strip() if op_red_zona else None,
             "agente_exportador": str(ag_exportador).strip() if ag_exportador else None,
             "agente_importador": str(ag_importador).strip() if ag_importador else None,
             "capacidad_transporte_mw": safe_float(cap_transporte),

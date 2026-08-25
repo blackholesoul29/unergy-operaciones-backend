@@ -1,5 +1,4 @@
 from datetime import date, datetime, timedelta, timezone
-import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, text
@@ -637,78 +636,6 @@ def backfill_medidor(
     Quoia para fronteras existentes que les falte ese dato. Idempotente y
     nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
     return _backfill_medidor_info(db, dry_run=dry_run)
-
-
-def _normalizar_nombre_operador(s: str | None) -> str:
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return s.strip().lower()
-
-
-def _backfill_operador_red_info(db: Session, dry_run: bool = True) -> dict:
-    """Vincula al catálogo (`operadores_red`) los proyectos cuyo
-    `operador_red` de texto libre YA diligenciado coincide (normalizado, sin
-    tildes/mayúsculas) con el `nombre_legal`/`nombre_comercial` de un
-    operador -- y cascada el vínculo hacia sus fronteras que todavía no lo
-    tengan. Nunca pisa un `operador_red_id` ya diligenciado en ningún lado.
-    Sin botón en el frontend a propósito (mismo criterio que
-    backfill-medidor): se corre puntualmente cuando haga falta."""
-    catalogo = db.query(OperadorRed).all()
-    por_nombre: dict[str, int] = {}
-    for o in catalogo:
-        por_nombre[_normalizar_nombre_operador(o.nombre_legal)] = o.id
-        if o.nombre_comercial:
-            por_nombre[_normalizar_nombre_operador(o.nombre_comercial)] = o.id
-
-    proyectos = (
-        db.query(Proyecto)
-        .options(selectinload(Proyecto.fronteras))
-        .filter(Proyecto.operador_red_id.is_(None), Proyecto.operador_red.isnot(None))
-        .all()
-    )
-
-    actualizados = []
-    sin_match = []
-    for p in proyectos:
-        operador_id = por_nombre.get(_normalizar_nombre_operador(p.operador_red))
-        if operador_id is None:
-            sin_match.append({"id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red})
-            continue
-        fronteras_afectadas = [f.id for f in p.fronteras if f.operador_red_id is None]
-        actualizados.append({
-            "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
-            "operador_red_id": operador_id, "fronteras_afectadas": fronteras_afectadas,
-        })
-        if not dry_run:
-            p.operador_red_id = operador_id
-            sincronizar_operador_red(db, p)
-
-    if not dry_run and actualizados:
-        db.commit()
-
-    return {
-        "dry_run": dry_run,
-        "total_candidatos": len(proyectos),
-        "actualizados": len(actualizados),
-        "sin_match": len(sin_match),
-        "detalle": actualizados,
-        "detalle_sin_match": sin_match,
-    }
-
-
-@router.post("/backfill-operador-red")
-def backfill_operador_red(
-    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Vincula al catálogo de operadores los proyectos/fronteras cuyo texto
-    libre ya diligenciado coincide con un operador existente. Idempotente,
-    nunca pisa un vínculo ya hecho. Sin botón en el frontend (se corre
-    puntualmente, ver comentario en `_backfill_operador_red_info`)."""
-    return _backfill_operador_red_info(db, dry_run=dry_run)
 
 
 # ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────

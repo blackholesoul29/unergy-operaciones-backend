@@ -476,9 +476,8 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
                            _primero("departamento"))
 
     # Operador de red: el catálogo manda. `operador_red_legal` ya resuelve
-    # proyecto → primera frontera con operador; acá solo se le agrega el escalón
-    # de lo declarado en la oferta y, al final, el texto libre legacy del
-    # proyecto, que existe en filas viejas y es mejor que un null.
+    # proyecto → primera frontera con operador; acá solo se le agrega el
+    # escalón de lo declarado en la oferta.
     operador = _elegir("operador_red",
                        proyecto.operador_red_legal if proyecto else None,
                        operador_oferta)
@@ -489,9 +488,6 @@ def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
                             if o.operador_red_id is not None), None)
     else:
         operador_id = None
-        if proyecto is not None and proyecto.operador_red:
-            operador = proyecto.operador_red
-            fuentes["operador_red"] = "proyecto_legacy"
 
     gen_mwh, gen_origen, gen_detalle = _gen_promedio(proyecto, ofertas)
     fuentes["gen_promedio_mensual"] = gen_origen
@@ -1275,10 +1271,6 @@ def _operador_red(proyecto, nombre_oferta=None, id_oferta=None):
     no tiene vínculo propio— hacía que nombre e id hablaran de cosas distintas.
     Por eso `frontera` es una fuente aparte de `proyecto`.
 
-    Último escalón: `proyectos.operador_red`, el texto libre legacy. No está
-    validado contra el catálogo y por eso va sin id, pero es mejor que un null y
-    la fuente avisa que con ese valor no se puede cruzar nada.
-
     Requiere `operador` y `fronteras.operador` precargados (lo hacen las dos
     funciones que traen los proyectos de este módulo).
     """
@@ -1290,8 +1282,6 @@ def _operador_red(proyecto, nombre_oferta=None, id_oferta=None):
                 return f.operador.nombre_legal, f.operador_red_id, "frontera"
     if nombre_oferta:
         return nombre_oferta, id_oferta, "oferta"
-    if proyecto is not None and proyecto.operador_red:
-        return proyecto.operador_red, None, "proyecto_legacy"
     return None, None, None
 
 
@@ -1513,8 +1503,7 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "punto_conexion": f.punto_conexion,
             "municipio": f.municipio,
             "departamento": f.departamento,
-            "operador_red": (f.operador.nombre_legal if f.operador
-                             else f.operador_red),
+            "operador_red": f.operador.nombre_legal if f.operador else None,
             "operador_red_id": f.operador_red_id,
             "representante_frontera": f.representante_frontera,
             "fecha_registro_asic": f.fecha_registro_asic,
@@ -1687,8 +1676,9 @@ def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
                              if proyecto.info_tecnica else None),
             },
             "operador_red": operador,
-            # Id del catálogo `operadores_red`, para cruzar. Un nombre con id null
-            # es texto libre legacy — lo dice `fuentes.operador_red`.
+            # Id del catálogo `operadores_red`, para cruzar. Null cuando el
+            # nombre salió de lo declarado en una oferta sin operador propio
+            # (`fuentes.operador_red == "oferta"`).
             "operador_red_id": operador_id,
             "fecha_entrada_operacion": proyecto.fecha_entrada_operacion,
             "fecha_inicio_comercializacion": proyecto.fecha_inicio_comercializacion,

@@ -589,15 +589,6 @@ def test_el_nombre_y_el_id_del_operador_salen_de_la_misma_oferta(db):
         assert fila["operador_red"] == esperado[fila["operador_red_id"]]
 
 
-def test_como_ultimo_recurso_vale_el_texto_libre_legacy_del_proyecto():
-    """`proyectos.operador_red` es texto sin validar y está declarado legacy,
-    pero en filas viejas es el único dato que hay. Se marca como tal para que
-    quien integre sepa que ese nombre no salió del catálogo."""
-    f = fila_operando([_of()], proyecto=_py(operador_red="Afinia"), hoy=HOY)
-
-    assert f["operador_red"] == "Afinia" and f["operador_red_id"] is None
-    assert f["fuentes"]["operador_red"] == "proyecto_legacy"
-
 
 def test_sin_ningun_dato_los_campos_y_sus_fuentes_quedan_en_null():
     """"Todavía no lo sabemos" y "no aplica" tienen que verse distinto."""

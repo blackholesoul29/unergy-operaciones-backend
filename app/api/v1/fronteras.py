@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -250,10 +251,21 @@ def create_frontera(
     _=Depends(get_current_user),
 ):
     if body.codigo_frontera:
-        existing = db.query(Frontera).filter_by(codigo_frontera=body.codigo_frontera).first()
+        # Case-insensitive y SIN filtrar deleted_at a propósito: una frontera
+        # borrada con este código debe "resucitar" (levantarle deleted_at) en
+        # vez de quedar invisible para siempre pese a un 201 "éxito" -- el
+        # índice único de la BD (ver migración 077) también es case-insensitive
+        # y solo aplica a filas vivas, así que esta es la única forma de
+        # encontrar el código sin importar mayúsculas o estado.
+        existing = (
+            db.query(Frontera)
+            .filter(func.lower(Frontera.codigo_frontera) == body.codigo_frontera.lower())
+            .first()
+        )
         if existing:
             for k, v in body.model_dump(exclude_none=True).items():
                 setattr(existing, k, v)
+            existing.deleted_at = None
             db.commit()
             _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             db.refresh(existing)
@@ -277,7 +289,11 @@ def create_frontera(
 
     obj = Frontera(**body.model_dump())
     db.add(obj)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
@@ -467,8 +483,13 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
     se crean solos."""
     gaia = _get_gaia()
 
+    # Solo fronteras VIVAS cuentan como "ya registradas" -- una borrada libera
+    # su código, así que su border de Quoia vuelve a aparecer acá para
+    # confirmarse de nuevo (ver migración 077 y create_frontera()).
     existentes = {
-        c.lower() for (c,) in db.query(Frontera.codigo_frontera).filter(Frontera.codigo_frontera.isnot(None)).all()
+        c.lower() for (c,) in db.query(Frontera.codigo_frontera).filter(
+            Frontera.codigo_frontera.isnot(None), Frontera.deleted_at.is_(None),
+        ).all()
     }
     ignorados = {c.lower() for (c,) in db.query(FronteraQuoiaIgnorada.frt_code).all()}
     proyectos = db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all()
@@ -511,8 +532,14 @@ def confirmar_frontera_quoia(
 
     if not db.query(Proyecto.id).filter(Proyecto.id == body.proyecto_id).first():
         raise HTTPException(404, "Proyecto no encontrado")
-    if db.query(Frontera).filter(func.lower(Frontera.codigo_frontera) == frt_code.lower()).first():
+    if db.query(Frontera).filter(
+        func.lower(Frontera.codigo_frontera) == frt_code.lower(), Frontera.deleted_at.is_(None),
+    ).first():
         raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera")
+    # Confirmar explícitamente gana sobre un "ignorar" anterior -- si alguien
+    # decide registrar este border ahora, ya no tiene sentido que siga
+    # excluido de /quoia/pendientes la próxima vez que otro código se ignore.
+    db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == frt_code.lower()).delete()
 
     match = None
     for code, categoria, nombre_quoia, frt in _iter_borders_frt(gaia):
@@ -536,16 +563,27 @@ def confirmar_frontera_quoia(
         except ValueError:
             pass
 
-    obj = Frontera(
-        proyecto_id=body.proyecto_id,
-        codigo_frontera=frt_code,
-        nombre_frontera=nombre_default,
-        codigo_propio=body.codigo_propio,
-        tipo_frontera=body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar"),
-        estado="activa",
-        quoia_border_id=frt.get("id"),
-        fecha_registro_asic=fecha_registro_asic,
+    # Si el código pertenece a una frontera BORRADA (el chequeo de arriba solo
+    # descarta fronteras vivas), se resucita esa fila en vez de crear una
+    # nueva -- conserva su id/historial y libera el código correctamente.
+    obj = (
+        db.query(Frontera)
+        .filter(func.lower(Frontera.codigo_frontera) == frt_code.lower())
+        .first()
     )
+    es_nueva = obj is None
+    if es_nueva:
+        obj = Frontera(codigo_frontera=frt_code)
+    else:
+        obj.deleted_at = None
+
+    obj.proyecto_id = body.proyecto_id
+    obj.nombre_frontera = nombre_default
+    obj.codigo_propio = body.codigo_propio
+    obj.tipo_frontera = body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar")
+    obj.estado = "activa"
+    obj.quoia_border_id = frt.get("id")
+    obj.fecha_registro_asic = fecha_registro_asic
     if info_ppal:
         obj.marca_med_ppal = info_ppal.get("marca")
         obj.modelo_med_ppal = info_ppal.get("modelo")
@@ -554,8 +592,13 @@ def confirmar_frontera_quoia(
         obj.marca_med_resp = info_resp.get("marca")
         obj.modelo_med_resp = info_resp.get("modelo")
         obj.nro_serie_med_resp = info_resp.get("serie")
-    db.add(obj)
-    db.commit()
+    if es_nueva:
+        db.add(obj)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
@@ -571,6 +614,10 @@ def ignorar_frontera_quoia(
     """Marca un border de Quoia como 'no aplica' para que deje de aparecer
     en /quoia/pendientes (ej. medidor de prueba, border de un tercero)."""
     code = frt_code.lower()
+    if db.query(Frontera).filter(
+        func.lower(Frontera.codigo_frontera) == code, Frontera.deleted_at.is_(None),
+    ).first():
+        raise HTTPException(409, "Ya existe una frontera activa con ese codigo_frontera -- no se puede ignorar")
     if db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == code).first():
         return
     db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))

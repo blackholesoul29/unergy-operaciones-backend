@@ -37,7 +37,11 @@ class Frontera(Base):
     agrupada_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
     embebida_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
 
-    codigo_frontera: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
+    # unique=True se reemplazó por un índice único parcial case-insensitive
+    # (ver migración 077) -- una fila borrada libera su código para que otra
+    # pueda reusarlo, y dos códigos que solo difieren en mayúsculas ya no
+    # pueden coexistir como fronteras activas distintas.
+    codigo_frontera: Mapped[str | None] = mapped_column(String(50), nullable=True)
     nombre_frontera: Mapped[str] = mapped_column(String(255), nullable=False)
     codigo_propio: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo_frontera: Mapped[str] = mapped_column(SAEnum(TipoFronteraEnum, name="tipo_frontera_enum"), nullable=False)

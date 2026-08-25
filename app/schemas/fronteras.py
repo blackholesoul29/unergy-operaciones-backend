@@ -2,7 +2,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, datetime
 from typing import Optional
 
-from app.models.fronteras import TipoFronteraEnum, EstadoFronteraEnum
+from app.models.fronteras import (
+    TipoFronteraEnum, EstadoFronteraEnum, ClaseCtEnum, ClasePtEnum, ClaseMedidorEnum,
+)
 
 
 class FronteraBase(BaseModel):
@@ -24,8 +26,8 @@ class FronteraBase(BaseModel):
     # Técnico
     tipo_punto_medicion: Optional[int] = None
     factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
-    clase_ct: Optional[str] = None
-    clase_pt: Optional[str] = None
+    clase_ct: Optional[ClaseCtEnum] = None
+    clase_pt: Optional[ClasePtEnum] = None
 
     # Agentes
     representante_anterior: Optional[str] = None
@@ -45,7 +47,7 @@ class FronteraBase(BaseModel):
     nro_serie_med_ppal: Optional[str] = None
     marca_med_ppal: Optional[str] = None
     modelo_med_ppal: Optional[str] = None
-    clase_medidor: Optional[str] = None
+    clase_medidor: Optional[ClaseMedidorEnum] = None
     num_elementos_med_ppal: Optional[int] = None
     fecha_cambio_med_ppal: Optional[date] = None
     entidad_calibradora_med_ppal: Optional[str] = None
@@ -100,8 +102,8 @@ class FronteraUpdate(BaseModel):
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
     factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
-    clase_ct: Optional[str] = None
-    clase_pt: Optional[str] = None
+    clase_ct: Optional[ClaseCtEnum] = None
+    clase_pt: Optional[ClasePtEnum] = None
 
     # Agentes
     representante_anterior: Optional[str] = None
@@ -121,7 +123,7 @@ class FronteraUpdate(BaseModel):
     nro_serie_med_ppal: Optional[str] = None
     marca_med_ppal: Optional[str] = None
     modelo_med_ppal: Optional[str] = None
-    clase_medidor: Optional[str] = None
+    clase_medidor: Optional[ClaseMedidorEnum] = None
     num_elementos_med_ppal: Optional[int] = None
     fecha_cambio_med_ppal: Optional[date] = None
     entidad_calibradora_med_ppal: Optional[str] = None

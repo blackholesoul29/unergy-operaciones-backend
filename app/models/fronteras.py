@@ -23,6 +23,25 @@ class EstadoFronteraEnum(str, enum.Enum):
     en_falla = "en_falla"
 
 
+# Clases de precision de metrologia (CREG, fronteras comerciales) -- acotadas
+# a los valores que de verdad se usan hoy (auditoria de integridad de
+# Fronteras, 2026-08-25), no al catalogo completo de la norma.
+class ClaseCtEnum(str, enum.Enum):
+    clase_0_2 = "0.2"
+    clase_0_2s = "0.2s"
+    clase_0_5s = "0.5s"
+
+
+class ClasePtEnum(str, enum.Enum):
+    clase_0_2 = "0.2"
+    clase_0_5 = "0.5"
+
+
+class ClaseMedidorEnum(str, enum.Enum):
+    clase_0_2s = "0.2s"
+    clase_0_5s = "0.5s"
+
+
 class Frontera(Base):
     __tablename__ = "fronteras"
     __table_args__ = (
@@ -55,8 +74,8 @@ class Frontera(Base):
     tipo_punto_medicion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nivel_tension_kv: Mapped[float | None] = mapped_column(Numeric(8, 3), nullable=True)
     factor_perdidas: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
-    clase_ct: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    clase_pt: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    clase_ct: Mapped[str | None] = mapped_column(SAEnum(ClaseCtEnum, name="clase_ct_enum"), nullable=True)
+    clase_pt: Mapped[str | None] = mapped_column(SAEnum(ClasePtEnum, name="clase_pt_enum"), nullable=True)
 
     # Registro ASIC
     nivel_tension: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -81,7 +100,7 @@ class Frontera(Base):
     nro_serie_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     marca_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     modelo_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    clase_medidor: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    clase_medidor: Mapped[str | None] = mapped_column(SAEnum(ClaseMedidorEnum, name="clase_medidor_enum"), nullable=True)
     num_elementos_med_ppal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fecha_cambio_med_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
     entidad_calibradora_med_ppal: Mapped[str | None] = mapped_column(String(255), nullable=True)

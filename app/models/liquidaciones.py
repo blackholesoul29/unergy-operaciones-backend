@@ -160,7 +160,11 @@ class LiquidacionXMDato(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
-    frontera_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
+    # RESTRICT explicito (migracion 083, antes era el NO ACTION implicito de
+    # Postgres -- mismo efecto practico, pero sin depender de un default sin
+    # documentar) -- dato financiero de liquidacion, igual criterio que
+    # reporte_energia_generacion/consumo/exclusion.
+    frontera_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="RESTRICT"), nullable=True, index=True)
     tipo_venta: Mapped[str] = mapped_column(SAEnum(TipoVentaLiqEnum, name="tipo_venta_xm_enum", create_constraint=False), nullable=False)
     energia_kwh: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
     tarifa_aplicada_kwh: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False)

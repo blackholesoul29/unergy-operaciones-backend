@@ -86,6 +86,19 @@ def _enriquecer_medidor_desde_quoia(obj: Frontera) -> None:
         obj.nro_serie_med_resp = obj.nro_serie_med_resp or info_resp.get("serie")
 
 
+def _validar_fks_frontera(db: Session, proyecto_id: int | None, operador_red_id: int | None) -> None:
+    """Valida proyecto_id/operador_red_id ANTES del commit -- sin esto, un id
+    invalido revienta como IntegrityError en el commit, y el except generico
+    de create/update lo reporta como '''ya existe ese codigo''', un mensaje
+    enganoso que oculta la causa real (confirmar_frontera_quoia() ya validaba
+    proyecto_id de esta misma forma; aca se extiende a create/update y se
+    suma operador_red_id, que ninguno de los tres validaba)."""
+    if proyecto_id is not None and not db.query(Proyecto.id).filter(Proyecto.id == proyecto_id).first():
+        raise HTTPException(404, "Proyecto no encontrado")
+    if operador_red_id is not None and not db.query(OperadorRed.id).filter(OperadorRed.id == operador_red_id).first():
+        raise HTTPException(404, "Operador de red no encontrado")
+
+
 CORRIDAS_VENTANA_GENERANDO = 3
 
 
@@ -248,6 +261,9 @@ def create_frontera(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    _validar_fks_frontera(db, body.proyecto_id, body.operador_red_id)
+
+    existing = None
     if body.codigo_frontera:
         # Case-insensitive y SIN filtrar deleted_at a propósito: una frontera
         # borrada con este código debe "resucitar" (levantarle deleted_at) en
@@ -260,17 +276,17 @@ def create_frontera(
             .filter(func.lower(Frontera.codigo_frontera) == body.codigo_frontera.lower())
             .first()
         )
-        if existing:
-            for k, v in body.model_dump(exclude_none=True).items():
-                setattr(existing, k, v)
-            existing.deleted_at = None
-            _enriquecer_medidor_desde_quoia(existing)
-            db.commit()
-            _sync_operador_red_para_proyecto(db, existing.proyecto_id)
-            return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
 
+    # Mismo chequeo de nombre parecido para las dos ramas (crear nueva o
+    # resucitar una borrada) -- antes resucitar se lo saltaba por completo,
+    # a diferencia de crear y de confirmar-desde-Quoia. excluir_id evita que
+    # una fila activa que se está re-registrando (mismo código, deleted_at ya
+    # en NULL) se compare contra sí misma.
     if not forzar:
-        duplicado = _buscar_duplicado_frontera(db, body.nombre_frontera, body.tipo_frontera)
+        duplicado = _buscar_duplicado_frontera(
+            db, body.nombre_frontera, body.tipo_frontera,
+            excluir_id=existing.id if existing else None,
+        )
         if duplicado:
             raise HTTPException(
                 409,
@@ -284,6 +300,19 @@ def create_frontera(
                     "candidato_nombre": duplicado.nombre_frontera,
                 },
             )
+
+    if existing:
+        for k, v in body.model_dump(exclude_none=True).items():
+            setattr(existing, k, v)
+        existing.deleted_at = None
+        _enriquecer_medidor_desde_quoia(existing)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
+        _sync_operador_red_para_proyecto(db, existing.proyecto_id)
+        return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
 
     obj = Frontera(**body.model_dump())
     _enriquecer_medidor_desde_quoia(obj)
@@ -366,6 +395,8 @@ def update_frontera(
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
     cambios = body.model_dump(exclude_unset=True)
+
+    _validar_fks_frontera(db, cambios.get("proyecto_id"), cambios.get("operador_red_id"))
 
     if "codigo_frontera" in cambios and cambios["codigo_frontera"]:
         nuevo_codigo = cambios["codigo_frontera"]

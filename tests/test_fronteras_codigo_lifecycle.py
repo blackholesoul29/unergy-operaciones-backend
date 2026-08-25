@@ -23,6 +23,7 @@ from app.models.fronteras import Frontera, FronteraQuoiaIgnorada
 from app.schemas.fronteras import FronteraCreate, FronteraUpdate, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar
 from app.api.v1 import fronteras as api
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 
 @compiles(JSONB, "sqlite")
@@ -118,6 +119,141 @@ def test_crear_es_case_insensitive_actualiza_la_activa_sin_duplicar(db):
 
     assert out.id == f.id
     assert db.query(Frontera).count() == 1
+
+
+def test_resucitar_una_borrada_tambien_rechaza_nombre_parecido(db):
+    """Antes esta rama (codigo_frontera coincide con una fila -- viva o
+    borrada -- que ya existe) se saltaba por completo el chequeo de nombre
+    parecido que sí tenían crear y confirmar-desde-Quoia: se podía
+    'resucitar' un código con un nombre que colisiona con otra frontera
+    activa, sin aviso ni forzar."""
+    proy = _proyecto(db)
+    db.add(Frontera(
+        id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Planta Catedral",
+        codigo_frontera="Frt00050", tipo_frontera="generacion", estado="activa",
+    ))
+    db.add(Frontera(
+        id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Vieja",
+        codigo_frontera="Frt00123", tipo_frontera="generacion",
+        deleted_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+    ))
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.create_frontera(
+            FronteraCreate(nombre_frontera="Planta Catedral", tipo_frontera="generacion",
+                            codigo_frontera="Frt00123"),
+            forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail["duplicado_nombre"] is True
+
+    # La fila borrada sigue borrada -- el rechazo fue antes de tocarla.
+    borrada = db.query(Frontera).filter(Frontera.codigo_frontera == "Frt00123").first()
+    assert borrada.deleted_at is not None
+
+
+def test_resucitar_con_forzar_ignora_el_nombre_parecido(db):
+    proy = _proyecto(db)
+    db.add(Frontera(
+        id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Planta Catedral",
+        codigo_frontera="Frt00050", tipo_frontera="generacion", estado="activa",
+    ))
+    f_id = next(_next_id)
+    db.add(Frontera(
+        id=f_id, proyecto_id=proy.id, nombre_frontera="Vieja",
+        codigo_frontera="Frt00123", tipo_frontera="generacion",
+        deleted_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+    ))
+    db.commit()
+
+    out = api.create_frontera(
+        FronteraCreate(nombre_frontera="Planta Catedral", tipo_frontera="generacion",
+                        codigo_frontera="Frt00123"),
+        forzar=True, db=db, _=ADMIN,
+    )
+    assert out.id == f_id
+    assert db.query(Frontera).filter(Frontera.id == f_id).first().deleted_at is None
+
+
+def test_resucitar_convierte_choque_de_integridad_en_409(db, monkeypatch):
+    """La rama de resucitar no tenia try/except alrededor de su propio
+    commit (a diferencia de crear nueva y de confirmar-desde-Quoia) -- un
+    choque real de una constraint distinta a codigo_frontera reventaba como
+    500 en vez de un 409 limpio."""
+    proy = _proyecto(db)
+    db.add(Frontera(
+        id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Vieja",
+        codigo_frontera="Frt00123", tipo_frontera="generacion",
+        deleted_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+    ))
+    db.commit()
+
+    def _commit_falla():
+        raise IntegrityError("insert", {}, Exception("choque"))
+    monkeypatch.setattr(db, "commit", _commit_falla)
+
+    with pytest.raises(HTTPException) as exc:
+        api.create_frontera(
+            FronteraCreate(nombre_frontera="Nueva", tipo_frontera="generacion",
+                            codigo_frontera="Frt00123"),
+            forzar=True, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 409
+
+
+def test_crear_frontera_con_proyecto_inexistente_da_404_no_409_enganoso(db):
+    """proyecto_id/operador_red_id nunca se validaban antes del commit -- un
+    id invalido reventaba como IntegrityError, y el except generico de
+    create/update lo reportaba como '''ya existe ese codigo''' (409), un
+    mensaje que no tiene nada que ver con la causa real."""
+    with pytest.raises(HTTPException) as exc:
+        api.create_frontera(
+            FronteraCreate(nombre_frontera="Nueva", tipo_frontera="generacion", proyecto_id=999999),
+            forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 404
+    assert "Proyecto" in exc.value.detail
+
+
+def test_crear_frontera_con_operador_red_inexistente_da_404(db):
+    with pytest.raises(HTTPException) as exc:
+        api.create_frontera(
+            FronteraCreate(nombre_frontera="Nueva", tipo_frontera="generacion", operador_red_id=999999),
+            forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 404
+    assert "Operador" in exc.value.detail
+
+
+def test_editar_frontera_con_proyecto_inexistente_da_404(db):
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Original",
+                 codigo_frontera="frt00300", tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(
+            f.id, FronteraUpdate(proyecto_id=999999), forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 404
+    assert "Proyecto" in exc.value.detail
+
+
+def test_editar_frontera_con_operador_red_inexistente_da_404(db):
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Original",
+                 codigo_frontera="frt00301", tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(
+            f.id, FronteraUpdate(operador_red_id=999999), forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 404
+    assert "Operador" in exc.value.detail
 
 
 def test_crear_frontera_completa_medidor_desde_quoia_si_esta_disponible(db, monkeypatch):

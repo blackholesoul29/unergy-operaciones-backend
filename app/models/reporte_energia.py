@@ -37,7 +37,12 @@ class ReporteEnergiaGeneracion(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="CASCADE"), nullable=False, index=True)
+    # RESTRICT, no CASCADE (migracion 083): esto es historial regulatorio ya
+    # reportado al ASIC -- no debe poder desaparecer en silencio si alguna
+    # vez se agrega un hard-delete real de Frontera (hoy no existe, solo
+    # soft-delete via deleted_at). Antes era CASCADE, que habria borrado
+    # este historial junto con la frontera sin ningun aviso.
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="RESTRICT"), nullable=False, index=True)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
 
     caso: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -141,7 +146,12 @@ class ReporteEnergiaExclusion(Base):
     __tablename__ = "reporte_energia_exclusiones"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="CASCADE"), nullable=False, index=True)
+    # RESTRICT, no CASCADE (migracion 083): esto es historial regulatorio ya
+    # reportado al ASIC -- no debe poder desaparecer en silencio si alguna
+    # vez se agrega un hard-delete real de Frontera (hoy no existe, solo
+    # soft-delete via deleted_at). Antes era CASCADE, que habria borrado
+    # este historial junto con la frontera sin ningun aviso.
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="RESTRICT"), nullable=False, index=True)
     motivo: Mapped[str] = mapped_column(String(500), nullable=False)
     fecha_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     fecha_fin_estimada: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -168,7 +178,12 @@ class ReporteEnergiaConsumo(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="CASCADE"), nullable=False, index=True)
+    # RESTRICT, no CASCADE (migracion 083): esto es historial regulatorio ya
+    # reportado al ASIC -- no debe poder desaparecer en silencio si alguna
+    # vez se agrega un hard-delete real de Frontera (hoy no existe, solo
+    # soft-delete via deleted_at). Antes era CASCADE, que habria borrado
+    # este historial junto con la frontera sin ningun aviso.
+    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="RESTRICT"), nullable=False, index=True)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
 
     caso: Mapped[str] = mapped_column(String(20), nullable=False)

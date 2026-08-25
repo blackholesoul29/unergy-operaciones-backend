@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
+from sqlalchemy.engine import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 from app.core.database import get_db
@@ -226,7 +227,7 @@ def list_fronteras(
 def _buscar_duplicado_frontera(
     db: Session, nombre_frontera: str | None, tipo_frontera: str | None = None,
     excluir_id: int | None = None,
-) -> Frontera | None:
+) -> Row | None:
     """Busca una frontera existente con nombre parecido, via solapamiento de
     tokens + similitud de texto (mismo algoritmo que _buscar_duplicado_por_nombre
     en proyectos, ver app/utils/nombre_matching.py) -- detecta parecidos aunque
@@ -244,12 +245,19 @@ def _buscar_duplicado_frontera(
     forzar=true)."""
     if not nombre_frontera:
         return None
-    q = db.query(Frontera).filter(Frontera.deleted_at.is_(None))
+    # with_entities: solo id/nombre hacen falta aca (el resultado solo se usa
+    # para el mensaje 409 y para excluir_id en el siguiente llamado) -- traer
+    # la fila completa con las ~80 columnas de Frontera por cada candidato en
+    # este chequeo de "nombre parecido" (que corre en cada create/update/
+    # confirmar) era trabajo de mas sin ningun uso.
+    q = db.query(Frontera).with_entities(Frontera.id, Frontera.nombre_frontera).filter(
+        Frontera.deleted_at.is_(None)
+    )
     if tipo_frontera:
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if excluir_id is not None:
         q = q.filter(Frontera.id != excluir_id)
-    candidatos = [(f, [f.nombre_frontera]) for f in q.all()]
+    candidatos = [(row, [row.nombre_frontera]) for row in q.all()]
     item, _score = mejor_candidato(nombre_frontera, candidatos)
     return item
 
@@ -281,6 +289,19 @@ def _validar_codigo_propio_no_duplicado(
             f"Ya existe una frontera activa con ese código propio: "
             f"'{choque.nombre_frontera}' (ID {choque.id}).",
         )
+
+
+def _commit_o_409_codigo_duplicado(db: Session) -> None:
+    """codigo_frontera tiene un indice unico case-insensitive sobre filas
+    vivas (migracion 078) -- dos requests concurrentes con el mismo codigo
+    pueden pasar los chequeos de arriba (que corren ANTES del round-trip a
+    la BD) y chocar recien en el commit. Centraliza el catch -> 409 que se
+    repetia identico en los 4 endpoints de escritura de codigo_frontera."""
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
 
 
 @router.post("", response_model=FronteraOut, status_code=201)
@@ -339,22 +360,14 @@ def create_frontera(
             setattr(existing, k, v)
         existing.deleted_at = None
         _enriquecer_medidor_desde_quoia(existing)
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
+        _commit_o_409_codigo_duplicado(db)
         _sync_operador_red_para_proyecto(db, existing.proyecto_id)
         return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
 
     obj = Frontera(**body.model_dump())
     _enriquecer_medidor_desde_quoia(obj)
     db.add(obj)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
+    _commit_o_409_codigo_duplicado(db)
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
@@ -476,11 +489,7 @@ def update_frontera(
     # cubria ese caso se elimino esta sesion).
     if cambios.get("codigo_frontera"):
         _enriquecer_medidor_desde_quoia(f)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
+    _commit_o_409_codigo_duplicado(db)
     _sync_operador_red_para_proyecto(db, f.proyecto_id)
     return _to_out(
         db.query(Frontera)
@@ -685,11 +694,7 @@ def confirmar_frontera_quoia(
     # lock a nivel de fila), pero la reduce a la ventana minúscula entre esta
     # línea y el commit, en vez de todo el round-trip a Quoia.
     db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == frt_code.lower()).delete()
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
+    _commit_o_409_codigo_duplicado(db)
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 

@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.contratos import ContratoServicio, PagoServicio
 from app.models.clientes import Cliente
+from app.models.fronteras import Frontera
 from app.schemas.contratos_servicio import (
     ContratoServicioCreate, ContratoServicioUpdate, ContratoServicioOut,
     PagoServicioCreate, PagoServicioUpdate, PagoServicioOut,
@@ -22,6 +23,7 @@ def _load_options():
         # Sin esto el listado dispara un SELECT por fila para pintar el nombre
         # del proyecto (112 contratos de representación = 112 queries).
         selectinload(ContratoServicio.proyecto),
+        selectinload(ContratoServicio.fronteras),
     ]
 
 
@@ -30,6 +32,37 @@ def _get_or_404(id: int, db: Session) -> ContratoServicio:
     if not c:
         raise HTTPException(404, "Contrato no encontrado")
     return c
+
+
+def _sync_fronteras(contrato: ContratoServicio, frontera_ids: list[int], db: Session):
+    """Deja el contrato vinculado exactamente a `frontera_ids`.
+
+    Asignar la relación deja que SQLAlchemy calcule el diff (borra los
+    vínculos que sobran, inserta los nuevos). Los ids repetidos en el
+    payload colapsan al resolverlos contra la BD, así no se viola
+    uq_contrato_frontera."""
+    fronteras = []
+    if frontera_ids:
+        fronteras = (
+            db.query(Frontera)
+            .filter(Frontera.id.in_(set(frontera_ids)), Frontera.deleted_at.is_(None))
+            .all()
+        )
+        faltantes = set(frontera_ids) - {f.id for f in fronteras}
+        if faltantes:
+            raise HTTPException(400, f"Fronteras no encontradas: {sorted(faltantes)}")
+        # Si el contrato ya tiene proyecto, las fronteras deben ser de ese
+        # mismo proyecto -- evita vincular por error un punto de medida de
+        # otra planta (el contrato es legal, la frontera es fisica; no
+        # tiene sentido que no coincidan de proyecto).
+        if contrato.proyecto_id is not None:
+            de_otro_proyecto = [f.id for f in fronteras if f.proyecto_id != contrato.proyecto_id]
+            if de_otro_proyecto:
+                raise HTTPException(
+                    400,
+                    f"Estas fronteras no pertenecen al proyecto del contrato: {sorted(de_otro_proyecto)}",
+                )
+    contrato.fronteras = fronteras
 
 
 def _sync_partes(contrato: ContratoServicio, db: Session):
@@ -99,10 +132,13 @@ def create_contrato(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    contrato = ContratoServicio(**data.model_dump())
+    payload = data.model_dump()
+    frontera_ids = payload.pop("frontera_ids", []) or []
+    contrato = ContratoServicio(**payload)
     db.add(contrato)
     db.flush()
     _sync_partes(contrato, db)
+    _sync_fronteras(contrato, frontera_ids, db)
     db.commit()
     return _get_or_404(contrato.id, db)
 
@@ -238,9 +274,14 @@ def update_contrato(
     _=Depends(get_current_user),
 ):
     contrato = _get_or_404(id, db)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    # None/ausente = no tocar las fronteras actuales; [] = desvincular todas
+    frontera_ids = payload.pop("frontera_ids", None)
+    for k, v in payload.items():
         setattr(contrato, k, v)
     _sync_partes(contrato, db)
+    if frontera_ids is not None:
+        _sync_fronteras(contrato, frontera_ids, db)
     db.commit()
     return _get_or_404(id, db)
 

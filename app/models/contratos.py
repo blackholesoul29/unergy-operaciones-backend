@@ -124,6 +124,13 @@ class ContratoServicio(Base):
     contratante: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[contratante_id])
     prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
+    # Puntos de medida especificos que cubre este contrato -- proyecto_id
+    # vincula al proyecto completo, esto permite granularidad cuando dos
+    # contratos (ej. operacion y representacion) aplican a fronteras
+    # distintas de la misma planta.
+    fronteras: Mapped[list["Frontera"]] = relationship(
+        "Frontera", secondary="contrato_frontera", back_populates="contratos",
+    )
 
 
 class PPAResponsable(Base):

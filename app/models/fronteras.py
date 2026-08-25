@@ -42,6 +42,16 @@ class ClaseMedidorEnum(str, enum.Enum):
     clase_0_5s = "0.5s"
 
 
+# Estos tres enum guardan el VALOR en Postgres ("0.5s"), no el nombre del miembro
+# ("clase_0_5s"): así están creados los tipos y así están las 94 filas. SQLAlchemy
+# usa el nombre salvo que se le diga lo contrario, y al leer reventaba con
+#     LookupError: '0.5s' is not among the defined enum values
+# tumbando con 500 cualquier consulta que cargara fronteras -- incluida la lista de
+# proyectos, que las trae con selectinload.
+def _por_valor(enum_cls):
+    return [m.value for m in enum_cls]
+
+
 class Frontera(Base):
     __tablename__ = "fronteras"
     __table_args__ = (
@@ -74,8 +84,8 @@ class Frontera(Base):
     tipo_punto_medicion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nivel_tension_kv: Mapped[float | None] = mapped_column(Numeric(8, 3), nullable=True)
     factor_perdidas: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
-    clase_ct: Mapped[str | None] = mapped_column(SAEnum(ClaseCtEnum, name="clase_ct_enum"), nullable=True)
-    clase_pt: Mapped[str | None] = mapped_column(SAEnum(ClasePtEnum, name="clase_pt_enum"), nullable=True)
+    clase_ct: Mapped[str | None] = mapped_column(SAEnum(ClaseCtEnum, name="clase_ct_enum", values_callable=_por_valor), nullable=True)
+    clase_pt: Mapped[str | None] = mapped_column(SAEnum(ClasePtEnum, name="clase_pt_enum", values_callable=_por_valor), nullable=True)
 
     # Registro ASIC
     nivel_tension: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -100,7 +110,7 @@ class Frontera(Base):
     nro_serie_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     marca_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     modelo_med_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    clase_medidor: Mapped[str | None] = mapped_column(SAEnum(ClaseMedidorEnum, name="clase_medidor_enum"), nullable=True)
+    clase_medidor: Mapped[str | None] = mapped_column(SAEnum(ClaseMedidorEnum, name="clase_medidor_enum", values_callable=_por_valor), nullable=True)
     num_elementos_med_ppal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fecha_cambio_med_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
     entidad_calibradora_med_ppal: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -1363,6 +1363,16 @@ _PENDING_DDLS = [
     #
     # El INSERT es idempotente por el NOT EXISTS: al correr en cada arranque, sin
     # esa guarda crearía un contrato nuevo cada vez.
+    # La clasificación NEU/Nitro es POR PERÍODO y en 2026-07 nadie la cargó: el
+    # último registro es de junio. Sin ella esos proyectos se tratarían como
+    # normales y se armarían desde la API, que es justo lo que no debe pasarles.
+    # Se arrastra la de junio en vez de teclear los nombres, para que salga de
+    # los datos y no de una lista que se desactualiza.
+    """INSERT INTO clasificacion_liquidacion (proyecto_id, periodo, tipo)
+         SELECT c.proyecto_id, '2026-07', c.tipo
+           FROM clasificacion_liquidacion c
+          WHERE c.periodo = '2026-06' AND c.tipo <> 'normal'
+       ON CONFLICT (proyecto_id, periodo) DO NOTHING""",
     # De dónde se armó cada panel: 'er' (Excel) o 'api'. Los costos ya traían su
     # `fuente` por línea, pero los ingresos no tenían marca y no había forma de
     # saber con qué se construyó un panel. Lo existente es todo 'er'.

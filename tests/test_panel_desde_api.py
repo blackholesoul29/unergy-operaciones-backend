@@ -174,15 +174,15 @@ def test_la_comercializacion_entra_en_negativo():
     """Son costos: el Panel los guarda con signo negativo."""
     parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
     valores = {l["concepto"]: l["valor"] for l in parsed["comercializacion"]}
-    assert valores["Energía en bolsa"] == -616_662.0
+    assert valores["Energía en Bolsa (Gen)"] == -616_662.0
 
 
 def test_trae_fazni_y_cargo_por_confiabilidad():
     """El Excel no las tiene; son 10,5M de costo real en julio de 2026."""
     parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
     conceptos = {l["concepto"] for l in parsed["comercializacion"]}
-    assert "FAZNI" in conceptos
-    assert "Cargo por confiabilidad" in conceptos
+    assert "FAZNI (Gen)" in conceptos
+    assert "Cargo por confiabilidad (Gen)" in conceptos
 
 
 def test_los_warnings_de_la_api_se_conservan():
@@ -202,3 +202,69 @@ def test_los_costos_y_facturas_los_pone_el_panel():
     parsed = construir_parsed(_proyecto_api())
     assert parsed["costos"] == []
     assert parsed["facturas"] == []
+
+
+# ── Etiquetas: se conservan las del Excel ────────────────────────────────────
+
+def test_la_comercializacion_usa_las_etiquetas_del_excel():
+    """Contabilidad reconoce "Energía en Bolsa (Gen)", no el nombre de la API."""
+    parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
+    conceptos = {l["concepto"] for l in parsed["comercializacion"]}
+    assert "Energía en Bolsa (Gen)" in conceptos
+    assert "Serv. Despacho CND (Gen)" in conceptos
+    assert "Energia en Bolsa (COP) (Generador)" not in conceptos
+
+
+def test_fazni_y_confiabilidad_siguen_la_misma_convencion():
+    """No existen en el Excel; se nombran como el resto."""
+    parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
+    conceptos = {l["concepto"] for l in parsed["comercializacion"]}
+    assert "FAZNI (Gen)" in conceptos
+    assert "Cargo por confiabilidad (Gen)" in conceptos
+
+
+def test_un_concepto_desconocido_conserva_el_nombre_de_la_api():
+    """Si aparece uno nuevo tiene que notarse, no desaparecer."""
+    parsed = construir_parsed(_proyecto_api(comercializacion=[
+        {"concepto": "Concepto Nuevo (COP)", "name": "concepto_nuevo", "valor": 1.0}]))
+    assert parsed["comercializacion"][0]["concepto"] == "Concepto Nuevo (COP)"
+
+
+def test_los_ingresos_usan_la_etiqueta_del_excel():
+    """La API dice "Terpel Venta"; el Excel, "Ingreso Bruto Terpel"."""
+    parsed = construir_parsed(_proyecto_api(ingresos_detalle=[
+        {"concepto": "Terpel Venta", "data_type": "dispatch", "valor": 100.0}]))
+    assert parsed["ingresos_detalle"][0]["concepto"] == "Ingreso Bruto Terpel"
+
+
+def test_capitaliza_el_comercializador_como_el_parser():
+    parsed = construir_parsed(_proyecto_api(ingresos_detalle=[
+        {"concepto": "UNERGY ENERGIA DIGITAL S.A.S ESP Venta",
+         "data_type": "dispatch", "valor": 100.0}]))
+    assert parsed["ingresos_detalle"][0]["concepto"] == \
+        "Ingreso Bruto Unergy Energia Digital S.A.S Esp"
+
+
+def test_la_venta_en_bolsa_tiene_su_propia_etiqueta():
+    parsed = construir_parsed(_proyecto_api(ingresos_detalle=[
+        {"concepto": "Neu Venta bolsa", "data_type": "dispatch_fazni", "valor": 100.0}]))
+    assert parsed["ingresos_detalle"][0]["concepto"] == "Venta en bolsa"
+
+
+def test_la_compra_dice_de_quien_es():
+    parsed = construir_parsed(_proyecto_api(project="baraya", ingresos_detalle=[
+        {"concepto": "Neu Compra", "data_type": "purchase", "valor": -100.0}]))
+    assert parsed["ingresos_detalle"][0]["concepto"] == "Compra Neu"
+
+
+def test_numera_los_contratos_repetidos_como_el_excel():
+    """Vallenata tiene dos de Terpel: el ER los llama Terpel 1 y Terpel 2."""
+    parsed = construir_parsed(_proyecto_api())
+    assert [l["concepto"] for l in parsed["ingresos_detalle"]] == [
+        "Ingreso Bruto Terpel 1", "Ingreso Bruto Terpel 2"]
+
+
+def test_no_numera_cuando_hay_uno_solo():
+    parsed = construir_parsed(_proyecto_api(ingresos_detalle=[
+        {"concepto": "Terpel Venta", "data_type": "dispatch", "valor": 100.0}]))
+    assert parsed["ingresos_detalle"][0]["concepto"] == "Ingreso Bruto Terpel"

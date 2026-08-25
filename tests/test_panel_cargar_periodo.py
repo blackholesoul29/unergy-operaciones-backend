@@ -215,3 +215,28 @@ def test_los_paneles_del_excel_siguen_diciendo_er(db):
     db.add(p)
     db.commit()
     assert p.origen == "er"
+
+
+# ── El Excel quedó solo para NEU y Nitro ─────────────────────────────────────
+
+def test_cargar_er_rechaza_un_proyecto_normal(client, db, monkeypatch, tmp_path):
+    """Desde la migración, un proyecto normal ya no se carga por Excel: se arma
+    desde la API. Dejar los dos caminos abiertos permitiría pisar sin querer un
+    panel armado desde la API con un Excel viejo."""
+    archivo = tmp_path / "Estado resultados Vallenata 7 2026.xlsx"
+    archivo.write_bytes(b"no importa: se rechaza antes de parsearlo")
+
+    monkeypatch.setattr(
+        panel_contable, "extraer_proyecto_de_archivo",
+        lambda *a, **k: {"id": 1, "nombre_comercial": "MGS 0007 La Paz Vallenata"})
+
+    with archivo.open("rb") as fh:
+        r = client.post("/api/v1/panel-contable/cargar-er",
+                        data={"periodo": "2026-07", "tipo": "oficial",
+                              "tipo_carga": "normal"},
+                        files={"files": ("er.xlsx", fh,
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    rechazos = r.json().get("rechazados") or []
+    assert rechazos, "un proyecto normal debería quedar rechazado"
+    assert "API" in rechazos[0]["mensaje"]

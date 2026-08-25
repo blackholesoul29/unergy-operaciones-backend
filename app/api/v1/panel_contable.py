@@ -423,9 +423,27 @@ async def cargar_er(
                 })
                 continue
 
+            # Desde la migración a la API, el Excel es SOLO para NEU y Nitro:
+            # su dato en `income_statement_data` está malo. Todo lo demás se arma
+            # con `POST /panel-contable/cargar-periodo`, que no pide archivos.
+            clasif = clasif_map.get(proy["id"], "normal")
+            if clasif == "normal":
+                resultados["rechazados"].append({
+                    "archivo": uf.filename,
+                    "proyecto": proy["nombre_comercial"],
+                    "clasificacion": clasif,
+                    "tipo_carga": tipo_carga,
+                    "mensaje": (
+                        f"{proy['nombre_comercial']} ya no se carga por Excel: se "
+                        f"arma desde la API con «Armar período». El Excel quedó "
+                        f"solo para NEU y Nitro. Si esta planta debería ser NEU o "
+                        f"Nitro en {periodo_norm}, clasifícala primero."
+                    ),
+                })
+                continue
+
             # Validación cruzada: la clasificación del período debe coincidir con
             # el tipo de carga elegido.
-            clasif = clasif_map.get(proy["id"], "normal")
             if clasif != tipo_carga:
                 resultados["rechazados"].append({
                     "archivo": uf.filename,
@@ -687,7 +705,10 @@ def comparar_lineas(excel: list[dict], api: list[dict]) -> list[dict]:
     diferencias = []
     for clave in sorted(set(ex) | set(ap)):
         v_ex, v_ap = ex.get(clave), ap.get(clave)
-        if v_ex is not None and v_ap is not None and abs(v_ex - v_ap) < 1:
+        # El lado que falta cuenta como cero. Así una línea en cero que existe de
+        # un solo lado no se reporta: no es una diferencia de plata, y con 36
+        # proyectos arrastrando conceptos vacíos tapaba las diferencias reales.
+        if abs((v_ap or 0) - (v_ex or 0)) < 1:
             continue
         diferencias.append({
             "grupo": clave[0], "concepto": clave[1],

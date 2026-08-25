@@ -79,3 +79,15 @@ def test_ordena_por_grupo_y_concepto():
 def test_un_valor_nulo_cuenta_como_cero():
     assert comparar_lineas(excel=[_l("ingresos", "T", None)],
                            api=[_l("ingresos", "T", 0.0)]) == []
+
+
+def test_una_linea_en_cero_de_un_solo_lado_no_es_diferencia():
+    """36 proyectos arrastran conceptos vacíos del comercializador; reportarlos
+    tapaba las diferencias que sí mueven plata."""
+    assert comparar_lineas(
+        excel=[], api=[_l("comercializacion", "IVA Comercializador", 0.0)]) == []
+
+
+def test_pero_un_valor_real_de_un_solo_lado_si_lo_es():
+    assert comparar_lineas(
+        excel=[], api=[_l("comercializacion", "FAZNI (Gen)", -504_489.0)]) != []

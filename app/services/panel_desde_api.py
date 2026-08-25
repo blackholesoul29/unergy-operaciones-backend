@@ -31,6 +31,76 @@ TOPICOS_QUE_COMPRAN = frozenset({
 # Tipos de línea de ingreso que suman. `purchase` se trata aparte.
 TIPOS_VENTA = ("dispatch", "dispatch_fazni")
 
+# La API y el Excel llaman distinto a lo mismo: "Energia en Bolsa (COP)
+# (Generador)" contra "Energía en Bolsa (Gen)". Se conservan las etiquetas del
+# Excel porque son las que contabilidad reconoce y las que muestra el espejo de
+# Liquidaciones; cambiarlas sería ruido puro y además haría imposible contrastar
+# un panel viejo contra uno nuevo.
+#
+# FAZNI y el cargo por confiabilidad no existen en el Excel: se nombran siguiendo
+# la misma convención (Gen).
+ETIQUETAS_COMERCIALIZACION = {
+    "arranque_parada": "Arranque y parada",
+    "arranque_parada_generador": "Arranque y parada (Gen)",
+    "energia_bolsa": "Energía en Bolsa",
+    "energia_bolsa_generador": "Energía en Bolsa (Gen)",
+    "servicios_despacho": "Serv. Despacho CND",
+    "servicios_despacho_generador": "Serv. Despacho CND (Gen)",
+    "servicios_despacho_comercializador": "Serv. Despacho CND (Com)",
+    "servicios_administracion": "Serv. Admin SIC",
+    "servicios_administracion_generador": "Serv. Admin SIC (Gen)",
+    "servicios_administracion_comercializador": "Serv. Admin SIC (Com)",
+    "iva": "IVA",
+    "iva_generador": "IVA Generador",
+    "iva_comercializador": "IVA Comercializador",
+    "fazni": "FAZNI",
+    "fazni_generador": "FAZNI (Gen)",
+    "cargo_confiabilidad": "Cargo por confiabilidad",
+    "cargo_confiabilidad_generador": "Cargo por confiabilidad (Gen)",
+    "valor_actualizacion": "Valor actualización",
+}
+
+
+def _etiqueta_ingreso(concepto: str, tipo: str) -> str:
+    """La etiqueta del Excel para una línea de ingreso de la API.
+
+    La API dice ``"UNERGY ENERGIA DIGITAL S.A.S ESP Venta"``; el Excel,
+    ``"Ingreso Bruto Unergy Energia Digital S.A.S Esp"``. El sufijo dice el tipo
+    y el resto es el comercializador, que el parser del ER capitaliza.
+    """
+    texto = (concepto or "").strip()
+    for sufijo, plantilla in (
+        (" Venta bolsa", "Venta en bolsa"),
+        (" Compra", "Compra {}"),
+        (" Venta", "Ingreso Bruto {}"),
+    ):
+        if texto.endswith(sufijo):
+            comercializador = texto[: -len(sufijo)].strip().title()
+            return plantilla.format(comercializador) if "{}" in plantilla else plantilla
+    return texto
+
+
+def _numerar_repetidos(etiquetas: list[str]) -> list[str]:
+    """Numera las etiquetas que se repiten, como hace el Excel.
+
+    Una planta con dos contratos del mismo comercializador sale en el ER como
+    "Ingreso Bruto Terpel 1" y "Ingreso Bruto Terpel 2". Si solo hay una, no
+    lleva número.
+    """
+    total: dict[str, int] = {}
+    for e in etiquetas:
+        total[e] = total.get(e, 0) + 1
+
+    visto: dict[str, int] = {}
+    salida = []
+    for e in etiquetas:
+        if total[e] == 1:
+            salida.append(e)
+            continue
+        visto[e] = visto.get(e, 0) + 1
+        salida.append(f"{e} {visto[e]}")
+    return salida
+
 
 def _comercializacion(proyecto: dict[str, Any]) -> list[dict[str, Any]]:
     """Los costos de XM que reparte la API, en negativo como el resto de costos.
@@ -43,7 +113,10 @@ def _comercializacion(proyecto: dict[str, Any]) -> list[dict[str, Any]]:
     """
     return [
         {
-            "concepto": c.get("concepto"),
+            # Se usa la etiqueta del Excel; si aparece un concepto nuevo que no
+            # esté en el mapa, se deja el nombre de la API para que se note.
+            "concepto": ETIQUETAS_COMERCIALIZACION.get(
+                c.get("name") or "", c.get("concepto")),
             "valor": -abs(float(c.get("valor") or 0)),
             "hoja": None,
             "celda": None,
@@ -88,9 +161,10 @@ def construir_parsed(proyecto: dict[str, Any]) -> dict[str, Any]:
         "ingreso_bruto": total_ingresos,
         "total_ingresos": total_ingresos,
         "ingresos_detalle": [
-            {"concepto": d.get("concepto"), "valor": float(d.get("valor") or 0),
+            {"concepto": etiqueta, "valor": float(d.get("valor") or 0),
              "hoja": None, "celda": None}
-            for d in lineas
+            for d, etiqueta in zip(lineas, _numerar_repetidos(
+                [_etiqueta_ingreso(d.get("concepto"), d.get("data_type")) for d in lineas]))
         ],
         "comercializacion": _comercializacion(proyecto),
         # Los costos operativos y las facturas de Unergy los pone el Panel desde

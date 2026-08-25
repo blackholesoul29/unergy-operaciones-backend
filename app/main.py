@@ -1355,12 +1355,30 @@ _PENDING_DDLS = [
     # Con el tópico corregido cuadra al peso con el Panel: 21.140.803 (2026-08-25).
     "UPDATE proyectos SET topico_liquidaciones = 'cedillanosexc' "
     "WHERE sub_project = 'cedillanos' AND topico_liquidaciones IS NULL",
-    # Su administración es del 5%, no del 3,8% del resto: se venía calculando por
-    # fuera del Excel y por eso el contrato no tenía la tarifa (confirmado con
-    # Jessica el 2026-08-25).
-    "UPDATE contratos_servicio SET tarifa_admin = 0.05 "
-    "WHERE servicio_aplica::text = 'representacion' AND tarifa_admin IS NULL "
-    "  AND proyecto_id IN (SELECT id FROM proyectos WHERE sub_project = 'cedillanos')",
+    # Cedillanos y Sabana de Torres no tenían contrato de representación, así que
+    # sus tarifas se calculaban por fuera del Excel. Sin ellas no pueden dejar de
+    # cargar el ER. Tarifas confirmadas con Jessica el 2026-08-25: Cedillanos
+    # administra al 5% (no al 3,8% del resto) y no cobra representación ni CGM;
+    # Sabana va al 3,8% con 6 y 6.
+    #
+    # El INSERT es idempotente por el NOT EXISTS: al correr en cada arranque, sin
+    # esa guarda crearía un contrato nuevo cada vez.
+    """INSERT INTO contratos_servicio (proyecto_id, servicio_aplica, estado,
+                                       tarifa_admin, tarifa_representacion, tarifa_cgm)
+         SELECT p.id, 'representacion', 'vigente', 0.05, NULL, NULL
+           FROM proyectos p
+          WHERE p.sub_project = 'cedillanos'
+            AND NOT EXISTS (SELECT 1 FROM contratos_servicio cs
+                             WHERE cs.proyecto_id = p.id
+                               AND cs.servicio_aplica::text = 'representacion')""",
+    """INSERT INTO contratos_servicio (proyecto_id, servicio_aplica, estado,
+                                       tarifa_admin, tarifa_representacion, tarifa_cgm)
+         SELECT p.id, 'representacion', 'vigente', 0.038, 6, 6
+           FROM proyectos p
+          WHERE p.nombre_comercial LIKE 'MiniGranja 0033 - Sabana de Torres%'
+            AND NOT EXISTS (SELECT 1 FROM contratos_servicio cs
+                             WHERE cs.proyecto_id = p.id
+                               AND cs.servicio_aplica::text = 'representacion')""",
     # Altitud consolidada en Proyecto (2026-08-25). Venía de Frontera, que la
     # perdió al unificarse la geolocalización; el modelo la declaró pero el DDL
     # se quedó afuera y prod respondía 500 en TODA consulta que tocara

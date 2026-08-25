@@ -1,8 +1,7 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text,
-                        Index, CheckConstraint)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -21,11 +20,6 @@ class EstadoFronteraEnum(str, enum.Enum):
     en_registro = "en_registro"
     cancelada = "cancelada"
     en_falla = "en_falla"
-
-
-class FuenteLecturaEnum(str, enum.Enum):
-    medidor_principal = "medidor_principal"
-    medidor_respaldo = "medidor_respaldo"
 
 
 class Frontera(Base):
@@ -173,32 +167,8 @@ class Frontera(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="fronteras")
-    lecturas: Mapped[list["FronteraLectura"]] = relationship("FronteraLectura", back_populates="frontera")
     xm_datos: Mapped[list["LiquidacionXMDato"]] = relationship("LiquidacionXMDato", back_populates="frontera")
     operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="fronteras")
-
-
-class FronteraLectura(Base):
-    __tablename__ = "fronteras_lecturas"
-    __table_args__ = (
-        Index("ix_frontera_lectura_frontera_fecha", "frontera_id", "fecha_hora"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    frontera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=False, index=True)
-    fuente: Mapped[str] = mapped_column(SAEnum(FuenteLecturaEnum, name="fuente_lectura_enum"), nullable=False)
-    fecha_hora: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)
-    periodo_fin: Mapped[date] = mapped_column(Date, nullable=False)
-    energia_activa_import_kwh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    energia_activa_export_kwh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    energia_react_ind_import_kvarh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    energia_react_ind_export_kvarh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    energia_react_cap_import_kvarh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    energia_react_cap_export_kvarh: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    frontera: Mapped["Frontera"] = relationship("Frontera", back_populates="lecturas")
 
 
 class FronteraQuoiaIgnorada(Base):

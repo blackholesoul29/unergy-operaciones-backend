@@ -709,8 +709,6 @@ _PENDING_DDLS = [
     # migration — ASIC ↔ PPA foreign key
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS contrato_ppa_id BIGINT REFERENCES ppa_contratos(id)",
     "CREATE INDEX IF NOT EXISTS ix_asic_contrato_ppa ON asic_solicitudes (contrato_ppa_id) WHERE contrato_ppa_id IS NOT NULL",
-    # migration — fronteras_lecturas dedup constraint
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_fronteras_lecturas_frontera_fuente_fecha ON fronteras_lecturas (frontera_id, fuente, fecha_hora)",
     # migration — liquidacion_xm_datos (datos XM por frontera para PPA/GD)
     """CREATE TABLE IF NOT EXISTS liquidacion_xm_datos (
         id BIGSERIAL PRIMARY KEY,

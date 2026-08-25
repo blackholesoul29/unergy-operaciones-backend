@@ -272,45 +272,6 @@ class FronteraOut(FronteraBase):
     clientes_cgm: list[dict] = []
 
 
-class FronteraLecturaCreate(BaseModel):
-    fuente: str
-    fecha_hora: datetime
-    periodo_inicio: date
-    periodo_fin: date
-    energia_activa_import_kwh: Optional[float] = None
-    energia_activa_export_kwh: Optional[float] = None
-    energia_react_ind_import_kvarh: Optional[float] = None
-    energia_react_ind_export_kvarh: Optional[float] = None
-    energia_react_cap_import_kvarh: Optional[float] = None
-    energia_react_cap_export_kvarh: Optional[float] = None
-
-
-class FronteraLecturaOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    frontera_id: int
-    fuente: str
-    fecha_hora: datetime
-    periodo_inicio: date
-    periodo_fin: date
-    energia_activa_import_kwh: Optional[float] = None
-    energia_activa_export_kwh: Optional[float] = None
-    energia_react_ind_import_kvarh: Optional[float] = None
-    energia_react_ind_export_kvarh: Optional[float] = None
-    energia_react_cap_import_kvarh: Optional[float] = None
-    energia_react_cap_export_kvarh: Optional[float] = None
-    created_at: datetime
-
-
-class FronteraResumen(BaseModel):
-    total_activas: int
-    total_inactivas: int
-    total_kwh_import_30d: float
-    total_kwh_export_30d: float
-    sin_datos_recientes: int
-    fronteras_sin_datos: list[dict]
-
 
 class FronteraQuoiaPendiente(BaseModel):
     frt_code: str

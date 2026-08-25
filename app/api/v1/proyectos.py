@@ -448,8 +448,14 @@ def listar_proyectos_simple(db: Session = Depends(get_db), _=Depends(get_current
     return {"total": len(items), "items": items}
 
 
-def _resolver_por_nombre(db: Session, nombre: str) -> Proyecto:
-    """Resuelve un nombre a UN proyecto, o lanza un error accionable.
+def _id_por_nombre(db: Session, nombre: str) -> int:
+    """Resuelve un nombre al ID de UN proyecto, o lanza un error accionable.
+
+    Devuelve solo el id -- no la fila cargada -- para que cada quien traiga lo
+    que necesita: `/proyectos/buscar` quiere el detalle completo con sus
+    eager-loads, pero otros consumidores (ver `/fallas/por-proyecto`) solo
+    necesitan identificar la planta y cargar esas 8 relaciones sería puro
+    desperdicio en cada llamada.
 
     El match es exacto sobre el nombre normalizado: tolera mayúsculas, tildes,
     guiones y espacios de más, pero NO es difuso -- un nombre parcial no
@@ -511,7 +517,12 @@ def _resolver_por_nombre(db: Session, nombre: str) -> Proyecto:
             },
         )
 
-    return _get_proyecto_or_404(coincidencias[0].id, db)
+    return coincidencias[0].id
+
+
+def _resolver_por_nombre(db: Session, nombre: str) -> Proyecto:
+    """El proyecto completo (con eager-loads) resuelto por nombre."""
+    return _get_proyecto_or_404(_id_por_nombre(db, nombre), db)
 
 
 @router.get("/buscar", response_model=ProyectoOut)

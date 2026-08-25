@@ -1514,7 +1514,6 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "departamento": proyecto.departamento,
             "operador_red": f.operador.nombre_legal if f.operador else None,
             "operador_red_id": f.operador_red_id,
-            "representante_frontera": f.representante_frontera,
             "fecha_registro_asic": f.fecha_registro_asic,
             "es_agrupadora": bool(f.es_agrupadora),
         }

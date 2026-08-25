@@ -10,7 +10,6 @@ from app.schemas.fronteras import FronteraOut
 
 _CAMPOS_ESPERADOS = {
     "agente_exportador", "agente_importador",
-    "centro_poblado",
     "clase_ct", "clase_medidor", "clase_pt",
     "clasificacion_industrial_especifica", "clasificacion_industrial_general",
     "clasificacion_recurso", "clientes_cgm", "codigo_ciiu", "codigo_frontera",
@@ -35,8 +34,8 @@ _CAMPOS_ESPERADOS = {
     "proyecto_potencia_instalada_mw", "proyecto_departamento", "proyecto_tipo_tecnologia",
     "proyecto_municipio", "proyecto_direccion",
     "proyecto_latitud", "proyecto_longitud", "proyecto_altitud_msnm",
-    "quoia_border_id", "registrada_por",
-    "representante_anterior", "representante_frontera",
+    "quoia_border_id",
+    "representante_anterior",
     "tipo_frontera", "tipo_punto_medicion",
     "transferencia_maxima_kwh", "updated_at",
 }

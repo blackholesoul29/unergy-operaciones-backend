@@ -15,11 +15,9 @@ class FronteraBase(BaseModel):
     fecha_registro_asic: Optional[date] = None
 
     # Registro ASIC
-    registrada_por: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
     transferencia_maxima_kwh: Optional[float] = Field(default=None, ge=0)
-    representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
 
@@ -35,9 +33,6 @@ class FronteraBase(BaseModel):
     agente_importador: Optional[str] = None
     nombre_recurso_generacion: Optional[str] = None
     clasificacion_recurso: Optional[str] = None
-
-    # Ubicación
-    centro_poblado: Optional[str] = None
 
     # Códigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None
@@ -96,11 +91,9 @@ class FronteraUpdate(BaseModel):
     fecha_registro_asic: Optional[date] = None
 
     # Registro ASIC
-    registrada_por: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
     transferencia_maxima_kwh: Optional[float] = Field(default=None, ge=0)
-    representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
 
@@ -116,9 +109,6 @@ class FronteraUpdate(BaseModel):
     agente_importador: Optional[str] = None
     nombre_recurso_generacion: Optional[str] = None
     clasificacion_recurso: Optional[str] = None
-
-    # Ubicacion
-    centro_poblado: Optional[str] = None
 
     # Codigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None

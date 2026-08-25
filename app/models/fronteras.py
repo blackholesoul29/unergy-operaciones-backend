@@ -58,14 +58,9 @@ class Frontera(Base):
     clase_ct: Mapped[str | None] = mapped_column(String(20), nullable=True)
     clase_pt: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    # Ubicación
-    centro_poblado: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
     # Registro ASIC
-    registrada_por: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nivel_tension: Mapped[int | None] = mapped_column(Integer, nullable=True)
     transferencia_maxima_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
-    representante_frontera: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fecha_inicio_representacion: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Vínculo estructurado hacia el catálogo de operadores -- para la
     # integración del reporte CGM, ver operadores_red_contactos para los correos.

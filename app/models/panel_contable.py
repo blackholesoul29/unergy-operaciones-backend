@@ -57,6 +57,14 @@ class PanelContable(Base):
     consecutivo_ingresos: Mapped[int | None] = mapped_column(Integer, nullable=True)
     consecutivo_costos: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # De dónde salieron los ingresos y la comercialización de este panel:
+    # 'er' = del Excel del Estado de Resultados (NEU, Nitro y todo lo anterior a
+    # la migración), 'api' = de income_statement_data. Las líneas de costos ya
+    # traen su propia `fuente`, pero los ingresos no tenían ninguna marca y sin
+    # esto no había forma de saber con qué se armó un panel.
+    origen: Mapped[str] = mapped_column(String(10), nullable=False, default="er",
+                                        server_default="er")
+
     er_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Snapshot del ER recalculado: {hoja: {coord: valor}} en JSON. Permite releer
     # una celda al cambiar el mapeo sin volver a subir el archivo. deferred: es un

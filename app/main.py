@@ -1363,6 +1363,10 @@ _PENDING_DDLS = [
     #
     # El INSERT es idempotente por el NOT EXISTS: al correr en cada arranque, sin
     # esa guarda crearía un contrato nuevo cada vez.
+    # De dónde se armó cada panel: 'er' (Excel) o 'api'. Los costos ya traían su
+    # `fuente` por línea, pero los ingresos no tenían marca y no había forma de
+    # saber con qué se construyó un panel. Lo existente es todo 'er'.
+    "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS origen VARCHAR(10) NOT NULL DEFAULT 'er'",
     """INSERT INTO contratos_servicio (proyecto_id, servicio_aplica, estado,
                                        tarifa_admin, tarifa_representacion, tarifa_cgm)
          SELECT p.id, 'representacion', 'vigente', 0.05, NULL, NULL

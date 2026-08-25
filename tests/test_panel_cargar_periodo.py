@@ -199,3 +199,19 @@ def test_devuelve_los_errores_que_reporta_la_api(client, monkeypatch):
     monkeypatch.setattr(liquidaciones_api, "estado_resultados_json",
                         lambda **kw: {**RESPUESTA_API, "errors": ["x no se pudo calcular"]})
     assert _cargar(client)["errores_api"] == ["x no se pudo calcular"]
+
+
+def test_marca_el_panel_como_armado_desde_la_api(client, db):
+    """Sin esta marca no hay forma de saber con qué se construyó un panel: los
+    ingresos no tienen columna `fuente`, solo los costos."""
+    _cargar(client)
+    panel = db.query(PanelContable).filter(PanelContable.proyecto_id == 1).one()
+    assert panel.origen == "api"
+
+
+def test_los_paneles_del_excel_siguen_diciendo_er(db):
+    """El default protege lo ya cargado: todo lo anterior a la migración es 'er'."""
+    p = PanelContable(proyecto_id=1, periodo="2026-06", tipo="oficial")
+    db.add(p)
+    db.commit()
+    assert p.origen == "er"

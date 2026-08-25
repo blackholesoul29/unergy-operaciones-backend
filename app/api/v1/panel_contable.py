@@ -481,6 +481,7 @@ async def cargar_er(
 def _guardar_panel(
     db: Session, proyecto_id: int, periodo: str, tipo: str,
     parsed: dict, er_filename: str | None, usuario_id: int,
+    origen: str = "er",
 ) -> PanelContable:
     panel = (
         db.query(PanelContable)
@@ -531,6 +532,7 @@ def _guardar_panel(
     if not tiene_costos:
         panel.liquidar_costos = False
     panel.er_filename = er_filename
+    panel.origen = origen
     # Snapshot del ER recalculado: permite releer una celda al cambiar el mapeo
     # sin re-subir el archivo. Se guarda como JSON {hoja: {coord: valor}}.
     snap = parsed.get("snapshot") or {}
@@ -642,7 +644,8 @@ def cargar_periodo(
             continue
 
         parsed = construir_parsed(proy_api)
-        _guardar_panel(db, proyecto.id, periodo, data.tipo, parsed, None, usuario.id)
+        _guardar_panel(db, proyecto.id, periodo, data.tipo, parsed, None,
+                       usuario.id, origen="api")
         armados.append(proyecto.nombre_comercial)
         if parsed["warnings"]:
             avisos.append({"proyecto": proyecto.nombre_comercial,
@@ -1043,6 +1046,8 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
         "consecutivo_ingresos": p.consecutivo_ingresos,
         "consecutivo_costos": p.consecutivo_costos,
         "er_filename": p.er_filename,
+        # "er" o "api": con qué se armó. Los costos traen su `fuente` por línea.
+        "origen": p.origen,
         "inversionistas": list(inv_map.values()),
         # Vista 100% (total proyecto sin dividir).
         "total_100": total_100,

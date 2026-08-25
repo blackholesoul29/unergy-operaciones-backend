@@ -256,6 +256,40 @@ def test_editar_frontera_con_operador_red_inexistente_da_404(db):
     assert "Operador" in exc.value.detail
 
 
+def test_delete_frontera_marca_deleted_at_y_desaparece_de_list_y_pendientes(db, monkeypatch):
+    """delete_frontera() (soft-delete) no tenia ningun test -- nada verificaba
+    que deleted_at se seteara ni que la fila desapareciera de GET /fronteras
+    ni de /quoia/pendientes despues de borrarla."""
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="A borrar",
+                 codigo_frontera="frt00123", tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+    f_id = f.id
+
+    assert any(x.id == f_id for x in api.list_fronteras(
+        proyecto_id=None, tipo_frontera=None, estado=None, skip=0, limit=100, db=db, _=ADMIN,
+    ))
+
+    api.delete_frontera(f_id, db=db, _=ADMIN)
+
+    db.refresh(f)
+    assert f.deleted_at is not None
+    assert not any(x.id == f_id for x in api.list_fronteras(
+        proyecto_id=None, tipo_frontera=None, estado=None, skip=0, limit=100, db=db, _=ADMIN,
+    ))
+
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso(_border("frt00123")))
+    pendientes = api.fronteras_quoia_pendientes(db=db, _=ADMIN)
+    assert [p.frt_code for p in pendientes] == ["frt00123"]  # vuelve a aparecer como pendiente
+
+
+def test_delete_frontera_inexistente_da_404(db):
+    with pytest.raises(HTTPException) as exc:
+        api.delete_frontera(999999, db=db, _=ADMIN)
+    assert exc.value.status_code == 404
+
+
 def test_confirmar_limpia_una_ignorada_colada_durante_la_llamada_a_quoia(db, monkeypatch):
     """confirmar_frontera_quoia() borra la fila 'ignorada' ANTES de llamar a
     Quoia (para no dejarla en medio de un round-trip lento) y otra vez justo

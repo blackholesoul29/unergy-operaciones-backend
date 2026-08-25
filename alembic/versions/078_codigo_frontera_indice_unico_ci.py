@@ -18,14 +18,14 @@ Verificado antes de esta migracion: 0 codigos duplicados case-insensitive
 entre fronteras vivas, y 0 en total (incluyendo borradas) -- se puede crear
 el indice sin resolver datos primero.
 
-Revision ID: 077
-Revises: 076
+Revision ID: 078
+Revises: 077
 Create Date: 2026-08-24
 """
 from alembic import op
 
-revision = "077"
-down_revision = "076"
+revision = "078"
+down_revision = "077"
 branch_labels = None
 depends_on = None
 

@@ -254,6 +254,35 @@ def _buscar_duplicado_frontera(
     return item
 
 
+def _validar_codigo_propio_no_duplicado(
+    db: Session, codigo_propio: str | None, excluir_id: int | None = None,
+) -> None:
+    """codigo_propio (el código de cliente/GESCON) no tenía ninguna protección
+    contra duplicados, a diferencia de codigo_frontera -- confirmado 0
+    duplicados reales en producción (2026-08-25), consistente con que sea un
+    identificador propio y no algo que dos fronteras deban compartir a
+    propósito. Case-insensitive, solo contra fronteras vivas. A diferencia del
+    nombre parecido, esto SÍ bloquea sin `forzar`: no hay evidencia de que un
+    duplicado aquí sea alguna vez legítimo, así que no vale la pena la
+    complejidad de un segundo flujo de "guardar de todos modos" en el frontend
+    por un caso que no se ha visto."""
+    if not codigo_propio:
+        return
+    q = db.query(Frontera).filter(
+        func.lower(Frontera.codigo_propio) == codigo_propio.lower(),
+        Frontera.deleted_at.is_(None),
+    )
+    if excluir_id is not None:
+        q = q.filter(Frontera.id != excluir_id)
+    choque = q.first()
+    if choque:
+        raise HTTPException(
+            409,
+            f"Ya existe una frontera activa con ese código propio: "
+            f"'{choque.nombre_frontera}' (ID {choque.id}).",
+        )
+
+
 @router.post("", response_model=FronteraOut, status_code=201)
 def create_frontera(
     body: FronteraCreate,
@@ -276,6 +305,10 @@ def create_frontera(
             .filter(func.lower(Frontera.codigo_frontera) == body.codigo_frontera.lower())
             .first()
         )
+
+    _validar_codigo_propio_no_duplicado(
+        db, body.codigo_propio, excluir_id=existing.id if existing else None,
+    )
 
     # Mismo chequeo de nombre parecido para las dos ramas (crear nueva o
     # resucitar una borrada) -- antes resucitar se lo saltaba por completo,
@@ -407,10 +440,18 @@ def update_frontera(
         if choque:
             raise HTTPException(409, "Ya existe una frontera activa con ese codigo_frontera")
 
-    if "nombre_frontera" in cambios and not forzar:
+    if "codigo_propio" in cambios:
+        _validar_codigo_propio_no_duplicado(db, cambios["codigo_propio"], excluir_id=frontera_id)
+
+    # No solo "nombre_frontera in cambios": cambiar SOLO tipo_frontera (ej.
+    # de "consumo" a "generacion") también puede crear una colisión nueva,
+    # porque _buscar_duplicado_frontera compara dentro del mismo tipo -- un
+    # nombre que no chocaba en "consumo" puede chocar al pasar a "generacion".
+    if ("nombre_frontera" in cambios or "tipo_frontera" in cambios) and not forzar:
+        nombre_efectivo = cambios.get("nombre_frontera", f.nombre_frontera)
         tipo_efectivo = cambios.get("tipo_frontera", f.tipo_frontera)
         duplicado = _buscar_duplicado_frontera(
-            db, cambios["nombre_frontera"], tipo_efectivo, excluir_id=frontera_id,
+            db, nombre_efectivo, tipo_efectivo, excluir_id=frontera_id,
         )
         if duplicado:
             raise HTTPException(
@@ -428,6 +469,13 @@ def update_frontera(
 
     for k, v in cambios.items():
         setattr(f, k, v)
+    # Si el PATCH agrega/cambia codigo_frontera, aprovechar para rellenar
+    # medidor desde Quoia -- antes solo create_frontera()/confirmar_frontera_quoia()
+    # lo hacian, asi que una frontera creada sin codigo y completada despues
+    # via PATCH se quedaba sin este dato para siempre (el backfill manual que
+    # cubria ese caso se elimino esta sesion).
+    if cambios.get("codigo_frontera"):
+        _enriquecer_medidor_desde_quoia(f)
     try:
         db.commit()
     except IntegrityError:
@@ -611,6 +659,8 @@ def confirmar_frontera_quoia(
     else:
         obj.deleted_at = None
 
+    _validar_codigo_propio_no_duplicado(db, body.codigo_propio, excluir_id=None if es_nueva else obj.id)
+
     obj.proyecto_id = body.proyecto_id
     obj.nombre_frontera = nombre_default
     obj.codigo_propio = body.codigo_propio
@@ -628,6 +678,13 @@ def confirmar_frontera_quoia(
         obj.nro_serie_med_resp = info_resp.get("serie")
     if es_nueva:
         db.add(obj)
+    # Repetido a propósito (ya se borró arriba, antes de las llamadas a Quoia):
+    # si un "ignorar" concurrente se coló y confirmó ENTRE ese primer borrado
+    # y este commit, la fila "ignorada" quedaría viva junto a la Frontera
+    # activa recién creada. No elimina la carrera del todo (haría falta un
+    # lock a nivel de fila), pero la reduce a la ventana minúscula entre esta
+    # línea y el commit, en vez de todo el round-trip a Quoia.
+    db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == frt_code.lower()).delete()
     try:
         db.commit()
     except IntegrityError:
@@ -654,7 +711,13 @@ def ignorar_frontera_quoia(
     if db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == code).first():
         return
     db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Dos clics rapidos en "Ignorar" sobre el mismo frt_code (frt_code es
+        # unico) -- la segunda solicitud pierde la carrera contra el chequeo
+        # de arriba; no es un error real para quien lo pidio, ya quedo ignorado.
+        db.rollback()
 
 
 # ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────

@@ -256,6 +256,138 @@ def test_editar_frontera_con_operador_red_inexistente_da_404(db):
     assert "Operador" in exc.value.detail
 
 
+def test_confirmar_limpia_una_ignorada_colada_durante_la_llamada_a_quoia(db, monkeypatch):
+    """confirmar_frontera_quoia() borra la fila 'ignorada' ANTES de llamar a
+    Quoia (para no dejarla en medio de un round-trip lento) y otra vez justo
+    antes del commit final -- simula que un 'ignorar' concurrente se cuela en
+    esa ventana y confirma que el segundo borrado la limpia igual."""
+    proy = _proyecto(db)
+    gaia = _GaiaFalso(_border("frt00123"))
+
+    def _borders_con_ignorar_concurrente():
+        db.add(FronteraQuoiaIgnorada(frt_code="frt00123", motivo="concurrente"))
+        db.commit()
+        return gaia._borders
+
+    monkeypatch.setattr(gaia, "get_all_borders", _borders_con_ignorar_concurrente)
+    monkeypatch.setattr(api, "_get_gaia", lambda: gaia)
+    monkeypatch.setattr(api, "get_frt_meter_info", lambda g, code: (None, None))
+
+    api.confirmar_frontera_quoia(
+        "frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id), forzar=False, db=db, _=ADMIN,
+    )
+
+    assert db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == "frt00123").first() is None
+    assert db.query(Frontera).filter(Frontera.codigo_frontera == "frt00123").first() is not None
+
+
+def test_ignorar_dos_veces_seguidas_no_revienta_con_500(db, monkeypatch):
+    """frt_code es unico en FronteraQuoiaIgnorada -- un choque de esa
+    constraint (ej. doble clic rapido, dos requests casi simultaneas que
+    ambas pasan el chequeo previo) debe absorberse en vez de propagar un
+    IntegrityError sin capturar."""
+    def _commit_falla():
+        raise IntegrityError("insert", {}, Exception("uq_frt_code"))
+    monkeypatch.setattr(db, "commit", _commit_falla)
+
+    # No debe lanzar -- el resultado esperado es que quede "ignorado" sin
+    # excepcion, igual que si ya existiera (el chequeo previo simplemente no
+    # alcanzo a verla por la carrera).
+    api.ignorar_frontera_quoia("frt00123", FronteraQuoiaIgnorar(motivo="prueba"), db=db, usuario=ADMIN)
+
+
+def test_editar_agregando_codigo_frontera_completa_medidor_desde_quoia(db, monkeypatch):
+    """Antes solo create_frontera()/confirmar_frontera_quoia() rellenaban el
+    medidor desde Quoia -- una frontera creada sin codigo y completada
+    despues via PATCH se quedaba sin este dato para siempre."""
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Sin codigo aun",
+                 tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso([]))
+    monkeypatch.setattr(
+        api, "get_frt_meter_info",
+        lambda gaia, code: ({"marca": "ISKRA", "modelo": "MT880", "serie": "555"}, None),
+    )
+
+    out = api.update_frontera(f.id, FronteraUpdate(codigo_frontera="Frt00500"), forzar=False, db=db, _=ADMIN)
+
+    assert out.marca_med_ppal == "ISKRA"
+    assert out.nro_serie_med_ppal == "555"
+
+
+def test_editar_solo_tipo_frontera_tambien_revalida_nombre_parecido(db):
+    """Antes el chequeo de nombre parecido solo corria si 'nombre_frontera'
+    estaba en los cambios -- cambiar SOLO tipo_frontera se saltaba la
+    validacion, aunque el nuevo tipo pueda chocar con otra frontera que antes
+    no competia (_buscar_duplicado_frontera compara dentro del mismo tipo)."""
+    proy = _proyecto(db)
+    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Planta Uruaco",
+                     tipo_frontera="generacion", estado="activa"))
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Planta Uruaco",
+                 tipo_frontera="consumo", estado="activa")
+    db.add(f)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(f.id, FronteraUpdate(tipo_frontera="generacion"), forzar=False, db=db, _=ADMIN)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["duplicado_nombre"] is True
+
+
+def test_crear_frontera_con_codigo_propio_duplicado_da_409(db):
+    proy = _proyecto(db)
+    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Original",
+                     codigo_propio="ABC-123", tipo_frontera="generacion", estado="activa"))
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.create_frontera(
+            FronteraCreate(nombre_frontera="Otra frontera muy distinta", tipo_frontera="consumo",
+                            codigo_propio="abc-123"),
+            forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 409
+    assert "código propio" in exc.value.detail
+
+
+def test_crear_frontera_con_codigo_propio_nuevo_no_choca(db):
+    proy = _proyecto(db)
+    out = api.create_frontera(
+        FronteraCreate(nombre_frontera="Frontera nueva", tipo_frontera="generacion",
+                        proyecto_id=proy.id, codigo_propio="XYZ-999"),
+        forzar=False, db=db, _=ADMIN,
+    )
+    assert out.codigo_propio == "XYZ-999"
+
+
+def test_editar_frontera_a_un_codigo_propio_ya_usado_da_409(db):
+    proy = _proyecto(db)
+    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Uno",
+                     codigo_propio="COD-1", tipo_frontera="generacion", estado="activa"))
+    f2 = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Dos",
+                  codigo_propio="COD-2", tipo_frontera="generacion", estado="activa")
+    db.add(f2)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(f2.id, FronteraUpdate(codigo_propio="cod-1"), forzar=False, db=db, _=ADMIN)
+    assert exc.value.status_code == 409
+
+
+def test_editar_frontera_sin_cambiar_su_propio_codigo_propio_no_choca(db):
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Uno",
+                 codigo_propio="COD-1", tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    out = api.update_frontera(f.id, FronteraUpdate(codigo_propio="COD-1"), forzar=False, db=db, _=ADMIN)
+    assert out.codigo_propio == "COD-1"
+
+
 def test_crear_frontera_completa_medidor_desde_quoia_si_esta_disponible(db, monkeypatch):
     """create_frontera() (POST manual, ej. el boton 'Nueva Frontera') antes
     nunca consultaba Quoia -- solo confirmar_frontera_quoia() lo hacia. Una
@@ -352,6 +484,24 @@ def test_confirmar_resucita_la_borrada_en_vez_de_rechazar(db, monkeypatch):
     assert f.deleted_at is None
     assert f.proyecto_id == proy_nuevo.id
     assert db.query(Frontera).count() == 1
+
+
+def test_confirmar_rechaza_codigo_propio_ya_usado(db, monkeypatch):
+    proy = _proyecto(db)
+    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Otra",
+                     codigo_propio="COD-1", tipo_frontera="generacion", estado="activa"))
+    db.commit()
+
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso(_border("frt00123")))
+    monkeypatch.setattr(api, "get_frt_meter_info", lambda gaia, code: (None, None))
+
+    with pytest.raises(HTTPException) as exc:
+        api.confirmar_frontera_quoia(
+            "frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id, codigo_propio="cod-1"),
+            forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 409
+    assert "código propio" in exc.value.detail
 
 
 def test_confirmar_rechaza_si_ya_existe_una_activa_con_ese_codigo(db, monkeypatch):

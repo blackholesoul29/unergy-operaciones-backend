@@ -37,7 +37,6 @@ class FronteraBase(BaseModel):
     clasificacion_recurso: Optional[str] = None
 
     # Ubicación
-    municipio: Optional[str] = None
     centro_poblado: Optional[str] = None
     direccion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
@@ -123,7 +122,6 @@ class FronteraUpdate(BaseModel):
     clasificacion_recurso: Optional[str] = None
 
     # Ubicacion
-    municipio: Optional[str] = None
     centro_poblado: Optional[str] = None
     direccion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
@@ -190,6 +188,10 @@ class FronteraOut(FronteraBase):
     # 2026-08-25 -- coincidian 100% con esto donde ambos tenian dato).
     proyecto_departamento: Optional[str] = None
     proyecto_tipo_tecnologia: Optional[str] = None
+    # Reemplaza a Frontera.municipio (eliminado 2026-08-25 -- 47/69 (68%)
+    # coincidian donde ambos tenian dato, el resto eran diferencias de
+    # formato/nivel de detalle, no datos contradictorios).
+    proyecto_municipio: Optional[str] = None
     # Basado en las últimas corridas del pipeline Reporte Energía
     # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
     # cubre todas las fronteras de generación, no solo las que tienen

@@ -1484,10 +1484,11 @@ def _fronteras_planta(proyecto) -> list[dict]:
     y, si no, el texto de GESCON —con `operador_red_id` en null justamente para
     avisar que con ese valor no se puede cruzar el catálogo.
 
-    `capacidad_transporte_mw`/`capacidad_efectiva_mw`/`departamento`: hasta
-    2026-08-25 eran columnas propias de Frontera: se eliminaron por duplicar
-    (100% igual donde ambas tenían dato) a `Proyecto.potencia_instalada_kwp`/
-    `Proyecto.departamento`, la fuente única desde entonces -- se repuntan
+    `capacidad_transporte_mw`/`capacidad_efectiva_mw`/`departamento`/
+    `municipio`: hasta 2026-08-25 eran columnas propias de Frontera: se
+    eliminaron por duplicar (con conversión de unidad para las capacidades,
+    igual salvo diferencias de formato para municipio) a los campos
+    homónimos de `Proyecto`, la fuente única desde entonces -- se repuntan
     acá en vez de quitarse del dict para no romper a quien integre contra
     estas claves.
     """
@@ -1509,7 +1510,7 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "capacidad_transporte_mw": cap_mw if f.tipo_frontera == "generacion" else None,
             "capacidad_efectiva_mw": cap_mw if f.tipo_frontera == "generacion" else None,
             "factor_perdidas": _num(f.factor_perdidas),
-            "municipio": f.municipio,
+            "municipio": proyecto.municipio,
             "departamento": proyecto.departamento,
             "operador_red": f.operador.nombre_legal if f.operador else None,
             "operador_red_id": f.operador_red_id,

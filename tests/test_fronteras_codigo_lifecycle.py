@@ -538,9 +538,9 @@ def test_editar_permite_guardar_el_mismo_codigo_frontera_sin_cambios(db):
     db.add(f)
     db.commit()
 
-    out = api.update_frontera(f.id, FronteraUpdate(codigo_frontera="FRT00001", municipio="Corozal"),
+    out = api.update_frontera(f.id, FronteraUpdate(codigo_frontera="FRT00001", centro_poblado="Corozal"),
                                forzar=False, db=db, _=ADMIN)
-    assert out.municipio == "Corozal"
+    assert out.centro_poblado == "Corozal"
 
 
 def test_editar_rechaza_nombre_muy_parecido_a_otra_frontera(db):
@@ -569,9 +569,9 @@ def test_editar_no_se_compara_consigo_misma(db):
     db.add(f)
     db.commit()
 
-    out = api.update_frontera(f.id, FronteraUpdate(nombre_frontera="La Catedral", municipio="Corozal"),
+    out = api.update_frontera(f.id, FronteraUpdate(nombre_frontera="La Catedral", centro_poblado="Corozal"),
                                forzar=False, db=db, _=ADMIN)
-    assert out.municipio == "Corozal"
+    assert out.centro_poblado == "Corozal"
 
 
 def test_editar_con_forzar_ignora_el_nombre_parecido(db):

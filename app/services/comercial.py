@@ -1492,7 +1492,6 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "id": f.id,
             "codigo_frontera": f.codigo_frontera,
             "nombre_frontera": f.nombre_frontera,
-            "codigo_propio": f.codigo_propio,
             "tipo_frontera": _valor_enum(f.tipo_frontera),
             "estado": _valor_enum(f.estado),
             "nivel_tension_kv": _num(f.nivel_tension_kv),

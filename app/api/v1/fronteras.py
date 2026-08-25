@@ -262,35 +262,6 @@ def _buscar_duplicado_frontera(
     return item
 
 
-def _validar_codigo_propio_no_duplicado(
-    db: Session, codigo_propio: str | None, excluir_id: int | None = None,
-) -> None:
-    """codigo_propio (el código de cliente/GESCON) no tenía ninguna protección
-    contra duplicados, a diferencia de codigo_frontera -- confirmado 0
-    duplicados reales en producción (2026-08-25), consistente con que sea un
-    identificador propio y no algo que dos fronteras deban compartir a
-    propósito. Case-insensitive, solo contra fronteras vivas. A diferencia del
-    nombre parecido, esto SÍ bloquea sin `forzar`: no hay evidencia de que un
-    duplicado aquí sea alguna vez legítimo, así que no vale la pena la
-    complejidad de un segundo flujo de "guardar de todos modos" en el frontend
-    por un caso que no se ha visto."""
-    if not codigo_propio:
-        return
-    q = db.query(Frontera).filter(
-        func.lower(Frontera.codigo_propio) == codigo_propio.lower(),
-        Frontera.deleted_at.is_(None),
-    )
-    if excluir_id is not None:
-        q = q.filter(Frontera.id != excluir_id)
-    choque = q.first()
-    if choque:
-        raise HTTPException(
-            409,
-            f"Ya existe una frontera activa con ese código propio: "
-            f"'{choque.nombre_frontera}' (ID {choque.id}).",
-        )
-
-
 def _commit_o_409_codigo_duplicado(db: Session) -> None:
     """codigo_frontera tiene un indice unico case-insensitive sobre filas
     vivas (migracion 078) -- dos requests concurrentes con el mismo codigo
@@ -326,10 +297,6 @@ def create_frontera(
             .filter(func.lower(Frontera.codigo_frontera) == body.codigo_frontera.lower())
             .first()
         )
-
-    _validar_codigo_propio_no_duplicado(
-        db, body.codigo_propio, excluir_id=existing.id if existing else None,
-    )
 
     # Mismo chequeo de nombre parecido para las dos ramas (crear nueva o
     # resucitar una borrada) -- antes resucitar se lo saltaba por completo,
@@ -452,9 +419,6 @@ def update_frontera(
         ).first()
         if choque:
             raise HTTPException(409, "Ya existe una frontera activa con ese codigo_frontera")
-
-    if "codigo_propio" in cambios:
-        _validar_codigo_propio_no_duplicado(db, cambios["codigo_propio"], excluir_id=frontera_id)
 
     # No solo "nombre_frontera in cambios": cambiar SOLO tipo_frontera (ej.
     # de "consumo" a "generacion") también puede crear una colisión nueva,
@@ -668,11 +632,8 @@ def confirmar_frontera_quoia(
     else:
         obj.deleted_at = None
 
-    _validar_codigo_propio_no_duplicado(db, body.codigo_propio, excluir_id=None if es_nueva else obj.id)
-
     obj.proyecto_id = body.proyecto_id
     obj.nombre_frontera = nombre_default
-    obj.codigo_propio = body.codigo_propio
     obj.tipo_frontera = tipo_efectivo
     obj.estado = "activa"
     obj.quoia_border_id = frt.get("id")

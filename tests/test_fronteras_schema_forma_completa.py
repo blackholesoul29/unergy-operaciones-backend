@@ -14,7 +14,7 @@ _CAMPOS_ESPERADOS = {
     "clase_ct", "clase_medidor", "clase_pt",
     "clasificacion_industrial_especifica", "clasificacion_industrial_general",
     "clasificacion_recurso", "clientes_cgm", "codigo_ciiu", "codigo_frontera",
-    "codigo_propio", "codigo_sic_frontera_generacion",
+    "codigo_sic_frontera_generacion",
     "codigo_sic_frontera_usuario", "codigo_sic_submercado_consumo",
     "codigo_sic_submercado_exportador", "created_at", "departamento",
     "direccion", "entidad_calibradora_med_ppal", "entidad_calibradora_med_resp",

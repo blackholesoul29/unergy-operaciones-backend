@@ -54,7 +54,6 @@ class Frontera(Base):
     # pueden coexistir como fronteras activas distintas.
     codigo_frontera: Mapped[str | None] = mapped_column(String(50), nullable=True)
     nombre_frontera: Mapped[str] = mapped_column(String(255), nullable=False)
-    codigo_propio: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tipo_frontera: Mapped[str] = mapped_column(SAEnum(TipoFronteraEnum, name="tipo_frontera_enum"), nullable=False)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoFronteraEnum, name="estado_frontera_enum"), nullable=False, default="en_registro")
     fecha_registro_asic: Mapped[date | None] = mapped_column(Date, nullable=True)

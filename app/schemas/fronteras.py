@@ -9,7 +9,6 @@ class FronteraBase(BaseModel):
     proyecto_id: Optional[int] = None
     codigo_frontera: Optional[str] = None
     nombre_frontera: str
-    codigo_propio: Optional[str] = None
     tipo_frontera: TipoFronteraEnum
     estado: Optional[EstadoFronteraEnum] = EstadoFronteraEnum.activa
     quoia_border_id: Optional[int] = None
@@ -107,7 +106,6 @@ class FronteraUpdate(BaseModel):
     proyecto_id: Optional[int] = None
     codigo_frontera: Optional[str] = None
     nombre_frontera: Optional[str] = None
-    codigo_propio: Optional[str] = None
     tipo_frontera: Optional[TipoFronteraEnum] = None
     estado: Optional[EstadoFronteraEnum] = None
     quoia_border_id: Optional[int] = None
@@ -232,7 +230,6 @@ class FronteraQuoiaPendiente(BaseModel):
 class FronteraQuoiaConfirmar(BaseModel):
     proyecto_id: int
     nombre_frontera: Optional[str] = None
-    codigo_propio: Optional[str] = None
     tipo_frontera: Optional[TipoFronteraEnum] = None
 
 

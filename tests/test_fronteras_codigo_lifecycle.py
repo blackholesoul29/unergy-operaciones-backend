@@ -371,57 +371,6 @@ def test_editar_solo_tipo_frontera_tambien_revalida_nombre_parecido(db):
     assert exc.value.detail["duplicado_nombre"] is True
 
 
-def test_crear_frontera_con_codigo_propio_duplicado_da_409(db):
-    proy = _proyecto(db)
-    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Original",
-                     codigo_propio="ABC-123", tipo_frontera="generacion", estado="activa"))
-    db.commit()
-
-    with pytest.raises(HTTPException) as exc:
-        api.create_frontera(
-            FronteraCreate(nombre_frontera="Otra frontera muy distinta", tipo_frontera="consumo",
-                            codigo_propio="abc-123"),
-            forzar=False, db=db, _=ADMIN,
-        )
-    assert exc.value.status_code == 409
-    assert "código propio" in exc.value.detail
-
-
-def test_crear_frontera_con_codigo_propio_nuevo_no_choca(db):
-    proy = _proyecto(db)
-    out = api.create_frontera(
-        FronteraCreate(nombre_frontera="Frontera nueva", tipo_frontera="generacion",
-                        proyecto_id=proy.id, codigo_propio="XYZ-999"),
-        forzar=False, db=db, _=ADMIN,
-    )
-    assert out.codigo_propio == "XYZ-999"
-
-
-def test_editar_frontera_a_un_codigo_propio_ya_usado_da_409(db):
-    proy = _proyecto(db)
-    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Uno",
-                     codigo_propio="COD-1", tipo_frontera="generacion", estado="activa"))
-    f2 = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Dos",
-                  codigo_propio="COD-2", tipo_frontera="generacion", estado="activa")
-    db.add(f2)
-    db.commit()
-
-    with pytest.raises(HTTPException) as exc:
-        api.update_frontera(f2.id, FronteraUpdate(codigo_propio="cod-1"), forzar=False, db=db, _=ADMIN)
-    assert exc.value.status_code == 409
-
-
-def test_editar_frontera_sin_cambiar_su_propio_codigo_propio_no_choca(db):
-    proy = _proyecto(db)
-    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Uno",
-                 codigo_propio="COD-1", tipo_frontera="generacion", estado="activa")
-    db.add(f)
-    db.commit()
-
-    out = api.update_frontera(f.id, FronteraUpdate(codigo_propio="COD-1"), forzar=False, db=db, _=ADMIN)
-    assert out.codigo_propio == "COD-1"
-
-
 def test_crear_frontera_completa_medidor_desde_quoia_si_esta_disponible(db, monkeypatch):
     """create_frontera() (POST manual, ej. el boton 'Nueva Frontera') antes
     nunca consultaba Quoia -- solo confirmar_frontera_quoia() lo hacia. Una
@@ -520,24 +469,6 @@ def test_confirmar_resucita_la_borrada_en_vez_de_rechazar(db, monkeypatch):
     assert db.query(Frontera).count() == 1
 
 
-def test_confirmar_rechaza_codigo_propio_ya_usado(db, monkeypatch):
-    proy = _proyecto(db)
-    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Otra",
-                     codigo_propio="COD-1", tipo_frontera="generacion", estado="activa"))
-    db.commit()
-
-    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso(_border("frt00123")))
-    monkeypatch.setattr(api, "get_frt_meter_info", lambda gaia, code: (None, None))
-
-    with pytest.raises(HTTPException) as exc:
-        api.confirmar_frontera_quoia(
-            "frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id, codigo_propio="cod-1"),
-            forzar=False, db=db, _=ADMIN,
-        )
-    assert exc.value.status_code == 409
-    assert "código propio" in exc.value.detail
-
-
 def test_confirmar_rechaza_si_ya_existe_una_activa_con_ese_codigo(db, monkeypatch):
     proy = _proyecto(db)
     db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Activa", codigo_frontera="frt00123",
@@ -600,7 +531,7 @@ def test_editar_rechaza_codigo_que_choca_con_otra_frontera_activa(db):
     assert b.codigo_frontera == "frt00002"  # no se guardó el cambio
 
 
-def test_editar_permite_guardar_el_mismo_codigo_propio_sin_cambios(db):
+def test_editar_permite_guardar_el_mismo_codigo_frontera_sin_cambios(db):
     proy = _proyecto(db)
     f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="A", codigo_frontera="frt00001",
                  tipo_frontera="generacion", estado="activa")

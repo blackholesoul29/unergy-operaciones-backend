@@ -927,11 +927,10 @@ def test_sin_ficha_tecnica_el_bloque_viaja_igual_todo_en_null(db):
     assert t["almacenamiento"]["tiene"] is False
 
 
-def test_las_fronteras_traen_su_codigo_y_no_las_credenciales(db):
+def test_las_fronteras_traen_su_codigo(db):
     """Las fronteras son con lo que se liquida y no pueden vivir a nivel de PPA:
     una planta tiene generación y consumo, y un contrato de dos plantas tiene
-    las de las dos. Las contraseñas de medidor viven en la misma tabla y NO
-    salen: esta superficie es de consulta."""
+    las de las dos."""
     op = _operador(db)
     proy = _proyecto(db, nombre_comercial="GD Catedral")
     db.add_all([
@@ -939,8 +938,7 @@ def test_las_fronteras_traen_su_codigo_y_no_las_credenciales(db):
                  codigo_frontera="Frt00123", tipo_frontera="generacion",
                  estado="activa", nivel_tension_kv=13.2,
                  capacidad_transporte_mw=0.9, subestacion="Corozal",
-                 operador_red_id=op.id, password_medidor_ppal="s3cr3t",
-                 ip_modem_ppal="10.0.0.5"),
+                 operador_red_id=op.id),
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral CON",
                  codigo_frontera="Frt00124", tipo_frontera="consumo",
                  estado="activa"),
@@ -963,7 +961,6 @@ def test_las_fronteras_traen_su_codigo_y_no_las_credenciales(db):
     assert gen["subestacion"] == "Corozal"
     assert gen["operador_red"] == "ELECTRIFICADORA DEL CARIBE S.A. E.S.P."
     assert gen["operador_red_id"] == op.id
-    assert not [k for k in gen if "password" in k or "ip_modem" in k]
     # Sin operador_red_id vinculado, esta frontera no tiene operador -- ya no
     # hay texto libre de respaldo.
     assert fronteras[1]["operador_red"] is None

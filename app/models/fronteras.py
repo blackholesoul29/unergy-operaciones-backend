@@ -107,16 +107,6 @@ class Frontera(Base):
     entidad_calibradora_med_ppal: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fecha_calibracion_med_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_actualizacion_ppal: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # Ficha técnica medidor/módem (2026-08-14) -- antes solo vivía la marca a
-    # nivel de proyecto (ProyectoInfoTecnica.marca_medidores_frontera/
-    # marca_modems_frontera, un solo valor para las 4 combinaciones posibles
-    # ppal/resp × generación/consumo de un proyecto) -- acá sí se puede
-    # distinguir cada medidor/módem real.
-    tipo_extraccion_ppal: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    password_medidor_ppal: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    ip_modem_ppal: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    puerto_modem_ppal: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    canal_comunicacion_ppal: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Medidor respaldo
     nro_serie_med_resp: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -127,11 +117,6 @@ class Frontera(Base):
     entidad_calibradora_med_resp: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fecha_calibracion_med_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_actualizacion_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
-    tipo_extraccion_resp: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    password_medidor_resp: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    ip_modem_resp: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    puerto_modem_resp: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    canal_comunicacion_resp: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Agrupación/embebido
     es_agrupadora: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

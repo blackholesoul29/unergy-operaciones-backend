@@ -85,11 +85,6 @@ class FronteraBase(BaseModel):
     entidad_calibradora_med_ppal: Optional[str] = None
     fecha_calibracion_med_ppal: Optional[date] = None
     fecha_actualizacion_ppal: Optional[date] = None
-    tipo_extraccion_ppal: Optional[str] = None
-    password_medidor_ppal: Optional[str] = None
-    ip_modem_ppal: Optional[str] = None
-    puerto_modem_ppal: Optional[int] = None
-    canal_comunicacion_ppal: Optional[str] = None
 
     # Medidor respaldo
     nro_serie_med_resp: Optional[str] = None
@@ -100,11 +95,6 @@ class FronteraBase(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
-    tipo_extraccion_resp: Optional[str] = None
-    password_medidor_resp: Optional[str] = None
-    ip_modem_resp: Optional[str] = None
-    puerto_modem_resp: Optional[int] = None
-    canal_comunicacion_resp: Optional[str] = None
 
     # Agrupación/embebido
     es_agrupadora: Optional[bool] = False
@@ -205,11 +195,6 @@ class FronteraUpdate(BaseModel):
     entidad_calibradora_med_ppal: Optional[str] = None
     fecha_calibracion_med_ppal: Optional[date] = None
     fecha_actualizacion_ppal: Optional[date] = None
-    tipo_extraccion_ppal: Optional[str] = None
-    password_medidor_ppal: Optional[str] = None
-    ip_modem_ppal: Optional[str] = None
-    puerto_modem_ppal: Optional[int] = None
-    canal_comunicacion_ppal: Optional[str] = None
 
     # Medidor respaldo
     nro_serie_med_resp: Optional[str] = None
@@ -220,11 +205,6 @@ class FronteraUpdate(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
-    tipo_extraccion_resp: Optional[str] = None
-    password_medidor_resp: Optional[str] = None
-    ip_modem_resp: Optional[str] = None
-    puerto_modem_resp: Optional[int] = None
-    canal_comunicacion_resp: Optional[str] = None
 
     # Agrupacion/embebido
     es_agrupadora: Optional[bool] = None

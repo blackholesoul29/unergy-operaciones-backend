@@ -17,13 +17,14 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.contratos import ContratoServicio
 from app.models.clientes import Cliente, ClienteTasaServicio
 import json
 
@@ -36,6 +37,7 @@ from app.utils.er_loader import (
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
 from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
+from app.services.costos_panel import valores_modulo_costos, valores_facturas_modulo, aplicar_costos_modulo
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,26 @@ def _es_minigranja_operativa():
     Excluye AMC, Acanto, COLxxx, proyectos en desarrollo, etc.
     """
     return (Proyecto.tipo_proyecto == "minigranja") & (Proyecto.estado == "en_operacion")
+
+
+def _representamos():
+    """
+    Condición SQLAlchemy: representamos el proyecto. Las liquidaciones (y por tanto
+    el Panel) solo aplican a proyectos que representamos. Criterio SEGURO — igual que
+    en liquidaciones.py: flag srv_representacion activo O contrato de representación
+    vigente (el flag y el contrato a veces se contradicen; se conserva si CUALQUIERA
+    indica representación para no dejar de liquidar algo representado).
+    """
+    tiene_contrato_repr = (
+        select(ContratoServicio.id)
+        .where(
+            ContratoServicio.proyecto_id == Proyecto.id,
+            ContratoServicio.servicio_aplica == "representacion",
+            ContratoServicio.estado == "vigente",
+        )
+        .exists()
+    )
+    return or_(Proyecto.srv_representacion.is_(True), tiene_contrato_repr)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -482,6 +504,21 @@ def _guardar_panel(
         db.expire(panel, ["lineas"])
 
     base = _construir_lineas_base(parsed)
+    # Costos que el Panel toma de los MÓDULOS (piloto: Mantenimiento y Arrendamiento).
+    # Si el proyecto tiene contrato de ese servicio, el valor del módulo MANDA sobre
+    # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
+    try:
+        mods = valores_modulo_costos(db, proyecto_id, periodo)
+        # Representación/CGM = tarifa app × energía del ER; Administración = tarifa_admin
+        # × ingreso del ER. Ambas bases (kWh, ingreso) salen del ER (grupo 'facturas').
+        mods.update(valores_facturas_modulo(
+            db, proyecto_id, periodo, parsed.get("kwh"), parsed.get("total_ingresos")))
+        if mods:
+            base = aplicar_costos_modulo(base, mods, iva=IVA)
+    except Exception:
+        # Un problema calculando el módulo no debe tumbar la carga del ER: se deja
+        # el costo del ER y se sigue.
+        logger.exception("No se pudieron aplicar los costos de módulo (proy=%s, per=%s)", proyecto_id, periodo)
     tiene_costos = any(l["grupo"] == "costos" for l in base)
 
     panel.ingreso_bruto_cop = parsed["ingreso_bruto"]
@@ -517,6 +554,7 @@ def _guardar_panel(
                 valor_cop=round(l["valor"] * frac, 2),
                 hoja=l.get("hoja"),
                 celda=l.get("celda"),
+                fuente=l.get("fuente"),
                 orden=orden,
             ))
             orden += 1
@@ -550,10 +588,12 @@ def listar_clasificacion(
         .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
     }
     # El Panel Contable es SOLO de minigranjas operativas: filtrar para no listar
-    # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er).
+    # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er). Además, solo
+    # proyectos que REPRESENTAMOS: los que no representamos no se liquidan, así que
+    # no deben aparecer en la clasificación (p. ej. San Pedro).
     proyectos = (
         db.query(Proyecto)
-        .filter(_es_minigranja_operativa())
+        .filter(_es_minigranja_operativa(), _representamos())
         .order_by(Proyecto.nombre_comercial)
         .all()
     )
@@ -746,6 +786,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
             "celda": ln.celda,
             # "hoja!celda" listo para mostrar/editar en el frontend (None si es derivado).
             "origen": f"{ln.hoja}!{ln.celda}" if (ln.hoja and ln.celda) else None,
+            "fuente": ln.fuente,     # 'om' | 'arriendos' cuando el valor no viene del ER
             "orden": ln.orden,
             "soporte": _sop(ln.grupo, ln.concepto),
         })
@@ -773,6 +814,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
                 total_100.append({
                     "grupo": l["grupo"], "concepto": l["concepto"], "valor_cop": l["valor_cop"],
                     "hoja": l["hoja"], "celda": l["celda"], "origen": l["origen"],
+                    "fuente": l.get("fuente"),
                     "comprobante_contable": l["comprobante_contable"], "orden": l["orden"],
                     "soporte": l.get("soporte"), "derivada": l.get("derivada", False),
                 })
@@ -924,7 +966,7 @@ def _linea_dict(ln) -> dict:
         "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
         "valor_cop": float(ln.valor_cop) if ln.valor_cop is not None else 0.0,
         "grupo": ln.grupo, "concepto": ln.concepto,
-        "hoja": ln.hoja, "celda": ln.celda,
+        "hoja": ln.hoja, "celda": ln.celda, "fuente": ln.fuente,
         "comprobante_contable": ln.comprobante_contable, "orden": ln.orden,
     }
 
@@ -947,6 +989,7 @@ def _reconstruir_base(lineas: list[dict]) -> list[dict]:
             bases.append({
                 "grupo": ln["grupo"], "concepto": ln["concepto"],
                 "hoja": ln.get("hoja"), "celda": ln.get("celda"),
+                "fuente": ln.get("fuente"),
                 "comprobante_contable": ln.get("comprobante_contable"),
                 "_sum_val": 0.0, "_sum_frac": 0.0,
             })
@@ -981,7 +1024,7 @@ def _redividir_lineas(lineas: list[dict], invs: list[dict]) -> list[dict]:
                 "porcentaje": inv["pct"],
                 "grupo": b["grupo"], "concepto": b["concepto"],
                 "valor_cop": round(b["valor"] * frac, 2),
-                "hoja": b["hoja"], "celda": b["celda"],
+                "hoja": b["hoja"], "celda": b["celda"], "fuente": b.get("fuente"),
                 "comprobante_contable": b["comprobante_contable"],
                 "orden": orden,
             })

@@ -15,7 +15,7 @@ from app.models import (
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
-    FallaCreate, FallaUpdate, FallaOut,
+    FallaCreate, FallaUpdate, FallaOut, FallaListOut,
     FallaSeguimientoCreate, FallaSeguimientoOut,
     FallaCatalogos, FallaCatEstadoOut, FallaCatPrioridadOut, FallaCatTipoOut, FallaCatResolucionOut,
     FallaSLADashboard, FallaImpacto,
@@ -33,7 +33,11 @@ _SEGS_LOAD = selectinload(Falla.seguimientos).options(
     selectinload(FallaSeguimiento.estado_nuevo),
 )
 
-_FALLA_LOAD = [
+# Liviano: lo que la tabla/lista y el "hero" del drawer muestran de entrada.
+# NO incluye seguimientos/intervalos/inversores -- eso solo hace falta al
+# abrir el detalle de una falla puntual (ver GET /fallas/{id} con
+# _FALLA_LOAD completo), no en cada fila de un listado de cientos de filas.
+_FALLA_LOAD_LISTA = [
     selectinload(Falla.proyecto),
     selectinload(Falla.tipo).selectinload(FallaCatTipo.categoria),
     selectinload(Falla.estado),
@@ -41,6 +45,10 @@ _FALLA_LOAD = [
     selectinload(Falla.resolucion),
     selectinload(Falla.registrado_por),
     selectinload(Falla.asignado_a),
+]
+
+_FALLA_LOAD = [
+    *_FALLA_LOAD_LISTA,
     selectinload(Falla.intervalos),
     selectinload(Falla.inversores_afectados),
     _SEGS_LOAD,
@@ -123,7 +131,10 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
 
     # Mapeo a tipo de catálogo (para que vistas/analytics legacy muestren etiqueta)
     nuevo_tipo_id = None
-    if categoria in ("red", "frontera", "eventos_adversos") and falla.subtipo_codigo:
+    # Categorías de opción/equipo (red, frontera, eventos, generando sin datos):
+    # el tipo sale del subtipo. Genérico a propósito: agregar una categoría a
+    # ESTRUCTURA_FALLAS no debe exigir tocar esta lista.
+    if cat["tipo"] in ("opcion", "equipo") and falla.subtipo_codigo:
         t = db.query(FallaCatTipo).filter_by(codigo=tipo_codigo(categoria, falla.subtipo_codigo)).first()
         if t:
             nuevo_tipo_id = t.id
@@ -147,7 +158,7 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
         clasif["detalle"] = falla.subtipo_detalle
     # tipo_libre legible (respaldo para listados/emails/analytics legacy) en las
     # categorías de opción/equipo; para inversores se arma más abajo.
-    if categoria in ("red", "frontera", "eventos_adversos"):
+    if cat["tipo"] in ("opcion", "equipo"):
         _et = clasif.get("subtipo_etiqueta") or cat["etiqueta"]
         falla.tipo_libre = (f"{_et}: {falla.subtipo_detalle}" if falla.subtipo_detalle else _et)[:255]
     if categoria == "frontera":
@@ -209,10 +220,39 @@ def _sync_intervalos(falla: Falla, intervalos: list | None, db: Session) -> None
 
 
 def _get_or_404(id: int, db: Session) -> Falla:
-    falla = db.query(Falla).options(*_FALLA_LOAD).filter(Falla.id == id).first()
+    falla = db.query(Falla).options(*_FALLA_LOAD).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     return falla
+
+
+def _sincronizar_resolucion(falla: Falla, nuevo_estado: "FallaCatEstado | None") -> None:
+    """Único punto que sincroniza fecha_resolucion + sla_cumplido con el estado
+    de una falla. Antes esta regla estaba copiada por separado en update_falla
+    y add_seguimiento -- si se corregía una copia y se olvidaba la otra,
+    quedaban desincronizadas. Se llama siempre que estado_id cambia: al pasar
+    a un estado final sella fecha_resolucion (si no la tenía) y calcula
+    sla_cumplido contra el mismo límite que ya usa sla_dashboard
+    (sla_limite_horas o el default por prioridad, ver _DEFAULT_SLA_HOURS); al
+    reabrir (estado no final) limpia ambos. sla_cumplido es siempre calculado,
+    nunca manual -- ver FallaUpdate."""
+    if not nuevo_estado:
+        return
+    if nuevo_estado.es_estado_final:
+        if not falla.fecha_resolucion:
+            falla.fecha_resolucion = datetime.now(timezone.utc)
+        nivel = falla.prioridad.nivel if falla.prioridad else None
+        sla_hours = falla.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        deadline = datetime(
+            falla.fecha_identificacion.year,
+            falla.fecha_identificacion.month,
+            falla.fecha_identificacion.day,
+            tzinfo=_COL_TZ,
+        ) + timedelta(hours=sla_hours)
+        falla.sla_cumplido = falla.fecha_resolucion <= deadline
+    else:
+        falla.fecha_resolucion = None
+        falla.sla_cumplido = None
 
 
 def _gen_codigo(db: Session) -> str:
@@ -507,7 +547,7 @@ def actividad_hoy(db: Session = Depends(get_db), _=Depends(get_current_user)):
     }
 
 
-@router.get("", response_model=PaginatedResponse[FallaOut])
+@router.get("", response_model=PaginatedResponse[FallaListOut])
 def list_fallas(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=5000),
@@ -524,6 +564,8 @@ def list_fallas(
     asignado_a_id: int | None = None,
     codigo_legado: str | None = None,
     solo_alerta: bool = False,
+    solo_activas: bool = False,
+    activa_en_fecha: date | None = None,
     fecha_programada_desde: date | None = None,
     fecha_programada_hasta: date | None = None,
     con_fecha_programada: bool = False,
@@ -534,7 +576,7 @@ def list_fallas(
     search = q or buscar
     estado_joined = False
 
-    query = db.query(Falla).filter(Falla.deleted_at.is_(None)).options(*_FALLA_LOAD)
+    query = db.query(Falla).filter(Falla.deleted_at.is_(None)).options(*_FALLA_LOAD_LISTA)
 
     if search:
         query = query.filter(Falla.descripcion.ilike(f"%{search}%") | Falla.codigo_interno.ilike(f"%{search}%"))
@@ -570,6 +612,28 @@ def list_fallas(
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
     if codigo_legado:
         query = query.filter(Falla.codigo_legado == codigo_legado)
+    if activa_en_fecha:
+        # "Activa a la fecha X" (no "activa ahora mismo") -- para mostrar,
+        # en el detalle de un día ya clasificado, las fallas que estaban
+        # abiertas EN ESE MOMENTO, no las que están abiertas hoy consultando
+        # en vivo (ver Reporte de Energía -> "Fallas activas del proyecto").
+        # fecha_resolucion NULL solo cuenta como "sigue abierta" si el estado
+        # REAL tampoco es final -- si no, una falla cerrada hace meses sin
+        # fecha_resolucion (dato legacy, ver A4/backfill_sla_cumplido) coló
+        # como "activa" para cualquier fecha que se consultara.
+        if not estado_joined:
+            query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+            estado_joined = True
+        query = query.filter(
+            Falla.fecha_identificacion <= activa_en_fecha,
+            (Falla.fecha_resolucion.is_(None) & ~FallaCatEstado.es_estado_final)
+            | (func.date(Falla.fecha_resolucion) >= activa_en_fecha),
+        )
+    if solo_activas:
+        if not estado_joined:
+            query = query.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+            estado_joined = True
+        query = query.filter(~FallaCatEstado.es_estado_final)
     if solo_alerta:
         alert_cutoff = date.today() - timedelta(days=7)
         if not estado_joined:
@@ -815,6 +879,63 @@ def backfill_tipos_endpoint(
     return backfill_tipos_estructurados(db, dry_run=dry_run)
 
 
+def backfill_sla_cumplido(db: Session, dry_run: bool = False) -> dict:
+    """Recalcula sla_cumplido para TODAS las fallas ya resueltas (estado final
+    con fecha_resolucion), incluidas las que ya tenían un valor manual puesto
+    -- ese subconjunto era justo el sesgo que se elimina al volver el campo
+    100% calculado (ver _sincronizar_resolucion). Idempotente: solo cuenta
+    como corregida si el valor cambia."""
+    fallas = (
+        db.query(Falla)
+        .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
+        .options(selectinload(Falla.prioridad))
+        .filter(
+            Falla.deleted_at.is_(None),
+            FallaCatEstado.es_estado_final.is_(True),
+            Falla.fecha_resolucion.isnot(None),
+        )
+        .all()
+    )
+    cambiadas = []
+    for f in fallas:
+        anterior = f.sla_cumplido
+        nivel = f.prioridad.nivel if f.prioridad else None
+        sla_hours = f.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        deadline = datetime(
+            f.fecha_identificacion.year, f.fecha_identificacion.month, f.fecha_identificacion.day,
+            tzinfo=_COL_TZ,
+        ) + timedelta(hours=sla_hours)
+        f.sla_cumplido = f.fecha_resolucion <= deadline
+        if f.sla_cumplido != anterior:
+            cambiadas.append({
+                "codigo": f.codigo_interno,
+                "sla_cumplido_anterior": anterior,
+                "sla_cumplido_nuevo": f.sla_cumplido,
+            })
+    if dry_run:
+        db.rollback()
+    elif cambiadas:
+        db.commit()
+    return {
+        "dry_run": dry_run,
+        "total_resueltas": len(fallas),
+        "corregidas": len(cambiadas),
+        "detalle": cambiadas[:200],
+    }
+
+
+@router.post("/backfill-sla")
+def backfill_sla_endpoint(
+    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Recalcula sla_cumplido para todas las fallas ya resueltas, ahora que el
+    campo es siempre calculado (antes se podía fijar a mano). Con dry_run=true
+    solo reporta qué cambiaría."""
+    return backfill_sla_cumplido(db, dry_run=dry_run)
+
+
 @router.get("/{id}", response_model=FallaOut)
 def get_falla(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     return _get_or_404(id, db)
@@ -827,7 +948,7 @@ def update_falla(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     dump = data.model_dump(exclude_unset=True)
@@ -872,16 +993,12 @@ def update_falla(
             _validar_clasificacion_payload(falla.categoria_codigo, falla.subtipo_codigo, None)
         _aplicar_clasificacion(falla, inversores if inversores_touched else None, db)
 
-    # Sellar fecha+hora de solución automáticamente al cerrar la falla (estado
-    # final) si el usuario no la indicó explícitamente; al reabrir se limpia.
-    # Replica el comportamiento de los seguimientos y del botón "Marcar resuelta".
+    # Sellar fecha+hora de solución y calcular sla_cumplido automáticamente al
+    # cerrar la falla (estado final); al reabrir se limpian ambos. Ver
+    # _sincronizar_resolucion -- único punto de esta regla.
     if "estado_id" in dump and dump["estado_id"] is not None:
         nuevo_estado = db.get(FallaCatEstado, dump["estado_id"])
-        if nuevo_estado and nuevo_estado.es_estado_final:
-            if not falla.fecha_resolucion:
-                falla.fecha_resolucion = datetime.now(timezone.utc)
-        elif nuevo_estado and not nuevo_estado.es_estado_final and "fecha_resolucion" not in dump:
-            falla.fecha_resolucion = None
+        _sincronizar_resolucion(falla, nuevo_estado)
 
     db.commit()
 
@@ -927,7 +1044,7 @@ def notificar_falla(
 
 @router.delete("/{id}", status_code=204)
 def delete_falla(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     falla.deleted_at = datetime.now(timezone.utc)
@@ -941,7 +1058,7 @@ def add_seguimiento(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
 
@@ -953,15 +1070,8 @@ def add_seguimiento(
     )
     if data.estado_nuevo_id:
         falla.estado_id = data.estado_nuevo_id
-        # Mantener fecha_resolucion en sincronía con el estado, igual que el
-        # botón "Marcar resuelta": al pasar a estado final se sella la fecha;
-        # al reabrir (estado no final) se limpia.
         nuevo_estado = db.get(FallaCatEstado, data.estado_nuevo_id)
-        if nuevo_estado and nuevo_estado.es_estado_final:
-            if not falla.fecha_resolucion:
-                falla.fecha_resolucion = datetime.now(timezone.utc)
-        elif nuevo_estado and not nuevo_estado.es_estado_final:
-            falla.fecha_resolucion = None
+        _sincronizar_resolucion(falla, nuevo_estado)
 
     db.add(seg)
     db.commit()
@@ -985,7 +1095,7 @@ def get_falla_impacto(id: int, db: Session = Depends(get_db), _=Depends(get_curr
     Estimate generation loss and economic impact for a falla based on
     project capacity and downtime duration.
     """
-    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id).first()
+    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
 
@@ -1058,7 +1168,7 @@ def get_falla_archivos(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     return _fotos_as_objects(falla.fotos_lista)
@@ -1071,7 +1181,7 @@ def delete_falla_archivo(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    falla = db.query(Falla).filter(Falla.id == id).first()
+    falla = db.query(Falla).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
 
@@ -1080,12 +1190,16 @@ def delete_falla_archivo(
     if len(nueva_lista) == len(items):
         raise HTTPException(404, "Archivo no encontrado")
 
-    # Intentar eliminar de Drive (no crítico si falla)
+    # Intentar eliminar de Drive (no crítico si falla -- el registro se quita
+    # de la BD igual, pero queda log para poder limpiar huérfanos en Drive)
     try:
         service = _get_drive_service()
         service.files().delete(fileId=archivo_id, supportsAllDrives=True).execute()
     except Exception:
-        pass
+        logging.getLogger("fallas").warning(
+            "No se pudo borrar de Drive el archivo %s de la falla %s (queda huérfano en Drive)",
+            archivo_id, falla.codigo_interno, exc_info=True,
+        )
 
     falla.fotos_urls = nueva_lista if nueva_lista else None
     db.commit()
@@ -1100,7 +1214,7 @@ async def upload_falla_attachment(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id).first()
+    falla = db.query(Falla).options(selectinload(Falla.proyecto)).filter(Falla.id == id, Falla.deleted_at.is_(None)).first()
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
 

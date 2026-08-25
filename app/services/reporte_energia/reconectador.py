@@ -26,29 +26,52 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import historial
-from app.services.reporte_energia.utils import escalar_curva
+from app.services.reporte_energia.utils import HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva
 
 HORAS = list(range(24))
 HORA_INICIO_GENERACION = 5   # 5 am
 HORA_FIN_GENERACION    = 18  # 6 pm (exclusiva -- la hora 17 sí cuenta, la 18 no)
+
+# Un panel solar puede superar brevemente su capacidad nominal (irradiancia
+# alta + temperatura baja), pero no por un margen enorme -- un multiplicador
+# generoso (3x) sigue descartando lecturas físicamente imposibles sin
+# arriesgar falsos positivos sobre picos reales. Ver MGS 0033 Sabana de
+# Torres 2026-08-21: el reconectador reportó ~235.000 kWh en una sola hora
+# para una frontera de 0,99 MW -- ~237x su capacidad, un error de escala de
+# unidades del dispositivo, no generación real. Ese valor absurdo se
+# guardaba igual (como fuente completa en Caso 5/7, o como referencia para
+# el gráfico), y en el front inflaba la escala del eje Y hasta aplastar la
+# curva real.
+MULTIPLICADOR_MAX_PLAUSIBLE = 3.0
 
 
 def _potencia_kw(punto: dict) -> float:
     return abs(float(punto.get("kw") or 0))
 
 
-def get_curva_reconectador(sol: SoleniumClient, id_solenium: int, fecha_str: str) -> pd.Series | None:
+def _limite_plausible_kwh(capacidad_efectiva_mw: float | None) -> float | None:
+    if capacidad_efectiva_mw is None or capacidad_efectiva_mw <= 0:
+        return None
+    return capacidad_efectiva_mw * 1000 * MULTIPLICADOR_MAX_PLAUSIBLE
+
+
+def get_curva_reconectador(
+    sv: SolarViewClient, id_solarview: int, fecha_str: str,
+    capacidad_efectiva_mw: float | None = None,
+) -> pd.Series | None:
     """Curva horaria (kWh) del reconectador para un proyecto y fecha (YYYY-MM-DD).
 
     Retorna pd.Series[0..23] con NaN en las horas sin ningún punto real.
-    Retorna None si el proyecto no tiene reconectador instalado, o si la
-    consulta falla -- quien llama debe seguir con el flujo normal sin este
-    relleno.
+    Retorna None si el proyecto no tiene reconectador instalado, si la
+    consulta falla, o si -- pasando capacidad_efectiva_mw -- ninguna hora
+    quedó dentro de un rango físicamente plausible para esa frontera (ver
+    MULTIPLICADOR_MAX_PLAUSIBLE arriba). Quien llama debe seguir con el
+    flujo normal sin este relleno.
     """
-    resp = sol.get_relay_historical(
-        id_solenium, f"{fecha_str} 00:00:00", f"{fecha_str} 23:59:59", variables="kw",
+    resp = sv.get_relay_historical(
+        id_solarview, f"{fecha_str} 00:00:00", f"{fecha_str} 23:59:59", variables="kw",
     )
     puntos = resp.get("results") if isinstance(resp, dict) else None
     if not puntos:
@@ -81,59 +104,94 @@ def get_curva_reconectador(sol: SoleniumClient, id_solenium: int, fecha_str: str
             curva[h] = 0.0
         elif h not in horas_con_dato:
             curva[h] = None
+
+    limite = _limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        curva[curva.abs() > limite] = None
+        if curva.fillna(0).abs().sum() == 0:
+            return None
     return curva
 
 
 def rellenar_horas_faltantes(
     db: Session,
-    sol: SoleniumClient,
+    sv: SolarViewClient,
     curva: pd.Series,
-    id_solenium: int | None,
+    id_solarview: int | None,
     fecha_str: str,
     frontera_id: int | None = None,
-    curva_solenium: pd.Series | None = None,
+    curva_solarview: pd.Series | None = None,
     fp: float | None = None,
-) -> tuple[pd.Series, set[int], set[int], set[int]]:
+    curva_reconectador_conocida: pd.Series | None = None,
+    capacidad_efectiva_mw: float | None = None,
+) -> tuple[pd.Series, set[int], set[int], set[int], pd.Series | None]:
     """Rellena las horas en NaN de `curva` en tres pasos, en orden:
 
-    1. Reconectador (dato físico directo del punto de generación).
-    2. Curva de Solenium (inversores) del MISMO día × factor de pérdida.
+    1. Curva de Solenium (inversores) del MISMO día × factor de pérdida.
+    2. Reconectador (dato físico directo del punto de generación).
     3. Histórico horario PROPIO de la frontera (último recurso) -- mediana
        del total diario × forma horaria típica de los últimos días
        confiables (ver historial.py).
 
     Las horas que ninguna de las tres fuentes cubre quedan en NaN -- no se
-    inventa un valor.
+    inventa un valor. Cada fuente además solo se acepta dentro de su propia
+    ventana horaria (HORAS_RECONECTADOR/HORAS_SOLARES en utils.py) -- fuera
+    de esas horas la generación real ya se espera en ~0, así que rellenar
+    ahí no protege nada y solo arriesga meter ruido de telemetría nocturna
+    como si fuera dato real (ver MGS 0022 La Cumbia 2026-08-05).
 
-    Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico).
+    `curva_reconectador_conocida` -- si el llamador YA tiene la curva del
+    reconectador a mano (ej. clasificar_generacion() la consulta y persiste
+    siempre, ver curva_reconectador_referencia), se reusa en vez de volver
+    a pedirla a SolarView -- evita una consulta duplicada cuando "Rellenar
+    horas" se usa el mismo día que ya se clasificó (2026-08-21).
+
+    `capacidad_efectiva_mw` -- se pasa a get_curva_reconectador() cuando SÍ
+    hace falta consultar (curva_reconectador_conocida es None) para
+    descartar lecturas físicamente imposibles (ver ese docstring).
+
+    Retorna (curva_rellenada, horas_reconectador, horas_solenium, horas_historico,
+    curva_reconectador) -- este último es la curva CRUDA del reconectador tal
+    como se consultó (para mostrarla de referencia en el detalle del front,
+    ver ReporteEnergiaCurvaChart.vue), o None si no se llegó a consultar
+    (medidor+inversores ya cubrieron todo, o el proyecto no tiene reconectador).
     """
     horas_reconectador: set[int] = set()
     horas_solenium: set[int] = set()
     horas_historico: set[int] = set()
+    curva_reconectador_ref: pd.Series | None = None
 
     if not curva.isna().any():
-        return curva, horas_reconectador, horas_solenium, horas_historico
+        return curva, horas_reconectador, horas_solenium, horas_historico, curva_reconectador_ref
 
     curva = curva.copy()
     horas_faltantes = set(curva[curva.isna()].index)
 
-    if id_solenium is not None:
-        curva_relay = get_curva_reconectador(sol, int(id_solenium), fecha_str)
+    if curva_solarview is not None and fp is not None:
+        for h in list(horas_faltantes):
+            if h not in HORAS_SOLARES:
+                continue
+            valor_inv = curva_solarview.get(h) if isinstance(curva_solarview, pd.Series) else None
+            if pd.notna(valor_inv):
+                curva[h] = valor_inv * fp
+                horas_solenium.add(h)
+        horas_faltantes -= horas_solenium
+
+    if horas_faltantes and id_solarview is not None:
+        curva_relay = (
+            curva_reconectador_conocida if curva_reconectador_conocida is not None
+            else get_curva_reconectador(sv, int(id_solarview), fecha_str, capacidad_efectiva_mw)
+        )
         if curva_relay is not None:
+            curva_reconectador_ref = curva_relay
             for h in list(horas_faltantes):
+                if h not in HORAS_RECONECTADOR:
+                    continue
                 valor = curva_relay.get(h)
                 if pd.notna(valor):
                     curva[h] = valor
                     horas_reconectador.add(h)
             horas_faltantes -= horas_reconectador
-
-    if horas_faltantes and curva_solenium is not None and fp is not None:
-        for h in list(horas_faltantes):
-            valor_inv = curva_solenium.get(h) if isinstance(curva_solenium, pd.Series) else None
-            if pd.notna(valor_inv):
-                curva[h] = valor_inv * fp
-                horas_solenium.add(h)
-        horas_faltantes -= horas_solenium
 
     if horas_faltantes and frontera_id is not None:
         fecha = pd.to_datetime(fecha_str).date()
@@ -143,7 +201,9 @@ def rellenar_horas_faltantes(
             if forma is not None:
                 curva_historica = escalar_curva(forma, mediana)
                 for h in list(horas_faltantes):
+                    if h not in HORAS_SOLARES:
+                        continue
                     curva[h] = curva_historica[h]
                     horas_historico.add(h)
 
-    return curva, horas_reconectador, horas_solenium, horas_historico
+    return curva, horas_reconectador, horas_solenium, horas_historico, curva_reconectador_ref

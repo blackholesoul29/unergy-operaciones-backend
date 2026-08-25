@@ -26,7 +26,6 @@ _PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls JSONB",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
     """CREATE TABLE IF NOT EXISTS generacion_diaria (
         id BIGSERIAL PRIMARY KEY,
         proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
@@ -48,10 +47,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS p99_mensual_kwh JSONB",
     # migration 005 — código TSF (frontera CREG) por proyecto
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_tsf VARCHAR(100)",
-    # migration 006 — múltiples correos por cliente (T14)
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
     # impuestos por cliente — reteiva (retención de IVA), separada de reteica
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
     # soportes/comprobantes (archivo Drive) por transacción del panel contable
@@ -107,6 +102,30 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
+    # precio de bolsa manual por mes (valoriza la energía sin PPA / UNGC)
+    """CREATE TABLE IF NOT EXISTS precio_bolsa_mensual (
+        id BIGSERIAL PRIMARY KEY,
+        año INT NOT NULL,
+        mes INT NOT NULL,
+        valor NUMERIC(12,4) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_precio_bolsa_periodo ON precio_bolsa_mensual (año, mes)",
+    # energía diaria por contrato (para ver el despacho día a día)
+    """CREATE TABLE IF NOT EXISTS despacho_contrato_dia (
+        id BIGSERIAL PRIMARY KEY,
+        periodo VARCHAR(7) NOT NULL,
+        codigo_sic_contrato VARCHAR(40) NOT NULL,
+        fecha DATE NOT NULL,
+        kwh NUMERIC(18,4) NOT NULL DEFAULT 0
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_dia ON despacho_contrato_dia (periodo, codigo_sic_contrato, fecha)",
+    "ALTER TABLE factura_emitida ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(80)",
+    "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS fuente VARCHAR(20)",
+    "CREATE INDEX IF NOT EXISTS ix_despacho_dia_lookup ON despacho_contrato_dia (periodo, codigo_sic_contrato)",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS dias INT",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
+    "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_max DATE",
     # agrupación manual de CONTRATOS en facturas con nombre (dividir un PPA)
     """CREATE TABLE IF NOT EXISTS factura_agrupacion (
         id BIGSERIAL PRIMARY KEY,
@@ -121,6 +140,22 @@ _PENDING_DDLS = [
     "DELETE FROM factura_agrupacion WHERE codigo_sic_contrato IS NULL",
     "DROP INDEX IF EXISTS uq_factura_agrupacion_proyecto",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_contrato ON factura_agrupacion (codigo_sic_contrato)",
+    "ALTER TABLE factura_agrupacion ADD COLUMN IF NOT EXISTS porcentaje NUMERIC(9,6)",
+    # Orden manual (fijo) y marca de emitida (por período) de las facturas de energía.
+    """CREATE TABLE IF NOT EXISTS factura_orden (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL UNIQUE,
+        orden INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS factura_emitida (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL,
+        periodo VARCHAR(7) NOT NULL,
+        emitida_por VARCHAR(120),
+        emitida_at TIMESTAMPTZ DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_emitida_nombre_periodo ON factura_emitida (nombre, periodo)",
     # migration 007 — tabla de gestión de proyectos (T16)
     """CREATE TABLE IF NOT EXISTS gestion_registros (
         id BIGSERIAL PRIMARY KEY,
@@ -221,6 +256,17 @@ _PENDING_DDLS = [
     # migration 013 — PPA linked to clientes as comprador/vendedor
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS comprador_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS vendedor_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
+    # Empresa responsable del PPA (catálogo). incluir_en_cumplimiento=false esconde
+    # sus contratos de la Matriz anual de /mem/cumplimiento.
+    """CREATE TABLE IF NOT EXISTS ppa_responsables (
+        id BIGSERIAL PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL UNIQUE,
+        incluir_en_cumplimiento BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS responsable_id BIGINT REFERENCES ppa_responsables(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_ppa_contratos_responsable_id ON ppa_contratos (responsable_id)",
     # Drop stale columns from old schema
     "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS proyecto_id",
     # Create the join table (idempotent)
@@ -284,8 +330,6 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS transferencia_maxima_kwh NUMERIC(14,3)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS representante_frontera VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_inicio_representacion DATE",
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS operador_red VARCHAR(255)",
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS operador_red_zona VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS nombre_cgm VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS predio_id VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS nombre_predio VARCHAR(255)",
@@ -299,6 +343,12 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_ppal VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_ppal DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_ppal DATE",
+    # migration — ficha técnica medidor/módem por frontera (2026-08-14)
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_ppal VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_ppal VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_ppal INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_ppal VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS nro_serie_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS marca_med_resp VARCHAR(100)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS modelo_med_resp VARCHAR(100)",
@@ -307,6 +357,11 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS entidad_calibradora_med_resp VARCHAR(255)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_resp DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_resp DATE",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS tipo_extraccion_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS password_medidor_resp VARCHAR(100)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS ip_modem_resp VARCHAR(50)",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS puerto_modem_resp INTEGER",
+    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS canal_comunicacion_resp VARCHAR(50)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS factor_perdidas_frontera_principal NUMERIC(10,6)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS codigo_ciiu VARCHAR(20)",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS clasificacion_industrial_general VARCHAR(255)",
@@ -337,8 +392,6 @@ _PENDING_DDLS = [
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_precio_unitario NUMERIC(12,4)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS rec_vintage VARCHAR(20)",
     "ALTER TYPE servicio_aplica_enum ADD VALUE IF NOT EXISTS 'rec'",
-    # migration 015 — correo_operacional en clientes
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_operacional VARCHAR(255)",
     # MGS alarms table
     """CREATE TABLE IF NOT EXISTS alarmas_monitoreo (
         id BIGSERIAL PRIMARY KEY,
@@ -352,10 +405,9 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_created ON alarmas_monitoreo (created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_alarmas_monitoreo_severity ON alarmas_monitoreo (severity) WHERE resolved_at IS NULL",
-    # Cross-database correlation columns
+    # origina_code: sigue vivo, lo llena tsf_sync.py desde Sun Factory (no
+    # depende de la correlacion cross-DB con Origina, ya retirada).
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS requestsdb_supply_id BIGINT",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_node_name VARCHAR(255)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     # migration 016 — informes_guardados: flujo editorial de informes operacionales
     """CREATE TABLE IF NOT EXISTS informes_guardados (
@@ -498,6 +550,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_clientes_deleted ON clientes (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_ppa_deleted ON ppa_contratos (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fallas_deleted ON fallas (deleted_at) WHERE deleted_at IS NOT NULL",
+    # el índice de arriba cubre el caso "borrada" (deleted_at IS NOT NULL) --
+    # list_fallas filtra el caso contrario (deleted_at IS NULL) y ordena por
+    # created_at DESC en el 100% de sus páginas, así que necesita su propio índice.
+    "CREATE INDEX IF NOT EXISTS ix_fallas_activas_created ON fallas (created_at DESC) WHERE deleted_at IS NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_deleted ON liquidaciones (deleted_at) WHERE deleted_at IS NOT NULL",
     # migration — PPA tipo_contrato + carpeta_link for purchase contract support
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
@@ -571,6 +627,10 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_fronteras_soft_deleted ON fronteras (deleted_at) WHERE deleted_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_fronteras_estado_op ON fronteras (estado_operacional) WHERE estado_operacional IS NOT NULL",
     # migration — ASIC: XM tracking fields
+    # Modalidad de pago del contrato ('plg' | 'plc'). Una planta repartida entre
+    # dos contratos, uno de cada modalidad, no está duplicada: entre los dos
+    # cubren su 100%.
+    "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS modalidad_pago VARCHAR(3)",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_envio_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS fecha_respuesta_xm DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS numero_radicado VARCHAR(100)",
@@ -588,20 +648,61 @@ _PENDING_DDLS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_email_envios_tipo ON email_envios (tipo)",
     "CREATE INDEX IF NOT EXISTS ix_email_envios_at ON email_envios (enviado_at DESC)",
-    # migration — correlation_sync_log: track sync runs
-    """CREATE TABLE IF NOT EXISTS correlation_sync_log (
+    # migration — email_envios: qué proyectos incluyó cada envío (solo reporte_cgm;
+    # NULL para otros tipos y para envíos previos a esta migración)
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos TEXT",
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos_total INTEGER",
+    # migration — reporte_energia_{generacion,consumo}: fila-placeholder cuando
+    # el clasificador falla (error_clasificacion) + resultado del envío a
+    # Quoia/ASIC (enviado_quoia_*)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS error_clasificacion VARCHAR(500)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_en TIMESTAMPTZ",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_ok BOOLEAN",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS enviado_quoia_error VARCHAR(500)",
+    # migration — reporte_energia_exclusiones: ventana de fechas en la que una
+    # frontera no se clasifica en absoluto (ej. CT en falla ya reportado a
+    # XM) -- no depende de Fallas (requiere monitoreo/representación, que no
+    # todas las fronteras tienen)
+    """CREATE TABLE IF NOT EXISTS reporte_energia_exclusiones (
         id BIGSERIAL PRIMARY KEY,
-        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        projects_processed INTEGER NOT NULL DEFAULT 0,
-        correlations_updated INTEGER NOT NULL DEFAULT 0,
-        origina_found INTEGER NOT NULL DEFAULT 0,
-        requestsdb_found INTEGER NOT NULL DEFAULT 0,
-        error TEXT
+        frontera_id BIGINT NOT NULL REFERENCES fronteras(id) ON DELETE CASCADE,
+        motivo VARCHAR(500) NOT NULL,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin_estimada DATE,
+        creado_por_id BIGINT NOT NULL REFERENCES usuarios(id),
+        resuelta_en TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
-    "CREATE INDEX IF NOT EXISTS ix_correlation_sync_at ON correlation_sync_log (synced_at DESC)",
-    # migration — investment fund correlation on clientes
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origina_investment_id BIGINT",
-    "CREATE INDEX IF NOT EXISTS ix_clientes_origina_investment ON clientes (origina_investment_id) WHERE origina_investment_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_reporte_energia_exclusiones_frontera ON reporte_energia_exclusiones (frontera_id)",
+    # migration — reporte_energia_generacion: curva de respaldo real subida
+    # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
+    # null, /enviar sigue usando la fórmula ±1% sobre curva_final
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_respaldo_terceros JSONB",
+    # migration — reporte_energia_{generacion,consumo}: curvas de referencia
+    # (medidor/Solenium) tal como estaban al momento de clasificar -- antes
+    # solo se guardaba el total, la curva completa se volvía a pedir en vivo
+    # cada vez que se abría el detalle (ver MGS 0032 El Paso Norte 2026-08-05)
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_solenium_referencia JSONB",
+    # migration — reporte_energia_generacion: curva de reconectador tal como
+    # estaba al momento de clasificar (2026-08-12) -- solo se llena en los
+    # días donde reconectador SÍ se llegó a consultar (medidor+inversores ya
+    # dejaron huecos), a diferencia de medidor/Solenium que se piden siempre.
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS curva_reconectador_referencia JSONB",
+    # migration — reporte_energia_generacion: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo -- mismo campo se
+    # agrega acá porque Generación también gana la opción en 'Rellenar horas')
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_principal JSONB",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS curva_medidor_respaldo JSONB",
+    # migration — reporte_energia_consumo: horas rellenadas con el OTRO
+    # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo)
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     # migration — ASIC porcentaje_despacho domain constraint (fix bad data first)
     "UPDATE asic_solicitudes SET porcentaje_despacho = porcentaje_despacho / 100.0 WHERE porcentaje_despacho > 1.0",
     "ALTER TABLE asic_solicitudes ADD CONSTRAINT chk_porcentaje_despacho CHECK (porcentaje_despacho >= 0 AND porcentaje_despacho <= 1.0)",
@@ -627,6 +728,16 @@ _PENDING_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_frt ON liquidacion_xm_datos (frontera_id) WHERE frontera_id IS NOT NULL",
     # migration — fecha_fin_representacion en proyectos
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_fin_representacion DATE",
+    # migration (058) — generación mensual promedio por proyecto, para no depender
+    # de la API de generación de Unergy en cada consulta de contratos.
+    # `gen_promedio_origen` ('api' | 'manual') existe para que el recálculo NO pise
+    # los valores cargados a mano en las plantas sin histórico.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_mensual_promedio_mwh NUMERIC(12,3)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_origen VARCHAR(10)",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_dias INTEGER",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_desde DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_hasta DATE",
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS gen_promedio_actualizado_en TIMESTAMPTZ",
     # migration — missing updated_at on liquidacion child tables
     "ALTER TABLE liquidacion_costos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE liquidacion_mandato_lineas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
@@ -884,7 +995,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
     # migration — Clasificación de liquidación por período (normal | neu | nitro)
     """CREATE TABLE IF NOT EXISTS clasificacion_liquidacion (
@@ -974,6 +1084,54 @@ _PENDING_DDLS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
+    """CREATE TABLE IF NOT EXISTS mandato_correos (
+        id BIGSERIAL PRIMARY KEY,
+        message_id VARCHAR(998) NOT NULL UNIQUE,
+        fecha TIMESTAMPTZ NOT NULL,
+        remitente VARCHAR(255) NOT NULL,
+        asunto VARCHAR(1000),
+        fuente VARCHAR(20) NOT NULL,
+        clasificacion VARCHAR(20) NOT NULL,
+        resultado VARCHAR(20) NOT NULL,
+        requiere_revision BOOLEAN NOT NULL DEFAULT FALSE,
+        detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
+        revertido BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
+    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_revision ON mandato_correos (requiere_revision)",
+    # La tabla ya existe en producción, creada por Base.metadata.create_all().
+    # Se declara acá por consistencia con el resto del esquema y para que un
+    # ALTER TYPE sobre su enum (ver más abajo) tenga su tabla al lado. El
+    # IF NOT EXISTS la vuelve un no-op donde ya está.
+    """CREATE TABLE IF NOT EXISTS finanzas_mandatos (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto VARCHAR(255) NOT NULL,
+        tercero VARCHAR(255) NOT NULL DEFAULT '',
+        periodo DATE NOT NULL,
+        tipo tipo_mandato_fin_enum NOT NULL,
+        cmu VARCHAR(20),
+        cmu_anterior VARCHAR(20),
+        estado estado_firma_fin_enum NOT NULL DEFAULT 'sin_firma',
+        comentario TEXT,
+        fecha_envio DATE,
+        fecha_firma DATE,
+        drive_file_id VARCHAR(255),
+        drive_url VARCHAR(1000),
+        correo_ref VARCHAR(500),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_finmandato_identidad ON finanzas_mandatos (proyecto, tercero, periodo, tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_periodo ON finanzas_mandatos (periodo)",
+    "CREATE INDEX IF NOT EXISTS ix_finmandatos_cmu ON finanzas_mandatos (cmu)",
+    # Estados nuevos del ciclo de firma (2026-08-18): corrección y entrega al
+    # inversionista. Ver TRANSICIONES_FIRMA en finanzas_mandatos_service.py.
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'corregido'",
+    "ALTER TYPE estado_firma_fin_enum ADD VALUE IF NOT EXISTS 'enviado_inversionista'",
+    # fecha_envio_inversionista: se llena cuando el estado pasa a
+    # enviado_inversionista (ver upsert_mandato).
+    "ALTER TABLE finanzas_mandatos ADD COLUMN IF NOT EXISTS fecha_envio_inversionista DATE",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
     "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
     "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",
@@ -1134,15 +1292,68 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_comunidad VARCHAR(255)",
     # detalle crudo por sub-oferta (servicios buscados, FPO, etc.) — 2026-07-14
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS detalle JSONB",
-    # migration — CRM: pipeline de 6 estados a nivel oportunidad (2026-07-15)
+    # migration — CRM: pipeline de 6 estados (2026-07-15)
     # RENAME VALUE migra los datos in-place (sin UPDATE) y es idempotente por
     # tolerancia (si ya se renombró, lanza y _run_column_migrations lo salta).
     # ADD VALUE va al bloque autocommit (debe correr fuera de transacción).
-    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'oferta' TO 'envio_oferta'",
+    #
+    # OJO: aquí vivía "RENAME VALUE 'oferta' TO 'envio_oferta'". Se ELIMINÓ a
+    # propósito el 2026-08-02. Como esta lista corre en cada arranque, dejarlo
+    # junto al rename inverso de abajo haría que cada deploy revirtiera la
+    # migración. Para las bases viejas que todavía dicen 'oferta', ese valor ya
+    # es el nombre final y no hay nada que renombrar.
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion' TO 'negociacion_contrato'",
     "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'servicio_operativo' TO 'operando'",
     "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'firmado'",
     "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'declinado'",
+    # Etapa terminal: el contrato corrió y llegó a su fecha_fin (2026-08-02).
+    # La pone el job diario, no una persona.
+    "ALTER TYPE estado_oportunidad_enum ADD VALUE IF NOT EXISTS 'terminado'",
+    # migration — Comercial: el pipeline pasa a ser DE LA OFERTA (2026-08-02)
+    # Decisión de Juan: "el cliente no debe tener estado, son las ofertas".
+    # Vocabulario nuevo: oportunidad → oferta → contrato → firmado → operando →
+    # declinado. Los tres renames convergen desde cualquier base anterior; si el
+    # valor ya no existe, el statement lanza y se salta.
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'envio_oferta' TO 'oferta'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'negociacion_contrato' TO 'contrato'",
+    "ALTER TYPE estado_oportunidad_enum RENAME VALUE 'prospeccion' TO 'oportunidad'",
+    # El estado y su fecha de entrada, ahora por oferta. Se reusa el mismo tipo
+    # PostgreSQL para que las dos columnas no puedan divergir de vocabulario.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS estado estado_oportunidad_enum",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS estado_desde TIMESTAMPTZ",
+    # Backfill una sola vez (solo filas sin estado): la etapa de cada oferta sale
+    # de combinar su propio `resultado` con la etapa que tenía su cliente.
+    # Una oferta pendiente cuyo cliente ya cerró por OTRA oferta vuelve a 'oferta':
+    # sigue viva, no se cerró con él.
+    """UPDATE oportunidad_ofertas o SET
+           estado = (CASE
+               WHEN o.resultado::text = 'declinado' THEN 'declinado'
+               WHEN o.resultado::text = 'aceptado' AND p.estado::text = 'operando' THEN 'operando'
+               WHEN o.resultado::text = 'aceptado' THEN 'firmado'
+               WHEN p.estado::text IN ('firmado', 'operando', 'declinado') THEN 'oferta'
+               ELSE p.estado::text
+           END)::estado_oportunidad_enum,
+           estado_desde = COALESCE(o.estado_desde, p.estado_desde, o.created_at, NOW())
+       FROM oportunidades p
+       WHERE p.id = o.oportunidad_id AND o.estado IS NULL""",
+    # Red de seguridad por si alguna oferta quedó huérfana del UPDATE anterior.
+    "UPDATE oportunidad_ofertas SET estado = 'oportunidad' WHERE estado IS NULL",
+    "UPDATE oportunidad_ofertas SET estado_desde = COALESCE(created_at, NOW()) WHERE estado_desde IS NULL",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado SET DEFAULT 'oportunidad'",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado SET NOT NULL",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado_desde SET DEFAULT NOW()",
+    "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado_desde SET NOT NULL",
+    # Qué oferta cambió de etapa; NULL en las filas anteriores a esta migración.
+    "ALTER TABLE oportunidad_estado_historial ADD COLUMN IF NOT EXISTS oferta_id BIGINT REFERENCES oportunidad_ofertas(id) ON DELETE CASCADE",
+    "CREATE INDEX IF NOT EXISTS ix_oport_hist_oferta_id ON oportunidad_estado_historial (oferta_id)",
+    # En qué contrato desembocó la oferta. Las condiciones comerciales (periodo,
+    # tarifa, indexación, energía, carpeta) NO se copian a la oferta: ya viven en
+    # ppa_contratos/ppa_tarifas y contratos_servicio, que es lo que leen
+    # Cumplimiento y Liquidaciones. Copiarlas las desincronizaría.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS ppa_contrato_id BIGINT REFERENCES ppa_contratos(id) ON DELETE SET NULL",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS contrato_servicio_id BIGINT REFERENCES contratos_servicio(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_ppa_contrato ON oportunidad_ofertas (ppa_contrato_id)",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_contrato_servicio ON oportunidad_ofertas (contrato_servicio_id)",
     # Estandariza el prefijo del código de seguimiento OF→OP (oferta y oportunidad).
     # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
     "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
@@ -1156,19 +1367,78 @@ _PENDING_DDLS = [
     # del backend, solo se mostraba/editaba en el frontend; el campo que si
     # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
     "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
-    # IDs de liquidación por proyecto — códigos SIC generación/consumo (2026-07-22)
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
     # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
+    # Tópico en la API de Liquidaciones cuando difiere del de generación
+    # (2026-08-19). Se siembran los tres casos conocidos; el UPDATE es
+    # idempotente porque solo toca las filas que aún no lo tienen.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS topico_liquidaciones VARCHAR(100)",
+    "UPDATE proyectos SET topico_liquidaciones = 'mgs18' WHERE sub_project = 'leyenda' AND topico_liquidaciones IS NULL",
+    "UPDATE proyectos SET topico_liquidaciones = 'mapale' WHERE sub_project = 'MGS Mapale' AND topico_liquidaciones IS NULL",
+    "UPDATE proyectos SET topico_liquidaciones = 'MGS 0012 La Reserva' WHERE sub_project = 'reserva' AND topico_liquidaciones IS NULL",
     # migration — Comercial: envío de la oferta (2026-07-28). fecha_oferta ya
     # existía y guarda el PRIMER envío; aquí viven los toques posteriores, la
     # respuesta del cliente (NULL = nunca respondió) y el PDF en Drive.
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS seguimientos INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_ultima_respuesta DATE",
     "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS documento_url VARCHAR(1000)",
+    # Campos informativos del plan de Internet en ContratoServicio (2026-08-03)
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS plan_datos_gb VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS velocidad_mbps INTEGER",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS tipo_conexion VARCHAR(50)",
+    # migration — Comercial: ficha operativa declarada en la oferta (2026-08-03)
+    # Los 6 parámetros que el equipo consume por API solo existían colgados de
+    # `proyectos`, y las ofertas del pipeline no tienen proyecto. Estas columnas
+    # son el fallback declarado; la API resuelve Proyecto → oferta → null.
+    # energia_promedio_kwh_mes NO duplica a ppa_contratos.cantidad_minima_kwh_mes:
+    # aquella es el compromiso contractual, esta la estimación de generación.
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS municipio VARCHAR(100)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS departamento VARCHAR(100)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
+    "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS energia_promedio_kwh_mes NUMERIC(14,3)",
+    "CREATE INDEX IF NOT EXISTS ix_oferta_operador_red ON oportunidad_ofertas (operador_red_id)",
+    # Campos técnicos del servicio de Internet en ContratoServicio (2026-08-06)
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS linea_servicio VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS id_router VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS numero_kit VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS latencia_ms INTEGER",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_seguridad VARCHAR(50)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lat NUMERIC(10,6)",
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS ubicacion_lng NUMERIC(10,6)",
+    # Sitios Starlink que no son proyecto nuestro (ej. temas contables/oficina):
+    # se marcan "excluido" para que dejen de bloquear el export de Costos sin
+    # forzar una asignación de minigranja que no existe (2026-08-11).
+    "ALTER TABLE starlink_mapeo_sitio ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE starlink_factura_linea ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE",
+    # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
+    # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
+    "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
+    """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),
+        version VARCHAR(100),
+        elaborado_por VARCHAR(255),
+        actividad VARCHAR(255),
+        objetivo_alcance JSONB NOT NULL DEFAULT '{}'::jsonb,
+        datos_generales JSONB NOT NULL DEFAULT '{}'::jsonb,
+        arquitectura_comunicacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+        equipos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        variables_monitoreadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        configuracion_monitoreo JSONB NOT NULL DEFAULT '{}'::jsonb,
+        protocolo_pruebas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        eventos_operativos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        observaciones JSONB NOT NULL DEFAULT '{}'::jsonb,
+        recomendaciones JSONB NOT NULL DEFAULT '[]'::jsonb,
+        conclusion TEXT,
+        firmas JSONB NOT NULL DEFAULT '[]'::jsonb,
+        evidencia_arquitectura JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
 ]
 
 
@@ -1971,16 +2241,197 @@ _CGM_CONTRATOS = [
          tarifa_cgm=6.0,
          indexacion_cgm=[{"año":2024,"ipc":None,"valor":6.0,"esBase":True}],
          indexacion_representacion=[]),
+
+    # ── Ayura 1: inversionistas que solo estaban en data/DataCGM.json ────────
+    # Migrados al repo al eliminar esos JSON. Mismo portafolio, tarifas y firma
+    # que los demas contratos de Ayura 1: cambia el inversionista.
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="SUNO ACTIVOS SOSTENIBLES S.A.S.",
+         tarifa_admin=0.038,
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0001 - Uruaco", codigo_sun_factory="COLATLT14P2",
+         portafolio="Ayura 1", inversionista_nombre="RODRIGUEZ VELEZ BEATRIZ",
+         tarifa_admin=0.038,
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0004 - Valle de Gandalf", codigo_sun_factory="COLCEST61P3",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0005 - Canahuate", codigo_sun_factory="COLCEST61P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0006 - Perija", codigo_sun_factory="COLCEST58P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0007 - La Paz Vallenata", codigo_sun_factory="COLCEST9P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0008 - La Paz Verso", codigo_sun_factory="COLCEST2P3",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0009 - El Molino", codigo_sun_factory="COLLAGT19P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0010 - Villanueva", codigo_sun_factory="COLLAGT27P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0013 - La Mesa", codigo_sun_factory="COLSANT10P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0014 - El Olimpo", codigo_sun_factory="COLSANT4P2",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="Minigranja 0016 - La Puya", codigo_sun_factory="COLCEST45P5",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
+    dict(proyecto_nombre="MiniGranja 0017 - La Paz Esmeralda", codigo_sun_factory="COLCEST17P1",
+         portafolio="Ayura 1", inversionista_nombre="PATRIMONIOS AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA",
+         tarifa_admin=0.038, fecha_firma_contrato="2024-10-11",
+         enlace_drive=_SOPORTE_AYURA1, tarifa_cgm=5.0, tarifa_representacion=5.0,
+         indexacion_cgm=_IDX_AYURA1, indexacion_representacion=_IDX_AYURA1),
 ]
+
+
+def _cgm_norm(s: str | None) -> str:
+    """Normaliza un nombre para comparar: sin tildes, sin puntuacion, sin dobles
+    espacios, en mayusculas.
+
+    El dedup del seed comparaba strings exactos y los dos seeds escriben el mismo
+    inversionista de dos formas ("SOMOS BOGOTA USME SAS" vs "SOMOS BOGOTÁ USME
+    SAS", "Ayura" vs "Ayurá", "FEM ENERGIA" vs "FEM ENERGÍA"): cada variante
+    creaba un contrato duplicado en produccion.
+    """
+    import re as _re
+    import unicodedata as _ud
+
+    s = _ud.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not _ud.combining(c))
+    return _re.sub(r"[^A-Z0-9]+", " ", s.upper()).strip()
+
+
+def _cgm_buscar_proyecto(nombre: str, sf: str | None,
+                         por_nombre: dict, por_tsf: dict) -> int | None:
+    """Resuelve a que planta pertenece un contrato del seed CGM.
+
+    Tres criterios, ninguno de los cuales adivina:
+      1. codigo Sun Factory == codigo_tsf del proyecto.
+      2. nombre de referencia == nombre de la planta, normalizados (exacto).
+      3. el numero de 4 digitos del nombre (ej. "0010" de "MGS 0010 - Villanueva"),
+         y solo si aparece en UNA sola planta.
+
+    Antes habia un cuarto criterio que tomaba la primera palabra de mas de 4
+    letras del nombre y devolvia el PRIMER proyecto que la contuviera como
+    substring. Acertaba cuando el nombre del contrato ya era el de la planta
+    (para eso esta ahora el criterio 2, que no depende del orden de la consulta),
+    pero tambien metia contratos en plantas ajenas: "GD Yuan Solar" caia en
+    "Minigranja Solar Baraya" por la palabra "solar", y con nombres de planta sin
+    numero era el criterio que decidia casi todos. Un contrato sin planta es un
+    pendiente visible que se resuelve a mano en Servicios > Representacion; un
+    contrato en la planta equivocada es un dato falso que nadie detecta.
+    """
+    import re as _re
+
+    if sf:
+        pid = por_tsf.get(_cgm_norm(sf))
+        if pid is not None:
+            return pid
+
+    pid = por_nombre.get(_cgm_norm(nombre))
+    if pid is not None:
+        return pid
+
+    for num in _re.findall(r"\d{4}", nombre or ""):
+        # Coincidencia unica: si el numero aparece en dos plantas no hay forma de
+        # saber cual es, y elegir la primera es arbitrario.
+        candidatos = {pid for db_n, pid in por_nombre.items() if num in db_n}
+        if len(candidatos) == 1:
+            return candidatos.pop()
+
+    return None
+
+
+class _CgmIndice:
+    """Indice de los contratos de representacion ya existentes, para decidir si
+    una entrada del seed ya esta en la base.
+
+    Tres entradas al mismo registro, porque cada fuente historica dejo una pista
+    distinta:
+      - por codigo Sun Factory : lo que sembro el seed de arranque.
+      - por nombre de referencia: idem, cuando el contrato no trae codigo.
+      - por proyecto_id        : lo que sembro scripts/seed_contratos_cgm.py, que
+        hace `c.pop("proyecto_nombre")` y nunca guarda nombre_proyecto_ref. Sin
+        esta entrada, los 34 contratos sin codigo Sun Factory eran invisibles al
+        dedup y se duplicaban.
+
+    Los contratos sin inversionista quedan FUERA del indice a proposito: son los
+    creados a mano en el wizard, y emparejarlos con una entrada del seed exigiria
+    adivinar (una planta puede tener varios inversionistas). Se revisan a mano en
+    Servicios > Representacion.
+    """
+
+    def __init__(self):
+        self.por_sf, self.por_ref, self.por_pid = {}, {}, {}
+
+    def indexar(self, reg) -> None:
+        inv_n = _cgm_norm(reg.inversionista_nombre)
+        if not inv_n:
+            return
+        if reg.codigo_sun_factory:
+            self.por_sf.setdefault((inv_n, _cgm_norm(reg.codigo_sun_factory)), reg)
+        if reg.nombre_proyecto_ref:
+            self.por_ref.setdefault((inv_n, _cgm_norm(reg.nombre_proyecto_ref)), reg)
+        if reg.proyecto_id is not None:
+            self.por_pid.setdefault((inv_n, reg.proyecto_id), reg)
+
+    def buscar(self, inv, nombre, sf, pid):
+        """Devuelve el registro que ya representa este contrato, o None."""
+        inv_n = _cgm_norm(inv)
+        if not inv_n:
+            return None
+        if sf:
+            hit = self.por_sf.get((inv_n, _cgm_norm(sf)))
+            if hit is not None:
+                return hit
+        hit = self.por_ref.get((inv_n, _cgm_norm(nombre)))
+        if hit is not None:
+            return hit
+        if pid is not None:
+            return self.por_pid.get((inv_n, pid))
+        return None
 
 
 def _run_cgm_seed() -> None:
     """
     Carga y mantiene contratos CGM/Representacion.
-    Idempotente: usa (inversionista + codigo_sun_factory) como clave de dedup.
+    Idempotente: dedupea por (inversionista + planta) con nombres normalizados.
     Corre en cada startup: inserta nuevos y repara proyecto_id NULL.
     """
-    import re as _re
     from datetime import date
     from sqlalchemy.orm import sessionmaker
     from app.models.contratos import ContratoServicio
@@ -1992,51 +2443,47 @@ def _run_cgm_seed() -> None:
         proyectos_rows = db.execute(
             text("SELECT id, nombre_comercial, codigo_tsf FROM proyectos")
         ).fetchall()
-        por_nombre = {(r[1] or "").lower(): r[0] for r in proyectos_rows if r[1]}
-        por_tsf    = {(r[2] or "").lower(): r[0] for r in proyectos_rows if r[2]}
+        por_nombre = {_cgm_norm(r[1]): r[0] for r in proyectos_rows if r[1]}
+        por_tsf    = {_cgm_norm(r[2]): r[0] for r in proyectos_rows if r[2]}
 
         def _buscar(nombre, sf):
-            # 1. Por codigo Sun Factory == codigo_tsf del proyecto
-            if sf and sf.lower() in por_tsf:
-                return por_tsf[sf.lower()]
-            # 2. Por numero de 4 digitos (ej. "0010" de "MGS 0010 - Villanueva")
-            for num in _re.findall(r'\d{4}', nombre):
-                for db_n, db_id in por_nombre.items():
-                    if num in db_n:
-                        return db_id
-            # 3. Por palabras clave largas
-            clean = _re.sub(r'[-()]', ' ', nombre)
-            for p in [w.lower() for w in clean.split() if len(w) > 4]:
-                for db_n, db_id in por_nombre.items():
-                    if p in db_n:
-                        return db_id
-            return None
+            return _cgm_buscar_proyecto(nombre, sf, por_nombre, por_tsf)
 
         # ── Paso 1: insertar contratos faltantes ─────────────────────────────────
+        # El dedup se hace en memoria y no con un filtro SQL: hay que comparar
+        # nombres normalizados, y hay que poder reconocer un contrato por su
+        # proyecto_id cuando le falta el nombre de referencia. Son ~112 filas.
+        existentes = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "representacion"
+        ).all()
+
+        indice = _CgmIndice()
+        for reg in existentes:
+            indice.indexar(reg)
+
         insertados = 0
         for c in _CGM_CONTRATOS:
             nombre  = c.get("proyecto_nombre", "")
             inv     = c.get("inversionista_nombre")
             sf      = c.get("codigo_sun_factory")
+            pid     = _buscar(nombre, sf)
 
-            # Dedup por (inversionista + codigo_sun_factory) o (inversionista + nombre_ref)
-            filtros = [
-                ContratoServicio.servicio_aplica == "representacion",
-                ContratoServicio.inversionista_nombre == inv,
-                ContratoServicio.codigo_sun_factory == sf if sf
-                    else ContratoServicio.nombre_proyecto_ref == nombre,
-            ]
-            ya = db.query(ContratoServicio).filter(*filtros).first()
-            if ya:
+            ya = indice.buscar(inv, nombre, sf, pid)
+            if ya is not None:
+                # Retroalimentar los campos que el registro no traia, para que la
+                # proxima corrida lo encuentre por cualquiera de los tres indices.
                 if not ya.nombre_proyecto_ref:
-                    ya.nombre_proyecto_ref = nombre  # retroalimentar registros viejos
+                    ya.nombre_proyecto_ref = nombre
+                if sf and not ya.codigo_sun_factory:
+                    ya.codigo_sun_factory = sf
+                indice.indexar(ya)
                 continue
 
             fecha_str = c.get("fecha_firma_contrato")
             fecha = date.fromisoformat(fecha_str) if fecha_str else None
 
-            db.add(ContratoServicio(
-                proyecto_id=_buscar(nombre, sf),
+            nuevo = ContratoServicio(
+                proyecto_id=pid,
                 servicio_aplica="representacion",
                 estado="vigente",
                 inversionista_nombre=inv,
@@ -2050,7 +2497,12 @@ def _run_cgm_seed() -> None:
                 indexacion_representacion=c.get("indexacion_representacion") or [],
                 fecha_firma_contrato=fecha,
                 enlace_drive=c.get("enlace_drive"),
-            ))
+            )
+            db.add(nuevo)
+            # Indexar el recien creado: si el propio seed repite la misma dupla
+            # (inversionista + planta), la segunda vuelta lo encuentra en vez de
+            # insertar otra copia.
+            indice.indexar(nuevo)
             insertados += 1
 
         db.commit()
@@ -2058,6 +2510,11 @@ def _run_cgm_seed() -> None:
             print(f"[cgm seed] {insertados} contratos nuevos insertados")
 
         # ── Paso 2: reparar proyecto_id = NULL en registros existentes ────────────
+        # Repara menos que antes, a proposito: _cgm_buscar_proyecto ya no adivina
+        # por palabras. Lo que no se resuelve por codigo Sun Factory o por numero
+        # de planta se queda en NULL y sale como "Sin proyecto" en
+        # Servicios > Representacion, donde se asigna a mano. Este paso nunca
+        # toca un proyecto_id ya asignado.
         sin_pid = db.execute(text("""
             SELECT id, codigo_sun_factory, nombre_proyecto_ref
             FROM contratos_servicio
@@ -2217,31 +2674,6 @@ def _scheduled_bolsa_ingest():
         print(f"[bolsa_ingest] Failed: {e}")
 
 
-def _scheduled_correlation_sync():
-    """Daily cross-database correlation sync."""
-    try:
-        db = SessionLocal()
-        try:
-            from app.services.correlation import correlate_projects
-            result = correlate_projects(db)
-            print(f"[correlation_sync] OK — {result.get('correlations_updated', 0)} updated")
-        except Exception as e:
-            print(f"[correlation_sync] Failed: {e}")
-            # Log error
-            try:
-                db.execute(text(
-                    "INSERT INTO correlation_sync_log (synced_at, projects_processed, correlations_updated, error) "
-                    "VALUES (NOW(), 0, 0, :err)"
-                ), {"err": str(e)})
-                db.commit()
-            except Exception:
-                db.rollback()
-        finally:
-            db.close()
-    except Exception as e:
-        print(f"[correlation_sync] Failed to get DB session: {e}")
-
-
 def _scheduled_comercializacion_backfill():
     """Rellena la fecha de inicio de comercialización (primer día con generación
     real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
@@ -2261,6 +2693,84 @@ def _scheduled_comercializacion_backfill():
             db.close()
     except Exception as e:
         print(f"[comercializacion_backfill] Failed to get DB session: {e}")
+
+
+def _scheduled_reporte_energia():
+    """Corre el clasificador de Reporte de Energía (Generación + Consumo)
+    para el día anterior, hora Bogotá -- a esa hora el reporte CGM de Quoia
+    ya suele estar asentado (ver hallazgos de sesión: Cedillanos/Baraya/La
+    Puya, el reporte de un día suele llegar completo entre las 9 y las 10am
+    del día siguiente). ejecutar_dia_background ya maneja su propia sesión
+    de BD, logging y registro en _ULTIMAS_CORRIDAS (mismo mecanismo que usa
+    POST /ejecutar) -- no hace falta duplicar nada acá, solo calcular la
+    fecha y llamarla."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from app.services.reporte_energia.orquestador import ejecutar_dia_background
+
+    fecha = (datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(days=1)).date()
+    ejecutar_dia_background(fecha)
+
+
+def _scheduled_excel_terceros_cedillanos():
+    """Revisa operaciones@unergy.io por correo nuevo de Cedillanos con su
+    Excel de CGM (ver excel_terceros_email.py) -- reemplaza la carga
+    manual. El reporte debe estar listo antes de las 6am, pero el correo
+    de Cedillanos históricamente llega entre 3:25am y 6:10am (con
+    tendencia a correrse más tarde, ver sesión 2026-08-14) -- por eso esta
+    función corre cada 15 min de 4am a 6am (ver registro del cron más
+    abajo) en vez de una sola vez, para minimizar el tiempo entre que el
+    correo llega y el dato queda cargado. Costo despreciable: sin correo
+    nuevo, cada corrida es solo un IMAP SEARCH que no toca la base de
+    datos (ver revisar_correo_cedillanos)."""
+    from app.services.reporte_energia.excel_terceros_email import revisar_correo_cedillanos
+
+    revisar_correo_cedillanos()
+
+
+def _scheduled_correos_mandatos():
+    """Lee el buzón de mandatos y alimenta finanzas_mandatos.
+
+    Cada hora de 7am a 7pm: los correos de la revisoría y los envíos a
+    inversionistas llegan en horario laboral. Sin correos nuevos la corrida es
+    solo un IMAP SEARCH que no toca la base.
+
+    Tres pasadas -- lo que llega de la revisoría, lo que Jessica manda a los
+    inversionistas, y lo que sale hacia la revisoría (carpeta Enviados, la que
+    permite saber cuántos mandatos se enviaron). Transacción por correo, y la
+    deduplicación va por Message-ID, así que una corrida interrumpida retoma
+    donde quedó.
+
+    El buzón es de una persona y nunca se modifica: todo `select` va con
+    readonly=True y no se marca nada como leído.
+
+    Reemplaza al diagnóstico que corrió mientras se verificaba la conexión
+    (app/services/mandatos/diagnostico.py, que ya se puede borrar). El endpoint
+    GET /mandatos/diagnostico-imap sigue disponible para probar a demanda.
+    """
+    from app.services.mandatos.finanzas_sync import revisar_correos_finanzas
+
+    revisar_correos_finanzas()
+
+
+def _scheduled_cerrar_contratos_vencidos():
+    """Mueve a 'terminado' las ofertas cuyo contrato PPA ya pasó su fecha_fin.
+
+    Diario e idempotente. Sin esto la etapa mentiría: nadie va a entrar al CRM
+    el día que vence un contrato a moverlo a mano."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.comercial import cerrar_contratos_vencidos
+            cerradas = cerrar_contratos_vencidos(db)
+            print(f"[comercial_cierres] OK — {len(cerradas)} oferta(s) a terminado"
+                  + (f": {[c['codigo'] for c in cerradas]}" if cerradas else ""))
+        except Exception as e:
+            print(f"[comercial_cierres] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[comercial_cierres] Failed to get DB session: {e}")
 
 
 def _scheduled_tsf_sync():
@@ -2313,9 +2823,7 @@ def _scheduled_representacion_alertas():
     Envía email 30 y 15 días antes del aniversario a _ALERTA_EMAILS.
     Corre diariamente a las 08:00.
     """
-    import json as _json
     from datetime import date, timedelta
-    from pathlib import Path as _Path
 
     try:
         from app.services.email_service import _smtp_send, _log_send
@@ -2326,9 +2834,30 @@ def _scheduled_representacion_alertas():
         if not _s.SMTP_HOST:
             return
 
-        data_dir = _Path(__file__).parent.parent / "data"
-        raw = _json.loads((data_dir / "DataCGM.json").read_text(encoding="utf-8"))
-        contratos = raw.get("Indexación", [])
+        # Antes esto leía data/DataCGM.json. Ahora la fuente es la tabla, que es
+        # lo que la plataforma muestra y deja editar: un cambio de tarifa o de
+        # fecha de firma hecho en la UI se refleja en la alerta.
+        from sqlalchemy.orm import sessionmaker
+        from app.models.contratos import ContratoServicio
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            filas = db.query(ContratoServicio).filter(
+                ContratoServicio.servicio_aplica == "representacion",
+                ContratoServicio.fecha_firma_contrato.isnot(None),
+            ).all()
+            contratos = [{
+                "Firma contrato": r.fecha_firma_contrato.isoformat(),
+                "Proyecto": r.nombre_proyecto_ref or (
+                    r.proyecto.nombre_comercial if r.proyecto else ""),
+                "Inversionista": r.inversionista_nombre or "",
+                "Tarifa CGM (kWh)": float(r.tarifa_cgm) if r.tarifa_cgm is not None else 0,
+                "Tarifa Representación (kWh)": (
+                    float(r.tarifa_representacion) if r.tarifa_representacion is not None else 0),
+            } for r in filas]
+        finally:
+            db.close()
 
         today = date.today()
         alertas_enviadas = 0
@@ -2966,41 +3495,23 @@ def _run_inversores_minigranja_seed() -> None:
         db.close()
 
 
-def _run_comercial_import() -> None:
-    """Carga idempotente de las hojas de prospección (Servicios + Energía +
-    Comunidades) al CRM comercial — mismo patrón que los demás *_seed. Corre en
-    el arranque, dentro del contenedor, contra la BD real; no requiere token.
-    Idempotente (por consecutivo o (cliente,tipo,planta)), así que repetir el
-    boot no duplica. Ver data/comercial_seed.json y POST /comercial/importar-hojas."""
-    from types import SimpleNamespace
+def _run_ppa_responsables_seed() -> None:
+    """Siembra el catálogo de empresas responsables de PPA (Unergy / Externo) y hace
+    la clasificación inicial de los contratos. Idempotente; la clasificación es
+    ONE-SHOT (ver sembrar_responsables_ppa) para que un redeploy no revierta lo que
+    se cambió a mano desde la UI. Los contratos externos que no casen por nombre
+    quedan en Unergy y salen listados en el log."""
     from app.core.database import SessionLocal
-    from app.api.v1.comercial import importar_hojas
+    from app.api.v1.ppa import sembrar_responsables_ppa
 
     db = SessionLocal()
     try:
-        from app.models.comercial import OportunidadOferta
-        hay_ofertas = db.query(OportunidadOferta.id).first() is not None
-        hay_detalle = (db.query(OportunidadOferta.id)
-                       .filter(OportunidadOferta.detalle.isnot(None)).first() is not None)
-        if hay_ofertas and hay_detalle:
-            # Ya cargado y enriquecido (la señal se apaga porque las filas de
-            # servicios sí reciben `detalle`). No tocar (evita recrear borradas).
-            print("[startup] comercial_import: ya cargado y enriquecido, se omite")
-            return
-        admin_id = None
-        try:
-            from app.models.usuarios import Usuario
-            adm = db.query(Usuario).filter(Usuario.rol == "admin").first()
-            admin_id = adm.id if adm else None
-        except Exception:
-            admin_id = None
-        current = SimpleNamespace(id=admin_id, rol=SimpleNamespace(value="admin"))
-        # 0 ofertas → carga completa. Ya hay ofertas pero sin detalle → solo
-        # enriquecer (rellena detalle/precio/etc. sin crear ni resucitar borradas).
-        crear = not hay_ofertas
-        res = importar_hojas(dry_run=False, crear_faltantes=crear, db=db, current=current)
-        print(f"[startup] comercial_import (crear_faltantes={crear}): "
-              f"clientes={res['clientes']} ofertas={res['ofertas']} sin_empresa={res['sin_empresa']}")
+        rep = sembrar_responsables_ppa(db)
+        if rep["clasifico"]:
+            print(f"[startup] ppa_responsables_seed: Unergy={rep['unergy']} Externo={rep['externo']}"
+                  + (f" · SIN MATCH (quedaron en Unergy): {rep['sin_match']}" if rep["sin_match"] else ""))
+        else:
+            print("[startup] ppa_responsables_seed: catálogo ok, clasificación ya hecha (se omite)")
     finally:
         db.close()
 
@@ -3089,7 +3600,6 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
-        ("comercial_import", _run_comercial_import),
         ("comercial_dedup", _run_comercial_dedup),
         ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),
@@ -3106,6 +3616,7 @@ def _deferred_init():
         ("arr_documento_proyecto_id_backfill", _run_arr_documento_proyecto_id_backfill),
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
+        ("ppa_responsables_seed", _run_ppa_responsables_seed),
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:
@@ -3166,13 +3677,6 @@ def _deferred_init():
                 )
 
             _mgs_scheduler.add_job(
-                _scheduled_correlation_sync,
-                CronTrigger(hour=2, minute=0, timezone=settings.TIMEZONE),
-                id="correlation_sync",
-                name="Daily correlation sync",
-            )
-
-            _mgs_scheduler.add_job(
                 _scheduled_representacion_alertas,
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
@@ -3190,19 +3694,70 @@ def _deferred_init():
             )
 
             _mgs_scheduler.add_job(
+                _scheduled_reporte_energia,
+                # Adelantado de 4:00am a 3:30am (2026-08-21): la corrida del
+                # 20-ago tardó >45 min sin terminar (vs. 23-50 min los 10
+                # días previos, siempre completando las 106 filas) -- media
+                # hora más de margen antes de que alguien la revise en la
+                # mañana. Contrapartida asumida a propósito: lee el CGM de
+                # Quoia un poco menos asentado que a las 4am (ver docstring
+                # de _scheduled_reporte_energia).
+                CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
+                id="reporte_energia_clasificar",
+                name="Reporte de Energía -- clasificar día anterior",
+            )
+
+            if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                # Cada 15 min de 4:00am a 6:00am (9 corridas) -- el correo de
+                # Cedillanos históricamente llega entre 3:25am y 6:10am (con
+                # tendencia a correrse más tarde) y el reporte debe estar
+                # listo antes de las 6am. Dos triggers porque CronTrigger no
+                # soporta minutos distintos por hora en una sola expresión
+                # (4am-5:45am cada 15 min + 6:00am exacto, el último intento
+                # antes del corte).
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour="4,5", minute="*/15", timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (4-5:45am)",
+                )
+                _mgs_scheduler.add_job(
+                    _scheduled_excel_terceros_cedillanos,
+                    CronTrigger(hour=6, minute=0, timezone=settings.TIMEZONE),
+                    id="excel_terceros_cedillanos_6am",
+                    name="Reporte de Energía -- Excel de Cedillanos por correo (6am, último intento)",
+                )
+
+            if settings.MANDATOS_IMAP_USER and settings.MANDATOS_IMAP_PASSWORD:
+                _mgs_scheduler.add_job(
+                    _scheduled_correos_mandatos,
+                    CronTrigger(hour="7-19", minute=5, timezone=settings.TIMEZONE),
+                    id="correos_mandatos",
+                    name="Mandatos -- lectura de correo por IMAP (7am-7pm)",
+                )
+
+            # Ofertas cuyo PPA ya vencio -> etapa 'terminado'. Justo despues del
+            # cambio de dia para que el tablero amanezca correcto.
+            _mgs_scheduler.add_job(
+                _scheduled_cerrar_contratos_vencidos,
+                CronTrigger(hour=0, minute=20, timezone=settings.TIMEZONE),
+                id="comercial_cierres",
+                name="Cerrar ofertas con contrato vencido",
+            )
+
+            _mgs_scheduler.add_job(
                 _scheduled_om_ipc_check,
                 CronTrigger(month=1, day=1, hour=9, minute=0, timezone=settings.TIMEZONE),
                 id="om_ipc_check",
                 name="Check IPC anual O&M",
             )
 
-            if settings.ORIGINA_DATABASE_URL:
-                _mgs_scheduler.add_job(
-                    _scheduled_tsf_sync,
-                    IntervalTrigger(hours=6),
-                    id="tsf_sync",
-                    name="Sync pipeline TSF -> proyectos",
-                )
+            _mgs_scheduler.add_job(
+                _scheduled_tsf_sync,
+                IntervalTrigger(hours=6),
+                id="tsf_sync",
+                name="Sync pipeline TSF -> proyectos",
+            )
 
             _mgs_scheduler.start()
             poll_once_async()

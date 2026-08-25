@@ -9,22 +9,27 @@ Endpoints:
   POST   /mandatos/upload-firmado           → subir PDF firmado (asocia por CMU del nombre)
   POST   /mandatos/{id}/asociar-pdf         → asociar PDF subido a un CMU manualmente
   DELETE /mandatos/{id}                     → eliminar
+  POST   /mandatos/ejecutar-ingesta         → correr la lectura de correo AHORA (admin)
+  GET    /mandatos/diagnostico-imap          → probar la conexión IMAP (solo lee)
+  GET    /mandatos/correos                  → bitácora de correos leídos por IMAP
+  POST   /mandatos/correos/{id}/revertir    → revertir cambios de un correo
   GET    /mandato-inversionistas            → tabla maestra
 """
 from __future__ import annotations
 import io
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
+                     Query, UploadFile)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import _require_admin, get_current_user
 from app.core.database import get_db
-from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum
+from app.models.mandatos import Mandato, MandatoInversionista, EstadoMandatoCostoEnum, MandatoCorreo
 from app.schemas.mandatos import MandatoCrear, MandatoActualizar, InversionistaOut
 from app.services.mandatos_service import (
     mandato_to_dict, calcular_resumen, transicion_valida, extraer_cmu_de_nombre,
@@ -39,6 +44,163 @@ _PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 _ZIP_DIR = Path("uploads/mandatos/zips")
 _ZIP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/ejecutar-ingesta")
+def ejecutar_ingesta(tareas: BackgroundTasks,
+                     reprocesar_desde: str = Query(None),
+                     dias: int = Query(30, ge=1, le=1825),
+                     db: Session = Depends(get_db), _=Depends(_require_admin)):
+    """Corre la lectura de correo AHORA, sin esperar al cron de las :05.
+
+    **Esto escribe.** Hace exactamente lo mismo que el cron: lee el buzón,
+    aplica lo que encuentra a finanzas_mandatos y registra todo en la bitácora.
+
+    Existe porque el cron solo corre de 7am a 7pm; sin esto, una primera tanda
+    que caiga fuera de esa ventana se procesaría de madrugada sin nadie
+    mirando. Correrlo cuando alguien está pendiente es más seguro.
+
+    Es POST y no GET a propósito: un GET se dispara con solo abrir la URL, y
+    con un prefetch del navegador podría ejecutarse sin que nadie lo pidiera.
+    Pide rol admin por la misma razón -- no es una consulta, es una acción.
+
+    Volver a correrlo es inofensivo: la deduplicación va por Message-ID, así
+    que los correos ya procesados se saltan.
+
+    ── dias=N ───────────────────────────────────────────────────────────────
+    Cuánto mirar hacia atrás. 30 por defecto, que es lo que necesita la
+    operación diaria. Para recuperar histórico se sube: 365 es un año, 730 son
+    dos. El tope de 1825 (cinco años) existe para que un cero de más no dispare
+    una corrida absurda por accidente.
+
+    Una ventana grande es cara -- cada PDF se abre para revisar firmas y los
+    mandatos nuevos se suben a Drive -- pero es segura de reintentar: si la
+    corrida se corta a mitad, la siguiente retoma donde quedó porque la
+    deduplicación va por Message-ID. Conviene subirla por tramos (90, 180, 365)
+    en vez de pedir cinco años de una: así se ve si algo sale raro con menos
+    volumen encima.
+
+    ── reprocesar_desde=YYYY-MM-DD ──────────────────────────────────────────
+    Borra las filas de bitácora desde esa fecha para que sus correos se vuelvan
+    a leer. Sirve cuando el parser mejoró y hay que reinterpretar lo ya visto.
+
+    **Destruye información que no se puede reconstruir.** Cada fila guarda en
+    `detalle` el `estado_previo` de los mandatos que ese correo cambió, y de ahí
+    sale el botón de revertir. Al reprocesar, lo que ya está aplicado dará
+    `sin_cambio` -- correcto, pero sin capturar un estado previo, porque ya no
+    cambia nada. O sea que se pierde la constancia de cómo estaban los mandatos
+    antes de que la automatización los tocara.
+
+    Exportar la bitácora antes: `GET /mandatos/correos?limite=500`.
+
+    Pide fecha explícita a propósito, en vez de un `todo=true`: obliga a
+    declarar el alcance y hace imposible vaciar la tabla entera por descuido.
+    """
+    from app.services.mandatos.finanzas_sync import (
+        ingesta_en_curso, revisar_correos_finanzas_async,
+    )
+
+    if ingesta_en_curso():
+        raise HTTPException(409, "Ya hay una corrida en curso. Espera a que "
+                                 "termine antes de lanzar otra.")
+
+    borradas = 0
+    if reprocesar_desde:
+        try:
+            desde = datetime.strptime(reprocesar_desde.strip()[:10], "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(422, "reprocesar_desde debe ser YYYY-MM-DD")
+        borradas = db.query(MandatoCorreo).filter(
+            MandatoCorreo.fecha >= desde.replace(tzinfo=timezone.utc)).delete(
+                synchronize_session=False)
+        db.commit()
+
+    # En segundo plano a propósito. Leer 90 días son minutos de trabajo -- cada
+    # PDF se abre para revisar firmas -- y el proxy de Vercel corta la conexión
+    # mucho antes, devolviendo un 502 que parece un fallo del backend cuando en
+    # realidad el proceso sigue corriendo. Respondiendo de una, el cliente sabe
+    # que arrancó y consulta el avance en /mandatos/correos.
+    tareas.add_task(revisar_correos_finanzas_async, dias)
+    return {"ok": True, "estado": "arrancó en segundo plano",
+            "dias": dias,
+            "bitacora_borrada": borradas if reprocesar_desde else 0,
+            "reprocesado_desde": reprocesar_desde,
+            "como_ver_avance": "GET /api/v1/mandatos/correos?limite=500 "
+                               "-- el conteo va subiendo mientras procesa"}
+
+
+@router.get("/diagnostico-imap")
+def diagnostico_imap_endpoint(_=Depends(get_current_user)):
+    """Prueba la conexión IMAP a demanda y devuelve lo que encontraría.
+
+    Existe porque el cron corre a los :05 y esperar una hora para saber si el
+    App Password sirve es absurdo. Solo lee: no toca la base de datos ni
+    modifica el buzón. Provisional, igual que el módulo que invoca -- se borra
+    junto con él cuando la ingesta real entre en servicio.
+    """
+    from app.services.mandatos.diagnostico import diagnostico_imap
+
+    return diagnostico_imap()
+
+
+@router.get("/correos")
+def listar_correos(limite: int = 100, solo_revision: bool = False,
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Bitácora de correos leídos por IMAP, del más reciente al más viejo."""
+    q = select(MandatoCorreo).order_by(MandatoCorreo.fecha.desc())
+    if solo_revision:
+        q = q.where(MandatoCorreo.requiere_revision.is_(True))
+    filas = db.execute(q.limit(min(limite, 500))).scalars().all()
+    return [{
+        "id": f.id, "fecha": f.fecha.isoformat(), "remitente": f.remitente,
+        "asunto": f.asunto, "fuente": f.fuente, "clasificacion": f.clasificacion,
+        "resultado": f.resultado, "requiere_revision": f.requiere_revision,
+        "revertido": f.revertido, "detalle": f.detalle,
+    } for f in filas]
+
+
+@router.post("/correos/{correo_id}/revertir")
+def revertir_correo(correo_id: int, db: Session = Depends(get_db),
+                    _=Depends(get_current_user)):
+    """Devuelve a su valor previo todos los campos que este correo cambió en
+    cada mandato: estado, observación, fechas y referencias de correo.
+
+    No borra PDFs guardados ni la fila de bitácora, y tampoco desasocia
+    pdf_firmado_ruta/pdf_firmado_nombre: revertir un estado no des-firma un
+    documento que sí existe, así que esos dos campos se dejan intactos a
+    propósito aunque el correo los haya asignado.
+    """
+    fila = db.get(MandatoCorreo, correo_id)
+    if not fila:
+        raise HTTPException(404, "Correo no encontrado.")
+    if fila.revertido:
+        raise HTTPException(409, "Este correo ya fue revertido.")
+
+    revertidos = []
+    for accion in (fila.detalle or {}).get("acciones", []):
+        if accion.get("resultado") != "aplicado":
+            continue
+        m = db.get(Mandato, accion.get("mandato_id"))
+        if not m:
+            continue
+        m.estado = accion["estado_previo"]
+        if "observacion_previa" in accion:
+            m.observacion = accion["observacion_previa"]
+        if "fecha_firmado_previa" in accion:
+            m.fecha_firmado = accion["fecha_firmado_previa"]
+        if "fecha_envio_inversionista_previa" in accion:
+            valor = accion["fecha_envio_inversionista_previa"]
+            m.fecha_envio_inversionista = date.fromisoformat(valor) if valor else None
+        if "correo_ref_envio_previo" in accion:
+            m.correo_ref_envio = accion["correo_ref_envio_previo"]
+        if "correo_ref_revisoria_previo" in accion:
+            m.correo_ref_revisoria = accion["correo_ref_revisoria_previo"]
+        revertidos.append(m.cmu)
+
+    fila.revertido = True
+    fila.requiere_revision = True
+    db.commit()
+    return {"revertidos": revertidos, "total": len(revertidos)}
 
 
 def _periodo_a_date(periodo: str) -> date:
@@ -154,13 +316,23 @@ async def upload_firmado(periodo: str = Form(...), file: UploadFile = File(...),
 
 
 @router.post("/{mandato_id}/asociar-pdf")
-def asociar_pdf(mandato_id: int, ruta: str = Form(...), nombre: str = Form(...),
+def asociar_pdf(mandato_id: int, nombre: str = Form(...),
                 db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Asocia manualmente un PDF ya subido a `_PDF_DIR` (vía upload-firmado) a
+    otro mandato. Solo recibe el nombre de archivo (no una ruta) para no permitir
+    que el cliente apunte a un archivo arbitrario del servidor."""
     m = db.get(Mandato, mandato_id)
     if not m:
         raise HTTPException(404, "Mandato no encontrado.")
-    m.pdf_firmado_ruta = ruta
-    m.pdf_firmado_nombre = nombre
+    destino = _PDF_DIR / Path(nombre).name
+    try:
+        destino.resolve().relative_to(_PDF_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, "Nombre de archivo inválido.")
+    if not destino.is_file():
+        raise HTTPException(404, "El archivo no existe en el servidor. Súbelo primero con 'Subir firmados'.")
+    m.pdf_firmado_ruta = str(destino)
+    m.pdf_firmado_nombre = destino.name
     m.fecha_firmado = m.fecha_firmado or date.today()
     if transicion_valida(m.estado, "firmado"):
         m.estado = "firmado"
@@ -241,24 +413,41 @@ async def upload_zip(periodo: str = Form(...), file: UploadFile = File(...),
 
 @router.get("/{mandato_id}/pdf")
 def descargar_pdf(mandato_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Sirve el PDF firmado del mandato, sin importar si llegó por 'Subir
+    firmados' (archivo suelto en _PDF_DIR) o dentro del ZIP del período."""
     m = db.get(Mandato, mandato_id)
     if not m:
         raise HTTPException(404, "Mandato no encontrado.")
-    if not m.archivo_zip_nombre:
-        raise HTTPException(404, "Este mandato no tiene PDF asociado en un ZIP.")
-    periodo = m.periodo.strftime("%Y-%m")
-    zpath = _ZIP_DIR / f"{periodo}.zip"
-    if not zpath.exists():
-        raise HTTPException(404, "No se encontró el ZIP del período.")
-    zf = zipfile.ZipFile(zpath)
-    entry = next((n for n in zf.namelist() if n.split("/")[-1] == m.archivo_zip_nombre), None)
-    if not entry:
-        raise HTTPException(404, "El PDF no está dentro del ZIP del período.")
-    data = zf.read(entry)
-    return StreamingResponse(
-        io.BytesIO(data), media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{m.archivo_zip_nombre}"'},
-    )
+
+    if m.pdf_firmado_ruta:
+        ruta = Path(m.pdf_firmado_ruta)
+        try:
+            ruta.resolve().relative_to(_PDF_DIR.resolve())
+        except ValueError:
+            raise HTTPException(404, "PDF no disponible.")
+        if not ruta.is_file():
+            raise HTTPException(404, "El archivo del PDF ya no existe en el servidor.")
+        return StreamingResponse(
+            io.BytesIO(ruta.read_bytes()), media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{m.pdf_firmado_nombre or ruta.name}"'},
+        )
+
+    if m.archivo_zip_nombre:
+        periodo = m.periodo.strftime("%Y-%m")
+        zpath = _ZIP_DIR / f"{periodo}.zip"
+        if not zpath.exists():
+            raise HTTPException(404, "No se encontró el ZIP del período.")
+        zf = zipfile.ZipFile(zpath)
+        entry = next((n for n in zf.namelist() if n.split("/")[-1] == m.archivo_zip_nombre), None)
+        if not entry:
+            raise HTTPException(404, "El PDF no está dentro del ZIP del período.")
+        data = zf.read(entry)
+        return StreamingResponse(
+            io.BytesIO(data), media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{m.archivo_zip_nombre}"'},
+        )
+
+    raise HTTPException(404, "Este mandato no tiene PDF asociado.")
 
 
 @maestra_router.get("")

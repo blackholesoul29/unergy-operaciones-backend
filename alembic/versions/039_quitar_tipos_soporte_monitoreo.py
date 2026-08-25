@@ -43,7 +43,13 @@ def upgrade() -> None:
         "proyecto_area_contacto", "t2.proyecto_id = proyecto_area_contacto.proyecto_id"
     )
 
-    op.execute("CREATE TYPE tipo_contacto_enum_new AS ENUM ('operacional', 'cgm', 'liquidacion')")
+    # Fix 2026-08-19: 'comercial' y 'contable' se agregaron despues (vía
+    # _PENDING_DDLS en app/main.py) de que esta migración se escribiera --
+    # si el enum se reconstruye solo con los 3 valores originales, esos dos
+    # se pierden y cualquier INSERT/UPDATE futuro con tipo='comercial' o
+    # 'contable' falla a nivel de base de datos aunque el código Python lo
+    # permita (ver app/models/contactos.py TipoContactoEnum).
+    op.execute("CREATE TYPE tipo_contacto_enum_new AS ENUM ('operacional', 'cgm', 'liquidacion', 'comercial', 'contable')")
     op.execute("ALTER TABLE contactos ALTER COLUMN tipo TYPE tipo_contacto_enum_new USING tipo::text::tipo_contacto_enum_new")
     op.execute("ALTER TABLE proyecto_area_contacto ALTER COLUMN tipo TYPE tipo_contacto_enum_new USING tipo::text::tipo_contacto_enum_new")
     op.execute("DROP TYPE tipo_contacto_enum")

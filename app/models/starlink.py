@@ -25,7 +25,9 @@ class StarlinkFactura(Base):
 class StarlinkMapeoSitio(Base):
     """Mapeo persistido y editable: nombre de sitio del PDF → proyecto (minigranja).
     Reemplaza el hardcode STARLINK_TO_PANEL del frontend. Match 1:1 por nombre
-    normalizado (los splits ya los aplica el parser antes de agrupar)."""
+    normalizado (los splits ya los aplica el parser antes de agrupar).
+    excluido = el sitio no corresponde a un proyecto nuestro (ej. tema contable,
+    oficina) — se deja sin proyecto_id pero no cuenta como "sin asignar" pendiente."""
     __tablename__ = "starlink_mapeo_sitio"
 
     id:          Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -34,6 +36,8 @@ class StarlinkMapeoSitio(Base):
         BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     activo:      Mapped[bool] = mapped_column(Boolean, nullable=False,
                                               default=True, server_default="true")
+    excluido:    Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                              default=False, server_default="false")
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   server_default=func.now(), onupdate=func.now())
@@ -52,6 +56,8 @@ class StarlinkFacturaLinea(Base):
     proyecto_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
     descripcion: Mapped[str]   = mapped_column(String(255), nullable=False)
+    excluido:    Mapped[bool]  = mapped_column(Boolean, nullable=False,
+                                               default=False, server_default="false")
     sin_iva:     Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
     iva:         Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
     monto_total: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)

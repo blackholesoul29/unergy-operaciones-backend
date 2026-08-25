@@ -2,10 +2,15 @@ from datetime import date, datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.proyectos import ProyectoCreate
+
 OrigenClienteLiteral = Literal["prospeccion_propia", "recomendacion", "referido", "otro"]
-EstadoOportunidadLiteral = Literal[
-    "prospeccion", "envio_oferta", "negociacion_contrato", "firmado", "operando", "declinado"
+# Pipeline de la oferta (2026-08-02). Antes vivía en la oportunidad y se llamaba
+# prospeccion / envio_oferta / negociacion_contrato.
+EstadoComercialLiteral = Literal[
+    "oportunidad", "oferta", "contrato", "firmado", "operando", "terminado", "declinado"
 ]
+EstadoOportunidadLiteral = EstadoComercialLiteral  # alias de compatibilidad
 TipoServicioLiteral = Literal["representacion", "comunidad_energetica"]
 TipoOfertaLiteral = Literal["servicios_operacionales", "compra_energia", "comunidad_energetica"]
 ResultadoOfertaLiteral = Literal["pendiente", "aceptado", "declinado"]
@@ -65,18 +70,73 @@ class OportunidadUpdate(BaseModel):
     notas: Optional[str] = None
 
 
+class PrecioAnualIn(BaseModel):
+    """Una fila de la tabla de precios de la oferta: año de suministro y $COP/kWh.
+    Al firmar se expande a 12 filas de `ppa_tarifas` (una por mes)."""
+    anio: int = Field(ge=2000, le=2100)
+    precio: float = Field(gt=0)
+
+
+class FirmarOfertaIn(BaseModel):
+    """Convierte una oferta aceptada en su contrato y la mueve a 'firmado'.
+
+    Las condiciones NO se guardan en la oferta: alimentan el contrato PPA
+    (o de representación), que es donde ya viven y donde las leen Cumplimiento
+    y Liquidaciones. La oferta solo se queda con el enlace.
+    """
+    numero_codigo_contrato: Optional[str] = None
+    nombre_interno: Optional[str] = None
+    fecha_inicio: date
+    fecha_fin: date
+    # Tarifa única cuando no hay tabla por año (Bayunca: 300 $/kWh planos).
+    tarifa_base: Optional[float] = Field(None, gt=0)
+    precios_anuales: Optional[list[PrecioAnualIn]] = None
+    indice_indexacion: Optional[str] = None
+    # Mes base de indexación en formato YYYY-MM, como lo guarda ppa_contratos.
+    periodo_indexacion_base: Optional[str] = Field(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    cantidad_minima_kwh_mes: Optional[float] = Field(None, ge=0)
+    carpeta_link: Optional[str] = None
+
+    @model_validator(mode="after")
+    def coherente(self):
+        if self.fecha_fin < self.fecha_inicio:
+            raise ValueError("fecha_fin no puede ser anterior a fecha_inicio")
+        if not self.tarifa_base and not self.precios_anuales:
+            raise ValueError("envía tarifa_base o precios_anuales")
+        if self.precios_anuales:
+            anios = [p.anio for p in self.precios_anuales]
+            if len(anios) != len(set(anios)):
+                raise ValueError("la tabla de precios tiene años repetidos")
+        return self
+
+
 class OfertaCreate(BaseModel):
     tipo: TipoOfertaLiteral
     planta_nombre: Optional[str] = None
     proyecto_id: Optional[int] = None
+    # Plantas de la oferta (M2M). Una oferta puede cubrir varias ("Balmora 1 y 2");
+    # es lo que /firmar pasa al contrato. Si se envía, la primera se copia también
+    # a `proyecto_id`, que es lo que siguen leyendo el vinculador y la ficha.
+    proyecto_ids: Optional[list[int]] = None
     numero_oferta: Optional[str] = None
     precio_detalle: Optional[str] = None
-    resultado: ResultadoOfertaLiteral = "pendiente"
+    # `resultado` ya no se envía: se deriva de `estado` (ver estado_a_resultado).
+    estado: EstadoComercialLiteral = "oportunidad"
     etapa_texto: Optional[str] = None
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
+    fecha_fin_tentativa: Optional[date] = None
     contrato_firmado: Optional[str] = None
+    documento_url: Optional[str] = None
     detalle: Optional[dict] = None
+    # ── Ficha operativa declarada (2026-08-03) ───────────────────────────────
+    # Solo aplican cuando la planta no existe como Proyecto: si lo tiene, manda
+    # el Proyecto (ver ficha_operativa). Editables porque si no, el equipo no
+    # puede llenarlos nunca.
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    operador_red_id: Optional[int] = None
+    energia_promedio_kwh_mes: Optional[float] = Field(None, ge=0)
     notas: Optional[str] = None
 
 
@@ -84,31 +144,89 @@ class OfertaUpdate(BaseModel):
     tipo: Optional[TipoOfertaLiteral] = None
     planta_nombre: Optional[str] = None
     proyecto_id: Optional[int] = None
+    # Ver OfertaCreate.proyecto_ids. Lista vacía = desvincular todas las plantas.
+    proyecto_ids: Optional[list[int]] = None
     numero_oferta: Optional[str] = None
     precio_detalle: Optional[str] = None
-    resultado: Optional[ResultadoOfertaLiteral] = None
+    # El estado se cambia por POST /ofertas/{id}/estado, que además deja histórico.
     etapa_texto: Optional[str] = None
     fecha_oferta: Optional[date] = None
     fecha_tentativa_inicio: Optional[date] = None
+    fecha_fin_tentativa: Optional[date] = None
     contrato_firmado: Optional[str] = None
     detalle: Optional[dict] = None
+    # ── Seguimiento del envío (editables desde 2026-08-19) ───────────────────
+    # Antes solo los escribía el import de correos y el +1 de /seguimiento: no
+    # había forma de registrar que el cliente CONTESTÓ, que es lo que apaga la
+    # señal fuerte del tablero. `seguimientos` es editable para corregir un
+    # conteo mal importado, no para reemplazar a POST /ofertas/{id}/seguimiento.
+    fecha_ultima_respuesta: Optional[date] = None
+    seguimientos: Optional[int] = Field(None, ge=0)
+    documento_url: Optional[str] = None
+    # En qué contrato de servicios desembocó. El PPA lo enlaza /firmar solo; los
+    # contratos de representación se crean por su propio wizard, así que el
+    # enlace tiene que poder hacerse a mano o la oferta queda huérfana.
+    contrato_servicio_id: Optional[int] = None
+    # Ficha operativa declarada — ver OfertaCreate.
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    operador_red_id: Optional[int] = None
+    energia_promedio_kwh_mes: Optional[float] = Field(None, ge=0)
     notas: Optional[str] = None
 
 
 class EstadoChangeIn(BaseModel):
-    estado: EstadoOportunidadLiteral
+    estado: EstadoComercialLiteral
 
 
 class GestionCreate(BaseModel):
     tipo: TipoGestionLiteral
     descripcion: str = Field(min_length=1)
     fecha: Optional[datetime] = None
+    # A cuál oferta se refiere. NULL = gestión del cliente: cuenta para todas
+    # sus ofertas, que es como se comportaban todas antes de 2026-08-19.
+    oferta_id: Optional[int] = None
 
 
-class ProyectoDesdeCRMIn(BaseModel):
+class RegistroComercialIn(BaseModel):
+    """Registro comercial completo en UNA transacción: cliente (nuevo o existente)
+    + oportunidad + sus ofertas.
+
+    Existe porque el registro en dos llamadas dejaba oportunidades sin ofertas, y
+    una oportunidad sin ofertas es INVISIBLE en toda la aplicación: el tablero y la
+    tabla se alimentan de las ofertas. Quien registraba veía "creado con éxito" y
+    después no encontraba nada. Por eso `ofertas` exige al menos una.
+    """
+    cliente_id: Optional[int] = None
+    cliente_nuevo: Optional[ClienteNuevoIn] = None
+    nombre: Optional[str] = None
+    notas: Optional[str] = None
+    forzar_cliente_duplicado: bool = False
+    ofertas: list[OfertaCreate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def exactamente_un_cliente(self):
+        if bool(self.cliente_id) == bool(self.cliente_nuevo):
+            raise ValueError("Envía cliente_id O cliente_nuevo (exactamente uno)")
+        return self
+
+
+class ProyectoDesdeCRMIn(ProyectoCreate):
+    """Una planta creada desde el CRM es un Proyecto normal de la plataforma.
+
+    Hereda `ProyectoCreate` — el MISMO esquema del `POST /proyectos` que usa
+    /proyectos — a propósito: el CRM no guarda datos de proyecto propios, lee de
+    la tabla `proyectos` o crea filas ahí. Antes declaraba sus cinco campos a
+    mano (nombre, kWp, departamento, municipio, operador) y descartaba en
+    silencio todo lo demás que trae un proyecto: coordenadas, dirección, tipo,
+    estado, clasificación regulatoria, comunidad energética, códigos de cruce,
+    curvas P50/P90. La planta nacía vacía y `GET /comercial/proyectos-operando`
+    —que resuelve casi toda su ficha desde el Proyecto— devolvía campos nulos.
+
+    Lo único que el CRM endurece sobre el esquema base es el operador de red:
+    ahí es obligatorio (validación bloqueante del CRM, spec §4.2) y en
+    /proyectos es opcional.
+    """
+
     nombre_comercial: str = Field(min_length=1)
-    potencia_instalada_kwp: Optional[float] = None
-    departamento: Optional[str] = None
-    municipio: Optional[str] = None
-    # OBLIGATORIO — validación bloqueante del CRM (spec §4.2).
     operador_red_id: int

@@ -106,7 +106,7 @@ def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
             pass
 
     # 2/3. Matching por nombre
-    candidates = [p.nombre_comercial, p.alias_monitoreo, p.nombre_bitacora]
+    candidates = [p.nombre_comercial, p.nombre_bitacora]
     for name in candidates:
         norm = _normalize_name(name or "")
         if not norm:
@@ -625,7 +625,7 @@ def debug_matching(
             matched.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "sol_id": sol_id})
         else:
             unmatched_ours.append({"proyecto_id": p.id, "nombre": p.nombre_comercial,
-                                   "alias": p.alias_monitoreo, "bitacora": p.nombre_bitacora})
+                                   "bitacora": p.nombre_bitacora})
 
     matched_sol_ids = {m["sol_id"] for m in matched}
     unmatched_solenium = [
@@ -1067,7 +1067,11 @@ def fleet_monitoring(
     _=Depends(get_current_user),
 ):
     """
-    Fleet monitoring: only DB projects with project_id_solenium set.
+    Fleet monitoring: DB projects en operación, minigranja y con servicio de
+    operación. Si a alguno le falta project_id_solenium, se resuelve por
+    coincidencia de nombre contra Solenium (igual que en /generacion-hoy) y se
+    persiste en la BD, para no depender de asignarlo a mano cada vez que se
+    activa un proyecto nuevo.
     Returns status (online/caido/degradado/sin_comunicacion) per project.
     Status determined by Solenium availability category:
       disconnect → sin_comunicacion
@@ -1079,7 +1083,6 @@ def fleet_monitoring(
 
     proyectos = db.query(Proyecto).filter(
         Proyecto.estado == "en_operacion",
-        Proyecto.project_id_solenium.isnot(None),
         Proyecto.tipo_proyecto == TipoProyectoEnum.minigranja,
         Proyecto.srv_operacion == True,  # noqa: E712
     ).all()
@@ -1093,16 +1096,21 @@ def fleet_monitoring(
             "projects": [],
         }
 
-    # Caché de flota (evita 2 llamadas Solenium por cada refresh)
+    # Caché de flota (evita llamadas Solenium por cada refresh)
     _FLEET_CACHE_KEY = f"fleet:{_hoy_col().isoformat()}"
     cached = _cache_get(_FLEET_CACHE_KEY)
     if cached:
         return cached
 
-    # Paralelizar las 2 llamadas Solenium que antes eran seriales
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        avail_f   = ex.submit(client.get_availability)
-        summary_f = ex.submit(client.get_project_summary)
+    sin_id = [p for p in proyectos if not p.project_id_solenium]
+
+    # Paralelizar las llamadas Solenium que antes eran seriales. Solo se pide
+    # get_projects() (para el matching por nombre) si hay algún proyecto sin
+    # project_id_solenium asignado.
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        avail_f    = ex.submit(client.get_availability)
+        summary_f  = ex.submit(client.get_project_summary)
+        projects_f = ex.submit(client.get_projects) if sin_id else None
     avail_map    = avail_f.result() or {}
     summary_list = summary_f.result() or []
 
@@ -1111,6 +1119,42 @@ def fleet_monitoring(
         pid = s.get("project_id") or s.get("id")
         if pid is not None:
             summary_map[int(pid)] = s
+
+    if sin_id:
+        sol_name_map: dict[str, int] = {}
+        for sp in (projects_f.result() or []):
+            pid = sp.get("id")
+            if pid is not None:
+                sol_name_map[_normalize_name(sp.get("name") or "")] = int(pid)
+
+        # project_id_solenium es único en la tabla: un mismo sol_id puede matchear
+        # por nombre a dos proyectos internos distintos (ej. planta principal vs.
+        # su proyecto de "excedentes"). Sin este chequeo, ese conflicto revienta
+        # el UPDATE de TODOS los proyectos de este lote (misma transacción) y
+        # ninguno queda asignado, aunque su match individual fuera correcto.
+        used_ids = {
+            v for (v,) in db.query(Proyecto.project_id_solenium)
+                            .filter(Proyecto.project_id_solenium.isnot(None)).all()
+        }
+
+        for p in sin_id:
+            sol_id = _find_solenium_id(p, sol_name_map)
+            if sol_id is None:
+                logger.warning("sin match solenium al auto-asignar: proyecto_id=%d nombre='%s'",
+                                p.id, p.nombre_comercial)
+                continue
+            if str(sol_id) in used_ids:
+                logger.warning(
+                    "match ambiguo al auto-asignar: proyecto_id=%d nombre='%s' -> sol_id=%d "
+                    "ya asignado a otro proyecto, requiere revisión manual",
+                    p.id, p.nombre_comercial, sol_id)
+                continue
+            logger.info("auto-asignando project_id_solenium=%d a proyecto_id=%d nombre='%s'",
+                        sol_id, p.id, p.nombre_comercial)
+            p.project_id_solenium = str(sol_id)
+            db.add(p)
+            used_ids.add(str(sol_id))
+        db.commit()
 
     today_str = _hoy_col().isoformat()
     today_rows = db.execute(
@@ -1126,7 +1170,12 @@ def fleet_monitoring(
     counts = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0}
 
     for p in proyectos:
-        sol_id = int(p.project_id_solenium)
+        try:
+            sol_id = int(p.project_id_solenium)
+        except (TypeError, ValueError):
+            logger.warning("project_id_solenium inválido proyecto_id=%s valor=%r",
+                            p.id, p.project_id_solenium)
+            continue
         avail   = avail_map.get(sol_id, {})
         summary = summary_map.get(sol_id, {})
 

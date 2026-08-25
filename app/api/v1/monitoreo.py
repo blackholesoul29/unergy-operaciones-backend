@@ -146,9 +146,7 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
                 return None
         return None
 
-    proyecto = db.query(Proyecto).filter(
-        or_(Proyecto.sub_project == sub_project, Proyecto.alias_monitoreo == sub_project)
-    ).first()
+    proyecto = db.query(Proyecto).filter(Proyecto.sub_project == sub_project).first()
     if proyecto and (proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh):
         try:
             month = d_from_date.month
@@ -174,11 +172,10 @@ async def _action_get_generation(sub_project: str | None, date_from: str | None,
 
 
 def _action_get_projects(db: Session) -> dict:
-    from sqlalchemy import or_
     proyectos = (
         db.query(Proyecto)
         .filter(
-            or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
+            Proyecto.sub_project.isnot(None),
             Proyecto.estado == "en_operacion",
         )
         .order_by(Proyecto.nombre_comercial)
@@ -188,7 +185,7 @@ def _action_get_projects(db: Session) -> dict:
         "ok": True,
         "projects": [
             {
-                "sub_project": p.sub_project or p.alias_monitoreo,
+                "sub_project": p.sub_project,
                 "nombre_comercial": p.nombre_comercial,
                 "nombre_clientes": p.nombre_clientes or p.nombre_comercial,
                 "nombre_bitacora": p.nombre_bitacora or "",
@@ -230,7 +227,7 @@ def _action_get_all_contratos(db: Session) -> dict:
     contratos = []
     for cs in rows:
         p = cs.proyecto
-        slug = (p.sub_project or p.alias_monitoreo) if p else None
+        slug = p.sub_project if p else None
         if not slug:
             continue
         contratos.append({
@@ -341,10 +338,7 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
     if not sub_project:
         return {"ok": False, "error": "sub_project requerido"}
 
-    from sqlalchemy import or_
-    proyecto = db.query(Proyecto).filter(
-        or_(Proyecto.sub_project == sub_project, Proyecto.alias_monitoreo == sub_project)
-    ).first()
+    proyecto = db.query(Proyecto).filter(Proyecto.sub_project == sub_project).first()
 
     contrato = None
     if proyecto:
@@ -414,11 +408,10 @@ async def resumen_generacion_fleet(
     agregada por fecha y también por proyecto, para el rango indicado.
     Usado por los gráficos de Monitoreo de Fallas.
     """
-    from sqlalchemy import or_
     import asyncio
 
     proyectos_db = db.query(Proyecto).filter(
-        or_(Proyecto.sub_project.isnot(None), Proyecto.alias_monitoreo.isnot(None)),
+        Proyecto.sub_project.isnot(None),
         Proyecto.estado == "en_operacion",
     ).all()
 
@@ -445,7 +438,7 @@ async def resumen_generacion_fleet(
     by_project: list[dict] = []
 
     async def fetch_one(p: Proyecto):
-        sub = p.sub_project or p.alias_monitoreo
+        sub = p.sub_project
         try:
             readings = await _fetch_unergy_raw(token, sub, fetch_from, fetch_to, verified_only=True)
             if not readings:
@@ -470,7 +463,7 @@ async def resumen_generacion_fleet(
         by_project.append({
             "proyecto_id":  p.id,
             "nombre":       p.nombre_comercial,
-            "sub_project":  p.sub_project or p.alias_monitoreo,
+            "sub_project":  p.sub_project,
             "kwh_real":     round(total_kwh, 1),
         })
 
@@ -599,10 +592,7 @@ def sync_proyectos(
     def _find(kw):
         r = db.query(Proyecto).filter(Proyecto.nombre_comercial == kw).first()
         if r: return r
-        r = db.query(Proyecto).filter(Proyecto.nombre_comercial.ilike(f"%{kw}%")).first()
-        if r: return r
-        r = db.query(Proyecto).filter(Proyecto.alias_monitoreo.ilike(f"%{kw}%")).first()
-        return r
+        return db.query(Proyecto).filter(Proyecto.nombre_comercial.ilike(f"%{kw}%")).first()
 
     def _clean_dpto(s):
         return _re.sub(r"\s+[Dd]epartment$", "", (s or "").strip()).strip()
@@ -638,9 +628,10 @@ def sync_proyectos(
         if kwp is not None and not proj.potencia_instalada_kwp:
             proj.potencia_instalada_kwp = kwp; changed = True
         paneles = row.get("numero_de_paneles")
-        if paneles is not None and not proj.cantidad_total_paneles:
-            proj.cantidad_total_paneles = paneles
-            _upsert_it(proj.id, paneles); changed = True
+        if paneles is not None:
+            it = db.query(ProyectoInfoTecnica).filter(ProyectoInfoTecnica.proyecto_id == proj.id).first()
+            if not (it and it.cantidad_total_paneles):
+                _upsert_it(proj.id, paneles); changed = True
         if changed:
             updated.append(proj.nombre_comercial)
 

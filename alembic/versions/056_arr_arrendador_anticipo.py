@@ -6,6 +6,7 @@ Create Date: 2026-07-28
 """
 from alembic import op
 import sqlalchemy as sa
+from alembic_idempotencia import agregar_columna_si_falta
 
 revision = "056"
 down_revision = "055"
@@ -14,9 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("arr_arrendador", sa.Column("anticipo_pagado_desde", sa.Date, nullable=True))
-    op.add_column("arr_arrendador", sa.Column("anticipo_pagado_hasta", sa.Date, nullable=True))
-    op.add_column("arr_arrendador", sa.Column("observaciones", sa.String(1000), nullable=True))
+    bind = op.get_bind()
+    agregar_columna_si_falta(bind, "arr_arrendador", sa.Column("anticipo_pagado_desde", sa.Date, nullable=True))
+    agregar_columna_si_falta(bind, "arr_arrendador", sa.Column("anticipo_pagado_hasta", sa.Date, nullable=True))
+    agregar_columna_si_falta(bind, "arr_arrendador", sa.Column("observaciones", sa.String(1000), nullable=True))
 
 
 def downgrade() -> None:

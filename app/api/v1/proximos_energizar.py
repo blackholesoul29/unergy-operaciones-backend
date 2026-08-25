@@ -42,7 +42,6 @@ _TSF_COLUMNS_DDL = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS mwh_mes_estimado NUMERIC(12,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sunfactory_project_id INTEGER",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
@@ -91,7 +90,10 @@ def _serialize(p: Proyecto, frontera: dict | None = None) -> dict:
         "status": status or "En construcción",
         "energizationDate": p.fecha_estimada_energizacion.isoformat() if p.fecha_estimada_energizacion else None,
         "avancePct": float(p.avance_obra_pct) if p.avance_obra_pct is not None else None,
-        "monthlyMwh": float(p.mwh_mes_estimado) if p.mwh_mes_estimado is not None else 0,
+        # mwh_mes_estimado se retiro 2026-08-20 (0/194 proyectos lo tuvieron
+        # alguna vez, sin ningun formulario que lo escribiera) -- monthlyMwh
+        # queda fijo en 0 hasta que exista una fuente real que lo llene.
+        "monthlyMwh": 0,
         "contracts": _contract_names(p),
         "municipio": p.municipio,
         "departamento": p.departamento,

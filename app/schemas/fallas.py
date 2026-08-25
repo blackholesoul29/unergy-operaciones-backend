@@ -156,7 +156,8 @@ class FallaUpdate(BaseModel):
     fecha_ocurrencia: Optional[datetime] = None
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
-    sla_cumplido: Optional[bool] = None
+    # sla_cumplido NO es editable -- es siempre calculado (ver
+    # _sincronizar_resolucion en app/api/v1/fallas.py), nunca manual.
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None
     notificacion: Optional[bool] = None
@@ -189,6 +190,71 @@ class FallaSeguimientoOut(BaseModel):
     usuario: UsuarioResumen
     created_at: datetime
     model_config = {"from_attributes": True}
+
+
+class FallaListOut(BaseModel):
+    """Versión liviana de FallaOut para el listado (GET /fallas) -- sin
+    seguimientos/intervalos/inversores_afectados, que la tabla no muestra y
+    que si se declararan acá forzarían un lazy-load por fila (list_fallas
+    ya no los precarga, ver _FALLA_LOAD_LISTA en fallas.py). El detalle
+    completo se pide aparte con GET /fallas/{id} (FallaOut)."""
+    id: int
+    codigo_interno: str
+    codigo_legado: Optional[str]
+    proyecto_id: int
+    proyecto: ProyectoResumen
+    tipo: Optional[FallaCatTipoOut]
+    tipo_libre: Optional[str] = None
+    estado: FallaCatEstadoOut
+    prioridad: FallaCatPrioridadOut
+    resolucion: Optional[FallaCatResolucionOut]
+    registrado_por: UsuarioResumen
+    asignado_a: Optional[UsuarioResumen]
+    descripcion: str
+    fecha_identificacion: date
+    hora_identificacion: Optional[time]
+    fecha_ocurrencia: Optional[datetime]
+    fecha_resolucion: Optional[datetime]
+    sla_limite_horas: Optional[int]
+    sla_cumplido: Optional[bool]
+    tiene_fotos: bool = False
+    fotos_lista: list[Any] = []
+    centinela: Optional[str] = None
+    notificacion: bool = False
+    alarma_monitoreo_id: Optional[int] = None
+    kwh_perdidos_estimado: Optional[float] = None
+    impacto_economico_cop: Optional[float] = None
+    causa_raiz: Optional[str] = None
+    acciones_correctivas: Optional[str] = None
+    fecha_programada: Optional[date] = None
+    dias_abierta: Optional[int] = None
+    tiempo_afectacion_horas: Optional[float] = None
+    sla_limite_dias: Optional[int] = None
+    categoria_codigo: Optional[str] = None
+    subtipo_codigo: Optional[str] = None
+    subtipo_detalle: Optional[str] = None
+    clasificacion: Optional[Any] = None
+    pendiente_reclasificar: bool = False
+    frontera_afecta_medicion: Optional[bool] = None
+    frontera_perdida_comunicacion: Optional[bool] = None
+    inversores_perdida_comunicacion: Optional[bool] = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+    @field_validator("fotos_lista", mode="before")
+    @classmethod
+    def coerce_fotos_lista(cls, v):
+        import json as _json
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                result = _json.loads(v)
+                return result if isinstance(result, list) else []
+            except Exception:
+                return []
+        return []
 
 
 class FallaOut(BaseModel):

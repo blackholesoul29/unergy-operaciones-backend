@@ -255,6 +255,8 @@ def calcular_proyecto(
     *,
     contrato_id: int,
     nombre_proyecto: str,
+    codigo_tsf: str | None = None,
+    proyecto_id: int | None = None,
     fecha_firma_contrato: date | None,
     fecha_inicio_om: date | None,
     valor_base_anual: float | None,
@@ -280,6 +282,8 @@ def calcular_proyecto(
         return {
             "contrato_id": contrato_id,
             "nombre_proyecto": nombre_proyecto,
+            "codigo_tsf": codigo_tsf,
+            "proyecto_id": proyecto_id,
             "periodo": periodo,
             "mes_año": f"{mes_label} {año_periodo}",
             "habilitado": False,
@@ -334,6 +338,8 @@ def calcular_proyecto(
     return {
         "contrato_id":          contrato_id,
         "nombre_proyecto":      nombre_proyecto,
+        "codigo_tsf":           codigo_tsf,
+        "proyecto_id":          proyecto_id,
         "periodo":              periodo,
         "mes_año":              f"{mes_label} {año_periodo}",
         "habilitado":           True,

@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     UNERGY_LOGIN: str = ""
     UNERGY_PASSWORD: str = ""
 
+    # API de Liquidaciones (mismo host que UNERGY_API_URL). Requiere una cuenta
+    # que pertenezca al grupo `admin` Y tenga is_staff=True: /api/liquidaciones/*
+    # exige lo primero y /api/admin/* lo segundo. Si se dejan vacías se usan las
+    # credenciales UNERGY_* de arriba.
+    LIQUIDACIONES_LOGIN: str = ""
+    LIQUIDACIONES_PASSWORD: str = ""
+    # Clave de Gemini con la que la API lee los PDF de las facturas de XM para
+    # sacarles mes y año. Es OPCIONAL: si se deja vacía, esa API usa la suya.
+    # Va aquí y no en un campo de la pantalla porque es un secreto: puesto en el
+    # navegador quedaría a la vista de cualquiera que abra la página.
+    LIQUIDACIONES_GEMINI_API_KEY: str = ""
+
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
     SUNFACTORY_API_URL: str = "https://sunfactory.solenium.co/api"
@@ -78,6 +90,11 @@ class Settings(BaseSettings):
     SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
+
+    # SolarView API (reemplazo de Solenium, Fase 1: solo Reporte de Energía)
+    # — token estático por header, sin login/refresh.
+    SOLARVIEW_BASE_URL: str = "https://api.sole.tech"
+    SOLARVIEW_TOKEN: str = ""
 
     # Quoia CGM API (fronteras / medidores) — legacy token auth
     QUOIA_API_TOKEN: str = ""
@@ -97,10 +114,6 @@ class Settings(BaseSettings):
     EVO_API_URL: str = ""
     EVO_API_TOKEN: str = ""
 
-    # External databases (read-only correlation)
-    ORIGINA_DATABASE_URL: str = ""
-    REQUESTSDB_DATABASE_URL: str = ""
-
     # SMTP — envío de informes aprobados
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -109,6 +122,28 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "operaciones@unergy.io"
     # Copia oculta (BCC) del Reporte CGM -- lista separada por comas.
     CORREO_SEGUIMIENTO: str = ""
+
+    # IMAP — lectura automática de correos entrantes (ej. Excel de terceros
+    # que envía Cedillanos vía cgm@erco.energy, ver excel_terceros_email.py).
+    # Reusa SMTP_USER/SMTP_PASSWORD -- misma cuenta de Gmail, el mismo App
+    # Password sirve para IMAP y SMTP a la vez. Requiere que IMAP esté
+    # habilitado en la configuración de esa cuenta de Gmail/Workspace.
+    IMAP_HOST: str = "imap.gmail.com"
+    IMAP_PORT: int = 993
+
+    # IMAP de mandatos -- buzón adhara@unergy.io, el único en copia de las tres
+    # fuentes de correo de mandatos (revisoría y envíos a inversionistas).
+    # NO reusa SMTP_USER/SMTP_PASSWORD: esas son de operaciones@, otra cuenta.
+    # Requiere App Password propio (verificación en dos pasos activa en la cuenta).
+    MANDATOS_IMAP_USER: str = ""
+    MANDATOS_IMAP_PASSWORD: str = ""
+    # Segundo buzón, opcional. Parte del correo de mandatos no pasa por
+    # adhara@: Jessica manda algunos a la revisoría desde su propia cuenta, y
+    # esos viven en SU carpeta de Enviados. Sin leerlos, la reconciliación no
+    # puede saber que esos mandatos salieron. Si queda vacío, se lee un solo
+    # buzón y todo funciona igual, solo con menos cobertura.
+    MANDATOS_IMAP_USER_2: str = ""
+    MANDATOS_IMAP_PASSWORD_2: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

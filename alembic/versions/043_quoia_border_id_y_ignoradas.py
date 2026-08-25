@@ -11,6 +11,7 @@ Revises: 042
 Create Date: 2026-07-08
 """
 from alembic import op
+from alembic_idempotencia import columna_existe, verificar_columnas
 
 revision = "043"
 down_revision = "042"
@@ -19,7 +20,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
     op.execute("ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_border_id INTEGER")
+    if not columna_existe(bind, "fronteras", "quoia_border_id"):
+        raise RuntimeError("Migración 043: no se pudo agregar fronteras.quoia_border_id.")
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS fronteras_quoia_ignoradas (
@@ -30,6 +35,9 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
+    verificar_columnas(bind, "fronteras_quoia_ignoradas", {
+        "id", "frt_code", "motivo", "ignorado_por_usuario_id", "created_at",
+    }, migracion="043")
 
 
 def downgrade() -> None:

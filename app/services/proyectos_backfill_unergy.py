@@ -1,5 +1,6 @@
-"""Backfill de `Proyecto.sub_project` ("API ID Unergy") por emparejamiento de
-nombre contra el listado de proyectos de la plataforma Unergy original.
+"""Backfill de datos de la plataforma Unergy original (no Quoia ni Solenium)
+hacia `Proyecto`: `sub_project` ("API ID Unergy") y `fecha_entrada_operacion`
+(COD -- Commercial Operation Date, tal cual la registra Unergy).
 
 Reemplaza la carga manual que antes hacia scripts/cargar_topics_tsf.py desde
 un JSON exportado a mano (data/NOMBRE TOPIC.json, con datos duplicados y
@@ -16,17 +17,28 @@ positivos (nombres parecidos por palabras sueltas como "Occidente"/"Sur",
 no el mismo proyecto). Por eso el umbral es deliberadamente estricto: mejor
 dejar un proyecto sin ID que asignarle uno equivocado sin que nadie lo revise.
 
-Dos formas de uso:
-  - `backfill_sub_project_unergy(db, apply=...)` -- corrida masiva (script),
-    con reporte dry-run/apply, para el backlog de proyectos ya existentes.
-  - `asignar_sub_project_unergy_si_aplica(proyecto, db)` -- un solo proyecto,
+`fecha_entrada_operacion` se resuelve distinto según el caso: si el proyecto
+YA tiene `sub_project`, se busca el registro de Unergy por `nombre_topico`
+exacto (sin ambigüedad, no hace falta el emparejamiento difuso); si no lo
+tiene, se usa el mismo emparejamiento y umbral que para `sub_project`.
+
+Formas de uso:
+  - `sincronizar_datos_unergy_si_aplica(proyecto, db)` -- un solo proyecto,
     siempre aplica de inmediato (sin dry-run) y nunca lanza excepción; se usa
     en el momento de crear/confirmar un proyecto (ver app/api/v1/proyectos.py)
-    para que los proyectos nuevos no vuelvan a acumular este vacío.
+    para que los proyectos nuevos no vuelvan a acumular estos vacíos. Llena
+    `sub_project` y/o `fecha_entrada_operacion`, lo que falte, en una sola
+    consulta a la API.
+  - `backfill_sub_project_unergy(db, apply=...)` -- corrida masiva (script),
+    con reporte dry-run/apply, para el backlog de proyectos sin `sub_project`.
+  - `backfill_fecha_entrada_operacion_unergy(db, apply=...)` -- igual, para
+    el backlog de proyectos sin `fecha_entrada_operacion` (independiente de
+    si ya tienen `sub_project` o no).
 """
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
@@ -37,6 +49,15 @@ from app.utils.nombre_matching import mejor_candidato
 logger = logging.getLogger(__name__)
 
 UMBRAL_SEGURO = 0.95
+
+
+def _parse_fecha(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw)[:10]).date()
+    except ValueError:
+        return None
 
 
 def _candidatos_unergy(unergy_proyectos: list[dict]) -> list[tuple]:
@@ -115,37 +136,128 @@ def backfill_sub_project_unergy(db: Session, apply: bool = False) -> dict:
     }
 
 
-def asignar_sub_project_unergy_si_aplica(proyecto: Proyecto, db: Session) -> str | None:
+def backfill_fecha_entrada_operacion_unergy(db: Session, apply: bool = False) -> dict:
+    """Corrida masiva sobre todos los proyectos sin fecha_entrada_operacion
+    (tengan o no sub_project ya asignado). Ver
+    scripts/backfill_fecha_entrada_operacion_unergy.py para el CLI
+    (dry-run por defecto)."""
+    sin_fecha = (
+        db.query(Proyecto)
+        .filter(Proyecto.deleted_at.is_(None), Proyecto.fecha_entrada_operacion.is_(None))
+        .order_by(Proyecto.nombre_comercial)
+        .all()
+    )
+    if not sin_fecha:
+        return {"ok": True, "revisados": 0, "asignados": [], "sin_match_seguro": []}
+
+    try:
+        token = unergy_token()
+    except Exception as exc:
+        return {"ok": False, "error": f"No se pudo autenticar contra la API de Unergy: {exc}"}
+
+    unergy_proyectos = fetch_unergy_projects(token)
+    if not unergy_proyectos:
+        return {"ok": False, "error": "La API de Unergy no devolvió proyectos"}
+
+    por_topico = {up.get("nombre_topico"): up for up in unergy_proyectos if up.get("nombre_topico")}
+    candidatos = _candidatos_unergy(unergy_proyectos)
+
+    asignados: list[dict] = []
+    sin_match_seguro: list[dict] = []
+
+    for p in sin_fecha:
+        # Si ya tiene sub_project, el vínculo con Unergy ya está confirmado --
+        # no hace falta (ni conviene) volver a emparejar por nombre. Antes, si
+        # ese tópico no aparecía en el listado ACTUAL de Unergy (ausencia
+        # temporal, filtro distinto, etc.), el código caía igual al fallback
+        # difuso por nombre e ignoraba el vínculo ya confirmado -- podía
+        # asignar la fecha de un proyecto distinto en vez de reportar
+        # simplemente que Unergy no trajo dato para ese sub_project.
+        motivo = None
+        if p.sub_project:
+            item = por_topico.get(p.sub_project)
+            if item is None:
+                motivo = f"sub_project '{p.sub_project}' ya vinculado, pero Unergy no lo trae en el listado actual"
+        else:
+            topico, _unergy_nombre, _score, motivo = _buscar_topico_seguro(p.nombre_comercial, p.id, candidatos, db)
+            item = por_topico.get(topico) if topico else None
+
+        fecha = _parse_fecha(item.get("fecha_entrada_operacion")) if item else None
+        if fecha is None:
+            sin_match_seguro.append({
+                "proyecto_id": p.id, "nombre": p.nombre_comercial,
+                "motivo": motivo or "Unergy no tiene fecha_entrada_operacion para este proyecto",
+            })
+            continue
+
+        asignados.append({
+            "proyecto_id": p.id, "nombre": p.nombre_comercial,
+            "fecha_entrada_operacion": fecha.isoformat(),
+        })
+        if apply:
+            p.fecha_entrada_operacion = fecha
+
+    if apply and asignados:
+        db.commit()
+
+    return {
+        "ok": True,
+        "revisados": len(sin_fecha),
+        "asignados": asignados,
+        "sin_match_seguro": sin_match_seguro,
+    }
+
+
+def sincronizar_datos_unergy_si_aplica(proyecto: Proyecto, db: Session) -> str | None:
     """Best-effort para UN proyecto, en el momento de crearlo/confirmarlo
     (ver create_proyecto/confirmar_proyecto_pendiente en
     app/api/v1/proyectos.py) -- reemplaza el ciclo de "correr el script a
     mano cada tanto" para que los proyectos nuevos no vuelvan a acumular
-    este vacío.
+    estos vacíos. Llena `sub_project` y/o `fecha_entrada_operacion`, lo que
+    falte, en una sola consulta a la API (evita pedirla dos veces si un
+    proyecto nuevo necesita ambos).
 
-    Nunca sobreescribe (no hace nada si el proyecto ya tiene sub_project) y
-    nunca lanza: si la API de Unergy falla, está lenta, o no hay match
-    seguro, el proyecto simplemente queda como estaba -- no bloquea la
-    creación del proyecto en ningún caso. Retorna el topico asignado, o
-    None si no se asignó nada."""
-    if proyecto.sub_project:
+    Nunca sobreescribe un valor ya cargado, y nunca lanza: si la API de
+    Unergy falla, está lenta, o no hay match seguro, el proyecto simplemente
+    queda como estaba -- no bloquea la creación del proyecto en ningún caso.
+    Retorna el topico si se asignó uno nuevo (no si solo se llenó la fecha),
+    o None."""
+    necesita_topico = not proyecto.sub_project
+    necesita_fecha = proyecto.fecha_entrada_operacion is None
+    if not necesita_topico and not necesita_fecha:
         return None
     try:
         token = unergy_token()
         unergy_proyectos = fetch_unergy_projects(token)
         if not unergy_proyectos:
             return None
-        candidatos = _candidatos_unergy(unergy_proyectos)
-        topico, _unergy_nombre, _score, _motivo = _buscar_topico_seguro(
-            proyecto.nombre_comercial, proyecto.id, candidatos, db,
-        )
-        if not topico:
+
+        topico = proyecto.sub_project
+        if necesita_topico:
+            candidatos = _candidatos_unergy(unergy_proyectos)
+            topico, _unergy_nombre, _score, _motivo = _buscar_topico_seguro(
+                proyecto.nombre_comercial, proyecto.id, candidatos, db,
+            )
+
+        item = next((up for up in unergy_proyectos if up.get("nombre_topico") == topico), None) if topico else None
+        if item is None:
             return None
-        proyecto.sub_project = topico
+
+        topico_asignado = None
+        if necesita_topico and topico:
+            proyecto.sub_project = topico
+            topico_asignado = topico
+        if necesita_fecha:
+            fecha = _parse_fecha(item.get("fecha_entrada_operacion"))
+            if fecha:
+                proyecto.fecha_entrada_operacion = fecha
+
         db.commit()
-        return topico
+        return topico_asignado
     except Exception:
+        db.rollback()
         logger.warning(
-            "No se pudo intentar asignar sub_project de Unergy para proyecto %s (%s)",
+            "No se pudo sincronizar datos de Unergy para proyecto %s (%s)",
             proyecto.id, proyecto.nombre_comercial, exc_info=True,
         )
         return None

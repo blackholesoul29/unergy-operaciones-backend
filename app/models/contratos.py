@@ -90,6 +90,18 @@ class ContratoServicio(Base):
     responsable_iva: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Campos informativos del plan de Internet (solo aplican a servicio_aplica='internet')
+    plan_datos_gb: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    velocidad_mbps: Mapped[int | None] = mapped_column(sa_Integer, nullable=True)
+    tipo_conexion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    linea_servicio: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    id_router: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    numero_kit: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    latencia_ms: Mapped[int | None] = mapped_column(sa_Integer, nullable=True)
+    wifi_seguridad: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    wifi_password: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ubicacion_lat: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    ubicacion_lng: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     indexacion_anual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     indexacion_mensual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
@@ -114,12 +126,38 @@ class ContratoServicio(Base):
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
 
 
+class PPAResponsable(Base):
+    """Empresa responsable de un PPA (normalmente Unergy; en algunos contratos es
+    un tercero). Es un catálogo —y no un texto libre en el contrato— para que los
+    filtros de la plataforma trabajen sobre valores consistentes.
+
+    `incluir_en_cumplimiento` marca si los contratos de este responsable son
+    relevantes para nosotros: los que están en False desaparecen de la Matriz
+    anual de /mem/cumplimiento (ver `_query_contratos_venta(solo_relevantes=True)`).
+    Un contrato SIN responsable (responsable_id NULL) siempre se incluye: nada se
+    esconde por omisión, solo por marca explícita."""
+    __tablename__ = "ppa_responsables"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    incluir_en_cumplimiento: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contratos: Mapped[list["PPAContrato"]] = relationship("PPAContrato", back_populates="responsable")
+
+
 class PPAContrato(Base):
     __tablename__ = "ppa_contratos"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     numero_codigo_contrato: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nombre_interno: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsable_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ppa_responsables.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     comprador_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     comprador_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -149,11 +187,17 @@ class PPAContrato(Base):
     carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Comunidad energética NO es otro tipo de contrato: es una CARACTERISTICA de
+    # este PPA (2026-08-18). Vive en el contrato y no se deriva de la oferta, para
+    # que el dato sobreviva si la oferta se borra. NULL en los PPAs viejos que no
+    # salieron de una oferta: null = no sabemos, distinto de False.
+    es_comunidad_energetica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", secondary=ppa_contrato_proyectos_table)
+    responsable: Mapped[Optional["PPAResponsable"]] = relationship("PPAResponsable", back_populates="contratos")
     comprador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[comprador_id])
     vendedor: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")
@@ -193,8 +237,83 @@ class FacturaAgrupacion(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    # % del contrato que va a esta factura; el resto (100-%) queda en el PPA default.
+    # NULL = 100% (el contrato entero se mueve). Ej. Uruaco 78596: 22.8066% → "Terpel 1
+    # Suno", 77.1934% queda en Terpel 1. Misma tarifa (solo reparte kWh/valor).
+    porcentaje: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FacturaOrden(Base):
+    """Orden manual de las facturas en la vista de emisión. Se llavea por NOMBRE de
+    factura (no hay id: la factura es el resultado de agrupar contratos), y es fijo:
+    se define una vez y aplica cada mes, como la agrupación. Una factura sin fila
+    aquí va al final, ordenada por valor como antes."""
+    __tablename__ = "factura_orden"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    orden: Mapped[int] = mapped_column(sa_Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FacturaEmitida(Base):
+    """Marca de "ya se facturó", por factura y PERÍODO (a diferencia del orden y la
+    agrupación, que son fijos). La presencia de la fila es la marca; se borra al
+    desmarcar. Guarda quién y cuándo para tener rastro."""
+    __tablename__ = "factura_emitida"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    numero_factura: Mapped[str | None] = mapped_column(String(80), nullable=True)  # código de la factura emitida
+    emitida_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    emitida_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("nombre", "periodo", name="uq_factura_emitida_nombre_periodo"),
+    )
+
+
+class DespachoContratoDia(Base):
+    """Energía diaria por contrato XM (suma de las 24 horas de ese día), ingerida
+    del despacho. Permite ver/filtrar el día a día de un contrato. Se llena al subir
+    el despacho, junto con el agregado mensual."""
+    __tablename__ = "despacho_contrato_dia"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False, index=True)  # "YYYY-MM"
+    codigo_sic_contrato: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("periodo", "codigo_sic_contrato", "fecha", name="uq_despacho_dia"),
+    )
+
+
+class PrecioBolsaMensual(Base):
+    """Precio de bolsa ($/kWh) manual por mes para valorizar la energía de los
+    contratos SIN PPA (UNGC / bolsa), que XM factura a precio de bolsa. Si no se
+    fija, se usa el promedio de precios_bolsa_diario como sugerido."""
+    __tablename__ = "precio_bolsa_mensual"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    año: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    mes: Mapped[int] = mapped_column(sa_Integer, nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("año", "mes", name="uq_precio_bolsa_periodo"),
     )
 
 
@@ -212,6 +331,11 @@ class DespachoContratoMensual(Base):
     comprador: Mapped[str | None] = mapped_column(String(40), nullable=True)
     tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     kwh: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    # Días efectivamente incluidos en el despacho (para facturas de mes parcial): se
+    # derivan de las fechas del archivo (FechaDocumento), no se hardcodean.
+    dias: Mapped[int | None] = mapped_column(sa_Integer, nullable=True)
+    fecha_min: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_max: Mapped[date | None] = mapped_column(Date, nullable=True)
     archivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

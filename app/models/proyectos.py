@@ -32,6 +32,18 @@ class EstadoProyectoEnum(str, enum.Enum):
     cancelado = "cancelado"
 
 
+# Cómo se lee cada estado en pantalla. Vive al lado del enum y no en la vista
+# que lo muestra: las APIs que salen hacia afuera mandan la etiqueta junto al
+# slug para que quien integre no hardcodee su propio mapa de español, que se
+# desalinearía el día que se agregue un estado.
+ESTADO_PROYECTO_LABELS = {
+    "en_desarrollo": "En desarrollo",
+    "en_operacion": "En operación",
+    "suspendido": "Suspendido",
+    "cancelado": "Cancelado",
+}
+
+
 class TipoProyectoEnum(str, enum.Enum):
     minigranja = "minigranja"
     autoconsumo = "autoconsumo"
@@ -66,13 +78,19 @@ class Proyecto(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
-    proyecto_padre_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
 
     nombre_comercial: Mapped[str] = mapped_column(String(255), nullable=False)
     nombre_bitacora: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nombre_clientes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     topic_slug: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     sub_project: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
+    # Tópico de la planta en la API de LIQUIDACIONES, cuando difiere del que usa
+    # la API de generación (`sub_project`). Los dos sistemas de Unergy no siempre
+    # nombran igual la misma planta: p. ej. la que aquí es `leyenda` allá es
+    # `mgs18`, y consultar generación con `mgs18` devuelve cero registros. Sin
+    # este campo esas plantas quedan fuera del AC Power total, que es el divisor
+    # de la prorrata del reparto. Vacío = se usa `sub_project`.
+    topico_liquidaciones: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     clasificacion_regulatoria: Mapped[str | None] = mapped_column(SAEnum(ClasificacionRegulatoriaEnum, name="clasificacion_regulatoria_enum"), nullable=True)
     tipo_tecnologia: Mapped[str | None] = mapped_column(SAEnum(TipoTecnologiaEnum, name="tipo_tecnologia_enum"), nullable=True)
@@ -80,7 +98,6 @@ class Proyecto(Base):
 
     potencia_instalada_kwp: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     potencia_con_cen_mw: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
-    cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
     produccion_especifica_kwh_kwp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     codigo_cnd: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoProyectoEnum, name="estado_proyecto_enum"), nullable=False, default="en_desarrollo")
@@ -95,17 +112,33 @@ class Proyecto(Base):
     # no la vuelve a pisar.
     fecha_comercializacion_editada_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # ── Generación mensual promedio ───────────────────────────────────────────
+    # Cuánta energía entrega esta planta en un mes típico, en MWh. Se calcula UNA
+    # vez desde la API de generación de Unergy (app/services/gen_promedio.py) y
+    # se persiste acá, para que las vistas de contratos no dependan de esa API en
+    # cada consulta: con esto alcanza con leer la BD.
+    #
+    # Las plantas sin histórico (recién energizadas, sin sub_project) se cargan a
+    # mano; por eso hace falta saber de dónde salió cada valor —ver
+    # `gen_promedio_origen`— y no pisar lo manual al recalcular. Es el mismo
+    # patrón que `fecha_comercializacion_editada_manual`.
+    gen_mensual_promedio_mwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    # 'api' = derivado del histórico · 'manual' = lo puso una persona.
+    gen_promedio_origen: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Cuántos días CON LECTURA entraron al promedio, de los 30 de la ventana. Un
+    # promedio hecho sobre 27 días no vale lo mismo que uno sobre 30, y sin este
+    # número no hay forma de saberlo.
+    gen_promedio_dias: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gen_promedio_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gen_promedio_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gen_promedio_actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion_vereda: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # Legacy (texto libre, sin validar contra el catálogo) -- preferir
-    # `operador_red_id` para datos nuevos. Se mantiene por compatibilidad con
-    # registros ya diligenciados y como respaldo si el catálogo no tiene el
-    # operador todavía.
-    operador_red: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
     # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene
     # valor, se rellena desde la primera frontera que sí lo tenga; si se edita
@@ -113,6 +146,11 @@ class Proyecto(Base):
     # Nunca se pisa un valor ya diligenciado en ningún lado (ver proyectos.py).
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
     project_id_solenium: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    # ID del proyecto en la API nueva de SolarView -- NO coincide con
+    # project_id_solenium (esquema de IDs completamente distinto entre las
+    # dos APIs). Se usa solo desde Reporte de Energía por ahora (Fase 1 de
+    # la migración); los demás módulos siguen con project_id_solenium.
+    project_id_solarview: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
 
     # ── CRM comercial ────────────────────────────────────────────────────────
     # Oportunidad (pipeline comercial) a la que pertenece este proyecto.
@@ -132,8 +170,6 @@ class Proyecto(Base):
     srv_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     srv_rec: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Monitoreo
-    alias_monitoreo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P50/P90/P99 monthly simulation (JSON arrays of 12 kWh values, index 0 = enero)
     p90_mensual_kwh = mapped_column(JSONB, nullable=True)
     p50_mensual_kwh = mapped_column(JSONB, nullable=True)
@@ -141,12 +177,6 @@ class Proyecto(Base):
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # ── IDs de liquidación ──────────────────────────────────────────────────────
-    # Códigos SIC que identifican al proyecto en las liquidaciones (generación y
-    # consumo). Texto libre a nivel de proyecto, editables desde la pestaña
-    # "ID liquidaciones" del detalle.
-    codigo_sic_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    codigo_sic_consumo: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
     # ── IDs de Quoia ────────────────────────────────────────────────────────────
     # IDs de la integración Quoia a nivel de proyecto: los reportes de generación
     # y consumo, y el nodo. Editables desde la pestaña "ID Quoia" del detalle.
@@ -172,15 +202,10 @@ class Proyecto(Base):
     # % de avance de obra (Sun Factory).
     avance_obra_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Proyección de generación mensual (MWh), editable por operaciones.
-    mwh_mes_estimado: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Origen del registro: 'manual' (alta normal) | 'tsf_sync' (auto-importado).
     origen: Mapped[str | None] = mapped_column(String(20), default="manual", nullable=True)
 
-    # Liquidación
     carpeta_drive_codigo: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    estado_resultados_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    income_distribution_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    generar_liquidacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -188,9 +213,7 @@ class Proyecto(Base):
 
     # Relaciones
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
-    subproyectos: Mapped[list["Proyecto"]] = relationship("Proyecto", foreign_keys=[proyecto_padre_id], uselist=True)
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
-    grupos_panel: Mapped[list["ProyectoGrupoPanel"]] = relationship("ProyectoGrupoPanel", back_populates="proyecto", uselist=True)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
     inversionistas: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="proyecto", uselist=True)
@@ -212,13 +235,14 @@ class Proyecto(Base):
     def operador_red_legal(self) -> str | None:
         """Nombre legal del operador de red (catálogo operadores_red). Primero
         el vínculo propio del proyecto; si no lo tiene, el de la primera
-        frontera que sí lo tenga (caso de datos aún no sincronizados).
+        frontera VIVA que sí lo tenga (caso de datos aún no sincronizados) --
+        una frontera borrada no debe seguir prestando su operador.
         Requiere precargar `operador` y `fronteras.operador` (selectinload)
         para no golpear la BD por cada proyecto."""
         if self.operador:
             return self.operador.nombre_legal
         for f in self.fronteras:
-            if f.operador:
+            if f.deleted_at is None and f.operador:
                 return f.operador.nombre_legal
         return None
 
@@ -278,21 +302,6 @@ class ProyectoInfoTecnica(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="info_tecnica")
-
-
-class ProyectoGrupoPanel(Base):
-    __tablename__ = "proyecto_grupos_panel"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
-    marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    potencia_pico_wp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    cantidad: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="grupos_panel")
 
 
 class ProyectoInversor(Base):

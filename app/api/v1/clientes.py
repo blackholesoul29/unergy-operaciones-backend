@@ -433,29 +433,6 @@ async def upload_archivo_documento(
     return doc
 
 
-# ── Fondos de inversión (origina) ────────────────────────────────────────────
-
-
-@router.get("/{id}/fondos")
-def get_client_fund(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Get the investment fund linked to this client (from originabotdb)."""
-    cliente = _get_cliente_or_404(id, db)
-    if not cliente.origina_investment_id:
-        return {"linked": False, "fund": None}
-
-    from app.services.correlation import fetch_origina_investment_detail
-    fund = fetch_origina_investment_detail(cliente.origina_investment_id)
-    if not fund:
-        return {
-            "linked": True,
-            "origina_investment_id": cliente.origina_investment_id,
-            "fund": None,
-            "error": "Fondo no encontrado en Origina (puede haber sido eliminado)",
-        }
-
-    return {"linked": True, "fund": fund}
-
-
 # ── Client linking: Proyectos, Fronteras, Contratos PPA ─────────────────────
 
 @router.get("/{id}/proyectos")
@@ -492,7 +469,7 @@ def list_client_proyectos(id: int, db: Session = Depends(get_db), _=Depends(get_
 @router.get("/{id}/fronteras")
 def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """List fronteras linked to this client via their projects."""
-    from app.models.proyectos import ProyectoInversionista
+    from app.models.proyectos import Proyecto, ProyectoInversionista
     from app.models.fronteras import Frontera
     _get_cliente_or_404(id, db)
 
@@ -507,7 +484,12 @@ def list_client_fronteras(id: int, db: Session = Depends(get_db), _=Depends(get_
 
     fronteras = (
         db.query(Frontera)
-        .filter(Frontera.proyecto_id.in_(all_project_ids))
+        .join(Proyecto, Proyecto.id == Frontera.proyecto_id)
+        .filter(
+            Frontera.proyecto_id.in_(all_project_ids),
+            Frontera.deleted_at.is_(None),
+            Proyecto.deleted_at.is_(None),
+        )
         .order_by(Frontera.codigo_frontera)
         .all()
     )
@@ -554,6 +536,112 @@ def list_client_contratos_ppa(id: int, db: Session = Depends(get_db), _=Depends(
         }
         for c in contratos
     ]
+
+
+# ── Servicios derivados de los contratos de las plantas ──────────────────────
+
+@router.get("/{id}/servicios-contratos")
+def list_client_servicios_contratos(
+    id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+    hoy: date | None = None,  # inyectable en tests
+):
+    """Servicios que Unergy le presta a este cliente, DERIVADOS de los contratos
+    de servicio reales de sus plantas (no de la lista manual `cliente_servicios`).
+
+    "Plantas del cliente" = misma unión que usa el panel 360 (inversionista +
+    contratante de un contrato de servicio + comprador/vendedor de un PPA). Toma
+    TODOS los `contratos_servicio` sobre esas plantas -- el contratante del
+    contrato puede estar vacío o ser Unergy; lo que importa es que el contrato
+    está sobre una planta del cliente. Caso real: Quantum es inversionista de GD
+    Sirius y GD Elektra, cuyos contratos de representación no lo tienen como
+    contratante. Los agrupa por tipo de servicio, cada uno con sus plantas,
+    semáforo de vencimiento y link al contrato en Drive, para encontrar el
+    contrato buscando por cliente y no solo por planta. Solo lectura."""
+    from collections import defaultdict
+    from sqlalchemy import or_
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import Proyecto
+    from app.services.clientes_panel import (
+        peor_semaforo, proyectos_por_cliente, semaforo_contrato,
+    )
+
+    hoy = hoy or date.today()
+    _get_cliente_or_404(id, db)
+
+    plant_ids = proyectos_por_cliente(db, {id}).get(id, set())
+    condiciones = []
+    if plant_ids:
+        condiciones.append(ContratoServicio.proyecto_id.in_(plant_ids))
+    condiciones.append(ContratoServicio.contratante_id == id)  # por si contrata sin planta ligada
+    contratos = (
+        db.query(ContratoServicio)
+        .filter(or_(*condiciones))
+        .all()
+    )
+    if not contratos:
+        return []
+
+    proyecto_ids = {c.proyecto_id for c in contratos if c.proyecto_id}
+    proyectos = {
+        p.id: p for p in db.query(Proyecto)
+        .filter(Proyecto.id.in_(proyecto_ids), Proyecto.deleted_at.is_(None)).all()
+    } if proyecto_ids else {}
+
+    def _enum_val(v):
+        return v.value if hasattr(v, "value") else v
+
+    def _num(v):
+        return float(v) if v is not None else None
+
+    def _fecha(v):
+        return v.isoformat() if v else None
+
+    def _tarifa(c):
+        """La tarifa relevante según el tipo de servicio del contrato."""
+        serv = _enum_val(c.servicio_aplica)
+        if serv == "representacion":
+            return _num(c.tarifa_representacion)
+        if serv == "cgm":
+            return _num(c.tarifa_cgm)
+        if serv == "promotor":
+            return _num(c.promotor_tarifa)
+        return _num(c.tarifa_base)
+
+    grupos: dict[str, list] = defaultdict(list)
+    for c in contratos:
+        serv = _enum_val(c.servicio_aplica)
+        estado = _enum_val(c.estado)
+        grupos[serv].append({
+            "contrato_id": c.id,
+            "proyecto_id": c.proyecto_id,
+            "proyecto_nombre": proyectos[c.proyecto_id].nombre_comercial
+                               if c.proyecto_id in proyectos else None,
+            "numero_contrato": c.numero_contrato,
+            "fecha_inicio": _fecha(c.fecha_inicio),
+            "fecha_fin": _fecha(c.fecha_fin),
+            "estado": estado,
+            "semaforo": "vencido" if estado == "terminado"
+                        else semaforo_contrato(c.fecha_fin, hoy),
+            "renovacion_automatica": c.renovacion_automatica,
+            "tarifa": _tarifa(c),
+            "enlace_drive": c.enlace_drive,
+        })
+
+    salida = []
+    for serv, filas in grupos.items():
+        filas.sort(key=lambda x: (x["fecha_fin"] is None, x["fecha_fin"] or ""))
+        proyectos_distintos = {f["proyecto_id"] for f in filas if f["proyecto_id"]}
+        salida.append({
+            "servicio": serv,
+            "num_plantas": len(proyectos_distintos),
+            "num_contratos": len(filas),
+            "semaforo": peor_semaforo([f["semaforo"] for f in filas]),
+            "contratos": filas,
+        })
+    salida.sort(key=lambda g: g["servicio"])
+    return salida
 
 
 # ── Panel 360 del cliente (pestaña Resumen del detalle) ──────────────────────
@@ -749,8 +837,8 @@ _MERGE_CLIENTE_COMPOSITE = [
 # copiarse al ganador (mismo tratamiento que sunfactory_project_id en proyectos).
 _MERGE_CLIENTE_SCALAR_UNIQUE = ["nit_cedula"]
 _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY = [
-    "telefono_contacto", "direccion", "ciudad", "departamento",
-    "tipo_persona", "representante_legal", "origina_investment_id",
+    "direccion", "ciudad", "departamento",
+    "tipo_persona", "representante_legal",
 ]
 
 

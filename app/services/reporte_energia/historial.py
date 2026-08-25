@@ -8,6 +8,7 @@ estimacion_consumo.py.
 """
 from __future__ import annotations
 
+import random
 from datetime import date
 
 import pandas as pd
@@ -35,7 +36,18 @@ CASOS_CONFIABLES_GENERACION = {1, 2, 4, 5, 7}
 FP_FIJO: dict[int, float] = {}
 
 UMBRAL_FP_MUY_BAJO  = 0.9
-FP_FIJO_POR_DEFECTO = 0.99
+# Sin FP calculable del histórico, se reporta un valor variado día a día
+# dentro de este rango en vez de repetir siempre el mismo número fijo
+# (decisión de negocio, 2026-08-19) -- determinístico por frontera+fecha
+# (ver _fp_fallback) para que no cambie si se re-consulta o se re-corre el
+# mismo día.
+FP_FALLBACK_RANGO = (0.990, 0.995)
+
+
+def _fp_fallback(frontera_id: int, fecha: date) -> float:
+    rng = random.Random(f"{frontera_id}:{fecha.isoformat()}")
+    lo, hi = FP_FALLBACK_RANGO
+    return round(rng.uniform(lo, hi), 4)
 
 # Fronteras de Consumo sin telemedida propia que comparten predio físico con
 # otra frontera que sí reporta con normalidad -- para el Caso 'Histórico' de
@@ -59,8 +71,9 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
     aporta, porque su 'energia_final_kwh' ya sale de invertir el propio FP).
 
     fp_usado: lo que realmente se aplica -- FP_FIJO si la frontera está ahí,
-    FP_FIJO_POR_DEFECTO si fp_calculado < UMBRAL_FP_MUY_BAJO o no hay
-    histórico suficiente, o fp_calculado tal cual en el resto de los casos.
+    un valor dentro de FP_FALLBACK_RANGO (variado por frontera+fecha, ver
+    _fp_fallback) si fp_calculado < UMBRAL_FP_MUY_BAJO o no hay histórico
+    suficiente, o fp_calculado tal cual en el resto de los casos.
     """
     filas = db.execute(
         select(
@@ -95,10 +108,10 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
         return FP_FIJO[frontera_id], fp_calculado
 
     if fp_calculado is None:
-        return FP_FIJO_POR_DEFECTO, None
+        return _fp_fallback(frontera_id, fecha), None
 
     if fp_calculado < UMBRAL_FP_MUY_BAJO:
-        return FP_FIJO_POR_DEFECTO, fp_calculado
+        return _fp_fallback(frontera_id, fecha), fp_calculado
 
     return fp_calculado, fp_calculado
 
@@ -122,9 +135,14 @@ def get_mediana_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[
         .limit(DIAS_VENTANA)
     ).scalars().all()
 
-    if len(totales) < MIN_DIAS_FORMA:
-        return None, len(totales)
-    return float(pd.Series([float(t) for t in totales]).median()), len(totales)
+    # energia_final_kwh puede ser NULL incluso en un Caso "confiable" (ej. un
+    # registro editado a mano a medias, o un dato viejo previo a que el
+    # clasificador siempre lo llenara) -- float(None) tumbaba toda la corrida
+    # del dia (ver ejecutar_dia, sin try/except por frontera).
+    validos = [float(t) for t in totales if t is not None]
+    if len(validos) < MIN_DIAS_FORMA:
+        return None, len(validos)
+    return float(pd.Series(validos).median()), len(validos)
 
 
 def get_forma_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:
@@ -169,36 +187,54 @@ def get_forma_generacion(db: Session, frontera_id: int, fecha: date) -> tuple[pd
 # Mediana / forma horaria -- Consumo
 # ---------------------------------------------------------------------------
 
+CASOS_CONFIABLES_CONSUMO = ("Medidor", "CGM")
+
+
 def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[float | None, int]:
     """Mediana del total diario de los últimos DIAS_VENTANA días de Caso
-    'Medidor' (nunca 'CGM' ni 'Histórico' -- el histórico debe basarse en
-    lectura física real, no en el reporte de un tercero ni en una
-    estimación previa), ANTES de `fecha`."""
+    'Medidor' o 'CGM' sin revisión manual, ANTES de `fecha`. 'Histórico'
+    queda fuera (es ya una estimación, no lectura real). 'CGM' cuenta como
+    confiable porque el reporte automático de Quoia es en sí una lectura
+    real (ASIC), no una estimación -- salvo fronteras en
+    FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (ej. Paso Norte), que SIEMPRE quedan
+    con revisar_manualmente=True (ver clasificador_consumo.py) y por lo
+    tanto nunca entran acá, aunque el cruce contra medidor haya pasado ese
+    día puntual -- el bug de Quoia es intermitente.
+
+    Sin este 'CGM', ninguna frontera de Consumo podría nunca construir
+    historial desde cero: 'Medidor' sin mediana previa SIEMPRE queda
+    revisar_manualmente=True (no hay una segunda fuente independiente tipo
+    inversores, como sí tiene Generación, para autoconfirmarse el mismo
+    día) -- sin 'Validar Frontera' a mano en cada frontera, el filtro nunca
+    se llenaría."""
     totales = db.execute(
         select(ReporteEnergiaConsumo.energia_final_kwh)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
-            ReporteEnergiaConsumo.caso == "Medidor",
+            ReporteEnergiaConsumo.caso.in_(CASOS_CONFIABLES_CONSUMO),
+            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)
     ).scalars().all()
 
-    if len(totales) < MIN_DIAS_CONSUMO:
-        return None, len(totales)
-    return float(pd.Series([float(t) for t in totales]).median()), len(totales)
+    validos = [float(t) for t in totales if t is not None]
+    if len(validos) < MIN_DIAS_CONSUMO:
+        return None, len(validos)
+    return float(pd.Series(validos).median()), len(validos)
 
 
 def get_forma_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:
-    """Forma horaria típica de Consumo, mismo criterio que get_forma_generacion
-    pero sobre Caso 'Medidor'."""
+    """Forma horaria típica de Consumo, mismo criterio que get_mediana_consumo
+    (Caso 'Medidor' o 'CGM' sin revisión manual)."""
     curvas = db.execute(
         select(ReporteEnergiaConsumo.curva_final)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
-            ReporteEnergiaConsumo.caso == "Medidor",
+            ReporteEnergiaConsumo.caso.in_(CASOS_CONFIABLES_CONSUMO),
+            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)

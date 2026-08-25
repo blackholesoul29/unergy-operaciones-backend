@@ -1,0 +1,102 @@
+"""editar_curva() (PATCH /reporte-energia/fronteras/{id}) -- corrección
+manual de la curva final.
+
+Bug reportado 2026-08-20: al usar "Reportar con otra fuente" -> "Medidor
+principal (actualizado)", el chart sí mostraba el nuevo valor pero "Detalle
+de las fuentes" y el aviso "el medidor muestra un valor distinto en Quoia"
+seguían comparando contra `curva_medidor_principal`, que editar_curva()
+nunca actualizaba -- quedaban desincronizados de `curva_final` recién
+guardado, así que el aviso jamás desaparecía aunque la persona ya hubiera
+adoptado el valor actualizado.
+"""
+from datetime import date
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.models.base import Base
+from app.models.fronteras import Frontera, TipoFronteraEnum
+from app.models.reporte_energia import ReporteEnergiaGeneracion
+from app.schemas.reporte_energia import EditarCurvaRequest
+from app.api.v1 import reporte_energia as re_api
+
+
+@compiles(JSONB, "sqlite")
+def _jsonb_as_text(element, compiler, **kw):
+    return "TEXT"
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[Frontera.__table__, ReporteEnergiaGeneracion.__table__])
+    s = sessionmaker(bind=engine)()
+    yield s
+    s.close()
+
+
+@pytest.fixture(autouse=True)
+def _sin_quoia(monkeypatch):
+    """Sin credenciales de Quoia en tests -- se fuerza a que GaiaClient()
+    falle rápido para que _construir_detalle caiga directo a su
+    `except Exception: pass` en vez de intentar red real (el fix bajo
+    prueba no depende de la consulta en vivo)."""
+    def _raise(*a, **kw):
+        raise RuntimeError("sin credenciales Quoia en tests")
+    monkeypatch.setattr(re_api, "GaiaClient", _raise)
+
+
+def _frontera_y_reporte(db, medidor_usado, curva_medidor_principal, curva_medidor_respaldo, curva_final):
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion)
+    db.add(front)
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=5,
+        medidor_usado=medidor_usado,
+        curva_final=curva_final,
+        curva_medidor_principal=curva_medidor_principal,
+        curva_medidor_respaldo=curva_medidor_respaldo,
+    )
+    db.add(rep)
+    db.commit()
+
+
+def test_adoptar_medidor_principal_actualizado_refresca_el_snapshot(db):
+    viejo = [100.0] * 24
+    nuevo = [50.0] * 24
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=viejo, curva_medidor_respaldo=None, curva_final=viejo)
+
+    body = EditarCurvaRequest(curva_final=nuevo, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_final == nuevo
+    assert detalle.curva_medidor_principal == nuevo, (
+        "si el snapshot no se actualiza, 'Detalle de las fuentes' sigue mostrando el valor viejo"
+    )
+
+
+def test_adoptar_medidor_respaldo_actualizado_refresca_su_propio_snapshot(db):
+    viejo = [20.0] * 24
+    nuevo = [35.0] * 24
+    _frontera_y_reporte(db, "respaldo", curva_medidor_principal=[100.0] * 24, curva_medidor_respaldo=viejo, curva_final=viejo)
+
+    body = EditarCurvaRequest(curva_final=nuevo, fuente="respaldo")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_respaldo == nuevo
+    assert detalle.curva_medidor_principal == [100.0] * 24, "no debe tocar el otro medidor"
+
+
+def test_fuente_no_medidor_no_toca_los_snapshots(db):
+    """'Inversores x FP' e 'Histórico propio' son estimaciones, no una
+    lectura del medidor -- no deben pisar curva_medidor_principal/respaldo."""
+    viejo_principal = [100.0] * 24
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=viejo_principal, curva_medidor_respaldo=None, curva_final=viejo_principal)
+
+    body = EditarCurvaRequest(curva_final=[10.0] * 24, fuente="inversores")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_principal == viejo_principal
+    assert detalle.medidor_usado == "inversores"

@@ -1,15 +1,116 @@
 """Lógica pura del CRM comercial (testeable sin BD)."""
+import enum
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
-# Estados donde aplica la alerta de días sin respuesta. Los estados de cierre
-# (firmado/operando) y el negativo (declinado) quedan por fuera a propósito:
-# no requieren seguimiento comercial y los históricos migrados viven en 'operando'.
-ESTADOS_CON_ALERTA = frozenset({"prospeccion", "envio_oferta", "negociacion_contrato"})
+from app.utils.nombre_matching import mejor_candidato
+from app.utils.series_mensuales import serie_mensual_kwh
+
+# Pipeline de la oferta, en orden. 'declinado' queda fuera del orden porque no
+# es un avance sino una salida.
+ETAPAS = ("oportunidad", "oferta", "contrato", "firmado", "operando", "terminado")
+ETAPA_ORDEN = {e: i for i, e in enumerate(ETAPAS)}
+
+# Etapas donde aplica la alerta de días sin respuesta. Las de cierre y la
+# negativa quedan por fuera a propósito: no requieren seguimiento comercial.
+ESTADOS_CON_ALERTA = frozenset({"oportunidad", "oferta", "contrato"})
+
+# `resultado` (pendiente/aceptado/declinado) dejó de ser un campo editable el
+# 2026-08-02: se deriva de la etapa. Existían dos verdades para lo mismo y podían
+# contradecirse (una oferta 'aceptada' colgando de un cliente 'declinado').
+_RESULTADO_POR_ETAPA = {
+    "oportunidad": "pendiente",
+    "oferta": "pendiente",
+    "contrato": "pendiente",
+    "firmado": "aceptado",
+    "operando": "aceptado",
+    # Terminado sigue siendo un negocio ganado: corrió y se venció.
+    "terminado": "aceptado",
+    "declinado": "declinado",
+}
+
+
+def estado_a_resultado(estado: str) -> str:
+    """Resultado que corresponde a una etapa del pipeline."""
+    return _RESULTADO_POR_ETAPA.get(estado, "pendiente")
+
+
+def cerrar_contratos_vencidos(db, hoy=None) -> list[dict]:
+    """Pasa a 'terminado' las ofertas cuyo contrato ya llegó a su fecha_fin.
+
+    Se hace por job y no a mano porque nadie va a entrar al CRM el 1-ene-2033 a
+    cerrar Pelletco. La fecha_fin del PPA es el dato duro; la etapa lo sigue.
+    Solo toca ofertas en 'operando' con contrato vencido: una firmada que aún no
+    arranca, o una sin contrato, se quedan donde están.
+
+    Devuelve las transiciones aplicadas (vacío si no hubo).
+    """
+    from datetime import date as _date
+    from app.models.comercial import OportunidadEstadoHistorial, OportunidadOferta
+    from app.models.contratos import PPAContrato
+
+    hoy = hoy or _date.today()
+    filas = (
+        db.query(OportunidadOferta, PPAContrato.fecha_fin)
+        .join(PPAContrato, PPAContrato.id == OportunidadOferta.ppa_contrato_id)
+        .filter(OportunidadOferta.estado == "operando",
+                PPAContrato.fecha_fin.isnot(None),
+                PPAContrato.fecha_fin < hoy,
+                PPAContrato.deleted_at.is_(None))
+        .all()
+    )
+    ahora = col_now()
+    cerradas = []
+    for oferta, fecha_fin in filas:
+        db.add(OportunidadEstadoHistorial(
+            oportunidad_id=oferta.oportunidad_id, oferta_id=oferta.id,
+            estado_anterior="operando", estado_nuevo="terminado"))
+        oferta.estado = "terminado"
+        oferta.estado_desde = ahora
+        oferta.resultado = estado_a_resultado("terminado")
+        cerradas.append({"oferta_id": oferta.id, "codigo": oferta.numero_oferta,
+                         "fecha_fin": str(fecha_fin)})
+    if cerradas:
+        db.commit()
+    return cerradas
+
+
+def resumen_etapas(estados) -> dict:
+    """Cuántas ofertas del cliente hay en cada etapa, p.ej. {'firmado': 1, 'oferta': 2}.
+
+    Un CLIENTE no tiene etapa: el negocio es la oferta (Juan, 2026-08-02). Lo que
+    diferencia a las ofertas de un mismo cliente son las plantas. Por eso su
+    ficha resume las etapas de sus ofertas en vez de inventar una sola —
+    colapsarlas escondería justo lo que hay que ver: Tecni-plast tiene una
+    firmada y otra abierta, y ninguna de las dos define "el estado del cliente".
+    """
+    out: dict = {}
+    for e in estados:
+        out[e] = out.get(e, 0) + 1
+    return out
 
 
 def col_now() -> datetime:
-    """Ahora en hora Colombia (UTC-5, sin DST) — patrón del repo."""
+    """Ahora en hora Colombia (UTC-5, sin DST) — patrón del repo.
+
+    OJO: la hora es la correcta pero el tzinfo queda en UTC, así que serializado
+    dice "+00:00" sobre una hora que es -05:00. Para uso interno da igual (todas
+    las cuentas se hacen entre valores de esta misma función), pero **no lo
+    devuelvas en una respuesta de API**: quien la parsee se corre cinco horas.
+    Para eso está `ahora_colombia()`.
+    """
     return datetime.now(timezone.utc) - timedelta(hours=5)
+
+
+COLOMBIA = timezone(timedelta(hours=-5))
+
+
+def ahora_colombia() -> datetime:
+    """Ahora en Colombia, con el offset bien puesto (-05:00).
+
+    La versión honesta de col_now(), para lo que sale hacia afuera.
+    """
+    return datetime.now(COLOMBIA)
 
 
 def calcular_alerta(
@@ -42,3 +143,1722 @@ def calcular_alerta(
         dias = 0
     alerta = estado in ESTADOS_CON_ALERTA and dias > umbral_dias
     return dias, alerta
+
+
+def meses_de_contrato(inicio, fin) -> int | None:
+    """Meses calendario que cubre el suministro, contando el primero y el último.
+
+    Se cuenta por mes y no por días porque el PPA se factura por mes: es
+    exactamente el número de filas de `ppa_tarifas` que genera /firmar al
+    expandir el periodo. 12-feb-2026 → 31-dic-2032 son 83 meses de suministro,
+    no "6 años y pico".
+    """
+    if inicio is None or fin is None or fin < inicio:
+        return None
+    return (fin.year - inicio.year) * 12 + (fin.month - inicio.month) + 1
+
+
+def ficha_operativa(oferta, proyecto=None, ppa=None, generacion=None,
+                    operador_oferta=None) -> dict:
+    """Los 6 parámetros que el equipo consume por API, resueltos por cascada.
+
+    La cascada es POR CAMPO: lo que diga el Proyecto manda, si no hay Proyecto o
+    el dato está vacío vale lo declarado en la oferta, si no null. Por campo y no
+    por entidad porque un Proyecto a medio diligenciar no debe borrar lo que la
+    oferta sí sabe.
+
+    Devuelve valores PLANOS más un mapa `fuentes` aparte, en vez de envolver cada
+    campo en {valor, fuente}: quien consume la API lee `ficha.municipio` directo,
+    y quien necesita auditar de dónde salió el dato mira `fuentes`. Sin ese mapa,
+    un null y un "todavía no lo sabemos" se ven igual.
+
+    No toca la BD. `generacion` —("2026-07", kwh) del último mes cerrado— y
+    `operador_oferta` —nombre legal del catálogo para oferta.operador_red_id—
+    los precarga contexto_ficha() por lotes.
+    """
+    fuentes: dict[str, str | None] = {}
+
+    def _elegir(campo, del_proyecto, de_la_oferta):
+        if del_proyecto not in (None, ""):
+            fuentes[campo] = "proyecto"
+            return del_proyecto
+        if de_la_oferta not in (None, ""):
+            fuentes[campo] = "oferta"
+            return de_la_oferta
+        fuentes[campo] = None
+        return None
+
+    proyecto_nombre = _elegir(
+        "proyecto_nombre",
+        proyecto.nombre_comercial if proyecto else None,
+        oferta.planta_nombre)
+    municipio = _elegir("municipio",
+                        proyecto.municipio if proyecto else None,
+                        oferta.municipio)
+    departamento = _elegir("departamento",
+                           proyecto.departamento if proyecto else None,
+                           oferta.departamento)
+
+    # Operador de red: la cascada operador propio → primera frontera que lo tenga
+    # ya vive en Proyecto.operador_red_legal; aquí solo se le agrega el escalón
+    # de lo declarado en la oferta.
+    operador_red = _elegir("operador_red",
+                           proyecto.operador_red_legal if proyecto else None,
+                           operador_oferta)
+    if fuentes["operador_red"] == "proyecto":
+        # Puede quedar None si el nombre salió de una frontera y no del proyecto:
+        # el nombre es el dato, el id es la conveniencia.
+        operador_red_id = proyecto.operador_red_id
+    elif fuentes["operador_red"] == "oferta":
+        operador_red_id = oferta.operador_red_id
+    else:
+        operador_red_id = None
+
+    # Energía promedio = generación mensual ESTIMADA (decisión de Juan). El
+    # proyecto habla en MWh/mes; el CRM en kWh/mes, como cantidad_minima_kwh_mes.
+    promedio_proyecto = None
+    if proyecto is not None:
+        # Ojo: el p50 llega como lista o como texto JSON según la antigüedad
+        # de la fila (ver serie_mensual_kwh). Leerlo crudo tumbaba la lista
+        # entera de /comercial/ofertas con un 500.
+        vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
+        if vals:
+            promedio_proyecto = sum(vals) / len(vals)
+    energia_promedio = _elegir(
+        "energia_promedio_kwh_mes", promedio_proyecto,
+        float(oferta.energia_promedio_kwh_mes)
+        if oferta.energia_promedio_kwh_mes is not None else None)
+
+    # Energía real: la del último mes CERRADO, con su periodo al lado para que
+    # nadie compare contra un mes a medias.
+    energia_real, energia_real_periodo = None, None
+    if generacion:
+        energia_real_periodo, kwh = generacion
+        energia_real = float(kwh) if kwh is not None else None
+    fuentes["energia_real_kwh_mes"] = "generacion" if energia_real is not None else None
+
+    # Fecha de inicio de operación = inicio de suministro del PPA (decisión de
+    # Juan). Sin contrato firmado sirve la tentativa, pero marcada como estimada.
+    contrato_inicio = ppa.fecha_inicio if ppa else None
+    contrato_fin = ppa.fecha_fin if ppa else None
+    if contrato_inicio is not None:
+        fecha_inicio_operacion = contrato_inicio
+        fuentes["fecha_inicio_operacion"] = "contrato"
+    elif oferta.fecha_tentativa_inicio is not None:
+        fecha_inicio_operacion = oferta.fecha_tentativa_inicio
+        fuentes["fecha_inicio_operacion"] = "estimada"
+    else:
+        fecha_inicio_operacion = None
+        fuentes["fecha_inicio_operacion"] = None
+
+    meses = meses_de_contrato(contrato_inicio, contrato_fin)
+    anios = None
+    if meses is not None:
+        anios = float((Decimal(meses) / Decimal(12)).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP))
+    fuentes["contrato_compra_meses"] = "contrato" if meses is not None else None
+
+    return {
+        "proyecto_nombre": proyecto_nombre,
+        "municipio": municipio,
+        "departamento": departamento,
+        "operador_red": operador_red,
+        "operador_red_id": operador_red_id,
+        "energia_promedio_kwh_mes": energia_promedio,
+        "energia_real_kwh_mes": energia_real,
+        "energia_real_periodo": energia_real_periodo,
+        "fecha_inicio_operacion": fecha_inicio_operacion,
+        "contrato_compra_meses": meses,
+        "contrato_compra_anios": anios,
+        "contrato_fecha_inicio": contrato_inicio,
+        "contrato_fecha_fin": contrato_fin,
+        "fuentes": fuentes,
+    }
+
+
+# ── Plantas firmadas y operando (consumo externo) ─────────────────────────────
+# Superficie de solo lectura para integrar la plataforma con otra: "dame las
+# plantas con negocio cerrado y sus datos". Vive acá y no en proyectos.py porque
+# en qué etapa está cada planta lo define el pipeline comercial
+# (`oportunidad_ofertas.estado`), que es lo que se ve en /comercial.
+#
+# La diferencia con ficha_operativa(): esta habla de PROYECTOS (una fila por
+# planta, aunque tenga dos ofertas), usa la generación promedio MEDIDA
+# (`proyectos.gen_mensual_promedio_mwh`) en vez de la estimada, y trae la fecha
+# de inicio de COMERCIALIZACIÓN, que no es la de inicio del contrato.
+
+ESTADO_OPERANDO = "operando"
+ESTADO_FIRMADO = "firmado"
+
+# Las dos etapas de negocio cerrado, que son las que se entregan hacia afuera:
+# `firmado` = hay contrato pero el suministro todavía no arrancó; `operando` = ya
+# está entregando energía. Antes solo se devolvía `operando`; se agregó `firmado`
+# porque son plantas comprometidas y quien integra necesita verlas, con la etapa
+# al lado para poder distinguirlas.
+ETAPAS_ENTREGABLES = (ESTADO_FIRMADO, ESTADO_OPERANDO)
+
+# Todo el pipeline consultable desde afuera. `terminado` y `declinado` son
+# SALIDAS, no avances: la primera es un negocio que corrió y se venció, la
+# segunda uno que nunca fue.
+ETAPAS_ACTIVAS = ("oportunidad", "oferta", "contrato", ESTADO_FIRMADO, ESTADO_OPERANDO)
+ETAPAS_SALIDA = ("terminado", "declinado")
+ETAPAS_CONSULTABLES = ETAPAS_ACTIVAS + ETAPAS_SALIDA
+
+# Cómo se elige la etapa de una PLANTA que tiene varias ofertas: cualquier etapa
+# activa le gana a cualquier salida, y entre activas gana la más avanzada.
+#
+# No alcanza con ETAPA_ORDEN, donde `terminado` es el último y por lo tanto el
+# "más avanzado": una planta que ya opera y que además tiene un contrato viejo
+# terminado saldría como `terminado` y desaparecería de la consulta por defecto,
+# cuando la verdad es que está entregando energía. Entre dos salidas gana
+# `terminado`, que al menos llegó a operar.
+_RANGO_ETAPA = {e: (1, i) for i, e in enumerate(ETAPAS_ACTIVAS)}
+_RANGO_ETAPA.update({"terminado": (0, 1), "declinado": (0, 0)})
+
+
+def etapa_de_la_planta(estados) -> str:
+    """La etapa que representa a una planta a partir de las de sus ofertas."""
+    return max(estados, key=lambda e: _RANGO_ETAPA.get(e, (-1, 0)))
+
+# De dónde salió la generación promedio. Se nombra por su naturaleza y no por la
+# columna: quien integra necesita saber si el número está medido o estimado, no
+# en qué tabla vive.
+GEN_MEDIDO = "medido"        # ventana móvil de 30 días de generación real
+GEN_MANUAL = "manual"        # lo cargó una persona (planta sin histórico)
+GEN_ESTIMADO = "estimado"    # proyección del proyecto (promedio de la curva p50)
+GEN_DECLARADO = "declarado"  # lo declaró la oferta comercial (planta sin Proyecto)
+
+
+def duracion_contrato(inicio, fin, hoy=None) -> dict:
+    """Cuánto dura el contrato de energía y cuánto le queda.
+
+    `meses` son meses calendario (ver meses_de_contrato) porque el PPA se factura
+    por mes. `texto` es la forma en que lo dice la gente ("6 años y 11 meses") y
+    existe para que quien integre no tenga que rearmarla en su front.
+
+    `meses_restantes` se cuenta desde hoy: un contrato que vence este mes tiene 1
+    mes restante y uno vencido tiene 0. Si **todavía no arrancó** (caso de las
+    plantas en etapa `firmado`) le queda su duración completa, no la distancia
+    hasta el fin — contar desde hoy daría más meses restantes que meses de
+    contrato, que es imposible.
+    """
+    meses = meses_de_contrato(inicio, fin)
+    anios = None
+    texto = None
+    if meses is not None:
+        anios = float((Decimal(meses) / Decimal(12)).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP))
+        a, m = divmod(meses, 12)
+        partes = []
+        if a:
+            partes.append(f"{a} año" if a == 1 else f"{a} años")
+        if m or not a:
+            partes.append(f"{m} mes" if m == 1 else f"{m} meses")
+        texto = " y ".join(partes)
+
+    hoy = hoy or col_now().date()
+    restantes = None
+    if fin is not None:
+        if inicio is not None and inicio > hoy:
+            restantes = meses          # firmado, sin arrancar
+        else:
+            restantes = meses_de_contrato(hoy, fin) or 0
+    vigente = None
+    if inicio is not None or fin is not None:
+        vigente = ((inicio is None or inicio <= hoy)
+                   and (fin is None or fin >= hoy))
+
+    return {
+        "fecha_inicio": inicio,
+        "fecha_fin": fin,
+        "duracion_meses": meses,
+        "duracion_anios": anios,
+        "duracion_texto": texto,
+        "meses_restantes": restantes,
+        "vigente": vigente,
+    }
+
+
+def _gen_promedio(proyecto, ofertas) -> tuple[float | None, str | None, dict]:
+    """Generación mensual promedio en MWh, su origen y el detalle de la medición.
+
+    La cascada va de lo más duro a lo más blando y el origen viaja siempre al
+    lado del número: un promedio medido sobre 30 días de lecturas y una
+    proyección de ingeniería no son el mismo dato aunque ocupen la misma casilla.
+
+        medido/manual (proyectos.gen_mensual_promedio_mwh)
+          → estimado (promedio de la curva p50)
+          → declarado en la oferta (planta que todavía no existe como Proyecto)
+    """
+    detalle: dict = {"dias_con_datos": None, "ventana_desde": None,
+                     "ventana_hasta": None, "actualizado_en": None}
+
+    if proyecto is not None and proyecto.gen_mensual_promedio_mwh is not None:
+        origen = (GEN_MANUAL if proyecto.gen_promedio_origen == "manual"
+                  else GEN_MEDIDO)
+        detalle = {
+            "dias_con_datos": proyecto.gen_promedio_dias,
+            "ventana_desde": proyecto.gen_promedio_desde,
+            "ventana_hasta": proyecto.gen_promedio_hasta,
+            "actualizado_en": proyecto.gen_promedio_actualizado_en,
+        }
+        return float(proyecto.gen_mensual_promedio_mwh), origen, detalle
+
+    if proyecto is not None:
+        # El p50 llega como lista o como texto JSON según la antigüedad de la
+        # fila; serie_mensual_kwh() absorbe las dos formas.
+        vals = serie_mensual_kwh(proyecto.p50_mensual_kwh)
+        if vals:
+            return round(sum(vals) / len(vals) / 1000.0, 3), GEN_ESTIMADO, detalle
+
+    for o in ofertas:
+        if o.energia_promedio_kwh_mes is not None:
+            return (round(float(o.energia_promedio_kwh_mes) / 1000.0, 3),
+                    GEN_DECLARADO, detalle)
+
+    return None, None, detalle
+
+
+def fila_operando(ofertas, proyecto=None, ppa=None, operador_oferta=None,
+                  cliente=None, hoy=None) -> dict:
+    """Una planta operando, con los datos que se consumen desde afuera.
+
+    Trae DOS estados y no hay que confundirlos: `estado_pipeline` es la etapa
+    comercial (firmado/operando) y `estado_proyecto` es el estado de la planta
+    en la plataforma (en_desarrollo/en_operacion/suspendido/cancelado).
+
+    `ofertas` son TODAS las ofertas en 'operando' de esa planta: una misma planta
+    puede tener la de compra de energía y la de servicios, y colapsarlas en dos
+    filas obligaría a quien integra a deduplicar. Los códigos de seguimiento de
+    todas viajan en `ofertas`.
+
+    Como en ficha_operativa(), la cascada Proyecto → oferta es POR CAMPO y
+    `fuentes` dice de dónde salió cada valor: sin ese mapa, "no aplica" y
+    "todavía no lo sabemos" se ven idénticos. No toca la BD.
+    """
+    ofertas = list(ofertas)
+    principal = ofertas[0]
+    fuentes: dict[str, str | None] = {}
+
+    # Etapa de la PLANTA = la más avanzada de sus ofertas, con las salidas
+    # (terminado/declinado) siempre por debajo de cualquier etapa viva. Una
+    # planta con la oferta de energía operando y la de servicios recién firmada
+    # está operando: colapsar hacia atrás diría que todavía no entrega energía,
+    # y es mentira. Las etapas de cada oferta viajan igual en `ofertas[]`.
+    etapa = etapa_de_la_planta(_valor_enum(o.estado) for o in ofertas)
+
+    def _elegir(campo, del_proyecto, de_la_oferta):
+        if del_proyecto not in (None, ""):
+            fuentes[campo] = "proyecto"
+            return del_proyecto
+        if de_la_oferta not in (None, ""):
+            fuentes[campo] = "oferta"
+            return de_la_oferta
+        fuentes[campo] = None
+        return None
+
+    def _primero(attr):
+        """Primer valor no vacío entre las ofertas de la planta."""
+        for o in ofertas:
+            v = getattr(o, attr, None)
+            if v not in (None, ""):
+                return v
+        return None
+
+    nombre = _elegir("nombre",
+                     proyecto.nombre_comercial if proyecto else None,
+                     _primero("planta_nombre"))
+    municipio = _elegir("municipio",
+                        proyecto.municipio if proyecto else None,
+                        _primero("municipio"))
+    departamento = _elegir("departamento",
+                           proyecto.departamento if proyecto else None,
+                           _primero("departamento"))
+
+    # Operador de red: el catálogo manda. `operador_red_legal` ya resuelve
+    # proyecto → primera frontera con operador; acá solo se le agrega el
+    # escalón de lo declarado en la oferta.
+    operador = _elegir("operador_red",
+                       proyecto.operador_red_legal if proyecto else None,
+                       operador_oferta)
+    if fuentes["operador_red"] == "proyecto":
+        operador_id = proyecto.operador_red_id
+    elif fuentes["operador_red"] == "oferta":
+        operador_id = next((o.operador_red_id for o in ofertas
+                            if o.operador_red_id is not None), None)
+    else:
+        operador_id = None
+
+    gen_mwh, gen_origen, gen_detalle = _gen_promedio(proyecto, ofertas)
+    fuentes["gen_promedio_mensual"] = gen_origen
+
+    # Identificador de la planta en la API de Unergy: es el `sub_project` que se
+    # manda como parámetro a /project_generation/ (ver monitoreo._fetch_unergy_raw)
+    # y con el que se calcula la generación promedio.
+    api_id_unergy = None
+    fuentes["api_id_unergy"] = None
+    if proyecto is not None and proyecto.sub_project:
+        api_id_unergy = proyecto.sub_project
+        fuentes["api_id_unergy"] = "sub_project"
+
+    # Estado del PROYECTO (en_desarrollo | en_operacion | suspendido | cancelado),
+    # que no es la etapa comercial y por eso viaja aparte de `estado_pipeline`:
+    # uno dice en qué punto está el negocio y el otro en qué punto está la planta.
+    # Pueden discrepar (oferta operando y proyecto todavía en_desarrollo) y acá NO
+    # se los concilia: inventar coherencia taparía el dato mal cargado en vez de
+    # mostrarlo. La etiqueta viaja al lado para que quien integra la pinte tal cual.
+    from app.models.proyectos import ESTADO_PROYECTO_LABELS  # dict, no toca la BD
+
+    estado_proyecto = _valor_enum(proyecto.estado) if proyecto is not None else None
+    fuentes["estado_proyecto"] = "proyecto" if estado_proyecto else None
+
+    # Inicio de comercialización = primer día con generación real (lo autoderiva
+    # app.services.comercializacion). NO se rellena con la fecha del contrato ni
+    # con la entrada en operación: son tres hechos distintos y mezclarlos haría
+    # que nadie pueda confiar en el campo. Los otros dos viajan aparte.
+    inicio_com = proyecto.fecha_inicio_comercializacion if proyecto else None
+    fuentes["fecha_inicio_comercializacion"] = "proyecto" if inicio_com else None
+
+    contrato = duracion_contrato(ppa.fecha_inicio if ppa else None,
+                                 ppa.fecha_fin if ppa else None, hoy=hoy)
+    if ppa is not None:
+        contrato.update({
+            "ppa_contrato_id": ppa.id,
+            "numero_codigo_contrato": ppa.numero_codigo_contrato,
+            "nombre_interno": ppa.nombre_interno,
+            "tipo": ppa.tipo_contrato or "venta",
+            "comprador": ppa.comprador_nombre,
+            "vendedor": ppa.vendedor_nombre,
+            "cantidad_minima_kwh_mes": (float(ppa.cantidad_minima_kwh_mes)
+                                        if ppa.cantidad_minima_kwh_mes is not None else None),
+        })
+        fuentes["contrato_energia"] = "contrato"
+    else:
+        contrato.update({"ppa_contrato_id": None, "numero_codigo_contrato": None,
+                         "nombre_interno": None, "tipo": None, "comprador": None,
+                         "vendedor": None, "cantidad_minima_kwh_mes": None})
+        fuentes["contrato_energia"] = None
+
+    partes_ubicacion = [p for p in (municipio, departamento) if p]
+
+    # La oferta VIGENTE: la que sostiene la etapa de la planta. Lo normal es que
+    # haya una sola viva, pero una planta puede tener a la vez la de compra de
+    # energía y la de servicios (representación/CGM), así que cuando las dos
+    # están en la misma etapa manda la de energía, que es la que define el
+    # negocio. Es `null` cuando la etapa de la planta es una SALIDA: si todo lo
+    # que tiene está terminado o declinado, no hay nada vigente que señalar.
+    # `ofertas[]` sigue trayéndolas todas.
+    vigente = None
+    if etapa not in ETAPAS_SALIDA:
+        vigente = min((o for o in ofertas if _valor_enum(o.estado) == etapa),
+                      key=lambda o: (0 if _valor_enum(o.tipo) == "compra_energia" else 1, o.id))
+
+    return {
+        "proyecto_id": proyecto.id if proyecto else None,
+        "nombre": nombre,
+        # Etapa COMERCIAL: `firmado` = hay contrato y el suministro no arrancó ·
+        # `operando` = ya entrega energía. Es el dato que separa las dos mitades
+        # de la respuesta. Se llama `estado_pipeline` y no `estado` porque al
+        # lado viaja el estado del proyecto y "estado" a secas no decía cuál.
+        "estado_pipeline": etapa,
+        # Estado del PROYECTO. null cuando la oferta todavía no está vinculada a
+        # una planta cargada en la plataforma: ahí no hay estado que dar.
+        "estado_proyecto": estado_proyecto,
+        "estado_proyecto_label": ESTADO_PROYECTO_LABELS.get(estado_proyecto),
+        # Con qué id se consulta esta planta en la API de Unergy. null = todavía
+        # no tiene identificador de monitoreo cargado.
+        "api_id_unergy": api_id_unergy,
+        "ubicacion": {
+            "municipio": municipio,
+            "departamento": departamento,
+            "texto": ", ".join(partes_ubicacion) if partes_ubicacion else None,
+            "latitud": float(proyecto.latitud) if proyecto is not None and proyecto.latitud is not None else None,
+            "longitud": float(proyecto.longitud) if proyecto is not None and proyecto.longitud is not None else None,
+        },
+        "operador_red": operador,
+        "operador_red_id": operador_id,
+        # El promedio va en las dos unidades a propósito: la plataforma habla en
+        # MWh y el CRM en kWh, y la conversión hecha en dos integraciones
+        # distintas es un factor 1000 esperando pasar.
+        "gen_promedio_mensual_mwh": gen_mwh,
+        "gen_promedio_mensual_kwh": round(gen_mwh * 1000, 3) if gen_mwh is not None else None,
+        "gen_promedio_origen": gen_origen,
+        "gen_promedio_detalle": gen_detalle,
+        "fecha_inicio_comercializacion": inicio_com,
+        # Hechos vecinos, explícitamente separados del inicio de comercialización.
+        "fecha_entrada_operacion": proyecto.fecha_entrada_operacion if proyecto else None,
+        "contrato_energia": contrato,
+        "cliente": cliente,
+        "potencia_instalada_kwp": (float(proyecto.potencia_instalada_kwp)
+                                   if proyecto is not None and proyecto.potencia_instalada_kwp is not None else None),
+        # La oferta que manda, suelta, porque casi siempre es una sola y hacer
+        # recorrer una lista de un elemento para el caso normal es incómodo.
+        "oferta_vigente": _oferta_min(vigente) if vigente is not None else None,
+        # Y TODAS las ofertas de la planta, de todo el pipeline, cada una con su
+        # etapa: acá aparecen la de servicios que acompaña a la de energía y las
+        # que ya se cayeron o se vencieron.
+        "ofertas": [_oferta_min(o) for o in ofertas],
+        "fuentes": fuentes,
+        # Guardado para ordenar y depurar; no forma parte del contrato público.
+        "_principal": principal.id,
+    }
+
+
+def _oferta_min(o) -> dict:
+    """La oferta como se ve desde afuera. Misma forma en `oferta_vigente` y en
+    `ofertas[]` a propósito: quien integra escribe un solo lector."""
+    return {
+        "oferta_id": o.id,
+        "codigo_seguimiento": _codigo_seguimiento(o.numero_oferta),
+        "tipo": _valor_enum(o.tipo),
+        "estado": _valor_enum(o.estado),
+        "oportunidad_id": o.oportunidad_id,
+    }
+
+
+def _codigo_seguimiento(numero: str | None) -> str | None:
+    """Prefijo estandarizado OF→OP del código de seguimiento. Idempotente.
+
+    Duplica a propósito `app/api/v1/comercial.py::_norm_codigo`: importarlo desde
+    la API metería la capa de rutas dentro de la de servicios.
+    """
+    if numero and numero[:2].upper() == "OF":
+        return "OP" + numero[2:]
+    return numero
+
+
+def proyectos_operando(db, q=None, hoy=None, estados=ETAPAS_ENTREGABLES) -> list[dict]:
+    """Las plantas del pipeline comercial: por defecto `firmado` **y** `operando`.
+
+    Una fila por PLANTA, no por oferta, con la etapa comercial de la planta en
+    `estado_pipeline` y el estado del proyecto en `estado_proyecto`. `estados`
+    acepta cualquiera de `ETAPAS_CONSULTABLES` (todo el pipeline, incluidas las
+    salidas `terminado` y `declinado`), no solo las entregables.
+    Todo se precarga por lotes: un número fijo de consultas sin importar cuántas
+    plantas haya, porque quien integra va a llamar esto en cada refresco de su
+    tablero.
+
+    `estados` filtra por la etapa **resuelta de la planta** (su oferta más
+    avanzada), no por "tiene alguna oferta en esa etapa". La diferencia importa:
+    una planta con la energía operando y los servicios recién firmados no debe
+    salir en `estados=("firmado",)` —está operando— y si saliera, los conteos de
+    las dos etapas por separado sumarían más que el total.
+
+    La fila siempre trae TODAS sus ofertas cerradas, no solo las de la etapa
+    filtrada: acotar la etapa elige plantas, no recorta su contenido.
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.clientes import Cliente
+    from app.models.comercial import Oportunidad, OportunidadOferta
+    from app.models.contratos import PPAContrato, ppa_contrato_proyectos_table
+    from app.models.fronteras import Frontera
+    from app.models.operadores_red import OperadorRed
+    from app.models.proyectos import Proyecto
+
+    hoy = hoy or col_now().date()
+    estados = tuple(estados)
+
+    # La consulta trae SIEMPRE todo el pipeline y el filtro por etapa se aplica
+    # al final, sobre la etapa resuelta de cada planta. Filtrar acá dejaría a una
+    # planta operando dentro de estados=("firmado",) por tener una oferta de
+    # servicios firmada, y le recortaría las ofertas que sí importan.
+    #
+    # El universo es todo el pipeline aunque se pidan solo las entregables: la
+    # etapa de una planta tiene que ser la misma sin importar cómo se la
+    # consulte, y para eso hay que mirarle todas las ofertas.
+    filas = (
+        db.query(OportunidadOferta, Cliente.razon_social_nombre)
+        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+        .join(Cliente, Cliente.id == Oportunidad.cliente_id)
+        .filter(OportunidadOferta.estado.in_(ETAPAS_CONSULTABLES),
+                Oportunidad.deleted_at.is_(None),
+                Cliente.deleted_at.is_(None))
+        .all()
+    )
+    if not filas:
+        return []
+
+    ofertas = [o for o, _ in filas]
+    cliente_por_oferta = {o.id: c for o, c in filas}
+
+    proyecto_ids = {o.proyecto_id for o in ofertas if o.proyecto_id}
+    proyectos = {}
+    if proyecto_ids:
+        # operador y fronteras.operador precargados: operador_red_legal los
+        # recorre y sin esto haría dos consultas por planta.
+        proyectos = {
+            p.id: p for p in db.query(Proyecto)
+            .options(selectinload(Proyecto.operador),
+                     selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+            .filter(Proyecto.id.in_(proyecto_ids), Proyecto.deleted_at.is_(None)).all()
+        }
+
+    ppa_ids = {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id}
+    ppas = {}
+    if ppa_ids:
+        ppas = {c.id: c for c in db.query(PPAContrato)
+                .filter(PPAContrato.id.in_(ppa_ids),
+                        PPAContrato.deleted_at.is_(None)).all()}
+
+    operador_ids = {o.operador_red_id for o in ofertas if o.operador_red_id}
+    operadores = {}
+    if operador_ids:
+        operadores = dict(db.query(OperadorRed.id, OperadorRed.nombre_legal)
+                          .filter(OperadorRed.id.in_(operador_ids)).all())
+
+    # PPAs del proyecto, para las plantas cuya oferta no quedó enlazada a un
+    # contrato: casi todas las que venían de antes del CRM. Sin esto, "tiempo del
+    # contrato" saldría null justo en las plantas más antiguas, que son las que
+    # sí tienen contrato.
+    ppas_por_proyecto: dict[int, list] = {}
+    if proyecto_ids:
+        for pid, contrato in (
+            db.query(ppa_contrato_proyectos_table.c.proyecto_id, PPAContrato)
+            .join(PPAContrato, PPAContrato.id == ppa_contrato_proyectos_table.c.contrato_id)
+            .filter(ppa_contrato_proyectos_table.c.proyecto_id.in_(proyecto_ids),
+                    PPAContrato.deleted_at.is_(None)).all()
+        ):
+            ppas_por_proyecto.setdefault(pid, []).append(contrato)
+
+    # Agrupar por planta. Sin proyecto vinculado la oferta es su propio grupo:
+    # es una planta real que aparece en /comercial, solo que todavía no existe
+    # como Proyecto en la plataforma.
+    grupos: dict[tuple, list] = {}
+    for o in ofertas:
+        clave = ("proyecto", o.proyecto_id) if o.proyecto_id else ("oferta", o.id)
+        grupos.setdefault(clave, []).append(o)
+
+    out = []
+    for (tipo_clave, valor), grupo in grupos.items():
+        proyecto = proyectos.get(valor) if tipo_clave == "proyecto" else None
+        if tipo_clave == "proyecto" and proyecto is None:
+            # El proyecto está borrado: la oferta sigue viva pero la planta no.
+            continue
+        # La oferta de compra de energía manda al elegir contrato: es la que
+        # define "el contrato de energía" de la planta.
+        grupo = sorted(grupo, key=lambda o: (
+            0 if _valor_enum(o.tipo) == "compra_energia" else 1, o.id))
+        ppa = next((ppas[o.ppa_contrato_id] for o in grupo
+                    if o.ppa_contrato_id and o.ppa_contrato_id in ppas), None)
+        if ppa is None and proyecto is not None:
+            ppa = _mejor_ppa(ppas_por_proyecto.get(proyecto.id, []), hoy)
+
+        # El nombre del operador se busca en la MISMA oferta que fila_operando
+        # va a usar para el id (la primera con operador declarado). Resolverlo
+        # en la primera que "exista en el catálogo" podía devolver el nombre de
+        # una oferta y el id de otra.
+        con_operador = next((o for o in grupo if o.operador_red_id is not None), None)
+        fila = fila_operando(
+            grupo, proyecto=proyecto, ppa=ppa,
+            operador_oferta=(operadores.get(con_operador.operador_red_id)
+                             if con_operador else None),
+            cliente=cliente_por_oferta.get(grupo[0].id), hoy=hoy)
+        out.append(fila)
+
+    if set(estados) != set(ETAPAS_CONSULTABLES):
+        out = [f for f in out if f["estado_pipeline"] in estados]
+
+    if q:
+        aguja = q.strip().lower()
+        out = [f for f in out
+               if aguja in (f["nombre"] or "").lower()
+               or aguja in (f["cliente"] or "").lower()
+               or any(aguja in (of["codigo_seguimiento"] or "").lower()
+                      for of in f["ofertas"])]
+
+    out.sort(key=lambda f: ((f["nombre"] or "").lower(), f["_principal"]))
+    for f in out:
+        f.pop("_principal", None)
+    return out
+
+
+def _valor_enum(v):
+    """Enum de SQLAlchemy → slug; deja pasar lo que ya es str puro o None.
+
+    El `isinstance(v, str)` se chequea DESPUÉS del enum, y no antes, porque los
+    enums del CRM heredan de `str` (`class EstadoComercialEnum(str, Enum)`): con
+    el orden inverso esta función devolvía el miembro del enum tal cual y no
+    normalizaba nada, pese al nombre. Las comparaciones seguían andando —un
+    str-enum es igual a su valor— y FastAPI lo serializaba bien, así que no se
+    notaba; pero cualquier lector en Python recibía `EstadoComercialEnum.firmado`
+    y al imprimirlo o usarlo de clave veía eso mismo en vez de `"firmado"`.
+    """
+    if v is None:
+        return None
+    return v.value if isinstance(v, enum.Enum) else v
+
+
+# Umbral para proponer un vínculo oferta→proyecto. Bastante más alto que el
+# UMBRAL_ACEPTAR=0.55 del matcher: con 0.55 la dedup de clientes llegó a fusionar
+# falsos positivos (Soluenergías→FEM, 0.59). Acá el costo de un match malo es que
+# una planta muestre la generación y el contrato de OTRA, así que se prefiere no
+# proponer nada y que quede en la lista de revisión manual.
+UMBRAL_VINCULO = 0.72
+
+
+def proponer_vinculos_proyecto(db, estados=ETAPAS_ENTREGABLES,
+                               umbral=UMBRAL_VINCULO) -> dict:
+    """Empareja por nombre las ofertas sin `proyecto_id` con proyectos existentes.
+
+    Existe porque el pipeline comercial se cargó desde hojas de cálculo, donde la
+    planta es texto libre: "Catedral" contra "La Catedral", "Taurus IX" contra
+    "GD Taurus IX", "Parque Solar Baraya" contra "Minigranja Solar Baraya". Son
+    la misma planta y sin el vínculo la API de plantas operando devuelve el
+    nombre y nada más.
+
+    NO escribe: solo propone. La decisión de vincular es de una persona, porque
+    un match equivocado le pone a una planta la generación y el contrato de otra
+    — un error silencioso, que es el peor tipo. Quien la aplique es
+    `vincular_proyectos()`.
+
+    Usa el matcher compartido (`mejor_candidato`), que tiene guarda de
+    ambigüedad: si dos proyectos quedan parejos no adivina.
+
+    `estados` acota las etapas; por defecto las entregables (firmado y operando),
+    que son las que alimentan la API. `estados=None` mira todo el pipeline.
+    """
+    from app.models.comercial import Oportunidad, OportunidadOferta
+    from app.models.proyectos import Proyecto
+
+    q = (db.query(OportunidadOferta)
+         .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+         .filter(OportunidadOferta.proyecto_id.is_(None),
+                 Oportunidad.deleted_at.is_(None)))
+    if estados:
+        q = q.filter(OportunidadOferta.estado.in_(tuple(estados)))
+    ofertas = q.all()
+
+    candidatos = [
+        (p, [n for n in (p.nombre_comercial, p.nombre_bitacora, p.nombre_clientes) if n])
+        for p in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
+    ]
+
+    propuestos, sin_candidato, sin_nombre = [], [], []
+    for o in ofertas:
+        if not (o.planta_nombre or "").strip():
+            sin_nombre.append({"oferta_id": o.id,
+                               "codigo": _codigo_seguimiento(o.numero_oferta)})
+            continue
+        proyecto, score = mejor_candidato(o.planta_nombre, candidatos)
+        fila = {
+            "oferta_id": o.id,
+            "codigo": _codigo_seguimiento(o.numero_oferta),
+            "planta_nombre": o.planta_nombre,
+            "estado": _valor_enum(o.estado),
+            "score": score,
+        }
+        if proyecto is not None and score >= umbral:
+            fila.update({"proyecto_id": proyecto.id,
+                         "proyecto_nombre": proyecto.nombre_comercial})
+            propuestos.append(fila)
+        else:
+            # Se reporta el mejor score aunque no alcance: dice si faltó poco
+            # (revisar a mano) o si no hay nada parecido (crear la planta).
+            sin_candidato.append(fila)
+
+    return {
+        "umbral": umbral,
+        "estados": list(estados) if estados else "todas",
+        "n_ofertas_sin_proyecto": len(ofertas),
+        "n_propuestos": len(propuestos),
+        "n_sin_candidato": len(sin_candidato),
+        "n_sin_nombre": len(sin_nombre),
+        # Las tres listas son el valor del reporte: qué se va a vincular, qué hay
+        # que mirar a mano y qué ni siquiera tiene nombre de planta.
+        "propuestos": sorted(propuestos, key=lambda f: -f["score"]),
+        "sin_candidato": sorted(sin_candidato, key=lambda f: -f["score"]),
+        "sin_nombre": sin_nombre,
+    }
+
+
+def vincular_proyectos(db, estados=ETAPAS_ENTREGABLES, umbral=UMBRAL_VINCULO,
+                       dry_run=True, solo_ofertas=None) -> dict:
+    """Aplica los vínculos que propone `proponer_vinculos_proyecto`.
+
+    Idempotente: solo toca ofertas con `proyecto_id` en NULL, así que repetirla
+    no cambia nada. `solo_ofertas` limita la escritura a una lista de ids —
+    el camino para aceptar unas propuestas y descartar otras sin tener que subir
+    el umbral.
+
+    Reversible a mano: deshacer un vínculo es poner `proyecto_id` en NULL desde
+    la ficha de la oferta.
+    """
+    from app.models.comercial import OportunidadOferta
+
+    reporte = proponer_vinculos_proyecto(db, estados=estados, umbral=umbral)
+    a_aplicar = reporte["propuestos"]
+    if solo_ofertas is not None:
+        permitidas = set(solo_ofertas)
+        omitidas = [f for f in a_aplicar if f["oferta_id"] not in permitidas]
+        a_aplicar = [f for f in a_aplicar if f["oferta_id"] in permitidas]
+        reporte["omitidos_por_filtro"] = omitidas
+
+    if not dry_run and a_aplicar:
+        por_id = {o.id: o for o in db.query(OportunidadOferta).filter(
+            OportunidadOferta.id.in_([f["oferta_id"] for f in a_aplicar])).all()}
+        for fila in a_aplicar:
+            oferta = por_id.get(fila["oferta_id"])
+            if oferta is not None and oferta.proyecto_id is None:
+                oferta.proyecto_id = fila["proyecto_id"]
+        db.commit()
+
+    reporte.update({"dry_run": dry_run, "n_aplicados": 0 if dry_run else len(a_aplicar),
+                    "aplicados": [] if dry_run else a_aplicar})
+    return reporte
+
+
+def _mejor_ppa(contratos, hoy):
+    """El contrato de energía que describe a la planta HOY.
+
+    Prioridad: vigente hoy → de compra (que es el que firma el CRM: Unergy le
+    compra la energía al dueño de la planta) → el de inicio más reciente. Un
+    contrato vencido de 2021 no puede ganarle al que está corriendo.
+    """
+    if not contratos:
+        return None
+
+    def _clave(c):
+        vigente = ((c.fecha_inicio is None or c.fecha_inicio <= hoy)
+                   and (c.fecha_fin is None or c.fecha_fin >= hoy))
+        return (0 if vigente else 1,
+                0 if (c.tipo_contrato or "venta") == "compra" else 1,
+                -(c.fecha_inicio.toordinal() if c.fecha_inicio else 0))
+
+    return sorted(contratos, key=_clave)[0]
+
+
+def contexto_ficha(db, ofertas, hoy=None) -> dict[int, dict]:
+    """Precarga lo que ficha_operativa() necesita: {oferta_id: kwargs}.
+
+    Un número FIJO de consultas sin importar cuántas ofertas entren. Resolver
+    esto dentro del bucle sería N+1 justo en la vista principal de /comercial,
+    que carga todas las ofertas de una.
+
+    Las llaves de cada valor son los nombres de los parámetros de
+    ficha_operativa, para poder llamarla como ficha_operativa(o, **ctx[o.id]).
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.proyectos import Proyecto
+    from app.models.fronteras import Frontera
+    from app.models.contratos import PPAContrato
+    from app.models.operadores_red import OperadorRed
+
+    ofertas = list(ofertas)
+    if not ofertas:
+        return {}
+
+    proyecto_ids = {o.proyecto_id for o in ofertas if o.proyecto_id}
+    ppa_ids = {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id}
+    operador_ids = {o.operador_red_id for o in ofertas if o.operador_red_id}
+
+    proyectos = {}
+    if proyecto_ids:
+        # operador y fronteras.operador precargados: Proyecto.operador_red_legal
+        # los recorre y sin esto haría dos consultas por proyecto.
+        proyectos = {
+            p.id: p for p in db.query(Proyecto)
+            .options(selectinload(Proyecto.operador),
+                     selectinload(Proyecto.fronteras).selectinload(Frontera.operador))
+            .filter(Proyecto.id.in_(proyecto_ids),
+                    Proyecto.deleted_at.is_(None)).all()
+        }
+    ppas = {}
+    if ppa_ids:
+        # Un contrato borrado no alimenta la ficha: la oferta conserva el FK pero
+        # sus fechas ya no son la verdad de nadie.
+        ppas = {c.id: c for c in db.query(PPAContrato)
+                .filter(PPAContrato.id.in_(ppa_ids),
+                        PPAContrato.deleted_at.is_(None)).all()}
+    operadores = {}
+    if operador_ids:
+        operadores = dict(
+            db.query(OperadorRed.id, OperadorRed.nombre_legal)
+            .filter(OperadorRed.id.in_(operador_ids)).all())
+
+    generacion = _ultimo_mes_generacion(db, proyecto_ids, hoy=hoy)
+
+    return {
+        o.id: {
+            "proyecto": proyectos.get(o.proyecto_id),
+            "ppa": ppas.get(o.ppa_contrato_id),
+            "generacion": generacion.get(o.proyecto_id),
+            "operador_oferta": operadores.get(o.operador_red_id),
+        }
+        for o in ofertas
+    }
+
+
+def _ultimo_mes_generacion(db, proyecto_ids, hoy=None) -> dict[int, tuple[str, float]]:
+    """Último mes CERRADO con lecturas por proyecto: {proyecto_id: ('2026-07', kwh)}.
+
+    Dos exclusiones a propósito, las dos por lo mismo — un número parcial
+    presentado como energía real del mes es peor que no dar número:
+      · el mes en curso no cuenta (tres días de agosto no son un mes);
+      · un mes con menos de 28 días de lectura tampoco.
+    Una sola consulta agregada para todos los proyectos.
+    """
+    from sqlalchemy import extract, func as sa_func
+    from app.models.generacion import GeneracionDiaria
+
+    if not proyecto_ids:
+        return {}
+    hoy = hoy or col_now().date()
+    primero_del_mes = hoy.replace(day=1)
+    anio = extract("year", GeneracionDiaria.fecha)
+    mes = extract("month", GeneracionDiaria.fecha)
+    filas = (
+        db.query(GeneracionDiaria.proyecto_id, anio.label("anio"), mes.label("mes"),
+                 sa_func.sum(GeneracionDiaria.kwh_real).label("kwh"))
+        .filter(GeneracionDiaria.proyecto_id.in_(proyecto_ids),
+                GeneracionDiaria.kwh_real.isnot(None),
+                GeneracionDiaria.fecha < primero_del_mes)
+        .group_by(GeneracionDiaria.proyecto_id, anio, mes)
+        .having(sa_func.count(GeneracionDiaria.id) >= 28)
+        .all()
+    )
+    out: dict[int, tuple[str, float]] = {}
+    for proyecto_id, a, m, kwh in filas:
+        periodo = f"{int(a):04d}-{int(m):02d}"
+        if proyecto_id not in out or periodo > out[proyecto_id][0]:
+            out[proyecto_id] = (periodo, float(kwh))
+    return out
+
+
+# ── La vista PPA-céntrica del pipeline ───────────────────────────────────────
+#
+# proyectos_operando() responde "¿qué plantas hay?"; esto responde "¿qué
+# contratos de energía hay?" y cuelga las plantas de cada uno. Es el árbol
+# PPA → PROYECTOS → detalles.
+#
+# La idea central: un PPA no firmado NO tiene fila en `ppa_contratos`. La oferta
+# del CRM ES el PPA hasta que se firma, y `ppa["id"] is None` es la única señal
+# de que todavía es un borrador. No hay un segundo estado que pueda contradecir
+# al primero, y no hay filas de mentira ensuciando los 18 módulos que leen
+# ppa_contratos (Cumplimiento, GESCON, liquidaciones, facturación).
+
+# Solo los contratos de ENERGIA derivan en un PPA. Los servicios
+# (representación, CGM) desembocan en contratos_servicio, que es otra entidad.
+# `comunidad_energetica` NO es un tipo de contrato aparte: es un PPA con una
+# característica, y por eso entra acá y se marca en el nodo.
+TIPOS_ENERGIA = ("compra_energia", "comunidad_energetica")
+
+# Las etapas que producen un PPA (borrador o materializado). `oportunidad` queda
+# afuera porque todavía no hay oferta de la que derivar condiciones, y las
+# salidas (declinado/terminado) porque un negocio caído no es un contrato en
+# preparación: sería basura con forma de PPA.
+ETAPAS_CON_PPA = ("oferta", "contrato", ESTADO_FIRMADO, ESTADO_OPERANDO)
+
+
+def ppas_del_pipeline(db, q=None, hoy=None, estados=ETAPAS_CON_PPA) -> list[dict]:
+    """Los contratos de energía del pipeline, con sus plantas colgando.
+
+    Un nodo por PPA: `{"ppa": {...}, "proyectos": [{...con detalles}]}`.
+    """
+    from app.models.comercial import Oportunidad, OportunidadOferta
+
+    hoy = hoy or col_now().date()
+    estados = tuple(estados)
+
+    ofertas = (
+        db.query(OportunidadOferta)
+        .join(Oportunidad, Oportunidad.id == OportunidadOferta.oportunidad_id)
+        .filter(OportunidadOferta.tipo.in_(TIPOS_ENERGIA),
+                OportunidadOferta.estado.in_(estados),
+                Oportunidad.deleted_at.is_(None))
+        .all()
+    )
+    if not ofertas:
+        return []
+
+    clientes = _clientes_por_oportunidad(db, {o.oportunidad_id for o in ofertas})
+    operadores = _operadores_por_id(
+        db, {o.operador_red_id for o in ofertas if o.operador_red_id})
+    de_oferta = _proyectos_de_ofertas(db, ofertas)
+    resuelto = _resolver_ppas(db, ofertas, de_oferta, hoy)
+    del_ppa = _proyectos_por_ppa(db, {p.id for p, _ in resuelto.values() if p is not None})
+
+    # Un nodo por CONTRATO: si dos ofertas desembocan en el mismo PPA, el PPA
+    # aparecería dos veces y `total` lo contaría doble. Sin contrato todavía no hay
+    # nada por lo que agrupar, así que cada oferta es su propio borrador.
+    grupos: dict[tuple, list] = {}
+    for o in ofertas:
+        ppa, _fuente = resuelto[o.id]
+        clave = ("ppa", ppa.id) if ppa is not None else ("oferta", o.id)
+        grupos.setdefault(clave, []).append(o)
+
+    nodos = []
+    for grupo in grupos.values():
+        # La oferta que representa al grupo: manda la de compra de energía, que es
+        # la que define el negocio; el id desempata.
+        grupo = sorted(grupo, key=lambda o: (
+            0 if _valor_enum(o.tipo) == "compra_energia" else 1, o.id))
+        principal = grupo[0]
+        ppa, fuente = resuelto[principal.id]
+        # Para un PPA que existe las plantas son las del CONTRATO: esa es la verdad
+        # contractual, y puede cubrir más plantas que una sola oferta. Para un
+        # borrador todavía no hay contrato, así que son las que declaró la oferta.
+        proyectos = (del_ppa.get(ppa.id, []) if ppa is not None
+                     else de_oferta.get(principal.id, []))
+        # Qué ofertas del grupo nombraron cada planta. Para un borrador son todas
+        # sus plantas; para un contrato, las plantas del PPA que además alguna
+        # oferta declaró (las demás quedan sin escalón de oferta, que es lo
+        # correcto: nadie declaró nada sobre ellas). En el orden del grupo, así
+        # que la de compra de energía manda.
+        declarantes: dict[int, list] = {}
+        for o in grupo:
+            for p in de_oferta.get(o.id, []):
+                declarantes.setdefault(p.id, []).append(o)
+        nodos.append(_nodo_ppa(principal, ppa=ppa, fuente_ppa=fuente,
+                               proyectos=proyectos, ofertas=grupo,
+                               cliente=clientes.get(principal.oportunidad_id), hoy=hoy,
+                               declarantes=declarantes, operadores=operadores))
+
+    if q:
+        aguja = q.strip().lower()
+        nodos = [n for n in nodos if _coincide(n, aguja)]
+
+    # Por nombre de planta para que la lista sea estable entre llamadas; el id
+    # desempata cuando dos ofertas nombran la misma planta.
+    nodos.sort(key=lambda n: ((n["ppa"]["planta_declarada"] or "").lower(),
+                              n["ppa"]["oferta_id"]))
+    return nodos
+
+
+def _coincide(nodo, aguja: str) -> bool:
+    """Busca en la planta declarada, el cliente, el código de seguimiento y el
+    nombre de cada proyecto del PPA."""
+    ppa = nodo["ppa"]
+    campos = [ppa["planta_declarada"], ppa["cliente"], ppa["codigo_seguimiento"],
+              ppa["numero_codigo_contrato"], ppa["nombre_interno"]]
+    campos += [p["nombre"] for p in nodo["proyectos"]]
+    return any(aguja in (c or "").lower() for c in campos)
+
+
+def _proyectos_de_ofertas(db, ofertas) -> dict[int, list]:
+    """Las plantas declaradas por cada oferta: las de la M2M si tiene, y si no la
+    del `proyecto_id` único. Así las ofertas ya vinculadas siguen resolviendo su
+    planta sin necesidad de backfill."""
+    from app.models.comercial import oportunidad_oferta_proyectos_table as tabla
+
+    ids = [o.id for o in ofertas]
+    asociadas: dict[int, list[int]] = {}
+    for oferta_id, proyecto_id in db.execute(
+        tabla.select().where(tabla.c.oferta_id.in_(ids))
+    ).all():
+        asociadas.setdefault(oferta_id, []).append(proyecto_id)
+
+    necesarios = {pid for lista in asociadas.values() for pid in lista}
+    necesarios |= {o.proyecto_id for o in ofertas
+                   if o.proyecto_id and o.id not in asociadas}
+    proyectos = _proyectos_por_id(db, necesarios)
+
+    out: dict[int, list] = {}
+    for o in ofertas:
+        pids = asociadas.get(o.id) or ([o.proyecto_id] if o.proyecto_id else [])
+        elegidos = [proyectos[pid] for pid in pids if pid in proyectos]
+        elegidos.sort(key=lambda p: ((p.nombre_comercial or "").lower(), p.id))
+        if elegidos:
+            out[o.id] = elegidos
+    return out
+
+
+def _opciones_proyecto() -> tuple:
+    """Todo lo que la ficha de la planta va a leer, precargado por lotes.
+
+    `selectinload` y no `joinedload`: son colecciones (fronteras, inversores,
+    grupos de panel) y con join se multiplicarían las filas del proyecto. Cada
+    opción cuesta UNA consulta extra para el lote completo, no una por planta —
+    lo que protege el test de N+1: el número de consultas no depende de cuántas
+    plantas traiga la respuesta.
+
+    `operador` y `fronteras.operador` estaban desde el principio porque
+    `operador_red_legal` las recorre; el resto entró con la ficha completa
+    (identificación, técnica, fronteras, portafolio). Sin precargarlas, armar la
+    ficha de 60 plantas costaría ~300 consultas.
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.fronteras import Frontera
+    from app.models.proyectos import Proyecto
+
+    return (
+        selectinload(Proyecto.operador),
+        selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+        selectinload(Proyecto.info_tecnica),
+        selectinload(Proyecto.inversores),
+        selectinload(Proyecto.portafolio),
+    )
+
+
+def _proyectos_por_ppa(db, ppa_ids: set[int]) -> dict[int, list]:
+    """Las plantas de cada PPA, en una consulta para todos, con la ficha
+    completa precargada (ver _opciones_proyecto)."""
+    from app.models.contratos import ppa_contrato_proyectos_table
+    from app.models.proyectos import Proyecto
+
+    if not ppa_ids:
+        return {}
+    out: dict[int, list] = {}
+    filas = (
+        db.query(ppa_contrato_proyectos_table.c.contrato_id, Proyecto)
+        .join(Proyecto, Proyecto.id == ppa_contrato_proyectos_table.c.proyecto_id)
+        .options(*_opciones_proyecto())
+        .filter(ppa_contrato_proyectos_table.c.contrato_id.in_(ppa_ids),
+                Proyecto.deleted_at.is_(None))
+        .all()
+    )
+    for ppa_id, proyecto in filas:
+        out.setdefault(ppa_id, []).append(proyecto)
+    return out
+
+
+def _proyectos_por_id(db, ids: set[int]) -> dict:
+    from app.models.proyectos import Proyecto
+
+    if not ids:
+        return {}
+    return {p.id: p for p in db.query(Proyecto)
+            .options(*_opciones_proyecto())
+            .filter(Proyecto.id.in_(ids), Proyecto.deleted_at.is_(None)).all()}
+
+
+def api_id_unergy(proyecto) -> tuple[str | None, str | None]:
+    """Con qué id se consulta esta planta en la API de Unergy, y de qué campo
+    salió."""
+    if proyecto is None:
+        return None, None
+    if proyecto.sub_project:
+        return proyecto.sub_project, "sub_project"
+    return None, None
+
+
+def _es_comunidad(oferta, ppa) -> bool:
+    """Si este PPA es de comunidad energética."""
+    if ppa is not None and ppa.es_comunidad_energetica is not None:
+        return bool(ppa.es_comunidad_energetica)
+    return _valor_enum(oferta.tipo) == "comunidad_energetica"
+
+
+def _condiciones(oferta, ppa, hoy=None) -> dict:
+    """Periodo, duración y energía del PPA, con `origen` diciendo de dónde salen.
+
+    En cuanto el contrato existe manda el contrato, sin mezclar: una fecha de la
+    oferta y una pactada se ven idénticas en el JSON, y sin `origen` quien
+    integra no puede saber si está mirando una intención o un compromiso.
+    """
+    if ppa is not None:
+        c = duracion_contrato(ppa.fecha_inicio, ppa.fecha_fin, hoy=hoy)
+        c["origen"] = "contrato"
+        c["energia_kwh_mes"] = (float(ppa.cantidad_minima_kwh_mes)
+                                if ppa.cantidad_minima_kwh_mes is not None else None)
+        return c
+    c = duracion_contrato(oferta.fecha_tentativa_inicio, oferta.fecha_fin_tentativa,
+                          hoy=hoy)
+    c["origen"] = "oferta"
+    # En la oferta la energía es una ESTIMACION técnica de la planta, no un
+    # compromiso contractual como cantidad_minima_kwh_mes. Ocupa la misma casilla
+    # porque es lo que se compara, y `origen` avisa que no es lo mismo.
+    c["energia_kwh_mes"] = (float(oferta.energia_promedio_kwh_mes)
+                            if oferta.energia_promedio_kwh_mes is not None else None)
+    return c
+
+
+def _operador_red(proyecto, nombre_oferta=None, id_oferta=None):
+    """El operador de red de la planta, su id de catálogo y de dónde salió.
+
+    Es `Proyecto.operador_red_legal` con el id al lado y un escalón más. El id
+    hace falta para cruzar contra `operadores_red`, y devolver el nombre de la
+    frontera junto al `operador_red_id` del proyecto —null justo cuando la planta
+    no tiene vínculo propio— hacía que nombre e id hablaran de cosas distintas.
+    Por eso `frontera` es una fuente aparte de `proyecto`.
+
+    Requiere `operador` y `fronteras.operador` precargados (lo hacen las dos
+    funciones que traen los proyectos de este módulo).
+    """
+    if proyecto is not None:
+        if proyecto.operador:
+            return proyecto.operador.nombre_legal, proyecto.operador_red_id, "proyecto"
+        for f in proyecto.fronteras:
+            if f.operador:
+                return f.operador.nombre_legal, f.operador_red_id, "frontera"
+    if nombre_oferta:
+        return nombre_oferta, id_oferta, "oferta"
+    return None, None, None
+
+
+# ── La ficha completa de la planta ───────────────────────────────────────────
+# Los datos con los que se creó el Proyecto en la plataforma: cómo se identifica
+# en cada sistema, su clasificación regulatoria, la ubicación fina, la ficha
+# técnica, las fronteras comerciales, los servicios contratados, el pipeline de
+# obra y la curva simulada.
+#
+# Ninguno de estos campos tiene escalón de oferta —una oferta comercial no
+# declara marcas de inversor ni códigos SIC—, así que salen del Proyecto o salen
+# null, y por eso NO entran a `fuentes`: ese mapa existe para los campos que se
+# resuelven por cascada, y meter ahí veinte entradas con el valor "proyecto"
+# fijo lo volvería ruido.
+#
+# Los bloques viajan siempre, aunque estén vacíos, para que quien integre lea
+# una sola forma: un `tecnica` ausente y uno con todo en null se programan
+# distinto, y la planta sin ficha técnica cargada es el caso normal, no un error.
+
+
+def _num(v):
+    """Decimal de la BD → float del JSON, dejando pasar el null."""
+    return float(v) if v is not None else None
+
+
+def _identificacion(proyecto) -> dict:
+    """Cómo se llama esta planta y con qué código se cruza en cada sistema.
+
+    Van todos los identificadores juntos porque el error clásico de una
+    integración es cruzar por el id equivocado: `sub_project` (API de generación
+    de Unergy), `project_id_solenium` (data.solenium.co) y
+    `sunfactory_project_id` (el pipeline de obra) son tres espacios de ids
+    distintos aunque los tres se lean como "el id de la planta". El nombre del
+    sistema está en la clave a propósito.
+
+    Los tres nombres también son datos distintos: la misma planta se llama de
+    una forma en la bitácora de operación y de otra en los documentos del
+    cliente, y quien integre necesita saber contra cuál está comparando.
+    """
+    return {
+        "nombre_comercial": proyecto.nombre_comercial,
+        "nombre_bitacora": proyecto.nombre_bitacora,
+        "nombre_clientes": proyecto.nombre_clientes,
+        "topic_slug": proyecto.topic_slug,
+        # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo.
+        "sub_project": proyecto.sub_project,
+        "codigo_cnd": proyecto.codigo_cnd,
+        "codigo_tsf": proyecto.codigo_tsf,
+        "origina_code": proyecto.origina_code,
+        "project_id_solenium": proyecto.project_id_solenium,
+        "sunfactory_project_id": proyecto.sunfactory_project_id,
+        "quoia_nodo_id": proyecto.quoia_nodo_id,
+        "quoia_reporte_generacion_id": proyecto.quoia_reporte_generacion_id,
+        "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,
+        "portafolio_id": proyecto.portafolio_id,
+        "portafolio": proyecto.portafolio.nombre if proyecto.portafolio else None,
+    }
+
+
+def _clasificacion(proyecto) -> dict:
+    """Qué tipo de planta es, en los tres ejes con los que se la clasifica.
+
+    `clasificacion_regulatoria` (AGP/AGPE/AGGE/GD/DER) es la de la CREG y es la
+    que manda para el mercado; `tipo_proyecto` es la interna
+    (minigranja/autoconsumo/gd/...) y `tipo_tecnologia` la fuente. Son ejes
+    independientes y no se derivan uno del otro.
+    """
+    return {
+        "clasificacion_regulatoria": _valor_enum(proyecto.clasificacion_regulatoria),
+        "tipo_tecnologia": _valor_enum(proyecto.tipo_tecnologia),
+        "tipo_proyecto": _valor_enum(proyecto.tipo_proyecto),
+        # Ortogonal a todo lo anterior: cualquier planta puede o no pertenecer a
+        # una comunidad energética.
+        "es_comunidad_energetica": bool(proyecto.es_comunidad_energetica),
+        "nombre_comunidad": proyecto.nombre_comunidad,
+    }
+
+
+def _servicios_planta(proyecto) -> dict:
+    """Qué le presta Unergy a esta planta.
+
+    Son los flags del Proyecto, que dicen qué servicio está ACTIVO — no los
+    contratos que lo respaldan, que son otra entidad (`contratos_servicio`). Se
+    exponen sin el prefijo `srv_` porque afuera el prefijo no significa nada.
+    """
+    return {
+        "operacion": bool(proyecto.srv_operacion),
+        "representacion": bool(proyecto.srv_representacion),
+        "cgm": bool(proyecto.srv_cgm),
+        "ppa": bool(proyecto.srv_ppa),
+        "promotor": bool(proyecto.srv_promotor),
+        "rec": bool(proyecto.srv_rec),
+        # Hasta cuándo la representa Unergy ante el mercado. Va con los
+        # servicios y no con las fechas del contrato de energía: son cosas
+        # distintas y una planta puede tener representación sin PPA.
+        "fecha_fin_representacion": proyecto.fecha_fin_representacion,
+    }
+
+
+def _ficha_tecnica(proyecto) -> dict:
+    """La ficha técnica: red, paneles, inversores, equipos y almacenamiento.
+
+    Casi todo vive en `proyecto_info_tecnica` (una fila por planta) y esa fila
+    **puede no existir**: ahí sus campos salen null y el bloque viaja igual.
+
+    `inversores.equipos` es la lista REAL cargada en la plataforma —los
+    inversores son los que se usan para reportar fallas por inversor— y no el
+    conteo de la ficha, que es un resumen escrito a mano y puede no coincidir.
+    Los dos viajan: el conteo dice lo que declaró el diseño, la lista lo que
+    está cargado. (`paneles.grupos` existió con el mismo propósito para
+    paneles -- ProyectoGrupoPanel, retirado 2026-08-20 por cero adopción real
+    en toda la plataforma; el conteo/marca/potencia de paneles sigue viniendo
+    de proyecto_info_tecnica.)
+
+    De los equipos salen las MARCAS y no las IPs ni las contraseñas de módem que
+    están en la misma tabla: son credenciales de acceso al equipo y esta
+    superficie es de consulta.
+    """
+    it = proyecto.info_tecnica
+
+    def _it(attr):
+        return getattr(it, attr, None) if it is not None else None
+
+    inversores = sorted(
+        (i for i in proyecto.inversores if i.activo),
+        key=lambda i: (i.orden if i.orden is not None else 0, i.id))
+    return {
+        "voltaje_red": _it("voltaje_red"),
+        "tipo_conexion": proyecto.tipo_conexion,
+        # Potencia AC (la del punto de conexión) contra kWp instalados (DC): no
+        # son el mismo número y la relación entre las dos es el sobredimensionado.
+        "potencia_ac_kw": _num(_it("potencia_ac_kw")),
+        "capacidad_instalada_kwp": _num(_it("capacidad_instalada_kwp")),
+        "produccion_especifica_kwh_kwp": _num(proyecto.produccion_especifica_kwh_kwp),
+        "tipo_tracker": _it("tipo_tracker"),
+        "paneles": {
+            # El conteo vive SOLO en la ficha técnica. Hasta 2026-08-19 estaba
+            # duplicado en `proyectos.cantidad_total_paneles` y acá se elegía uno
+            # de los dos; al eliminarse esa columna duplicada este era el último
+            # lector que quedaba, y leerla tiraba AttributeError en CADA planta
+            # del árbol — es decir, /comercial/proyectos-operando entero.
+            "cantidad_total": _it("cantidad_total_paneles"),
+            "marca": _it("marca_paneles"),
+            "potencia_panel_kwp": _it("potencia_panel_kwp"),
+        },
+        "inversores": {
+            "cantidad": _it("cantidad_inversores"),
+            "marca": _it("marca_inversores"),
+            "potencia_kwp": _it("potencia_inversores_kwp"),
+            "cantidad_strings": _it("cantidad_strings"),
+            # Solo los activos: un inversor dado de baja no está en la planta, y
+            # devolverlo haría que la suma de potencias no cuadre.
+            "equipos": [
+                {
+                    "id": i.id,
+                    "nombre": i.nombre,
+                    "marca": i.marca,
+                    "modelo": i.modelo,
+                    "potencia_nominal_kw": _num(i.potencia_nominal_kw),
+                    "tipo": _valor_enum(i.tipo),
+                    "numero_serie": i.numero_serie,
+                }
+                for i in inversores
+            ],
+        },
+        "almacenamiento": {
+            "tiene": bool(_it("tiene_almacenamiento")),
+            "capacidad_kwh": _num(_it("capacidad_almacenamiento_kwh")),
+            "marca": _it("marca_almacenamiento"),
+            "modelo": _it("modelo_almacenamiento"),
+        },
+        "equipos_marcas": {
+            "transformador": _it("marca_transformador"),
+            "reconectador_rele": _it("marca_reconectador_rele"),
+            "totalizador": _it("marca_totalizador"),
+            "seguidor_solar": _it("marca_seguidor_solar"),
+            "medidores_frontera": _it("marca_medidores_frontera"),
+            "modems_frontera": _it("marca_modems_frontera"),
+            "cctv": _it("marca_cctv"),
+        },
+        "seguridad_fisica": _it("seguridad_fisica"),
+        "tiene_internet": _it("tiene_internet"),
+        "retie_url": _it("retie_url"),
+    }
+
+
+def _fronteras_planta(proyecto) -> list[dict]:
+    """Las fronteras comerciales de la planta: con qué código se liquida.
+
+    Es el dato que cruza esta API contra el SIC y contra las liquidaciones, y no
+    puede vivir a nivel de PPA: una planta puede tener frontera de generación y
+    de consumo, y un contrato de dos plantas tiene las de las dos.
+
+    Se omiten las BORRADAS (`deleted_at`): la relación del modelo no filtra el
+    soft delete, así que una frontera dada de baja seguiría saliendo como
+    vigente. Tampoco viajan contraseñas de medidor ni IPs de módem, que están en
+    la misma tabla.
+
+    El operador de la frontera se devuelve del catálogo cuando existe el vínculo
+    y, si no, el texto de GESCON —con `operador_red_id` en null justamente para
+    avisar que con ese valor no se puede cruzar el catálogo.
+    """
+    fronteras = sorted(
+        (f for f in proyecto.fronteras if f.deleted_at is None),
+        key=lambda f: (f.codigo_frontera or "", f.id))
+    return [
+        {
+            "id": f.id,
+            "codigo_frontera": f.codigo_frontera,
+            "nombre_frontera": f.nombre_frontera,
+            "codigo_propio": f.codigo_propio,
+            "tipo_frontera": _valor_enum(f.tipo_frontera),
+            "estado": _valor_enum(f.estado),
+            "nivel_tension_kv": _num(f.nivel_tension_kv),
+            "capacidad_transporte_mw": _num(f.capacidad_transporte_mw),
+            "capacidad_efectiva_mw": _num(f.capacidad_efectiva_mw),
+            "factor_perdidas": _num(f.factor_perdidas),
+            "subestacion": f.subestacion,
+            "punto_conexion": f.punto_conexion,
+            "municipio": f.municipio,
+            "departamento": f.departamento,
+            "operador_red": f.operador.nombre_legal if f.operador else None,
+            "operador_red_id": f.operador_red_id,
+            "representante_frontera": f.representante_frontera,
+            "fecha_registro_asic": f.fecha_registro_asic,
+            "niu": f.niu,
+            "es_agrupadora": bool(f.es_agrupadora),
+        }
+        for f in fronteras
+    ]
+
+
+def _construccion(proyecto) -> dict:
+    """En qué punto de la obra está la planta (pipeline de Sun Factory).
+
+    Complementa `estado_proyecto`, que se queda en `en_desarrollo` durante toda
+    la construcción y no distingue una planta en cimientos de una que se
+    energiza la semana entrante.
+    """
+    return {
+        "fase": proyecto.fase_construccion,
+        "avance_obra_pct": _num(proyecto.avance_obra_pct),
+        # Siempre la que trae Sun Factory (solo lectura en la plataforma).
+        "fecha_estimada_energizacion": proyecto.fecha_estimada_energizacion,
+        # 'manual' (alta normal) | 'tsf_sync' (auto-importado de Sun Factory).
+        "origen_registro": proyecto.origen,
+    }
+
+
+def _simulacion(proyecto) -> dict:
+    """La curva de generación simulada: 12 valores en kWh, índice 0 = enero.
+
+    Los tres escenarios viajan porque no son intercambiables: el P50 es el
+    esperado y con el P90/P99 se estructura el negocio. Es una PROYECCIÓN del
+    estudio, distinta de `energia_promedio_mensual_*`, que puede ser medida —
+    `energia_promedio_origen` dice cuál de las dos se está mirando.
+
+    `serie_mensual_kwh` absorbe que las filas viejas guarden la lista como texto
+    JSON en vez de array: leerla cruda tumbaba /comercial con un 500.
+    """
+    def _serie(v):
+        return serie_mensual_kwh(v) or None
+
+    p50 = _serie(proyecto.p50_mensual_kwh)
+    return {
+        "p50_mensual_kwh": p50,
+        "p90_mensual_kwh": _serie(proyecto.p90_mensual_kwh),
+        "p99_mensual_kwh": _serie(proyecto.p99_mensual_kwh),
+        # La suma de los 12, para no obligar a sumarla del otro lado. Solo si la
+        # serie está completa: sumar 7 meses y llamarlo anual sería mentira.
+        "p50_anual_kwh": (round(sum(p50), 3) if p50 and len(p50) == 12 else None),
+    }
+
+
+def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
+    """Una planta del PPA con sus detalles.
+
+    `detalles` es la ficha de la PLANTA: dónde está, quién le distribuye, qué
+    potencia tiene instalada, en qué estado está y desde cuándo entrega energía.
+    Son los datos con los que se cruza esta API contra otra, y viven en el
+    Proyecto: el nivel PPA no los tiene ni puede tenerlos, porque un contrato de
+    dos plantas no está en un municipio ni tiene un operador.
+
+    La energía promedio sale de `_gen_promedio`, la misma cascada
+    medido → estimado → declarado que usa proyectos_operando, con su origen al
+    lado: un promedio medido y una proyección de ingeniería no valen lo mismo.
+    NO se calcula energía acumulada acá — `api_id_unergy` es la llave para que
+    quien integre la consulte contra la API de generación cuando la necesite.
+
+    `ofertas` son las que DECLARARON esta planta, no todas las del PPA: lo que
+    cae al escalón de la oferta (ubicación y energía declaradas, operador
+    declarado) son afirmaciones sobre una planta concreta, y aplicárselas a una
+    hermana del mismo contrato le inventaría datos. Puede venir vacía —una planta
+    que el contrato cubre y ninguna oferta nombró— y ahí manda solo el Proyecto.
+
+    `operadores` es `{operador_red_id: nombre_legal}` para el escalón de la
+    oferta, que declara el id y no el nombre. La planta ya trae el suyo
+    precargado y no lo necesita.
+
+    `fuentes` dice de dónde salió cada campo. Sin ese mapa "no aplica" y
+    "todavía no lo sabemos" se ven idénticos, y un operador del catálogo se lee
+    igual que uno de texto libre.
+    """
+    from app.models.proyectos import ESTADO_PROYECTO_LABELS  # dict, no toca la BD
+
+    ofertas = list(ofertas)
+    fuentes: dict[str, str | None] = {}
+
+    def _elegir(campo, del_proyecto, de_la_oferta):
+        if del_proyecto not in (None, ""):
+            fuentes[campo] = "proyecto"
+            return del_proyecto
+        if de_la_oferta not in (None, ""):
+            fuentes[campo] = "oferta"
+            return de_la_oferta
+        fuentes[campo] = None
+        return None
+
+    def _declarado(attr):
+        """Primer valor no vacío entre las ofertas que nombraron esta planta."""
+        for o in ofertas:
+            v = getattr(o, attr, None)
+            if v not in (None, ""):
+                return v
+        return None
+
+    # Municipio y departamento se resuelven por separado a propósito: hay filas
+    # con el departamento cargado y el municipio en blanco, y colapsarlos en un
+    # solo campo perdería el que sí está.
+    municipio = _elegir("municipio", proyecto.municipio, _declarado("municipio"))
+    departamento = _elegir("departamento", proyecto.departamento,
+                           _declarado("departamento"))
+    partes = [p for p in (municipio, departamento) if p]
+
+    # El nombre del operador se busca en la MISMA oferta de la que sale el id (la
+    # primera que lo declaró). Resolverlo en la primera que "exista en el
+    # catálogo" podía devolver el nombre de una oferta y el id de otra.
+    con_operador = next((o for o in ofertas if o.operador_red_id is not None), None)
+    operador, operador_id, fuentes["operador_red"] = _operador_red(
+        proyecto,
+        nombre_oferta=((operadores or {}).get(con_operador.operador_red_id)
+                       if con_operador else None),
+        id_oferta=con_operador.operador_red_id if con_operador else None)
+
+    # Estado del PROYECTO (en_desarrollo | en_operacion | suspendido | cancelado),
+    # que no es la etapa comercial del PPA: uno dice en qué punto está la planta y
+    # el otro en qué punto está el negocio. Pueden discrepar (PPA operando y
+    # planta todavía en_desarrollo) y acá NO se los concilia: inventar coherencia
+    # taparía el dato mal cargado en vez de mostrarlo. La etiqueta viaja al lado
+    # para que quien integra la pinte tal cual.
+    estado = _valor_enum(proyecto.estado)
+    fuentes["estado_proyecto"] = "proyecto" if estado else None
+
+    mwh, origen, detalle = _gen_promedio(proyecto, ofertas)
+    fuentes["energia_promedio"] = origen
+    sub, fuentes["api_id_unergy"] = api_id_unergy(proyecto)
+
+    # Inicio de comercialización = primer día con generación real (lo autoderiva
+    # app.services.comercializacion). NO se rellena con la fecha del contrato ni
+    # con la entrada en operación: son tres hechos distintos y mezclarlos dejaría
+    # el campo sin poder creerse. Los otros dos viajan aparte —la del contrato en
+    # `condiciones` del PPA, la de operación acá al lado.
+    fuentes["fecha_inicio_comercializacion"] = (
+        "proyecto" if proyecto.fecha_inicio_comercializacion else None)
+
+    return {
+        "proyecto_id": proyecto.id,
+        "nombre": proyecto.nombre_comercial,
+        "api_id_unergy": sub,
+        "detalles": {
+            "estado_proyecto": estado,
+            "estado_proyecto_label": ESTADO_PROYECTO_LABELS.get(estado),
+            "potencia_instalada_kwp": _num(proyecto.potencia_instalada_kwp),
+            # Potencia con CEN, en MW. Va aparte de la instalada y no se convierte
+            # a una sola unidad: no son el mismo número ni salen del mismo papel.
+            "potencia_con_cen_mw": _num(proyecto.potencia_con_cen_mw),
+            "ubicacion": {
+                "municipio": municipio,
+                "departamento": departamento,
+                # Armado acá para que quien integre no decida el orden ni el
+                # separador; null cuando no hay ninguna de las dos partes.
+                "texto": ", ".join(partes) if partes else None,
+                "latitud": _num(proyecto.latitud),
+                "longitud": _num(proyecto.longitud),
+                # Dirección o vereda: la ubicación fina, que en zona rural es lo
+                # único que hay además de las coordenadas.
+                "direccion": proyecto.direccion_vereda,
+                # El enlace al mapa que cargó operaciones (Google Maps u otro).
+                # No se genera uno a partir de lat/lon: si está en null es que
+                # nadie lo cargó, y fabricarlo taparía la diferencia.
+                "url_mapa": (proyecto.info_tecnica.url_ubicacion
+                             if proyecto.info_tecnica else None),
+            },
+            "operador_red": operador,
+            # Id del catálogo `operadores_red`, para cruzar. Null cuando el
+            # nombre salió de lo declarado en una oferta sin operador propio
+            # (`fuentes.operador_red == "oferta"`).
+            "operador_red_id": operador_id,
+            "fecha_entrada_operacion": proyecto.fecha_entrada_operacion,
+            "fecha_inicio_comercializacion": proyecto.fecha_inicio_comercializacion,
+            # El promedio va en las dos unidades a propósito: la plataforma habla
+            # en MWh y el CRM en kWh, y la conversión hecha en dos integraciones
+            # distintas es un factor 1000 esperando pasar.
+            "energia_promedio_mensual_mwh": mwh,
+            "energia_promedio_mensual_kwh": round(mwh * 1000, 3) if mwh is not None else None,
+            "energia_promedio_origen": origen,
+            "energia_promedio_detalle": detalle,
+            # ── El resto de la ficha del Proyecto ─────────────────────────────
+            # Todo lo que se diligencia al crear una planta en la plataforma.
+            # Sale del Proyecto o sale null (no hay escalón de oferta para nada
+            # de esto), y por eso no aparece en `fuentes`.
+            "identificacion": _identificacion(proyecto),
+            "clasificacion": _clasificacion(proyecto),
+            "tecnica": _ficha_tecnica(proyecto),
+            "fronteras": _fronteras_planta(proyecto),
+            "servicios": _servicios_planta(proyecto),
+            "construccion": _construccion(proyecto),
+            "simulacion": _simulacion(proyecto),
+        },
+        "fuentes": fuentes,
+    }
+
+
+def _resolver_ppas(db, ofertas, de_oferta, hoy) -> dict[int, tuple]:
+    """El contrato de cada oferta y de dónde salió: `(ppa, fuente)`.
+
+    Dos caminos, y el explícito manda:
+
+    1. `oferta.ppa_contrato_id` — el enlace que deja `firmar`. fuente `"oferta"`.
+    2. el mejor PPA de las PLANTAS de la oferta. fuente `"proyecto"`.
+
+    El segundo camino no es un lujo: en producción **ningún** PPA está enlazado a
+    su oferta porque los contratos son anteriores al CRM. Sin él, una planta con
+    contrato salía como `sin_contrato` —que significa "falta cargarlo"— y eso es
+    una falsa alarma. Es el mismo doble camino que ya resolvía la vista por planta.
+
+    `(None, None)` cuando no hay contrato por ningún camino: ahí la alarma es real.
+    """
+    enlazados = _ppas_por_id(db, {o.ppa_contrato_id for o in ofertas if o.ppa_contrato_id})
+
+    # Solo se buscan los PPAs de las plantas de las ofertas que quedaron sin
+    # enlace: no tiene sentido pagar la consulta por las que ya lo declararon.
+    sin_enlace = [o for o in ofertas if enlazados.get(o.ppa_contrato_id) is None]
+    por_proyecto = _ppas_de_proyectos(
+        db, {p.id for o in sin_enlace for p in de_oferta.get(o.id, [])})
+
+    out = {}
+    for o in ofertas:
+        ppa = enlazados.get(o.ppa_contrato_id)
+        if ppa is not None:
+            out[o.id] = (ppa, "oferta")
+            continue
+        candidatos = [c for p in de_oferta.get(o.id, [])
+                      for c in por_proyecto.get(p.id, [])]
+        mejor = _mejor_ppa(candidatos, hoy)
+        out[o.id] = (mejor, "proyecto" if mejor is not None else None)
+    return out
+
+
+def _ppas_de_proyectos(db, proyecto_ids: set[int]) -> dict[int, list]:
+    """Los contratos de energía de cada planta, en una consulta para todas."""
+    from app.models.contratos import PPAContrato, ppa_contrato_proyectos_table
+
+    if not proyecto_ids:
+        return {}
+    out: dict[int, list] = {}
+    for pid, contrato in (
+        db.query(ppa_contrato_proyectos_table.c.proyecto_id, PPAContrato)
+        .join(PPAContrato, PPAContrato.id == ppa_contrato_proyectos_table.c.contrato_id)
+        .filter(ppa_contrato_proyectos_table.c.proyecto_id.in_(proyecto_ids),
+                PPAContrato.deleted_at.is_(None)).all()
+    ):
+        out.setdefault(pid, []).append(contrato)
+    return out
+
+
+def _operadores_por_id(db, ids: set[int]) -> dict[int, str]:
+    """Nombre legal de los operadores declarados en las ofertas, en una consulta.
+
+    Solo hace falta para el escalón `oferta`: la oferta declara el id del
+    catálogo y no el nombre. Las plantas ya traen su operador precargado.
+    """
+    from app.models.operadores_red import OperadorRed
+
+    if not ids:
+        return {}
+    return dict(db.query(OperadorRed.id, OperadorRed.nombre_legal)
+                .filter(OperadorRed.id.in_(ids)).all())
+
+
+def _clientes_por_oportunidad(db, ids: set[int]) -> dict[int, str]:
+    """Razón social del dueño del negocio, por oportunidad, en una consulta."""
+    from app.models.clientes import Cliente
+    from app.models.comercial import Oportunidad
+
+    if not ids:
+        return {}
+    return dict(db.query(Oportunidad.id, Cliente.razon_social_nombre)
+                .join(Cliente, Cliente.id == Oportunidad.cliente_id)
+                .filter(Oportunidad.id.in_(ids)).all())
+
+
+def _ppas_por_id(db, ids: set[int]) -> dict:
+    """Los PPAs materializados, en una sola consulta. Un PPA borrado deja a su
+    oferta como borrador: la fila ya no está, así que el contrato tampoco."""
+    from app.models.contratos import PPAContrato
+
+    if not ids:
+        return {}
+    return {c.id: c for c in db.query(PPAContrato)
+            .filter(PPAContrato.id.in_(ids), PPAContrato.deleted_at.is_(None)).all()}
+
+
+def _nodo_ppa(oferta, ppa=None, fuente_ppa=None, proyectos=(), ofertas=None,
+              cliente=None, hoy=None, declarantes=None, operadores=None) -> dict:
+    """Un PPA (borrador o materializado) con sus plantas.
+
+    `ppa is None` ⟺ borrador: la oferta todavía no desembocó en un contrato. No
+    se inventa un id ni se rellenan los campos del contrato con los de la
+    oferta sin decirlo — el borrador declara sus condiciones como tentativas.
+    """
+    etapa = _valor_enum(oferta.estado)
+    return {
+        "ppa": {
+            "id": None if ppa is None else ppa.id,
+            # UN solo estado, y es el del pipeline comercial: oportunidad,
+            # oferta, contrato, firmado, operando, terminado, declinado.
+            #
+            # Antes había dos (`etapa_comercial` y `estado_ppa`) y el segundo no
+            # aportaba nada: era función pura de este estado y de si `id` es
+            # None. Peor, reusaba la palabra «firmado» con OTRO significado —
+            # "existe la fila en ppa_contratos" — así que un nodo podía decir
+            # `estado_ppa: firmado` junto a `etapa_comercial: oferta` y leerse
+            # como una contradicción cuando no lo era.
+            #
+            # Lo que decían los tres valores viejos se lee de `estado` + `id`:
+            #   borrador      → estado en (oferta, contrato) e `id` None
+            #   firmado       → `id` con valor (el contrato existe)
+            #   sin_contrato  → estado en (firmado, operando) e `id` None,
+            #                   que es la INCONSISTENCIA: el negocio cerró y el
+            #                   PPA no está cargado. Sigue viéndose igual de
+            #                   claro, y ahora sin dos vocabularios en pugna.
+            "estado": etapa,
+            # El gate explícito, y el mismo hecho que `id is not None`:
+            # /servicios lista `ppa_contratos`, así que sin fila no hay nada que
+            # listar. Viaja como booleano para que quien integre no tenga que
+            # deducirlo.
+            "aparece_en_servicios": ppa is not None,
+            "numero_codigo_contrato": None if ppa is None else ppa.numero_codigo_contrato,
+            "nombre_interno": None if ppa is None else ppa.nombre_interno,
+            # El nombre de planta tal como lo declaró la oferta. Viaja aunque el
+            # nodo tenga proyectos: en el 74% del pipeline la planta todavía no
+            # existe como Proyecto, y este es el único nombre que hay.
+            "planta_declarada": oferta.planta_nombre,
+            "condiciones": _condiciones(oferta, ppa, hoy=hoy),
+            # Del contrato en cuanto existe; del tipo de la oferta mientras es
+            # borrador. Nunca se deriva de la oferta si el contrato ya lo dice.
+            "es_comunidad_energetica": _es_comunidad(oferta, ppa),
+            "cantidad_proyectos": len(proyectos),
+            # De qué camino salió el contrato: `oferta` = enlace explícito de la
+            # firma, `proyecto` = el PPA vigente de la planta, `null` = no hay.
+            "fuente_ppa": fuente_ppa,
+            # TODAS las ofertas que desembocan en este contrato, cada una con su
+            # código y su etapa. Lo normal es una sola.
+            "ofertas": [_oferta_min(o) for o in (ofertas or [oferta])],
+            "cliente": cliente,
+            "oferta_id": oferta.id,
+            "codigo_seguimiento": _codigo_seguimiento(oferta.numero_oferta),
+            "oportunidad_id": oferta.oportunidad_id,
+            "tipo_contrato": None if ppa is None else ppa.tipo_contrato,
+            "comprador": None if ppa is None else ppa.comprador_nombre,
+            "vendedor": None if ppa is None else ppa.vendedor_nombre,
+        },
+        # A cada planta se le pasan las ofertas que LA nombraron —no todas las
+        # del contrato— para que los escalones que caen en la oferta no le
+        # atribuyan a una planta lo que se declaró de su hermana.
+        "proyectos": [_nodo_proyecto(p, (declarantes or {}).get(p.id, ()),
+                                     operadores=operadores)
+                      for p in proyectos],
+    }

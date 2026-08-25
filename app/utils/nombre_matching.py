@@ -31,13 +31,23 @@ _STOPWORDS = {
 }
 
 
+# Sufijos societarios (razón social de empresa, no de proyecto/frontera) --
+# se quitan ANTES de tirar la puntuación, para que "S.A.S." se reconozca como
+# una sola unidad y no como las letras sueltas "s"/"a"/"s" tras normalizar.
+_SUFIJOS_SOCIETARIOS = re.compile(
+    r"\b(s[.\s]?a[.\s]?s\.?|e[.\s]?s[.\s]?p\.?|s[.\s]?a\.?|ltda\.?|bic)\b", re.IGNORECASE
+)
+
+
 def normalizar(texto: str) -> str:
-    """Quita tildes, pone minúsculas, elimina caracteres no alfanuméricos."""
+    """Quita tildes, pone minúsculas, sufijos societarios (S.A.S./LTDA/E.S.P.)
+    y elimina caracteres no alfanuméricos."""
     if not texto:
         return ""
     nfkd = unicodedata.normalize("NFKD", texto)
-    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9\s]", " ", ascii_str.lower()).strip()
+    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii").lower()
+    ascii_str = _SUFIJOS_SOCIETARIOS.sub(" ", ascii_str)
+    return re.sub(r"[^a-z0-9\s]", " ", ascii_str).strip()
 
 
 def core_tokens(nombre: str) -> set[str]:
@@ -67,6 +77,32 @@ def score_nombre(nombre_a: str, nombres_b: list[str]) -> float:
         ).ratio()
         mejor = max(mejor, jaccard, overlap * 0.85, ratio)
     return round(mejor, 3)
+
+
+# Indicadores de persona jurídica en la razón social -- para sugerir
+# tipo_persona al crear un cliente. Aparte de _SUFIJOS_SOCIETARIOS (que se
+# QUITAN del nombre para comparar) porque aquí es al revés: su PRESENCIA es
+# la señal. Incluye fiduciaria/patrimonio autónomo/fideicomiso, que no son
+# sufijos societarios pero tampoco son personas naturales (ej. "PATRIMONIOS
+# AUTONOMOS FIDUCIARIA BANCOLOMBIA S A SOCIEDAD FIDUCIARIA").
+_INDICADORES_PERSONA_JURIDICA = re.compile(
+    r"\b(s[.\s]?a[.\s]?s\.?|e[.\s]?s[.\s]?p\.?|s[.\s]?a\.?|ltda\.?|bic|"
+    r"fiduciaria|patrimonio\s+autonomo|fideicomiso)\b",
+    re.IGNORECASE,
+)
+
+
+def parece_persona_juridica(nombre: str) -> bool:
+    """True si la razón social trae un indicador reconocible de persona
+    jurídica. Solo es señal POSITIVA -- su ausencia NO implica persona
+    natural (no hay suficientes clientes reales marcados 'natural' en la
+    plataforma para validar ese lado de la regla), así que no se usa para
+    sugerir 'natural', solo para sugerir 'juridica' cuando aplica."""
+    if not nombre:
+        return False
+    nfkd = unicodedata.normalize("NFKD", nombre)
+    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii").lower()
+    return bool(_INDICADORES_PERSONA_JURIDICA.search(ascii_str))
 
 
 def mejor_candidato(nombre_objetivo: str, candidatos: list[tuple]) -> tuple:

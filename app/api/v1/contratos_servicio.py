@@ -19,6 +19,9 @@ def _load_options():
     return [
         selectinload(ContratoServicio.contratante),
         selectinload(ContratoServicio.prestador),
+        # Sin esto el listado dispara un SELECT por fila para pintar el nombre
+        # del proyecto (112 contratos de representación = 112 queries).
+        selectinload(ContratoServicio.proyecto),
     ]
 
 
@@ -151,6 +154,75 @@ def importar_indexacion(
 
     db.commit()
     return {"actualizados": actualizados, "no_encontrados": no_encontrados}
+
+
+# ── Duplicados de representacion ──────────────────────────────────────────────
+# Van ANTES de /{id}: si no, FastAPI intenta leer "duplicados" como el id.
+
+@router.get("/duplicados-representacion")
+def duplicados_representacion(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Informe de contratos de representacion que son el mismo registro repetido.
+
+    Solo lee. Separa los grupos que se pueden fusionar sin perder nada de los que
+    se contradicen y necesitan que alguien decida.
+    """
+    from app.services.representacion_dedup import revisar
+
+    contratos = db.query(ContratoServicio).filter(
+        ContratoServicio.servicio_aplica == "representacion"
+    ).all()
+    return revisar(contratos)
+
+
+@router.post("/fusionar-representacion")
+def fusionar_representacion(
+    ids: list[int] | None = Body(None, embed=True),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Fusiona los duplicados de representacion.
+
+    Por cada grupo: completa el registro que se conserva con los datos que solo
+    tenian los otros y borra los otros. Nunca sobreescribe un valor existente, y
+    salta cualquier grupo donde dos registros se contradigan.
+
+    `ids` limita la operacion a los grupos que contengan alguno de esos ids; sin
+    el, fusiona todos los grupos limpios.
+    """
+    from app.services.representacion_dedup import agrupar, analizar
+
+    contratos = db.query(ContratoServicio).filter(
+        ContratoServicio.servicio_aplica == "representacion"
+    ).all()
+    por_id = {c.id: c for c in contratos}
+
+    fusionados, eliminados, saltados = [], 0, []
+    for grupo in agrupar(contratos):
+        r = analizar(grupo)
+        if not r["fusionable"]:
+            saltados.append({"ids": [g.id for g in grupo],
+                             "conflictos": r["conflictos"]})
+            continue
+        if ids and not any(g.id in ids for g in grupo):
+            continue
+
+        conservado = por_id[r["conservar"]]
+        for campo, valor in r["valores"].items():
+            setattr(conservado, campo, valor)
+            if campo in ("indexacion_cgm", "indexacion_representacion"):
+                flag_modified(conservado, campo)
+        for cid in r["eliminar"]:
+            db.delete(por_id[cid])
+            eliminados += 1
+        fusionados.append({"conservado": conservado.id, "eliminados": r["eliminar"],
+                           "campos_completados": sorted(r["valores"])})
+
+    db.commit()
+    return {"grupos_fusionados": len(fusionados), "contratos_eliminados": eliminados,
+            "detalle": fusionados, "saltados_por_conflicto": saltados}
 
 
 @router.get("/{id}", response_model=ContratoServicioOut)

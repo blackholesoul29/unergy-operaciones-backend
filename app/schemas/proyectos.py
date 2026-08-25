@@ -96,30 +96,6 @@ class ProyectoInfoTecnicaOut(ProyectoInfoTecnicaCreate):
     model_config = {"from_attributes": True}
 
 
-# ── Grupos Panel ──────────────────────────────────────────────────────────────
-
-class ProyectoGrupoPanelCreate(BaseModel):
-    marca: Optional[str] = None
-    modelo: Optional[str] = None
-    potencia_pico_wp: Optional[float] = None
-    cantidad: Optional[int] = None
-
-
-class ProyectoGrupoPanelUpdate(BaseModel):
-    marca: Optional[str] = None
-    modelo: Optional[str] = None
-    potencia_pico_wp: Optional[float] = None
-    cantidad: Optional[int] = None
-
-
-class ProyectoGrupoPanelOut(ProyectoGrupoPanelCreate):
-    id: int
-    proyecto_id: int
-    created_at: datetime
-    updated_at: datetime
-    model_config = {"from_attributes": True}
-
-
 # ── Inversores ────────────────────────────────────────────────────────────────
 
 class ProyectoInversorCreate(BaseModel):
@@ -240,22 +216,37 @@ class ServicioRepresentacionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── PPA asociado (resumen) ────────────────────────────────────────────────────
+# Lo justo para identificar y filtrar por el contrato desde el listado de
+# proyectos. El detalle completo del PPA sigue viviendo en /ppa.
+
+class ProyectoPPAResumenOut(BaseModel):
+    id: int
+    numero_codigo_contrato: Optional[str] = None
+    nombre_interno: Optional[str] = None
+    tipo_contrato: Optional[str] = None
+    comprador_nombre: Optional[str] = None
+    fecha_inicio: Optional[date] = None
+    fecha_fin: Optional[date] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
     portafolio_id: Optional[int] = None
-    proyecto_padre_id: Optional[int] = None
     nombre_bitacora: Optional[str] = None
     nombre_clientes: Optional[str] = None
     topic_slug: Optional[str] = None
     sub_project: Optional[str] = None
+    # Tópico en la API de Liquidaciones cuando difiere del de generación.
+    topico_liquidaciones: Optional[str] = None
     clasificacion_regulatoria: Optional[str] = None
     tipo_tecnologia: Optional[str] = None
     tipo_proyecto: Optional[str] = None
     potencia_instalada_kwp: Optional[float] = None
     potencia_con_cen_mw: Optional[float] = None
-    cantidad_total_paneles: Optional[int] = None
     produccion_especifica_kwh_kwp: Optional[float] = None
     codigo_cnd: Optional[str] = None
     estado: Optional[str] = "en_desarrollo"
@@ -263,26 +254,24 @@ class ProyectoCreate(BaseModel):
     fecha_fin_representacion: Optional[date] = None
     fecha_inicio_comercializacion: Optional[date] = None
     fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio (MWh/mes). Escribirla por PATCH la marca como
+    # 'manual' y el recálculo desde la API deja de pisarla — es el camino para
+    # las plantas sin histórico. Ver app/services/gen_promedio.py.
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
     departamento: Optional[str] = None
     municipio: Optional[str] = None
     direccion_vereda: Optional[str] = None
     latitud: Optional[float] = None
     longitud: Optional[float] = None
     tipo_conexion: Optional[str] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
-    estado_resultados_url: Optional[str] = None
-    income_distribution_method: Optional[str] = None
-    generar_liquidacion: Optional[bool] = None
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
-    # IDs de liquidación (códigos SIC de generación y consumo)
-    codigo_sic_generacion: Optional[str] = None
-    codigo_sic_consumo: Optional[str] = None
     # IDs de Quoia (reportes de generación/consumo y nodo)
     quoia_reporte_generacion_id: Optional[int] = None
     quoia_reporte_consumo_id: Optional[int] = None
@@ -302,7 +291,6 @@ class ProyectoCreate(BaseModel):
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     avance_obra_pct: Optional[float] = None
-    mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
@@ -329,17 +317,16 @@ class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
     portafolio_id: Optional[int]
-    proyecto_padre_id: Optional[int]
     nombre_bitacora: Optional[str]
     nombre_clientes: Optional[str]
     topic_slug: Optional[str]
     sub_project: Optional[str]
+    topico_liquidaciones: Optional[str] = None
     clasificacion_regulatoria: Optional[str]
     tipo_tecnologia: Optional[str]
     tipo_proyecto: Optional[str]
     potencia_instalada_kwp: Optional[float]
     potencia_con_cen_mw: Optional[float]
-    cantidad_total_paneles: Optional[int]
     produccion_especifica_kwh_kwp: Optional[float]
     codigo_cnd: Optional[str]
     estado: str
@@ -347,26 +334,29 @@ class ProyectoOut(BaseModel):
     fecha_fin_representacion: Optional[date]
     fecha_inicio_comercializacion: Optional[date] = None
     fecha_comercializacion_editada_manual: Optional[bool] = None
+    # Generación mensual promedio, persistida para no depender de la API de
+    # generación en cada consulta. `gen_promedio_origen` dice si salió del
+    # histórico ('api') o lo cargó una persona ('manual').
+    gen_mensual_promedio_mwh: Optional[float] = None
+    gen_promedio_origen: Optional[str] = None
+    gen_promedio_dias: Optional[int] = None
+    gen_promedio_desde: Optional[date] = None
+    gen_promedio_hasta: Optional[date] = None
+    gen_promedio_actualizado_en: Optional[datetime] = None
     departamento: Optional[str]
     municipio: Optional[str]
     direccion_vereda: Optional[str]
     latitud: Optional[float]
     longitud: Optional[float]
     tipo_conexion: Optional[str]
-    operador_red: Optional[str]
     operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
     carpeta_drive_codigo: Optional[str]
-    estado_resultados_url: Optional[str]
-    income_distribution_method: Optional[str]
-    generar_liquidacion: bool
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
     codigo_tsf: Optional[str] = None
-    codigo_sic_generacion: Optional[str] = None
-    codigo_sic_consumo: Optional[str] = None
     quoia_reporte_generacion_id: Optional[int] = None
     quoia_reporte_consumo_id: Optional[int] = None
     quoia_nodo_id: Optional[int] = None
@@ -385,12 +375,11 @@ class ProyectoOut(BaseModel):
     fase_construccion: Optional[str] = None
     fecha_estimada_energizacion: Optional[date] = None
     avance_obra_pct: Optional[float] = None
-    mwh_mes_estimado: Optional[float] = None
     origen: Optional[str] = None
     servicio_representacion: Optional[ServicioRepresentacionOut] = None
+    ppa_contratos: list[ProyectoPPAResumenOut] = []
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None
-    grupos_panel: list[ProyectoGrupoPanelOut] = []
     inversores: list[ProyectoInversorOut] = []
     area_contactos: list[ProyectoAreaContactoOut] = []
     created_at: datetime
@@ -398,7 +387,7 @@ class ProyectoOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_validator("inversionistas", "grupos_panel", "inversores", "area_contactos", mode="before")
+    @field_validator("inversionistas", "inversores", "area_contactos", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
         if v is None:
@@ -406,6 +395,17 @@ class ProyectoOut(BaseModel):
         if not isinstance(v, list):
             return list(v) if hasattr(v, "__iter__") else [v]
         return v
+
+    @field_validator("ppa_contratos", mode="before")
+    @classmethod
+    def solo_ppas_vivos(cls, v):
+        """La relación Proyecto.ppa_contratos es un viewonly sobre la tabla
+        puente, así que no conoce el borrado lógico de `ppa_contratos`. Aquí se
+        filtran los eliminados para que no reaparezcan en el listado."""
+        if v is None:
+            return []
+        items = v if isinstance(v, list) else (list(v) if hasattr(v, "__iter__") else [v])
+        return [c for c in items if getattr(c, "deleted_at", None) is None]
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod
@@ -421,6 +421,29 @@ class ProyectoOut(BaseModel):
             except Exception:
                 return None
         return v
+
+
+# ── Listado liviano de consulta ────────────────────────────────────────────────
+# Para GET /proyectos/lista: lo justo para identificar un proyecto y quedarse con
+# su `id`, con el que después se pide el detalle completo (ProyectoOut). No trae
+# relaciones anidadas a propósito -- ese es el valor del paso del detalle.
+
+class ProyectoListaOut(BaseModel):
+    id: int
+    nombre_comercial: str
+    estado: str
+    tipo_proyecto: Optional[str] = None
+    municipio: Optional[str] = None
+    departamento: Optional[str] = None
+    potencia_instalada_kwp: Optional[float] = None
+    sub_project: Optional[str] = None   # API ID Unergy
+    codigo_tsf: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class ProyectoListaResponse(BaseModel):
+    total: int
+    items: list[ProyectoListaOut]
 
 
 # ── Proyectos pendientes (Sun Factory + Quoia + Solenium) ──────────────────────

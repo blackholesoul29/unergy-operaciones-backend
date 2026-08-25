@@ -13,7 +13,11 @@ validar cruzado (no existe un "inversores" de consumo) -- el árbol es más
 corto, solo dos niveles:
 
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
-                     dato real -- se confía en él a ciegas.
+                     dato real -- se confía en él a ciegas, salvo las
+                     fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (bug
+                     puntual de Quoia, se descarta solo si no cuadra) y
+                     FRONTERAS_CONSUMO_IGNORAR_CGM (medidor compartido con
+                     otra frontera, se ignora siempre).
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO = ±50%) en vez de tomar
@@ -22,9 +26,9 @@ corto, solo dos niveles:
                      valor" elegiría sistemáticamente el más inflado.
   Caso 'Histórico' -- ni CGM ni medidor creíble, pero hay historial propio
                      (o del vecino de predio, ver VECINO_HISTORICO_CONSUMO)
-                     -- mediana × forma horaria. NO marca Revisar
-                     Manualmente: sí hay con qué comparar y la curva no
-                     queda vacía.
+                     -- mediana × forma horaria. Marca Revisar Manualmente:
+                     ningún dato real de ese día respalda la curva
+                     completa, es una estimación de punta a punta.
   Caso 'Sin dato' -- nada de lo anterior -- curva vacía, Revisar Manualmente.
 
 Recuperación activa de medidor (ver clasificador.py) aplica igual acá --
@@ -40,14 +44,17 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas, historial
-from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, escalar_curva
+from app.services.reporte_energia.utils import CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, curva_a_lista
 
 HORAS = list(range(24))
 ESTADOS_AUTOMATICO = {"OK", "WARNING"}
 
 # %: qué tan lejos puede quedar el medidor más cercano de la mediana
-# histórica antes de dejar de confiar en él.
-TOLERANCIA_HISTORICO_CONSUMO = 0.50
+# histórica antes de dejar de confiar en él. Bajado de 0.50 a 0.30 (ver MGS
+# 0015 El Son Consumo 2026-08-09: un bug de Quoia duplicó el consumo real,
+# 38,41 kWh vs mediana 26,795 kWh -- 43,4% de diferencia, pasaba con el 50%
+# de antes).
+TOLERANCIA_HISTORICO_CONSUMO = 0.30
 
 # frontera_id (Consumo) -> frontera_id (Consumo del vecino de predio) --
 # para el Caso 'Histórico' cuando la frontera nunca ha tenido un día de
@@ -55,9 +62,70 @@ TOLERANCIA_HISTORICO_CONSUMO = 0.50
 # de Torres" -> "MGS 0012 - La Reserva" en el pipeline original).
 VECINO_HISTORICO_CONSUMO: dict[int, int] = {}
 
+# frontera_id (Consumo) donde Quoia tiene un bug intermitente confirmado:
+# reporta el doble de la energía real de Consumo aunque el estado del
+# reporte diga OK/WARNING (Paso Norte, 2026-08-03: CGM=69,23 kWh vs
+# medidor=34,615 kWh, exactamente 2x -- el día anterior CGM y medidor
+# coincidían exacto, confirma que es intermitente, no un offset fijo).
+# Mientras Quoia lo soluciona de su lado, para estas fronteras puntuales SÍ
+# se consulta el medidor aunque CGM parezca válido, para descartar el
+# reporte si no cuadra. No se aplica a todas las fronteras de Consumo para
+# no sumarle una llamada extra a Quoia, todos los días, a las ~40+ que hoy
+# resuelven solo con CGM sin tocar el medidor.
+FRONTERAS_VALIDAR_CGM_VS_MEDIDOR: set[int] = {111}  # Paso Norte Consumo
+
+# %: qué tan lejos puede quedar CGM del medidor antes de dejar de confiar
+# en el reporte automático, para las fronteras de FRONTERAS_VALIDAR_CGM_VS_MEDIDOR.
+# Mismo valor que TOLERANCIA_HISTORICO_CONSUMO (±50%) -- generoso a propósito,
+# CGM y medidor son dos canales físicos distintos y pueden divergir algo por
+# su cuenta; lo que se busca descartar es un error tipo "el doble" (100%),
+# no una diferencia normal entre ambos.
+TOLERANCIA_CGM_VS_MEDIDOR = 0.50
+
+# frontera_id (Consumo) donde Quoia comparte el mismo medidor físico entre
+# dos fronteras -- confirmado 2026-08-04: MGS 0075 Chiriguaná Norte 2
+# (frontera_id=90) reporta casi siempre el mismo valor de CGM que MGS 0077
+# Chiriguaná Norte 4 (frt_codes distintos, cada uno registrado aparte en
+# Quoia), configuración de Quoia, no un bug del lado de acá (mismo tipo de
+# hallazgo que el medidor compartido entre estas mismas dos fronteras, ya
+# aceptado 2026-07-25). A diferencia de FRONTERAS_VALIDAR_CGM_VS_MEDIDOR
+# (que solo descarta CGM si no cuadra contra el medidor), acá se ignora CGM
+# siempre -- el problema no es que a veces se equivoque mucho, es que el
+# dato en sí no es confiablemente el de esta frontera.
+FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
+
+# frontera_id (Consumo) con un patrón de consumo atípico confirmado --
+# ninguna validación automática (CGM vs mediana, medidor vs mediana) es
+# confiable para decidir sola si un día puntual es normal o no. Siempre
+# queda para revisar a mano sin importar qué Caso resultó ganador ese día
+# (mismo criterio que FRONTERAS_MEDIDOR_SOSPECHOSO en clasificador.py).
+FRONTERAS_CONSUMO_SIEMPRE_REVISAR: set[int] = {78}  # La Catedral Consumo
+
+# %: qué tan lejos puede quedar un medidor del otro (principal vs respaldo)
+# antes de dejar de "preferir siempre el principal" cuando no hay mediana
+# histórica con qué arbitrar. Diferencias chicas (ej. Sol&Cielo 7 Los Bongos
+# 2026-08-03: 22 vs 19,8 kWh, ~10%) no justifican preferir el más alto solo
+# por serlo -- pero diferencias grandes (ej. Baraya AUX 2026-08-03: 18,9 vs
+# 3,3 kWh, ~83%) ya no son "cuál preferir sin razón", sino que uno de los
+# dos medidores probablemente está mal -- ahí se prefiere el de mayor valor
+# (una lectura de más se explica más fácil -- medidor caído/mal ubicado --
+# que una lectura de menos).
+DIFERENCIA_MEDIDORES_ALTA = 0.50
+
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
     return isinstance(curva, pd.Series) and curva.notna().any()
+
+
+def _cgm_confiable(e_cgm: float, curva_ppal: pd.Series, curva_resp: pd.Series) -> bool:
+    """True si no hay medidor con qué cruzar (se confía en CGM como
+    siempre) o si al menos uno de los dos medidores coincide con CGM
+    dentro de tolerancia. False si ambos medidores tienen dato y ninguno
+    se acerca -- ahí no se confía en CGM."""
+    totales = [c.fillna(0).sum() for c in (curva_ppal, curva_resp) if _tiene_dato(c)]
+    if not totales:
+        return True
+    return any(t > 0 and abs(e_cgm - t) / t <= TOLERANCIA_CGM_VS_MEDIDOR for t in totales)
 
 
 def _en_rango_historico(curva: pd.Series, mediana: float) -> bool:
@@ -75,12 +143,14 @@ def _medidor_mas_cercano(curva_a: pd.Series, curva_b: pd.Series, mediana: float)
     return curva_b, "respaldo", _en_rango_historico(curva_b, mediana)
 
 
-def _rellenar_horas_faltantes_consumo(
+def rellenar_horas_faltantes_consumo(
     db: Session, curva: pd.Series, frontera_id: int, fecha: date,
 ) -> tuple[pd.Series, set[int]]:
-    """Rellena las horas en NaN de un Caso 'Medidor' ya aceptado con el
-    histórico horario propio -- no existe reconectador para Consumo, así
-    que este es el único recurso de relleno horario disponible."""
+    """Rellena las horas en NaN de un Caso 'Medidor' con el histórico
+    horario propio -- último recurso de la acción manual 'Rellenar horas'
+    (POST /fronteras/{id}/rellenar-horario en reporte_energia.py), después
+    de intentar medidor cruzado. No existe reconectador/Solenium para
+    Consumo, así que histórico es la única fuente además del otro medidor."""
     if not curva.isna().any():
         return curva, set()
 
@@ -122,35 +192,84 @@ def clasificar_consumo(
     )
     e_cgm = float(curva_cgm.fillna(0).sum())
 
-    if reporte_valido and e_cgm > 0:
-        return {
+    cgm_ok = reporte_valido and e_cgm > 0 and frontera_id not in FRONTERAS_CONSUMO_IGNORAR_CGM
+    if cgm_ok and frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+        main_meter = border_meta.get("main_meter") if border_meta else None
+        backup_meter = border_meta.get("backup_meter") if border_meta else None
+        c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+        if not _cgm_confiable(e_cgm, c["consumo_ppal"], c["consumo_resp"]):
+            cgm_ok = False
+
+    if cgm_ok:
+        resultado_cgm = {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "horas_rellenadas_historico": None, "recuperacion_datos": None,
         }
+        if frontera_id in FRONTERAS_VALIDAR_CGM_VS_MEDIDOR:
+            # Paso Norte -- el bug de Quoia es intermitente, así que pasar el
+            # cruce contra medidor un día puntual no lo vuelve confiable en
+            # general. Se sigue reportando con CGM (la mejor fuente que hay),
+            # pero siempre queda para revisar a mano -- y por lo mismo nunca
+            # alimenta el histórico (get_mediana_consumo exige
+            # revisar_manualmente=False).
+            resultado_cgm["revisar_manualmente"] = True
+        else:
+            # Blindaje contra outliers no descubiertos todavía (el mismo
+            # motivo por el que Paso Norte necesitó el suyo): 'reporte
+            # automático válido' por sí solo no protege de un CGM que ese
+            # día reportó algo raro en una frontera que nunca habíamos
+            # sospechado. En cuanto hay mediana histórica (aunque se haya
+            # construido con días de CGM, ver CASOS_CONFIABLES_CONSUMO), se
+            # cruza igual que ya se hace para 'Medidor' -- mientras no haya
+            # mediana (arranque desde cero), se sigue confiando solo en el
+            # status de Quoia, como hasta ahora.
+            mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
+            if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
+                resultado_cgm["revisar_manualmente"] = True
+        if frontera_id in FRONTERAS_CONSUMO_SIEMPRE_REVISAR:
+            resultado_cgm["revisar_manualmente"] = True
+        return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,
     )
 
-    # Relleno de horas puntuales (2026-07-25): un Caso 'Medidor' ya aceptado
-    # puede traer huecos puntuales (el medidor dejó de reportar a media
-    # tarde, por ejemplo) -- se rellenan con el histórico horario propio
-    # (no hay reconectador para Consumo). El total se recalcula sobre la
-    # curva ya rellenada; si aun así quedan horas sin cubrir, se marca
-    # Revisar Manualmente.
+    # Relleno horario (2026-08-12): solo el cero directo se aplica
+    # automático acá. Medidor cruzado/histórico dejaron de rellenar solos
+    # (mismo cambio que Generación) -- quedan disponibles como acción
+    # manual desde el front (POST /fronteras/{id}/rellenar-horario en
+    # reporte_energia.py), que decide la persona explícitamente.
     curva_actual = resultado.get("curva_final")
-    horas_historico: set[int] = set()
+    horas_ventana_solar_directo: set[int] = set()
     if resultado.get("caso") == "Medidor" and isinstance(curva_actual, pd.Series) and curva_actual.isna().any():
-        curva_rellenada, horas_historico = _rellenar_horas_faltantes_consumo(db, curva_actual, frontera_id, fecha)
-        if horas_historico:
-            resultado["curva_final"] = curva_rellenada
-            resultado["energia_final_kwh"] = float(curva_rellenada.fillna(0).sum())
-        if curva_rellenada.isna().any():
+        # Huecos DENTRO de la ventana solar se llenan en 0.0 directo -- esta
+        # frontera es el consumo de red del MISMO proyecto de generación
+        # solar, así que durante horas de sol alto el consumo de red ya se
+        # espera en ~0 (los propios paneles cubren la carga del sitio) --
+        # mismo principio que Generación para las horas FUERA de la
+        # ventana solar. No es una estimación, es una certeza física, así
+        # que NO marca Revisar Manualmente.
+        huecos_iniciales = curva_actual[curva_actual.isna()].index
+        horas_ventana_solar_directo = {h for h in huecos_iniciales if h in HORAS_SOLARES}
+        if horas_ventana_solar_directo:
+            curva_actual = curva_actual.copy()
+            curva_actual[sorted(horas_ventana_solar_directo)] = 0.0
+            resultado["curva_final"] = curva_actual
+            resultado["energia_final_kwh"] = float(curva_actual.fillna(0).sum())
+
+        # Un hueco fuera de la ventana solar (madrugada/noche) sin dato real
+        # sí preocupa -- ahí es consumo real de red, no hay certeza física
+        # que ayude, y sin el relleno automático de medidor cruzado/
+        # histórico no queda nada más con qué completarlo desde acá.
+        if curva_actual.isna().any():
             resultado["revisar_manualmente"] = True
 
     resultado.setdefault("revisar_manualmente", False)
-    resultado["horas_rellenadas_historico"] = sorted(horas_historico) or None
+    if frontera_id in FRONTERAS_CONSUMO_SIEMPRE_REVISAR:
+        resultado["revisar_manualmente"] = True
+    resultado["horas_rellenadas_historico"] = None
+    resultado["horas_rellenadas_medidor_cruzado"] = None
     return resultado
 
 
@@ -161,6 +280,19 @@ def _clasificar_por_medidor_o_historico(
     main_meter = border_meta.get("main_meter") if border_meta else None
     backup_meter = border_meta.get("backup_meter") if border_meta else None
     c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+    resultado = _decidir_medidor_o_historico(db, frontera_id, fecha, e_cgm, estado_reporte, c)
+    # Curvas de referencia tal como estaban al momento de clasificar -- ya se
+    # tenían que pedir de todas formas para esta rama, así que persistirlas
+    # no agrega ninguna llamada nueva a Quoia (ver mismo fix en
+    # clasificador.py -- MGS 0032 El Paso Norte 2026-08-05).
+    resultado["curva_medidor_principal"] = curva_a_lista(c["consumo_ppal"])
+    resultado["curva_medidor_respaldo"] = curva_a_lista(c["consumo_resp"])
+    return resultado
+
+
+def _decidir_medidor_o_historico(
+    db: Session, frontera_id: int, fecha: date, e_cgm: float, estado_reporte: str | None, c: dict,
+) -> dict:
     # Para una frontera de Consumo, "generación" (eae) y "consumo" (iae) del
     # mismo medidor son ambos relevantes en teoría, pero lo que interesa acá
     # es la variable iae de ESTE medidor -- ya viene calculada en
@@ -188,18 +320,52 @@ def _clasificar_por_medidor_o_historico(
                     "recuperacion_datos": recuperacion_datos,
                 }
         else:
+            # Sin mediana historica para comparar -- no se descarta el dato
+            # real solo porque no hay con que cruzarlo, esté completo o no
+            # (ver GD Polaris 2 Consumo 2026-08-03: 19 de 24 horas reales,
+            # faltaban las últimas 5-6 -- antes se vaciaba la curva entera
+            # por ese hueco parcial).
+            total_ppal = float(curva_ppal.fillna(0).sum())
+            total_resp = float(curva_resp.fillna(0).sum())
+            mayor = max(total_ppal, total_resp)
+            diferencia = abs(total_ppal - total_resp) / mayor if mayor > 0 else 0.0
+
+            if diferencia > DIFERENCIA_MEDIDORES_ALTA:
+                # Diferencia demasiado grande para ser solo ruido -- uno de
+                # los dos medidores probablemente está mal (ver Baraya AUX
+                # 2026-08-03). Sin mediana con qué arbitrar, se prefiere el
+                # de mayor valor.
+                curva = curva_ppal if total_ppal >= total_resp else curva_resp
+                return {
+                    "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                    "medidor_usado": "principal_sin_historico" if curva is curva_ppal else "respaldo_sin_historico",
+                    "revisar_manualmente": True,
+                    "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                    "recuperacion_datos": recuperacion_datos,
+                }
+
+            # Diferencia chica -- se prefiere SIEMPRE el principal (ya
+            # sabemos que tiene dato, por estar en este 'if') -- no el de
+            # mayor valor: decisión explícita del usuario tras ver Sol&Cielo
+            # 7 Los Bongos Consumo 2026-08-03, donde el respaldo (22 kWh)
+            # superaba al principal (19,8 kWh) sin ninguna razón para
+            # preferirlo solo por ser más alto. Marcado para revisar a mano
+            # porque nadie confirmó que el nivel sea el correcto.
             return {
-                "caso": "Medidor", "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
-                "medidor_usado": "revisar", "revisar_manualmente": True,
+                "caso": "Medidor", "energia_final_kwh": total_ppal, "curva_final": curva_ppal,
+                "medidor_usado": "principal_sin_historico", "revisar_manualmente": True,
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,
             }
     elif tiene_ppal or tiene_resp:
         curva = curva_ppal if tiene_ppal else curva_resp
         if mediana is None:
+            # Mismo criterio que arriba -- se usa el dato disponible aunque
+            # no esté completo, no hay con qué cruzarlo de todas formas.
             return {
-                "caso": "Medidor", "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),
-                "medidor_usado": "revisar", "revisar_manualmente": True,
+                "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
+                "medidor_usado": "principal_sin_historico" if tiene_ppal else "respaldo_sin_historico",
+                "revisar_manualmente": True,
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,
             }
@@ -225,7 +391,8 @@ def _clasificar_por_medidor_o_historico(
         medidor_usado = "historico" if fuente_id == frontera_id else "historico_vecino"
         return {
             "caso": "Histórico", "energia_final_kwh": mediana, "curva_final": curva_historico,
-            "medidor_usado": medidor_usado, "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+            "medidor_usado": medidor_usado, "revisar_manualmente": True,
+            "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
             "recuperacion_datos": recuperacion_datos,
         }
 

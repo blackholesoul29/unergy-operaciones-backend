@@ -92,6 +92,34 @@ ESTRUCTURA_FALLAS: list[dict] = [
         ],
     },
     {
+        "codigo": "generando_sin_datos",
+        "etiqueta": "Sistema generando pero sin datos",
+        "icono": "pi pi-question-circle",
+        "color_hex": "#64748B",
+        "tipo": "opcion",
+        "descripcion": "No llegan datos de generación y desde el monitoreo no se puede afirmar si el proyecto generó o no.",
+        # Las opciones no son "eventos": son el resultado de verificar en sitio.
+        "opciones_label": "Verificación en sitio",
+        "opciones": [
+            {
+                "codigo": "incertidumbre",
+                "etiqueta": "Incertidumbre (no sabemos si generó o no)",
+                "pendiente_reclasificar": True,
+                "descripcion": "Sin verificación en sitio todavía: queda pendiente hasta confirmar si el proyecto estaba encendido o apagado.",
+            },
+            {
+                "codigo": "verificado_encendido",
+                "etiqueta": "Verificado en sitio: proyecto encendido",
+                "descripcion": "Se verificó en sitio que el proyecto está generando: la falla es solo de datos/monitoreo.",
+            },
+            {
+                "codigo": "verificado_apagado",
+                "etiqueta": "Verificado en sitio: proyecto apagado",
+                "descripcion": "Se verificó en sitio que el proyecto no está generando.",
+            },
+        ],
+    },
+    {
         "codigo": "eventos_adversos",
         "etiqueta": "Eventos naturales",
         "icono": "pi pi-exclamation-triangle",

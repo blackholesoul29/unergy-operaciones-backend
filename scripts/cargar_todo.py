@@ -252,7 +252,6 @@ def main():
                 existing.nombre_comercial          = p["nombre_comercial"]
                 existing.tipo_tecnologia           = "solar"
                 existing.potencia_instalada_kwp    = p["potencia_instalada_kwp"]
-                existing.cantidad_total_paneles    = p["cantidad_total_paneles"]
                 existing.produccion_especifica_kwh_kwp = p["produccion_especifica_kwh_kwp"]
                 proyectos_by_slug[p["topic_slug"]] = existing.id
                 ok_upd += 1
@@ -263,7 +262,6 @@ def main():
                     topic_slug                     = p["topic_slug"],
                     tipo_tecnologia                = "solar",
                     potencia_instalada_kwp         = p["potencia_instalada_kwp"],
-                    cantidad_total_paneles         = p["cantidad_total_paneles"],
                     produccion_especifica_kwh_kwp  = p["produccion_especifica_kwh_kwp"],
                     estado                         = "en_operacion",
                 )

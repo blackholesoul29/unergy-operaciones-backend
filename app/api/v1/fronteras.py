@@ -1,10 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
-import io
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
@@ -12,6 +8,7 @@ from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraLectura, FronteraQuoiaIgnorada
 from app.models.operadores_red import OperadorRed
 from app.models.proyectos import Proyecto
+from app.models.reporte_energia import ReporteEnergiaGeneracion
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraLecturaCreate, FronteraLecturaOut, FronteraResumen,
@@ -64,29 +61,34 @@ def _get_gaia() -> GaiaClient:
     return _gaia
 
 
-# ── Nodos (medidores) de Quoia vía Gaia/JWT — cacheados 1 h ───────────────────
-# El diagrama fasorial se alimenta del snapshot eléctrico del nodo, que se pide
-# por node_id. La lista de nodos y su lectura usan GaiaClient (GAIA_USER/PASS),
-# que es la credencial realmente configurada en producción.
-_nodes_cache: list[dict] = []
-_nodes_ts: float = 0.0
-_NODES_TTL = 3600.0
+CORRIDAS_VENTANA_GENERANDO = 3
 
 
-def _list_gaia_nodes(gaia: GaiaClient) -> list[dict]:
-    """Lista de nodos del retailer (cacheada 1 h). Conserva el cache previo si
-    la API responde vacío en vez de invalidarlo."""
-    global _nodes_cache, _nodes_ts
-    now = time.monotonic()
-    if not _nodes_cache or (now - _nodes_ts) >= _NODES_TTL:
-        nodes = gaia.get_all_nodes()
-        if nodes:
-            _nodes_cache = nodes
-            _nodes_ts = now
-    return _nodes_cache
+def _ultimas_generaciones(db: Session, frontera_ids: list[int]) -> dict[int, list[ReporteEnergiaGeneracion]]:
+    """Últimas corridas (por fecha) de reporte_energia_generacion por
+    frontera, hasta CORRIDAS_VENTANA_GENERANDO. 'genera de verdad' se decide
+    contra esta ventana corta -- no la sola corrida más reciente -- para que
+    un día nublado o una falla puntual de medidor no apague la bandera de una
+    planta que sigue operando. Tampoco es un umbral fijo de días calendario:
+    el pipeline todavía no corre con cadencia diaria estricta (ver memoria de
+    sesión), así que se cuentan corridas disponibles, no días del calendario."""
+    if not frontera_ids:
+        return {}
+    filas = (
+        db.query(ReporteEnergiaGeneracion)
+        .filter(ReporteEnergiaGeneracion.frontera_id.in_(frontera_ids))
+        .order_by(ReporteEnergiaGeneracion.frontera_id, ReporteEnergiaGeneracion.fecha.desc())
+        .all()
+    )
+    ultimas: dict[int, list[ReporteEnergiaGeneracion]] = {}
+    for fila in filas:
+        lista = ultimas.setdefault(fila.frontera_id, [])
+        if len(lista) < CORRIDAS_VENTANA_GENERANDO:
+            lista.append(fila)
+    return ultimas
 
 
-def _to_out(f: Frontera, db: Session) -> FronteraOut:
+def _to_out(f: Frontera, db: Session, corridas_generacion: list | None = "sin_dato") -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
@@ -99,6 +101,15 @@ def _to_out(f: Frontera, db: Session) -> FronteraOut:
         d.operador_red_id = f.operador.id
         d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
         d.operador_correos = [c.email for c in f.operador.contactos]
+
+    # "sin_dato" (default) marca que no se pidió este dato en batch para esta
+    # llamada (endpoints de un solo objeto) -- se consulta puntual. Lista
+    # vacía/None explícito (pasado desde list_fronteras) significa "sí se
+    # consultó en batch y esta frontera no tiene ninguna corrida todavía".
+    corridas = _ultimas_generaciones(db, [f.id]).get(f.id, []) if corridas_generacion == "sin_dato" else (corridas_generacion or [])
+    if corridas:
+        d.generando_actual = any(c.energia_final_kwh is not None and c.energia_final_kwh > 0 for c in corridas)
+        d.fecha_ultima_generacion = corridas[0].fecha
     return d
 
 
@@ -199,7 +210,9 @@ def list_fronteras(
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
     if estado:
         q = q.filter(Frontera.estado == estado)
-    return [_to_out(f, db) for f in q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()]
+    fronteras = q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()
+    generaciones = _ultimas_generaciones(db, [f.id for f in fronteras])
+    return [_to_out(f, db, generaciones.get(f.id)) for f in fronteras]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
@@ -625,80 +638,6 @@ def backfill_medidor(
     return _backfill_medidor_info(db, dry_run=dry_run)
 
 
-def _backfill_operador_red_info(db: Session, dry_run: bool = True) -> dict:
-    """Vincula al catálogo (`operadores_red`) los proyectos cuyo
-    `operador_red` de texto libre YA diligenciado coincide con el
-    `nombre_legal`/`nombre_comercial` de un operador -- y cascada el vínculo
-    hacia sus fronteras que todavía no lo tengan. Nunca pisa un
-    `operador_red_id` ya diligenciado en ningún lado. Sin botón en el
-    frontend a propósito (mismo criterio que backfill-medidor): se corre
-    puntualmente cuando haga falta.
-
-    El match usa `mejor_candidato` (mismo algoritmo de
-    app/utils/nombre_matching.py que ya usa el aviso de duplicados de
-    Operadores de Red/Proyectos/Fronteras), no una coincidencia exacta de
-    texto normalizado -- así variantes de puntuación o espacios ("S.A.S."
-    vs "SAS") sí matchean, sin perder la cautela de "mejor no adivinar que
-    adivinar mal" que ya trae incorporada `mejor_candidato` (no acepta un
-    match ambiguo entre 2 candidatos con score parecido)."""
-    catalogo = db.query(OperadorRed).all()
-    candidatos = [
-        (o, [n for n in (o.nombre_legal, o.nombre_comercial) if n])
-        for o in catalogo
-    ]
-
-    proyectos = (
-        db.query(Proyecto)
-        .options(selectinload(Proyecto.fronteras))
-        .filter(Proyecto.operador_red_id.is_(None), Proyecto.operador_red.isnot(None))
-        .all()
-    )
-
-    actualizados = []
-    sin_match = []
-    for p in proyectos:
-        operador, score = mejor_candidato(p.operador_red, candidatos)
-        if operador is None:
-            sin_match.append({
-                "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
-                "mejor_score": score,
-            })
-            continue
-        fronteras_afectadas = [f.id for f in p.fronteras if f.operador_red_id is None]
-        actualizados.append({
-            "id": p.id, "nombre": p.nombre_comercial, "operador_red_texto": p.operador_red,
-            "operador_red_id": operador.id, "score": score, "fronteras_afectadas": fronteras_afectadas,
-        })
-        if not dry_run:
-            p.operador_red_id = operador.id
-            sincronizar_operador_red(db, p)
-
-    if not dry_run and actualizados:
-        db.commit()
-
-    return {
-        "dry_run": dry_run,
-        "total_candidatos": len(proyectos),
-        "actualizados": len(actualizados),
-        "sin_match": len(sin_match),
-        "detalle": actualizados,
-        "detalle_sin_match": sin_match,
-    }
-
-
-@router.post("/backfill-operador-red")
-def backfill_operador_red(
-    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Vincula al catálogo de operadores los proyectos/fronteras cuyo texto
-    libre ya diligenciado coincide con un operador existente. Idempotente,
-    nunca pisa un vínculo ya hecho. Sin botón en el frontend (se corre
-    puntualmente, ver comentario en `_backfill_operador_red_info`)."""
-    return _backfill_operador_red_info(db, dry_run=dry_run)
-
-
 # ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────
 
 @router.get("/quoia/meters")
@@ -743,213 +682,3 @@ def quoia_meter_curves(meter_id: int, _=Depends(get_current_user)):
             "eae": eae,
         })
     return {"meter_id": meter_id, "curves": summary}
-
-
-# ── Diagrama Fasorial ──────────────────────────────────────────────────────────
-
-class FasorialLecturaOut(BaseModel):
-    """Última lectura del medidor (tensiones y corrientes por fase) desde Quoia."""
-    vp1: float | None
-    vp2: float | None
-    vp3: float | None
-    cp1: float | None
-    cp2: float | None
-    cp3: float | None
-    last_time: str | None = None
-
-
-@router.get("/fasorial/nodos", tags=["Fronteras"])
-def fasorial_nodos(_=Depends(get_current_user)):
-    """Lista de nodos/medidores de Quoia (vía Gaia) para el selector del fasorial."""
-    gaia = _get_gaia()
-    out = [
-        {"id": int(n["id"]), "name": n.get("name") or f"Nodo {n['id']}"}
-        for n in _list_gaia_nodes(gaia)
-        if n.get("id") is not None
-    ]
-    out.sort(key=lambda x: x["name"].lower())
-    return {"total": len(out), "nodos": out}
-
-
-@router.get("/fasorial/lectura/{node_id}", response_model=FasorialLecturaOut, tags=["Fronteras"])
-def fasorial_lectura(
-    node_id: int,
-    _=Depends(get_current_user),
-):
-    """Devuelve la lectura más reciente del nodo (hoy) para el diagrama fasorial.
-
-    Toma el snapshot eléctrico del nodo y extrae tensiones (vp1/2/3) y corrientes
-    (cp1/2/3) de fase. Si el nodo no tiene lectura disponible hoy, responde 422.
-    """
-    gaia = _get_gaia()
-    snap = gaia.get_node_electrical_snapshot(node_id)
-    if not snap:
-        raise HTTPException(422, "No fue posible obtener la información del medidor")
-
-    vp = (snap.get("vp1"), snap.get("vp2"), snap.get("vp3"))
-    cp = (snap.get("cp1"), snap.get("cp2"), snap.get("cp3"))
-    if all(v is None for v in vp) and all(c is None for c in cp):
-        raise HTTPException(422, "No fue posible obtener la información del medidor")
-
-    return FasorialLecturaOut(
-        vp1=vp[0], vp2=vp[1], vp3=vp[2],
-        cp1=cp[0], cp2=cp[1], cp3=cp[2],
-        last_time=snap.get("last_time"),
-    )
-
-
-class FasorialInput(BaseModel):
-    titulo: str
-    vp1: float
-    vp2: float
-    vp3: float
-    cp1: float
-    cp2: float
-    cp3: float
-
-
-@router.post("/fasorial/generar", tags=["Fronteras"])
-def generar_fasorial(
-    body: FasorialInput,
-    _=Depends(get_current_user),
-):
-    """Genera y retorna el diagrama fasorial trifásico como imagen JPEG."""
-    try:
-        import numpy as np
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        from matplotlib.lines import Line2D
-    except ImportError as exc:
-        raise HTTPException(500, f"matplotlib no disponible: {exc}")
-
-    vp = [body.vp1, body.vp2, body.vp3]
-    cp = [body.cp1, body.cp2, body.cp3]
-
-    ang_v    = [90, 330, 210]
-    ang_c    = list(ang_v)
-
-    colors_v = ["#E84040", "#2ECC71", "#3B82F6"]
-    colors_c = ["#FF8C8C", "#7EEFC1", "#93C5FD"]
-    labels_v = ["V₁ (R)", "V₂ (S)", "V₃ (T)"]
-    labels_c = ["I₁ (R)", "I₂ (S)", "I₃ (T)"]
-
-    v_max   = max(vp);  c_max = max(cp)
-    radius  = 1.0;      c_scale = 0.55
-    v_norm  = [v / v_max * radius for v in vp]
-    c_norm  = [c / c_max * c_scale for c in cp]
-
-    fig, ax = plt.subplots(figsize=(11, 11), dpi=150, facecolor="#0D1117")
-    ax.set_facecolor("#0D1117")
-    ax.set_aspect("equal")
-
-    for r in np.linspace(0.25, 1.15, 4):
-        ax.add_patch(plt.Circle((0, 0), r, color="#2C3E50", lw=0.6,
-                                linestyle="--", fill=False, zorder=1))
-
-    for deg in range(0, 360, 30):
-        rad = np.radians(deg)
-        ax.plot([0, 1.18 * np.cos(rad)], [0, 1.18 * np.sin(rad)],
-                color="#2C3E50", lw=0.5, zorder=1)
-        ax.text(1.22 * np.cos(rad), 1.22 * np.sin(rad), f"{deg}°",
-                ha="center", va="center", fontsize=6.5,
-                color="#5B7A99", fontfamily="monospace")
-
-    ax.axhline(0, color="#3D5166", lw=0.8, zorder=1)
-    ax.axvline(0, color="#3D5166", lw=0.8, zorder=1)
-
-    for i in range(3):
-        rad = np.radians(ang_v[i])
-        xv, yv = v_norm[i] * np.cos(rad), v_norm[i] * np.sin(rad)
-        ax.annotate("", xy=(xv, yv), xytext=(0, 0),
-                    arrowprops=dict(arrowstyle="->", color=colors_v[i],
-                                   lw=2.8, mutation_scale=20))
-        off = 0.09
-        ax.text(xv + off * np.cos(rad), yv + off * np.sin(rad),
-                f"{labels_v[i]}\n{vp[i]:,.2f} V",
-                ha="center", va="center", fontsize=9,
-                color=colors_v[i], fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="#151C26",
-                          edgecolor=colors_v[i], alpha=0.85, lw=1))
-
-    for i in range(3):
-        rad = np.radians(ang_c[i])
-        xi, yi = c_norm[i] * np.cos(rad), c_norm[i] * np.sin(rad)
-        ax.annotate("", xy=(xi, yi), xytext=(0, 0),
-                    arrowprops=dict(arrowstyle="->", color=colors_c[i],
-                                   lw=1.8, mutation_scale=16,
-                                   linestyle="dashed"))
-        off2 = -0.12
-        ax.text(xi + off2 * np.cos(rad), yi + off2 * np.sin(rad),
-                f"{labels_c[i]}\n{cp[i]:.3f} A",
-                ha="center", va="center", fontsize=8,
-                color=colors_c[i],
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0D1117",
-                          edgecolor=colors_c[i], alpha=0.75, lw=0.8))
-
-    ax.plot(0, 0, "o", color="white", ms=5, zorder=10)
-
-    lim = 1.40
-    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.axis("off")
-
-    ax.add_patch(mpatches.FancyBboxPatch(
-        (-lim * 0.97, -lim * 0.97), lim * 1.94, lim * 1.94,
-        boxstyle="round,pad=0.02", linewidth=2,
-        edgecolor="#1E3A5F", facecolor="none", zorder=20))
-
-    fig.text(0.5, 0.965, body.titulo.upper(), ha="center", va="top",
-             fontsize=22, fontweight="bold", color="#FFFFFF",
-             fontfamily="DejaVu Sans", transform=fig.transFigure)
-    fig.text(0.5, 0.930, "Diagrama Fasorial — Sistema Trifásico",
-             ha="center", va="top", fontsize=11, color="#7EB4E2",
-             transform=fig.transFigure)
-    fig.add_artist(Line2D([0.08, 0.92], [0.918, 0.918],
-                   transform=fig.transFigure, color="#1E4D7B", lw=1.5))
-
-    anomalias = [labels_v[i] for i in range(3) if vp[i] < v_max * 0.10]
-    if anomalias:
-        msg = "⚠  " + ", ".join(anomalias) + " — Posible falla o pérdida de fase"
-        fig.text(0.5, 0.905, msg, ha="center", va="top", fontsize=9.5,
-                 color="#FFD700",
-                 bbox=dict(boxstyle="round,pad=0.35", facecolor="#2A1A00",
-                           edgecolor="#FFD700", alpha=0.9, lw=1.2),
-                 transform=fig.transFigure)
-
-    legend_items = []
-    for i in range(3):
-        legend_items.append(mpatches.Patch(color=colors_v[i],
-                             label=f"{labels_v[i]}: {vp[i]:,.2f} V"))
-    for i in range(3):
-        legend_items.append(mpatches.Patch(color=colors_c[i],
-                             label=f"{labels_c[i]}: {cp[i]:.3f} A"))
-
-    ax.legend(handles=legend_items, loc="lower left",
-              bbox_to_anchor=(0.01, 0.01), fontsize=8.5,
-              framealpha=0.7, facecolor="#111827",
-              edgecolor="#1E4D7B", labelcolor="white", ncol=2)
-
-    fig.text(0.5, 0.035,
-             "Ángulos: V₁=90° | V₂=330° | V₃=210°   •   Unergy",
-             ha="center", va="bottom", fontsize=7.5,
-             color="#4A6B8A", transform=fig.transFigure)
-
-    fig.text(0.5, 0.5, "UNERGY", ha="center", va="center",
-             fontsize=72, fontweight="bold", color="#FFFFFF",
-             alpha=0.045, rotation=30, transform=fig.transFigure,
-             fontfamily="DejaVu Sans", zorder=0)
-
-    plt.tight_layout(rect=[0, 0.05, 1, 0.89])
-
-    buf = io.BytesIO()
-    plt.savefig(buf, dpi=150, bbox_inches="tight",
-                facecolor=fig.get_facecolor(), format="jpeg")
-    plt.close(fig)
-    buf.seek(0)
-
-    filename = body.titulo.replace(" ", "_").replace("/", "-") + "_Fasorial.jpg"
-    return StreamingResponse(
-        buf,
-        media_type="image/jpeg",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )

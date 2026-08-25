@@ -8,6 +8,7 @@ Create Date: 2026-07-28
 """
 from alembic import op
 import sqlalchemy as sa
+from alembic_idempotencia import agregar_columna_si_falta
 
 revision = "051"
 down_revision = "050"
@@ -16,8 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "contratos_servicio",
+    bind = op.get_bind()
+    agregar_columna_si_falta(
+        bind, "contratos_servicio",
         sa.Column("responsable_iva", sa.Boolean, nullable=False, server_default=sa.false()),
     )
 

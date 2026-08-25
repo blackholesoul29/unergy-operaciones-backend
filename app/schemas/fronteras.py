@@ -22,9 +22,7 @@ class FronteraBase(BaseModel):
     transferencia_maxima_kwh: Optional[float] = None
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
-    operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
     nombre_predio: Optional[str] = None
@@ -85,6 +83,11 @@ class FronteraBase(BaseModel):
     entidad_calibradora_med_ppal: Optional[str] = None
     fecha_calibracion_med_ppal: Optional[date] = None
     fecha_actualizacion_ppal: Optional[date] = None
+    tipo_extraccion_ppal: Optional[str] = None
+    password_medidor_ppal: Optional[str] = None
+    ip_modem_ppal: Optional[str] = None
+    puerto_modem_ppal: Optional[int] = None
+    canal_comunicacion_ppal: Optional[str] = None
 
     # Medidor respaldo
     nro_serie_med_resp: Optional[str] = None
@@ -95,6 +98,11 @@ class FronteraBase(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
+    tipo_extraccion_resp: Optional[str] = None
+    password_medidor_resp: Optional[str] = None
+    ip_modem_resp: Optional[str] = None
+    puerto_modem_resp: Optional[int] = None
+    canal_comunicacion_resp: Optional[str] = None
 
     # Agrupación/embebido
     es_agrupadora: Optional[bool] = False
@@ -136,9 +144,7 @@ class FronteraUpdate(BaseModel):
     transferencia_maxima_kwh: Optional[float] = None
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
-    operador_red: Optional[str] = None
     operador_red_id: Optional[int] = None
-    operador_red_zona: Optional[str] = None
     nombre_cgm: Optional[str] = None
     predio_id: Optional[str] = None
     nombre_predio: Optional[str] = None
@@ -199,6 +205,11 @@ class FronteraUpdate(BaseModel):
     entidad_calibradora_med_ppal: Optional[str] = None
     fecha_calibracion_med_ppal: Optional[date] = None
     fecha_actualizacion_ppal: Optional[date] = None
+    tipo_extraccion_ppal: Optional[str] = None
+    password_medidor_ppal: Optional[str] = None
+    ip_modem_ppal: Optional[str] = None
+    puerto_modem_ppal: Optional[int] = None
+    canal_comunicacion_ppal: Optional[str] = None
 
     # Medidor respaldo
     nro_serie_med_resp: Optional[str] = None
@@ -209,6 +220,11 @@ class FronteraUpdate(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
+    tipo_extraccion_resp: Optional[str] = None
+    password_medidor_resp: Optional[str] = None
+    ip_modem_resp: Optional[str] = None
+    puerto_modem_resp: Optional[int] = None
+    canal_comunicacion_resp: Optional[str] = None
 
     # Agrupacion/embebido
     es_agrupadora: Optional[bool] = None
@@ -241,6 +257,13 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     proyecto_fecha_inicio_comercializacion: Optional[date] = None
+    # Basado en las últimas corridas del pipeline Reporte Energía
+    # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
+    # cubre todas las fronteras de generación, no solo las que tienen
+    # identificador de monitoreo Unergy resuelto. None = todavía sin ninguna
+    # corrida para esta frontera (no implica que no genere).
+    generando_actual: Optional[bool] = None
+    fecha_ultima_generacion: Optional[date] = None
     operador_comercial: Optional[str] = None
     operador_correos: list[str] = []
     # Uno por cada cliente que sea fuente del contacto CGM de este proyecto

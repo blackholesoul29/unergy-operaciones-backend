@@ -12,6 +12,7 @@ Fuentes:
 """
 import io
 import logging
+import re
 from calendar import monthrange
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -21,8 +22,12 @@ from sqlalchemy import delete
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models import PPAContrato, PPATarifa, Proyecto, AsicSolicitud
-from app.models.contratos import DespachoContratoMensual, IppMensual, FacturaAgrupacion
+from app.models.contratos import (
+    DespachoContratoMensual, IppMensual, FacturaAgrupacion, FacturaOrden, FacturaEmitida,
+    PrecioBolsaMensual, DespachoContratoDia, PPACompromisoEnergia,
+)
 from app.models.asic import EstadoSolicitudAsicEnum, TipoSolicitudAsicEnum
+from app.services.facturacion_factura import construir_mensaje, contribuciones
 from app.utils.gescon_vigencia import resolver_vigencias
 from pydantic import BaseModel
 
@@ -73,23 +78,69 @@ async def cargar_despacho(
     i_ven = _find({"VENDEDOR"})
     i_com = _find({"COMPRADOR"})
     i_tipo = _find({"TIPO"})
+    i_fec = _find({"FECHADOCUMENTO", "FECHA DOCUMENTO", "FECHA"})
     if i_con is None:
         raise HTTPException(400, "No encontré la columna CONTRATO en el archivo")
-    horas = [i for i, h in enumerate(header)
-             if isinstance(h, str) and (h.strip().upper().startswith("DESP_HORA")
-                                        or h.strip().upper().replace(" ", "").startswith("H0")
-                                        or h.strip().upper().replace(" ", "") in {f"H{n}" for n in range(24)})]
-    if not horas:
-        raise HTTPException(400, "No encontré columnas de horas (DESP_HORA 01..24)")
+    # Columnas de ENERGÍA por hora. El despacho bien armado trae EXACTAMENTE 24
+    # (DESP_HORA 01..24). Hay archivos mal armados (p. ej. abril `dspcttos_txF`) que
+    # mezclan energía y PRECIO por hora, dejando columnas duplicadas/48 de hora — y
+    # los nombres quedan tan corruptos que no se pueden leer confiable. En vez de
+    # inflar el total callado, se RECHAZA y se pide el archivo correcto.
+    def _horas_por_patron(patron):
+        d: dict[int, int] = {}
+        cnt = 0
+        for i, h in enumerate(header):
+            if not isinstance(h, str):
+                continue
+            mm = re.match(patron, h.strip().upper().replace(" ", ""))
+            if not mm:
+                continue
+            cnt += 1
+            n = int(mm.group(1))
+            if 1 <= n <= 24 and n not in d:
+                d[n] = i
+        return d, cnt
+
+    hd, n_cols_hora = _horas_por_patron(r"^DESP_HORA(\d{1,2})(?:\.\d+)?$")
+    if not hd:   # respaldo para formatos H01..H24
+        hd, n_cols_hora = _horas_por_patron(r"^H(\d{1,2})(?:\.\d+)?$")
+    if not hd:
+        raise HTTPException(400, "No encontré columnas de horas (DESP_HORA 01..24) en el archivo.")
+    if len(hd) != 24 or n_cols_hora != 24:
+        raise HTTPException(
+            400,
+            f"El archivo parece mal armado: encontré {n_cols_hora} columnas de hora y "
+            f"{len(hd)} horas distintas (deben ser 24 columnas = 24 horas). Suele pasar "
+            f"cuando el Excel trae la energía y el PRECIO por hora mezclados (ej. "
+            f"'dspcttos_txF'). Sube el archivo de despacho correcto (24 columnas "
+            f"DESP_HORA 01..24, ej. 'dspcttos_txr' / 'dspcttos_txf').",
+        )
+    horas = [hd[n] for n in sorted(hd)]
 
     agg: dict = {}
+    diario: dict = {}   # (contrato, fecha) → kwh del día
     for r in filas:
         if not r or i_con >= len(r) or r[i_con] is None:
             continue
         con = str(int(r[i_con])) if isinstance(r[i_con], float) else str(r[i_con]).strip()
         kwh = sum(r[i] for i in horas if i < len(r) and isinstance(r[i], (int, float)))
-        d = agg.setdefault(con, {"kwh": 0.0, "vendedor": None, "comprador": None, "tipo": None})
+        d = agg.setdefault(con, {"kwh": 0.0, "vendedor": None, "comprador": None, "tipo": None, "fechas": set()})
         d["kwh"] += kwh
+        if i_fec is not None and i_fec < len(r) and r[i_fec] is not None:
+            fv = r[i_fec]
+            fecha = None
+            if hasattr(fv, "date"):          # datetime
+                fecha = fv.date()
+            elif hasattr(fv, "year"):        # date
+                fecha = fv
+            else:
+                try:
+                    fecha = date.fromisoformat(str(fv)[:10])
+                except ValueError:
+                    fecha = None
+            if fecha is not None:
+                d["fechas"].add(fecha)
+                diario[(con, fecha)] = round(diario.get((con, fecha), 0.0) + kwh, 4)
         if i_ven is not None and i_ven < len(r) and r[i_ven]:
             d["vendedor"] = str(r[i_ven]).strip()
         if i_com is not None and i_com < len(r) and r[i_com]:
@@ -98,15 +149,23 @@ async def cargar_despacho(
             d["tipo"] = str(r[i_tipo]).strip()
 
     db.execute(delete(DespachoContratoMensual).where(DespachoContratoMensual.periodo == per))
+    db.execute(delete(DespachoContratoDia).where(DespachoContratoDia.periodo == per))
     for con, d in agg.items():
+        fechas = d.get("fechas") or set()
         db.add(DespachoContratoMensual(
             periodo=per, codigo_sic_contrato=con, kwh=round(d["kwh"], 4),
             vendedor=d["vendedor"], comprador=d["comprador"], tipo=d["tipo"],
+            dias=(len(fechas) or None),
+            fecha_min=(min(fechas) if fechas else None),
+            fecha_max=(max(fechas) if fechas else None),
             archivo=archivo.filename,
         ))
+    for (con, fecha), kwh_dia in diario.items():
+        db.add(DespachoContratoDia(periodo=per, codigo_sic_contrato=con, fecha=fecha, kwh=kwh_dia))
     db.commit()
     total = sum(d["kwh"] for d in agg.values())
-    return {"periodo": per, "contratos": len(agg), "kwh_total": round(total, 2), "archivo": archivo.filename}
+    return {"periodo": per, "contratos": len(agg), "kwh_total": round(total, 2),
+            "horas": len(horas), "archivo": archivo.filename}
 
 
 @router.get("/despacho")
@@ -122,9 +181,27 @@ def listar_despacho(periodo: str = Query(...), db: Session = Depends(get_db), _=
         "kwh_total": round(sum(float(r.kwh) for r in rows), 2),
         "contratos": [
             {"contrato": r.codigo_sic_contrato, "vendedor": r.vendedor, "comprador": r.comprador,
-             "tipo": r.tipo, "kwh": float(r.kwh)} for r in rows
+             "tipo": r.tipo, "kwh": float(r.kwh), "dias": r.dias} for r in rows
         ],
         "archivo": rows[0].archivo if rows else None,
+    }
+
+
+@router.get("/despacho/dias")
+def despacho_por_dia(periodo: str = Query(...), contrato: str = Query(...),
+                     db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Día a día del despacho de un contrato en el período."""
+    per = _norm_periodo(periodo)
+    rows = (
+        db.query(DespachoContratoDia)
+        .filter(DespachoContratoDia.periodo == per,
+                DespachoContratoDia.codigo_sic_contrato == str(contrato).strip())
+        .order_by(DespachoContratoDia.fecha).all()
+    )
+    return {
+        "periodo": per, "contrato": contrato,
+        "kwh_total": round(sum(float(r.kwh) for r in rows), 2),
+        "dias": [{"fecha": r.fecha.isoformat(), "kwh": float(r.kwh)} for r in rows],
     }
 
 
@@ -136,6 +213,15 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     despacho = db.query(DespachoContratoMensual).filter(DespachoContratoMensual.periodo == per).all()
     ipp_row = db.query(IppMensual).filter(IppMensual.año == año, IppMensual.mes == mes).first()
     ipp = float(ipp_row.valor) if ipp_row else None
+
+    # Precio de bolsa para valorizar la energía SIN PPA (UNGC). Lo pone la usuaria
+    # cada mes (es el promedio horario→diario del mes, un cálculo propio que NO
+    # coincide con el promedio simple de precios_bolsa_diario). Sin fallback: si no
+    # está cargado, la energía sin PPA queda sin valorizar hasta que ella lo ponga.
+    bolsa_row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    bolsa_manual = float(bolsa_row.valor) if bolsa_row else None
+    bolsa_precio = bolsa_manual
 
     # contrato XM → solicitud asic VIGENTE al fin del período (resolver_vigencias
     # corre sobre el universo publicado, igual que la vista de asic).
@@ -154,19 +240,43 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     )
     vig = resolver_vigencias(universo, hasta=last_day)
     sol: dict = {}
+    # Respaldo para códigos SIN versión vigente: un contrato TERMINADO a mitad de
+    # mes (o relevado sin sucesor bajo el mismo código) queda vigente=False pero
+    # saliente_por_relevo=True — su ventana recortada SIGUE contando y el despacho
+    # ya trae solo la energía de los días que operó. Sin esto, ese código perdía
+    # su dueño y su energía caía a "sin PPA" (valorada a bolsa) en vez de
+    # facturarse a su PPA (caso SIC 89902 / GD San Pelayo → Terpel 8, jul-2026).
+    salientes: dict = {}
     for s in universo:
         v = vig.get(s.id)
-        if v is not None and v.vigente:
-            c = (s.codigo_sic_contrato or "").strip()
-            if c:
-                sol[c] = s
+        if v is None or not v.procesado:
+            continue
+        c = (s.codigo_sic_contrato or "").strip()
+        if not c:
+            continue
+        if v.vigente:
+            sol[c] = s
+        elif v.saliente_por_relevo:
+            # Si hay varios salientes del mismo código, gana el que cerró más
+            # tarde (el último dueño del período).
+            prev = salientes.get(c)
+            fin = v.fecha_fin_efectiva or date.min
+            if prev is None or (vig[prev.id].fecha_fin_efectiva or date.min) < fin:
+                salientes[c] = s
+    for c, s in salientes.items():
+        sol.setdefault(c, s)
     ppas = {p.id: p for p in db.query(PPAContrato).all()}
     tarifas: dict = {}
     for t in db.query(PPATarifa).filter(PPATarifa.año == año, PPATarifa.mes == mes).all():
         tarifas[t.contrato_id] = float(t.tarifa) if t.tarifa is not None else None
     proy_nombre = {pid: nom for pid, nom in db.query(Proyecto.id, Proyecto.nombre_comercial).all()}
-    # Agrupación manual de facturas: codigo_sic_contrato → nombre de factura (fija).
-    agrup = {a.codigo_sic_contrato: a.nombre for a in db.query(FacturaAgrupacion).all()}
+    # Agrupación manual de facturas: codigo_sic_contrato → (nombre, porcentaje). El
+    # porcentaje se lee acá porque `contribuciones` lo necesita para partir el
+    # contrato; cargarlo solo como nombre reventaba el reparto.
+    agrup = {
+        a.codigo_sic_contrato: (a.nombre, float(a.porcentaje) if a.porcentaje is not None else None)
+        for a in db.query(FacturaAgrupacion).all()
+    }
 
     lineas = []
     for d in despacho:
@@ -193,14 +303,23 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             tarifa_idx = round(base * ipp / ipp_base, 2)   # redondeo idéntico al Excel
             fact = round(kwh * tarifa_idx, 2)
         ppa_nom = (ppa.nombre_interno or ppa.numero_codigo_contrato) if ppa else None
+        ag = agrup.get(c)
         lineas.append({
             "contrato": c,
             "comprador": d.comprador,
+            "ppa_id": pid,
             "proyecto_id": proyid,
             "proyecto": proy_nombre.get(proyid) if proyid else None,
             "ppa": ppa_nom,
             # Nombre de la factura: agrupación manual del CONTRATO si existe, si no el PPA.
-            "factura": (agrup.get(c) if agrup.get(c) else ppa_nom),
+            "factura": (ag[0] if ag and ag[0] else ppa_nom),
+            # Datos del contrato para el mensaje que se pega en la factura.
+            "numero_contrato": ppa.numero_codigo_contrato if ppa else None,
+            "periodo_ipp_base": ppa.periodo_indexacion_base if ppa else None,
+            # Días efectivos del despacho (para el mensaje; mes parcial).
+            "dias": d.dias,
+            "fecha_min": d.fecha_min,
+            "fecha_max": d.fecha_max,
             "kwh": kwh,
             "tarifa_base": base,
             "ipp_base": ipp_base,
@@ -223,27 +342,88 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
     for g in por_sic.values():
         g["kwh"] = round(g["kwh"], 2); g["facturacion"] = round(g["facturacion"], 2)
 
-    # Agrupación por FACTURA (agrupación manual si existe, si no el PPA) — replica la
-    # hoja "Facturación" del Excel: una fila por factura con su tarifa y total, y la
-    # lista de proyectos que la componen (para dividir/reasignar desde la UI).
+    # Agrupación por FACTURA — replica la hoja "Facturación" del Excel. Una fila por
+    # factura (agrupación manual si existe, si no el PPA). Un contrato con agrupación
+    # PARCIAL (porcentaje) reparte su kWh/valor: el % va a la factura nombrada y el
+    # resto (100-%) queda en el PPA. Misma tarifa en ambas partes.
     por_factura: dict = {}
     for l in facturables:
-        k = l["factura"] or "—"
-        g = por_factura.setdefault(k, {
-            "factura": k, "ppa": l["ppa"], "comprador": l["comprador"], "contratos": 0,
-            "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
-            "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
-            "personalizada": bool(agrup.get(l["contrato"])),
-            "_tarifas": set(), "proyectos": [],
+        a = agrup.get(l["contrato"])           # (nombre, porcentaje) | None
+        ppa_nom = l["ppa"] or "—"
+        contribs = contribuciones(a, ppa_nom)
+        for (fname, fr, pct) in contribs:
+            es_custom = bool(a and a[0] and fname == a[0])
+            g = por_factura.setdefault(fname, {
+                "factura": fname, "ppa": ppa_nom, "comprador": l["comprador"], "contratos": 0,
+                "kwh": 0.0, "tarifa_base": l["tarifa_base"], "ipp_base": l["ipp_base"],
+                "tarifa_indexada": l["tarifa_indexada"], "facturacion": 0.0,
+                "personalizada": False, "sin_ppa": False, "_tarifas": set(), "proyectos": [],
+                "periodo_ipp_base": l["periodo_ipp_base"],
+                "_numeros": [], "_sic": [], "_dias": set(), "_fmin": None, "_fmax": None,
+            })
+            if l.get("dias"):
+                g["_dias"].add(l["dias"])
+            if l.get("fecha_min"):
+                g["_fmin"] = l["fecha_min"] if g["_fmin"] is None else min(g["_fmin"], l["fecha_min"])
+            if l.get("fecha_max"):
+                g["_fmax"] = l["fecha_max"] if g["_fmax"] is None else max(g["_fmax"], l["fecha_max"])
+            if l["numero_contrato"] and l["numero_contrato"] not in g["_numeros"]:
+                g["_numeros"].append(l["numero_contrato"])
+            if l["contrato"] and l["contrato"] not in g["_sic"]:
+                g["_sic"].append(l["contrato"])
+            kwh_p = round(l["kwh"] * fr, 2); fact_p = round(l["facturacion"] * fr, 2)
+            g["kwh"] += kwh_p; g["facturacion"] += fact_p; g["contratos"] += 1
+            if es_custom:
+                g["personalizada"] = True
+            if l["tarifa_indexada"] is not None:
+                g["_tarifas"].add(l["tarifa_indexada"])
+            g["proyectos"].append({
+                "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
+                "contrato": l["contrato"], "ppa": l["ppa"], "tarifa_indexada": l["tarifa_indexada"],
+                "kwh": kwh_p, "facturacion": fact_p, "porcentaje": pct,
+                "asignada": es_custom,
+            })
+    # Contratos SIN PPA (ej. UNGC / bolsa): XM SÍ los factura, así que se muestran
+    # como factura agrupada por comprador para que la energía total coincida con XM.
+    # No tienen tarifa PPA → la facturación queda pendiente ($0); solo cuenta la energía.
+    for l in lineas:
+        if l["estado"] != "sin_ppa":
+            continue
+        fname = f"{l['comprador'] or 'Sin PPA'} (sin PPA)"
+        g = por_factura.setdefault(fname, {
+            "factura": fname, "ppa": None, "comprador": l["comprador"], "contratos": 0,
+            "kwh": 0.0, "tarifa_base": None, "ipp_base": None,
+            "tarifa_indexada": None, "facturacion": 0.0,
+            "personalizada": False, "sin_ppa": True, "_tarifas": set(), "proyectos": [],
+            "periodo_ipp_base": None,
+            "_numeros": [], "_sic": [], "_dias": set(), "_fmin": None, "_fmax": None,
         })
-        g["kwh"] += l["kwh"]; g["facturacion"] += l["facturacion"]; g["contratos"] += 1
-        if l["tarifa_indexada"] is not None:
-            g["_tarifas"].add(l["tarifa_indexada"])
+        if l.get("dias"):
+            g["_dias"].add(l["dias"])
+        if l.get("fecha_min"):
+            g["_fmin"] = l["fecha_min"] if g["_fmin"] is None else min(g["_fmin"], l["fecha_min"])
+        if l.get("fecha_max"):
+            g["_fmax"] = l["fecha_max"] if g["_fmax"] is None else max(g["_fmax"], l["fecha_max"])
+        if l["contrato"] and l["contrato"] not in g["_sic"]:
+            g["_sic"].append(l["contrato"])
+        # Valorización a precio de bolsa (si hay precio).
+        fact_bolsa = round(l["kwh"] * bolsa_precio, 2) if bolsa_precio else 0.0
+        g["tarifa_indexada"] = bolsa_precio        # la "tarifa" de bolsa
+        g["kwh"] += l["kwh"]; g["facturacion"] += fact_bolsa; g["contratos"] += 1
         g["proyectos"].append({
             "proyecto_id": l["proyecto_id"], "proyecto": l["proyecto"],
-            "contrato": l["contrato"], "ppa": l["ppa"], "tarifa_indexada": l["tarifa_indexada"],
-            "kwh": l["kwh"], "facturacion": l["facturacion"], "asignada": bool(agrup.get(l["contrato"])),
+            "contrato": l["contrato"], "ppa": None, "tarifa_indexada": bolsa_precio,
+            "kwh": l["kwh"], "facturacion": fact_bolsa, "porcentaje": None, "asignada": False,
         })
+
+    # Orden manual (fijo) y marca de emitida (del período).
+    orden_manual = {o.nombre: o.orden for o in db.query(FacturaOrden).all()}
+    emitidas = {
+        e.nombre: {"por": e.emitida_por, "at": e.emitida_at.isoformat() if e.emitida_at else None,
+                   "numero": e.numero_factura}
+        for e in db.query(FacturaEmitida).filter(FacturaEmitida.periodo == per).all()
+    }
+
     for g in por_factura.values():
         g["kwh"] = round(g["kwh"], 2); g["facturacion"] = round(g["facturacion"], 2)
         # Si la factura mezcla contratos de PPAs con tarifas distintas, no hay una
@@ -253,19 +433,74 @@ def _facturacion_periodo(db: Session, per: str) -> dict:
             g["tarifa_indexada"] = None
         g.pop("_tarifas", None)
 
+        em = emitidas.get(g["factura"])
+        g["emitida"] = em is not None
+        g["emitida_por"] = em["por"] if em else None
+        g["emitida_at"] = em["at"] if em else None
+        g["numero_factura"] = em["numero"] if em else None
+        g["orden"] = orden_manual.get(g["factura"])
+        g["numeros_contrato"] = g.pop("_numeros")
+        g["contratos_sic"] = g.pop("_sic")
+        # Días efectivos del despacho (máx entre los contratos; comparten el archivo).
+        _dias = g.pop("_dias", set())
+        g["dias"] = max(_dias) if _dias else None
+        g["fecha_min"] = g.pop("_fmin", None)
+        g["fecha_max"] = g.pop("_fmax", None)
+        g["fecha_min"] = g["fecha_min"].isoformat() if g["fecha_min"] else None
+        g["fecha_max"] = g["fecha_max"].isoformat() if g["fecha_max"] else None
+        # El mensaje se arma acá (no en el frontend) para que el formato viva en un
+        # solo lugar, fijado por test. La tarifa base del grupo puede ser mixta; en
+        # ese caso el mensaje igual sale y la UI avisa que revise.
+        # Energía por contrato (para desglosar en el mensaje). Agrega por si un
+        # contrato aparece en varias líneas de la factura.
+        _det: dict = {}
+        for p in g["proyectos"]:
+            _det[p["contrato"]] = round(_det.get(p["contrato"], 0.0) + (p["kwh"] or 0.0), 2)
+        contratos_detalle = [{"contrato": c, "kwh": k} for c, k in _det.items()]
+        g["mensaje"] = construir_mensaje(
+            numeros_contrato=g["numeros_contrato"],
+            periodo=per,
+            kwh=g["kwh"],
+            contratos_sic=g["contratos_sic"],
+            contratos_detalle=contratos_detalle,
+            tarifa_base=g["tarifa_base"],
+            ipp_base=g["ipp_base"],
+            periodo_ipp_base=g["periodo_ipp_base"],
+            ipp_mes=ipp,
+            dias=g["dias"],
+            fecha_min=g["fecha_min"],
+            fecha_max=g["fecha_max"],
+        )
+
+    # Las que tienen orden manual van primero (por ese orden); el resto por valor.
+    facturas = sorted(
+        por_factura.values(),
+        key=lambda x: (x["orden"] is None, x["orden"] if x["orden"] is not None else 0,
+                       -x["facturacion"]),
+    )
+
+    fact_ppa = _suma(facturables)
+    ingreso_bolsa = round(sum(g["facturacion"] for g in por_factura.values() if g.get("sin_ppa")), 2)
     return {
         "periodo": per,
         "ipp_mes": ipp,
+        "bolsa_precio": bolsa_precio,
+        "bolsa_manual": bolsa_manual,
         "resumen": {
             "contratos": len(lineas),
             "facturables": len(facturables),
             "sin_ppa": sum(1 for l in lineas if l["estado"] == "sin_ppa"),
             "kwh_total": round(sum(l["kwh"] for l in facturables), 2),
-            "facturacion_total": _suma(facturables),
+            "kwh_bolsa": round(sum(l["kwh"] for l in lineas if l["estado"] == "sin_ppa"), 2),
+            "facturacion_total": fact_ppa,
+            "ingreso_bolsa": ingreso_bolsa,
+            "ingreso_total": round(fact_ppa + ingreso_bolsa, 2),
+            "emitidas": sum(1 for g in por_factura.values() if g["emitida"]),
+            "facturas": len(por_factura),
         },
         "lineas": lineas,
         "por_codigo_sic": sorted(por_sic.values(), key=lambda x: -x["facturacion"]),
-        "por_factura": sorted(por_factura.values(), key=lambda x: -x["facturacion"]),
+        "por_factura": facturas,
     }
 
 
@@ -274,15 +509,116 @@ def facturacion(periodo: str = Query(...), db: Session = Depends(get_db), _=Depe
     return _facturacion_periodo(db, _norm_periodo(periodo))
 
 
+@router.get("/cumplimiento")
+def cumplimiento(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Compromiso (mínimo mensual del PPA) vs cumplimiento (energía despachada).
+
+    Por contrato marco (PPA): suma el despacho de todos sus contratos SIC y lo compara
+    con el mínimo/máximo del mes (ppa_compromisos_energia, en MWh). El despacho está en
+    kWh → se convierte a MWh. Muestra TODOS los PPA despachados; los que no tienen
+    compromiso cargado salen como 'sin_compromiso'. La energía sin PPA (bolsa/UNGC) no
+    entra aquí (no tiene contrato marco)."""
+    per = _norm_periodo(periodo)
+    y, m = per.split("-")
+    año, mes = int(y), int(m)
+
+    data = _facturacion_periodo(db, per)
+    comp = {}
+    for r in (db.query(PPACompromisoEnergia)
+              .filter(PPACompromisoEnergia.año == año, PPACompromisoEnergia.mes == mes).all()):
+        comp[r.contrato_id] = (
+            float(r.energia_minima) if r.energia_minima is not None else None,
+            float(r.energia_maxima) if r.energia_maxima is not None else None,
+        )
+
+    grupos: dict = {}
+    for l in data["lineas"]:
+        pid = l.get("ppa_id")
+        if not pid:
+            continue   # sin PPA (bolsa/UNGC) no aplica a compromiso
+        g = grupos.setdefault(pid, {
+            "ppa_id": pid, "ppa": l["ppa"], "numero_contrato": l["numero_contrato"],
+            "compradores": set(), "proyectos": set(), "kwh": 0.0, "contratos": 0,
+        })
+        g["kwh"] += l["kwh"]
+        g["contratos"] += 1
+        if l["comprador"]:
+            g["compradores"].add(l["comprador"])
+        if l["proyecto"]:
+            g["proyectos"].add(l["proyecto"])
+
+    filas = []
+    n_cumple = n_bajo = 0
+    faltante_mwh = 0.0
+    faltante_kwh = 0.0
+    for pid, g in grupos.items():
+        mn, mx = comp.get(pid, (None, None))
+        if mn is None:
+            continue   # solo PPA con mínimo cargado
+        desp = round(g["kwh"] / 1000.0, 2)   # kWh → MWh
+        pct, sospechosa = None, False
+        dif = round(desp - mn, 2)
+        pct = round(desp / mn * 100, 1) if mn else None
+        if mx and mx > 0 and desp > mx:
+            estado = "sobre_maximo"
+        elif desp >= mn:
+            estado = "cumple"
+        else:
+            estado = "bajo_minimo"
+            faltante_mwh += (mn - desp)
+            faltante_kwh += (mn * 1000.0 - g["kwh"])   # exacto en kWh (mín MWh→kWh − despacho kWh)
+        # Aviso de posible bug de unidades (kWh vs MWh): escalas muy dispares.
+        if mn > 0 and (desp > mn * 50 or desp < mn / 50):
+            sospechosa = True
+        if estado in ("cumple", "sobre_maximo"):
+            n_cumple += 1
+        else:
+            n_bajo += 1
+        filas.append({
+            "ppa": g["ppa"], "numero_contrato": g["numero_contrato"],
+            "comprador": ", ".join(sorted(g["compradores"])) or None,
+            "proyecto": ", ".join(sorted(g["proyectos"])) or None,
+            "contratos": g["contratos"],
+            "minimo_mwh": mn, "maximo_mwh": mx, "despachado_mwh": desp,
+            "pct": pct, "diferencia_mwh": dif,
+            # Faltante en kWh (exacto): 0 si cumple/sobre; positivo si está por debajo.
+            "faltante_kwh": round(mn * 1000.0 - g["kwh"], 2) if estado == "bajo_minimo" else 0.0,
+            "estado": estado, "unidad_sospechosa": sospechosa,
+        })
+
+    orden = {"bajo_minimo": 0, "sobre_maximo": 1, "sin_compromiso": 2, "cumple": 3}
+    filas.sort(key=lambda f: (orden.get(f["estado"], 9), -(f["despachado_mwh"] or 0)))
+    return {
+        "periodo": per,
+        "resumen": {
+            "cumplen": n_cumple, "bajo_minimo": n_bajo,
+            "faltante_mwh": round(faltante_mwh, 1), "faltante_kwh": round(faltante_kwh, 2),
+            "ppas": len(filas),
+        },
+        "filas": filas,
+    }
+
+
 # ── Agrupación manual de facturas (dividir un PPA en sub-facturas) ─────────────
 class AgrupacionIn(BaseModel):
     codigo_sic_contrato: str
     nombre: str | None = None   # None/"" = quitar la asignación (vuelve al PPA)
+    # % del contrato que va a esta factura; el resto queda en el PPA. None = todo.
+    # Ej. Uruaco 78596 → 22.8066% a "Terpel 1 Suno", 77.1934% en Terpel 1.
+    porcentaje: float | None = None
+
+
+def _agrup_out(a: FacturaAgrupacion) -> dict:
+    return {
+        "codigo_sic_contrato": a.codigo_sic_contrato,
+        "nombre": a.nombre,
+        "porcentaje": float(a.porcentaje) if a.porcentaje is not None else None,
+    }
 
 
 @router.get("/agrupaciones")
 def listar_agrupaciones(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
+    return [_agrup_out(a)
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
 
 
@@ -294,6 +630,9 @@ def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db)
         c = (r.codigo_sic_contrato or "").strip()
         if not c:
             continue
+        pct = r.porcentaje
+        if pct is not None and not 0 < pct <= 100:
+            raise HTTPException(422, f"El porcentaje de {c} debe estar entre 0 y 100 (llegó {pct})")
         obj = db.query(FacturaAgrupacion).filter(FacturaAgrupacion.codigo_sic_contrato == c).first()
         nombre = (r.nombre or "").strip()
         if not nombre:
@@ -301,9 +640,104 @@ def guardar_agrupaciones(rows: list[AgrupacionIn], db: Session = Depends(get_db)
                 db.delete(obj)
             continue
         if obj is None:
-            db.add(FacturaAgrupacion(codigo_sic_contrato=c, nombre=nombre))
+            db.add(FacturaAgrupacion(codigo_sic_contrato=c, nombre=nombre, porcentaje=pct))
         else:
             obj.nombre = nombre
+            obj.porcentaje = pct
     db.commit()
-    return [{"codigo_sic_contrato": a.codigo_sic_contrato, "nombre": a.nombre}
+    return [_agrup_out(a)
             for a in db.query(FacturaAgrupacion).order_by(FacturaAgrupacion.nombre).all()]
+
+
+# ── Precio de bolsa por mes (valoriza la energía sin PPA / UNGC) ───────────────
+class BolsaIn(BaseModel):
+    periodo: str
+    valor: float | None = None   # None/0 = quitar el manual (vuelve al sugerido)
+
+
+@router.get("/bolsa")
+def obtener_bolsa(periodo: str = Query(...), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    per = _norm_periodo(periodo)
+    año, mes = int(per[:4]), int(per[5:7])
+    row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    manual = float(row.valor) if row else None
+    # La usuaria lo pone cada mes (promedio horario→diario). Sin sugerido automático.
+    return {"periodo": per, "manual": manual, "vigente": manual}
+
+
+@router.put("/bolsa")
+def guardar_bolsa(data: BolsaIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    per = _norm_periodo(data.periodo)
+    año, mes = int(per[:4]), int(per[5:7])
+    row = db.query(PrecioBolsaMensual).filter(
+        PrecioBolsaMensual.año == año, PrecioBolsaMensual.mes == mes).first()
+    if data.valor is None or data.valor <= 0:
+        if row:
+            db.delete(row)
+    elif row is None:
+        db.add(PrecioBolsaMensual(año=año, mes=mes, valor=data.valor))
+    else:
+        row.valor = data.valor
+    db.commit()
+    return obtener_bolsa(periodo=per, db=db)
+
+
+# ── Orden manual de las facturas (fijo, aplica cada mes) ───────────────────────
+class OrdenIn(BaseModel):
+    nombres: list[str]   # en el orden deseado; las que no vengan quedan al final
+
+
+@router.put("/orden")
+def guardar_orden(data: OrdenIn, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Fija el orden de las facturas. Se reemplaza completo: llega la lista ordenada
+    y se reescribe, así no quedan huecos ni posiciones viejas."""
+    db.execute(delete(FacturaOrden))
+    for i, nombre in enumerate(data.nombres):
+        n = (nombre or "").strip()
+        if n:
+            db.add(FacturaOrden(nombre=n, orden=i))
+    db.commit()
+    return {"guardadas": len([n for n in data.nombres if (n or "").strip()])}
+
+
+@router.delete("/orden")
+def limpiar_orden(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Vuelve al orden por valor (descendente)."""
+    db.execute(delete(FacturaOrden))
+    db.commit()
+    return {"ok": True}
+
+
+# ── Marca de "ya se facturó" (por período) ─────────────────────────────────────
+class EmitidaIn(BaseModel):
+    nombre: str
+    periodo: str
+    emitida: bool
+    numero_factura: str | None = None   # código de la factura emitida
+
+
+@router.put("/emitida")
+def marcar_emitida(data: EmitidaIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    per = _norm_periodo(data.periodo)
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(422, "Falta el nombre de la factura")
+    num = (data.numero_factura or "").strip() or None
+    obj = (
+        db.query(FacturaEmitida)
+        .filter(FacturaEmitida.nombre == nombre, FacturaEmitida.periodo == per)
+        .first()
+    )
+    if data.emitida:
+        if obj is None:
+            db.add(FacturaEmitida(
+                nombre=nombre, periodo=per, numero_factura=num,
+                emitida_por=getattr(user, "nombre", None) or getattr(user, "email", None),
+            ))
+        else:
+            obj.numero_factura = num   # permite editar el código sin desmarcar
+    elif obj is not None:
+        db.delete(obj)
+    db.commit()
+    return {"nombre": nombre, "periodo": per, "emitida": data.emitida, "numero_factura": num}

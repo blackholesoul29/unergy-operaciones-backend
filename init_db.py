@@ -16,17 +16,13 @@ def add_columns():
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
-        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS alias_monitoreo TEXT",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS sub_project VARCHAR(50)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_bitacora VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS nombre_clientes VARCHAR(255)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS srv_operacion BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_inicio_comercializacion DATE",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_comercializacion_editada_manual BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS cantidad_total_paneles INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS produccion_especifica_kwh_kwp NUMERIC(10,2)",
-        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_generacion VARCHAR(50)",
-        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS codigo_sic_consumo VARCHAR(50)",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
@@ -43,6 +39,21 @@ def add_columns():
         # ppa_contratos: FK a clientes (comprador/vendedor)
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS comprador_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS vendedor_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
+        # ppa_contratos: comunidad energética NO es otro tipo de contrato, es una
+        # característica de este PPA (2026-08-18). NULL a propósito en los
+        # contratos viejos que no salieron de una oferta: null = no sabemos,
+        # distinto de False.
+        "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS es_comunidad_energetica BOOLEAN",
+        # oportunidad_ofertas: fin tentativo del suministro (2026-08-18). Con el
+        # inicio que ya existía, es lo que permite que un PPA en borrador declare
+        # su periodo antes de firmarse.
+        "ALTER TABLE oportunidad_ofertas ADD COLUMN IF NOT EXISTS fecha_fin_tentativa DATE",
+        # oportunidad_gestiones: a cuál oferta se refiere la gestión (2026-08-19).
+        # NULL = del cliente, cuenta para todas sus ofertas (comportamiento viejo,
+        # que es el que conservan las filas existentes).
+        "ALTER TABLE oportunidad_gestiones ADD COLUMN IF NOT EXISTS oferta_id BIGINT",
+        "CREATE INDEX IF NOT EXISTS ix_oportunidad_gestiones_oferta_id "
+        "ON oportunidad_gestiones (oferta_id)",
         # ppa_contratos: tipo_contrato y carpeta_link (migración 009)
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",

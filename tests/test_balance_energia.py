@@ -11,7 +11,9 @@ Todo es función pura: sin BD, sin red, sin reloj.
 from datetime import date
 
 from app.services.balance_energia import (
+    _energia_proyectada,
     agregar_balance,
+    calcular_balance_proyectado,
     construir_inventario,
     construir_tramos,
 )
@@ -529,3 +531,34 @@ def test_calcular_balance_marca_estimado_en_la_fila_correspondiente(monkeypatch)
     (fila,) = [f for f in out["inventario"] if f["categoria"] == "e"]
     assert fila["estimado"] is True
     assert fila["gen_tramo_real"] == 220.0
+
+
+def test_energia_proyectada_reparte_tasa_diaria_por_dias_de_tramo():
+    # planta 10 con un tramo que necesita energía, del 1 al 10 (10 días), tasa 2 MWh/día
+    plantas = {10: {"nombre": "X", "tramos": [
+        {"ini": date(2026, 9, 1), "fin": date(2026, 9, 10),
+         "pct_ppa": 0.0, "pct_dup": 0.0, "pct_uso": 0.0, "pct_venta_bolsa": 1.0,
+         "piscina_venta": "ungg", "codigo_sic_bolsa": None, "asignaciones": []},
+    ]}}
+    energia = _energia_proyectada(plantas, {10: 2.0}, date(2026, 9, 1), date(2026, 9, 30))
+    real, proy = energia[10][0]
+    assert real == 0.0            # mes futuro: nada real
+    assert proy == 20.0           # 2 MWh/día × 10 días
+
+
+def test_calcular_balance_proyectado_usa_contratos_futuros_y_tasa(monkeypatch):
+    import app.services.balance_energia as be
+    # una planta al 100% en bolsa (sin contrato) todo septiembre
+    data = {"venta": [], "bolsa": [{"id": 10, "nombre": "X", "pct_despacho": 1.0,
+        "segmento_inicio": "2026-09-01", "segmento_fin": "2026-09-30",
+        "es_duplicado": False, "uso_del_recurso": False, "codigo_sic": "700",
+        "piscina": "libre"}]}
+    monkeypatch.setattr(be, "_plantas_contratos_de", lambda db, y, m: data)
+    monkeypatch.setattr(be, "_tasa_diaria_reciente", lambda db, plantas, hoy: {10: 3.0})
+
+    out = calcular_balance_proyectado(db=None, year=2026, month=9, hoy=date(2026, 8, 21))
+    # 30 días × 3 MWh = 90 MWh, todo venta en bolsa UNGG, proyectado
+    vb = out["balance"]["ungg"]["venta_bolsa"]
+    assert round(vb["total"], 1) == 90.0
+    assert vb["real"] == 0.0
+    assert out["periodo"]["es_proyeccion"] is True

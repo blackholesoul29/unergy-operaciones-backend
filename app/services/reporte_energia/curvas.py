@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -25,8 +26,12 @@ HORAS = list(range(24))
 # todos los borders), no solo el de esa frontera. El reporte real
 # (orquestador.ejecutar_dia) corre una vez al día y no necesita el TTL --
 # esto es sobre todo para la vista de detalle, que se abre repetidas veces
-# en la misma sesión.
-_CACHE_TTL = 300  # segundos
+# en la misma sesión. Subido de 300 a 1800 (30 min) -- este catálogo (qué
+# medidor/nodo tiene cada frontera) casi no cambia día a día, así que un
+# TTL más largo reduce cuánto se paga el costo de refrescarlo (~5-9s en
+# frío) sin perder nada de precisión real (los VALORES de medición se
+# siguen consultando frescos siempre, solo el mapeo de IDs se reusa más).
+_CACHE_TTL = 1800  # segundos
 _mapa_medidor_nodo_cache: dict[int, int] | None = None
 _mapa_medidor_nodo_ts = 0.0
 _mapa_borders_cache: dict[str, dict] | None = None
@@ -191,6 +196,33 @@ def _curva_nodo(
     return curva, completo
 
 
+def curva_medidor_en_vivo(
+    gaia: GaiaClient,
+    mapa_medidor_nodo: dict[int, int],
+    main_meter_id: int | None,
+    backup_meter_id: int | None,
+    fecha_str: str,
+    frt_code: str,
+    var_name: str = "eae",
+) -> tuple[pd.Series, pd.Series]:
+    """Curva EN VIVO (principal, respaldo) de UNA sola variable (eae o iae),
+    sin recuperación activa -- pensado para 'Detalle de las fuentes' del
+    front, que solo necesita esto para detectar si Quoia ya cambió desde
+    que se clasificó (medidor_actualizado_en_quoia). curvas_de_frontera()
+    trae las 4 curvas (eae+iae x principal+respaldo) de forma secuencial
+    porque el clasificador SÍ necesita las 4 -- acá solo hacían falta 2, y
+    en paralelo, no en secuencia (era el 4x de más peso en la demora que
+    reportó el usuario al abrir el panel, 2026-08-12)."""
+    node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
+    node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_p = executor.submit(_curva_nodo, gaia, node_p, fecha_str, f"{frt_code}/principal", var_name)
+        fut_r = executor.submit(_curva_nodo, gaia, node_r, fecha_str, f"{frt_code}/respaldo", var_name)
+        curva_p, _ = fut_p.result()
+        curva_r, _ = fut_r.result()
+    return curva_p, curva_r
+
+
 def recuperar_y_releer(
     gaia: GaiaClient, node_id: int, meter_id: int, fecha_str: str, label: str, var_name: str = "eae",
 ) -> tuple[pd.Series, bool, bool]:
@@ -211,6 +243,9 @@ def recuperar_y_releer(
     return curva, completo, exito
 
 
+TOLERANCIA_VALOR_SOSPECHOSO = 0.50  # %: qué tan lejos de mediana_referencia antes de forzar recuperación
+
+
 def curvas_de_frontera(
     gaia: GaiaClient,
     mapa_medidor_nodo: dict[int, int],
@@ -219,6 +254,7 @@ def curvas_de_frontera(
     fecha_str: str,
     frt_code: str,
     recuperar: bool = True,
+    mediana_referencia: float | None = None,
 ) -> dict:
     """Curvas horarias (kWh) de generación (eae) y consumo propio (iae) del
     medidor principal y de respaldo de una frontera, para una fecha.
@@ -233,6 +269,15 @@ def curvas_de_frontera(
     del dispositivo físico sin importar la variable, así que no hace falta
     interrogar dos veces el mismo medidor -- y se vuelven a leer ambas
     curvas (eae e iae) después.
+
+    `mediana_referencia` (opcional, default None -- no cambia nada para
+    quien no lo pasa) agrega un segundo motivo para recuperar: aunque la
+    lectura pasiva venga "completa", si su total se aleja de esta mediana
+    más de TOLERANCIA_VALOR_SOSPECHOSO, se interroga igual -- la
+    completitud no detecta un glitch de telemetría que reporta un valor
+    doblado o partido a la mitad, solo huecos (ver MGS 0032 El Paso Norte /
+    Sol&Cielo 7 Los Bongos: el medidor venía "completo" pero exactamente 2x
+    su valor normal).
     """
     node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
     node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
@@ -242,13 +287,21 @@ def curvas_de_frontera(
     cons_p, cons_comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal/consumo", "iae")
     cons_r, cons_comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo/consumo", "iae")
 
+    def _sospechoso(curva: pd.Series) -> bool:
+        if not mediana_referencia or mediana_referencia <= 0:
+            return False
+        total = float(curva.fillna(0).sum())
+        if total == 0:
+            return False
+        return abs(total - mediana_referencia) / mediana_referencia > TOLERANCIA_VALOR_SOSPECHOSO
+
     intentos: list[str] = []
     if recuperar:
-        if node_p is not None and main_meter_id and not (comp_p and cons_comp_p):
+        if node_p is not None and main_meter_id and (not (comp_p and cons_comp_p) or _sospechoso(curva_p)):
             curva_p, comp_p, exito = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal", "eae")
             cons_p, cons_comp_p, _ = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal/consumo", "iae")
             intentos.append(f"principal: {'éxito' if exito else 'falló'}")
-        if node_r is not None and backup_meter_id and not (comp_r and cons_comp_r):
+        if node_r is not None and backup_meter_id and (not (comp_r and cons_comp_r) or _sospechoso(curva_r)):
             curva_r, comp_r, exito = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo", "eae")
             cons_r, cons_comp_r, _ = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo/consumo", "iae")
             intentos.append(f"respaldo: {'éxito' if exito else 'falló'}")

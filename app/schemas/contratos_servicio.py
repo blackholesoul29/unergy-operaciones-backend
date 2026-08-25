@@ -46,6 +46,11 @@ class ClienteBasico(BaseModel):
 class ProyectoBasico(BaseModel):
     id: int
     nombre_comercial: str
+    # `tipo_proyecto` viaja acá para que el listado de contratos pueda decir a
+    # qué clase de planta pertenece cada uno (minigranja / autoconsumo / gd)
+    # sin tener que cargar además todo /proyectos.
+    tipo_proyecto: Optional[str] = None
+    codigo_tsf: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -74,6 +79,17 @@ class ContratoServicioCreate(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
+    linea_servicio: Optional[str] = None
+    id_router: Optional[str] = None
+    numero_kit: Optional[str] = None
+    latencia_ms: Optional[int] = None
+    wifi_seguridad: Optional[str] = None
+    wifi_password: Optional[str] = None
+    ubicacion_lat: Optional[float] = None
+    ubicacion_lng: Optional[float] = None
     # CGM
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
@@ -121,6 +137,17 @@ class ContratoServicioUpdate(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
+    linea_servicio: Optional[str] = None
+    id_router: Optional[str] = None
+    numero_kit: Optional[str] = None
+    latencia_ms: Optional[int] = None
+    wifi_seguridad: Optional[str] = None
+    wifi_password: Optional[str] = None
+    ubicacion_lat: Optional[float] = None
+    ubicacion_lng: Optional[float] = None
     tiene_cgm: Optional[bool] = None
     cgm_codigo_sic: Optional[str] = None
     cgm_porcentaje_fncer: Optional[float] = None
@@ -147,6 +174,10 @@ class ContratoServicioUpdate(BaseModel):
 class ContratoServicioOut(BaseModel):
     id: int
     proyecto_id: Optional[int] = None
+    # La planta a la que pertenece el contrato. `proyecto_id` sola no le sirve a
+    # ninguna tabla: obliga a cruzar contra /proyectos en el cliente. Va anidada
+    # y NULL cuando el contrato quedó huérfano, que es justo el caso a corregir.
+    proyecto: Optional[ProyectoBasico] = None
     servicio_aplica: str
     contratante_id: Optional[int] = None
     prestador_id: Optional[int] = None
@@ -172,6 +203,17 @@ class ContratoServicioOut(BaseModel):
     fecha_indexacion: Optional[date] = None
     enlace_drive: Optional[str] = None
     estado_pago: Optional[str] = None
+    plan_datos_gb: Optional[str] = None
+    velocidad_mbps: Optional[int] = None
+    tipo_conexion: Optional[str] = None
+    linea_servicio: Optional[str] = None
+    id_router: Optional[str] = None
+    numero_kit: Optional[str] = None
+    latencia_ms: Optional[int] = None
+    wifi_seguridad: Optional[str] = None
+    wifi_password: Optional[str] = None
+    ubicacion_lat: Optional[float] = None
+    ubicacion_lng: Optional[float] = None
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
     cgm_porcentaje_fncer: Optional[float] = None

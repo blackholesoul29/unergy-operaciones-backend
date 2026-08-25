@@ -287,6 +287,25 @@ def agregar_balance(plantas: dict, energia: dict) -> dict:
     }
 
 
+def _energia_proyectada(plantas: dict, tasa_diaria: dict, first_day, last_day) -> dict:
+    """Energía por tramo para un mes 100% futuro: (real=0, proyectado=tasa×días_tramo).
+    `tasa_diaria` = {proyecto_id: MWh/día}. Tramos que no necesitan energía → (0,0)."""
+    energia: dict[int, dict] = {}
+    for pid, planta in plantas.items():
+        tasa = tasa_diaria.get(pid)
+        por_tramo = {}
+        for idx, t in enumerate(planta["tramos"]):
+            if tasa is None or not _necesita_energia(t):
+                por_tramo[idx] = (0.0, 0.0)
+                continue
+            ini = max(t["ini"], first_day)
+            fin = min(t["fin"], last_day)
+            dias = (fin - ini).days + 1 if fin >= ini else 0
+            por_tramo[idx] = (0.0, tasa * dias)
+        energia[pid] = por_tramo
+    return energia
+
+
 def construir_inventario(plantas: dict, energia: dict, fronteras: dict,
                          estimados: set | None = None) -> list:
     """Tabla plana: una fila por (planta, tramo, rol). Es el Excel de Juan,
@@ -406,7 +425,8 @@ def _nombre_frontera(db, ids: list) -> dict:
 
 
 def calcular_balance(db, year: int, month: int,
-                     excluir_compra_externa: bool = False, hoy: date | None = None) -> dict:
+                     excluir_compra_externa: bool = False, hoy: date | None = None,
+                     incluir_todos: bool = False) -> dict:
     """Balance mensual de energía en bolsa, real + proyección al cierre.
 
     Real: generación de cada tramo dentro de [primer día, corte]. Si el tramo
@@ -455,7 +475,10 @@ def calcular_balance(db, year: int, month: int,
                              "compra_externa_en_bolsa": [], "tramos_estimados": []},
         }
 
-    data = get_plantas_contratos(year=year, month=month, db=db, _=None)
+    # El balance se arma sobre plantas-contratos, así que hereda de ahí el filtro
+    # de empresa responsable (ver _contratos_vigentes en cumplimiento.py).
+    data = get_plantas_contratos(year=year, month=month, incluir_todos=incluir_todos,
+                                 db=db, _=None)
 
     ids_compra_externa = {
         p["id"] for c in (data.get("compra_externa") or [])
@@ -614,3 +637,63 @@ def calcular_balance(db, year: int, month: int,
     if warning:
         salida["warning"] = warning
     return salida
+
+
+# Ventana (días) hacia atrás para estimar la tasa diaria de generación del mes futuro.
+_DIAS_TASA_REF = 30
+
+
+def _plantas_contratos_de(db, year: int, month: int) -> dict:
+    """Payload de plantas-contratos del mes (aislado para poder mockear en tests)."""
+    from app.api.v1.cumplimiento import get_plantas_contratos
+    return get_plantas_contratos(year=year, month=month, incluir_todos=False, db=db, _=None)
+
+
+def _tasa_diaria_reciente(db, plantas: dict, hoy: date) -> dict:
+    """{proyecto_id: MWh/día} desde la generación de los últimos _DIAS_TASA_REF días.
+    Aislado para mockear en tests (hace red)."""
+    from app.api.v1.cumplimiento import _fetch_range, _mon_id, _unergy_token
+    from app.models.proyectos import Proyecto
+    sub = {}
+    if plantas:
+        for p in db.query(Proyecto).filter(Proyecto.id.in_(list(plantas))).all():
+            sp = _mon_id(p)
+            if sp:
+                sub[p.id] = sp
+    if not sub:
+        return {}
+    try:
+        token = _unergy_token()
+    except Exception:
+        logger.error("Auth Unergy failed in balance proyectado")
+        return {}
+    desde = hoy - timedelta(days=_DIAS_TASA_REF)
+    hasta = hoy - timedelta(days=1)
+    sps = sorted(set(sub.values()))
+    por_sp: dict[str, float | None] = {}
+    with ThreadPoolExecutor(max_workers=min(len(sps), 12)) as pool:
+        for sp, res in pool.map(lambda s: (s, _fetch_range(token, s, desde, hasta)), sps):
+            por_sp[sp] = res.get("mwh")
+    dias = max(1, (hasta - desde).days + 1)
+    return {pid: (por_sp.get(sp) / dias) for pid, sp in sub.items() if por_sp.get(sp) is not None}
+
+
+def calcular_balance_proyectado(db, year: int, month: int, hoy: date | None = None) -> dict:
+    """Balance de bolsa de un mes FUTURO: contratos de ese mes × tasa de generación
+    reciente, todo proyectado. Misma forma de salida que `calcular_balance` (balance/periodo)."""
+    hoy = hoy or date.today()
+    total_dias = calendar.monthrange(year, month)[1]
+    first_day = date(year, month, 1)
+    last_day = date(year, month, total_dias)
+
+    data = _plantas_contratos_de(db, year, month)
+    derivado = construir_tramos(data, first_day, last_day)
+    plantas = derivado["plantas"]
+    tasa = _tasa_diaria_reciente(db, plantas, hoy)
+    energia = _energia_proyectada(plantas, tasa, first_day, last_day)
+    balance = agregar_balance(plantas, energia)
+    return {
+        "periodo": {"year": year, "month": month, "dias_mes": total_dias,
+                    "es_proyeccion": True, "dias_tasa_ref": _DIAS_TASA_REF},
+        "balance": balance,
+    }

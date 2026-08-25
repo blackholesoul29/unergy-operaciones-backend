@@ -5,20 +5,6 @@ from datetime import datetime, date
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-def _validate_email_list(v: list) -> list:
-    """Validate each address in the list and return trimmed, lowercase entries."""
-    if not v:
-        return []
-    result = []
-    for raw in v:
-        addr = str(raw).strip().lower()
-        if not addr:
-            continue
-        if not _EMAIL_RE.match(addr):
-            raise ValueError(f"Dirección de correo inválida: {addr}")
-        result.append(addr)
-    return result
-
 
 class ContactoParaClienteCreate(BaseModel):
     """Contacto a crear junto con el cliente (ver create_cliente). Definida acá
@@ -71,13 +57,6 @@ class ClienteCreate(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    correo_liquidacion: Optional[str] = None
-    correo_monitoreo: Optional[str] = None
-    correo_soporte: Optional[str] = None
-    correo_operacional: Optional[str] = None
-    correos_operacionales: list[str] = []
-    correos_cgm: list[str] = []
-    telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
@@ -94,11 +73,6 @@ class ClienteCreate(BaseModel):
     origen_detalle: Optional[str] = None
     contactos: list[ContactoParaClienteCreate] = []
     servicios: list[ClienteServicioCreate] = []
-
-    @field_validator("correos_operacionales", "correos_cgm", mode="before")
-    @classmethod
-    def validate_correos(cls, v):
-        return _validate_email_list(v or [])
 
 
 class ClienteUpdate(ClienteCreate):
@@ -144,13 +118,6 @@ class ClienteBase(BaseModel):
     nit_cedula: Optional[str] = None
     tipo_persona: Optional[str] = None
     representante_legal: Optional[str] = None
-    correo_liquidacion: Optional[str] = None
-    correo_monitoreo: Optional[str] = None
-    correo_soporte: Optional[str] = None
-    correo_operacional: Optional[str] = None
-    correos_operacionales: list[str] = []
-    correos_cgm: list[str] = []
-    telefono_contacto: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
@@ -163,7 +130,6 @@ class ClienteBase(BaseModel):
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
     rut_url: Optional[str] = None
-    origina_investment_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
@@ -179,7 +145,7 @@ class ClienteOut(ClienteBase):
     servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 
-    @field_validator("servicios", "documentos_comerciales", "correos_operacionales", "correos_cgm", mode="before")
+    @field_validator("servicios", "documentos_comerciales", mode="before")
     @classmethod
     def none_to_list(cls, v):
         if v is None:

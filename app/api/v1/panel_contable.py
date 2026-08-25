@@ -661,6 +661,113 @@ def cargar_periodo(
     }
 
 
+# ── Contraste: la API contra el Excel, sin guardar nada ─────────────────────────
+
+def comparar_lineas(excel: list[dict], api: list[dict]) -> list[dict]:
+    """Diferencias entre dos juegos de líneas, agrupadas por (grupo, concepto).
+
+    Solo devuelve lo que NO cuadra: una lista vacía significa que la API produce
+    exactamente lo mismo que el Excel. Se toleran diferencias menores a un peso,
+    que son redondeo y no discrepancia.
+
+    Suma las líneas del mismo concepto porque las del panel vienen divididas por
+    inversionista y hay que reagruparlas al 100 % para comparar.
+    """
+    def _indexar(lineas):
+        out: dict[tuple, float] = {}
+        for l in lineas:
+            clave = (l["grupo"], l["concepto"])
+            out[clave] = out.get(clave, 0.0) + float(l.get("valor") or 0)
+        return out
+
+    ex, ap = _indexar(excel), _indexar(api)
+    diferencias = []
+    for clave in sorted(set(ex) | set(ap)):
+        v_ex, v_ap = ex.get(clave), ap.get(clave)
+        if v_ex is not None and v_ap is not None and abs(v_ex - v_ap) < 1:
+            continue
+        diferencias.append({
+            "grupo": clave[0], "concepto": clave[1],
+            "excel": v_ex, "api": v_ap,
+            "solo_en": "excel" if v_ap is None else ("api" if v_ex is None else None),
+            "diferencia": round((v_ap or 0) - (v_ex or 0), 2),
+        })
+    return diferencias
+
+
+@router.get("/contraste")
+def contraste_api_vs_excel(
+    periodo: str = Query(..., description="YYYY-MM"),
+    tipo: str = Query("oficial"),
+    version: str = Query("txf"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """En qué se diferencia lo que daría la API de lo que dio el Excel.
+
+    No guarda nada: es para mirar antes de decidir. Las diferencias esperadas son
+    la administración de los proyectos GD sin `tarifa_admin`, y FAZNI y cargo por
+    confiabilidad, que el Excel no trae. Cualquier otra hay que entenderla antes
+    de liquidar con esto.
+    """
+    periodo, anio, mes = _normalizar_periodo(periodo)
+
+    try:
+        er = liquidaciones_api.estado_resultados_json(
+            month=mes, year=anio, version=version)
+    except liquidaciones_api.LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+    api_por_topico = {p["project"]: p for p in (er.get("results") or [])}
+    clasif = {
+        c.proyecto_id: c.tipo
+        for c in db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo == periodo).all()
+    }
+
+    paneles = (
+        db.query(PanelContable)
+        .options(selectinload(PanelContable.lineas))
+        .filter(PanelContable.periodo == periodo, PanelContable.tipo == tipo)
+        .all()
+    )
+
+    salida, cuadran = [], 0
+    for panel in paneles:
+        proyecto = db.get(Proyecto, panel.proyecto_id)
+        topico = proyecto.topico_liquidaciones or proyecto.sub_project
+        clase = clasif.get(proyecto.id, "normal")
+
+        if clase != "normal":
+            salida.append({"proyecto": proyecto.nombre_comercial, "topico": topico,
+                           "omitido": clase})
+            continue
+        proy_api = api_por_topico.get(topico or "")
+        if proy_api is None:
+            salida.append({"proyecto": proyecto.nombre_comercial, "topico": topico,
+                           "sin_dato_en_api": True})
+            continue
+
+        parsed = construir_parsed(proy_api)
+        diferencias = comparar_lineas(
+            excel=[{"grupo": l.grupo, "concepto": l.concepto,
+                    "valor": float(l.valor_cop or 0)} for l in panel.lineas],
+            api=_construir_lineas_base(parsed),
+        )
+        if not diferencias:
+            cuadran += 1
+        salida.append({
+            "proyecto": proyecto.nombre_comercial,
+            "topico": topico,
+            "diferencias": diferencias,
+            "avisos": parsed["warnings"],
+        })
+
+    return {"periodo": periodo, "tipo": tipo, "version": version,
+            "paneles": len(paneles), "cuadran_exacto": cuadran,
+            "proyectos": salida}
+
+
 # ── Clasificación de liquidación por período ────────────────────────────────────
 
 @router.get("/clasificacion")

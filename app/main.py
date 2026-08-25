@@ -2965,6 +2965,19 @@ def _scheduled_representacion_alertas():
         print(f"[cgm_alertas] ERROR: {e}")
 
 
+def _scheduled_ppa_expiration_checker():
+    """Alertas proactivas de vencimiento de contratos PPA -- ver
+    app/jobs/ppa_expiration_checker.py para la logica completa (umbrales
+    90/60/30 dias, idempotencia via constraint unico, correo best-effort)."""
+    try:
+        from app.jobs.ppa_expiration_checker import check_ppa_expirations
+        creadas = check_ppa_expirations()
+        if creadas:
+            print(f"[ppa_expiration_checker] {len(creadas)} alertas nuevas")
+    except Exception as e:
+        print(f"[ppa_expiration_checker] ERROR: {e}")
+
+
 _OM_IPC_SEED = [
     {"año": 2024, "tasa": 0.0928, "confirmado": True, "fuente": "DANE"},
     {"año": 2025, "tasa": 0.0520, "confirmado": True, "fuente": "DANE"},
@@ -3664,6 +3677,15 @@ def _deferred_init():
                 CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
                 id="cgm_alertas",
                 name="Alertas renovacion CGM/Representacion",
+            )
+
+            # 8:15 en vez de 8:00 para no competir con cgm_alertas por la misma
+            # franja exacta (aunque corren en threads separados de todas formas).
+            _mgs_scheduler.add_job(
+                _scheduled_ppa_expiration_checker,
+                CronTrigger(hour=8, minute=15, timezone=settings.TIMEZONE),
+                id="ppa_expiration_checker",
+                name="Alertas vencimiento PPA",
             )
 
             # Fecha de inicio de comercialización (primer día con generación real):

@@ -1357,6 +1357,17 @@ _PENDING_DDLS = [
     "UPDATE proyectos SET topico_liquidaciones = 'mgs18' WHERE sub_project = 'leyenda' AND topico_liquidaciones IS NULL",
     "UPDATE proyectos SET topico_liquidaciones = 'mapale' WHERE sub_project = 'MGS Mapale' AND topico_liquidaciones IS NULL",
     "UPDATE proyectos SET topico_liquidaciones = 'MGS 0012 La Reserva' WHERE sub_project = 'reserva' AND topico_liquidaciones IS NULL",
+    # Cedillanos liquida por `cedillanosexc` (Cedillanos_excedentes), no por
+    # `cedillanos`, que en la API es el lado de consumo (from_generator=False).
+    # Con el tópico corregido cuadra al peso con el Panel: 21.140.803 (2026-08-25).
+    "UPDATE proyectos SET topico_liquidaciones = 'cedillanosexc' "
+    "WHERE sub_project = 'cedillanos' AND topico_liquidaciones IS NULL",
+    # Su administración es del 5%, no del 3,8% del resto: se venía calculando por
+    # fuera del Excel y por eso el contrato no tenía la tarifa (confirmado con
+    # Jessica el 2026-08-25).
+    "UPDATE contratos_servicio SET tarifa_admin = 0.05 "
+    "WHERE servicio_aplica::text = 'representacion' AND tarifa_admin IS NULL "
+    "  AND proyecto_id IN (SELECT id FROM proyectos WHERE sub_project = 'cedillanos')",
     # Altitud consolidada en Proyecto (2026-08-25). Venía de Frontera, que la
     # perdió al unificarse la geolocalización; el modelo la declaró pero el DDL
     # se quedó afuera y prod respondía 500 en TODA consulta que tocara

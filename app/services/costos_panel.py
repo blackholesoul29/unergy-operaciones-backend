@@ -87,6 +87,25 @@ def valores_modulo_costos(db: Session, proyecto_id: int, periodo: str) -> dict[s
     if v is not None:
         out[CONCEPTO_INTERNET] = {"valor": -abs(v), "fuente": "internet", "iva": True}
 
+    # La factura de Starlink manda sobre el contrato: solo 4 proyectos tienen
+    # tarifa de internet cargada, y Starlink factura 40. Va después a propósito,
+    # para pisar lo del contrato cuando existan ambos.
+    from app.models.starlink import StarlinkFactura, StarlinkFacturaLinea
+
+    lineas_sl = (
+        db.query(StarlinkFacturaLinea)
+        .join(StarlinkFactura, StarlinkFactura.id == StarlinkFacturaLinea.factura_id)
+        .filter(StarlinkFacturaLinea.proyecto_id == proyecto_id,
+                StarlinkFactura.periodo == periodo)
+        .all()
+    )
+    sl = internet_desde_starlink(lineas_sl)
+    if sl:
+        # El IVA del ER es 19% plano; el de Starlink viene en la factura, así que
+        # se conserva el flag para que el merge lo recalcule igual que antes.
+        sl[CONCEPTO_INTERNET]["iva"] = True
+        out.update(sl)
+
     return out
 
 
@@ -119,6 +138,29 @@ def _tarifa_indexada_periodo(indexacion, tarifa_base, fecha_firma, periodo: str)
     if base is not None:
         return float(base)
     return float(tarifa_base) if tarifa_base is not None else None
+
+
+def internet_desde_starlink(lineas) -> dict[str, dict]:
+    """Internet del período a partir de la factura real de Starlink.
+
+    ``lineas`` son las ``StarlinkFacturaLinea`` del proyecto en ese período. Se
+    suman porque un proyecto puede tener más de un sitio (Perija tiene dos). El
+    IVA no se devuelve: el Panel lo deriva por cliente al leer, y mandarlo aquí
+    lo duplicaría.
+
+    Manda sobre el contrato de servicio de internet, que solo tiene tarifa en 4
+    proyectos mientras Starlink factura 40. Cruzado contra 2026-07: los 26
+    proyectos con internet en el Panel cuadran al peso, 3.894.133 en ambos lados.
+
+    Sin líneas devuelve ``{}`` y no ``0``: un cero pisaría el valor del ER con un
+    dato falso.
+    """
+    vivas = [l for l in lineas if not getattr(l, "excluido", False)]
+    if not vivas:
+        return {}
+    base = sum(float(l.sin_iva or 0) for l in vivas)
+    return {CONCEPTO_INTERNET: {"grupo": "costos", "valor": -abs(round(base, 2)),
+                                "fuente": "starlink"}}
 
 
 def elegir_contrato_representacion(contratos):

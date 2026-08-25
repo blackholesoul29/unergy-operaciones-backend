@@ -22,7 +22,6 @@ class FronteraBase(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
-    nombre_cgm: Optional[str] = None
 
     # Técnico
     tipo_punto_medicion: Optional[int] = None
@@ -39,16 +38,11 @@ class FronteraBase(BaseModel):
     nombre_recurso_generacion: Optional[str] = None
     clasificacion_recurso: Optional[str] = None
 
-    # Operativo
-    niu: Optional[str] = None
-
     # Ubicación
     municipio: Optional[str] = None
     departamento: Optional[str] = None
     centro_poblado: Optional[str] = None
     direccion: Optional[str] = None
-    subestacion: Optional[str] = None
-    punto_conexion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
     longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None
@@ -118,7 +112,6 @@ class FronteraUpdate(BaseModel):
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
-    nombre_cgm: Optional[str] = None
 
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
@@ -135,16 +128,11 @@ class FronteraUpdate(BaseModel):
     nombre_recurso_generacion: Optional[str] = None
     clasificacion_recurso: Optional[str] = None
 
-    # Operativo
-    niu: Optional[str] = None
-
     # Ubicacion
     municipio: Optional[str] = None
     departamento: Optional[str] = None
     centro_poblado: Optional[str] = None
     direccion: Optional[str] = None
-    subestacion: Optional[str] = None
-    punto_conexion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
     longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None

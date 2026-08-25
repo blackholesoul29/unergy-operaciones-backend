@@ -1498,15 +1498,12 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "capacidad_transporte_mw": _num(f.capacidad_transporte_mw),
             "capacidad_efectiva_mw": _num(f.capacidad_efectiva_mw),
             "factor_perdidas": _num(f.factor_perdidas),
-            "subestacion": f.subestacion,
-            "punto_conexion": f.punto_conexion,
             "municipio": f.municipio,
             "departamento": f.departamento,
             "operador_red": f.operador.nombre_legal if f.operador else None,
             "operador_red_id": f.operador_red_id,
             "representante_frontera": f.representante_frontera,
             "fecha_registro_asic": f.fecha_registro_asic,
-            "niu": f.niu,
             "es_agrupadora": bool(f.es_agrupadora),
         }
         for f in fronteras

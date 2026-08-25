@@ -937,7 +937,7 @@ def test_las_fronteras_traen_su_codigo(db):
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral GEN",
                  codigo_frontera="Frt00123", tipo_frontera="generacion",
                  estado="activa", nivel_tension_kv=13.2,
-                 capacidad_transporte_mw=0.9, subestacion="Corozal",
+                 capacidad_transporte_mw=0.9,
                  operador_red_id=op.id),
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral CON",
                  codigo_frontera="Frt00124", tipo_frontera="consumo",
@@ -958,7 +958,6 @@ def test_las_fronteras_traen_su_codigo(db):
     assert gen["tipo_frontera"] == "generacion"
     assert gen["nivel_tension_kv"] == 13.2
     assert gen["capacidad_transporte_mw"] == 0.9
-    assert gen["subestacion"] == "Corozal"
     assert gen["operador_red"] == "ELECTRIFICADORA DEL CARIBE S.A. E.S.P."
     assert gen["operador_red_id"] == op.id
     # Sin operador_red_id vinculado, esta frontera no tiene operador -- ya no

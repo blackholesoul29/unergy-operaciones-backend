@@ -61,7 +61,6 @@ class Frontera(Base):
     # Clasificación técnica
     tipo_punto_medicion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nivel_tension_kv: Mapped[float | None] = mapped_column(Numeric(8, 3), nullable=True)
-    punto_conexion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     capacidad_transporte_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     capacidad_efectiva_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     factor_perdidas: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
@@ -73,7 +72,6 @@ class Frontera(Base):
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     centro_poblado: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    subestacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -87,7 +85,6 @@ class Frontera(Base):
     # Vínculo estructurado hacia el catálogo de operadores -- para la
     # integración del reporte CGM, ver operadores_red_contactos para los correos.
     operador_red_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("operadores_red.id"), nullable=True, index=True)
-    nombre_cgm: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Agentes
     representante_anterior: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -95,9 +92,6 @@ class Frontera(Base):
     agente_importador: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nombre_recurso_generacion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     clasificacion_recurso: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    # Datos operativos
-    niu: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Códigos SIC
     codigo_sic_submercado_exportador: Mapped[str | None] = mapped_column(String(20), nullable=True)

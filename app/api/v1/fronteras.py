@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 from app.core.database import get_db
@@ -15,7 +15,7 @@ from app.schemas.fronteras import (
     FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.mgs.gaia_client import GaiaClient, _mgs_number, _get_dynamic_maps, get_frt_meter_info
+from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
 from app.utils.nombre_matching import mejor_candidato
@@ -59,6 +59,31 @@ def _get_gaia() -> GaiaClient:
     if not _gaia.enabled:
         raise HTTPException(503, "Credenciales de Gaia/Quoia no configuradas (GAIA_USER/GAIA_PASS)")
     return _gaia
+
+
+def _enriquecer_medidor_desde_quoia(obj: Frontera) -> None:
+    """Completa marca/modelo/serie de medidor (ppal+resp) desde Quoia al
+    crear una frontera con codigo_frontera, si no vienen ya en el body --
+    mismo relleno que confirmar_frontera_quoia() ya hace para las que se
+    detectan solas, para que una frontera creada a mano no dependa del
+    backfill manual (retirado) para tener este dato. Best-effort: si Quoia
+    no esta configurado o la consulta falla, se ignora en silencio -- no
+    bloquea la creacion de la frontera."""
+    if not obj.codigo_frontera:
+        return
+    try:
+        gaia = _get_gaia()
+    except HTTPException:
+        return
+    info_ppal, info_resp = get_frt_meter_info(gaia, obj.codigo_frontera)
+    if info_ppal:
+        obj.marca_med_ppal = obj.marca_med_ppal or info_ppal.get("marca")
+        obj.modelo_med_ppal = obj.modelo_med_ppal or info_ppal.get("modelo")
+        obj.nro_serie_med_ppal = obj.nro_serie_med_ppal or info_ppal.get("serie")
+    if info_resp:
+        obj.marca_med_resp = obj.marca_med_resp or info_resp.get("marca")
+        obj.modelo_med_resp = obj.modelo_med_resp or info_resp.get("modelo")
+        obj.nro_serie_med_resp = obj.nro_serie_med_resp or info_resp.get("serie")
 
 
 CORRIDAS_VENTANA_GENERANDO = 3
@@ -239,6 +264,7 @@ def create_frontera(
             for k, v in body.model_dump(exclude_none=True).items():
                 setattr(existing, k, v)
             existing.deleted_at = None
+            _enriquecer_medidor_desde_quoia(existing)
             db.commit()
             _sync_operador_red_para_proyecto(db, existing.proyecto_id)
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
@@ -260,6 +286,7 @@ def create_frontera(
             )
 
     obj = Frontera(**body.model_dump())
+    _enriquecer_medidor_desde_quoia(obj)
     db.add(obj)
     try:
         db.commit()
@@ -597,75 +624,6 @@ def ignorar_frontera_quoia(
         return
     db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
     db.commit()
-
-
-def _backfill_medidor_info(db: Session, dry_run: bool = True) -> dict:
-    """Completa marca/modelo/serie de medidor (ppal + respaldo) desde Quoia en
-    fronteras que ya existen pero les falta ese dato. Nunca pisa un campo que
-    ya tenga valor -- solo llena huecos."""
-    gaia = _get_gaia()
-    # Se fuerza la carga de los mapas ANTES del loop (en vez de dejar que el
-    # primer get_frt_meter_info() de la primera fila la dispare sola) para
-    # poder distinguir acá mismo una caída real de Quoia de "esta frontera no
-    # tiene medidor registrado" -- antes ambas terminaban en "sin_info_en_quoia".
-    _get_dynamic_maps(gaia)
-    if gaia.ultima_llamada_fallo:
-        raise HTTPException(503, "No se pudo consultar Quoia -- intenta de nuevo en un momento")
-
-    fronteras = db.query(Frontera).filter(
-        Frontera.codigo_frontera.isnot(None),
-        or_(
-            Frontera.marca_med_ppal.is_(None), Frontera.modelo_med_ppal.is_(None),
-            Frontera.nro_serie_med_ppal.is_(None), Frontera.marca_med_resp.is_(None),
-            Frontera.modelo_med_resp.is_(None), Frontera.nro_serie_med_resp.is_(None),
-        ),
-    ).all()
-
-    actualizadas = []
-    sin_info = []
-    for f in fronteras:
-        info_ppal, info_resp = get_frt_meter_info(gaia, f.codigo_frontera)
-        cambios = {}
-        for prefix, info in (("ppal", info_ppal), ("resp", info_resp)):
-            if not info:
-                continue
-            for campo, valor in (("marca", info.get("marca")), ("modelo", info.get("modelo")), ("serie", info.get("serie"))):
-                if not valor:
-                    continue
-                attr = f"{'nro_serie' if campo == 'serie' else campo}_med_{prefix}"
-                if getattr(f, attr) is None:
-                    cambios[attr] = valor
-
-        if cambios:
-            actualizadas.append({"id": f.id, "nombre": f.nombre_frontera, "cambios": cambios})
-            if not dry_run:
-                for attr, valor in cambios.items():
-                    setattr(f, attr, valor)
-        else:
-            sin_info.append({"id": f.id, "nombre": f.nombre_frontera})
-
-    if not dry_run and actualizadas:
-        db.commit()
-
-    return {
-        "dry_run": dry_run,
-        "total_candidatas": len(fronteras),
-        "actualizadas": len(actualizadas),
-        "sin_info_en_quoia": len(sin_info),
-        "detalle": actualizadas,
-    }
-
-
-@router.post("/backfill-medidor")
-def backfill_medidor(
-    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Backfill de marca/modelo/serie de medidor (principal y respaldo) desde
-    Quoia para fronteras existentes que les falte ese dato. Idempotente y
-    nunca pisa un valor ya diligenciado. Con dry_run=true solo reporta."""
-    return _backfill_medidor_info(db, dry_run=dry_run)
 
 
 # ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────

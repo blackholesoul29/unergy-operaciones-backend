@@ -120,6 +120,66 @@ def test_crear_es_case_insensitive_actualiza_la_activa_sin_duplicar(db):
     assert db.query(Frontera).count() == 1
 
 
+def test_crear_frontera_completa_medidor_desde_quoia_si_esta_disponible(db, monkeypatch):
+    """create_frontera() (POST manual, ej. el boton 'Nueva Frontera') antes
+    nunca consultaba Quoia -- solo confirmar_frontera_quoia() lo hacia. Una
+    frontera creada a mano se quedaba sin marca/modelo/serie de medidor para
+    siempre (dependia del backfill manual, ya retirado). Ahora hace el mismo
+    relleno best-effort al crear."""
+    proy = _proyecto(db)
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso([]))
+    monkeypatch.setattr(
+        api, "get_frt_meter_info",
+        lambda gaia, code: (
+            {"marca": "ISKRA", "modelo": "MT880", "serie": "12345"},
+            {"marca": "ISKRA", "modelo": "MT880", "serie": "67890"},
+        ),
+    )
+
+    out = api.create_frontera(
+        FronteraCreate(nombre_frontera="Nueva", tipo_frontera="generacion",
+                        codigo_frontera="Frt00200", proyecto_id=proy.id),
+        forzar=False, db=db, _=ADMIN,
+    )
+
+    assert out.marca_med_ppal == "ISKRA"
+    assert out.modelo_med_ppal == "MT880"
+    assert out.nro_serie_med_ppal == "12345"
+    assert out.marca_med_resp == "ISKRA"
+    assert out.nro_serie_med_resp == "67890"
+
+
+def test_crear_frontera_no_pisa_medidor_si_ya_viene_en_el_body(db, monkeypatch):
+    proy = _proyecto(db)
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso([]))
+    monkeypatch.setattr(
+        api, "get_frt_meter_info",
+        lambda gaia, code: ({"marca": "DE QUOIA", "modelo": "X", "serie": "999"}, None),
+    )
+
+    out = api.create_frontera(
+        FronteraCreate(nombre_frontera="Nueva", tipo_frontera="generacion",
+                        codigo_frontera="Frt00201", proyecto_id=proy.id,
+                        marca_med_ppal="MANUAL"),
+        forzar=False, db=db, _=ADMIN,
+    )
+
+    assert out.marca_med_ppal == "MANUAL"
+
+
+def test_crear_frontera_sin_codigo_no_consulta_quoia(db, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(api, "_get_gaia", lambda: llamadas.append(1) or _GaiaFalso([]))
+
+    out = api.create_frontera(
+        FronteraCreate(nombre_frontera="Sin codigo", tipo_frontera="generacion"),
+        forzar=False, db=db, _=ADMIN,
+    )
+
+    assert out.codigo_frontera is None
+    assert llamadas == []
+
+
 def test_pendientes_de_quoia_no_cuenta_una_frontera_borrada_como_existente(db, monkeypatch):
     proy = _proyecto(db)
     db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="Vieja", codigo_frontera="Frt00123",

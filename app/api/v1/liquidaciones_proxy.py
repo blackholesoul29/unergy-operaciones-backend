@@ -595,6 +595,8 @@ def listar_costos(
     grupo: liquidaciones_api.GrupoCosto | None = None,
     mes: int | None = Query(None, ge=1, le=12),
     anio: int | None = Query(None, ge=2020, le=2100),
+    solo_con_valor: bool = Query(
+        True, description="Oculta los costos en cero. El conteo se devuelve aparte."),
     page: int = Query(1, ge=1),
     size: int = Query(100, ge=1, le=5000),
     db: Session = Depends(get_db),
@@ -606,6 +608,12 @@ def listar_costos(
     así que el corte se hace aquí para no mandarle eso al navegador. Por lo mismo
     el filtro por ``grupo`` se aplica antes de paginar: si no, ``total`` contaría
     filas que la página no muestra.
+
+    Más de la mitad de esas filas valen cero, y no por casualidad: el reparto le
+    crea una fila de cada concepto a todos los proyectos, así que un proyecto que
+    no es comercializador igual arrastra su ``iva_comercializador`` en cero. Por
+    eso se ocultan por defecto -- pero ``ocultos_en_cero`` viaja siempre, para que
+    en pantalla se pueda decir cuántos hay en vez de dar a entender que no existen.
     """
     try:
         # `payment_type` ya se puede filtrar en la API (antes daba 500). Mandarlo
@@ -636,12 +644,34 @@ def listar_costos(
             and (c.get("to_date") or "9999-12-31") >= desde
         ]
 
+    def _valor(c: dict) -> float | None:
+        """El valor como número, o ``None`` si la API mandó algo que no lo es.
+
+        No revienta: una sola fila con el valor corrupto tumbaba la pantalla
+        entera con un 500, y el resto de los costos son perfectamente legibles.
+        """
+        try:
+            return float(c["value"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    # Los ceros se cuentan sobre el resto de filtros ya aplicados: "2.208 en cero
+    # ocultas" tiene que referirse a lo que se está mirando, no a toda la tabla.
+    def _es_cero(c: dict) -> bool:
+        # Un valor ilegible no es un cero: se muestra, para que se note.
+        return _valor(c) == 0
+
+    ocultos_en_cero = sum(1 for c in filas if _es_cero(c))
+    if solo_con_valor:
+        filas = [c for c in filas if not _es_cero(c)]
+
     # Lo más reciente primero: es lo que se está liquidando.
     filas.sort(key=lambda c: (c.get("from_date") or ""), reverse=True)
 
     nombres = _nombres_por_topico(db)
     inicio = (page - 1) * size
     return CostosOut(
+        ocultos_en_cero=ocultos_en_cero,
         total=len(filas),
         page=page,
         size=size,
@@ -653,7 +683,7 @@ def listar_costos(
                 "tipo_pago": c.get("payment_type"),
                 "tipo_pago_nombre": (tipos.get(c.get("payment_type") or "") or {}).get("long_name"),
                 "grupo": (tipos.get(c.get("payment_type") or "") or {}).get("group"),
-                "valor": float(c["value"]) if c.get("value") is not None else None,
+                "valor": _valor(c),
                 "fecha_desde": c.get("from_date"),
                 "fecha_hasta": c.get("to_date"),
                 "frecuencia_pago": c.get("payment_frecuency"),

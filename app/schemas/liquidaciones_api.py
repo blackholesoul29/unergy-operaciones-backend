@@ -253,6 +253,10 @@ class CostosOut(BaseModel):
     total: int
     page: int
     size: int
+    # Cuántos costos en cero quedaron fuera con los filtros actuales. Viaja
+    # aunque se estén mostrando, para poder decir "N en cero ocultas" en vez de
+    # que parezca que esos conceptos no existen.
+    ocultos_en_cero: int = 0
     results: list[CostoOut]
 
 

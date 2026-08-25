@@ -65,7 +65,6 @@ class Frontera(Base):
 
     # Ubicación
     municipio: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     centro_poblado: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
@@ -134,7 +133,6 @@ class Frontera(Base):
     codigo_ciiu: Mapped[str | None] = mapped_column(String(20), nullable=True)
     clasificacion_industrial_general: Mapped[str | None] = mapped_column(String(255), nullable=True)
     clasificacion_industrial_especifica: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tipo_tecnologia: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Códigos SIC adicionales
     codigo_sic_frontera_generacion: Mapped[str | None] = mapped_column(String(50), nullable=True)

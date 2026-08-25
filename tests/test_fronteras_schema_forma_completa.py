@@ -16,7 +16,7 @@ _CAMPOS_ESPERADOS = {
     "clasificacion_recurso", "clientes_cgm", "codigo_ciiu", "codigo_frontera",
     "codigo_sic_frontera_generacion",
     "codigo_sic_frontera_usuario", "codigo_sic_submercado_consumo",
-    "codigo_sic_submercado_exportador", "created_at", "departamento",
+    "codigo_sic_submercado_exportador", "created_at",
     "direccion", "entidad_calibradora_med_ppal", "entidad_calibradora_med_resp",
     "es_agrupadora", "es_principal_embebido", "estado", "factor_acordado",
     "factor_ajuste", "factor_perdidas", "factor_perdidas_frontera_principal",
@@ -32,10 +32,10 @@ _CAMPOS_ESPERADOS = {
     "num_elementos_med_ppal", "num_elementos_med_resp", "operador_comercial",
     "operador_correos", "operador_red_id", "potencia_maxima_declarada",
     "proyecto_fecha_inicio_comercializacion", "proyecto_id", "proyecto_nombre",
-    "proyecto_potencia_instalada_mw",
+    "proyecto_potencia_instalada_mw", "proyecto_departamento", "proyecto_tipo_tecnologia",
     "quoia_border_id", "registrada_por",
     "representante_anterior", "representante_frontera",
-    "tipo_frontera", "tipo_punto_medicion", "tipo_tecnologia",
+    "tipo_frontera", "tipo_punto_medicion",
     "transferencia_maxima_kwh", "updated_at",
 }
 

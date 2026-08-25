@@ -163,6 +163,8 @@ def _to_out(
         d.proyecto_fecha_inicio_comercializacion = f.proyecto.fecha_inicio_comercializacion
         if f.proyecto.potencia_instalada_kwp is not None:
             d.proyecto_potencia_instalada_mw = float(f.proyecto.potencia_instalada_kwp) / 1000
+        d.proyecto_departamento = f.proyecto.departamento
+        d.proyecto_tipo_tecnologia = f.proyecto.tipo_tecnologia
         # "sin_dato" (default): no se pidió en batch -- se consulta puntual
         # (endpoints de un solo objeto). Lista pasada desde list_fronteras
         # (aunque sea vacía) significa "ya se consultó en batch".

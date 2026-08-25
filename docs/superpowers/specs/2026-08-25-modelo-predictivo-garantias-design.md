@@ -34,22 +34,55 @@ resultan idénticos**.
 Regla general: ambas ventanas base cierran 14 días antes del vencimiento; XM calcula 7
 días antes; el vencimiento es viernes.
 
-> **Alcance de esta regla.** El timeline está verificado sobre un vencimiento
-> **semanal**. La garantía **mensual** vence 16 días antes del mes garantizado — otra
-> cadencia — y no hay evidencia de que le aplique el mismo desfase de 14/7. Para
-> `esquema = mensual` la ventana se toma de las fuentes observadas (`PERIODO BASE`,
-> nombre CGM, calendario) y **no** de esta regla; la derivación por regla general queda
-> restringida a `semanal`. Verificarlo es tarea del primer backtest.
+Esta regla aplica a la garantía **semanal**. La mensual tiene su propio objetivo.
+
+### Anticipación mensual: 30 días antes del mes garantizado
+
+Verificado sobre **8 meses** (nov-2025 → sep-2026): la ventana base del cálculo mensual
+cierra antes de la fecha objetivo en **8/8 casos**, con margen mediano de **3 días**
+(rango 0 a 10).
+
+Ejemplo (mes garantizado SEP-2026):
+
+| Hito | Fecha |
+|---|---|
+| Cierra la ventana base | 29 JUL |
+| **Objetivo de conocimiento** | **2 AGO** |
+| XM publica | 6 AGO |
+
+Se le gana a XM por **4 días**.
+
+> **Requisito operativo.** Un margen mediano de 3 días — y de **0 en el peor caso** — no
+> tolera retrasos. La ingesta de generación debe correr **diariamente**, no semanal: un
+> atraso de 2 días elimina el margen por completo.
+>
+> Esto ya está cubierto por infraestructura existente. `app/main.py` corre APScheduler
+> en producción con `gen_sync_am` / `gen_sync_pm` (7:00 y 19:00, ventana móvil de 7 días
+> hacia `generacion_diaria`) y `reporte_energia_clasificar` (3:30 diario, hacia
+> `reporte_energia_generacion`). La ventana móvil de 7 días absorbe además atrasos
+> puntuales. No hay que construir el cron: hay que **monitorear** que no se caiga, y
+> alertar si el dato más reciente tiene más de 1 día.
+
+### La fecha de cálculo es determinística
+
+No se estima: viene del calendario oficial de XM, publicado con **años** de
+anticipación. Lo único incierto es la ventana base, no el momento del cálculo. Eso
+mueve el calendario de "una fuente más" a **la fuente autoritativa de `fecha_calculo`**
+(ver §5.3).
 
 ### Sistema de dos velocidades
 
-| Momento | Salida | Mecanismo |
-|---|---|---|
-| 14 días antes | Rango: valor central + cuantil superior | Reconstrucción con insumos propios + residual calibrado |
-| 7 días antes | Número firme | Réplica determinística con el TX2 publicado |
+| Esquema | Estimación temprana | Número firme | Se le gana a XM por |
+|---|---|---|---|
+| **Semanal** | 14 días antes del vencimiento | 7 días antes | 7 días |
+| **Mensual** | ~30 días antes del mes garantizado | cuando XM publica | ~4 días (ej. SEP-2026) |
 
-La estimación temprana se reemplaza por la firme cuando XM publica. El valor del
-sistema es la semana de anticipación que gana entre ambos momentos.
+En ambos carriles la salida temprana es un **rango** (valor central + cuantil superior)
+producido por reconstrucción con insumos propios más el residual calibrado; la firme es
+la réplica determinística con el TX2 ya publicado.
+
+La estimación temprana se reemplaza por la firme cuando XM publica. El valor del sistema
+es la anticipación que gana entre ambos momentos.
 
 ---
 
@@ -117,6 +150,10 @@ agregado por persistencia. La varianza está en un solo lugar.
 - Backtesting con cobertura y ancho de intervalo, contra los 149 vencimientos CGM.
 - Tab con cobertura de datos, tabla de backtest y detalle por vencimiento.
 - **UNGG y UNGC**, ambos. Es el mismo camino de código con otra entidad.
+- **Semanal y mensual**, cada uno con su propio objetivo de anticipación (§1).
+- Alerta de frescura sobre la ingesta diaria de generación: si el dato más reciente
+  tiene más de 1 día, el margen de la anticipación mensual está en riesgo y hay que
+  avisarlo antes de que el número salga mal.
 
 ### Fuera
 
@@ -125,7 +162,7 @@ agregado por persistencia. La varianza está en un solo lugar.
 | Garantía TIE | Proyecta hacia adelante mientras la nacional ajusta hacia atrás. Se reparte por participación en compras en bolsa y usa TRM del día. Lógica aparte, spec aparte. |
 | Los otros 19 componentes en detalle | Entran como agregado por persistencia. Se refinan cuando el backtest muestre que su error es material. |
 | Cualquier modelo de ML | Fase 3 del brief, contingente a que la vía determinística + residual deje error material. |
-| Cron automático de descarga FTP | Se deja el enganche y las variables de entorno documentadas; en este spec la carga es manual. |
+| Cron automático de **descarga FTP** | Se deja el enganche y las variables de entorno documentadas; en este spec la carga de archivos XM es manual. **No confundir** con la ingesta diaria de generación, que sí es requisito y ya existe (ver §1). |
 | Saldo de cuenta custodia / "efectivo a conseguir" | Retirado del alcance por la adenda corregida del 2026-08-25. |
 
 ---
@@ -169,9 +206,31 @@ El estado de Alembic en este repo obliga a ello, y conviene dejarlo escrito:
 - Por eso `_PENDING_DDLS` creció a 1.493 líneas y es hoy la fuente de verdad real de
   producción.
 
-**Regla para este módulo:** cada tabla y cada columna se declara en una migración
-Alembic **y** en `_PENDING_DDLS` con `IF NOT EXISTS`. Se extiende
-`tests/test_modelo_vs_ddl.py` a las cinco tablas nuevas.
+**Regla para este módulo — sin Alembic.** El `CLAUDE.md` del repo la fija: *tabla nueva
+= modelo + `create_all`*. Este módulo agrega **cinco tablas nuevas y ninguna columna
+sobre tablas existentes**, así que cae entero en ese caso.
+
+Y es lo correcto, no solo lo convencional: escribir una migración Alembic para estas
+tablas agregaría **otra** migración a una cadena que ya aborta, sin ganar nada — las
+tablas las crea `create_all` igual. Se verificó que no hay colisión de nombres: ningún
+modelo existente usa los prefijos `xm_` ni `gar_`.
+
+Dos refuerzos, porque `create_all` está envuelto en un `try/except` que solo imprime:
+
+- `CREATE TABLE IF NOT EXISTS` de las cinco tablas en `_PENDING_DDLS`, como respaldo si
+  `create_all` falla en silencio.
+- Los índices compuestos de §5.2 explícitos en `_PENDING_DDLS` con `IF NOT EXISTS`.
+  `create_all` crea los del modelo, pero conviene no depender de eso para los que
+  sostienen el rendimiento de las consultas del backtest.
+
+Se extiende `tests/test_modelo_vs_ddl.py` a las cinco tablas nuevas.
+
+Si más adelante el módulo necesita **agregar una columna a una tabla existente**, ahí sí
+aplica la otra regla del repo: `ALTER TABLE … ADD COLUMN IF NOT EXISTS`. Nota práctica:
+el `CLAUDE.md` la ubica en `add_columns()` de `init_db.py` (39 sentencias, corre primero
+en `start.sh`), pero el trabajo reciente va a `_PENDING_DDLS` de `app/main.py` (272
+sentencias, corre en `_deferred_init`). Las dos funcionan; usar la segunda, que es donde
+está el resto.
 
 Arreglar Alembic de verdad — auditar qué se aplicó contra el esquema vivo, stampear,
 sacar `create_all`, quitar el `if !` — es un proyecto aparte y no entra acá.
@@ -291,6 +350,29 @@ Orden fijo, y cada fecha guarda de cuál de las cuatro salió:
 Si dos fuentes disponibles se contradicen, se registra en `discrepancias` y **no** se
 frena la carga.
 
+**Excepción: `fecha_calculo` no entra en esta precedencia.** Sale siempre del calendario
+oficial, que XM publica con años de anticipación. No se infiere ni se deriva de las
+otras fuentes. Si el `PERIODO BASE` de un Excel la contradice, gana el calendario y la
+diferencia se registra en `discrepancias` para revisarla.
+
+#### Ventanas candidatas: cuando la ventana base no es derivable
+
+Medido sobre el histórico, la ventana base del cálculo mensual **cierra entre 5 y 16
+días antes de la fecha de cálculo, sin patrón derivable**. No hay una regla que la
+prediga.
+
+La respuesta no es adivinar una: es **calcular sobre todas las ventanas candidatas** y
+dejar que la dispersión entre ellas se convierta en ancho del intervalo. Si las 12
+ventanas posibles dan casi el mismo número, el intervalo es angosto y la incertidumbre
+de ventana era irrelevante. Si dan números muy distintos, el intervalo se ensancha — que
+es la respuesta honesta.
+
+En `gar_calculo`, `base_30d_ini` / `base_30d_fin` guardan la ventana **observada** cuando
+existe. Cuando no, se guarda el rango candidato y `procedencia` lo marca como
+`candidatas`, con el conjunto evaluado en el mismo jsonb. Un cálculo con ventana
+observada y uno con ventana candidata **nunca se promedian en la misma métrica**: la tab
+los separa siempre.
+
 Esto importa porque aplicando una ventana uniforme de 30 días a todos los vencimientos,
 solo **13 de 127** quedaron dentro de ±3%. Sin separar "ventana observada" de "ventana
 derivada", el backtest no puede distinguir el error del modelo del error de la ventana.
@@ -312,7 +394,7 @@ derivada", el backtest no puede distinguir el error del modelo del error de la v
 |---|---|
 | `calculo_id` | FK → `gar_calculo` |
 | `componente` | |
-| `horizonte_dias` | `14` \| `7` |
+| `horizonte_dias` | smallint: días de anticipación respecto a la publicación de XM |
 | `cuantil` | `0.5` \| `0.9` (configurable) |
 | `valor` | numeric |
 | `modelo_version` | qué versión del código lo produjo |
@@ -323,9 +405,17 @@ derivada", el backtest no puede distinguir el error del modelo del error de la v
 UNIQUE (calculo_id, componente, horizonte_dias, cuantil, modelo_version)
 ```
 
-`horizonte_dias` guardado explícitamente permite medir exactamente lo que la adenda
-quiere saber: cuánto se gana adelantándose una semana. `insumos` es lo que permite
-auditar por qué cambió un número entre corridas.
+`horizonte_dias` es un entero, no un enum: el objetivo de anticipación difiere por
+esquema y no conviene cablearlo en el tipo.
+
+| Esquema | Estimación temprana | Número firme |
+|---|---|---|
+| Semanal | 14 días antes del vencimiento | 7 días antes (XM publica) |
+| Mensual | ~30 días antes del mes garantizado | cuando XM publica |
+
+Guardarlo explícitamente permite medir lo que la adenda quiere saber: **cuánto se gana
+adelantándose**, por esquema y por vencimiento. `insumos` es lo que permite auditar por
+qué cambió un número entre corridas.
 
 ---
 
@@ -475,6 +565,26 @@ El intervalo son los **cuantiles empíricos del residual** aplicados a la recons
 Calibración estrictamente temporal: los cuantiles de un vencimiento se estiman solo con
 residuales de vencimientos anteriores.
 
+#### Tres fuentes de incertidumbre, un solo intervalo
+
+Todas se expresan en la misma unidad — ancho del intervalo — y por eso se pueden
+componer en vez de reportarse por separado:
+
+| Fuente | Cómo se trata | Cuándo desaparece |
+|---|---|---|
+| **Liquidación** — qué dirá TX2 sobre días ya ocurridos | Cuantiles empíricos del residual | Cuando XM publica (día 7) |
+| **Ventana base** — cierra entre 5 y 16 días antes del cálculo, sin patrón | Calcular sobre todas las ventanas candidatas; la dispersión entre ellas es el aporte | Cuando aparece el `PERIODO BASE` observado |
+| **Días sin liquidar al final de la ventana** | Se cubren con generación **medida** de la API de Unergy, no con proyección | Cuando XM liquida esos días |
+
+La tercera es la que justifica el requisito de ingesta diaria: si el dato medido llega
+tarde, esos días no se pueden cubrir con medición y hay que proyectarlos, lo que
+ensancha el intervalo justo en el momento en que más importa que sea angosto.
+
+**La descomposición se reporta.** No basta con un ancho total: la tab muestra cuánto
+aporta cada fuente. Es lo que dice dónde invertir el siguiente esfuerzo — si el 80% del
+ancho viene de ventanas candidatas, conseguir los `PERIODO BASE` históricos vale más que
+cualquier refinamiento del modelo de residual.
+
 ### 8.3 El piso en cero se resuelve por monotonía
 
 El brief advertía que la variable objetivo está censurada en cero, que una regresión
@@ -543,14 +653,19 @@ test futuro.
 Tercera tab, sin gráficos: con un componente modelado no hay dashboard que valga. Tres
 bloques, `DataTable` de PrimeVue.
 
-1. **Cobertura de datos** — qué rango hay por tipo y por versión, y qué archivos fueron
-   rechazados por `validar_esquema()`. El primer problema real va a ser "faltan días en
-   `.tx2`", y conviene verlo antes de sacar conclusiones del error.
+1. **Cobertura y frescura de datos** — qué rango hay por tipo y por versión, y qué
+   archivos fueron rechazados por `validar_esquema()`. El primer problema real va a ser
+   "faltan días en `.tx2`", y conviene verlo antes de sacar conclusiones del error.
+   Arriba de todo, en rojo si aplica: **antigüedad del dato de generación más reciente**.
+   Más de 1 día compromete el margen de la anticipación mensual, y tiene que verse antes
+   que cualquier número.
 2. **Backtest** — una fila por (agente, vencimiento, período): esquema, período,
    predicho día 14 (central y P90), predicho día 7, real, dentro-del-intervalo, ancho.
    La **procedencia de la ventana** como chip filtrable.
-3. **Detalle** — al abrir una fila: desglose diario, y qué archivos y versiones exactos
-   alimentaron el número.
+3. **Detalle** — al abrir una fila: desglose diario, qué archivos y versiones exactos
+   alimentaron el número, y la **descomposición del ancho del intervalo** por fuente
+   (liquidación / ventana candidata / días sin liquidar). Esa descomposición es la que
+   dice dónde invertir el siguiente esfuerzo.
 
 Percentil configurable desde la UI, con **P90 por defecto**.
 
@@ -582,6 +697,9 @@ resultados que **se ven bien y son falsos**.
 3. Tener, para UNGG y UNGC, el error de Exposición en Bolsa por vencimiento y período,
    con cobertura y ancho de intervalo, separado por procedencia de ventana.
 4. El baseline de persistencia corrido sobre el mismo conjunto, para comparar.
+5. Para la mensual: demostrar sobre los 8 meses verificados que el número sale **antes**
+   de que XM publique, con la descomposición del ancho del intervalo por fuente.
+6. La alerta de frescura dispara cuando el dato de generación más reciente supera 1 día.
 
 ---
 
@@ -596,8 +714,11 @@ resultados que **se ven bien y son falsos**.
 | 5 | Faltan días en `.tx2` en varios meses | Identificado en el análisis previo. La tab de cobertura lo expone antes de que contamine conclusiones. |
 | 6 | `DemandaXAgenteSTR-Proy{MMYYYY}.xlsx` | Sin analizar. Revisar si alimenta el componente de Cargos Uso STN — fuera de este spec. |
 | 7 | Agente CHVC | Única excepción a las identidades de la fórmula. No nos afecta, pero si algún día se generaliza el motor a otros agentes, hay que mirarlo. |
-| 8 | Desfase 14/7 en garantía **mensual** | Verificado solo para semanal. Para mensual la ventana se toma de fuentes observadas y la regla general no se aplica. Lo confirma o lo desmiente el primer backtest. |
+| 8 | Desfase 14/7 en garantía **mensual** | **Resuelto.** No aplica: la mensual tiene su propio objetivo, 30 días antes del mes garantizado, verificado 8/8 con margen mediano de 3 días. Ver §1. |
 | 9 | Reconciliación del precio implícito | El precio implícito de la suma horaria debe coincidir con el *Precio de Bolsa Ponderado* de XM. Si no coincide de forma sistemática, la hipótesis de granularidad horaria de §7 está mal y hay que revisarla antes de leer cualquier métrica. |
+| 10 | **Frescura de la ingesta diaria** | El margen mensual es de 0 días en el peor caso. Si `gen_sync` se cae, el margen desaparece **en silencio** — el número sigue saliendo, solo que con días proyectados en vez de medidos. La alerta de frescura no es un extra: es lo que hace confiable la anticipación mensual. |
+| 11 | Migración Solenium → SolarView en curso | `_scheduled_generation_sync` está condicionado a `SOLENIUM_USER/PASS`, y `solarview_client.py` se declara "reemplazo de Solenium, Fase 1". Si esa migración corta el sync diario, se lleva puesto el margen mensual sin que nada falle visiblemente. Coordinar antes de tocarlo. |
+| 12 | Dispersión entre ventanas candidatas | Si las ~12 ventanas posibles dan números muy distintos, el intervalo se vuelve tan ancho que no sirve. Es medible en el primer backtest y decide si vale la pena conseguir los `PERIODO BASE` históricos. |
 
 ---
 

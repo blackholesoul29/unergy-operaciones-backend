@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.fronteras import Frontera, FronteraQuoiaIgnorada
@@ -74,17 +74,28 @@ def _ultimas_generaciones(db: Session, frontera_ids: list[int]) -> dict[int, lis
     sesión), así que se cuentan corridas disponibles, no días del calendario."""
     if not frontera_ids:
         return {}
-    filas = (
-        db.query(ReporteEnergiaGeneracion)
+    # ROW_NUMBER() en SQL en vez de traer TODO el historial y cortar en
+    # Python -- para una frontera con meses de corridas diarias esto traía
+    # cientos de filas solo para quedarse con 3.
+    rn = func.row_number().over(
+        partition_by=ReporteEnergiaGeneracion.frontera_id,
+        order_by=ReporteEnergiaGeneracion.fecha.desc(),
+    ).label("rn")
+    subq = (
+        db.query(ReporteEnergiaGeneracion, rn)
         .filter(ReporteEnergiaGeneracion.frontera_id.in_(frontera_ids))
-        .order_by(ReporteEnergiaGeneracion.frontera_id, ReporteEnergiaGeneracion.fecha.desc())
+        .subquery()
+    )
+    entidad = aliased(ReporteEnergiaGeneracion, subq)
+    filas = (
+        db.query(entidad)
+        .filter(subq.c.rn <= CORRIDAS_VENTANA_GENERANDO)
+        .order_by(subq.c.frontera_id, subq.c.rn)
         .all()
     )
     ultimas: dict[int, list[ReporteEnergiaGeneracion]] = {}
     for fila in filas:
-        lista = ultimas.setdefault(fila.frontera_id, [])
-        if len(lista) < CORRIDAS_VENTANA_GENERANDO:
-            lista.append(fila)
+        ultimas.setdefault(fila.frontera_id, []).append(fila)
     return ultimas
 
 

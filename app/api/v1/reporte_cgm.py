@@ -134,7 +134,11 @@ def _excels_cliente_por_proyecto(
     destinatario) por proyecto_id. Ver CLIENTES_EXCEL_POR_PROYECTO."""
     por_proyecto: dict[int, list[Frontera]] = {}
     for f in fronteras:
-        if f.proyecto_id:
+        # Mismo guard que _datos_proyectos_para_resumen (linea 99): sin esto,
+        # un proyecto_id huerfano (FK sin fila viva del otro lado) revienta
+        # con AttributeError en `.proyecto.nombre_comercial` mas abajo y tumba
+        # el envio completo de CGM para este cliente, no solo esta fila.
+        if f.proyecto_id and f.proyecto:
             por_proyecto.setdefault(f.proyecto_id, []).append(f)
 
     adjuntos: list[tuple[bytes, str]] = []

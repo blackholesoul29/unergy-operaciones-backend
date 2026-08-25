@@ -20,7 +20,7 @@ from app.models.base import Base
 import app.models  # noqa: F401 -- registra todos los modelos en Base.metadata
 from app.models.proyectos import Proyecto
 from app.models.fronteras import Frontera, FronteraQuoiaIgnorada
-from app.schemas.fronteras import FronteraCreate, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar
+from app.schemas.fronteras import FronteraCreate, FronteraUpdate, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar
 from app.api.v1 import fronteras as api
 from fastapi import HTTPException
 
@@ -197,3 +197,96 @@ def test_ignorar_funciona_igual_si_el_codigo_esta_libre(db):
     ignorada = db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == "frt00123").first()
     assert ignorada is not None
     assert ignorada.motivo == "medidor de prueba"
+
+
+# ── PATCH /fronteras/{id}: mismos chequeos que crear (2026-08-24) ──────────────
+
+def test_editar_rechaza_codigo_que_choca_con_otra_frontera_activa(db):
+    proy = _proyecto(db)
+    a = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="A", codigo_frontera="frt00001",
+                 tipo_frontera="generacion", estado="activa")
+    b = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="B", codigo_frontera="frt00002",
+                 tipo_frontera="generacion", estado="activa")
+    db.add_all([a, b])
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(b.id, FronteraUpdate(codigo_frontera="FRT00001"), forzar=False, db=db, _=ADMIN)
+    assert exc.value.status_code == 409
+    db.refresh(b)
+    assert b.codigo_frontera == "frt00002"  # no se guardó el cambio
+
+
+def test_editar_permite_guardar_el_mismo_codigo_propio_sin_cambios(db):
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="A", codigo_frontera="frt00001",
+                 tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    out = api.update_frontera(f.id, FronteraUpdate(codigo_frontera="FRT00001", municipio="Corozal"),
+                               forzar=False, db=db, _=ADMIN)
+    assert out.municipio == "Corozal"
+
+
+def test_editar_rechaza_nombre_muy_parecido_a_otra_frontera(db):
+    proy = _proyecto(db)
+    a = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="AGGE Extractora Monterrey",
+                 codigo_frontera="frt00001", tipo_frontera="generacion", estado="activa")
+    b = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="La Catedral",
+                 codigo_frontera="frt00002", tipo_frontera="generacion", estado="activa")
+    db.add_all([a, b])
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        api.update_frontera(b.id, FronteraUpdate(nombre_frontera="AGGE Frontera Monterrey"),
+                             forzar=False, db=db, _=ADMIN)
+    assert exc.value.status_code == 409
+    db.refresh(b)
+    assert b.nombre_frontera == "La Catedral"
+
+
+def test_editar_no_se_compara_consigo_misma(db):
+    """Cambiar un campo sin tocar el nombre no debe disparar el chequeo de
+    'parecido a sí misma'."""
+    proy = _proyecto(db)
+    f = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="La Catedral",
+                 codigo_frontera="frt00001", tipo_frontera="generacion", estado="activa")
+    db.add(f)
+    db.commit()
+
+    out = api.update_frontera(f.id, FronteraUpdate(nombre_frontera="La Catedral", municipio="Corozal"),
+                               forzar=False, db=db, _=ADMIN)
+    assert out.municipio == "Corozal"
+
+
+def test_editar_con_forzar_ignora_el_nombre_parecido(db):
+    proy = _proyecto(db)
+    a = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="AGGE Extractora Monterrey",
+                 codigo_frontera="frt00001", tipo_frontera="generacion", estado="activa")
+    b = Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="La Catedral",
+                 codigo_frontera="frt00002", tipo_frontera="generacion", estado="activa")
+    db.add_all([a, b])
+    db.commit()
+
+    out = api.update_frontera(b.id, FronteraUpdate(nombre_frontera="AGGE Frontera Monterrey"),
+                               forzar=True, db=db, _=ADMIN)
+    assert out.nombre_frontera == "AGGE Frontera Monterrey"
+
+
+def test_confirmar_rechaza_nombre_muy_parecido_a_otra_frontera(db, monkeypatch):
+    proy = _proyecto(db)
+    db.add(Frontera(id=next(_next_id), proyecto_id=proy.id, nombre_frontera="AGGE Extractora Monterrey",
+                     codigo_frontera="frt00001", tipo_frontera="generacion", estado="activa"))
+    db.commit()
+    monkeypatch.setattr(
+        api, "_get_gaia",
+        lambda: _GaiaFalso(_border("frt00002", nombre="AGGE Frontera Monterrey")),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        api.confirmar_frontera_quoia(
+            "frt00002", FronteraQuoiaConfirmar(proyecto_id=proy.id), forzar=False, db=db, _=ADMIN,
+        )
+    assert exc.value.status_code == 409
+    assert db.query(Frontera).count() == 1

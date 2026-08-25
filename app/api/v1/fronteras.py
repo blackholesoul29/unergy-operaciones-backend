@@ -220,6 +220,7 @@ def list_fronteras(
 
 def _buscar_duplicado_frontera(
     db: Session, nombre_frontera: str | None, tipo_frontera: str | None = None,
+    excluir_id: int | None = None,
 ) -> Frontera | None:
     """Busca una frontera existente con nombre parecido, via solapamiento de
     tokens + similitud de texto (mismo algoritmo que _buscar_duplicado_por_nombre
@@ -231,13 +232,18 @@ def _buscar_duplicado_frontera(
     reduce falsos positivos entre fronteras de naturaleza distinta (generación
     vs consumo) que comparten palabras en el nombre.
 
-    Deliberadamente permisivo -- no bloquea, solo avisa (se puede forzar la
-    creación con forzar=true)."""
+    `excluir_id` -- para editar: la propia frontera no debe compararse contra
+    sí misma (su nombre actual siempre "empataría" con el nuevo si no cambió).
+
+    Deliberadamente permisivo -- no bloquea, solo avisa (se puede forzar con
+    forzar=true)."""
     if not nombre_frontera:
         return None
     q = db.query(Frontera).filter(Frontera.deleted_at.is_(None))
     if tipo_frontera:
         q = q.filter(Frontera.tipo_frontera == tipo_frontera)
+    if excluir_id is not None:
+        q = q.filter(Frontera.id != excluir_id)
     candidatos = [(f, [f.nombre_frontera]) for f in q.all()]
     item, _score = mejor_candidato(nombre_frontera, candidatos)
     return item
@@ -352,6 +358,7 @@ def get_frontera(
 def update_frontera(
     frontera_id: int,
     body: FronteraUpdate,
+    forzar: bool = Query(False, description="true: guardar igual aunque el nuevo nombre sea muy parecido a otra frontera"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -363,9 +370,43 @@ def update_frontera(
     )
     if not f:
         raise HTTPException(404, "Frontera no encontrada")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    cambios = body.model_dump(exclude_unset=True)
+
+    if "codigo_frontera" in cambios and cambios["codigo_frontera"]:
+        nuevo_codigo = cambios["codigo_frontera"]
+        choque = db.query(Frontera).filter(
+            func.lower(Frontera.codigo_frontera) == nuevo_codigo.lower(),
+            Frontera.deleted_at.is_(None), Frontera.id != frontera_id,
+        ).first()
+        if choque:
+            raise HTTPException(409, "Ya existe una frontera activa con ese codigo_frontera")
+
+    if "nombre_frontera" in cambios and not forzar:
+        tipo_efectivo = cambios.get("tipo_frontera", f.tipo_frontera)
+        duplicado = _buscar_duplicado_frontera(
+            db, cambios["nombre_frontera"], tipo_efectivo, excluir_id=frontera_id,
+        )
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe una frontera con un nombre muy parecido: "
+                        f"'{duplicado.nombre_frontera}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_frontera,
+                },
+            )
+
+    for k, v in cambios.items():
         setattr(f, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, f.proyecto_id)
     db.refresh(f)
     return _to_out(
@@ -523,6 +564,7 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
 def confirmar_frontera_quoia(
     frt_code: str,
     body: FronteraQuoiaConfirmar,
+    forzar: bool = Query(False, description="true: confirmar igual aunque el nombre sea muy parecido a otra frontera"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -554,6 +596,23 @@ def confirmar_frontera_quoia(
 
     nombre_base = body.nombre_frontera or nombre_quoia or frt_code
     nombre_default = f"{nombre_base} Consumo" if categoria == "consumo" and not body.nombre_frontera else nombre_base
+    tipo_efectivo = body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar")
+
+    if not forzar:
+        duplicado = _buscar_duplicado_frontera(db, nombre_default, tipo_efectivo)
+        if duplicado:
+            raise HTTPException(
+                409,
+                {
+                    "mensaje": (
+                        f"Ya existe una frontera con un nombre muy parecido: "
+                        f"'{duplicado.nombre_frontera}' (ID {duplicado.id})."
+                    ),
+                    "duplicado_nombre": True,
+                    "candidato_id": duplicado.id,
+                    "candidato_nombre": duplicado.nombre_frontera,
+                },
+            )
 
     fecha_registro_asic = None
     init_date = frt.get("init_date")
@@ -580,7 +639,7 @@ def confirmar_frontera_quoia(
     obj.proyecto_id = body.proyecto_id
     obj.nombre_frontera = nombre_default
     obj.codigo_propio = body.codigo_propio
-    obj.tipo_frontera = body.tipo_frontera or ("generacion" if categoria == "generacion" else "consumo_auxiliar")
+    obj.tipo_frontera = tipo_efectivo
     obj.estado = "activa"
     obj.quoia_border_id = frt.get("id")
     obj.fecha_registro_asic = fecha_registro_asic

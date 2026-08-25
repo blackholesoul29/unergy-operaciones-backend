@@ -1481,6 +1481,28 @@ _PENDING_DDLS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
+    # ── Columnas del modelo que Alembic no alcanzo a provisionar (2026-08-25) ──
+    # Mismo caso que `sunfactory_project_id` mas arriba: `start.sh` corre
+    # `alembic upgrade head` dentro de un `if !`, asi que cuando una migracion
+    # falla el arranque CONTINUA y la app queda pidiendo columnas que la base no
+    # tiene. Cualquier SELECT sobre esas tablas responde 500 -- fue lo que tumbo
+    # /proyectos y, con el, /ppa (que carga la relacion proyectos).
+    #
+    # `altitud_msnm` ya quedo provisionada mas arriba, junto con su backfill desde
+    # fronteras; aca va lo que falto: el id de SolarView y la verificacion de
+    # envio a XM del Reporte de Energia.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS project_id_solarview VARCHAR(100)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_proyectos_project_id_solarview ON proyectos (project_id_solarview) WHERE project_id_solarview IS NOT NULL",
+    # Verificacion del envio a XM en el Reporte de Energia: mismas cuatro
+    # columnas en las dos tablas, que ya existian antes del cambio.
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS xm_process_id VARCHAR(100)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS xm_estado VARCHAR(30)",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS xm_exitoso BOOLEAN",
+    "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS xm_verificado_en TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_process_id VARCHAR(100)",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_estado VARCHAR(30)",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_exitoso BOOLEAN",
+    "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_verificado_en TIMESTAMP WITH TIME ZONE",
 ]
 
 

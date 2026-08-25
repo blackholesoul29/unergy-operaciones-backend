@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, datetime
 from typing import Optional
 
@@ -20,7 +20,7 @@ class FronteraBase(BaseModel):
     registrada_por: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
-    transferencia_maxima_kwh: Optional[float] = None
+    transferencia_maxima_kwh: Optional[float] = Field(default=None, ge=0)
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
@@ -28,9 +28,9 @@ class FronteraBase(BaseModel):
 
     # Técnico
     tipo_punto_medicion: Optional[int] = None
-    capacidad_transporte_mw: Optional[float] = None
-    capacidad_efectiva_mw: Optional[float] = None
-    factor_perdidas: Optional[float] = None
+    capacidad_transporte_mw: Optional[float] = Field(default=None, ge=0)
+    capacidad_efectiva_mw: Optional[float] = Field(default=None, ge=0)
+    factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
 
@@ -51,8 +51,8 @@ class FronteraBase(BaseModel):
     direccion: Optional[str] = None
     subestacion: Optional[str] = None
     punto_conexion: Optional[str] = None
-    latitud: Optional[float] = None
-    longitud: Optional[float] = None
+    latitud: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None
 
     # Códigos SIC
@@ -60,7 +60,7 @@ class FronteraBase(BaseModel):
     codigo_sic_submercado_consumo: Optional[str] = None
     codigo_sic_frontera_generacion: Optional[str] = None
     codigo_sic_frontera_usuario: Optional[str] = None
-    potencia_maxima_declarada: Optional[float] = None
+    potencia_maxima_declarada: Optional[float] = Field(default=None, ge=0)
     tipo_tecnologia: Optional[str] = None
 
     # Medidor principal
@@ -86,11 +86,11 @@ class FronteraBase(BaseModel):
 
     # Agrupación/embebido
     es_agrupadora: Optional[bool] = False
-    factor_psf: Optional[float] = None
+    factor_psf: Optional[float] = Field(default=None, ge=0)
     es_principal_embebido: Optional[bool] = False
-    factor_acordado: Optional[float] = None
-    factor_ajuste: Optional[float] = None
-    factor_perdidas_frontera_principal: Optional[float] = None
+    factor_acordado: Optional[float] = Field(default=None, ge=0)
+    factor_ajuste: Optional[float] = Field(default=None, ge=0)
+    factor_perdidas_frontera_principal: Optional[float] = Field(default=None, ge=0)
 
     # Clasificación industrial
     codigo_ciiu: Optional[str] = None
@@ -118,7 +118,7 @@ class FronteraUpdate(BaseModel):
     registrada_por: Optional[str] = None
     nivel_tension: Optional[int] = None
     nivel_tension_kv: Optional[float] = None
-    transferencia_maxima_kwh: Optional[float] = None
+    transferencia_maxima_kwh: Optional[float] = Field(default=None, ge=0)
     representante_frontera: Optional[str] = None
     fecha_inicio_representacion: Optional[date] = None
     operador_red_id: Optional[int] = None
@@ -126,9 +126,9 @@ class FronteraUpdate(BaseModel):
 
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
-    capacidad_transporte_mw: Optional[float] = None
-    capacidad_efectiva_mw: Optional[float] = None
-    factor_perdidas: Optional[float] = None
+    capacidad_transporte_mw: Optional[float] = Field(default=None, ge=0)
+    capacidad_efectiva_mw: Optional[float] = Field(default=None, ge=0)
+    factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
 
@@ -149,8 +149,8 @@ class FronteraUpdate(BaseModel):
     direccion: Optional[str] = None
     subestacion: Optional[str] = None
     punto_conexion: Optional[str] = None
-    latitud: Optional[float] = None
-    longitud: Optional[float] = None
+    latitud: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None
 
     # Codigos SIC
@@ -158,7 +158,7 @@ class FronteraUpdate(BaseModel):
     codigo_sic_submercado_consumo: Optional[str] = None
     codigo_sic_frontera_generacion: Optional[str] = None
     codigo_sic_frontera_usuario: Optional[str] = None
-    potencia_maxima_declarada: Optional[float] = None
+    potencia_maxima_declarada: Optional[float] = Field(default=None, ge=0)
     tipo_tecnologia: Optional[str] = None
 
     # Medidor principal
@@ -184,11 +184,11 @@ class FronteraUpdate(BaseModel):
 
     # Agrupacion/embebido
     es_agrupadora: Optional[bool] = None
-    factor_psf: Optional[float] = None
+    factor_psf: Optional[float] = Field(default=None, ge=0)
     es_principal_embebido: Optional[bool] = None
-    factor_acordado: Optional[float] = None
-    factor_ajuste: Optional[float] = None
-    factor_perdidas_frontera_principal: Optional[float] = None
+    factor_acordado: Optional[float] = Field(default=None, ge=0)
+    factor_ajuste: Optional[float] = Field(default=None, ge=0)
+    factor_perdidas_frontera_principal: Optional[float] = Field(default=None, ge=0)
 
     # Clasificacion industrial
     codigo_ciiu: Optional[str] = None

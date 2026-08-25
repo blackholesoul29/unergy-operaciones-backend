@@ -1,7 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text,
+                        CheckConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -24,6 +25,25 @@ class EstadoFronteraEnum(str, enum.Enum):
 
 class Frontera(Base):
     __tablename__ = "fronteras"
+    __table_args__ = (
+        # Protecciones contra typos de digitacion (ej. latitud=950 en vez de
+        # 9.50) -- rangos verificados contra produccion (2026-08-25, 145
+        # fronteras) antes de agregarlos, para no romper datos reales.
+        CheckConstraint("latitud IS NULL OR (latitud >= -90 AND latitud <= 90)", name="ck_fronteras_latitud_rango"),
+        CheckConstraint("longitud IS NULL OR (longitud >= -180 AND longitud <= 180)", name="ck_fronteras_longitud_rango"),
+        CheckConstraint("capacidad_efectiva_mw IS NULL OR capacidad_efectiva_mw >= 0", name="ck_fronteras_capacidad_efectiva_mw_no_negativa"),
+        CheckConstraint("capacidad_transporte_mw IS NULL OR capacidad_transporte_mw >= 0", name="ck_fronteras_capacidad_transporte_mw_no_negativa"),
+        CheckConstraint("potencia_maxima_declarada IS NULL OR potencia_maxima_declarada >= 0", name="ck_fronteras_potencia_maxima_declarada_no_negativa"),
+        CheckConstraint("transferencia_maxima_kwh IS NULL OR transferencia_maxima_kwh >= 0", name="ck_fronteras_transferencia_maxima_kwh_no_negativa"),
+        # factor_perdidas es un multiplicador (energia_real = energia_medida
+        # x factor_perdidas), no una fraccion 0-1 -- produccion hoy va de
+        # 1.0 a ~1.05. Rango generoso (0-2) para no bloquear variacion real.
+        CheckConstraint("factor_perdidas IS NULL OR (factor_perdidas > 0 AND factor_perdidas <= 2)", name="ck_fronteras_factor_perdidas_rango"),
+        CheckConstraint("factor_psf IS NULL OR factor_psf >= 0", name="ck_fronteras_factor_psf_no_negativo"),
+        CheckConstraint("factor_acordado IS NULL OR factor_acordado >= 0", name="ck_fronteras_factor_acordado_no_negativo"),
+        CheckConstraint("factor_ajuste IS NULL OR factor_ajuste >= 0", name="ck_fronteras_factor_ajuste_no_negativo"),
+        CheckConstraint("factor_perdidas_frontera_principal IS NULL OR factor_perdidas_frontera_principal >= 0", name="ck_fronteras_factor_perdidas_frontera_principal_no_negativo"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)

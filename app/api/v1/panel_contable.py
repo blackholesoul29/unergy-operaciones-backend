@@ -38,6 +38,8 @@ from app.utils.er_loader import (
 )
 from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
 from app.services.costos_panel import valores_modulo_costos, valores_facturas_modulo, aplicar_costos_modulo
+from app.services import liquidaciones_api
+from app.services.panel_desde_api import construir_parsed
 
 logger = logging.getLogger(__name__)
 
@@ -562,6 +564,101 @@ def _guardar_panel(
     db.commit()
     db.refresh(panel)
     return panel
+
+
+# ── Armar el período desde la API de Liquidaciones ──────────────────────────────
+
+class CargarPeriodoIn(BaseModel):
+    """Período a armar. `version` es la de XM (txf, tx3…tx8)."""
+
+    periodo: str            # YYYY-MM
+    tipo: str = "oficial"   # preliquidacion | oficial
+    version: str = "txf"
+
+
+def _normalizar_periodo(periodo: str) -> tuple[str, int, int]:
+    """`2026-7` y `2026-07` son el mismo mes. Devuelve (YYYY-MM, año, mes)."""
+    try:
+        y, m = periodo.strip().split("-")
+        y, m = int(y), int(m)
+        if not 1 <= m <= 12:
+            raise ValueError
+    except Exception:
+        raise HTTPException(422, "El período debe tener formato YYYY-MM")
+    return f"{y:04d}-{m:02d}", y, m
+
+
+@router.post("/cargar-periodo")
+def cargar_periodo(
+    data: CargarPeriodoIn,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(_require_write),
+):
+    """Arma los paneles del período desde la API, sin subir un solo archivo.
+
+    Es el mismo camino que `cargar-er` a partir del `parsed`: cambia de dónde sale
+    ese dict, no lo que se hace con él. El reparto por inversionista, los costos de
+    los módulos y los impuestos siguen igual.
+
+    NEU y Nitro se omiten a propósito -- su dato en la API está malo y siguen
+    cargando el Excel-- y se informan en `omitidos`: saltarlos en silencio haría
+    creer que el período quedó completo.
+    """
+    periodo, anio, mes = _normalizar_periodo(data.periodo)
+
+    try:
+        er = liquidaciones_api.estado_resultados_json(
+            month=mes, year=anio, version=data.version)
+    except liquidaciones_api.LiquidacionesAPIError as exc:
+        raise HTTPException(502, str(exc))
+
+    # Un proyecto sin registro de clasificación es 'normal'.
+    clasif = {
+        c.proyecto_id: c.tipo
+        for c in db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo == periodo).all()
+    }
+    # La API nombra los proyectos por tópico y algunos difieren del de generación.
+    por_topico = {
+        (p.topico_liquidaciones or p.sub_project): p
+        for p in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
+        if (p.topico_liquidaciones or p.sub_project)
+    }
+
+    armados: list[str] = []
+    omitidos: list[dict] = []
+    sin_cruce: list[str] = []
+    avisos: list[dict] = []
+
+    for proy_api in (er.get("results") or []):
+        topico = proy_api.get("project") or ""
+        proyecto = por_topico.get(topico)
+        if proyecto is None:
+            sin_cruce.append(topico)
+            continue
+        if clasif.get(proyecto.id, "normal") != "normal":
+            omitidos.append({"proyecto": proyecto.nombre_comercial,
+                             "motivo": clasif[proyecto.id]})
+            continue
+
+        parsed = construir_parsed(proy_api)
+        _guardar_panel(db, proyecto.id, periodo, data.tipo, parsed, None, usuario.id)
+        armados.append(proyecto.nombre_comercial)
+        if parsed["warnings"]:
+            avisos.append({"proyecto": proyecto.nombre_comercial,
+                           "avisos": parsed["warnings"]})
+
+    return {
+        "periodo": periodo,
+        "tipo": data.tipo,
+        "version": data.version,
+        "armados": len(armados),
+        "proyectos": armados,
+        "omitidos": omitidos,
+        "sin_cruce": sin_cruce,
+        "avisos": avisos,
+        "errores_api": er.get("errors") or [],
+    }
 
 
 # ── Clasificación de liquidación por período ────────────────────────────────────

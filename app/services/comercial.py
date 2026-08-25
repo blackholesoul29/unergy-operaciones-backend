@@ -1483,7 +1483,17 @@ def _fronteras_planta(proyecto) -> list[dict]:
     El operador de la frontera se devuelve del catálogo cuando existe el vínculo
     y, si no, el texto de GESCON —con `operador_red_id` en null justamente para
     avisar que con ese valor no se puede cruzar el catálogo.
+
+    `capacidad_transporte_mw`/`capacidad_efectiva_mw`: hasta 2026-08-25 eran
+    columnas propias de Frontera: se eliminaron por duplicar (con conversión
+    de unidad) a `Proyecto.potencia_instalada_kwp`, la fuente única desde
+    entonces -- se repuntan acá en vez de quitarse del dict para no romper a
+    quien integre contra estas dos claves.
     """
+    cap_mw = (
+        float(proyecto.potencia_instalada_kwp) / 1000
+        if proyecto.potencia_instalada_kwp is not None else None
+    )
     fronteras = sorted(
         (f for f in proyecto.fronteras if f.deleted_at is None),
         key=lambda f: (f.codigo_frontera or "", f.id))
@@ -1495,8 +1505,8 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "tipo_frontera": _valor_enum(f.tipo_frontera),
             "estado": _valor_enum(f.estado),
             "nivel_tension_kv": _num(f.nivel_tension_kv),
-            "capacidad_transporte_mw": _num(f.capacidad_transporte_mw),
-            "capacidad_efectiva_mw": _num(f.capacidad_efectiva_mw),
+            "capacidad_transporte_mw": cap_mw if f.tipo_frontera == "generacion" else None,
+            "capacidad_efectiva_mw": cap_mw if f.tipo_frontera == "generacion" else None,
             "factor_perdidas": _num(f.factor_perdidas),
             "municipio": f.municipio,
             "departamento": f.departamento,

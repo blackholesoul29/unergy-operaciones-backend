@@ -25,8 +25,6 @@ class FronteraBase(BaseModel):
 
     # Técnico
     tipo_punto_medicion: Optional[int] = None
-    capacidad_transporte_mw: Optional[float] = Field(default=None, ge=0)
-    capacidad_efectiva_mw: Optional[float] = Field(default=None, ge=0)
     factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
@@ -115,8 +113,6 @@ class FronteraUpdate(BaseModel):
 
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
-    capacidad_transporte_mw: Optional[float] = Field(default=None, ge=0)
-    capacidad_efectiva_mw: Optional[float] = Field(default=None, ge=0)
     factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[str] = None
     clase_pt: Optional[str] = None
@@ -189,6 +185,11 @@ class FronteraOut(FronteraBase):
 
     proyecto_nombre: Optional[str] = None
     proyecto_fecha_inicio_comercializacion: Optional[date] = None
+    # Reemplaza a capacidad_transporte_mw/capacidad_efectiva_mw (eliminados
+    # 2026-08-25 -- 52/53 fronteras de generacion con dato coincidian exacto
+    # con esto, solo con conversion de unidad kWp->MW). potencia_instalada_kwp
+    # es la fuente unica del proyecto, no se vuelve a duplicar en Frontera.
+    proyecto_potencia_instalada_mw: Optional[float] = None
     # Basado en las últimas corridas del pipeline Reporte Energía
     # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
     # cubre todas las fronteras de generación, no solo las que tienen

@@ -57,7 +57,7 @@ def cancelar_corrida(fecha: date) -> None:
     _CANCELAR[str(fecha)] = True
 
 
-def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[Frontera, str | None]]:
+def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[Frontera, str | None, float | None]]:
     """(Frontera, project_id_solarview) de las fronteras que de verdad
     reportan al ASIC -- 'activa'/'deleted_at' son nuestro propio control de
     desactivación (una frontera que marcamos inactiva no reporta aunque
@@ -73,7 +73,7 @@ def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[F
     regla propia SÍ tenía huecos reales (GD Piojó, GD La Hormiguita: ya
     registradas en Quoia pero nunca marcadas a mano)."""
     filas = db.execute(
-        select(Frontera, Proyecto.project_id_solarview)
+        select(Frontera, Proyecto.project_id_solarview, Proyecto.potencia_instalada_kwp)
         .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
         .where(
             Frontera.estado == EstadoFronteraEnum.activa,
@@ -82,7 +82,7 @@ def _fronteras_con_reporte(db: Session, codigos_quoia: set[str]) -> list[tuple[F
         )
     ).all()
     return [
-        (f, sid) for f, sid in filas
+        (f, sid, kwp) for f, sid, kwp in filas
         if f.codigo_frontera.strip().lower() in codigos_quoia
     ]
 
@@ -259,7 +259,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
     _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior
     cancelado = False
 
-    for i, (frontera, project_id_solarview) in enumerate(fronteras, start=1):
+    for i, (frontera, project_id_solarview, potencia_instalada_kwp) in enumerate(fronteras, start=1):
         if _CANCELAR.get(str(fecha)):
             print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
             cancelado = True
@@ -310,7 +310,7 @@ def ejecutar_dia(db: Session, fecha: date) -> dict:
                 resultado = clasificador.clasificar_generacion(
                     db, gaia, sv, frontera.id, frt_code, border_meta, pid_solarview, mapa_medidor_nodo, fecha,
                     capacidad_efectiva_mw=(
-                        float(frontera.capacidad_efectiva_mw) if frontera.capacidad_efectiva_mw is not None else None
+                        float(potencia_instalada_kwp) / 1000 if potencia_instalada_kwp is not None else None
                     ),
                 )
                 _upsert_generacion(db, frontera.id, fecha, resultado)

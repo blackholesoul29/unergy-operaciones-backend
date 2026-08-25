@@ -54,7 +54,7 @@ def test_registrada_en_quoia_entra_sin_importar_estado_del_proyecto(db):
     db.commit()
 
     resultado = _fronteras_con_reporte(db, {"frt001"})
-    assert [f.id for f, _ in resultado] == [1]
+    assert [f.id for f, _, _ in resultado] == [1]
 
 
 def test_no_registrada_en_quoia_no_entra_aunque_este_en_operacion(db):
@@ -72,7 +72,7 @@ def test_comparacion_de_codigo_es_case_insensitive(db):
     db.commit()
 
     resultado = _fronteras_con_reporte(db, {"frt0000003"})
-    assert [f.id for f, _ in resultado] == [3]
+    assert [f.id for f, _, _ in resultado] == [3]
 
 
 def test_frontera_cancelada_no_entra_aunque_este_en_quoia(db):

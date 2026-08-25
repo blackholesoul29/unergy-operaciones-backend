@@ -109,7 +109,8 @@ def _datos_proyectos_para_resumen(
         meta = mapa_borders.get(f.codigo_frontera.strip().lower()) if f.codigo_frontera else None
         if f.tipo_frontera == TipoFronteraEnum.generacion and f.codigo_frontera:
             datos["frt_gen"] = f.codigo_frontera
-            datos["capacidad_efectiva_mw"] = f.capacidad_efectiva_mw
+            if f.proyecto.potencia_instalada_kwp is not None:
+                datos["capacidad_efectiva_mw"] = float(f.proyecto.potencia_instalada_kwp) / 1000
             if meta:
                 datos["main_meter_gen"] = meta.get("main_meter")
                 datos["backup_meter_gen"] = meta.get("backup_meter")

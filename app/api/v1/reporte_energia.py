@@ -597,7 +597,10 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         respaldo_energia_actual_kwh=round(respaldo_energia_actual_kwh, 4) if respaldo_energia_actual_kwh is not None else None,
         respaldo_curva_actual=respaldo_curva_actual,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
-        capacidad_efectiva_mw=float(front.capacidad_efectiva_mw) if es_generacion and front.capacidad_efectiva_mw is not None else None,
+        capacidad_efectiva_mw=(
+            float(front.proyecto.potencia_instalada_kwp) / 1000
+            if es_generacion and front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
+        ),
     )
 
 
@@ -741,7 +744,8 @@ def rellenar_horario(
                     frontera_id=frontera_id, curva_solarview=curva_solarview, fp=fp,
                     curva_reconectador_conocida=curva_reconectador_conocida,
                     capacidad_efectiva_mw=(
-                        float(front.capacidad_efectiva_mw) if front.capacidad_efectiva_mw is not None else None
+                        float(proyecto.potencia_instalada_kwp) / 1000
+                        if proyecto and proyecto.potencia_instalada_kwp is not None else None
                     ),
                 )
             )

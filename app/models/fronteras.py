@@ -31,8 +31,6 @@ class Frontera(Base):
         # fronteras) antes de agregarlos, para no romper datos reales.
         CheckConstraint("latitud IS NULL OR (latitud >= -90 AND latitud <= 90)", name="ck_fronteras_latitud_rango"),
         CheckConstraint("longitud IS NULL OR (longitud >= -180 AND longitud <= 180)", name="ck_fronteras_longitud_rango"),
-        CheckConstraint("capacidad_efectiva_mw IS NULL OR capacidad_efectiva_mw >= 0", name="ck_fronteras_capacidad_efectiva_mw_no_negativa"),
-        CheckConstraint("capacidad_transporte_mw IS NULL OR capacidad_transporte_mw >= 0", name="ck_fronteras_capacidad_transporte_mw_no_negativa"),
         CheckConstraint("potencia_maxima_declarada IS NULL OR potencia_maxima_declarada >= 0", name="ck_fronteras_potencia_maxima_declarada_no_negativa"),
         CheckConstraint("transferencia_maxima_kwh IS NULL OR transferencia_maxima_kwh >= 0", name="ck_fronteras_transferencia_maxima_kwh_no_negativa"),
         # factor_perdidas es un multiplicador (energia_real = energia_medida
@@ -61,8 +59,6 @@ class Frontera(Base):
     # Clasificación técnica
     tipo_punto_medicion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nivel_tension_kv: Mapped[float | None] = mapped_column(Numeric(8, 3), nullable=True)
-    capacidad_transporte_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
-    capacidad_efectiva_mw: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     factor_perdidas: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
     clase_ct: Mapped[str | None] = mapped_column(String(20), nullable=True)
     clase_pt: Mapped[str | None] = mapped_column(String(20), nullable=True)

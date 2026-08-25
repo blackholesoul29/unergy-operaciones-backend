@@ -25,9 +25,9 @@ def test_latitud_longitud_validas_se_aceptan():
     assert f.longitud == -73.2
 
 
-def test_capacidad_efectiva_negativa_se_rechaza():
+def test_potencia_maxima_declarada_negativa_se_rechaza():
     with pytest.raises(ValidationError):
-        FronteraCreate(nombre_frontera="Test", tipo_frontera="generacion", capacidad_efectiva_mw=-5)
+        FronteraCreate(nombre_frontera="Test", tipo_frontera="generacion", potencia_maxima_declarada=-5)
 
 
 def test_factor_perdidas_fuera_de_rango_se_rechaza():
@@ -46,4 +46,4 @@ def test_update_tambien_valida_rangos():
     with pytest.raises(ValidationError):
         FronteraUpdate(latitud=100)
     with pytest.raises(ValidationError):
-        FronteraUpdate(capacidad_transporte_mw=-1)
+        FronteraUpdate(potencia_maxima_declarada=-1)

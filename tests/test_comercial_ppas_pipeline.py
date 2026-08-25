@@ -932,12 +932,11 @@ def test_las_fronteras_traen_su_codigo(db):
     una planta tiene generación y consumo, y un contrato de dos plantas tiene
     las de las dos."""
     op = _operador(db)
-    proy = _proyecto(db, nombre_comercial="GD Catedral")
+    proy = _proyecto(db, nombre_comercial="GD Catedral", potencia_instalada_kwp=900)
     db.add_all([
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral GEN",
                  codigo_frontera="Frt00123", tipo_frontera="generacion",
                  estado="activa", nivel_tension_kv=13.2,
-                 capacidad_transporte_mw=0.9,
                  operador_red_id=op.id),
         Frontera(proyecto_id=proy.id, nombre_frontera="FN Catedral CON",
                  codigo_frontera="Frt00124", tipo_frontera="consumo",
@@ -957,7 +956,13 @@ def test_las_fronteras_traen_su_codigo(db):
     gen = fronteras[0]
     assert gen["tipo_frontera"] == "generacion"
     assert gen["nivel_tension_kv"] == 13.2
+    # capacidad_transporte_mw/capacidad_efectiva_mw ya no son columnas de
+    # Frontera (eliminadas 2026-08-25) -- se repuntan a
+    # Proyecto.potencia_instalada_kwp/1000, solo para la de generación.
     assert gen["capacidad_transporte_mw"] == 0.9
+    assert gen["capacidad_efectiva_mw"] == 0.9
+    assert fronteras[1]["capacidad_transporte_mw"] is None
+    assert fronteras[1]["capacidad_efectiva_mw"] is None
     assert gen["operador_red"] == "ELECTRIFICADORA DEL CARIBE S.A. E.S.P."
     assert gen["operador_red_id"] == op.id
     # Sin operador_red_id vinculado, esta frontera no tiene operador -- ya no

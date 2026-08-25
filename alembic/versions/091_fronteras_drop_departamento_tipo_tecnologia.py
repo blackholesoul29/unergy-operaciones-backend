@@ -7,6 +7,11 @@ guardaba texto libre "Solar", Proyecto usa el enum TipoTecnologiaEnum.solar)
 con Proyecto.tipo_tecnologia. Sara decidio: viven en Proyecto, Frontera se
 alimenta de ahi (mismo patron que potencia_instalada_kwp).
 
+Antes de eliminar: 16 proyectos no tenian su propio departamento y 1
+(id 84, GD La Hormiguita -- el mismo de la migracion 090) no tenia
+tipo_tecnologia -- se rellenan con el valor de su(s) frontera(s), sin
+conflicto entre fronteras del mismo proyecto en ningun caso.
+
 A diferencia de esos dos, NO se tocan en esta migracion: municipio (68%
 de coincidencia real, uso activo en filtro/columna de FronterasView.vue),
 direccion/direccion_vereda (nombres distintos a proposito, no son
@@ -27,8 +32,36 @@ down_revision = "090"
 branch_labels = None
 depends_on = None
 
+_BACKFILL_DEPARTAMENTO = {
+    3: "Norte de Santander",
+    6: "Norte de Santander",
+    7: "Córdoba",
+    15: "Córdoba",
+    18: "Nariño",
+    29: "Atlántico",
+    32: "Nariño",
+    33: "Nariño",
+    34: "Nariño",
+    38: "Cauca",
+    39: "Cauca",
+    44: "Córdoba",
+    46: "Norte de Santander",
+    55: "Meta",
+    56: "Bolívar",
+    84: "Atlántico",
+}
+
 
 def upgrade():
+    conn = op.get_bind()
+    for proyecto_id, departamento in _BACKFILL_DEPARTAMENTO.items():
+        conn.execute(
+            sa.text("UPDATE proyectos SET departamento = :d WHERE id = :id AND departamento IS NULL"),
+            {"d": departamento, "id": proyecto_id},
+        )
+    conn.execute(
+        sa.text("UPDATE proyectos SET tipo_tecnologia = 'solar' WHERE id = 84 AND tipo_tecnologia IS NULL")
+    )
     op.drop_column("fronteras", "departamento")
     op.drop_column("fronteras", "tipo_tecnologia")
 

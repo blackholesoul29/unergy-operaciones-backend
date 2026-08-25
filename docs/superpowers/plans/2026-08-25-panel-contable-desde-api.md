@@ -401,7 +401,12 @@ git commit -m "Panel desde API: comercializacion con FAZNI y cargo por confiabil
 
 ## Task 4: Elegir el contrato de representación correcto
 
-Hay 66 contratos de representación para 38 proyectos y algunos con tarifas contradictorias: Joropo tiene uno en 0 y otro en 5. El código toma el de menor `id`, que puede ser el equivocado.
+Hay 66 contratos de representación para 38 proyectos y algunos con tarifas
+contradictorias: Joropo tiene tres, dos en 0 y uno en 5. El código toma el de menor
+`id` y **hoy acierta en los 38** -- no hay ninguno donde el de menor id tenga menos
+tarifa que otro disponible. Pero eso es suerte, no diseño: basta que se borre el
+contrato 108 de Joropo o que aparezca uno con id menor para que empiece a leer ceros
+en silencio. Esta tarea cambia la casualidad por una regla.
 
 **Files:**
 - Modify: `app/services/costos_panel.py:138-148`
@@ -413,9 +418,10 @@ Hay 66 contratos de representación para 38 proyectos y algunos con tarifas cont
 # tests/test_costos_panel_contrato.py
 """Cuál contrato de representación manda cuando hay varios.
 
-Un proyecto puede tener más de uno -- 66 filas para 38 proyectos-- y algunos con
-tarifas contradictorias. Tomar el de menor id es arbitrario: Joropo tiene uno en
-0 y otro en 5, y el de id menor gana sin ninguna razón.
+Un proyecto puede tener más de uno -- 66 filas para 38 proyectos -- y algunos con
+tarifas contradictorias: Joropo tiene tres, dos con las tarifas en cero. Hoy gana
+el de menor id, que da la casualidad de ser el correcto en los 38 proyectos. Estas
+pruebas fijan la regla para que deje de depender de la casualidad.
 """
 import types
 
@@ -433,7 +439,7 @@ def test_prefiere_el_vigente():
 
 
 def test_entre_vigentes_prefiere_el_que_tiene_tarifas():
-    """El caso Joropo: uno en cero y otro con tarifa real."""
+    """El caso Joropo: dos en cero y uno con tarifa real."""
     assert elegir_contrato_representacion([
         _c(1, rep=0.0, cgm=0.0), _c(2, rep=5.0, cgm=5.0)]).id == 2
 
@@ -467,9 +473,9 @@ def elegir_contrato_representacion(contratos):
     """El contrato que manda cuando un proyecto tiene varios.
 
     Ordena por: vigente primero, luego el que sí tiene tarifas cargadas, y a
-    igualdad de condiciones el más reciente. Antes se tomaba el de menor `id`,
-    que en Joropo elegía uno con las tarifas en cero teniendo otro con tarifa
-    real al lado.
+    igualdad de condiciones el más reciente. Antes se tomaba el de menor `id`:
+    hoy acierta en los 38 proyectos, pero Joropo tiene dos contratos con las
+    tarifas en cero esperando a que un cambio de ids los deje ganar.
     """
     if not contratos:
         return None

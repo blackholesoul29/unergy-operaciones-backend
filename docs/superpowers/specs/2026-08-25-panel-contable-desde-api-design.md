@@ -130,10 +130,13 @@ compras. Una compra errónea no puede bajar el fee sin que nadie se entere.
    `tarifa_admin = 0.05` (se venía calculando por fuera del Excel).
 2. **Sabana de Torres:** crear contrato de representación con `tarifa_admin = 0.038`,
    `tarifa_representacion = 6`, `tarifa_cgm = 6`.
-3. **Contratos de representación duplicados:** 66 filas para 38 proyectos, algunas con
-   tarifas contradictorias —Joropo tiene una en 0 y otra en 5. El código toma el de
-   menor `id`, que puede ser el equivocado. Se define una regla determinista:
-   vigente + con tarifa cargada + el más reciente.
+3. **Contratos de representación duplicados:** 66 filas para 38 proyectos, algunas
+   con tarifas contradictorias —Joropo tiene tres, dos de ellas en 0 y una en 5. El
+   código toma el de menor `id`. **Hoy eso acierta en los 38 proyectos**: no hay
+   ninguno donde el de menor id tenga menos tarifa que otro disponible. Pero es
+   suerte, no diseño — basta que alguien borre el contrato 108 de Joropo o que se
+   cree uno con id menor para que empiece a leer ceros. Se cambia por una regla
+   determinista: vigente + con tarifa cargada + el más reciente.
 
 ## Efecto en la liquidación (julio como referencia)
 

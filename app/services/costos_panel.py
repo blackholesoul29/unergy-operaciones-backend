@@ -121,6 +121,37 @@ def _tarifa_indexada_periodo(indexacion, tarifa_base, fecha_firma, periodo: str)
     return float(tarifa_base) if tarifa_base is not None else None
 
 
+def elegir_contrato_representacion(contratos):
+    """El contrato de representación que manda cuando un proyecto tiene varios.
+
+    Ahí viven las tarifas de Representación, CGM y Administración. Hay 66 filas
+    para 38 proyectos y algunas se contradicen: Joropo tiene tres, dos con las
+    tarifas en cero.
+
+    Ordena por vigencia primero, luego por **cuántas** tarifas trae cargadas, y a
+    igualdad de condiciones el más reciente. Antes se tomaba el de menor ``id``,
+    que hoy acierta en los 38 proyectos por casualidad -- el de Joropo con tarifa
+    tiene id menor que los dos de ceros. Basta borrar ese o crear uno con id menor
+    para que empiece a leer ceros sin que nadie lo note.
+
+    Cuenta las tarifas en vez de preguntar si tiene alguna: los tres contratos de
+    Joropo traen ``tarifa_admin``, así que con un booleano los tres empatarían y
+    ganaría el de id más alto, que es uno de los que tiene Representación y CGM
+    en cero. Contándolas gana el 108, que trae las tres.
+
+    La vigencia pesa más que las tarifas: un contrato vigente en ceros es una
+    decisión de negocio, no un dato faltante.
+    """
+    if not contratos:
+        return None
+
+    def _puntaje(c):
+        tarifas = sum(1 for t in (c.tarifa_representacion, c.tarifa_cgm, c.tarifa_admin) if t)
+        return (c.estado == "vigente", tarifas, c.id)
+
+    return max(contratos, key=_puntaje)
+
+
 def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str,
                             kwh: float | None, ingreso: float | None = None) -> dict[str, dict]:
     """Servicios del grupo 'facturas' desde las tarifas de la app (no del ER):
@@ -139,12 +170,11 @@ def valores_facturas_modulo(db: Session, proyecto_id: int, periodo: str,
     proyecto = db.get(Proyecto, proyecto_id)
     if proyecto is None:
         return {}
-    c = (
+    c = elegir_contrato_representacion(
         db.query(ContratoServicio)
         .filter(ContratoServicio.servicio_aplica == "representacion",
                 ContratoServicio.proyecto_id == proyecto_id)
-        .order_by(ContratoServicio.id)
-        .first()
+        .all()
     )
     if c is None:
         return {}

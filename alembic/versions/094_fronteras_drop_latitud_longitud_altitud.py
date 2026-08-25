@@ -91,21 +91,41 @@ _BACKFILL_ALTITUD = {
 
 
 def upgrade():
-    op.add_column("proyectos", sa.Column("altitud_msnm", sa.Integer(), nullable=True))
-    op.create_check_constraint(
-        "ck_proyectos_latitud_rango",
-        "proyectos", "latitud IS NULL OR (latitud >= -90 AND latitud <= 90)",
-    )
-    op.create_check_constraint(
-        "ck_proyectos_longitud_rango",
-        "proyectos", "longitud IS NULL OR (longitud >= -180 AND longitud <= 180)",
-    )
-    op.create_check_constraint(
-        "ck_proyectos_altitud_msnm_rango",
-        "proyectos", "altitud_msnm IS NULL OR (altitud_msnm >= -100 AND altitud_msnm <= 6000)",
-    )
-
     conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_checks = {
+        c["name"] for c in inspector.get_check_constraints("proyectos")
+    }
+
+    # Idempotente: un parche de emergencia (commit 8c9551b, Jessica) ya habia
+    # agregado esta columna + su CHECK en produccion el mismo dia, porque el
+    # modelo la declaraba antes de que esta migracion llegara a correr (la
+    # cadena de Alembic estaba atascada en 082 por el problema de
+    # 085_contrato_frontera). Ese parche tambien rellenO altitud_msnm para
+    # los 50 proyectos usando "la frontera de menor id" -- sin el criterio de
+    # plausibilidad geografica aplicado aca, asi que los proyectos 20 y 26
+    # (ver _BACKFILL_ALTITUD) se corrigen explicitamente mas abajo aunque ya
+    # tengan dato, en vez de respetar el WHERE ... IS NULL como el resto.
+    existing_columns = {c["name"] for c in inspector.get_columns("proyectos")}
+    if "altitud_msnm" not in existing_columns:
+        op.add_column("proyectos", sa.Column("altitud_msnm", sa.Integer(), nullable=True))
+    if "ck_proyectos_latitud_rango" not in existing_checks:
+        op.create_check_constraint(
+            "ck_proyectos_latitud_rango",
+            "proyectos", "latitud IS NULL OR (latitud >= -90 AND latitud <= 90)",
+        )
+    if "ck_proyectos_longitud_rango" not in existing_checks:
+        op.create_check_constraint(
+            "ck_proyectos_longitud_rango",
+            "proyectos", "longitud IS NULL OR (longitud >= -180 AND longitud <= 180)",
+        )
+    if "ck_proyectos_altitud_msnm_rango" not in existing_checks:
+        op.create_check_constraint(
+            "ck_proyectos_altitud_msnm_rango",
+            "proyectos", "altitud_msnm IS NULL OR (altitud_msnm >= -100 AND altitud_msnm <= 6000)",
+        )
+
+    _CORRECCIONES_PLAUSIBILIDAD = {20, 26}
     for proyecto_id, (lat, lon) in _BACKFILL_LATLON.items():
         conn.execute(
             sa.text(
@@ -115,8 +135,9 @@ def upgrade():
             {"lat": lat, "lon": lon, "id": proyecto_id},
         )
     for proyecto_id, altitud in _BACKFILL_ALTITUD.items():
+        clausula_id = "" if proyecto_id in _CORRECCIONES_PLAUSIBILIDAD else " AND altitud_msnm IS NULL"
         conn.execute(
-            sa.text("UPDATE proyectos SET altitud_msnm = :a WHERE id = :id AND altitud_msnm IS NULL"),
+            sa.text(f"UPDATE proyectos SET altitud_msnm = :a WHERE id = :id{clausula_id}"),
             {"a": altitud, "id": proyecto_id},
         )
 

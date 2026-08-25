@@ -27,9 +27,6 @@ class Frontera(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True)
-    frontera_gemela_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
-    agrupada_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
-    embebida_bajo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id"), nullable=True, index=True)
 
     # unique=True se reemplazó por un índice único parcial case-insensitive
     # (ver migración 077) -- una fila borrada libera su código para que otra

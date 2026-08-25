@@ -121,9 +121,7 @@ class FronteraBase(BaseModel):
 
 
 class FronteraCreate(FronteraBase):
-    frontera_gemela_id: Optional[int] = None
-    agrupada_bajo_id: Optional[int] = None
-    embebida_bajo_id: Optional[int] = None
+    pass
 
 
 class FronteraUpdate(BaseModel):
@@ -236,11 +234,6 @@ class FronteraUpdate(BaseModel):
     factor_ajuste: Optional[float] = None
     factor_perdidas_frontera_principal: Optional[float] = None
 
-    # Self-referential FK
-    frontera_gemela_id: Optional[int] = None
-    agrupada_bajo_id: Optional[int] = None
-    embebida_bajo_id: Optional[int] = None
-
     # Clasificacion industrial
     codigo_ciiu: Optional[str] = None
     clasificacion_industrial_general: Optional[str] = None
@@ -251,9 +244,6 @@ class FronteraOut(FronteraBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    frontera_gemela_id: Optional[int] = None
-    agrupada_bajo_id: Optional[int] = None
-    embebida_bajo_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

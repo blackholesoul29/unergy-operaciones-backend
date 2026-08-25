@@ -14,7 +14,6 @@ adivinar que adivinar mal).
 
 Usado por:
   - app/utils/proyecto_matching.py  (find_proyecto_by_name, con sesión de BD)
-  - scripts/cargar_fronteras_gescon.py  (match_proyecto, vía API externa)
 """
 import re
 import unicodedata

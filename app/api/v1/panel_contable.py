@@ -809,6 +809,65 @@ def contraste_api_vs_excel(
             "proyectos": salida}
 
 
+# ── Estado de Resultados propio ─────────────────────────────────────────────────
+
+@router.get("/{panel_id}/estado-resultados")
+def descargar_estado_resultados(
+    panel_id: int,
+    inversionista: str | None = Query(
+        None, description="Solo la parte de este inversionista; vacío = el 100%"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """El Estado de Resultados del panel, en Excel.
+
+    La tabla diaria se arma con los dos históricos de la API: los despachos dan
+    generación y venta, y el consumo por hora da la importación. Verificado
+    contra 2026-07: los totales de la tabla cuadran al peso con los mensuales que
+    reporta la API.
+    """
+    from fastapi.responses import Response
+
+    from app.services.er_diario import construir_tabla_diaria
+    from app.services.er_export import generar_er_xlsx
+
+    panel = (
+        db.query(PanelContable)
+        .options(selectinload(PanelContable.lineas))
+        .filter(PanelContable.id == panel_id)
+        .first()
+    )
+    if panel is None:
+        raise HTTPException(404, "Panel no encontrado")
+
+    proyecto = db.get(Proyecto, panel.proyecto_id)
+    topico = proyecto.topico_liquidaciones or proyecto.sub_project
+    _, anio, mes = _normalizar_periodo(panel.periodo)
+
+    diario: list[dict] = []
+    if topico:
+        try:
+            diario = construir_tabla_diaria(
+                despachos=liquidaciones_api.listar_liquidaciones_mercado(
+                    year=anio, month=mes, project=topico),
+                consumos=liquidaciones_api.listar_contratos_despachados(
+                    year=anio, month=mes, project=topico),
+            )
+        except liquidaciones_api.LiquidacionesAPIError:
+            # Los totales del ER salen de las líneas del panel, no de la tabla
+            # diaria: que la API no responda no debe impedir descargarlo.
+            logger.warning("Sin datos diarios para el ER de %s (%s)", topico, panel.periodo)
+
+    contenido = generar_er_xlsx(panel, proyecto.nombre_comercial, diario, inversionista)
+    sufijo = f" - {inversionista}" if inversionista else ""
+    nombre = f"Estado resultados {proyecto.nombre_comercial} {panel.periodo}{sufijo}.xlsx"
+    return Response(
+        contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
 # ── Clasificación de liquidación por período ────────────────────────────────────
 
 @router.get("/clasificacion")

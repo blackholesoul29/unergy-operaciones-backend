@@ -2,14 +2,16 @@ from pydantic import BaseModel, ConfigDict
 from datetime import date, datetime
 from typing import Optional
 
+from app.models.fronteras import TipoFronteraEnum, EstadoFronteraEnum
+
 
 class FronteraBase(BaseModel):
     proyecto_id: Optional[int] = None
     codigo_frontera: Optional[str] = None
     nombre_frontera: str
     codigo_propio: Optional[str] = None
-    tipo_frontera: str
-    estado: Optional[str] = "activa"
+    tipo_frontera: TipoFronteraEnum
+    estado: Optional[EstadoFronteraEnum] = EstadoFronteraEnum.activa
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
@@ -130,8 +132,8 @@ class FronteraUpdate(BaseModel):
     codigo_frontera: Optional[str] = None
     nombre_frontera: Optional[str] = None
     codigo_propio: Optional[str] = None
-    tipo_frontera: Optional[str] = None
-    estado: Optional[str] = None
+    tipo_frontera: Optional[TipoFronteraEnum] = None
+    estado: Optional[EstadoFronteraEnum] = None
     quoia_border_id: Optional[int] = None
     fecha_registro_asic: Optional[date] = None
     fecha_primer_registro_asic: Optional[date] = None
@@ -285,7 +287,7 @@ class FronteraQuoiaConfirmar(BaseModel):
     proyecto_id: int
     nombre_frontera: Optional[str] = None
     codigo_propio: Optional[str] = None
-    tipo_frontera: Optional[str] = None
+    tipo_frontera: Optional[TipoFronteraEnum] = None
 
 
 class FronteraQuoiaIgnorar(BaseModel):

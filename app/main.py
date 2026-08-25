@@ -683,21 +683,6 @@ _PENDING_DDLS = [
     # migration — ASIC ↔ PPA foreign key
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS contrato_ppa_id BIGINT REFERENCES ppa_contratos(id)",
     "CREATE INDEX IF NOT EXISTS ix_asic_contrato_ppa ON asic_solicitudes (contrato_ppa_id) WHERE contrato_ppa_id IS NOT NULL",
-    # migration — liquidacion_xm_datos (datos XM por frontera para PPA/GD)
-    """CREATE TABLE IF NOT EXISTS liquidacion_xm_datos (
-        id BIGSERIAL PRIMARY KEY,
-        liquidacion_id BIGINT NOT NULL REFERENCES liquidaciones(id) ON DELETE CASCADE,
-        frontera_id BIGINT REFERENCES fronteras(id) ON DELETE SET NULL,
-        tipo_venta TEXT NOT NULL,
-        energia_kwh NUMERIC(14,3) NOT NULL,
-        tarifa_aplicada_kwh NUMERIC(12,6) NOT NULL,
-        valor_bruto_cop NUMERIC(18,2) NOT NULL,
-        referencia_factura_xm VARCHAR(100),
-        fecha_factura_xm DATE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_liq ON liquidacion_xm_datos (liquidacion_id)",
-    "CREATE INDEX IF NOT EXISTS ix_liquidacion_xm_datos_frt ON liquidacion_xm_datos (frontera_id) WHERE frontera_id IS NOT NULL",
     # migration — fecha_fin_representacion en proyectos
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_fin_representacion DATE",
     # migration (058) — generación mensual promedio por proyecto, para no depender

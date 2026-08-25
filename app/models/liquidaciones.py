@@ -133,7 +133,6 @@ class Liquidacion(Base):
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="liquidaciones")
     generado_por: Mapped["Usuario"] = relationship("Usuario", back_populates="liquidaciones")
     costos: Mapped[List["LiquidacionCosto"]] = relationship("LiquidacionCosto", back_populates="liquidacion")
-    xm_datos: Mapped[List["LiquidacionXMDato"]] = relationship("LiquidacionXMDato", back_populates="liquidacion")
     mandatos: Mapped[List["LiquidacionMandato"]] = relationship("LiquidacionMandato", back_populates="liquidacion")
     facturas: Mapped[List["LiquidacionFactura"]] = relationship("LiquidacionFactura", back_populates="liquidacion")
 
@@ -153,28 +152,6 @@ class LiquidacionCosto(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="costos")
-
-
-class LiquidacionXMDato(Base):
-    __tablename__ = "liquidacion_xm_datos"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    liquidacion_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("liquidaciones.id"), nullable=False, index=True)
-    # RESTRICT explicito (migracion 083, antes era el NO ACTION implicito de
-    # Postgres -- mismo efecto practico, pero sin depender de un default sin
-    # documentar) -- dato financiero de liquidacion, igual criterio que
-    # reporte_energia_generacion/consumo/exclusion.
-    frontera_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fronteras.id", ondelete="RESTRICT"), nullable=True, index=True)
-    tipo_venta: Mapped[str] = mapped_column(SAEnum(TipoVentaLiqEnum, name="tipo_venta_xm_enum", create_constraint=False), nullable=False)
-    energia_kwh: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
-    tarifa_aplicada_kwh: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False)
-    valor_bruto_cop: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
-    referencia_factura_xm: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    fecha_factura_xm: Mapped[date | None] = mapped_column(Date, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    liquidacion: Mapped["Liquidacion"] = relationship("Liquidacion", back_populates="xm_datos")
-    frontera: Mapped["Frontera | None"] = relationship("Frontera", back_populates="xm_datos")
 
 
 class LiquidacionMandato(Base):

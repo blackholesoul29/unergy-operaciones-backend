@@ -65,7 +65,6 @@ class Frontera(Base):
 
     # Ubicación
     centro_poblado: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)

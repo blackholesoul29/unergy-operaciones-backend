@@ -38,7 +38,6 @@ class FronteraBase(BaseModel):
 
     # Ubicación
     centro_poblado: Optional[str] = None
-    direccion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
     longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None
@@ -123,7 +122,6 @@ class FronteraUpdate(BaseModel):
 
     # Ubicacion
     centro_poblado: Optional[str] = None
-    direccion: Optional[str] = None
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
     longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = None
@@ -192,6 +190,11 @@ class FronteraOut(FronteraBase):
     # coincidian donde ambos tenian dato, el resto eran diferencias de
     # formato/nivel de detalle, no datos contradictorios).
     proyecto_municipio: Optional[str] = None
+    # Reemplaza a Frontera.direccion (eliminado 2026-08-25). A diferencia de
+    # los demas campos de ubicacion, NO era el mismo texto (0/45 identicas
+    # donde ambas tenian dato) -- son dos transcripciones independientes del
+    # mismo sitio; Proyecto.direccion_vereda gana siempre de aca en adelante.
+    proyecto_direccion: Optional[str] = None
     # Basado en las últimas corridas del pipeline Reporte Energía
     # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
     # cubre todas las fronteras de generación, no solo las que tienen

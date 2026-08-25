@@ -241,7 +241,6 @@ def create_frontera(
             existing.deleted_at = None
             db.commit()
             _sync_operador_red_para_proyecto(db, existing.proyecto_id)
-            db.refresh(existing)
             return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == existing.id).first(), db)
 
     if not forzar:
@@ -268,7 +267,6 @@ def create_frontera(
         db.rollback()
         raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
-    db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
 
@@ -378,7 +376,6 @@ def update_frontera(
         db.rollback()
         raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, f.proyecto_id)
-    db.refresh(f)
     return _to_out(
         db.query(Frontera)
         .options(*_FRONTERA_OPTS)
@@ -579,7 +576,6 @@ def confirmar_frontera_quoia(
         db.rollback()
         raise HTTPException(409, "Ya existe una frontera con ese codigo_frontera (creada justo ahora por otra solicitud)")
     _sync_operador_red_para_proyecto(db, obj.proyecto_id)
-    db.refresh(obj)
     return _to_out(db.query(Frontera).options(*_FRONTERA_OPTS).filter(Frontera.id == obj.id).first(), db)
 
 

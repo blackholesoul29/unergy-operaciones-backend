@@ -560,6 +560,16 @@ def _guardar_panel(
     if not invs:
         invs = [{"id": None, "nombre": "Sin inversionistas", "fraccion": 1.0, "pct": 100.0}]
 
+    # Un reparto que no suma 100% se lleva plata a ninguna parte o la duplica, y
+    # sin este aviso se dividiría en silencio. Puede pasar si un inversionista
+    # termina a mitad de mes: el saliente y el entrante se traslapan y suman 200%.
+    suma_pct = sum(i["pct"] or 0 for i in invs)
+    if abs(suma_pct - 100) >= 0.6:
+        logger.warning(
+            "Reparto de %s en %s suma %.2f%% entre %d inversionistas, no 100%%",
+            proyecto_id, periodo, suma_pct, len(invs),
+        )
+
     orden = 0
     for inv in invs:
         frac = inv["fraccion"] if inv["fraccion"] is not None else 0.0

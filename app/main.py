@@ -1348,6 +1348,25 @@ _PENDING_DDLS = [
     #
     # El INSERT es idempotente por el NOT EXISTS: al correr en cada arranque, sin
     # esa guarda crearía un contrato nuevo cada vez.
+    # Sabana de Torres no tenía ningún inversionista cargado, así que su panel
+    # repartía todo a una línea "Sin inversionistas". Es Solenium al 100%
+    # (confirmado con Jessica el 2026-08-25).
+    #
+    # Se ata por NIT y no por id: hay DOS clientes Solenium duplicados, el 23 con
+    # NIT y el 28 sin él, y el que se usa en los demás repartos (Merengue, La Paz
+    # Leyenda, San Diego Sur, El Son) es el que tiene NIT.
+    #
+    # Sin fecha_inicio: no se sabe desde cuándo, y NULL significa "activo siempre",
+    # que es lo correcto mientras no haya un relevo que registrar.
+    """INSERT INTO proyecto_inversionistas
+              (proyecto_id, cliente_id, porcentaje_participacion, es_patrimonio_autonomo)
+         SELECT p.id, c.id, 1.0, FALSE
+           FROM proyectos p
+           CROSS JOIN clientes c
+          WHERE p.nombre_comercial LIKE 'MiniGranja 0033 - Sabana de Torres%'
+            AND c.nit_cedula = '901.097.244-5'
+            AND NOT EXISTS (SELECT 1 FROM proyecto_inversionistas pi
+                             WHERE pi.proyecto_id = p.id)""",
     # La clasificación NEU/Nitro es POR PERÍODO y en 2026-07 nadie la cargó: el
     # último registro es de junio. Sin ella esos proyectos se tratarían como
     # normales y se armarían desde la API, que es justo lo que no debe pasarles.

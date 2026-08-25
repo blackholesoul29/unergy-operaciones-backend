@@ -88,15 +88,36 @@ def _ultimas_generaciones(db: Session, frontera_ids: list[int]) -> dict[int, lis
     return ultimas
 
 
-def _to_out(f: Frontera, db: Session, corridas_generacion: list | None = "sin_dato") -> FronteraOut:
+def _clientes_cgm_por_proyecto(db: Session, proyecto_ids: list[int]) -> dict[int, list[dict]]:
+    """{proyecto_id: [{"id", "nombre", "correos"}]} para tipo 'cgm', UNA VEZ
+    por proyecto distinto -- varias fronteras del mismo proyecto (frecuente:
+    generación + consumo de la misma planta) antes repetían exactamente la
+    misma consulta por cada fila."""
+    return {
+        pid: [
+            {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
+            for c in get_clientes_contacto(db, "cgm", pid)
+        ]
+        for pid in {pid for pid in proyecto_ids if pid is not None}
+    }
+
+
+def _to_out(
+    f: Frontera, db: Session,
+    corridas_generacion: list | None = "sin_dato",
+    clientes_cgm: list[dict] | None = "sin_dato",
+) -> FronteraOut:
     d = FronteraOut.model_validate(f)
     if f.proyecto:
         d.proyecto_nombre = f.proyecto.nombre_comercial
         d.proyecto_fecha_inicio_comercializacion = f.proyecto.fecha_inicio_comercializacion
-        d.clientes_cgm = [
-            {**c, "correos": get_contactos(db, "cgm", cliente_id=c["id"])}
-            for c in get_clientes_contacto(db, "cgm", f.proyecto_id)
-        ]
+        # "sin_dato" (default): no se pidió en batch -- se consulta puntual
+        # (endpoints de un solo objeto). Lista pasada desde list_fronteras
+        # (aunque sea vacía) significa "ya se consultó en batch".
+        d.clientes_cgm = (
+            _clientes_cgm_por_proyecto(db, [f.proyecto_id]).get(f.proyecto_id, [])
+            if clientes_cgm == "sin_dato" else clientes_cgm
+        )
     if f.operador:
         d.operador_red_id = f.operador.id
         d.operador_comercial = f.operador.nombre_comercial or f.operador.nombre_legal
@@ -144,7 +165,11 @@ def list_fronteras(
         q = q.filter(Frontera.estado == estado)
     fronteras = q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()
     generaciones = _ultimas_generaciones(db, [f.id for f in fronteras])
-    return [_to_out(f, db, generaciones.get(f.id)) for f in fronteras]
+    clientes_cgm = _clientes_cgm_por_proyecto(db, [f.proyecto_id for f in fronteras])
+    return [
+        _to_out(f, db, generaciones.get(f.id), clientes_cgm.get(f.proyecto_id, []))
+        for f in fronteras
+    ]
 
 
 # ── Create ────────────────────────────────────────────────────────────────────

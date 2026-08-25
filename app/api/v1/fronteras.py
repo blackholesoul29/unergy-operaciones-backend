@@ -16,7 +16,7 @@ from app.schemas.fronteras import (
     FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
-from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
+from app.services.mgs.gaia_client import GaiaClient, _mgs_number, _get_dynamic_maps, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
 from app.utils.nombre_matching import mejor_candidato
@@ -330,6 +330,9 @@ def debug_quoia_border(frt_code: str = Query(...), _=Depends(get_current_user)):
         "total_borders_en_quoia": len(borders),
         "encontrado": match is not None,
         "detalle": match,
+        # Si esto es True, "encontrado": false no significa que el código no
+        # exista -- significa que no se pudo preguntar (ver GaiaClient._get()).
+        "fallo_consulta_quoia": gaia.ultima_llamada_fallo,
     }
 
 
@@ -499,10 +502,10 @@ def create_lecturas_bulk(
 
 # ── Fronteras pendientes de Quoia (detectar + confirmar, nunca auto-escribir) ──
 
-def _iter_borders_frt(gaia: GaiaClient):
+def _iter_borders_frt(borders: list[dict]):
     """Yield (frt_code_lower, categoria, nombre_quoia, frt_meta) para cada
     frt_generation/frt_consumption de cada border de Quoia."""
-    for border in gaia.get_all_borders():
+    for border in borders:
         nombre = (border.get("name") or "").strip()
         for key, categoria in (("frt_generation", "generacion"), ("frt_consumption", "consumo")):
             frt = border.get(key)
@@ -523,6 +526,12 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
     marcados como ignorados -- para revisar y confirmar manualmente, nunca
     se crean solos."""
     gaia = _get_gaia()
+    borders = gaia.get_all_borders()
+    if gaia.ultima_llamada_fallo:
+        # Sin esto, una caída de Quoia se veía igual que "todo ya está
+        # registrado" (lista vacía, 200 OK) -- diagnóstico de Fronteras,
+        # 2026-08-24.
+        raise HTTPException(503, "No se pudo consultar Quoia -- intenta de nuevo en un momento")
 
     # Solo fronteras VIVAS cuentan como "ya registradas" -- una borrada libera
     # su código, así que su border de Quoia vuelve a aparecer acá para
@@ -537,7 +546,7 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
 
     pendientes: list[FronteraQuoiaPendiente] = []
     vistos: set[str] = set()
-    for frt_code, categoria, nombre_quoia, _frt in _iter_borders_frt(gaia):
+    for frt_code, categoria, nombre_quoia, _frt in _iter_borders_frt(borders):
         if frt_code in existentes or frt_code in ignorados or frt_code in vistos:
             continue
         vistos.add(frt_code)
@@ -583,8 +592,12 @@ def confirmar_frontera_quoia(
     # excluido de /quoia/pendientes la próxima vez que otro código se ignore.
     db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == frt_code.lower()).delete()
 
+    borders = gaia.get_all_borders()
+    if gaia.ultima_llamada_fallo:
+        raise HTTPException(503, "No se pudo consultar Quoia -- intenta de nuevo en un momento")
+
     match = None
-    for code, categoria, nombre_quoia, frt in _iter_borders_frt(gaia):
+    for code, categoria, nombre_quoia, frt in _iter_borders_frt(borders):
         if code == frt_code.lower():
             match = (categoria, nombre_quoia, frt)
             break
@@ -688,6 +701,14 @@ def _backfill_medidor_info(db: Session, dry_run: bool = True) -> dict:
     fronteras que ya existen pero les falta ese dato. Nunca pisa un campo que
     ya tenga valor -- solo llena huecos."""
     gaia = _get_gaia()
+    # Se fuerza la carga de los mapas ANTES del loop (en vez de dejar que el
+    # primer get_frt_meter_info() de la primera fila la dispare sola) para
+    # poder distinguir acá mismo una caída real de Quoia de "esta frontera no
+    # tiene medidor registrado" -- antes ambas terminaban en "sin_info_en_quoia".
+    _get_dynamic_maps(gaia)
+    if gaia.ultima_llamada_fallo:
+        raise HTTPException(503, "No se pudo consultar Quoia -- intenta de nuevo en un momento")
+
     fronteras = db.query(Frontera).filter(
         Frontera.codigo_frontera.isnot(None),
         or_(

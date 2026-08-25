@@ -18,11 +18,16 @@ from app.models.fronteras import Frontera
 from app.services.mgs.gaia_client import GaiaClient
 
 
-def _mapa_init_dates(gaia: GaiaClient) -> dict[str, str]:
+def _mapa_init_dates(gaia: GaiaClient) -> dict[str, str] | None:
     """frt_code (minusculas) -> init_date (string YYYY-MM-DD), de todos los
-    borders de Quoia (generacion y consumo)."""
+    borders de Quoia (generacion y consumo). None si la consulta a Quoia
+    falló -- distinto de {} (Quoia respondió pero sin bordes), para no
+    confundir una caída de Quoia con "ningún código tiene init_date"."""
+    borders = gaia.get_all_borders()
+    if gaia.ultima_llamada_fallo:
+        return None
     mapa: dict[str, str] = {}
-    for border in gaia.get_all_borders():
+    for border in borders:
         for key in ("frt_generation", "frt_consumption"):
             frt = border.get(key)
             if not frt:
@@ -40,6 +45,8 @@ def backfill_fecha_registro_asic(db: Session, apply: bool = False, force: bool =
         return {"ok": False, "error": "Credenciales de Gaia/Quoia no configuradas (GAIA_USER/GAIA_PASS)"}
 
     init_dates = _mapa_init_dates(gaia)
+    if init_dates is None:
+        return {"ok": False, "error": "No se pudo consultar Quoia -- intenta de nuevo en un momento"}
 
     q = db.query(Frontera).filter(
         Frontera.deleted_at.is_(None),

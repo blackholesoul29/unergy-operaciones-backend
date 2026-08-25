@@ -85,9 +85,21 @@ def _get_dynamic_maps(gaia: "GaiaClient") -> dict | None:
         return _dynamic_cache
     try:
         borders = gaia.get_all_borders()
+        # get_all_borders() y get_all_nodes() nunca lanzan (_get() ya traga
+        # sus propias excepciones) -- pero cada una resetea
+        # `gaia.ultima_llamada_fallo` al empezar, así que si la primera
+        # falla y la segunda tiene éxito, el estado final del atributo
+        # ocultaría la falla real. Se guarda aparte para no perderla.
+        fallo_borders = gaia.ultima_llamada_fallo
         nodes = gaia.get_all_nodes()
+        if fallo_borders:
+            gaia.ultima_llamada_fallo = True
     except Exception as exc:
         logger.warning("Dynamic node map fetch failed, using stale cache: %s", exc)
+        gaia.ultima_llamada_fallo = True
+        return _dynamic_cache
+    if gaia.ultima_llamada_fallo:
+        logger.warning("Dynamic node map fetch failed, using stale cache")
         return _dynamic_cache
 
     # meter_id → node_id, node_id → {marca, modelo, serie}
@@ -279,6 +291,16 @@ class GaiaClient:
         self._refresh_token: str | None = None
         self._token_time: float = 0
         self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
+        # `_get()` traga cualquier excepción y devuelve None -- indistinguible
+        # de "no hay dato" para quien llama. Esta bandera se resetea a False
+        # al INICIO de cada _get() y solo queda en True si esa llamada
+        # específica falló (red, timeout, error HTTP, o no se pudo
+        # autenticar) -- nunca por un 404 real. Pensada para los pocos
+        # llamadores que necesitan distinguir "Quoia dice que no hay nada" de
+        # "no se pudo preguntar" (ver /fronteras/quoia/pendientes y los
+        # backfills, que antes reportaban huecos falsos durante una caída de
+        # Quoia -- diagnóstico de Fronteras, 2026-08-24).
+        self.ultima_llamada_fallo: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -327,8 +349,10 @@ class GaiaClient:
         return {"Authorization": f"Bearer {self._access_token}"}
 
     def _get(self, url: str, params: dict | None = None) -> dict | list | None:
+        self.ultima_llamada_fallo = False
         self._ensure_token()
         if not self._access_token:
+            self.ultima_llamada_fallo = True
             return None
         try:
             resp = self._http.get(url, headers=self._headers(), params=params)
@@ -337,6 +361,7 @@ class GaiaClient:
                 self._access_token = None
                 self._authenticate()
                 if not self._access_token:
+                    self.ultima_llamada_fallo = True
                     return None
                 resp = self._http.get(url, headers=self._headers(), params=params)
             if resp.status_code == 404:
@@ -345,6 +370,7 @@ class GaiaClient:
             return resp.json()
         except Exception as exc:
             logger.warning("gaia request failed url=%s: %s", url, exc)
+            self.ultima_llamada_fallo = True
             return None
 
     # ── Public methods ─────────────────────────────────────────────────────────

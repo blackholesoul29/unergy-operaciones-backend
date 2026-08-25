@@ -66,11 +66,14 @@ def _proyecto(db, **kw):
 
 class _GaiaFalso:
     """Un solo border de Quoia, controlado por el test."""
-    def __init__(self, borders):
+    def __init__(self, borders, fallo=False):
         self._borders = borders
+        self.ultima_llamada_fallo = False
+        self._fallo = fallo
 
     def get_all_borders(self):
-        return self._borders
+        self.ultima_llamada_fallo = self._fallo
+        return [] if self._fallo else self._borders
 
 
 def _border(frt_code, categoria="frt_generation", nombre="Planta X", init_date=None):
@@ -290,3 +293,22 @@ def test_confirmar_rechaza_nombre_muy_parecido_a_otra_frontera(db, monkeypatch):
         )
     assert exc.value.status_code == 409
     assert db.query(Frontera).count() == 1
+
+
+# ── Falla de Quoia no debe verse como "todo en orden" (2026-08-24) ─────────────
+
+def test_pendientes_devuelve_503_si_quoia_esta_caido_en_vez_de_lista_vacia(db, monkeypatch):
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso([], fallo=True))
+
+    with pytest.raises(HTTPException) as exc:
+        api.fronteras_quoia_pendientes(db=db, _=ADMIN)
+    assert exc.value.status_code == 503
+
+
+def test_confirmar_devuelve_503_si_quoia_esta_caido_en_vez_de_404(db, monkeypatch):
+    proy = _proyecto(db)
+    monkeypatch.setattr(api, "_get_gaia", lambda: _GaiaFalso([], fallo=True))
+
+    with pytest.raises(HTTPException) as exc:
+        api.confirmar_frontera_quoia("frt00123", FronteraQuoiaConfirmar(proyecto_id=proy.id), db=db, _=ADMIN)
+    assert exc.value.status_code == 503

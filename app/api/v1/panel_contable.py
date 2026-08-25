@@ -374,11 +374,9 @@ async def cargar_er(
     ]
 
     # Clasificación del período: proyecto_id → tipo (default 'normal').
-    clasif_map = {
-        c.proyecto_id: c.tipo
-        for c in db.query(ClasificacionLiquidacion)
-        .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
-    }
+    # Hereda del período anterior, igual que el resto: si una planta NEU no se
+    # reclasificó este mes, su Excel tiene que seguir entrando.
+    clasif_map = clasificacion_vigente(db, periodo_norm)
 
     # Mapeos guardados: proyecto_id → {concepto_norm: {hoja, celda}}. Si existe un
     # mapeo confirmado para (proyecto, concepto), el parser lee ESA celda.
@@ -596,6 +594,32 @@ class CargarPeriodoIn(BaseModel):
     version: str = "txf"
 
 
+def clasificacion_vigente(db: Session, periodo: str) -> dict[int, str]:
+    """`{proyecto_id: tipo}` para el período, heredando del anterior.
+
+    La clasificación NEU/Nitro se guarda por período, pero son plantas muy
+    estables: lo normal es que un proyecto siga siendo NEU mes tras mes. Exigir
+    que alguien la recargue cada mes convierte un olvido en una liquidación mal
+    armada -- pasó en 2026-07, donde el último registro era de junio y los cuatro
+    NEU habrían pasado por el camino de la API.
+
+    Se toma el registro más reciente ANTERIOR o igual al período, así que
+    reclasificar un mes concreto sigue mandando y no lo pisa la herencia. Y no se
+    hereda del futuro: clasificar agosto no cambia cómo se armó julio.
+    """
+    filas = (
+        db.query(ClasificacionLiquidacion)
+        .filter(ClasificacionLiquidacion.periodo <= periodo)
+        .all()
+    )
+    vigente: dict[int, tuple[str, str]] = {}
+    for c in filas:
+        anterior = vigente.get(c.proyecto_id)
+        if anterior is None or c.periodo > anterior[0]:
+            vigente[c.proyecto_id] = (c.periodo, c.tipo)
+    return {pid: tipo for pid, (_, tipo) in vigente.items()}
+
+
 def _normalizar_periodo(periodo: str) -> tuple[str, int, int]:
     """`2026-7` y `2026-07` son el mismo mes. Devuelve (YYYY-MM, año, mes)."""
     try:
@@ -632,12 +656,9 @@ def cargar_periodo(
     except liquidaciones_api.LiquidacionesAPIError as exc:
         raise HTTPException(502, str(exc))
 
-    # Un proyecto sin registro de clasificación es 'normal'.
-    clasif = {
-        c.proyecto_id: c.tipo
-        for c in db.query(ClasificacionLiquidacion)
-        .filter(ClasificacionLiquidacion.periodo == periodo).all()
-    }
+    # Hereda del período anterior: son plantas estables y un olvido de
+    # clasificar no puede hacer que un NEU se arme por el camino de la API.
+    clasif = clasificacion_vigente(db, periodo)
     # La API nombra los proyectos por tópico y algunos difieren del de generación.
     por_topico = {
         (p.topico_liquidaciones or p.sub_project): p
@@ -743,11 +764,7 @@ def contraste_api_vs_excel(
         raise HTTPException(502, str(exc))
 
     api_por_topico = {p["project"]: p for p in (er.get("results") or [])}
-    clasif = {
-        c.proyecto_id: c.tipo
-        for c in db.query(ClasificacionLiquidacion)
-        .filter(ClasificacionLiquidacion.periodo == periodo).all()
-    }
+    clasif = clasificacion_vigente(db, periodo)
 
     paneles = (
         db.query(PanelContable)
@@ -810,11 +827,10 @@ def listar_clasificacion(
     except Exception:
         raise HTTPException(422, "El período debe tener formato YYYY-MM")
 
-    asignados = {
-        c.proyecto_id: c.tipo
-        for c in db.query(ClasificacionLiquidacion)
-        .filter(ClasificacionLiquidacion.periodo == periodo_norm).all()
-    }
+    # Lo que REALMENTE se va a usar para armar el período, con la herencia
+    # aplicada: la vista tiene que mostrar lo mismo que hará el Panel, no solo
+    # lo tecleado en ese mes.
+    asignados = clasificacion_vigente(db, periodo_norm)
     # El Panel Contable es SOLO de minigranjas operativas: filtrar para no listar
     # AMC, Acanto, los COLxxx, etc. (mismo filtro que en cargar-er). Además, solo
     # proyectos que REPRESENTAMOS: los que no representamos no se liquidan, así que

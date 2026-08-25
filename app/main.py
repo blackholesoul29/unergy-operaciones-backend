@@ -1361,6 +1361,29 @@ _PENDING_DDLS = [
     "UPDATE proyectos SET topico_liquidaciones = 'mgs18' WHERE sub_project = 'leyenda' AND topico_liquidaciones IS NULL",
     "UPDATE proyectos SET topico_liquidaciones = 'mapale' WHERE sub_project = 'MGS Mapale' AND topico_liquidaciones IS NULL",
     "UPDATE proyectos SET topico_liquidaciones = 'MGS 0012 La Reserva' WHERE sub_project = 'reserva' AND topico_liquidaciones IS NULL",
+    # Altitud consolidada en Proyecto (2026-08-25). Venía de Frontera, que la
+    # perdió al unificarse la geolocalización; el modelo la declaró pero el DDL
+    # se quedó afuera y prod respondía 500 en TODA consulta que tocara
+    # `proyectos` -- SELECT lista las columnas del modelo una por una.
+    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS altitud_msnm INTEGER",
+    # Rellena desde la frontera que ya la tenía: una sola por proyecto, la de
+    # menor id para que el resultado no dependa del orden de lectura.
+    """UPDATE proyectos p SET altitud_msnm = f.altitud_msnm
+         FROM (SELECT DISTINCT ON (proyecto_id) proyecto_id, altitud_msnm
+                 FROM fronteras
+                WHERE altitud_msnm IS NOT NULL
+                ORDER BY proyecto_id, id) f
+        WHERE f.proyecto_id = p.id AND p.altitud_msnm IS NULL""",
+    # El CHECK lo declara el modelo, pero `create_all` no toca tablas que ya
+    # existen. Postgres no admite ADD CONSTRAINT IF NOT EXISTS para CHECK, de
+    # ahí el bloque condicional.
+    """DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                         WHERE conname = 'ck_proyectos_altitud_msnm_rango') THEN
+           ALTER TABLE proyectos ADD CONSTRAINT ck_proyectos_altitud_msnm_rango
+             CHECK (altitud_msnm IS NULL OR (altitud_msnm >= -100 AND altitud_msnm <= 6000));
+         END IF;
+       END $$""",
     # migration — Comercial: envío de la oferta (2026-07-28). fecha_oferta ya
     # existía y guarda el PRIMER envío; aquí viven los toques posteriores, la
     # respuesta del cliente (NULL = nunca respondió) y el PDF en Drive.

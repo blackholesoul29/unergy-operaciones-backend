@@ -13,7 +13,7 @@ from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion
 from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
-    FronteraQuoiaPendiente, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar,
+    FronteraQuoiaPendiente, FronteraQuoiaConfirmar,
 )
 from app.services.mgs.quoia_client import QuoiaClient
 from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
@@ -674,7 +674,6 @@ def confirmar_frontera_quoia(
 @router.post("/quoia/pendientes/{frt_code}/ignorar", status_code=204)
 def ignorar_frontera_quoia(
     frt_code: str,
-    body: FronteraQuoiaIgnorar,
     db: Session = Depends(get_db),
     usuario=Depends(get_current_user),
 ):
@@ -687,7 +686,7 @@ def ignorar_frontera_quoia(
         raise HTTPException(409, "Ya existe una frontera activa con ese codigo_frontera -- no se puede ignorar")
     if db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == code).first():
         return
-    db.add(FronteraQuoiaIgnorada(frt_code=code, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.add(FronteraQuoiaIgnorada(frt_code=code, ignorado_por_usuario_id=usuario.id))
     try:
         db.commit()
     except IntegrityError:

@@ -1491,6 +1491,11 @@ def _fronteras_planta(proyecto) -> list[dict]:
     homónimos de `Proyecto`, la fuente única desde entonces -- se repuntan
     acá en vez de quitarse del dict para no romper a quien integre contra
     estas claves.
+
+    `factor_perdidas`/`es_agrupadora`: columnas de Frontera eliminadas
+    2026-08-25 sin equivalente en Proyecto (no duplicaban nada, eran datos
+    propios de la frontera). A diferencia de las anteriores, sí se quitan
+    del dict -- confirmado que no tienen consumidor externo.
     """
     cap_mw = (
         float(proyecto.potencia_instalada_kwp) / 1000
@@ -1509,13 +1514,11 @@ def _fronteras_planta(proyecto) -> list[dict]:
             "nivel_tension_kv": _num(f.nivel_tension_kv),
             "capacidad_transporte_mw": cap_mw if f.tipo_frontera == "generacion" else None,
             "capacidad_efectiva_mw": cap_mw if f.tipo_frontera == "generacion" else None,
-            "factor_perdidas": _num(f.factor_perdidas),
             "municipio": proyecto.municipio,
             "departamento": proyecto.departamento,
             "operador_red": f.operador.nombre_legal if f.operador else None,
             "operador_red_id": f.operador_red_id,
             "fecha_registro_asic": f.fecha_registro_asic,
-            "es_agrupadora": bool(f.es_agrupadora),
         }
         for f in fronteras
     ]

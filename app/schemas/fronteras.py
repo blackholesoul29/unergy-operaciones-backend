@@ -25,23 +25,16 @@ class FronteraBase(BaseModel):
 
     # Técnico
     tipo_punto_medicion: Optional[int] = None
-    factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[ClaseCtEnum] = None
     clase_pt: Optional[ClasePtEnum] = None
 
     # Agentes
-    representante_anterior: Optional[str] = None
     agente_exportador: Optional[str] = None
     agente_importador: Optional[str] = None
-    nombre_recurso_generacion: Optional[str] = None
-    clasificacion_recurso: Optional[str] = None
 
     # Códigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None
     codigo_sic_submercado_consumo: Optional[str] = None
-    codigo_sic_frontera_generacion: Optional[str] = None
-    codigo_sic_frontera_usuario: Optional[str] = None
-    potencia_maxima_declarada: Optional[float] = Field(default=None, ge=0)
 
     # Medidor principal
     nro_serie_med_ppal: Optional[str] = None
@@ -63,19 +56,6 @@ class FronteraBase(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
-
-    # Agrupación/embebido
-    es_agrupadora: Optional[bool] = False
-    factor_psf: Optional[float] = Field(default=None, ge=0)
-    es_principal_embebido: Optional[bool] = False
-    factor_acordado: Optional[float] = Field(default=None, ge=0)
-    factor_ajuste: Optional[float] = Field(default=None, ge=0)
-    factor_perdidas_frontera_principal: Optional[float] = Field(default=None, ge=0)
-
-    # Clasificación industrial
-    codigo_ciiu: Optional[str] = None
-    clasificacion_industrial_general: Optional[str] = None
-    clasificacion_industrial_especifica: Optional[str] = None
 
 
 class FronteraCreate(FronteraBase):
@@ -101,23 +81,16 @@ class FronteraUpdate(BaseModel):
 
     # Tecnico
     tipo_punto_medicion: Optional[int] = None
-    factor_perdidas: Optional[float] = Field(default=None, gt=0, le=2)
     clase_ct: Optional[ClaseCtEnum] = None
     clase_pt: Optional[ClasePtEnum] = None
 
     # Agentes
-    representante_anterior: Optional[str] = None
     agente_exportador: Optional[str] = None
     agente_importador: Optional[str] = None
-    nombre_recurso_generacion: Optional[str] = None
-    clasificacion_recurso: Optional[str] = None
 
     # Codigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None
     codigo_sic_submercado_consumo: Optional[str] = None
-    codigo_sic_frontera_generacion: Optional[str] = None
-    codigo_sic_frontera_usuario: Optional[str] = None
-    potencia_maxima_declarada: Optional[float] = Field(default=None, ge=0)
 
     # Medidor principal
     nro_serie_med_ppal: Optional[str] = None
@@ -139,19 +112,6 @@ class FronteraUpdate(BaseModel):
     entidad_calibradora_med_resp: Optional[str] = None
     fecha_calibracion_med_resp: Optional[date] = None
     fecha_actualizacion_resp: Optional[date] = None
-
-    # Agrupacion/embebido
-    es_agrupadora: Optional[bool] = None
-    factor_psf: Optional[float] = Field(default=None, ge=0)
-    es_principal_embebido: Optional[bool] = None
-    factor_acordado: Optional[float] = Field(default=None, ge=0)
-    factor_ajuste: Optional[float] = Field(default=None, ge=0)
-    factor_perdidas_frontera_principal: Optional[float] = Field(default=None, ge=0)
-
-    # Clasificacion industrial
-    codigo_ciiu: Optional[str] = None
-    clasificacion_industrial_general: Optional[str] = None
-    clasificacion_industrial_especifica: Optional[str] = None
 
 
 class FronteraOut(FronteraBase):
@@ -215,7 +175,3 @@ class FronteraQuoiaConfirmar(BaseModel):
     proyecto_id: int
     nombre_frontera: Optional[str] = None
     tipo_frontera: Optional[TipoFronteraEnum] = None
-
-
-class FronteraQuoiaIgnorar(BaseModel):
-    motivo: Optional[str] = None

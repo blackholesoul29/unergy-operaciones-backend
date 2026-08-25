@@ -20,7 +20,7 @@ from app.models.base import Base
 import app.models  # noqa: F401 -- registra todos los modelos en Base.metadata
 from app.models.proyectos import Proyecto
 from app.models.fronteras import Frontera, FronteraQuoiaIgnorada
-from app.schemas.fronteras import FronteraCreate, FronteraUpdate, FronteraQuoiaConfirmar, FronteraQuoiaIgnorar
+from app.schemas.fronteras import FronteraCreate, FronteraUpdate, FronteraQuoiaConfirmar
 from app.api.v1 import fronteras as api
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -299,7 +299,7 @@ def test_confirmar_limpia_una_ignorada_colada_durante_la_llamada_a_quoia(db, mon
     gaia = _GaiaFalso(_border("frt00123"))
 
     def _borders_con_ignorar_concurrente():
-        db.add(FronteraQuoiaIgnorada(frt_code="frt00123", motivo="concurrente"))
+        db.add(FronteraQuoiaIgnorada(frt_code="frt00123"))
         db.commit()
         return gaia._borders
 
@@ -327,7 +327,7 @@ def test_ignorar_dos_veces_seguidas_no_revienta_con_500(db, monkeypatch):
     # No debe lanzar -- el resultado esperado es que quede "ignorado" sin
     # excepcion, igual que si ya existiera (el chequeo previo simplemente no
     # alcanzo a verla por la carrera).
-    api.ignorar_frontera_quoia("frt00123", FronteraQuoiaIgnorar(motivo="prueba"), db=db, usuario=ADMIN)
+    api.ignorar_frontera_quoia("frt00123", db=db, usuario=ADMIN)
 
 
 def test_editar_agregando_codigo_frontera_completa_medidor_desde_quoia(db, monkeypatch):
@@ -500,17 +500,16 @@ def test_ignorar_rechaza_si_ya_existe_una_frontera_activa_con_ese_codigo(db):
     db.commit()
 
     with pytest.raises(HTTPException) as exc:
-        api.ignorar_frontera_quoia("frt00123", FronteraQuoiaIgnorar(motivo="prueba"), db=db, usuario=ADMIN)
+        api.ignorar_frontera_quoia("frt00123", db=db, usuario=ADMIN)
     assert exc.value.status_code == 409
     assert db.query(FronteraQuoiaIgnorada).count() == 0
 
 
 def test_ignorar_funciona_igual_si_el_codigo_esta_libre(db):
-    api.ignorar_frontera_quoia("frt00123", FronteraQuoiaIgnorar(motivo="medidor de prueba"), db=db, usuario=ADMIN)
+    api.ignorar_frontera_quoia("frt00123", db=db, usuario=ADMIN)
 
     ignorada = db.query(FronteraQuoiaIgnorada).filter(FronteraQuoiaIgnorada.frt_code == "frt00123").first()
     assert ignorada is not None
-    assert ignorada.motivo == "medidor de prueba"
 
 
 # ── PATCH /fronteras/{id}: mismos chequeos que crear (2026-08-24) ──────────────

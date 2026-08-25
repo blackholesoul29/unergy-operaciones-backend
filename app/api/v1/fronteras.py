@@ -167,6 +167,11 @@ def _to_out(
         d.proyecto_tipo_tecnologia = f.proyecto.tipo_tecnologia
         d.proyecto_municipio = f.proyecto.municipio
         d.proyecto_direccion = f.proyecto.direccion_vereda
+        if f.proyecto.latitud is not None:
+            d.proyecto_latitud = float(f.proyecto.latitud)
+        if f.proyecto.longitud is not None:
+            d.proyecto_longitud = float(f.proyecto.longitud)
+        d.proyecto_altitud_msnm = f.proyecto.altitud_msnm
         # "sin_dato" (default): no se pidió en batch -- se consulta puntual
         # (endpoints de un solo objeto). Lista pasada desde list_fronteras
         # (aunque sea vacía) significa "ya se consultó en batch".

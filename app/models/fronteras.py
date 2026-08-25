@@ -26,11 +26,6 @@ class EstadoFronteraEnum(str, enum.Enum):
 class Frontera(Base):
     __tablename__ = "fronteras"
     __table_args__ = (
-        # Protecciones contra typos de digitacion (ej. latitud=950 en vez de
-        # 9.50) -- rangos verificados contra produccion (2026-08-25, 145
-        # fronteras) antes de agregarlos, para no romper datos reales.
-        CheckConstraint("latitud IS NULL OR (latitud >= -90 AND latitud <= 90)", name="ck_fronteras_latitud_rango"),
-        CheckConstraint("longitud IS NULL OR (longitud >= -180 AND longitud <= 180)", name="ck_fronteras_longitud_rango"),
         CheckConstraint("potencia_maxima_declarada IS NULL OR potencia_maxima_declarada >= 0", name="ck_fronteras_potencia_maxima_declarada_no_negativa"),
         CheckConstraint("transferencia_maxima_kwh IS NULL OR transferencia_maxima_kwh >= 0", name="ck_fronteras_transferencia_maxima_kwh_no_negativa"),
         # factor_perdidas es un multiplicador (energia_real = energia_medida
@@ -65,9 +60,6 @@ class Frontera(Base):
 
     # Ubicación
     centro_poblado: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
-    longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
-    altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Registro ASIC
     registrada_por: Mapped[str | None] = mapped_column(String(255), nullable=True)

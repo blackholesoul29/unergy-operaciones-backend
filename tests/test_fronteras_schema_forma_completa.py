@@ -9,7 +9,7 @@ campos cambia a proposito, este test se actualiza junto con el cambio."""
 from app.schemas.fronteras import FronteraOut
 
 _CAMPOS_ESPERADOS = {
-    "agente_exportador", "agente_importador", "altitud_msnm",
+    "agente_exportador", "agente_importador",
     "centro_poblado",
     "clase_ct", "clase_medidor", "clase_pt",
     "clasificacion_industrial_especifica", "clasificacion_industrial_general",
@@ -25,7 +25,7 @@ _CAMPOS_ESPERADOS = {
     "fecha_cambio_med_ppal", "fecha_cambio_med_resp",
     "fecha_inicio_representacion",
     "fecha_registro_asic", "fecha_ultima_generacion", "generando_actual",
-    "id", "latitud", "longitud", "marca_med_ppal", "marca_med_resp",
+    "id", "marca_med_ppal", "marca_med_resp",
     "modelo_med_ppal", "modelo_med_resp",
     "nivel_tension", "nivel_tension_kv", "nombre_frontera",
     "nombre_recurso_generacion", "nro_serie_med_ppal", "nro_serie_med_resp",
@@ -34,6 +34,7 @@ _CAMPOS_ESPERADOS = {
     "proyecto_fecha_inicio_comercializacion", "proyecto_id", "proyecto_nombre",
     "proyecto_potencia_instalada_mw", "proyecto_departamento", "proyecto_tipo_tecnologia",
     "proyecto_municipio", "proyecto_direccion",
+    "proyecto_latitud", "proyecto_longitud", "proyecto_altitud_msnm",
     "quoia_border_id", "registrada_por",
     "representante_anterior", "representante_frontera",
     "tipo_frontera", "tipo_punto_medicion",

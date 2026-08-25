@@ -38,9 +38,6 @@ class FronteraBase(BaseModel):
 
     # Ubicación
     centro_poblado: Optional[str] = None
-    latitud: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitud: Optional[float] = Field(default=None, ge=-180, le=180)
-    altitud_msnm: Optional[int] = None
 
     # Códigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None
@@ -122,9 +119,6 @@ class FronteraUpdate(BaseModel):
 
     # Ubicacion
     centro_poblado: Optional[str] = None
-    latitud: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitud: Optional[float] = Field(default=None, ge=-180, le=180)
-    altitud_msnm: Optional[int] = None
 
     # Codigos SIC
     codigo_sic_submercado_exportador: Optional[str] = None
@@ -195,6 +189,12 @@ class FronteraOut(FronteraBase):
     # donde ambas tenian dato) -- son dos transcripciones independientes del
     # mismo sitio; Proyecto.direccion_vereda gana siempre de aca en adelante.
     proyecto_direccion: Optional[str] = None
+    # Reemplazan a Frontera.latitud/longitud/altitud_msnm (eliminados
+    # 2026-08-25). altitud_msnm no existia en Proyecto -- se agrego junto
+    # con esta consolidacion.
+    proyecto_latitud: Optional[float] = None
+    proyecto_longitud: Optional[float] = None
+    proyecto_altitud_msnm: Optional[int] = None
     # Basado en las últimas corridas del pipeline Reporte Energía
     # (reporte_energia_generacion), no en fecha_inicio_comercializacion --
     # cubre todas las fronteras de generación, no solo las que tienen

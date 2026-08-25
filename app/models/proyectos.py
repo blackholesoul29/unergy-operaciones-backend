@@ -75,6 +75,17 @@ class Portafolio(Base):
 
 class Proyecto(Base):
     __tablename__ = "proyectos"
+    __table_args__ = (
+        # Frontera tenia esta misma proteccion contra typos de digitacion
+        # (ej. latitud=950 en vez de 9.50) antes de que sus columnas se
+        # consolidaran aca (2026-08-25, ver migracion 094) -- se traslada
+        # para no perderla ahora que Proyecto es la fuente unica. Rango de
+        # altitud generoso (Colombia va de ~0 a ~5800 msnm) para no
+        # bloquear variacion real.
+        CheckConstraint("latitud IS NULL OR (latitud >= -90 AND latitud <= 90)", name="ck_proyectos_latitud_rango"),
+        CheckConstraint("longitud IS NULL OR (longitud >= -180 AND longitud <= 180)", name="ck_proyectos_longitud_rango"),
+        CheckConstraint("altitud_msnm IS NULL OR (altitud_msnm >= -100 AND altitud_msnm <= 6000)", name="ck_proyectos_altitud_msnm_rango"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
@@ -138,6 +149,11 @@ class Proyecto(Base):
     direccion_vereda: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitud: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+    # Sin equivalente en Frontera antes de 2026-08-25 -- se agrega junto con
+    # la consolidacion de latitud/longitud (auditoria de integridad de
+    # Fronteras) para no dejar la altitud como el unico dato de ubicacion
+    # que solo vivia en Frontera.
+    altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
     # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene

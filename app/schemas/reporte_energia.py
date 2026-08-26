@@ -103,6 +103,15 @@ class DetalleFronteraReporte(BaseModel):
     # del medidor de respaldo, auto-detectado) | 'manual' (columna Respaldo
     # de la tabla de corrección, confirmada a mano) | 'estimado' (±1%).
     # Solo Generación.
+    #
+    # EXCEPCIÓN -- medidor_usado == 'cgm' (Caso 1): acá NADA se manda a
+    # Quoia (_reporte_ya_valido() salta el envío entero -- el reporte
+    # automático de Quoia ya es válido, y Quoia calcula su propio Backup
+    # por su cuenta, que nunca vemos ni tocamos). Estos dos campos SÍ se
+    # calculan igual para 'cgm' (ampliado 2026-08-26, por consistencia
+    # visual con Principal en el detalle/tabla) pero ahí son puramente
+    # informativos -- "así se vería si se enviara", no "esto se va a
+    # enviar".
     curva_respaldo_reportada: list[float | None] | None = None
     respaldo_reportado_origen: str | None = None
     # Capacidad efectiva de la frontera (MW) -- referencia visual en el chart

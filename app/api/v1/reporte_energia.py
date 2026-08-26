@@ -453,6 +453,12 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     # antes de que existiera esa columna, se calcula al vuelo igual que
     # antes (mismo criterio de respaldo que /enviar usaría ahora mismo).
     # Solo Generación -- Consumo no tiene estas columnas.
+    #
+    # Si medidor_usado == 'cgm', /enviar en realidad NO manda nada
+    # (_reporte_ya_valido() se lo salta) -- estos dos campos igual se
+    # calculan, por consistencia visual con Principal (ver
+    # curva_respaldo_a_reportar() en utils.py), pero ahí son informativos:
+    # "así se vería", no "esto se va a enviar".
     curva_respaldo_reportada = respaldo_reportado_origen = None
     if es_generacion and rep.curva_final:
         curva_respaldo_reportada = rep.curva_respaldo_final

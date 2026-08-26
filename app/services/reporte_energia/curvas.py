@@ -223,6 +223,7 @@ def curva_medidor_en_vivo(
     fecha_str: str,
     frt_code: str,
     var_name: str = "eae",
+    capacidad_efectiva_mw: float | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Curva EN VIVO (principal, respaldo) de UNA sola variable (eae o iae),
     sin recuperación activa -- pensado para 'Detalle de las fuentes' del
@@ -231,12 +232,19 @@ def curva_medidor_en_vivo(
     trae las 4 curvas (eae+iae x principal+respaldo) de forma secuencial
     porque el clasificador SÍ necesita las 4 -- acá solo hacían falta 2, y
     en paralelo, no en secuencia (era el 4x de más peso en la demora que
-    reportó el usuario al abrir el panel, 2026-08-12)."""
+    reportó el usuario al abrir el panel, 2026-08-12).
+
+    Si se pasa capacidad_efectiva_mw, mismo criterio de plausibilidad que
+    ya usa el resto de la clasificación (ver limite_plausible_kwh() en
+    utils.py) -- un glitch de telemetría también puede colarse acá,
+    inflando la escala del gráfico o disparando un falso aviso de
+    "el medidor cambió" contra un valor corrupto (ver MGS 0010 Villanueva
+    2026-08-26)."""
     node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
     node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
     with ThreadPoolExecutor(max_workers=2) as executor:
-        fut_p = executor.submit(_curva_nodo, gaia, node_p, fecha_str, f"{frt_code}/principal", var_name)
-        fut_r = executor.submit(_curva_nodo, gaia, node_r, fecha_str, f"{frt_code}/respaldo", var_name)
+        fut_p = executor.submit(_curva_nodo, gaia, node_p, fecha_str, f"{frt_code}/principal", var_name, capacidad_efectiva_mw)
+        fut_r = executor.submit(_curva_nodo, gaia, node_r, fecha_str, f"{frt_code}/respaldo", var_name, capacidad_efectiva_mw)
         curva_p, _ = fut_p.result()
         curva_r, _ = fut_r.result()
     return curva_p, curva_r

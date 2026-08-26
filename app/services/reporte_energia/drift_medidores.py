@@ -26,30 +26,40 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.fronteras import Frontera
+from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas
 from app.services.reporte_energia.utils import curva_a_lista, curva_cambio
 
 
-def _revisar_tabla(db: Session, Modelo, gaia, mapa_nodo, borders, fecha: date, var_name: str) -> int:
+def _revisar_tabla(
+    db: Session, Modelo, gaia, mapa_nodo, borders, fecha: date, var_name: str, es_generacion: bool,
+) -> int:
     filas = db.execute(
-        select(Modelo, Frontera)
+        select(Modelo, Frontera, Proyecto)
         .join(Frontera, Frontera.id == Modelo.frontera_id)
+        .join(Proyecto, Proyecto.id == Frontera.proyecto_id, isouter=True)
         .where(Modelo.fecha == fecha, Modelo.revisar_manualmente.is_(False))
     ).all()
 
     marcadas = 0
-    for rep, front in filas:
+    for rep, front, proyecto in filas:
         if not rep.curva_medidor_principal and not rep.curva_medidor_respaldo:
             continue  # nada persistido con qué comparar (Caso CGM sin medidor consultado, o fila vieja)
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if not meta:
             continue
+        # Solo Generación -- Consumo no tiene un concepto de capacidad
+        # efectiva definido todavía (decidido con Sara 2026-08-26).
+        capacidad_efectiva_mw = (
+            float(proyecto.potencia_instalada_kwp) / 1000
+            if es_generacion and proyecto and proyecto.potencia_instalada_kwp is not None else None
+        )
         try:
             curva_p, curva_r = curvas.curva_medidor_en_vivo(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-                str(fecha), front.codigo_frontera, var_name,
+                str(fecha), front.codigo_frontera, var_name, capacidad_efectiva_mw,
             )
         except Exception:
             continue  # el aviso es informativo -- si Quoia falla acá, se sigue con las demás fronteras
@@ -72,8 +82,8 @@ def verificar_drift_medidores(db: Session, fecha: date) -> dict:
     gaia = GaiaClient()
     mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
     borders = curvas.construir_mapa_borders(gaia)
-    marcadas_gen = _revisar_tabla(db, ReporteEnergiaGeneracion, gaia, mapa_nodo, borders, fecha, "eae")
-    marcadas_con = _revisar_tabla(db, ReporteEnergiaConsumo, gaia, mapa_nodo, borders, fecha, "iae")
+    marcadas_gen = _revisar_tabla(db, ReporteEnergiaGeneracion, gaia, mapa_nodo, borders, fecha, "eae", True)
+    marcadas_con = _revisar_tabla(db, ReporteEnergiaConsumo, gaia, mapa_nodo, borders, fecha, "iae", False)
     db.commit()
     return {"generacion": marcadas_gen, "consumo": marcadas_con}
 

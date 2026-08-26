@@ -380,6 +380,11 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     # clasificó (un caso mucho menos común que el del medidor). Se usa
     # directo lo que quedó persistido; si la fila es de antes del fix de
     # persistencia, simplemente no hay curva de Solenium que mostrar acá.
+    capacidad_efectiva_mw = (
+        float(front.proyecto.potencia_instalada_kwp) / 1000
+        if es_generacion and front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
+    )
+
     curva_medidor_ppal_viva = curva_medidor_resp_viva = None
     try:
         gaia = GaiaClient()
@@ -406,7 +411,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
             var_name = "eae" if es_generacion else "iae"
             curva_p, curva_r = curvas.curva_medidor_en_vivo(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-                str(fecha), front.codigo_frontera, var_name,
+                str(fecha), front.codigo_frontera, var_name, capacidad_efectiva_mw,
             )
             curva_medidor_ppal_viva = curva_a_lista(curva_p)
             curva_medidor_resp_viva = curva_a_lista(curva_r)
@@ -491,10 +496,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         curva_respaldo_reportada=curva_respaldo_reportada,
         respaldo_reportado_origen=respaldo_reportado_origen,
-        capacidad_efectiva_mw=(
-            float(front.proyecto.potencia_instalada_kwp) / 1000
-            if es_generacion and front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
-        ),
+        capacidad_efectiva_mw=capacidad_efectiva_mw,
     )
 
 

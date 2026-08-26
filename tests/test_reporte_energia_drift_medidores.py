@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.base import Base
 from app.models.fronteras import Frontera, TipoFronteraEnum
+from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 from app.services.reporte_energia import curvas, drift_medidores
 
@@ -31,7 +32,7 @@ def _jsonb_as_text(element, compiler, **kw):
 def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        Frontera.__table__, ReporteEnergiaGeneracion.__table__, ReporteEnergiaConsumo.__table__,
+        Frontera.__table__, Proyecto.__table__, ReporteEnergiaGeneracion.__table__, ReporteEnergiaConsumo.__table__,
     ])
     s = sessionmaker(bind=engine)()
     yield s
@@ -44,8 +45,10 @@ def _sin_gaia_real(monkeypatch):
     monkeypatch.setattr(curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
 
 
-def _frontera(db, id_=1, codigo="frt001", tipo=TipoFronteraEnum.generacion):
-    front = Frontera(id=id_, nombre_frontera="Test", tipo_frontera=tipo, codigo_frontera=codigo)
+def _frontera(db, id_=1, codigo="frt001", tipo=TipoFronteraEnum.generacion, proyecto_id=None):
+    front = Frontera(
+        id=id_, nombre_frontera="Test", tipo_frontera=tipo, codigo_frontera=codigo, proyecto_id=proyecto_id,
+    )
     db.add(front)
     return front
 
@@ -205,7 +208,7 @@ def test_error_de_quoia_en_una_frontera_no_tumba_las_demas(db, monkeypatch):
         "frt002": {"main_meter": 3, "backup_meter": 4},
     })
 
-    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name):
+    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name, capacidad_efectiva_mw=None):
         if main_id == 1:
             raise RuntimeError("Quoia caído para frt001")
         return _curva_serie([200.0] * 24), _curva_serie([50.0] * 24)
@@ -231,7 +234,7 @@ def test_consumo_usa_iae_y_es_independiente_de_generacion(db, monkeypatch):
                          lambda gaia: {"frt001": {"main_meter": 1, "backup_meter": 2}})
 
     vars_usadas = []
-    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name):
+    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name, capacidad_efectiva_mw=None):
         vars_usadas.append(var_name)
         return _curva_serie([160.0] * 24), _curva_serie([0.0] * 24)
     monkeypatch.setattr(curvas, "curva_medidor_en_vivo", _curva_en_vivo)
@@ -241,3 +244,38 @@ def test_consumo_usa_iae_y_es_independiente_de_generacion(db, monkeypatch):
     assert vars_usadas == ["iae"]
     assert resultado == {"generacion": 0, "consumo": 1}
     assert rep.revisar_manualmente is True
+
+
+def test_capacidad_efectiva_se_propaga_solo_para_generacion(db, monkeypatch):
+    """Villanueva 2026-08-26: el mismo criterio de plausibilidad de la
+    clasificación debe aplicarse a esta consulta en vivo -- pero solo para
+    Generación (Consumo no tiene capacidad efectiva definida, decidido con
+    Sara 2026-08-26)."""
+    db.add(Proyecto(id=1, nombre_comercial="Planta Test", potencia_instalada_kwp=990))
+    _frontera(db, id_=1, codigo="frt001", tipo=TipoFronteraEnum.generacion, proyecto_id=1)
+    _frontera(db, id_=2, codigo="frt002", tipo=TipoFronteraEnum.consumo_auxiliar, proyecto_id=1)
+    db.add(ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 25), caso=2, medidor_usado="principal",
+        curva_medidor_principal=[100.0] * 24, curva_medidor_respaldo=None, revisar_manualmente=False,
+    ))
+    db.add(ReporteEnergiaConsumo(
+        id=1, frontera_id=2, fecha=date(2026, 8, 25), caso="Histórico", medidor_usado="principal",
+        curva_medidor_principal=[80.0] * 24, curva_medidor_respaldo=None, revisar_manualmente=False,
+    ))
+    db.commit()
+    monkeypatch.setattr(curvas, "construir_mapa_borders", lambda gaia: {
+        "frt001": {"main_meter": 1, "backup_meter": 2},
+        "frt002": {"main_meter": 3, "backup_meter": 4},
+    })
+
+    capacidades = []
+    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name, capacidad_efectiva_mw=None):
+        capacidades.append((frt_code, capacidad_efectiva_mw))
+        return _curva_serie([100.0] * 24), _curva_serie([0.0] * 24)
+    monkeypatch.setattr(curvas, "curva_medidor_en_vivo", _curva_en_vivo)
+
+    drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
+
+    capacidades_por_frt = dict(capacidades)
+    assert capacidades_por_frt["frt001"] == 0.99  # 990 kWp / 1000
+    assert capacidades_por_frt["frt002"] is None

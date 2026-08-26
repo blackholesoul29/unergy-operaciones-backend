@@ -115,8 +115,14 @@ class Frontera(Base):
     fecha_actualizacion_resp: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Id interno del border en Quoia -- lo requiere get_border_report_status(),
-    # que no acepta frt_code. Se guarda al confirmar desde /quoia/pendientes
-    # para no tener que resolverlo con una llamada extra en cada reporte CGM.
+    # que no acepta frt_code. Se guarda al confirmar desde /quoia/pendientes,
+    # pensado originalmente para no tener que resolverlo con una llamada
+    # extra en cada reporte CGM -- pero HOY resolver_borders() (reporte_cgm.py)
+    # nunca lo lee: sigue resolviendo en vivo contra el catálogo completo de
+    # Quoia por frt_code (curvas.obtener_borders_crudos(), cacheado 30 min).
+    # Solo 45/145 fronteras activas lo tienen poblado (auditoría CGM
+    # 2026-08-26, finding #6) -- usarlo como fast-path necesitaría antes un
+    # backfill de las que faltan.
     quoia_border_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Soft delete

@@ -229,8 +229,12 @@ def enviar_reporte_cgm(
         proyectos_total = len(_nombres_proyectos(fronteras))
 
         # Filtro opcional a proyectos puntuales dentro de este destinatario --
-        # el frontend siempre manda la selección explícita (nunca None), pero
-        # se respeta None por si algún otro consumidor de la API no lo manda.
+        # el frontend manda None cuando el usuario no seleccionó ningún
+        # proyecto puntual dentro del destinatario (equivale a "sin filtro",
+        # todas sus fronteras -- ver ReporteCGMView.vue, enviarSeleccionados())
+        # y una lista no vacía cuando sí hay una selección explícita.
+        # Corregido 2026-08-26 (auditoría CGM, finding #7): el comentario
+        # anterior decía lo opuesto (que el frontend nunca mandaba None).
         if dest.proyectos is not None:
             proyectos_ids = set(dest.proyectos)
             fronteras = [f for f in fronteras if f.proyecto_id in proyectos_ids]

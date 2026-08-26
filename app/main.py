@@ -824,8 +824,11 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras DROP COLUMN IF EXISTS estado_operacional",
     "DROP TYPE IF EXISTS estado_operacional_enum",
     # migration — drop fronteras.quoia_meter_id: nunca lo leyo ningun servicio
-    # del backend, solo se mostraba/editaba en el frontend; el campo que si
-    # usa el reporte CGM es quoia_border_id, que se mantiene (2026-07-22)
+    # del backend, solo se mostraba/editaba en el frontend; quoia_border_id
+    # (que se mantiene) es un campo distinto -- aunque tampoco lo lee hoy
+    # ningun servicio del reporte CGM, que sigue resolviendo el border en
+    # vivo por frt_code (ver comentario en el modelo Frontera, auditoria CGM
+    # 2026-08-26 finding #6) (2026-07-22)
     "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
     # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",

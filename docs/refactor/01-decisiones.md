@@ -5,6 +5,9 @@ trade-off que acepté. Las marcadas **⚠️** son las que no tengo cerradas o d
 **Criterio general:** lo que ya funciona no se toca. Cuatro decisiones grandes cambian respecto del plan
 inicial, y una queda **abierta a tu confirmación** (D-06, frontera).
 **Cómo leerlo:** las ⚠️ primero — son D-01, D-03, D-04, D-06, D-09, D-11, D-13, D-16.
+**Actualizado el 2026-08-26:** hay un **apéndice al final** que cierra D-06 (frontera) y corrige un
+hueco de D-10 (las tres tarifas de servicio). Lo de abajo se conserva tal como se escribió el
+2026-08-23; el apéndice dice qué quedó superado y por qué.
 
 ---
 
@@ -358,3 +361,154 @@ Guardarlos además como columna crea dos verdades que se van a desincronizar, qu
 un filtro concreto, dime cuál es el filtro y lo dejo como vista o columna generada, no como dato editable.
 Lo que sí quedan como columnas del proyecto son `potencia_ac_kw`, `potencia_dc_kwp` y `altitud_msnm`:
 esos no se derivan de ningún equipo.
+
+---
+---
+
+# Apéndice · 2026-08-26
+
+Todo lo de arriba se escribió el 2026-08-23 contra el estado del repo en `370b9cf`.
+Entre esa fecha y hoy entraron **86 commits**, y una parte grande demolió y reconstruyó
+`fronteras`. Este apéndice **no reescribe** ninguna decisión anterior: las cierra, las corrige
+o las marca como superadas, con la fecha y el motivo.
+
+## D-06 (cierre) · Frontera — la pregunta cambió de forma
+
+**Estado: la pregunta original quedó SIN SENTIDO. Hay una nueva, más pequeña, y sí está abierta.**
+
+### Lo que se cayó de mi propio análisis
+
+El 23 de agosto argumenté que tu 1:1 chocaba con el modelo porque existía maquinaria explícita de
+agrupación y embebido (`frontera_gemela_id`, `agrupada_bajo_id`, `embebida_bajo_id`,
+`es_agrupadora`, `es_principal_embebido`, y cinco factores de reparto). **Ese argumento ya no
+existe, y era peor de lo que yo creía.** La migración 080 borró las tres auto-FK con esta
+verificación: *"los 3 son 0/145 en producción, no tienen `relationship()` en el modelo, y ningún
+query/servicio del backend los usa (confirmado con auditoría de 2 agentes)"*. Y la 097 borró los
+dos booleanos con un dato aún más contundente: *"145/145 en False siempre — nunca tuvieron un
+valor real distinto del default"*.
+
+O sea: **mi principal objeción a tu 1:1 se apoyaba en estructura que nunca se usó en ninguna
+fila.** Queda retirada.
+
+### Pero la respuesta sigue siendo que no es 1:1 — y ahora está documentada
+
+Dos evidencias nuevas, ninguna mía:
+
+1. **La migración 085**, que crea el M2M `contrato_frontera`, lo declara como hecho del dominio:
+   *"una planta puede tener varias Fronteras (generación, consumo, distintos medidores)"*.
+2. **`app/api/v1/reporte_cgm.py:98-124`** construye, por proyecto, un diccionario con **dos
+   ranuras**: `frt_gen` y `frt_con`. Un proyecto tiene rutinariamente dos fronteras, una de
+   generación y una de consumo. El comentario del código nombra un caso real: *"consumo_auxiliar /
+   consumo_propio son el autoconsumo de la misma planta de generación (ej. Sol&Cielo 7 Los Bongos)"*.
+
+Y el modelo lo sostiene: `Proyecto.fronteras` sigue siendo `Mapped[list[...]]` con `uselist=True`
+(`app/models/proyectos.py:236`). El repo **sabe** expresar 1:1 cuando lo quiere —
+`servicio_operacion` y `servicio_representacion` usan `uselist=False` en las líneas 247-248 del
+mismo archivo.
+
+### Por qué tu 1:1 no era un error, sino otro nivel de la misma realidad
+
+En el brief describiste la frontera con cuatro campos: *«código FRT de generación, FRT de consumo,
+código SIC de generación, código SIC de consumo»*. **Eso es exactamente la forma del diccionario que
+`reporte_cgm` arma al vuelo por proyecto.** Los cuatro códigos en un registro.
+
+Tú describes la vista **a nivel de proyecto**; la base guarda la vista **a nivel de frontera**. Las
+dos son ciertas, y el código ya traduce de una a la otra. Por eso la pregunta «¿1:1 o 1:N?» estaba
+mal planteada: **la pregunta real era en qué nivel se almacena**, y la respuesta la dieron los
+hechos — se almacena por frontera, y la vista por proyecto es una proyección.
+
+### Lo que además cambió, y encarece tu opción
+
+Dos de los cuatro códigos que pediste **ya no existen**. La migración 097 los eliminó:
+
+| Campo del brief | Estado hoy |
+|---|---|
+| código FRT de generación | vive como `codigo_frontera` de la fila cuyo `tipo_frontera = 'generacion'` |
+| FRT de consumo | ídem, en la fila de tipo consumo |
+| **código SIC de generación** | **eliminado** (`codigo_sic_frontera_generacion`, tenía 92-94/145 filas con dato, *"sin consumidor"*) |
+| **código SIC de consumo** | **eliminado** (`codigo_sic_frontera_usuario`, ídem). Queda `codigo_sic_submercado_consumo`, que es otra cosa |
+
+Si los quieres de vuelta, es una decisión de re-agregarlos, no de rediseñar la cardinalidad. Y ya
+no hay 101 columnas que fusionar: `fronteras` bajó a **40**, y perdió toda su ubicación (consolidada
+en `Proyecto`), su capacidad y sus factores.
+
+### ⚠️ Lo que sigue abierto, y es mucho más chico
+
+Ya no hace falta decidir la cardinalidad general. Lo único que queda por resolver es si se impone
+**unicidad de la frontera de generación por proyecto**:
+
+```sql
+SELECT proyecto_id, count(*)
+  FROM fronteras
+ WHERE tipo_frontera = 'generacion' AND deleted_at IS NULL
+ GROUP BY 1 HAVING count(*) > 1;
+```
+
+Tres piezas de evidencia apuntan a que devuelve **0 filas**:
+
+- La migración 090 midió que la capacidad de la frontera coincidía con
+  `Proyecto.potencia_instalada_kwp` en **52 de 53** fronteras con dato. Con dos fronteras de
+  generación por planta, cada una llevaría una fracción, no el total.
+- La migración 097 dice que `potencia_maxima_declarada` coincide **1:1, con 0 discrepancias en las
+  94 filas pobladas**, con su equivalente en `Proyecto`.
+- El dict de `reporte_cgm` tiene **una sola** ranura `frt_gen` por proyecto.
+
+**Mi recomendación:** correr esa consulta y, si da 0 filas, imponerlo con un índice único parcial —
+
+```sql
+CREATE UNIQUE INDEX uq_frontera_generacion_por_proyecto
+    ON fronteras (proyecto_id)
+ WHERE tipo_frontera = 'generacion' AND deleted_at IS NULL;
+```
+
+Eso te da el 1:1 que querías **donde de verdad aplica**, sin ilegalizar la frontera de consumo que
+el negocio sí usa, sin fusionar dos filas en una, y sin tocar `reporte_energia_generacion` /
+`reporte_energia_consumo`, que cuelgan de `frontera_id` y quedaron en `ON DELETE RESTRICT` por ser
+historial regulatorio (migración 083).
+
+**Y un bug latente que encontré de paso, independiente de la decisión:** en
+`app/api/v1/reporte_cgm.py:110-115`, `datos["frt_gen"] = f.codigo_frontera` **sobrescribe en
+silencio** si un proyecto tuviera dos fronteras de generación. O eso no puede pasar —y entonces el
+índice único solo formaliza lo que ya es cierto— o el reporte CGM está perdiendo códigos hoy sin
+que nadie lo note. La misma consulta responde las dos cosas. Vale correrla aunque decidas no tocar
+el modelo.
+
+### Qué NO cambia del diseño
+
+Que la frontera vaya en **tabla aparte** y no como columnas de `proyectos` sigue siendo correcto, y
+por las tres razones que tú diste: va a crecer en campos, puede no existir cuando se crea el
+proyecto, y los códigos cambian durante el trámite. Los 86 commits refuerzan la tercera: hubo
+`fecha_primer_registro_asic` fusionada en `fecha_registro_asic` (migración 088) y códigos SIC
+eliminados, todo movimiento de identidad regulatoria. **El historial de códigos
+(`frontera_codigo_historial`) sigue siendo la pieza que falta** y sigue justificado.
+
+## ⚠️ D-10 (corrección) · Las tres tarifas de servicio no estaban contempladas
+
+Juan preguntó el 2026-08-26 si `tarifa_administracion`, `tarifa_cgm` y `tarifa_representacion`
+quedan cubiertas en `proyecto_composicion` o se pierden en la migración. **Dos cosas.**
+
+Primero, una precisión de ubicación: **esas columnas no están en `proyecto_inversionistas`.**
+Verificado en el modelo de hoy (`app/models/proyectos.py`, la clase `ProyectoInversionista` tiene
+10 columnas y ninguna es de tarifa) y en el DDL de producción del 2026-08-20. Viven en
+**`contratos_servicio`**: `tarifa_admin`, `tarifa_cgm`, `tarifa_representacion`
+(`app/models/contratos.py:115-117`).
+
+Segundo, y esto **sí es un hueco real de mi diseño**: mi tabla `contratos` de `03-esquema.sql` tiene
+**solo `tarifa_base`**, y `04-mapeo.md` **no las menciona en ninguna parte**. Tal como está escrito
+el Entregable 1, **las tres se perderían en silencio en la fusión de contratos**.
+
+No es un detalle menor: están vivas y en uso activo. El 2026-08-25 se insertaron contratos de
+representación usando las tres (Cedillanos al 5 % de administración sin representación ni CGM;
+Sabana de Torres al 3,8 % con 6 y 6), y hay lógica de negocio colgando —
+`4024c1c Costos del panel: elegir el contrato de representacion por regla, no por id`.
+
+**No lo resuelvo por mi cuenta**, según tu regla. Lo que hay que decidir, y lo dejo planteado:
+
+| Opción | Qué implica |
+|---|---|
+| **A · Tres columnas en `contratos`** | Lo más directo y lo que menos rompe. Pero son tarifas específicas de un tipo de contrato viviendo en la tabla genérica: el mismo antipatrón de bloques por tipo que `04-mapeo.md` §5 critica en `contratos_servicio` |
+| **B · Tabla `contrato_tarifa(contrato_id, concepto, valor)`** | Consistente con el resto del modelo, extensible sin migración, y deja `tarifa_base` para el precio principal. Cuesta reescribir los lectores |
+| **C · Dejarlas donde están** | `contratos_servicio` no se fusiona en esta fase y se aplaza. Contradice D-10 |
+
+Me inclino por **B**, pero la decisión es tuya y afecta el DDL, el mapeo y la Fase 6 del plan.
+Mientras no se decida, `04-mapeo.md` queda con la advertencia y **la Fase 6 no se puede ejecutar**.

@@ -6,6 +6,8 @@ su rollback.
 **Decisiones ya cerradas por ti (2026-08-24):** `ppa.id` conserva su valor original · la consumidora
 externa se adapta, no bloquea · **frontera sigue pendiente y no se toca en ninguna fase**.
 **Regla que gobierna todo:** ninguna fase avanza sin que la anterior esté verificada en producción.
+**Actualizado el 2026-08-26:** hay un **apéndice al final** con la Fase 0 ya ejecutada (commit
+`383bf1e`, local) y la **Fase 1 detallada paso por paso**.
 
 ---
 
@@ -492,3 +494,201 @@ aprobación se pide con la verificación de §7 ya corrida y su salida a la vist
 | **Postgres en CI** | Habilitaría probar el trigger y el `EXCLUDE` (§2.3). Tarea de infraestructura, no de modelo |
 | **Endurecer los scopes de API key** | Hoy una key `["read"]` puede escribir. Es una tarea de seguridad y es independiente |
 | **Catálogo DIVIPOLA de municipios** | Decisión D-16: el contrato congelado necesita los dos strings resueltos por cascadas independientes |
+
+---
+---
+
+# Apéndice · 2026-08-26 · Fase 0 cerrada y Fase 1 en detalle
+
+**Fase 0: hecha y commiteada** (`383bf1e`, local, sin push). Lo que se ejecutó y lo que se descubrió
+al ejecutarla está en §A.
+**Fase 1: detallada aquí** — 5 pasos, con su script, su orden, su verificación y su rollback. Ningún
+script se ejecutó: este apéndice es el plan, no el registro de una corrida.
+**Lo que cambió del plan original:** el paso 1.4 (`ON DELETE`) ya está hecho en parte por otra sesión,
+y el conteo de FK sin índice subió de 18 a 20.
+
+## A · Fase 0 · lo ejecutado y las tres sorpresas
+
+Commit `383bf1e`. `_PENDING_DDLS` pasó de **551 a 478 sentencias** (−73), y sus `CREATE TABLE` de
+**55 a 11** (−44 redundantes, incluida la zombie `gmail_credenciales`, que la revisión **100** dropea).
+Los 29 backfills del mapeo FRT → `quoia_meter_id` salieron a `_BACKFILLS_REFERENCIA`. Más el borrado de
+`fila_operando`/`proyectos_operando` y 51 de sus tests. Suite: **1897 pasan** contra un baseline de
+**1947** en `origin/master`.
+
+⚠️ **Errata del mensaje del commit `383bf1e`:** dice «queda en 439 sentencias». El número correcto es
+**478**; el 439 era de un estado intermedio, antes de rebasar sobre los 86 commits. El resto del
+mensaje es exacto. Conviene corregirlo con un `--amend` antes del push, ya que el commit todavía es
+local.
+
+Tres cosas que el plan no anticipaba, y que valen como lección para la Fase 1:
+
+1. **No se pueden mover todos los backfills.** Hay tres parejas *backfill → constraint* donde el
+   orden importa: `asic_solicitudes.porcentaje_despacho` antes de `chk_porcentaje_despacho`, y los dos
+   `UPDATE` de `oportunidad_ofertas` antes de sus `SET NOT NULL`. Quedaron en `_PENDING_DDLS` con un
+   comentario «No los separes». **Regla derivada para la Fase 1: antes de mover o borrar una sentencia
+   del arranque, buscar qué depende de ella.**
+2. **Borrar tests de código muerto puede llevarse cobertura de código vivo.** De los 67 tests del
+   archivo, 15 cubrían funciones vivas — 5 de ellos `duracion_contrato()`, que produce tres campos
+   congelados. Un `rm` del archivo habría quitado esa cobertura justo antes de tocar esos campos.
+3. **Resolver un conflicto por «mi lado» sin leer el lado ajeno completo pierde trabajo.** Al reaplicar
+   la Fase 0 sobre los 86 commits nuevos, tomé mi lado en un conflicto cuyo lado upstream traía, además
+   del `CREATE TABLE` que yo quitaba, **12 `ALTER ... ADD COLUMN`** — entre ellos los que arreglaban un
+   500 en producción. Lo detectó `tests/test_modelo_vs_ddl.py`, que otra sesión había agregado
+   precisamente para eso. **Se rehízo la fase partiendo del archivo de `origin/master`** y verificando
+   que el conteo de `ALTER` no bajara.
+
+⚠️ **Y un aviso sobre la Fase 0:** su objetivo era que los datos no vivan en `_PENDING_DDLS`, pero
+otra sesión **agregó** sentencias de datos ahí el 2026-08-25 (contratos de Cedillanos y Sabana de
+Torres, clasificación heredada). Se respetaron donde están. Mientras el equipo siga usando
+`_PENDING_DDLS` como vía rápida para cargar datos, la limpieza se deshace sola. Eso no se arregla con
+un commit sino con la convención, y por eso se documentó en `CLAUDE.md`.
+
+## B · Fase 1 · Higiene de integridad, en detalle
+
+**Objetivo:** que la base imponga lo que hoy solo vive en la aplicación, sin mover ni una tabla.
+**Riesgo global: BAJO**, salvo el paso 1.4, que cambia el comportamiento del borrado.
+**Precondición:** la Fase 0 desplegada y estable 24 h. Nada de esta fase depende de las decisiones
+abiertas (D-06 frontera, D-10 tarifas), así que se puede ejecutar mientras esas se discuten.
+
+### Paso 1.1 · Índice en las 20 FK que no lo tienen
+
+**Recontado el 2026-08-26** contra los modelos de hoy: son **20**, no 18. Dos son nuevas y dos casos
+merecen decisión aparte.
+
+| # | FK sin índice | Nota |
+|---|---|---|
+| 1 | `cliente_tasa_servicio.proyecto_id` | verificado: solo aparece como 3.ª columna de un `UniqueConstraint`, que no sirve de índice |
+| 2 | `fallas_cat_tipos.categoria_id` | catálogo chico, pero se lee en cada carga de `/fallas` |
+| 3 | `mantenimiento_impacto.created_by` | tabla en 0 filas |
+| 4 | `oportunidades.creado_por_usuario_id` | |
+| 5 | `oportunidad_estado_historial.usuario_id` | |
+| 6 | `oportunidad_gestiones.usuario_id` | |
+| 7 | `panel_contable.generado_por_id` | |
+| 8 | **`panel_contable_linea.proyecto_inversionista_id`** | **el más importante:** es el que ata las liquidaciones a la composición accionaria (`04` §5.4) |
+| 9 | `clasificacion_energia_mensual.contrato_ppa_id` | |
+| 10 | `informes_guardados.enviado_por_id` | |
+| 11 | `om_pagina_sin_match.contrato_id_asignado` | |
+| 12 | `fronteras_quoia_ignoradas.ignorado_por_usuario_id` | |
+| 13 | `proyectos_pendientes_ignorados.ignorado_por_usuario_id` | |
+| 14 | `registro_hito.evidencia_documento_id` | |
+| 15 | `registro_transicion.evidencia_documento_id` | |
+| 16 | `reporte_energia_consumo.validado_por_id` | tabla que crece a diario |
+| 17 | `reporte_energia_generacion.validado_por_id` | ídem |
+| 18 | `reporte_energia_exclusiones.creado_por_id` | |
+| 19 | ⚠️ `ppa_contrato_proyectos.proyecto_id` | **caso distinto:** es la 2.ª columna de una PK compuesta. Postgres indexa `(contrato_id, proyecto_id)`, así que la búsqueda «qué contratos tiene esta planta» hace scan. **Sí hace falta**, y es una consulta que Cumplimiento usa |
+| 20 | ⚠️ `oportunidad_oferta_proyectos.proyecto_id` | idéntico al anterior, en la M2M del CRM |
+
+**Script:** una revisión de Alembic, `101_indices_fk_faltantes.py`, con
+`CREATE INDEX IF NOT EXISTS` uno por uno. Sin `CONCURRENTLY`: son tablas chicas y `CONCURRENTLY` no
+corre dentro de la transacción de Alembic. La excepción son
+`reporte_energia_generacion`/`_consumo`, que crecen a diario: para esas dos, medir el tamaño primero y
+si pasan de ~100 k filas, sacarlas a una revisión aparte con `autocommit_block()`.
+
+**Verificación:** `EXPLAIN (ANALYZE, BUFFERS)` antes y después de tres consultas concretas — el
+`/cumplimiento/panel-anual`, el detalle de un cliente (`/clientes/{id}/panel`) y `GET /fallas`. Y la
+consulta de control de `§7.2`: 0 FK sin índice.
+**Rollback:** `DROP INDEX` de cada uno. Reversible sin pérdida.
+
+### Paso 1.2 · Quitar uno de cada par de índices redundantes
+
+Eran **46 pares** en el inventario del 23-ago. ⚠️ **Hay que recontar antes de ejecutar:** las
+migraciones 077-097 crearon y borraron índices de `fronteras`, así que ese número está desactualizado y
+no se puede recalcular sin leer los índices reales de la base.
+
+**Script:** una revisión que, para cada par, dropee el índice **no** asociado a un constraint —
+Postgres no deja dropear el que respalda un `UNIQUE` sin dropear el constraint.
+**Precondición:** correr primero la consulta que lista los pares reales (va en el paso, no acá, porque
+exige la base).
+**Verificación:** el conteo de índices baja en exactamente el número de pares detectados; ninguna
+consulta de control cambia de plan.
+**Rollback:** recrear. Los nombres quedan en la migración.
+
+### Paso 1.3 · Las FK que faltan
+
+| FK a agregar | Estado hoy |
+|---|---|
+| `alarma_estado.proyecto_id → proyectos` | ⚠️ La tabla **no tiene modelo ORM** y `alarmas_monitoreo` tampoco. Ver la corrección del `04` §E: **están vivas**, el scheduler les escribe cada 15 min. Agregar la FK exige antes verificar que no haya filas con `proyecto_id` huérfano, y eso necesita la base |
+| `panel_soporte.created_by_id → usuarios` | directa |
+| `fallas.alarma_monitoreo_id → alarmas_monitoreo` | ⚠️ **Reevaluar.** El inventario la propuso, pero la columna está al **0 %** y `05` la marca sin uso. Si no se va a llenar, la decisión correcta es **borrar la columna**, no agregarle una FK |
+| `audit_log.registro_id` | **NO lleva FK**: es polimórfica a propósito |
+
+**Verificación:** por cada FK nueva, contar filas huérfanas **antes** (`LEFT JOIN ... WHERE padre.id IS
+NULL`). Si hay alguna, el `ADD CONSTRAINT` falla — y eso es información, no un error a silenciar.
+**Rollback:** `DROP CONSTRAINT`.
+
+### Paso 1.4 · ⚠️ `ON DELETE` explícito — el único paso con riesgo real
+
+Eran **80 de 148 FK** sin `ON DELETE`. **Otra sesión ya hizo una parte**: la migración 083 puso
+`RESTRICT` en las 4 tablas de historial que cuelgan de `fronteras`
+(`reporte_energia_generacion`, `_consumo`, `_exclusiones`, `liquidacion_xm_datos`, esta última ya
+eliminada), y la 085 puso `CASCADE` en la M2M `contrato_frontera`. **Y usó exactamente el criterio que
+este plan propone**, así que hay precedente citable:
+
+> *"`RESTRICT` explícito — un intento de hard-delete falla ruidosamente en vez de cascadear datos
+> regulatorios/financieros o depender de un default sin documentar"* (migración 083)
+>
+> *"`CASCADE` en las dos FK es correcto para esta tabla: es una tabla de vínculo puro sin datos
+> propios — si se borra un Contrato o una Frontera, lo único que debe desaparecer es el enlace"* (085)
+
+**El criterio, ya validado en producción:**
+
+| Tipo de hijo | `ON DELETE` | Ejemplos |
+|---|---|---|
+| Vínculo puro, sin datos propios | `CASCADE` | `ppa_contrato_proyectos`, `oportunidad_oferta_proyectos`, `contrato_frontera` |
+| Línea de detalle que no existe sin su padre | `CASCADE` | `fallas_seguimientos`, `pagos_servicio`, `ppa_tarifas` |
+| Historial regulatorio o financiero | `RESTRICT` | `reporte_energia_*`, `cumplimiento_mensual`, `panel_contable_linea` |
+| Referencia opcional a un catálogo o persona | `SET NULL` | `*_por_usuario_id`, `resolucion_id`, `asignado_a_id` |
+
+**Cómo se ejecuta, y esto no es negociable:** **una revisión de Alembic por grupo, no una sola para
+las 80.** Un `CASCADE` mal puesto convierte un error de integridad —molesto pero seguro— en un borrado
+silencioso en cascada, y el rollback no devuelve las filas. El orden es: primero todos los `SET NULL`
+(los más inocuos), después los `RESTRICT` (endurecen, no borran), y **al final** los `CASCADE`, uno por
+grupo, con la decisión escrita en el mensaje del commit.
+
+**Verificación por grupo:** para cada FK que pase a `CASCADE`, un `DELETE` de prueba sobre una fila
+desechable dentro de `BEGIN … ROLLBACK`, contando qué se habría borrado. Si el conteo sorprende, no se
+aplica.
+**Rollback:** `ALTER ... DROP CONSTRAINT` + `ADD CONSTRAINT` sin `ON DELETE`. Reversible, pero **las
+filas borradas por un CASCADE no vuelven** — de ahí el `BEGIN/ROLLBACK` previo.
+
+### Paso 1.5 · `IntegrityError` → 409 en la API
+
+Hoy un borrado con dependencias devuelve **500**, y está documentado como deuda en
+`docs/API_FALLAS.md`.
+
+Hay **precedente del patrón**, no un helper reusable: el commit `2793a90` creó
+`_commit_o_409_codigo_duplicado()` (`app/api/v1/fronteras.py:276`), pero es específico del choque de
+`codigo_frontera` duplicado, no genérico —captura `IntegrityError` y devuelve un 409 con un mensaje de
+código duplicado. **Lo que se reusa es su forma**: centralizar el `try/except IntegrityError` en un
+helper en vez de repetirlo en cada endpoint. Para los borrados hace falta uno distinto, que distinga
+violación de FK (409 «tiene dependencias») de violación de UNIQUE (409 «ya existe»).
+
+**Alcance:** los `DELETE` de `/proyectos`, `/clientes`, `/ppa`, `/contratos-servicio` y `/fallas`.
+**Verificación:** un test por endpoint que cree padre + hijo, intente borrar el padre y espere 409 con
+mensaje legible. Estos **sí** se pueden testear en SQLite (§2.3 no aplica: es comportamiento de la app).
+**Rollback:** revertir el commit. No toca datos.
+
+### Orden y puertas
+
+```
+1.1 índices FK        ── medir EXPLAIN ── [aprobación]
+1.2 índices redundantes ─ recontar primero ─ [aprobación]
+1.3 FK faltantes      ── contar huérfanos ── [aprobación]
+1.5 IntegrityError→409 ─ tests ─────────── [aprobación]
+1.4 ON DELETE         ── por grupos, el último ── [aprobación por grupo]
+```
+
+⚠️ **1.5 va antes de 1.4 a propósito**, cambiando el orden del plan original: endurecer los borrados
+antes de que la API sepa reportar el conflicto convierte cada bloqueo nuevo en un 500 para el usuario.
+Con el 409 ya en su lugar, el endurecimiento se ve como un mensaje claro.
+
+## C · Lo que la Fase 1 NO incluye
+
+- **Nada de las decisiones abiertas.** D-06 (frontera) y D-10 (las tres tarifas) no se tocan; la
+  Fase 1 no depende de ninguna.
+- **El golden test del contrato congelado.** Sigue sin construirse y sigue siendo precondición de la
+  Fase 4, no de la 1. ⚠️ Pero conviene capturarlo **ya**: cada día que pasa, el árbol cambia y el
+  golden se vuelve más difícil de atribuir.
+- **`comparar_con_prod.py`.** Sigue pendiente y sigue siendo precondición de la Fase 2 (colisión del
+  nombre `equipos` — Juan confirmó el 25-ago que no existe, pero las 14 tablas del hallazgo F3 siguen
+  sin verificar).

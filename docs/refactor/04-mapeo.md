@@ -6,6 +6,8 @@ solo es barato cuando la tabla está en cero.
 **El resumen en números:** se conservan 14 tablas, se crean 15, se fusionan 4 en 1, y **se eliminan 7
 tablas y 41 columnas que están al 0 % de llenado**.
 **Regla que no se rompe:** ninguna fila con dato se pierde. Donde hay historia, hay destino.
+**Actualizado el 2026-08-26:** hay un **apéndice al final** que reconcilia este mapeo con el estado
+real del repo, y que abre un 🛑: las tres tarifas de servicio no estaban contempladas.
 
 ---
 
@@ -282,3 +284,142 @@ intersección, no enumera lo que sobra. Así que sigue pendiente correr
 `python comparar_con_prod.py "<DATABASE_URL>"`, que es justamente lo que lista lo que hay en prod y no
 está en el esquema. **Si aparece una tabla `equipos`, hay que decidir entre borrarla (si está en 0 filas)
 o renombrar la del modelo nuevo.** No se ejecuta ni un `CREATE TABLE equipos` antes de esa respuesta.
+
+---
+---
+
+# Apéndice · 2026-08-26 · Reconciliación con el estado real
+
+**Qué es esto:** qué filas del mapeo de arriba dejaron de aplicar tras los 86 commits del 23 al 26
+de agosto, y **un hueco propio que hay que tapar antes de la Fase 6**.
+**Lo más importante:** las tres tarifas de servicio no estaban contempladas en ninguna parte del
+mapeo, y se perderían en la fusión de contratos.
+**Método:** comparación local `Base.metadata` vs. `esquema.json` (snapshot 2026-08-20). No se tocó la
+base de datos. Ver `00-inventario-actual.md` §A del apéndice para lo que esa comparación no puede ver.
+
+## A · 🛑 Las tres tarifas de servicio — hueco del mapeo
+
+Juan preguntó si `tarifa_administracion`, `tarifa_cgm` y `tarifa_representacion` quedan cubiertas en
+`proyecto_composicion` o se pierden. La respuesta corta: **no estaban contempladas en ningún lado**.
+
+**Precisión de ubicación primero.** No están en `proyecto_inversionistas` — esa tabla tiene 10
+columnas y ninguna es de tarifa, verificado en el modelo de hoy y en el DDL de producción del
+2026-08-20. Viven en **`contratos_servicio`** (`app/models/contratos.py:115-117`):
+
+| Columna | Tipo |
+|---|---|
+| `tarifa_admin` | `Numeric(8,4)` |
+| `tarifa_cgm` | `Numeric(10,6)` |
+| `tarifa_representacion` | `Numeric(10,6)` |
+
+**Y el hueco:** la tabla `contratos` de `03-esquema.sql` tiene **solo `tarifa_base`**. El §5.1 de este
+documento lista lo que se conserva de `contratos_servicio` y **las tres tarifas no aparecen**; el §5.2
+lista lo que se elimina por vacío y **tampoco aparecen ahí**. Quedaron fuera de las dos listas, que es
+la peor forma de perder una columna: sin decisión.
+
+**No están vacías ni muertas.** El 2026-08-25 se insertaron contratos de representación usando las
+tres — Cedillanos al 5 % de administración sin representación ni CGM, Sabana de Torres al 3,8 % con
+6 y 6 — y hay lógica de negocio leyéndolas (`4024c1c Costos del panel: elegir el contrato de
+representacion por regla, no por id`).
+
+⚠️ **Sin resolver, por indicación de Juan.** Las opciones y mi inclinación (una tabla
+`contrato_tarifa(contrato_id, concepto, valor)`) están en el apéndice de `01-decisiones.md`, sección
+D-10. **Mientras no se decida, la Fase 6 no se puede ejecutar**, porque es la fase que fusiona
+`contratos_servicio` y perdería las tres.
+
+### Y una pregunta que esto abre
+
+`cliente_tasa_servicio` tiene sus propias 4 tasas (`iva_pct`, `retencion_pct`, `reteica_pct`,
+`reteiva_pct`), y `clientes` las tiene otra vez. Ya estaba señalado en el §4.2 y en el §5.3 que hay
+que conciliar vocabularios. Con las tres tarifas de `contratos_servicio` sobre la mesa, el mapa
+completo de «cuánto se cobra» está repartido en **tres tablas** y ninguna manda. ⚠️ Eso es una
+decisión de dominio, no de mapeo.
+
+## B · Filas del mapeo que ya no aplican
+
+### §2.1 · `proyectos`
+
+| Lo que decía | Estado real |
+|---|---|
+| `operador_red` varchar(100) → «se resuelve contra el catálogo y **se elimina**» | **Ya se eliminó** (migración 076), y con la verificación que yo exigía. Ver `05` apéndice |
+| — | **Dos columnas nuevas** que el mapeo no contempla: `altitud_msnm` y `project_id_solarview`. La segunda es una **11.ª clave de integración externa**: entra en el alcance de D-13 |
+
+### §2.2 · `proyecto_info_tecnica`
+
+Sigue existiendo con sus 33 columnas y el mapeo sigue siendo válido, **con una salvedad**: varias
+columnas `marca_*` que iban a convertirse en equipos apuntaban a fronteras que ya no existen
+(`marca_medidores_frontera`, `marca_modems_frontera`). El destino no cambia —siguen siendo equipos—
+pero el dato de contexto que las acompañaba en `fronteras` se fue.
+
+### §3 y §7 · Tablas a eliminar
+
+| Tabla | Lo que decía el mapeo | Estado real |
+|---|---|---|
+| `fronteras_lecturas` | eliminar por 0 filas (Fase 7) | **ya eliminada** (079). Un ítem menos |
+| `alarmas_monitoreo` | eliminar por 0 filas (Fase 7) | 🛑 **NO se puede eliminar. El mapeo estaba equivocado.** Ver §E |
+| `mantenimientos`, `mantenimiento_impacto`, `polizas`, `servicio_operacion`, `servicio_representacion` | eliminar por 0 filas | **siguen existiendo**. El mapeo sigue válido |
+| `proyecto_inicio_operacion` | eliminar (2 filas), exportando antes | **sigue existiendo**. Válido |
+| `liquidacion_xm_datos` | fuera de alcance, no mencionada | **eliminada** (098). No afecta al mapeo |
+
+### §5 · La fusión de contratos
+
+Dos cambios que el mapeo tiene que absorber:
+
+1. **`contrato_frontera` es nueva** (migración 085): M2M `ContratoServicio` ↔ `Frontera`. El §5.1
+   mapea `contratos_servicio.proyecto_id` → una fila en `contrato_proyectos`, pero **ahora hay un
+   segundo vínculo**, más fino: contrato → punto de medida. ⚠️ El modelo objetivo no tiene
+   equivalente. Habría que agregar `contrato_frontera` al DDL — pero eso depende de D-06, que sigue
+   sin decidirse, porque la tabla apunta a `fronteras`.
+2. **`liquidacion_xm_datos` sale de la lista de satélites** a re-apuntar en el paso 6.5: ya no existe.
+
+## C · Lo que el mapeo acertó y ya se confirmó en producción
+
+Vale registrarlo, porque son decisiones que otra sesión tomó igual por su cuenta:
+
+| Propuesta del mapeo | Qué pasó |
+|---|---|
+| Consolidar la ubicación duplicada entre `fronteras` y `proyectos` | Hecho, migraciones 091-095, con backfill previo en cada una |
+| Eliminar `operador_red` texto libre dejando solo el FK | Hecho, migración 076 |
+| Eliminar las columnas 100 % vacías de `fronteras` | Hecho, migraciones 081, 082, 089, 097 |
+| Unificar la potencia duplicada en 4 columnas de 2 tablas | Hecho en la parte de `fronteras` (090): `Proyecto.potencia_instalada_kwp` queda como fuente única |
+| `ON DELETE` explícito con criterio por tipo de hijo | Hecho en las 4 tablas de historial de frontera (083), con el mismo criterio que propone la Fase 1 paso 1.4 |
+| Texto libre de enums → Enum real | Hecho en `clase_ct`, `clase_pt`, `clase_medidor` (096) |
+
+Esto es señal de que el mapeo apunta donde el equipo ya está apuntando. También significa que
+**cada día que pasa, más de la Fase 7 ya está hecha por otra vía** — y que el mapeo hay que releerlo
+antes de ejecutarlo, no después.
+
+## D · Corrección de conteos del §7
+
+| Lo que decía | Valor correcto al 2026-08-26 |
+|---|---|
+| «7 tablas en 0 filas a eliminar» | **5**: `fronteras_lecturas` y `alarmas_monitoreo` ya no están |
+| «41 columnas al 0 % en el núcleo» | Sin recontar. Las de `fronteras` se eliminaron; las de `proyectos`, `clientes`, `contratos_servicio` y `ppa_contratos` siguen. ⚠️ Habría que volver a correr `medir_uso_real.py` para dar un número, y eso exige la base |
+
+## E · 🛑 Corrección: `alarmas_monitoreo` NO se puede eliminar
+
+El §7 la listaba entre las «7 tablas en 0 filas» a eliminar en la Fase 7, apoyándose en que
+`uso_real.json` le midió **0 filas** el 2026-08-23. **Ese razonamiento era incorrecto**, y verificarlo
+hoy lo dejó claro:
+
+| Evidencia | Dónde |
+|---|---|
+| El scheduler le hace **INSERT** | `app/services/mgs/scheduler.py:111` |
+| El dashboard la **lee** en cada carga | `app/api/v1/dashboard.py:77` y `:82` |
+| No tiene modelo ORM, solo `CREATE TABLE` en `_PENDING_DDLS` | por eso no aparece en la comparación de modelos |
+
+**Por qué me equivoqué:** confundí «0 filas ahora» con «tabla muerta». Es una tabla de **estado
+transitorio** — el detector de desconexión crea alarmas cada 15 minutos y se resuelven; que esté
+vacía en el instante de la medición es lo normal cuando no hay ninguna alarma activa, no evidencia de
+abandono. La lección aplica a toda la lista del §7: **0 filas es condición necesaria, no suficiente.**
+Antes de cualquier `DROP` hay que comprobar que nadie escriba, y para las 11 tablas sin modelo ORM eso
+no se puede ver leyendo `app/models/`.
+
+**Qué hay que revisar en las otras 4 candidatas** (`mantenimientos`, `mantenimiento_impacto`,
+`polizas`, `servicio_operacion`, `servicio_representacion`): las cinco sí tienen modelo ORM, así que
+son visibles a un grep, pero **la Fase 7 debe verificar escrituras con la misma pregunta**, no solo el
+conteo de filas.
+
+⚠️ Y queda un pendiente heredado del diagnóstico de agosto: el detector sigue creando alarmas y **ya no
+hay UI web para resolverlas** (la vista `/alertas/monitoreo` se retiró). Eso no lo decide este refactor,
+pero explica por qué la tabla puede acumular filas que nadie cierra.

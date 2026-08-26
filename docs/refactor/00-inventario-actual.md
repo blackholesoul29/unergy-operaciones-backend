@@ -7,6 +7,8 @@ contratos, fallas). No re-describo la BD completa: para eso ya están `ESQUEMA_B
 (`uso_real.json`, 2026-08-23 18:20), que es lo que distingue "columna que existe" de "columna que se usa".
 **Conclusión de una línea:** el esquema modela mucho más de lo que la operación llena, y las relaciones
 que de verdad sostienen el negocio hoy son de texto, no de clave foránea.
+**Actualizado el 2026-08-26:** hay un **apéndice al final** con lo que cambió en estos 3 días (86
+commits; `fronteras` bajó de 101 a 40 columnas). El cuerpo se conserva como la foto del 2026-08-23.
 
 ---
 
@@ -660,3 +662,131 @@ Cinco cosas que no voy a suponer:
    Se resuelve con `comparar_con_prod.py`.
 5. **¿`arr_proyectos` (27 filas) y `finanzas_mandatos` (1 194 filas) se pueden cruzar con `proyectos`
    por nombre sin ambigüedad?** Determina si esas relaciones se pueden normalizar sin pérdida.
+
+---
+---
+
+# Apéndice · 2026-08-26 · Qué cambió desde que se escribió este inventario
+
+**Lo de arriba es una foto del 2026-08-23 sobre `370b9cf`.** No se reescribe: se conserva como el
+estado que motivó el diseño. Este apéndice dice qué dejó de ser cierto y por qué.
+**Causa:** 86 commits entre el 23 y el 26 de agosto. La mayoría son la auditoría de integridad de
+`fronteras` de Sara y la migración del Panel Contable a la API de Liquidaciones.
+**Impacto de una línea:** `fronteras` dejó de ser la God Table del §4, y el §11.A perdió a varios de
+sus casos porque ya se corrigieron.
+
+## A · Cómo se midió esta actualización
+
+⚠️ **No se pudo correr `comparar_con_prod.py`**: exige una `DATABASE_URL` de producción, y la
+instrucción de esta sesión es no tocar la base ni para leer. La salida de la corrida que hizo Juan
+tampoco quedó guardada en el repo (solo está el script, en `esquema-bd-produccion/`).
+
+En su lugar se hizo una **comparación local, solo lectura**: `Base.metadata` de los modelos de hoy
+contra `esquema-bd-produccion/esquema.json` (el snapshot del 2026-08-20).
+
+**Lo que esa comparación sí ve:** la deriva entre modelos y snapshot, o sea qué cambió en el esquema
+desde que se escribió el inventario.
+**Lo que NO ve, y sigue pendiente:** tablas que existan en producción y el código no conozca — que
+es justamente para lo que sirve `comparar_con_prod.py`. Las 14 tablas del hallazgo F3 siguen sin
+confirmar.
+
+## B · Tablas: +3 nuevas, −3 eliminadas
+
+| Nueva | Modelo | Qué es |
+|---|---|---|
+| `contrato_frontera` | `app/models/contrato_frontera.py` | M2M `ContratoServicio` ↔ `Frontera` (migración 085). **Relevante al refactor:** es la primera vez que un contrato puede apuntar a un punto de medida y no a la planta entera |
+| `balcttos_neto` | `app/models/garantias_proyecciones.py` | Neto real de compras en bolsa de XM por periodo. Fuera del núcleo |
+| `alertas` | `app/models/alerta.py` | Alertas proactivas de vencimiento de PPA. Fuera del núcleo |
+
+| Eliminada | Migración | Efecto en este inventario |
+|---|---|---|
+| `fronteras_lecturas` | 079 | Estaba en la lista de «7 tablas en 0 filas» del §7 de `04-mapeo.md`. **Ya la borraron**: un ítem menos en mi Fase 7 |
+| `liquidacion_xm_datos` | 098 | No estaba en mi alcance. Borrada por muerta: 0 filas y el Panel Contable la superó |
+| `gmail_credenciales` | **100 (mía)** | El hallazgo F2. Cerrado en la Fase 0 de este refactor |
+
+Las **11 tablas sin modelo ORM** del §11.I siguen igual (`alarma_estado`, `alarmas_monitoreo`,
+`api_keys`, `audit_log`, las 4 de clima, `email_envios`, las 2 de precios de bolsa). Eran 12 en el
+inventario: la que salió es `gmail_credenciales`.
+
+## C · `fronteras`: de 101 a 40 columnas — el §4 quedó obsoleto
+
+Veinte commits entre el 24 y el 25 de agosto. **−61 columnas** respecto del snapshot. Por categoría:
+
+| Categoría | Columnas | Migración |
+|---|---|---|
+| **Consolidadas en `Proyecto`** (eran duplicado real, con backfill previo) | `municipio`, `departamento`, `latitud`, `longitud`, `altitud_msnm`, `direccion`, `tipo_tecnologia`, `capacidad_transporte_mw`, `capacidad_efectiva_mw`, `potencia_maxima_declarada` | 090-095 |
+| **Maquinaria de agrupación** — nunca usada | `agrupada_bajo_id`, `embebida_bajo_id`, `frontera_gemela_id` (0/145), `es_agrupadora`, `es_principal_embebido` (**145/145 en False**), y los 5 factores | 080, 097 |
+| **Ficha de medidor/módem sin uso** | `ip_modem_*`, `puerto_modem_*`, `password_medidor_*`, `tipo_extraccion_*`, `canal_comunicacion_*`, `relacion_transformacion_*` | 081 |
+| **Campos GESCON sin dato** | 12 columnas | 082 |
+| **Códigos y clasificaciones sin consumidor** | `codigo_ciiu`, `clasificacion_industrial_*`, `clasificacion_recurso`, `codigo_sic_frontera_generacion`, `codigo_sic_frontera_usuario`, `codigo_sic_submercado_usuario`, `niu`, `codigo_propio` | 087, 089, 097 |
+| **Agentes en texto libre** | `nit`, `nit_rf`, `nit_cgm`, `representante_frontera`, `representante_ddv`, `representante_anterior`, `registrada_por`, `nombre_cgm`, `nombre_recurso_generacion`, `operador_red`, `operador_red_zona` | 076, 095, 097 |
+| **Ubicación redundante** | `centro_poblado`, `nombre_predio`, `predio_id`, `subestacion`, `punto_conexion` | 089, 095 |
+| **Fusionadas** | `fecha_primer_registro_asic` → `fecha_registro_asic` | 088 |
+| **Texto → Enum real** | `clase_ct`, `clase_pt`, `clase_medidor` | 096 |
+
+**Qué de mi §11 dejó de aplicar:**
+
+- «`fronteras` — 101 columnas, 94 nullables» → **40 columnas**. Sigue siendo la más ancha del núcleo
+  después de `contratos_servicio`, pero ya no es un caso de God Table.
+- «13 agentes en texto libre» → quedan **2** (`agente_exportador`, `agente_importador`).
+- «medidor principal y de respaldo espejados en 13+12 columnas» → **9+8**, y sin credenciales.
+- «`tipo_tecnologia` ENUM en `proyectos` y varchar(100) en `fronteras`» → **resuelto**: la de
+  `fronteras` se eliminó.
+- «`nivel_tension` dos veces» → **sigue**: `nivel_tension_kv` numeric y `nivel_tension` integer.
+- «ubicación duplicada en 4 tablas» → **resuelto del lado de `fronteras`**.
+- «29 columnas 100 % vacías» → la mayoría se eliminó; el conteo del §1 ya no vale.
+
+⚠️ **Una consecuencia para el modelo objetivo:** la migración 089 eliminó `fronteras.punto_conexion`
+(texto, 0 % lleno). En `02-modelo.md` propuse `red_puntos_conexion` como pieza central de D-07. Esa
+propuesta **no se contradice** —la columna borrada era texto libre vacío, no una tabla— pero ahora
+la topología de red no tiene ni el rastro textual del que partir. Sigue habiendo que cargarla de cero.
+
+## D · `proyectos`: +2 / −1
+
+| Cambio | Detalle |
+|---|---|
+| **+ `altitud_msnm`** | Vino de `Frontera` al consolidarse la geolocalización. Causó un **500 en toda consulta a `proyectos`** porque el modelo la declaró y el DDL de arranque se quedó atrás (commits `8c9551b`, `042bca5`) |
+| **+ `project_id_solarview`** | Id en la API nueva de SolarView. **No coincide** con `project_id_solenium`. Mismo modo de falla que el anterior |
+| **− `operador_red`** | El texto libre legacy. Ver §E |
+
+**Esto valida el diagnóstico del §11.I con un incidente real de producción.** El mecanismo de
+esquema repartido en cuatro sitios rompió `/proyectos` y `/ppa` el 2026-08-25, exactamente por la
+razón documentada: Alembic corre último y `start.sh` se traga su fallo, así que una columna que solo
+existe en una migración deja la app pidiendo algo que la base no tiene. Sara agregó
+`tests/test_modelo_vs_ddl.py` como guardián. **La Fase 0 de este refactor va en esa misma dirección
+y ahora tiene precedente empírico.**
+
+## E · `proyectos.operador_red`: la condición dura de `05` §2.2 se cumplió
+
+Yo puse como condición que esa columna **no se borrara** hasta que un backfill medido demostrara que
+ninguna planta perdía su operador. Sara la borró en la migración 076 **con esa verificación hecha**:
+
+> *"Verificado en vivo antes de este cambio: 0 filas dependían del texto libre sin también tener
+> `operador_red_id` (63/63 proyectos, 100/100 fronteras con texto también tenían el FK), y
+> `operador_red_zona` tenía 0 filas pobladas — no hay pérdida de datos real."*
+
+La cascada de `_operador_red()` pasó de 4 escalones a 3, y el escalón que devolvía `null` como señal
+(«el nombre no está en el catálogo») desapareció junto con su fuente. Ver el apéndice de
+`05-impacto-campos-congelados.md` para el impacto en el campo expuesto.
+
+## F · Antipatrones del §11 que se corrigieron solos
+
+| §11 | Estado |
+|---|---|
+| A · texto libre donde va FK | `proyectos.operador_red` y `fronteras.operador_red` **eliminados** (076). Los demás casos siguen |
+| B · tablas anchas | `fronteras` 101 → 40. `contratos_servicio` (61) y `proyectos` (62) **siguen** |
+| G · FK sin `ON DELETE` | Corregido en las 4 tablas de historial de frontera (083), con criterio explícito: `RESTRICT` donde hay historial regulatorio, `CASCADE` solo en tablas de vínculo puro. **Es el criterio que mi Fase 1 paso 1.4 propone, ya aplicado en una parte** |
+| G · solo 7 CHECK en 1 619 columnas | Mejorado: la 084 agregó CHECK numéricos a `fronteras` y hay un `ck_proyectos_altitud_msnm_rango` |
+| I · esquema en cuatro sitios | **Sin cambio de fondo, y con dos roturas de producción para demostrarlo.** Es lo que ataca la Fase 0 |
+
+## G · Lo que este apéndice NO revisó
+
+Para no dar por verificado lo que no lo está:
+
+- **Las filas.** `uso_real.json` es del 2026-08-23 y no se volvió a medir. Todos los conteos del §1
+  y los porcentajes de llenado son de esa fecha. Las tablas que entonces estaban en 0 filas pueden
+  no estarlo (`alertas` y `balcttos_neto` son nuevas y no se midieron nunca).
+- **Las 14 tablas del hallazgo F3.** Siguen sin confirmar; hace falta `comparar_con_prod.py`.
+- **El dominio de Liquidaciones / Panel Contable**, que recibió ~15 commits en estos días. Está
+  fuera del alcance del refactor, pero su acople con la composición accionaria (`04-mapeo.md` §5.4)
+  se decidió sobre un código que ya cambió. ⚠️ Hay que revisarlo antes de la Fase 6.

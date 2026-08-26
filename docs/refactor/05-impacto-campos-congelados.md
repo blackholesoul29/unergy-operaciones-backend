@@ -6,6 +6,8 @@ preserva la salida.
 **Resultado:** **25 no se afectan**, **16 cambian de almacenamiento pero conservan la salida idéntica**,
 **3 tienen riesgo real** y **2 de la lista ya no se sirven** (eliminados el 2026-08-19, antes de este refactor).
 **Los riesgos reales son `ppa.id` y la pareja `operador_red` / `operador_red_id`.** Van en §2 y necesitan tu decisión.
+**Actualizado el 2026-08-26:** hay un **apéndice al final** que recorre los 46 campos contra el código
+de hoy, con las líneas actuales. Los `archivo:línea` del cuerpo son del 2026-08-23 y ya se corrieron.
 
 ---
 
@@ -274,3 +276,210 @@ Todo el árbol lo arma `app/services/comercial.py` (`_nodo_ppa` en `:1808`, `_no
 capa que produce el contrato **no se reescribe**: solo cambian las fuentes de las que lee. Eso es
 precisamente la separación entre almacenamiento y contrato de salida que pide el brief, y acá ya existe
 por accidente arquitectónico. Conviene aprovecharla en vez de tocarla.
+
+---
+---
+
+# Apéndice · 2026-08-26 · Los campos, recorridos uno por uno contra el código de hoy
+
+**Qué es esto:** cada campo del contrato congelado verificado contra el código en `master` a fecha de
+hoy, con su `archivo:línea` actual. Los números de línea del cuerpo de arriba son del 2026-08-23 y
+**ya no sirven**: `app/services/comercial.py` perdió 334 líneas en la Fase 0 y recibió cambios de
+otras dos sesiones.
+**Resultado:** de los 46 campos, **42 siguen igual**, **1 cambió de origen** conservando la salida,
+**1 cambió de semántica** y **2 siguen sin servirse**. Ninguno se rompió.
+**Lo único que hay que mirar con cuidado:** `operador_red_id`, cuyo `null` ya no significa lo mismo.
+
+## A · La cadena de producción, con las líneas de hoy
+
+Ninguna de las 17 funciones que arman el árbol desapareció. Todas están en
+`app/services/comercial.py` salvo el endpoint:
+
+| Función | Antes (23-ago) | **Hoy** |
+|---|---|---|
+| `GET /comercial/proyectos-operando` | `api/v1/comercial.py:521` | **`:524`** |
+| `ppas_del_pipeline` | `1056` | **`718`** |
+| `_nodo_ppa` | `1808` | **`1474`** |
+| `_nodo_proyecto` | `1570` | **`1235`** |
+| `_condiciones` | `1849` | **`907`** |
+| `duracion_contrato` | `349` | **`332`** |
+| `_operador_red` | `1269` | **`931`** |
+| `_gen_promedio` | `382` | **`382`** |
+| `_simulacion` | `1559` | **`1210`** |
+| `_clasificacion` | `1363` | **`1010`** |
+| `_construccion` | `1536` | **`1193`** |
+| `_identificacion` | `1320` | **`976`** |
+| `_ficha_tecnica` | `1394` | **`1050`** |
+| `_fronteras_planta` | `1481` | **`1137`** |
+| `_servicios_planta` | `1373` | **`1029`** |
+| `api_id_unergy` | `1228` | **`890`** |
+| `_es_comunidad` | `1238` | **`900`** |
+| `_codigo_seguimiento` | `623` | **`432`** |
+
+El corrimiento hacia arriba es la Fase 0: se borraron `fila_operando` y `proyectos_operando`, que
+vivían entre `_gen_promedio` y `_oferta_min`. **Ninguna función viva se tocó.**
+
+## B · 🛑 El único cambio de semántica: `operador_red_id`
+
+| | |
+|---|---|
+| **Antes** | cascada de **4** escalones; `null` significaba «el nombre salió del texto libre legacy `proyectos.operador_red`, o sea que no está en el catálogo» |
+| **Hoy** | cascada de **3** escalones (`app/services/comercial.py:931-951`); `null` significa «el nombre salió de lo declarado en una oferta que no traía operador propio» |
+| **Causa** | migración 076 eliminó `proyectos.operador_red`. No fue este refactor |
+
+El escalón que se fue es el 4.º: `if proyecto is not None and proyecto.operador_red: return
+proyecto.operador_red, None, "proyecto_legacy"`. Con él desapareció el valor `"proyecto_legacy"` de
+`fuentes.operador_red`.
+
+**Qué significa para el consumidor externo**, que según el brief usa este campo para «el match de
+catálogo interno»:
+
+- El campo **sigue existiendo**, con el mismo nombre y tipo, y `operador_red` sigue devolviendo nombre.
+- **`null` sigue queriendo decir «no puedo cruzarlo contra el catálogo»** — que es la propiedad útil.
+  Lo que cambió es *por qué*: ya no hay una cuarta fuente de texto sin validar.
+- **`fuentes.operador_red` ya no puede devolver `"proyecto_legacy"`.** Si el consumidor discrimina por
+  ese valor literal, esa rama quedó muerta. Los valores posibles hoy son `"proyecto"`, `"frontera"`,
+  `"oferta"` y `null`.
+
+⚠️ La condición dura que puse en el §2.2 del cuerpo **se cumplió**: la migración 076 documenta que
+*"0 filas dependían del texto libre sin también tener `operador_red_id` (63/63 proyectos, 100/100
+fronteras)"*. O sea que **ninguna planta perdió su nombre de operador** al borrar la columna. Mi
+exigencia se satisfizo, por otra vía y antes de que yo la ejecutara.
+
+## C · El único que cambió de origen, y uno que NO cambió aunque yo lo propuse
+
+| Campo | Antes | Hoy | Veredicto |
+|---|---|---|---|
+| `detalles.operador_red` | cascada de 4 escalones | cascada de 3 (`comercial.py:931-951`) | **↷** Cambió el origen; la salida es idéntica porque la migración 076 verificó que ninguna planta dependía solo del 4.º escalón |
+| `detalles.ubicacion.url_mapa` | `proyecto_info_tecnica.url_ubicacion` | **igual**, `comercial.py:1351` | **=** Verificado: sigue en la ficha técnica. **No** se movió a `proyectos` como propone `04` §2.2 — ese movimiento sigue pendiente y este campo lo va a sentir cuando ocurra |
+
+Y un campo del mismo árbol que **no** es del contrato congelado pero conviene registrar, porque un
+consumidor podría estar leyéndolo: `detalles.fronteras[].operador_red` pasó de
+`f.operador.nombre_legal or f.operador_red` (texto libre) a **solo** `f.operador.nombre_legal`, o
+`null` (`_fronteras_planta`, `:1137`). Misma causa: migración 076.
+
+## D · Los 46 campos, uno por uno
+
+Leyenda: **=** igual · **↷** cambió de origen, salida idéntica · **🛑** cambió de semántica ·
+**✖** no se sirve.
+
+### Nodo `ppa` (5 del brief)
+
+| Campo | Estado | Origen hoy |
+|---|---|---|
+| `ppa.id` | **=** | `ppa_contratos.id`, `comercial.py:1485`. Sigue `null` en borradores. La decisión de Juan del 24-ago (conservar el id original en la fusión) mantiene esto intacto |
+| `ppa.etapa_comercial` | **✖** | no existe desde el 2026-08-19 |
+| `ppa.estado_ppa` | **✖** | no existe desde el 2026-08-19 |
+| `ppa.es_comunidad_energetica` | **=** | `_es_comunidad()` en `:900`, expuesto en `:1518` |
+| `ppa.planta_declarada` | **=** | `oportunidad_ofertas.planta_nombre`, `:1514` |
+
+### `ppa.condiciones` (5)
+
+Los cinco los sigue calculando `duracion_contrato()` (`:332`), sin un solo cambio de fórmula:
+
+| Campo | Estado | Línea |
+|---|---|---|
+| `fecha_inicio` | **=** | `:372` |
+| `fecha_fin` | **=** | `:373` |
+| `duracion_texto` | **=** | `:376` |
+| `meses_restantes` | **=** | `:377` |
+| `vigente` | **=** | `:378` |
+
+Y siguen cubiertos por tests: los 5 que se conservaron de
+`tests/test_comercial_proyectos_operando.py` en la Fase 0 son justamente los de esta función.
+
+### Cada proyecto (3)
+
+| Campo | Estado | Origen hoy |
+|---|---|---|
+| `proyecto.proyecto_id` | **=** | `proyectos.id`, `:1327` |
+| `proyecto.nombre` | **=** | `proyectos.nombre_comercial`, `:1328` |
+| `proyecto.api_id_unergy` | **=** | `api_id_unergy()` en `:890`, salida `:1329`. Sigue saliendo de `proyectos.sub_project`. ⚠️ **Ojo:** ahora hay una **11.ª clave externa**, `project_id_solarview`, que NO alimenta este campo — no confundirlas, son esquemas de id distintos |
+
+### `proyecto.detalles` · generación promedio (7)
+
+Los siete siguen en `_gen_promedio()` (`:382`), con la misma cascada de tres escalones:
+
+| Campo | Estado | Línea |
+|---|---|---|
+| `energia_promedio_mensual_mwh` | **=** | `:405` (medido/manual), `:412` (estimado), `:416` (declarado) |
+| `energia_promedio_mensual_kwh` | **=** | `:1365` |
+| `energia_promedio_origen` | **=** | `:397-398` |
+| `energia_promedio_detalle.dias_con_datos` | **=** | `:400` |
+| `…ventana_desde` | **=** | `:401` |
+| `…ventana_hasta` | **=** | `:402` |
+| `…actualizado_en` | **=** | `:403` |
+
+Los cuatro de `detalle` siguen saliendo **todos `null`** en los orígenes `estimado` y `declarado`.
+
+### `detalles.construccion` (4)
+
+| Campo | Estado | Origen hoy |
+|---|---|---|
+| `fase` | **=** | `proyectos.fase_construccion`, `:1201` |
+| `avance_obra_pct` | **=** | `:1202` |
+| `fecha_estimada_energizacion` | **=** | `:1204` |
+| `origen_registro` | **=** | `proyectos.origen`, `:1206` |
+
+✅ Las dos columnas que devolví al DDL el 23-ago (`fase_construccion` y `origen`) **siguen siendo
+necesarias**: alimentan estos dos campos y nadie más las provee.
+
+### `detalles.simulacion` (4)
+
+| Campo | Estado | Línea |
+|---|---|---|
+| `p50_mensual_kwh` | **=** | `:1226` |
+| `p90_mensual_kwh` | **=** | `:1227` |
+| `p99_mensual_kwh` | **=** | `:1228` |
+| `p50_anual_kwh` | **=** | `:1231`, y sigue la regla `null` si no son 12 meses |
+
+### `detalles.clasificacion` (4)
+
+| Campo | Estado | Línea |
+|---|---|---|
+| `clasificacion_regulatoria` | **=** | `:1019` |
+| `tipo_tecnologia` | **=** | `:1020`. ⚠️ La homónima de `fronteras` se eliminó (091): ya no hay ambigüedad de dos columnas con el mismo nombre y tipo distinto |
+| `tipo_proyecto` | **=** | `:1021` |
+| `nombre_comunidad` | **=** | `:1025` |
+
+### Potencia, red, estados y fechas (7)
+
+| Campo | Estado | Origen hoy |
+|---|---|---|
+| `potencia_instalada_kwp` **crítico** | **=** | `:1333`. ⚠️ Ahora es **más central que antes**: la migración 090 la dejó como **fuente única** de capacidad, tras eliminar `capacidad_transporte_mw` y `capacidad_efectiva_mw` de `fronteras`. Mi propuesta de renombrarla a `potencia_dc_kwp` (`04` §2.1) ahora tiene **más** superficie que romper, no menos |
+| `operador_red` **crítico** | **↷** | `_operador_red()` `:931`, salida `:1354`. 3 escalones en vez de 4 |
+| `operador_red_id` **crítico** | **🛑** | `:1358`. Ver §B |
+| `estado_proyecto` | **=** | `proyectos.estado`, `:1331` |
+| `estado_proyecto_label` | **=** | dict `ESTADO_PROYECTO_LABELS`, `:1332` |
+| `fecha_inicio_comercializacion` | **=** | `:1360` |
+| `fecha_entrada_operacion` | **=** | `:1359` |
+
+### `detalles.ubicacion` (7)
+
+| Campo | Estado | Origen hoy |
+|---|---|---|
+| `municipio` **crítico** | **=** | `:1338`. Sigue string, sigue cascada independiente. D-16 sin cambios |
+| `departamento` **crítico** | **=** | `:1339` |
+| `texto` | **=** | `:1342` |
+| `latitud` | **=** | `:1343` |
+| `longitud` | **=** | `:1344` |
+| `direccion` | **=** | `proyectos.direccion_vereda`, `:1347` |
+| `url_mapa` | **=** | `proyecto_info_tecnica.url_ubicacion`, `:1351` |
+
+⚠️ **Un refuerzo inesperado para D-16.** Las migraciones 091-095 consolidaron `municipio`,
+`departamento`, `latitud`, `longitud` y `direccion` **desde `fronteras` hacia `proyectos`**, con el
+argumento de que duplicaban. Eso significa que `proyectos` es ahora la **única** fuente de ubicación
+de la plataforma, y que estos campos congelados quedaron con **más** peso, no menos. Normalizarlos a
+un catálogo DIVIPOLA ahora rompería más consumidores que hace tres días.
+
+## E · Lo que sigue sin verificar
+
+- **El consumidor externo.** Juan dijo el 24-ago que «se adaptará», así que no bloquea. Pero eso
+  **no** cambia el diseño: los campos vivos se siguen preservando igual, y el cambio de semántica de
+  `operador_red_id` (§B) es algo que conviene avisarle, porque no lo causamos nosotros y ya está en
+  producción.
+- **Ningún test cubre el árbol completo como golden.** `tests/test_comercial_ppas_pipeline.py` prueba
+  campos sueltos, incluido `api_id_unergy` (3 aserciones). El golden test que propone el §7.1 de
+  `06-plan-migracion.md` **sigue sin construirse**, y sigue siendo la única forma de demostrar que la
+  salida no cambió. ⚠️ Con 86 commits en 3 días tocando este dominio, cada día que pasa sin ese golden
+  es un día en que nadie puede afirmar que el contrato se mantuvo.

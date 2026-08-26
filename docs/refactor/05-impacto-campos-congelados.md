@@ -351,7 +351,7 @@ exigencia se satisfizo, por otra vía y antes de que yo la ejecutara.
 | Campo | Antes | Hoy | Veredicto |
 |---|---|---|---|
 | `detalles.operador_red` | cascada de 4 escalones | cascada de 3 (`comercial.py:931-951`) | **↷** Cambió el origen; la salida es idéntica porque la migración 076 verificó que ninguna planta dependía solo del 4.º escalón |
-| `detalles.ubicacion.url_mapa` | `proyecto_info_tecnica.url_ubicacion` | **igual**, `comercial.py:1351` | **=** Verificado: sigue en la ficha técnica. **No** se movió a `proyectos` como propone `04` §2.2 — ese movimiento sigue pendiente y este campo lo va a sentir cuando ocurra |
+| `detalles.ubicacion.url_mapa` | `proyecto_info_tecnica.url_ubicacion` | **igual**, `comercial.py:1351` | **=** hoy. ⚠️ Pero **D-22 (2026-08-26) lo mueve a `documentos`**: ver abajo |
 
 Y un campo del mismo árbol que **no** es del contrato congelado pero conviene registrar, porque un
 consumidor podría estar leyéndolo: `detalles.fronteras[].operador_red` pasó de
@@ -483,3 +483,46 @@ un catálogo DIVIPOLA ahora rompería más consumidores que hace tres días.
   `06-plan-migracion.md` **sigue sin construirse**, y sigue siendo la única forma de demostrar que la
   salida no cambió. ⚠️ Con 86 commits en 3 días tocando este dominio, cada día que pasa sin ese golden
   es un día en que nadie puede afirmar que el contrato se mantuvo.
+
+## F · ⚠️ 2026-08-26 · `url_mapa` cambia de almacenamiento por D-22
+
+La decisión **D-22** (documentos como entidad con arco exclusivo) mueve las seis columnas `*_url`
+sueltas a una tabla `documentos`. Una de ellas, `url_ubicacion`, **alimenta un campo congelado**:
+`detalles.ubicacion.url_mapa`.
+
+| | |
+|---|---|
+| **Hoy** | `proyecto_info_tecnica.url_ubicacion`, leído en `app/services/comercial.py:1351` |
+| **Con el modelo objetivo (antes de D-22)** | `proyectos.url_ubicacion` |
+| **Con D-22** | `documentos` con `proyecto_id = ? AND tipo = 'mapa_ubicacion'` |
+
+### ✅ Confirmación pedida por Juan (2026-08-26): la salida queda idéntica
+
+**Sí, idéntica.** Punto por punto, contra lo que el contrato congela:
+
+| Qué congela el brief | Antes | Con D-22 |
+|---|---|---|
+| **Nombre del campo** | `url_mapa` | `url_mapa` |
+| **Tipo** | string o `null` | string o `null` |
+| **Anidamiento** | `detalles.ubicacion.url_mapa` | `detalles.ubicacion.url_mapa` |
+| **Existencia de la clave** | siempre presente | siempre presente |
+
+Lo único que cambia es la expresión que la llena en `_nodo_proyecto()`: de leer un atributo a resolver
+`WHERE proyecto_id = ? AND tipo = 'mapa_ubicacion'`. Eso es precisamente la separación entre
+almacenamiento y contrato de salida que pide el brief — el consumidor externo **no puede notar la
+diferencia**.
+
+**Dos condiciones que la implementación debe cumplir**, y que el golden test tiene que probar para que
+esa afirmación sea verificable y no una promesa:
+
+1. **Sigue devolviendo `null` cuando no hay documento**, no una lista vacía, no un `[]`, y sin omitir la
+   clave. Una planta sin mapa cargado es el caso normal, no un error.
+2. **Con dos documentos `mapa_ubicacion`, la salida tiene que ser determinista.** Sin un orden explícito
+   se cae en el mismo modo de falla que `_get_proyecto_id_por_sub_project` con su `LIMIT 1` sin `ORDER
+   BY`, ya documentado como bug real en el diagnóstico de agosto. **Recomendación:** un
+   `UNIQUE (proyecto_id) WHERE tipo = 'mapa_ubicacion' AND deleted_at IS NULL` sobre `documentos`, que
+   convierte el problema en imposible en vez de en «hay que acordarse de ordenar».
+
+Es el **tercer** campo congelado que cambia de almacenamiento en el modelo objetivo, junto con
+`api_id_unergy` (D-13) y `potencia_instalada_kwp` (renombre a `potencia_dc_kwp`). Los tres exigen mapeo
+en la capa de salida y ninguno cambia el contrato.

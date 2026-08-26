@@ -5,9 +5,11 @@ trade-off que acepté. Las marcadas **⚠️** son las que no tengo cerradas o d
 **Criterio general:** lo que ya funciona no se toca. Cuatro decisiones grandes cambian respecto del plan
 inicial, y una queda **abierta a tu confirmación** (D-06, frontera).
 **Cómo leerlo:** las ⚠️ primero — son D-01, D-03, D-04, D-06, D-09, D-11, D-13, D-16.
-**Actualizado el 2026-08-26:** hay un **apéndice al final** que cierra D-06 (frontera) y corrige un
-hueco de D-10 (las tres tarifas de servicio). Lo de abajo se conserva tal como se escribió el
-2026-08-23; el apéndice dice qué quedó superado y por qué.
+**Actualizado el 2026-08-26:** hay **dos apéndices al final**. El primero cierra D-06 (frontera) y
+corrige un hueco de D-10 (las tres tarifas de servicio). El segundo trae **D-21 a D-23**: la caché
+sincronizada de `estado`/`etapa`, los documentos como entidad con arco exclusivo, y la coherencia
+entre `operador_red_id` y `punto_conexion_id`. Lo de abajo se conserva tal como se escribió el
+2026-08-23.
 
 ---
 
@@ -512,3 +514,395 @@ Sabana de Torres al 3,8 % con 6 y 6), y hay lógica de negocio colgando —
 
 Me inclino por **B**, pero la decisión es tuya y afecta el DDL, el mapeo y la Fase 6 del plan.
 Mientras no se decida, `04-mapeo.md` queda con la advertencia y **la Fase 6 no se puede ejecutar**.
+
+---
+
+# Apéndice II · 2026-08-26 · Tres decisiones nuevas (D-21 a D-23)
+
+**Origen:** la validación de separación de entidades que pidió Juan destapó tres cosas — `estado`/`etapa`
+como caché sin sincronizar, documentos sin entidad propia, y `operador_red_id`/`punto_conexion_id`
+capaces de contradecirse. Las tres quedan decididas acá.
+**Estado: SOLO DISEÑO.** `02-modelo.md` y `03-esquema.sql` **no se modificaron**, igual que con D-06.
+El DDL de abajo es la propuesta, no el esquema.
+**Contexto que pesa en las tres:** producción **no tiene ni un trigger ni una función** hoy, y **cero FK
+compuestas**. `03-esquema.sql` ya introduce el primer trigger (la suma 100 % de D-09). Cada mecanismo
+procedimental nuevo es un patrón que el equipo no tiene, y eso cuenta como costo.
+
+## D-21 · `estado` y `etapa`: caché con sincronización garantizada
+
+**Decisión de Juan (2026-08-26):** se quedan en `proyectos`, pero con trigger que las sincronice desde
+`proyecto_estado_historial` y `COMMENT` explicando la razón. *«Caché sin sincronización garantizada no
+es opción.»*
+
+**La fuente de verdad pasa a ser `proyecto_estado_historial`.** `proyectos.estado` y `proyectos.etapa`
+son una proyección de la fila cuya `vigencia` contiene la fecha de hoy.
+
+### El agujero que un trigger solo NO tapa
+
+Un trigger reacciona a escrituras. Pero la caché también se puede desincronizar **sin que nadie
+escriba**: si un periodo termina el 1 de septiembre y el siguiente arranca ese día, la fila vigente
+cambia **por el paso del tiempo**. A las 00:00 del 1 de septiembre la caché queda mal y ningún trigger
+se enteró.
+
+Y no se puede tapar con un `CHECK`: cualquier expresión con `CURRENT_DATE` es `STABLE`, no `IMMUTABLE`,
+y Postgres la rechaza en un constraint. Es el mismo muro que ya encontramos con
+`fecha_resolucion::date` en `fallas` (ver el BLOQUE 9 del DDL).
+
+**Por eso la sincronización garantizada son tres piezas, no una:**
+
+| Pieza | Qué cubre |
+|---|---|
+| 1 · Trigger sobre `proyecto_estado_historial` | El 99 % de los casos: alguien registra un cambio de estado |
+| 2 · Tarea diaria de reconciliación | El paso del tiempo. Son 194 filas: recalcular todas cuesta milisegundos |
+| 3 · Trigger de bloqueo sobre `proyectos` | Que nadie escriba `estado` por fuera del historial |
+
+### El diseño
+
+```sql
+-- 1 · Recalcula la caché de UN proyecto desde su historial.
+CREATE OR REPLACE FUNCTION fn_sync_estado_proyecto(p_proyecto_id BIGINT) RETURNS VOID AS $$
+DECLARE
+    v_estado estado_proyecto_enum;
+    v_etapa  proyecto_etapa_enum;
+    v_hay    BOOLEAN := FALSE;
+BEGIN
+    SELECT h.estado, h.etapa, TRUE
+      INTO v_estado, v_etapa, v_hay
+      FROM proyecto_estado_historial h
+     WHERE h.proyecto_id = p_proyecto_id
+       AND h.vigencia @> CURRENT_DATE
+     LIMIT 1;
+
+    -- DECISION EXPLICITA (D-21, cerrada por Juan el 2026-08-26): si el historial
+    -- tiene un HUECO -- ningun periodo cubre hoy -- la cache NO se toca. Se
+    -- conserva el ultimo estado conocido, que es mas util que un NULL y ademas
+    -- respeta el NOT NULL de proyectos.estado. El hueco no queda escondido: el
+    -- proyecto aparece en v_proyecto_estado_desincronizado, que es donde se ve.
+    -- Esto NO es el comportamiento por defecto de un UPDATE ... FROM vacio: es
+    -- una salida temprana escrita a proposito.
+    IF NOT v_hay THEN
+        RETURN;
+    END IF;
+
+    -- El flag de sesión le dice al trigger de bloqueo que este UPDATE es legítimo.
+    PERFORM set_config('app.sync_estado', 'on', TRUE);
+    UPDATE proyectos
+       SET estado = v_estado,
+           etapa  = v_etapa
+     WHERE id = p_proyecto_id;
+    PERFORM set_config('app.sync_estado', 'off', TRUE);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 2 · Se dispara con cada escritura del historial.
+CREATE OR REPLACE FUNCTION fn_trg_sync_estado() RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM fn_sync_estado_proyecto(COALESCE(NEW.proyecto_id, OLD.proyecto_id));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tg_sync_estado
+    AFTER INSERT OR UPDATE OR DELETE ON proyecto_estado_historial
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_sync_estado();
+
+-- 3 · Bloquea la escritura directa: el estado se cambia registrando un periodo.
+CREATE OR REPLACE FUNCTION fn_bloquear_estado_directo() RETURNS TRIGGER AS $$
+BEGIN
+    IF current_setting('app.sync_estado', TRUE) IS DISTINCT FROM 'on'
+       AND (NEW.estado IS DISTINCT FROM OLD.estado
+            OR NEW.etapa IS DISTINCT FROM OLD.etapa) THEN
+        RAISE EXCEPTION
+            'proyectos.estado/etapa son una cache de proyecto_estado_historial. '
+            'Registra un periodo nuevo en esa tabla; no los escribas directo.'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tg_bloquear_estado_directo
+    BEFORE UPDATE ON proyectos
+    FOR EACH ROW EXECUTE FUNCTION fn_bloquear_estado_directo();
+```
+
+#### El `COMMENT` y la vista de deriva
+
+Más el `COMMENT` que pidió Juan, y una vista para **detectar** la deriva en vez de suponer que no existe:
+
+```sql
+COMMENT ON COLUMN proyectos.estado IS
+    'CACHE de proyecto_estado_historial (la fila cuya vigencia contiene hoy). NO se escribe '
+    'directo: tg_bloquear_estado_directo lo impide. Se sincroniza con tg_sync_estado en cada '
+    'escritura del historial y con la tarea diaria _run_sync_estados, que cubre el cambio de '
+    'periodo por paso del tiempo. Existe como columna por rendimiento: la lista de proyectos y '
+    'los filtros por estado son la consulta mas frecuente de la plataforma. Ver D-21.';
+
+CREATE VIEW v_proyecto_estado_desincronizado AS
+SELECT p.id AS proyecto_id, p.nombre_comercial,
+       p.estado AS estado_cache, h.estado AS estado_historial,
+       p.etapa  AS etapa_cache,  h.etapa  AS etapa_historial
+  FROM proyectos p
+  LEFT JOIN proyecto_estado_historial h
+         ON h.proyecto_id = p.id AND h.vigencia @> CURRENT_DATE
+ WHERE p.deleted_at IS NULL
+   AND (p.estado IS DISTINCT FROM h.estado OR p.etapa IS DISTINCT FROM h.etapa);
+```
+
+La tarea diaria (`_run_sync_estados` en el scheduler) recorre esa vista y llama a
+`fn_sync_estado_proyecto` por cada fila. Si la vista devuelve algo **después** de correrla, hay un bug,
+no deriva esperada.
+
+**El hueco en el historial, resuelto explícitamente** *(cerrado por Juan el 2026-08-26: «que sea
+explícita, no accidental»)*. Si ningún periodo cubre la fecha de hoy, la función **sale temprano y no
+toca la caché**: se conserva el último estado conocido. Tres razones para elegir eso y no NULL:
+
+1. `proyectos.estado` es `NOT NULL`, así que un NULL ni siquiera es representable.
+2. El último estado conocido es más útil que un hueco para quien lee la lista de proyectos.
+3. **El hueco no queda escondido:** ese proyecto aparece en `v_proyecto_estado_desincronizado`, porque
+   su `LEFT JOIN` deja `h.estado` en NULL y `IS DISTINCT FROM` dispara.
+
+La diferencia con la versión anterior de este DDL es que antes ese comportamiento era el **efecto
+colateral** de un `UPDATE ... FROM` sin filas; ahora es un `IF NOT v_hay THEN RETURN` con su comentario.
+Mismo resultado, pero decidido en vez de heredado.
+
+**Trade-offs aceptados:**
+
+- ⚠️ **Tres triggers y tres funciones nuevas en una base que hoy tiene cero.** Es el costo real de
+  «caché con sincronización garantizada». La alternativa —quitar las columnas y exponer una vista— no
+  tiene triggers pero cambia el plan de la consulta más frecuente de la plataforma.
+- ⚠️ **El flag de sesión `app.sync_estado` es frágil ante una excepción**: si algo revienta entre el
+  `set_config('on')` y el `set_config('off')`, queda encendido hasta el fin de la transacción. Se usa
+  `is_local = TRUE`, así que muere con la transacción y no contamina la conexión del pool. Aceptado.
+- El estado **futuro programado** no se refleja hasta que llega su fecha, que es lo correcto: la caché
+  dice qué es hoy, no qué será.
+
+## D-22 · Documentos como entidad, con arco exclusivo
+
+**Decisión de Juan (2026-08-26):** una tabla `documentos` con arco exclusivo, que absorba las columnas
+`*_url` sueltas y contemple los documentos de cliente del brief.
+
+Hoy los documentos están en seis sitios y ninguno es una entidad:
+
+| Dónde vive hoy | En el esquema objetivo |
+|---|---|
+| `proyectos.url_ubicacion` | L334 |
+| `equipo_modelos.datasheet_url` | L461 |
+| `equipos.documentacion_url` | L499 |
+| `proyecto_composiciones.documento_url` | L563 |
+| `contratos.documento_url` | L604 |
+| `planos_url` dentro del JSON Schema de `subestacion` | L955 |
+| `falla_adjuntos` (tabla) | L710 |
+
+Y los del brief —RUT, cámara de comercio, certificación bancaria— **no tienen dónde vivir** en el núcleo.
+
+### El diseño
+
+```sql
+CREATE TYPE documento_tipo_enum AS ENUM (
+    'datasheet', 'planos', 'ficha_tecnica', 'manual',          -- equipo
+    'rut', 'camara_comercio', 'certificacion_bancaria',        -- cliente (los del brief)
+    'contrato_firmado', 'acta', 'poliza',                      -- contrato / propiedad
+    'evidencia_falla', 'fotografia',                           -- falla
+    'mapa_ubicacion',                                          -- proyecto
+    'otro'
+);
+
+CREATE TABLE documentos (
+    id              BIGSERIAL PRIMARY KEY,
+    tipo            documento_tipo_enum NOT NULL,
+
+    -- Arco exclusivo: exactamente UNO de estos SEIS tiene valor.
+    -- cliente_id y contrato_id van con RESTRICT, no CASCADE: un RUT o un contrato
+    -- firmado tienen valor legal y no desaparecen porque se borre su fila padre.
+    -- El borrado tiene que fallar ruidosamente y obligar a decidir que se hace
+    -- con los documentos. Mismo criterio que la migracion 083 aplico al historial
+    -- regulatorio de fronteras.
+    proyecto_id      BIGINT REFERENCES proyectos(id)       ON DELETE CASCADE,
+    contrato_id      BIGINT REFERENCES contratos(id)       ON DELETE RESTRICT,
+    equipo_id        BIGINT REFERENCES equipos(id)         ON DELETE CASCADE,
+    equipo_modelo_id BIGINT REFERENCES equipo_modelos(id)  ON DELETE CASCADE,
+    cliente_id       BIGINT REFERENCES clientes(id)        ON DELETE RESTRICT,
+    falla_id         BIGINT REFERENCES fallas(id)          ON DELETE CASCADE,
+
+    nombre          VARCHAR(300),
+    url             VARCHAR(1000) NOT NULL,
+    content_type    VARCHAR(120),
+    tamano_bytes    BIGINT,
+    fecha_documento DATE,
+    fecha_expiracion DATE,
+    subido_por_id   BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    subido_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
+
+    CONSTRAINT ck_documentos_arco_exclusivo CHECK (
+        num_nonnulls(proyecto_id, contrato_id, equipo_id,
+                     equipo_modelo_id, cliente_id, falla_id) = 1
+    ),
+    CONSTRAINT ck_documentos_expiracion CHECK (
+        fecha_expiracion IS NULL OR fecha_documento IS NULL
+        OR fecha_expiracion >= fecha_documento
+    )
+);
+```
+
+`num_nonnulls()` es `IMMUTABLE` y existe desde Postgres 9.6, así que **el arco lo impone la base**, no
+la aplicación. Es la diferencia con `audit_log.registro_id`, que es polimórfica sin FK y por eso puede
+apuntar a filas que ya no existen (`00-inventario-actual.md` §11.G).
+
+Índices: uno parcial por brazo (`CREATE INDEX ... ON documentos (proyecto_id) WHERE proyecto_id IS NOT NULL`),
+más `(tipo)` y `(fecha_expiracion) WHERE fecha_expiracion IS NOT NULL` — este último responde
+«qué documentos de cliente están por vencer», que es el equivalente documental de la consulta de
+garantías de D-04.
+
+### Qué se migra
+
+| Origen | `tipo` | Brazo |
+|---|---|---|
+| `proyectos.url_ubicacion` | `mapa_ubicacion` | `proyecto_id` |
+| `equipo_modelos.datasheet_url` | `datasheet` | `equipo_modelo_id` |
+| `equipos.documentacion_url` | `manual` | `equipo_id` |
+| `contratos.documento_url` | `contrato_firmado` | `contrato_id` |
+| `proyecto_composiciones.documento_url` | `acta` | **`proyecto_id`** (ver nota) |
+| `planos_url` del JSON Schema de `subestacion` | `planos` | `equipo_id` |
+| **`falla_adjuntos` (tabla completa)** | `evidencia_falla` / `fotografia` | `falla_id` |
+| — (nuevos, del brief) | `rut`, `camara_comercio`, `certificacion_bancaria` | `cliente_id` |
+
+**`falla_adjuntos` se absorbe y desaparece.** Tenía las mismas 6 columnas (`url`, `nombre`,
+`content_type`, `tamano_bytes`, `subido_por_id`, `subido_en`) y mantenerla aparte dejaría dos entidades
+para lo mismo — justo lo que esta decisión corrige.
+
+**Y sale una propiedad del JSON Schema.** `planos_url` deja de ser una clave dentro de
+`equipo_tipos.esquema_especificaciones`: los documentos son documentos, no una especificación técnica.
+Es un ajuste a D-01 que la hace más limpia.
+
+### Los tres puntos abiertos, cerrados por Juan el 2026-08-26
+
+**1 · Seis brazos, no siete.** Se saca `composicion_id`: **el acta de una composición cuelga del
+proyecto**, con `tipo = 'acta'`. La composición concreta se puede recuperar cruzando la fecha del
+documento con la `vigencia` de la composición, y si algún día hace falta el vínculo directo, se agrega
+una columna `composicion_id` *sin* brazo de arco — informativa, no discriminante.
+
+*Alternativa descartada:* siete brazos con `composicion_id` en el arco. Se descartó porque un arco de
+siete columnas empieza a costar más de lo que aporta: siete índices parciales, siete FK, y un `CHECK`
+que hay que leer dos veces.
+
+**2 · `cliente_id` y `contrato_id` van con `RESTRICT`.** *«Un RUT no se borra solo.»* Un documento con
+valor legal no desaparece porque se borre su fila padre: el borrado falla ruidosamente y obliga a
+decidir qué se hace con él. Es el mismo criterio que la migración 083 aplicó al historial regulatorio de
+fronteras, y el que la Fase 1 paso 1.4 propone como regla general.
+
+Los otros cuatro brazos siguen en `CASCADE`, y por qué: un datasheet sin su modelo de equipo, un manual
+sin su equipo o una foto sin su falla no son documentos huérfanos con valor propio — son ruido.
+
+⚠️ **Consecuencia operativa:** borrar un cliente con documentos pasa a fallar. Hoy devuelve 500 porque
+la API no captura `IntegrityError` — por eso el paso **1.5** de la Fase 1 (traducir a 409 legible) tiene
+que ir **antes** de que esta tabla exista, no después.
+
+**3 · `url_ubicacion`: la salida queda idéntica, confirmado en `05`.** Alimenta
+`detalles.ubicacion.url_mapa` de la API externa. Cambia de dónde se lee, no lo que se devuelve. La
+confirmación con sus dos condiciones verificables está en `05-impacto-campos-congelados.md` §F.
+
+## D-23 · Coherencia entre `operador_red_id` y `punto_conexion_id`
+
+**Decisión de Juan (2026-08-26):** no se mueven, pero hay que impedir que se contradigan.
+
+El invariante: si un proyecto tiene punto de conexión, su operador de red **tiene que ser** el dueño del
+circuito al que pertenece ese punto. Hoy nada lo impide: `punto_conexion → circuito → operador_red` es
+una cadena que la fila del proyecto puede desmentir.
+
+### Lo que propongo: FK compuesta, no trigger
+
+```sql
+-- 1 · Claves candidatas redundantes que habilitan la FK compuesta.
+ALTER TABLE red_circuitos       ADD CONSTRAINT uq_red_circuitos_id_operador
+    UNIQUE (id, operador_red_id);
+
+-- 2 · El punto de conexion carga el operador y lo ata a su circuito.
+ALTER TABLE red_puntos_conexion ADD COLUMN operador_red_id BIGINT NOT NULL;
+ALTER TABLE red_puntos_conexion ADD CONSTRAINT fk_punto_circuito_operador
+    FOREIGN KEY (circuito_id, operador_red_id)
+    REFERENCES red_circuitos (id, operador_red_id) ON DELETE RESTRICT;
+ALTER TABLE red_puntos_conexion ADD CONSTRAINT uq_punto_id_operador
+    UNIQUE (id, operador_red_id);
+
+-- 3 · Y el proyecto queda atado a los dos a la vez.
+ALTER TABLE proyectos ADD CONSTRAINT fk_proyecto_punto_operador
+    FOREIGN KEY (punto_conexion_id, operador_red_id)
+    REFERENCES red_puntos_conexion (id, operador_red_id) ON DELETE SET NULL;
+```
+
+**Por qué esta y no un trigger:**
+
+- **La contradicción se vuelve imposible por construcción**, no detectable a posteriori. No hay ventana
+  entre la escritura y la validación, ni deriva silenciosa si alguien escribe por fuera de la API.
+- **Es declarativa.** No agrega código procedimental a una base que hoy tiene cero triggers, y D-21 ya
+  va a agregar tres. Un mecanismo declarativo más es barato; el cuarto trigger no.
+- **Cubre la segunda dirección, que un trigger sobre `proyectos` no cubre:** si mañana un circuito
+  cambia de operador, la FK compuesta bloquea el `UPDATE` en `red_circuitos` mientras haya puntos —y
+  proyectos— colgando con el operador viejo. Un trigger sobre `proyectos` no se enteraría.
+
+**La semántica de los NULL es exactamente la que hace falta.** Una FK compuesta usa `MATCH SIMPLE` por
+defecto: **si alguna columna es NULL, la restricción no se evalúa**. O sea:
+
+| `punto_conexion_id` | `operador_red_id` | ¿Permitido? |
+|---|---|---|
+| NULL | NULL | Sí — planta sin datos de red |
+| NULL | puesto | Sí — **el caso común hoy**: se conoce el operador, no el punto |
+| puesto | NULL | Sí (no se evalúa) ⚠ ver abajo |
+| puesto | puesto | **Solo si concuerdan** |
+
+El tercer caso es el único hueco: se podría registrar el punto sin el operador. No es una
+contradicción —es un dato incompleto— y **Juan decidió el 2026-08-26 cerrarlo también**, con un `CHECK`
+que no necesita consultar otra tabla y por tanto es `IMMUTABLE`:
+
+```sql
+ALTER TABLE proyectos ADD CONSTRAINT ck_proyectos_red_completa CHECK (
+    punto_conexion_id IS NULL OR operador_red_id IS NOT NULL
+);
+```
+
+Con eso la matriz queda en tres casos válidos y uno prohibido: **si hay punto de conexión, tiene que
+haber operador, y tiene que ser el correcto.**
+
+**Cerrada por Juan el 2026-08-26:** FK compuesta, con la denormalización de `operador_red_id` en
+`red_puntos_conexion` y el `CHECK` del hueco. *Alternativa descartada:* el trigger que rellena
+`operador_red_id` desde el punto de conexión — menos esquema, pero no cubre el cambio de operador de un
+circuito y suma un cuarto trigger a una base que hoy tiene cero.
+
+**Trade-offs aceptados:**
+
+- ⚠️ **`red_puntos_conexion` carga un `operador_red_id` denormalizado.** Es el precio estándar de esta
+  técnica, y no puede desincronizarse: su propia FK compuesta contra `red_circuitos` lo impide.
+- ⚠️ **Es un patrón que el repo no tiene**: cero FK compuestas en las 148 de producción. Un
+  `UNIQUE (id, otra_columna)` se lee como redundante si no se sabe para qué está; los dos
+  `CONSTRAINT` llevan `COMMENT` explicándolo.
+- ⚠️ **`red_puntos_conexion.operador_red_id` es `NOT NULL`**, así que ningún punto de conexión se
+  puede crear sin decir de qué operador es. Es lo correcto —un punto siempre pertenece a un circuito y
+  un circuito a un operador— pero conviene tenerlo presente al cargar la topología, que hoy no existe
+  y hay que crear desde cero.
+
+## D-16 (nota de deuda) · `municipio` y `departamento` siguen como texto
+
+**Decisión de Juan (2026-08-26):** se queda como está, anotado como deuda con su razón.
+
+Lo correcto sería `municipio_id` contra un catálogo DIVIPOLA. **No se hace, y la razón es el contrato
+congelado:** `ubicacion.municipio` y `ubicacion.departamento` se resuelven por **cascadas
+independientes** —el municipio puede venir de la oferta comercial y el departamento del proyecto— y el
+comentario del código explica por qué: *«hay filas con el departamento cargado y el municipio en blanco,
+y colapsarlos en un solo campo perdería el que sí está»* (`app/services/comercial.py`). Un
+`municipio_id` único no puede representar «departamento sí, municipio no».
+
+**Y desde el 2026-08-25 pesa más**, no menos: las migraciones 091-095 consolidaron `municipio`,
+`departamento`, `latitud`, `longitud` y `direccion` **desde `fronteras` hacia `proyectos`**, así que
+`proyectos` es ahora la única fuente de ubicación de la plataforma. Normalizar hoy rompe más
+consumidores que hace tres días.
+
+**Coste de la deuda, para que esté dicho:** no hay forma de garantizar que «Sabana de Torres» se escriba
+igual en dos filas, ni de desambiguar los municipios homónimos (~15 «La Unión» en Colombia) sin mirar el
+departamento al lado. El consumidor externo ya carga con eso: su `_resolve_municipio_id` necesita los dos
+strings justamente porque no hay id.
+
+**Cuándo se paga:** cuando el consumidor externo confirme que puede recibir un id, o cuando aparezca un
+segundo consumidor que necesite cruzar por municipio. Entra el catálogo y los dos strings se conservan
+como campos derivados de la salida.

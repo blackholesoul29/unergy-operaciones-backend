@@ -2788,22 +2788,37 @@ def _scheduled_reporte_energia():
     del día siguiente). ejecutar_dia_background ya maneja su propia sesión
     de BD, logging y registro en _ULTIMAS_CORRIDAS (mismo mecanismo que usa
     POST /ejecutar) -- no hace falta duplicar nada acá, solo calcular la
-    fecha y llamarla.
-
-    Encadenado justo después: verificar_drift_medidores() (pedido de Sara
-    2026-08-26) -- vuelve a consultar Quoia por cada fila recién
-    clasificada y marca revisar_manualmente=True si el medidor ya cambió,
-    para que quien entre a reportar lo vea reflejado en la lista sin tener
-    que abrir cada frontera. Encadenado acá a propósito, no en un cron
-    aparte con otro horario -- así siempre corre pegado a la clasificación
-    del día, sin quedar desincronizado si el horario de esta cambia."""
+    fecha y llamarla."""
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
     from app.services.reporte_energia.orquestador import ejecutar_dia_background
-    from app.services.reporte_energia.drift_medidores import verificar_drift_medidores_background
 
     fecha = (datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(days=1)).date()
     ejecutar_dia_background(fecha)
+
+
+def _scheduled_drift_medidores_reporte_energia():
+    """verificar_drift_medidores_background() (pedido de Sara 2026-08-26):
+    vuelve a consultar Quoia por cada fila del día anterior que sigue SIN
+    revisar_manualmente y la marca si algún medidor ya cambió desde que se
+    clasificó -- para que quien entre a reportar lo vea reflejado en la
+    lista, sin tener que abrir cada frontera.
+
+    Corre cada 5 min de 4:00am a 5:30am (ver registro del cron más abajo,
+    mismo patrón de dos triggers que excel_terceros_cedillanos) -- después
+    de las 3:30am de la clasificación, con margen para que termine (23-50
+    min históricamente) y para darle varias oportunidades de detectar un
+    valor que Quoia siga asentando esa madrugada, antes de que alguien
+    empiece a reportar. Costo acotado: las filas que ya quedan marcadas
+    revisar_manualmente=True se excluyen de la consulta en las corridas
+    siguientes (ver _revisar_tabla en drift_medidores.py), así que el
+    trabajo por corrida solo crece con lo que sigue sin explicar, no con
+    el total de fronteras."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from app.services.reporte_energia.drift_medidores import verificar_drift_medidores_background
+
+    fecha = (datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(days=1)).date()
     resultado = verificar_drift_medidores_background(fecha)
     print(f"[reporte_energia] verificar_drift_medidores fecha={fecha} marcadas={resultado}")
 
@@ -3823,6 +3838,23 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="reporte_energia_clasificar",
                 name="Reporte de Energía -- clasificar día anterior",
+            )
+
+            # Cada 5 min de 4:00am a 5:30am (19 corridas) -- dos triggers por
+            # la misma razón que excel_terceros_cedillanos más abajo
+            # (CronTrigger no soporta minutos distintos por hora en una sola
+            # expresión: 4:00-4:55 cada 5 min + 5:00-5:30 cada 5 min).
+            _mgs_scheduler.add_job(
+                _scheduled_drift_medidores_reporte_energia,
+                CronTrigger(hour=4, minute="*/5", timezone=settings.TIMEZONE),
+                id="reporte_energia_drift_medidores_4am",
+                name="Reporte de Energía -- drift de medidores (4:00-4:55am)",
+            )
+            _mgs_scheduler.add_job(
+                _scheduled_drift_medidores_reporte_energia,
+                CronTrigger(hour=5, minute="0,5,10,15,20,25,30", timezone=settings.TIMEZONE),
+                id="reporte_energia_drift_medidores_5am",
+                name="Reporte de Energía -- drift de medidores (5:00-5:30am)",
             )
 
             if settings.SMTP_USER and settings.SMTP_PASSWORD:

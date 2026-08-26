@@ -684,7 +684,40 @@ signo de la exposición se invierte.
 
 Con `disponible_desde` en el esquema esto no se hardcodea: cae solo del filtro temporal.
 
-### Validación ya realizada
+### Validación de la réplica completa (2026-08-26)
+
+Reconstruida la `Exposición Energía en Bolsa` desde `BalCttos` `.tx2` × `PBNA` horario de
+`trsd` `.tx2`, y comparada contra el valor que publica XM en las hojas `AJUSTE TX2`, sobre
+**70 períodos** con los insumos completos:
+
+| | |
+|---|---|
+| **Error mediano** | **0,0057%** (536 COP sobre cifras de decenas de millones) |
+| Dentro de 0,01% | **39/70** |
+| Dentro de 1% | **62/70** |
+| Dentro de 5% | **63/70** |
+| Fuera de 5% | 7 |
+
+La media (10,2%) está inflada por los 7 outliers; la mediana describe el comportamiento
+típico. **La réplica del día 7 del componente dominante está resuelta**: no es un modelo
+a ajustar, es aritmética que reproduce el número de XM con los mismos insumos.
+
+#### El signo: XM usa compras − ventas
+
+`Exposición Energía en Bolsa` es **compras − ventas**, no al revés. Positivo = comprador
+neto = se debe dinero = sube la garantía. La primera corrida dio un error de exactamente
+−200,0% en todos los casos, que es la firma de un signo invertido. Con el piso en cero de
+por medio, este error habría producido **ceros donde hay deuda** sin que nada fallara.
+
+#### Los 7 outliers son la ventana, no el cálculo
+
+Se filtró a períodos con los cuatro insumos completos, así que no es falta de datos. La
+explicación probable es que la ventana declarada en el nombre de la hoja no sea la que XM
+realmente usó. Es la primera confirmación empírica de la fuente de incertidumbre
+"ventanas candidatas" de §5.3, y de cuánto pesa: **10% de los casos**. Investigarlos uno
+a uno es el primer trabajo del backtest, no un pendiente menor.
+
+### Validación previa
 
 - Generación Ideal reconstruida desde `BalCttos` `.tx2` vs. la publicada por XM para el
   período base 2026-06-25 → 2026-07-24: **28 de 28 días exactos**, diferencia 0,00 kWh.

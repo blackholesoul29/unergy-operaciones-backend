@@ -35,8 +35,8 @@ HORAS = list(range(24))
 _CACHE_TTL = 1800  # segundos
 _mapa_medidor_nodo_cache: dict[int, int] | None = None
 _mapa_medidor_nodo_ts = 0.0
-_mapa_borders_cache: dict[str, dict] | None = None
-_mapa_borders_ts = 0.0
+_borders_crudos_cache: list[dict] | None = None
+_borders_crudos_ts = 0.0
 
 UMBRAL_GENERACION_KWH = 0.5   # kWh por hora mínimo para considerar la hora "generando"
 HORA_MINIMA_CIERRE    = 18    # el medidor debe seguir reportando al menos hasta esta hora
@@ -82,17 +82,35 @@ def construir_mapa_medidor_nodo(gaia: GaiaClient, usar_cache: bool = True) -> di
     return mapa
 
 
+def obtener_borders_crudos(gaia: GaiaClient, usar_cache: bool = True) -> list[dict]:
+    """Catálogo completo de fronteras de Quoia (gaia.get_all_borders()), sin
+    transformar -- cacheado _CACHE_TTL segundos, mismo criterio que
+    construir_mapa_medidor_nodo()/construir_mapa_borders().
+
+    Punto único de acceso al catálogo completo para evitar traerlo dos veces
+    en la misma request: antes construir_mapa_borders() (este módulo) y
+    resolver_borders() (reporte_cgm.py, servicio de envío del reporte CGM a
+    clientes/operadores) cada uno llamaba a gaia.get_all_borders() por su
+    cuenta -- con caches independientes, ambos podían fallar en frío en la
+    misma request (ej. "Cliente" que además dispara el resumen mensual) y
+    pagar el fetch completo dos veces (~5-9s cada uno, auditoría CGM
+    2026-08-26, finding #2)."""
+    global _borders_crudos_cache, _borders_crudos_ts
+    now = time.monotonic()
+    if usar_cache and _borders_crudos_cache is not None and (now - _borders_crudos_ts) < _CACHE_TTL:
+        return _borders_crudos_cache
+
+    borders = gaia.get_all_borders()
+    _borders_crudos_cache = borders
+    _borders_crudos_ts = now
+    return borders
+
+
 def construir_mapa_borders(gaia: GaiaClient, usar_cache: bool = True) -> dict[str, dict]:
     """frt_code (lowercase) -> {border_id, main_meter, backup_meter} desde
-    /api/cgm/v1/border/ (gaia.get_all_borders()). Cacheado igual que
-    construir_mapa_medidor_nodo()."""
-    global _mapa_borders_cache, _mapa_borders_ts
-    now = time.monotonic()
-    if usar_cache and _mapa_borders_cache is not None and (now - _mapa_borders_ts) < _CACHE_TTL:
-        return _mapa_borders_cache
-
+    obtener_borders_crudos() (cacheado 30 min)."""
     mapa: dict[str, dict] = {}
-    for proyecto in gaia.get_all_borders():
+    for proyecto in obtener_borders_crudos(gaia, usar_cache):
         for key in ("frt_generation", "frt_consumption"):
             frt = proyecto.get(key)
             if not frt:
@@ -106,8 +124,6 @@ def construir_mapa_borders(gaia: GaiaClient, usar_cache: bool = True) -> dict[st
                 "backup_meter": frt.get("backup_meter"),
             }
 
-    _mapa_borders_cache = mapa
-    _mapa_borders_ts = now
     return mapa
 
 

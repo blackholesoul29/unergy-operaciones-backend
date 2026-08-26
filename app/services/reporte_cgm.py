@@ -60,11 +60,18 @@ COLUMNAS = (
 
 
 def resolver_borders(gaia: GaiaClient, frt_codes: set[str]) -> dict[str, dict]:
-    """Mapea frt_code (lowercase) -> {id, category, name} usando el listado de
-    Quoia (get_all_borders, ya cacheado 1h) -- solo para los frt_codes pedidos."""
+    """Mapea frt_code (lowercase) -> {id, category, name} -- solo para los
+    frt_codes pedidos.
+
+    Usa curvas_energia.obtener_borders_crudos() (cacheado 30 min), el mismo
+    catálogo completo que construir_mapa_borders() -- antes cada uno llamaba
+    a gaia.get_all_borders() por su cuenta con su propia caché, así que una
+    request que dispara ambos (ej. destinatario "Cliente", que además arma
+    el resumen mensual con construir_mapa_borders) pagaba el fetch completo
+    del catálogo dos veces (auditoría CGM 2026-08-26, finding #2)."""
     wanted = {c.lower() for c in frt_codes}
     resultado: dict[str, dict] = {}
-    for proyecto in gaia.get_all_borders():
+    for proyecto in curvas_energia.obtener_borders_crudos(gaia):
         nombre = (proyecto.get("name") or "").strip()
         for key in ("frt_generation", "frt_consumption"):
             frt = proyecto.get(key)

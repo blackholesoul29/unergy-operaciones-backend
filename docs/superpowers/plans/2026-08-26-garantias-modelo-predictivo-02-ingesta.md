@@ -217,7 +217,8 @@ _MESES = {
 
 _RE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
 _RE_DDMMM = re.compile(r"(\d{1,2})([A-Z]{3,4})-?(20\d{2})")
-_RE_VERSION = re.compile(r"\.(tx[0-9r-z])$", re.IGNORECASE)
+# `a-z`, no `r-z`: el rango r-z excluye la `f` de txf y la `n` de txn.
+_RE_VERSION = re.compile(r"\.(tx[0-9a-z])$", re.IGNORECASE)
 
 # Orden de liquidación. Sucesivas versiones corrigen a las anteriores.
 _ORDEN = {"tx1": 1, "tx2": 2, "tx3": 3, "txr": 4, "txf": 5, "txn": 6}

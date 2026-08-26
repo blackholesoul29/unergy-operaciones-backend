@@ -33,7 +33,7 @@ from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
 from app.services.reporte_energia.clasificador_consumo import rellenar_horas_faltantes_consumo
 from app.services.reporte_energia.utils import (
     curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor,
-    curva_respaldo_a_reportar, actualizar_respaldo_final,
+    curva_respaldo_a_reportar, actualizar_respaldo_final, curva_cambio,
 )
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
@@ -355,22 +355,6 @@ def _fila_por_id(db: Session, frontera_id: int, fecha: date):
     return front, rep, Modelo
 
 
-def _curva_cambio(persistida: list | None, viva: list | None, tolerancia: float = 0.01) -> bool | None:
-    """True si la curva en vivo difiere de la persistida por más del 1% del
-    total del día -- señal de que Quoia corrigió algo desde que se
-    clasificó (ver MGS 0032 El Paso Norte 2026-08-05: medidor doblado al
-    momento de clasificar, ya corregido para cuando se revisó). None si no
-    hay curva persistida con qué comparar (fila anterior a este fix)."""
-    if persistida is None or viva is None:
-        return None
-    total_p = sum(v for v in persistida if v is not None)
-    total_v = sum(v for v in viva if v is not None)
-    base = max(abs(total_p), abs(total_v))
-    if base == 0:
-        return False
-    return abs(total_p - total_v) / base > tolerancia
-
-
 def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFronteraReporte:
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     es_generacion = Modelo is ReporteEnergiaGeneracion
@@ -435,8 +419,8 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     # el botón "Recuperar medidor"), esto tiene que poder avisarlo igual --
     # antes, al estar escopado solo al medidor usado, ese caso quedaba
     # invisible: ni el aviso ni la opción "(actualizado)" aparecían nunca.
-    principal_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
-    respaldo_actualizado_en_quoia = bool(_curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
+    principal_actualizado_en_quoia = bool(curva_cambio(curva_medidor_ppal_bd, curva_medidor_ppal_viva))
+    respaldo_actualizado_en_quoia = bool(curva_cambio(curva_medidor_resp_bd, curva_medidor_resp_viva))
     curva_medidor_ppal = curva_medidor_ppal_bd if curva_medidor_ppal_bd is not None else curva_medidor_ppal_viva
     curva_medidor_resp = curva_medidor_resp_bd if curva_medidor_resp_bd is not None else curva_medidor_resp_viva
     curva_sol = curva_sol_bd

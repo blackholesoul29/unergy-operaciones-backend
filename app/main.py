@@ -2788,13 +2788,24 @@ def _scheduled_reporte_energia():
     del día siguiente). ejecutar_dia_background ya maneja su propia sesión
     de BD, logging y registro en _ULTIMAS_CORRIDAS (mismo mecanismo que usa
     POST /ejecutar) -- no hace falta duplicar nada acá, solo calcular la
-    fecha y llamarla."""
+    fecha y llamarla.
+
+    Encadenado justo después: verificar_drift_medidores() (pedido de Sara
+    2026-08-26) -- vuelve a consultar Quoia por cada fila recién
+    clasificada y marca revisar_manualmente=True si el medidor ya cambió,
+    para que quien entre a reportar lo vea reflejado en la lista sin tener
+    que abrir cada frontera. Encadenado acá a propósito, no en un cron
+    aparte con otro horario -- así siempre corre pegado a la clasificación
+    del día, sin quedar desincronizado si el horario de esta cambia."""
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
     from app.services.reporte_energia.orquestador import ejecutar_dia_background
+    from app.services.reporte_energia.drift_medidores import verificar_drift_medidores_background
 
     fecha = (datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(days=1)).date()
     ejecutar_dia_background(fecha)
+    resultado = verificar_drift_medidores_background(fecha)
+    print(f"[reporte_energia] verificar_drift_medidores fecha={fecha} marcadas={resultado}")
 
 
 def _scheduled_excel_terceros_cedillanos():

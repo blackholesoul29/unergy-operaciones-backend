@@ -150,6 +150,26 @@ def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
     return estimado, "estimado"
 
 
+def curva_cambio(persistida: list | None, viva: list | None, tolerancia: float = 0.01) -> bool | None:
+    """True si la curva en vivo difiere de la persistida por más del 1% del
+    total del día -- señal de que Quoia corrigió algo desde que se
+    clasificó (ver MGS 0032 El Paso Norte 2026-08-05: medidor doblado al
+    momento de clasificar, ya corregido para cuando se revisó). None si no
+    hay curva persistida con qué comparar (fila anterior a este fix).
+
+    Compartida por _construir_detalle() (reporte_energia.py, comparación al
+    abrir el detalle) y verificar_drift_medidores() (drift_medidores.py,
+    mismo chequeo corrido en lote justo después de clasificar)."""
+    if persistida is None or viva is None:
+        return None
+    total_p = sum(v for v in persistida if v is not None)
+    total_v = sum(v for v in viva if v is not None)
+    base = max(abs(total_p), abs(total_v))
+    if base == 0:
+        return False
+    return abs(total_p - total_v) / base > tolerancia
+
+
 def actualizar_respaldo_final(rep) -> None:
     """Recalcula y persiste curva_respaldo_final/respaldo_final_origen en
     `rep` -- llamar cada vez que curva_final/medidor_usado (o las curvas de

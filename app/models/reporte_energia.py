@@ -6,6 +6,16 @@ de pérdida y el relleno horario se calcula consultando estas mismas tablas
 (ver app/services/reporte_energia/historial.py) -- 'curva_final' y 'caso' ya
 contienen todo lo necesario, no hace falta duplicar en un CSV/tabla extra
 como en el pipeline original (Reporte-Energia).
+
+Todas las columnas JSONB usan JSONB(none_as_null=True): sin esto, SQLAlchemy
+serializa un Python None como el LITERAL JSON 'null' (una fila con dato, no
+SQL NULL real) en vez de dejar la columna en NULL de verdad -- no rompe nada
+en el ORM (json.loads('null') sigue dando None de vuelta), pero es una
+trampa para cualquier query SQL/BI directa que filtre con IS NULL/IS NOT
+NULL (auditoría Reporte ASIC 2026-08-26: ~1298 filas de
+horas_rellenadas_reconectador salían "IS NOT NULL" cuando solo 13 tenían
+dato real). Ver migración que backfillea las filas ya escritas así antes de
+este fix.
 """
 from datetime import datetime, date
 from decimal import Decimal
@@ -48,7 +58,7 @@ class ReporteEnergiaGeneracion(Base):
     caso: Mapped[int] = mapped_column(Integer, nullable=False)
     medidor_usado: Mapped[str | None] = mapped_column(String(30), nullable=True)
     energia_final_kwh: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-    curva_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 24 floats o null
+    curva_final: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)  # 24 floats o null
 
     fp: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     fp_calculada: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
@@ -73,7 +83,7 @@ class ReporteEnergiaGeneracion(Base):
     # ej. Cedillanos) -- viene del rol "Backup" del Excel que sube el
     # tercero, en vez de la fórmula ±1% que /enviar aplica por defecto sobre
     # curva_final cuando esta columna es null.
-    curva_respaldo_terceros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_respaldo_terceros: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     # Lo que /enviar realmente manda como "Backup" a Quoia -- congelado al
     # mismo momento que curva_final (clasificar, editar_curva o Excel de
@@ -83,7 +93,7 @@ class ReporteEnergiaGeneracion(Base):
     # nuevo en cada vista daría un número DISTINTO al que ya se envió.
     # origen: 'terceros' | 'medidor' (dato real del medidor de respaldo,
     # dentro de tolerancia) | 'estimado' (fórmula ±1%).
-    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     respaldo_final_origen: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
@@ -92,23 +102,23 @@ class ReporteEnergiaGeneracion(Base):
     # mostrar un valor distinto si Quoia corrige un dato después (ver MGS
     # 0032 El Paso Norte 2026-08-05: medidor doblado por un glitch de Quoia
     # al momento de clasificar, ya autocorregido para cuando se revisó).
-    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    curva_solenium_referencia: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    curva_solenium_referencia: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     # A diferencia de medidor/Solenium, el reconectador NO se consulta todos
     # los días -- solo cuando medidor e inversores × FP ya dejaron huecos sin
     # cubrir (tercera fuente de la cadena de relleno, ver reconectador.py) --
     # así que esta columna queda en null la mayoría de los días, a propósito.
-    curva_reconectador_referencia: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_reconectador_referencia: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
-    horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    horas_rellenadas_reconectador: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    horas_rellenadas_solenium: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     # Horas rellenadas con el OTRO medidor (el que no ganó como fuente) --
     # mismo consumo/generación física, otro canal de lectura (2026-08-12,
     # ver MGS 0021 Ibirico Consumo). Primera fuente que se intenta en
     # 'Rellenar horas', antes de reconectador/Solenium/histórico.
-    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     recuperacion_datos: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -197,7 +207,7 @@ class ReporteEnergiaConsumo(Base):
     caso: Mapped[str] = mapped_column(String(20), nullable=False)
     medidor_usado: Mapped[str | None] = mapped_column(String(30), nullable=True)
     energia_final_kwh: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-    curva_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_final: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     energia_cgm_kwh: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     estado_reporte: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -206,23 +216,23 @@ class ReporteEnergiaConsumo(Base):
     # motivo que en ReporteEnergiaGeneracion. Quedan en null cuando el caso
     # fue 'CGM' (esa rama no consulta el medidor, para no sumarle una
     # llamada a Quoia a los ~40+ fronteras que resuelven solo con CGM).
-    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     # "Backup" congelado desde que se fijó curva_final -- dato real del
     # medidor de respaldo si medidor_usado empieza con 'principal'/es 'cgm'
     # y está dentro de TOLERANCIA_RESPALDO_REAL_KWH, si no la estimación
     # ±1% de siempre (mismo mecanismo que ReporteEnergiaGeneracion, ver
     # curva_respaldo_a_reportar() en utils.py -- extendido a Consumo
     # 2026-08-26, pedido de Sara).
-    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     respaldo_final_origen: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     # Horas rellenadas con el OTRO medidor (el que no ganó como fuente) --
     # mismo consumo físico, otro canal de lectura (2026-08-12, ver MGS 0021
     # Ibirico Consumo). Distinto de horas_rellenadas_historico: es dato real
     # de un medidor, no una estimación.
-    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    horas_rellenadas_medidor_cruzado: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     recuperacion_datos: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

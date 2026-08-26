@@ -532,10 +532,17 @@ def _guardar_panel(
     # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
     try:
         mods = valores_modulo_costos(db, proyecto_id, periodo)
-        # Representación/CGM = tarifa app × energía del ER; Administración = tarifa_admin
-        # × ingreso del ER. Ambas bases (kWh, ingreso) salen del ER (grupo 'facturas').
+        # Representación/CGM = tarifa app × energía; Administración = tarifa_admin ×
+        # ingreso. Las dos bases son la VENTA de energía, no el neto de compras:
+        # cuando el traductor de la API las entrega (`base_tarifa_*`) mandan ellas.
+        # NEU y Nitro no pasan por aquí: su Excel tiene su propia fórmula, donde la
+        # compra sí resta, y ese camino se deja intacto con kwh/total_ingresos.
+        base_kwh = parsed.get("base_tarifa_kwh")
+        base_cop = parsed.get("base_tarifa_cop")
         mods.update(valores_facturas_modulo(
-            db, proyecto_id, periodo, parsed.get("kwh"), parsed.get("total_ingresos")))
+            db, proyecto_id, periodo,
+            parsed.get("kwh") if base_kwh is None else base_kwh,
+            parsed.get("total_ingresos") if base_cop is None else base_cop))
         if mods:
             base = aplicar_costos_modulo(base, mods, iva=IVA)
     except Exception:

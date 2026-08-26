@@ -160,6 +160,15 @@ def construir_parsed(proyecto: dict[str, Any]) -> dict[str, Any]:
     lineas = ventas + compras
     total_ingresos = round(sum(float(d.get("valor") or 0) for d in lineas), 2)
 
+    # Base de las tarifas de servicio: la VENTA de energía, sin restar la compra.
+    # `generacion_kwh` de la API viene NETA (`dispatch + dispatch_fazni − purchase`,
+    # verificado al centavo en los 52 proyectos de 2026-07) y cobrar sobre ella
+    # subcobraba Representación y CGM en los proyectos que compran -- 270.887 en
+    # julio entre Delta 1, Naos 1 y Polaris 1. El ingreso bruto sí sigue neto: la
+    # compra es plata que salió, y es lo que alimenta el espejo de Liquidaciones.
+    base_kwh = round(sum(float(d.get("energia_kwh") or 0) for d in ventas), 2)
+    base_cop = round(sum(float(d.get("valor") or 0) for d in ventas), 2)
+
     return {
         "tipo": "normal",
         "comercializador": (proyecto.get("comercializadores") or [None])[0],
@@ -180,6 +189,11 @@ def construir_parsed(proyecto: dict[str, Any]) -> dict[str, Any]:
         # Un cero haría que Representación y CGM se calcularan en cero; None los
         # deja sin tocar, que es lo correcto cuando no hay dato de generación.
         "kwh": float(proyecto.get("generacion_kwh") or 0) or None,
+        # Lo que se le cobra al proyecto sale de estas dos, no de `kwh` ni de
+        # `total_ingresos`: Repre y CGM = tarifa × `base_tarifa_kwh`;
+        # Administración = tarifa_admin × `base_tarifa_cop`.
+        "base_tarifa_kwh": base_kwh or None,
+        "base_tarifa_cop": base_cop or None,
         # El snapshot son celdas del Excel: desde la API no aplica.
         "snapshot": {},
         "warnings": avisos + [str(w) for w in (proyecto.get("warnings") or [])],

@@ -22,6 +22,7 @@ from app.models.base import Base
 from app.models.panel_contable import (
     ClasificacionLiquidacion, PanelContable, PanelContableLinea,
 )
+from app.models.contratos import ContratoServicio
 from app.models.proyectos import Proyecto
 from app.services import liquidaciones_api
 
@@ -52,6 +53,11 @@ def db():
     # La Reserva se llama distinto en cada API: cruza por topico_liquidaciones.
     s.add(Proyecto(id=3, nombre_comercial="MGS 0012 La Reserva",
                    sub_project="reserva", topico_liquidaciones="MGS 0012 La Reserva"))
+    # Delta 1 compra energía: es donde se ve sobre qué base se cobran las tarifas.
+    s.add(Proyecto(id=4, nombre_comercial="GD Delta 1", sub_project="delta_1"))
+    s.add(ContratoServicio(
+        proyecto_id=4, servicio_aplica="representacion", estado="vigente",
+        tarifa_representacion=3, tarifa_cgm=7, tarifa_admin=0.038))
     s.add(ClasificacionLiquidacion(proyecto_id=2, periodo="2026-07", tipo="neu"))
     s.commit()
     yield s
@@ -80,13 +86,30 @@ def _proy(topico, nombre, ingreso):
     }
 
 
+# Delta 1, julio de 2026: vendió 178.715,35 kWh por 63.620.877,44 y compró
+# 6.619,15 por 4.965.099,17. La API reporta `generacion_kwh` NETA de la compra.
+DELTA_1_QUE_COMPRA = {
+    "project": "delta_1", "project_name": "GD Delta 1",
+    "generacion_kwh": 172_096.20, "importacion_kwh": 1_250.27,
+    "ingreso_bruto": 58_655_778.27, "venta": 63_620_877.44, "compra": 4_965_099.17,
+    "tiene_bolsa": False, "comercializadores": ["BIAC"],
+    "ingresos_detalle": [
+        {"concepto": "BIAC Venta", "data_type": "dispatch",
+         "energia_kwh": 178_715.35, "valor": 63_620_877.44},
+        {"concepto": "BIAC Compra", "data_type": "purchase",
+         "energia_kwh": 6_619.15, "valor": -4_965_099.17},
+    ],
+    "comercializacion": [], "participantes": [], "warnings": [],
+}
+
 RESPUESTA_API = {
-    "month": 7, "year": 2026, "version": "txf", "count": 4,
+    "month": 7, "year": 2026, "version": "txf", "count": 5,
     "results": [
         _proy("vallenata", "MGS 0007 La Paz Vallenata", 77_464_585.0),
         _proy("baraya", "Minigranja Solar Baraya", 56_978_276.0),
         _proy("MGS 0012 La Reserva", "MGS 0012 La Reserva", 60_435_889.0),
         _proy("planta_que_no_esta_en_esta_base", "Otra", 1_000.0),
+        DELTA_1_QUE_COMPRA,
     ],
     "errors": [],
 }
@@ -146,7 +169,7 @@ def test_informa_los_que_no_cruzan_con_esta_base(client):
 
 def test_cuenta_los_que_armo(client):
     d = _cargar(client)
-    assert d["armados"] == 2
+    assert d["armados"] == 3
 
 
 def test_recargar_no_duplica_paneles(client, db):
@@ -240,3 +263,35 @@ def test_cargar_er_rechaza_un_proyecto_normal(client, db, monkeypatch, tmp_path)
     rechazos = r.json().get("rechazados") or []
     assert rechazos, "un proyecto normal debería quedar rechazado"
     assert "API" in rechazos[0]["mensaje"]
+
+
+# ── Sobre qué base se cobran las tarifas de servicio ─────────────────────────
+# Regla de negocio (Jessica, 26AGO26): se cobran sobre la VENTA de energía, no
+# sobre la generación neta de compras.
+
+def _linea(db, concepto):
+    fila = (db.query(PanelContableLinea)
+            .join(PanelContable, PanelContable.id == PanelContableLinea.panel_id)
+            .filter(PanelContable.proyecto_id == 4,
+                    PanelContableLinea.concepto == concepto)
+            .first())
+    assert fila is not None, f"no se creó la línea {concepto}"
+    return abs(float(fila.valor_cop))
+
+
+def test_representacion_se_cobra_sobre_la_venta(client, db):
+    """3 $/kWh × 178.715,35 vendidos. Sobre la generación neta salían 516.288,60."""
+    _cargar(client)
+    assert _linea(db, "Representación") == pytest.approx(536_146.05, abs=0.01)
+
+
+def test_cgm_se_cobra_sobre_la_venta(client, db):
+    """7 $/kWh × 178.715,35 vendidos."""
+    _cargar(client)
+    assert _linea(db, "CGM") == pytest.approx(1_251_007.45, abs=0.01)
+
+
+def test_administracion_se_cobra_sobre_la_venta(client, db):
+    """3,8 % de 63.620.877,44 vendidos, no del neto de la compra."""
+    _cargar(client)
+    assert _linea(db, "Administración") == pytest.approx(2_417_593.34, abs=0.01)

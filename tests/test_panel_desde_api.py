@@ -276,3 +276,88 @@ def test_las_lineas_llevan_marca_de_fuente():
     parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
     assert all(l["fuente"] == "api" for l in parsed["ingresos_detalle"])
     assert all(l["fuente"] == "api" for l in parsed["comercializacion"])
+
+
+# ── Base de la tarifa ────────────────────────────────────────────────────────
+# Regla de negocio (Jessica, 26AGO26): las tarifas de servicio se cobran sobre la
+# VENTA de energía, no sobre la generación neta de compras. `generacion_kwh` de la
+# API viene neta (`dispatch + dispatch_fazni − purchase`, verificado en los 52
+# proyectos de 2026-07), así que usarla subcobra Representación y CGM.
+
+DELTA_1 = dict(
+    project="delta_1", comercializadores=["BIAC"],
+    generacion_kwh=172_096.20,          # neta: 178.715,35 − 6.619,15
+    ingreso_bruto=58_655_778.27,        # neto: 63.620.877,44 − 4.965.099,17
+    ingresos_detalle=[
+        {"concepto": "BIAC Venta", "data_type": "dispatch",
+         "energia_kwh": 178_715.35, "valor": 63_620_877.44},
+        {"concepto": "BIAC Venta bolsa", "data_type": "dispatch_fazni",
+         "energia_kwh": 0.0, "valor": 0.0},
+        {"concepto": "BIAC Compra", "data_type": "purchase",
+         "energia_kwh": 6_619.15, "valor": -4_965_099.17},
+    ])
+
+
+def test_la_base_en_kwh_es_la_venta_no_la_generacion_neta():
+    """Delta 1 vendió 178.715,35 kWh y compró 6.619,15. Cobrar sobre los
+    172.096,20 netos dejaba 69.567 sin cobrar entre Representación y CGM."""
+    parsed = construir_parsed(_proyecto_api(**DELTA_1))
+    assert parsed["base_tarifa_kwh"] == 178_715.35
+
+
+def test_la_base_en_pesos_no_resta_la_compra():
+    """La administración es un % de la venta, nunca del neto de compras."""
+    parsed = construir_parsed(_proyecto_api(**DELTA_1))
+    assert parsed["base_tarifa_cop"] == 63_620_877.44
+
+
+def test_la_venta_en_bolsa_entra_en_la_base():
+    """Baraya vende 169.669,38 por contrato y 54.148,80 en bolsa: las dos son venta."""
+    parsed = construir_parsed(_proyecto_api(
+        project="baraya", ingresos_detalle=[
+            {"concepto": "Neu Venta", "data_type": "dispatch",
+             "energia_kwh": 169_669.38, "valor": 29_746_435.71},
+            {"concepto": "Neu Venta bolsa", "data_type": "dispatch_fazni",
+             "energia_kwh": 54_148.80, "valor": 39_690_465.93},
+            {"concepto": "Neu Compra", "data_type": "purchase",
+             "energia_kwh": 16_789.54, "valor": -12_458_625.22},
+        ]))
+    assert parsed["base_tarifa_kwh"] == 223_818.18
+    assert parsed["base_tarifa_cop"] == 69_436_901.64
+
+
+def test_sin_compras_la_base_es_la_generacion_de_la_api():
+    """Los 45 proyectos que no compran no cambian: venta == generación."""
+    parsed = construir_parsed(_proyecto_api(
+        generacion_kwh=152_506.98, ingresos_detalle=[
+            {"concepto": "Unergy Venta", "data_type": "dispatch",
+             "energia_kwh": 152_506.98, "valor": 51_852_373.20}]))
+    assert parsed["base_tarifa_kwh"] == parsed["kwh"] == 152_506.98
+    assert parsed["base_tarifa_cop"] == 51_852_373.20
+
+
+def test_una_compra_excluida_tampoco_entra_en_la_base():
+    """La compra fantasma de Verso ya se excluía del ingreso; la base tampoco la ve."""
+    parsed = construir_parsed(_proyecto_api(
+        project="verso", ingresos_detalle=[
+            {"concepto": "Terpel Venta", "data_type": "dispatch",
+             "energia_kwh": 210_740.66, "valor": 76_949_845.0},
+            COMPRA_FANTASMA,
+        ]))
+    assert parsed["base_tarifa_kwh"] == 210_740.66
+    assert parsed["base_tarifa_cop"] == 76_949_845.0
+
+
+def test_sin_energia_la_base_queda_en_none():
+    """Un cero haría que Representación y CGM se calcularan en cero; None los deja
+    sin tocar, que es lo correcto cuando no hay dato de venta."""
+    parsed = construir_parsed(_proyecto_api(
+        generacion_kwh=0.0, ingresos_detalle=[
+            {"concepto": "Terpel Venta", "data_type": "dispatch", "valor": 100.0}]))
+    assert parsed["base_tarifa_kwh"] is None
+
+
+def test_el_ingreso_bruto_sigue_siendo_el_neto():
+    """`ingreso_bruto_cop` alimenta el espejo de Liquidaciones: no se toca."""
+    parsed = construir_parsed(_proyecto_api(**DELTA_1))
+    assert parsed["ingreso_bruto"] == parsed["total_ingresos"] == 58_655_778.27

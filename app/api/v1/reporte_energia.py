@@ -508,12 +508,41 @@ def detalle_frontera(
     return _construir_detalle(db, frontera_id, fecha)
 
 
+def _refrescar_otro_medidor_en_vivo(front: Frontera, rep, fecha: date, fuente: str) -> None:
+    """Trae en vivo el medidor que NO se acaba de confirmar como `fuente`
+    (ver editar_curva) y refresca su snapshot persistido -- best-effort: si
+    Quoia falla o la frontera no tiene match en Quoia, se queda con lo que
+    ya había, sin bloquear el guardado."""
+    try:
+        gaia = GaiaClient()
+        mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
+        borders = curvas.construir_mapa_borders(gaia)
+        meta = borders.get((front.codigo_frontera or "").strip().lower())
+        if not meta:
+            return
+        capacidad_efectiva_mw = (
+            float(front.proyecto.potencia_instalada_kwp) / 1000
+            if front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
+        )
+        curva_p, curva_r = curvas.curva_medidor_en_vivo(
+            gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
+            str(fecha), front.codigo_frontera, "eae", capacidad_efectiva_mw,
+        )
+        if fuente == "principal":
+            rep.curva_medidor_respaldo = curva_a_lista(curva_r)
+        else:
+            rep.curva_medidor_principal = curva_a_lista(curva_p)
+    except Exception:
+        pass
+
+
 @router.patch("/fronteras/{frontera_id}", response_model=DetalleFronteraReporte)
 def editar_curva(
     frontera_id: int, body: EditarCurvaRequest, fecha: date = Query(...),
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    es_generacion = Modelo is ReporteEnergiaGeneracion
     if len(body.curva_final) != 24:
         raise HTTPException(422, "curva_final debe tener 24 valores")
 
@@ -555,6 +584,17 @@ def editar_curva(
         rep.curva_medidor_principal = rep.curva_final
     elif body.fuente == "respaldo":
         rep.curva_medidor_respaldo = rep.curva_final
+    # El medidor que NO se acaba de confirmar como fuente también puede
+    # tener un valor fresco en Quoia (ej. "Recuperar medidor" trae ambos a
+    # la vez) -- sin esto, el chequeo de coherencia de
+    # curva_respaldo_a_reportar() más abajo comparaba contra el snapshot
+    # vacío/viejo de la clasificación original y siempre caía a estimado,
+    # aunque el respaldo en vivo coincidiera con el principal recién
+    # confirmado (ver MGS GD La Hormiguita 2026-08-26: ambos medidores
+    # recuperados con éxito y casi idénticos, pero solo Principal se
+    # refrescaba). Solo Generación -- es la única con este chequeo.
+    if es_generacion and body.fuente in ("principal", "respaldo"):
+        _refrescar_otro_medidor_en_vivo(front, rep, fecha, body.fuente)
     # Si la persona confirma que el MEDIDOR (no una estimación) es la
     # fuente correcta, 'caso' se actualiza para que esta fila SÍ pueda
     # alimentar la mediana/forma histórica de días futuros -- antes quedaba

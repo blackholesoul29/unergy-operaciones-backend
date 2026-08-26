@@ -11,6 +11,7 @@ adoptado el valor actualizado.
 """
 from datetime import date
 
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -144,3 +145,93 @@ def test_columna_respaldo_con_menos_de_24_valores_se_rechaza(db):
     with pytest.raises(HTTPException) as exc:
         re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
     assert exc.value.status_code == 422
+
+
+class _GaiaDummy:
+    pass
+
+
+def test_adoptar_principal_refresca_tambien_el_respaldo_en_vivo(db, monkeypatch):
+    """GD La Hormiguita 2026-08-26: ambos medidores recuperados con éxito,
+    la persona adopta 'Medidor principal (actualizado)' -- el respaldo
+    también tiene un valor fresco en Quoia y debe quedar disponible para
+    el chequeo de coherencia, no seguir comparando contra el snapshot
+    vacío de la clasificación original."""
+    monkeypatch.setattr(re_api, "GaiaClient", lambda: _GaiaDummy())
+    monkeypatch.setattr(re_api.curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
+    monkeypatch.setattr(re_api.curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 1, "backup_meter": 2}})
+    respaldo_vivo = [100.0] * 23 + [101.0]  # +1 kWh -- dentro de tolerancia del nuevo principal
+    monkeypatch.setattr(re_api.curvas, "curva_medidor_en_vivo",
+                         lambda *a, **kw: (pd.Series([None] * 24, dtype=float), pd.Series(respaldo_vivo, dtype=float)))
+
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=6, medidor_usado="ninguno",
+        curva_final=[0.0] * 24, curva_medidor_principal=[None] * 24, curva_medidor_respaldo=[None] * 24,
+    )
+    db.add(rep)
+    db.commit()
+
+    nuevo_principal = [100.0] * 24
+    body = EditarCurvaRequest(curva_final=nuevo_principal, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_principal == nuevo_principal
+    assert detalle.curva_medidor_respaldo == respaldo_vivo, (
+        "el respaldo debia refrescarse con el valor en vivo, no seguir en None"
+    )
+    assert detalle.respaldo_reportado_origen == "medidor"
+    assert detalle.curva_respaldo_reportada == respaldo_vivo
+
+
+def test_adoptar_respaldo_refresca_tambien_el_principal_en_vivo(db, monkeypatch):
+    monkeypatch.setattr(re_api, "GaiaClient", lambda: _GaiaDummy())
+    monkeypatch.setattr(re_api.curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
+    monkeypatch.setattr(re_api.curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 1, "backup_meter": 2}})
+    principal_vivo = [50.0] * 24
+    monkeypatch.setattr(re_api.curvas, "curva_medidor_en_vivo",
+                         lambda *a, **kw: (pd.Series(principal_vivo, dtype=float), pd.Series([None] * 24, dtype=float)))
+
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=6, medidor_usado="ninguno",
+        curva_final=[0.0] * 24, curva_medidor_principal=[None] * 24, curva_medidor_respaldo=[None] * 24,
+    )
+    db.add(rep)
+    db.commit()
+
+    nuevo_respaldo = [50.0] * 24
+    body = EditarCurvaRequest(curva_final=nuevo_respaldo, fuente="respaldo")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_respaldo == nuevo_respaldo
+    assert detalle.curva_medidor_principal == principal_vivo, (
+        "el principal debia refrescarse con el valor en vivo, no seguir en None"
+    )
+
+
+def test_refresco_en_vivo_del_otro_medidor_falla_silenciosamente(db, monkeypatch):
+    """Si Quoia falla al traer el otro medidor, el guardado no se
+    interrumpe -- se queda con el snapshot que ya había (best-effort,
+    igual que el resto de las curvas de referencia)."""
+    monkeypatch.setattr(re_api, "GaiaClient", lambda: (_ for _ in ()).throw(RuntimeError("Quoia caído")))
+
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=6, medidor_usado="ninguno",
+        curva_final=[0.0] * 24, curva_medidor_principal=[None] * 24, curva_medidor_respaldo=[None] * 24,
+    )
+    db.add(rep)
+    db.commit()
+
+    nuevo_principal = [100.0] * 24
+    body = EditarCurvaRequest(curva_final=nuevo_principal, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_principal == nuevo_principal
+    assert detalle.curva_medidor_respaldo == [None] * 24

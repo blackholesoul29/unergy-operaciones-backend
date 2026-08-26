@@ -617,9 +617,9 @@ Ninguno de los cuatro términos requiere que XM haya liquidado:
 | Término | Fuente | Nota |
 |---|---|---|
 | Generación ideal | `reporte_energia_generacion.curva_final` | por frontera, horaria, ya validada contra el ASIC |
-| Contratos de venta | `dspcttos` | XM declara: *"No se incluyen datos de despacho de contratos dado que esta información es conocida el día de cálculo"* |
+| Contratos de venta | `dspcttos` crudo (**no** `despacho_contrato_dia`, ver abajo) | XM declara: *"No se incluyen datos de despacho de contratos dado que esta información es conocida el día de cálculo"* |
 | Pérdidas asignadas | `arrpas` | FTP público |
-| Precio | `PBNA` diario ponderado por energía horaria | FTP público |
+| Precio | `PBNA` horario de `trsd` (§8.1.1) | FTP público, versionado |
 
 Es literalmente la identidad de `BalCttos` reconstruida sin `BalCttos`.
 
@@ -628,6 +628,43 @@ exposición neta** — la exposición es la diferencia entre dos números grande
 término trivial contra el bruto pesa contra el neto. No se puede descartar por pequeño.
 Mientras `arrpas` no esté en `.tx2`, este término usa `.txf` y el cálculo queda marcado
 como contaminado (riesgo 13).
+
+#### 8.1.1 De dónde sale el precio — y de dónde no
+
+El precio de bolsa **cambia semana a semana**, así que no puede tomarse de un valor
+agregado por mes. Lo que la plataforma tiene hoy no sirve para este cálculo:
+
+| Fuente existente | Qué guarda | Por qué no sirve |
+|---|---|---|
+| `precio_bolsa_mensual` | Un valor por mes, cargado a mano desde `facturacion.py` | Un solo número por mes no puede valorizar una ventana semanal |
+| `precios_bolsa_diario` | Diario, campo `precio_promedio` | Es **promedio simple**, que §7 prohíbe explícitamente; además no es horario |
+| Origen de ambas | Cron `bolsa_ingest` → EVO `/dailyspot/latest` | Proveedor **externo**, un día a la vez. El cálculo debe reconciliar contra el precio que publica **XM** |
+
+**La fuente autoritativa es `PBNA` horario de `trsd`**, que ya tenemos versionado: 539
+días en `.tx2` y 516 en `.tx1`. Es horario, es de XM, y lleva versión de liquidación —
+las tres cosas que las tablas existentes no tienen.
+
+**El portal público de XM cubre los huecos**: días fuera del rango de `trsd`, y el
+precio del día en curso antes de que exista el `.tx2`. Entra como un tipo más en
+`xm_archivo` con su propio `disponible_desde`, sin tratamiento especial.
+
+Las tablas de EVO **no se tocan**: siguen alimentando facturación, que es para lo que
+existen. Este módulo no las lee ni las escribe.
+
+#### 8.1.2 Los despachos ya están en la plataforma, con dos límites
+
+`despacho_contrato_dia` (`periodo`, `codigo_sic_contrato`, `fecha`, `kwh`) ya se puebla
+al subir el archivo de despachos en `facturacion.py`. Es útil, pero no reemplaza al
+`dspcttos` crudo:
+
+- Es **diaria, no horaria**. §7 exige el producto energía × precio hora a hora, y
+  agregar a día antes de multiplicar da otro número.
+- **No está versionada.** Se llena con `delete` + `insert` por período, así que es "lo
+  último que alguien subió", sin distinguir `tx1` / `tx2` / `txf`. Eso rompe el
+  anti-leakage: no se puede saber qué se conocía en la fecha de cálculo.
+
+Uso: sirve como contraste operativo y para el estimador del día 14 a granularidad
+diaria. La réplica auditable del día 7 usa el `dspcttos` crudo ingerido en `xm_medida`.
 
 **TX1 como señal aún más temprana.** Hay 516 días de `trsd` en `.tx1` (2025-01 →
 2026-05). El TX1 sale antes que el TX2, así que abre la puerta a estimar antes del día
@@ -893,6 +930,8 @@ resultados que **se ven bien y son falsos**.
 | 14 | Rango de targets menor que el de insumos | CGM e Insumos cubren desde nov-2023, pero los targets solo van de **dic-2025 a ago-2026** (22 vencimientos del consolidado interno + los Excel de XM de may–ago 2026). El backtest está limitado por los targets, no por los insumos. Conseguir Excel de garantía anteriores a may-2026 amplía la muestra más que cualquier otra cosa. |
 | 15 | `.tx2` incompleto por diseño | `BalCttos` trae 28–29 días por mes en `.tx2` contra 30–31 en `.txf` (~7% ausentes). No es error de descarga: es lo que publica XM. La tab de cobertura tiene que exponerlo antes de que contamine conclusiones. |
 | 16 | Correlación entre semanas | Si la correlación es cercana a 1, el P90 del horizonte converge a la suma de P90 y la brecha se anula: juntar el pozo no libera capital. Es un resultado posible y se reporta como tal, no se esconde. Medible en el primer backtest. |
+| 17 | Precio de bolsa desde fuentes inadecuadas | `precio_bolsa_mensual` es un valor por mes y `precios_bolsa_diario` es promedio simple de un proveedor externo (EVO). Ninguna sirve: el precio cambia semana a semana y debe ser ponderado y de XM. Se usa `PBNA` horario de `trsd`, con el portal público de XM para los huecos. Riesgo si alguien conecta por comodidad las tablas existentes. |
+| 18 | `despacho_contrato_dia` no está versionada | Se llena con delete+insert por período. Usarla en la réplica auditable rompería el anti-leakage sin fallar visiblemente. Solo se usa en el estimador del día 14, a granularidad diaria. |
 
 ---
 

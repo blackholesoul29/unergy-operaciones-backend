@@ -192,28 +192,32 @@ CASOS_CONFIABLES_CONSUMO = ("Medidor", "CGM")
 
 def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[float | None, int]:
     """Mediana del total diario de los últimos DIAS_VENTANA días de Caso
-    'Medidor' o 'CGM' sin revisión manual, ANTES de `fecha`. 'Histórico'
-    queda fuera (es ya una estimación, no lectura real). 'CGM' cuenta como
-    confiable porque el reporte automático de Quoia es en sí una lectura
-    real (ASIC), no una estimación -- salvo fronteras en
-    FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (ej. Paso Norte), que SIEMPRE quedan
-    con revisar_manualmente=True (ver clasificador_consumo.py) y por lo
-    tanto nunca entran acá, aunque el cruce contra medidor haya pasado ese
-    día puntual -- el bug de Quoia es intermitente.
+    'Medidor' o 'CGM', ANTES de `fecha`. 'Histórico' queda fuera (es ya una
+    estimación, no lectura real). 'CGM' cuenta como confiable porque el
+    reporte automático de Quoia es en sí una lectura real (ASIC), no una
+    estimación.
+
+    Ya NO se filtra por revisar_manualmente (quitado 2026-08-26, pedido de
+    Sara: lo que importa es si la FUENTE fue real -- caso 'Medidor'/'CGM' --
+    no si ese día puntual quedó marcado para revisar por otro motivo, ej.
+    alejarse de la mediana). Antes esto también bloqueaba por completo el
+    histórico de fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (ej. Paso
+    Norte, siempre revisar_manualmente=True) -- decisión consciente de
+    dejarlas alimentar su histórico igual que el resto; la mediana (sobre
+    hasta 30 días) sigue siendo robusta a un outlier puntual aunque se
+    cuele sin revisar.
 
     Sin este 'CGM', ninguna frontera de Consumo podría nunca construir
     historial desde cero: 'Medidor' sin mediana previa SIEMPRE queda
     revisar_manualmente=True (no hay una segunda fuente independiente tipo
     inversores, como sí tiene Generación, para autoconfirmarse el mismo
-    día) -- sin 'Validar Frontera' a mano en cada frontera, el filtro nunca
-    se llenaría."""
+    día)."""
     totales = db.execute(
         select(ReporteEnergiaConsumo.energia_final_kwh)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
             ReporteEnergiaConsumo.caso.in_(CASOS_CONFIABLES_CONSUMO),
-            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)
@@ -227,14 +231,13 @@ def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[flo
 
 def get_forma_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[pd.Series | None, int]:
     """Forma horaria típica de Consumo, mismo criterio que get_mediana_consumo
-    (Caso 'Medidor' o 'CGM' sin revisión manual)."""
+    (Caso 'Medidor' o 'CGM', sin filtrar por revisar_manualmente)."""
     curvas = db.execute(
         select(ReporteEnergiaConsumo.curva_final)
         .where(
             ReporteEnergiaConsumo.frontera_id == frontera_id,
             ReporteEnergiaConsumo.fecha < fecha,
             ReporteEnergiaConsumo.caso.in_(CASOS_CONFIABLES_CONSUMO),
-            ReporteEnergiaConsumo.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaConsumo.fecha.desc())
         .limit(DIAS_VENTANA)

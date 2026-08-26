@@ -113,8 +113,6 @@ class ReporteEnergiaGeneracion(Base):
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    validado_por_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
-    validado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Mensaje de la excepción cuando caso=-1 (clasificador falló para esta
     # frontera+fecha) -- null en cualquier otro caso.
     error_clasificacion: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -139,7 +137,6 @@ class ReporteEnergiaGeneracion(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     frontera: Mapped["Frontera"] = relationship("Frontera")
-    validado_por: Mapped["Usuario | None"] = relationship("Usuario")
 
 
 class ReporteEnergiaExclusion(Base):
@@ -222,8 +219,6 @@ class ReporteEnergiaConsumo(Base):
 
     revisar_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    validado_por_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
-    validado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_clasificacion: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     enviado_quoia_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -239,4 +234,3 @@ class ReporteEnergiaConsumo(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     frontera: Mapped["Frontera"] = relationship("Frontera")
-    validado_por: Mapped["Usuario | None"] = relationship("Usuario")

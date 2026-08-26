@@ -61,8 +61,6 @@ class DetalleFronteraReporte(BaseModel):
     recuperacion_datos: str | None = None
     revisar_manualmente: bool
     editado_manualmente: bool
-    validado_por: str | None = None
-    validado_en: datetime | None = None
     error_clasificacion: str | None = None
     enviado_quoia_en: datetime | None = None
     enviado_quoia_ok: bool | None = None
@@ -134,8 +132,6 @@ class ValidarResponse(BaseModel):
     frontera_id: int
     fecha: date
     revisar_manualmente: bool
-    validado_por: str | None
-    validado_en: datetime | None
 
 
 class EjecutarDiaResponse(BaseModel):

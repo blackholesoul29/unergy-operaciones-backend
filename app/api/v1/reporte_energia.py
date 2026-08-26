@@ -491,8 +491,6 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         horas_rellenadas_medidor_cruzado=rep.horas_rellenadas_medidor_cruzado,
         recuperacion_datos=rep.recuperacion_datos,
         revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
-        validado_por=rep.validado_por.nombre if rep.validado_por else None,
-        validado_en=rep.validado_en,
         error_clasificacion=rep.error_clasificacion,
         enviado_quoia_en=rep.enviado_quoia_en, enviado_quoia_ok=rep.enviado_quoia_ok,
         enviado_quoia_error=rep.enviado_quoia_error,
@@ -928,12 +926,9 @@ def validar(
 ):
     front, rep, _Modelo = _fila_por_id(db, frontera_id, fecha)
     rep.revisar_manualmente = False
-    rep.validado_por_id = usuario.id
-    rep.validado_en = datetime.now(timezone.utc)
     db.commit()
     return ValidarResponse(
         frontera_id=frontera_id, fecha=fecha, revisar_manualmente=False,
-        validado_por=usuario.nombre, validado_en=rep.validado_en,
     )
 
 

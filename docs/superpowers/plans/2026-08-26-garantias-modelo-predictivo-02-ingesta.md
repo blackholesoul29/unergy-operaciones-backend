@@ -624,7 +624,12 @@ decorativo: los BalCttos reales fallan en utf-8 por la tilde de PÉRDIDAS.
 """
 import datetime
 
-from app.services.garantias_modelo.parsers_ftp import parsear_balcttos, parsear_trsd
+from app.services.garantias_modelo.parsers_ftp import (
+    parsear_arrpas,
+    parsear_balcttos,
+    parsear_dspcttos,
+    parsear_trsd,
+)
 
 FECHA = datetime.date(2025, 12, 15)
 
@@ -695,21 +700,15 @@ def test_parsers_toleran_utf8_sig():
 DSPCTTOS = (
     "CONTRATO;VENDEDOR;COMPRADOR;TIPO;TIPOMERC;TIPO ASIGNA;"
     + ";".join(f"DESP_HORA {h:02d}" for h in range(1, 25)) + ";"
-    + ";".join(f"TRF_HORA {h:02d}" for h in range(1, 25)) + "
-"
-    "78596;UNGG;TPLC;PC;N;NB;" + ";".join(["50"] * 24) + ";" + ";".join(["400"] * 24) + "
-"
-    "99999;OTRO;TPLC;PC;N;NB;" + ";".join(["70"] * 24) + ";" + ";".join(["400"] * 24) + "
-"
+    + ";".join(f"TRF_HORA {h:02d}" for h in range(1, 25)) + "\n"
+    "78596;UNGG;TPLC;PC;N;NB;" + ";".join(["50"] * 24) + ";" + ";".join(["400"] * 24) + "\n"
+    "99999;OTRO;TPLC;PC;N;NB;" + ";".join(["70"] * 24) + ";" + ";".join(["400"] * 24) + "\n"
 ).encode("latin1")
 
 ARRPAS = (
-    "SUBMERCADO;DELN $/KWH;VRA $;VDA $
-"
-    "3A44;3.56;35243.84;0
-"
-    "3HYG;3.56;4379.04;0
-"
+    "SUBMERCADO;DELN $/KWH;VRA $;VDA $\n"
+    "3A44;3.56;35243.84;0\n"
+    "3HYG;3.56;4379.04;0\n"
 ).encode("latin1")
 
 

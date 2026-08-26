@@ -147,7 +147,8 @@ agregado por persistencia. La varianza está en un solo lugar.
 - Estimador con intervalo de Exposición en Bolsa (día 14).
 - Agregado por persistencia de los otros 19 componentes.
 - Piso en cero aplicado sobre los cuantiles.
-- Backtesting con cobertura y ancho de intervalo, contra los 149 vencimientos CGM.
+- Backtesting con cobertura y ancho de intervalo, sobre el rango cubierto por los
+  targets (ver §6.1).
 - Tab con cobertura de datos, tabla de backtest y detalle por vencimiento.
 - **UNGG y UNGC**, ambos. Es el mismo camino de código con otra entidad.
 - **Semanal y mensual**, cada uno con su propio objetivo de anticipación (§1).
@@ -258,7 +259,7 @@ Es donde vive el anti-leakage.
 | Campo | Tipo | Nota |
 |---|---|---|
 | `id` | bigserial | |
-| `tipo` | varchar | `balcttos`, `trsd`, `tgrl`, `grip`, `dspcttos`, `arrpas`, `cxcsb`, `cgm_con`, `cgm_car`, `cgm_ene`, `insumos_prelim`, `calendario`, `garantia_excel` |
+| `tipo` | varchar | `balcttos`, `trsd`, `tgrl`, `grip`, `dspcttos`, `arrpas`, `cxcsb`, `gargm_con`, `gargm_car`, `gargm_ene`, `insumos_prelim`, `calendario`, `garantia_excel` |
 | `nombre_archivo` | varchar | tal como llegó |
 | `version` | varchar null | `tx1 tx2 tx3 txr txf txn`, con ordinal explícito en código |
 | `periodo_ini`, `periodo_fin` | date | a qué días aplica el contenido |
@@ -322,8 +323,8 @@ silencio.
 UNIQUE (agente, esquema, fecha_vencimiento, periodo_ini, periodo_fin)
 ```
 
-**El período va en la clave a propósito.** De los 149 vencimientos, 93 cubren dos
-períodos y 56 uno solo. Ejemplo real de julio 2026:
+**El período va en la clave a propósito.** El corpus tiene **162 vencimientos**
+(nov-2023 → ago-2026) y la mayoría cubre dos períodos, no uno. Ejemplo real de julio 2026:
 
 | Vencimiento | Período garantizado | Duración | Corresponde a |
 |---|---|---|---|
@@ -385,8 +386,44 @@ derivada", el backtest no puede distinguir el error del modelo del error de la v
 | `componente` | uno de los 20, o `agregado_administrativos` |
 | `valor` | numeric |
 
-`UNIQUE (calculo_id, componente)`. Se parsea de la hoja `PERIODOS A GARANTIZAR` de los
-`GARANTIA_TXR_*.xlsx`.
+`UNIQUE (calculo_id, componente)`.
+
+**Los targets salen de tres formatos, no de uno.** Verificado sobre los archivos reales:
+
+| Archivo | Dónde está el desglose | Rinde |
+|---|---|---|
+| `GARANTIA TXR *.xlsx` | hoja `PERIODOS A GARANTIZAR` | 1 target por archivo |
+| `GARANTIA SEMANAL MENSUAL *.xlsx` | **una hoja por período** (`AJUSTE TX2 SEMA MENS 01-07 AGO`, `AJUSTE PROY (M) 08-31 AGO`, `AJUSTE (M+1) 01-30 SEPT`) | **3 targets por archivo** |
+| `GARANTIA MENSUAL *.xlsx` | hoja del período (`01-30 SEP`) + `PERIODO BASE` | 1 target por archivo |
+
+En los tres casos la cabecera está en la fila que contiene `CÓDIGO` (fila 3 en las hojas
+`AJUSTE …`), con una fila por agente del mercado y una columna por componente.
+
+**El nombre de la hoja lleva la ventana.** `AJUSTE TX2 SEMA MENS 01-07 AGO` dice
+literalmente que ese bloque corresponde al 01–07 de agosto. Es la fuente de ventana más
+directa que existe y entra en la precedencia de §5.3 junto al `PERIODO BASE`.
+
+#### Fuente derivada: el consolidado interno
+
+`Automatizado_2026_Valor_Garantias_Semanales.xlsx` tiene **22 hojas de vencimiento**
+(2025-12-26 → 2026-06-26), cada una con ambos agentes, el desglose por período con la
+ventana en la etiqueta (`AJUSTE PROY 13 AL 31 DIC`), TIE, TOTAL A PAGAR y custodia.
+
+Es **de segunda mano**: lo arma el equipo, no XM. Se ingiere con
+`origen_disponibilidad = derivado` y se usa para (a) cubrir vencimientos sin el Excel
+original y (b) contrastar contra los de XM donde haya ambos. Nunca reemplaza al archivo
+de XM cuando existe.
+
+Trampas verificadas en ese archivo, todas silenciosas:
+
+- Hojas que **no** son vencimientos: `Inicio`, `Prueba` y `13MARMIO` — esta última es un
+  duplicado manual de `13MAR`. Filtrar por el patrón `\d{2}[A-Z]{3}` no alcanza para
+  `13MARMIO`; hay que exigir coincidencia exacta.
+- **Faltan 5 viernes** dentro del rango: 16, 23 y 30 de enero, 6 de febrero y 29 de mayo
+  de 2026. Ausencia, no ceros: no se pueden contar como vencimientos sin garantía.
+- Un mismo tipo de ajuste puede aparecer **dos veces** en una hoja cuando el período
+  cruza fin de mes (`AJUSTE 1 25 AL 30 ABR` y `AJUSTE 1 01 AL 01 MAY` en la hoja
+  `15MAY`). El parser no puede asumir uno por tipo.
 
 ### 5.5 `gar_componente_pred` — la predicción
 
@@ -423,10 +460,41 @@ qué cambió un número entre corridas.
 
 ### 6.1 Origen de los archivos
 
+#### Inventario real disponible (verificado 2026-08-25)
+
+Deduplicado por contenido entre los tres zips del workspace: **1.263 archivos únicos**.
+
+| Familia | Únicos | Rango |
+|---|---|---|
+| CGM | 785 | **162 vencimientos**, nov-2023 → ago-2026 |
+| Insumos Preliminares UNGG | 203 | jun-2023 → ago-2026 |
+| Insumos Preliminares UNGC | 256 | mar-2022 → ago-2026 |
+| `DemandaXAgenteSTR` | 19 | — |
+
+Insumos del FTP, en `XM_*.zip`, cobertura **2025-01 → 2026-07**:
+
+| Tipo | Archivos | Versiones |
+|---|---|---|
+| `BalCttos` | 1.115 | 538 `.tx2` + 577 `.txf` |
+| `trsd` | 577 | `.txf` únicamente |
+| `arrpas` | 577 | `.txf` únicamente |
+| `dspcttos` | 1.123 | `.txf` únicamente |
+
+**El CGM no es por agente.** Se verificó: los 725 CSV comunes a los dos zips son
+byte a byte **idénticos**. El nombre del archivo codifica el período y el vencimiento,
+**no** el agente — este viene en la columna `Entidad` del contenido. Tratar el nombre
+como clave completa mezclaría UNGG con UNGC sin que nada falle.
+
+**Colisión de nomenclatura.** El repo ya usa "CGM" para otra cosa
+(`scripts/seed_contratos_cgm.py`, `Data/contratosCGM.json`, en el contexto de
+Representación). Por eso los tipos de este módulo se llaman `gargm_*` y no `cgm_*`.
+
+#### Cómo llega cada familia
+
 | Familia | Cómo llega |
 |---|---|
 | 7 tipos FTP | `app/services/xm/` ya los descarga. Falta persistir credenciales. |
-| CGM (725 CSV) e Insumos Preliminares (212 xlsx) | Carga masiva desde una carpeta local que provee el usuario |
+| CGM e Insumos Preliminares | Carga masiva desde carpeta local, deduplicando por `sha256` |
 | Calendario | Carga manual, un archivo por año |
 | Excel de garantía (targets) | Carga manual |
 
@@ -719,6 +787,9 @@ resultados que **se ven bien y son falsos**.
 | 10 | **Frescura de la ingesta diaria** | El margen mensual es de 0 días en el peor caso. Si `gen_sync` se cae, el margen desaparece **en silencio** — el número sigue saliendo, solo que con días proyectados en vez de medidos. La alerta de frescura no es un extra: es lo que hace confiable la anticipación mensual. |
 | 11 | Migración Solenium → SolarView en curso | `_scheduled_generation_sync` está condicionado a `SOLENIUM_USER/PASS`, y `solarview_client.py` se declara "reemplazo de Solenium, Fase 1". Si esa migración corta el sync diario, se lleva puesto el margen mensual sin que nada falle visiblemente. Coordinar antes de tocarlo. |
 | 12 | Dispersión entre ventanas candidatas | Si las ~12 ventanas posibles dan números muy distintos, el intervalo se vuelve tan ancho que no sirve. Es medible en el primer backtest y decide si vale la pena conseguir los `PERIODO BASE` históricos. |
+| 13 | **Solo `BalCttos` tiene `.tx2`** | `trsd`, `arrpas` y `dspcttos` están únicamente en `.txf`. El precio de bolsa sale de `trsd`, así que hoy ese término solo puede armarse con datos que no existían en la fecha de cálculo — el leakage que §7 prohíbe. **Bloqueante:** hay que re-descargar los tres en `.tx2` antes de que el backtest signifique algo. Mientras tanto, cualquier corrida queda marcada como contaminada. |
+| 14 | Rango de targets menor que el de insumos | CGM e Insumos cubren desde nov-2023, pero los targets solo van de **dic-2025 a ago-2026** (22 vencimientos del consolidado interno + los Excel de XM de may–ago 2026). El backtest está limitado por los targets, no por los insumos. Conseguir Excel de garantía anteriores a may-2026 amplía la muestra más que cualquier otra cosa. |
+| 15 | `.tx2` incompleto por diseño | `BalCttos` trae 28–29 días por mes en `.tx2` contra 30–31 en `.txf` (~7% ausentes). No es error de descarga: es lo que publica XM. La tab de cobertura tiene que exponerlo antes de que contamine conclusiones. |
 
 ---
 

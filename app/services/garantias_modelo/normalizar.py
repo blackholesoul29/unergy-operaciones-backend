@@ -42,6 +42,10 @@ def normalizar_concepto(texto: str | None) -> str:
 def coincide_concepto(a: str | None, b: str | None) -> bool:
     """¿Son el mismo concepto, tolerando doble codificación?
 
+    Este plan no la consume — la usa quien empareje conceptos entre los CSV de CGM,
+    cuyas tildes llegan con la misma doble codificación descrita en
+    `normalizar_concepto` (mojibake).
+
     No alcanza con comparar por igualdad: el mojibake **destruye** el carácter
     acentuado, así que `Generaciï¿½n Kw` normaliza a `generacin kw` y nunca va a ser
     igual a `generacion kw`. Pero le faltan caracteres, no le sobran — la forma

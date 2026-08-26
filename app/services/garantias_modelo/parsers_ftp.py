@@ -55,7 +55,7 @@ def _parsear_ancho(contenido: bytes, fecha: datetime.date, version: str | None,
         crudo = (col[col_concepto] or "").strip()
         if not crudo:
             continue
-        concepto = normalizar_concepto(crudo)
+        concepto = normalizar_concepto(crudo)[:120]
         for h in range(HORAS):
             filas.append({
                 "tipo": tipo,
@@ -169,7 +169,7 @@ def parsear_arrpas(contenido: bytes, fecha: datetime.date,
                 "fecha_documento": fecha,
                 "hora": 0,
                 "entidad": submercado,
-                "concepto": normalizar_concepto(crudo),
+                "concepto": normalizar_concepto(crudo)[:120],
                 "concepto_raw": crudo[:200],
                 "valor": _valor(col[i]),
                 "version": version,

@@ -37,15 +37,32 @@ def preparar_archivo(nombre: str, contenido: bytes,
                      anio: int | None = None) -> dict:
     """Metadatos listos para `xm_archivo`. No escribe nada.
 
-    `disponible_desde=None` significa backfill histórico: no hay timestamp real de
-    descarga, así que la disponibilidad queda marcada como derivada. Toda consulta
-    anti-leakage pasa por el mismo campo, y la derivación queda auditable.
+    `disponible_desde` es obligatorio en la práctica: quien llama tiene que
+    indicarlo siempre — observado, para una descarga en vivo, o calculado por quien
+    llama a partir de la regla de publicación de XM, para un backfill histórico.
+    Esta función **no lo adivina**: los zips del corpus no conservan la fecha de
+    publicación (todas las entradas traen la fecha de descarga), así que no hay
+    forma de derivarlo de los datos. Errar el filtro anti-leakage en cualquier
+    dirección — de más o de menos — es peor que rechazar el archivo, así que si se
+    pasa `None` el archivo vuelve marcado como no ingerible (`esquema_ok=False`) en
+    vez de estampar `now()`.
     """
     tipo = tipo_de_nombre(nombre)
     version = version_de_nombre(nombre)
 
-    ok, detalle = validar_estructura(contenido, tipo) if tipo else (False, {
-        "motivo": f"tipo no reconocido en el nombre: {nombre}"})
+    if disponible_desde is None:
+        ok = False
+        detalle = {
+            "motivo": (
+                "disponible_desde desconocido: la fecha de disponibilidad no vino "
+                "de quien llama y esta función no la adivina. Hay que indicarla "
+                "explícitamente (observada, o calculada por quien llama a partir "
+                "de la regla de publicación de XM para un backfill)."
+            )
+        }
+    else:
+        ok, detalle = validar_estructura(contenido, tipo) if tipo else (False, {
+            "motivo": f"tipo no reconocido en el nombre: {nombre}"})
 
     fecha = None
     m = _RE_DIARIO.match(nombre)
@@ -55,15 +72,14 @@ def preparar_archivo(nombre: str, contenido: bytes,
         except ValueError:
             fecha = None
 
-    observado = disponible_desde is not None
     return {
         "tipo": tipo or "desconocido",
         "nombre_archivo": nombre[:300],
         "version": version,
         "periodo_ini": fecha,
         "periodo_fin": fecha,
-        "disponible_desde": disponible_desde or datetime.datetime.now(datetime.timezone.utc),
-        "origen_disponibilidad": "observado" if observado else "derivado",
+        "disponible_desde": disponible_desde,
+        "origen_disponibilidad": "observado" if disponible_desde is not None else None,
         "sha256": sha256_de(contenido),
         "bytes_len": len(contenido),
         "esquema_ok": ok,

@@ -54,6 +54,20 @@ def test_balcttos_conserva_el_concepto_crudo():
     assert "PÉRDIDAS ASIGNADAS A UN GENERADOR" in crudos
 
 
+def test_balcttos_trunca_concepto_a_120_caracteres():
+    # `concepto` es `String(120)` en el modelo (Hallazgo E). El resto de los campos
+    # de texto se trunca defensivamente en la construcción (`nombre_archivo[:300]`,
+    # `crudo[:200]` para `concepto_raw`) — este debe seguir el mismo patrón.
+    concepto_largo = "A" * 150
+    contenido = (
+        "CONCEPTO;MERCADO;CÓDIGO CONTRATO;COMPRADOR;VENDEDOR;TIPO DE DESPACHO;TIPO ASIGNA;"
+        + ";".join(f"HORA {h:02d}" for h in range(1, 25)) + "\n"
+        + concepto_largo + ";NACIONAL;;;;;;" + ";".join(["1"] * 24) + "\n"
+    ).encode("latin1")
+    filas, _ = parsear_balcttos(contenido, FECHA, "tx2", "UNGG")
+    assert len(filas[0]["concepto"]) <= 120
+
+
 def test_balcttos_hora_va_de_1_a_24():
     filas, _ = parsear_balcttos(BALCTTOS, FECHA, "tx2", "UNGG")
     horas = sorted({f["hora"] for f in filas})
@@ -159,6 +173,16 @@ def test_arrpas_usa_la_cabecera_como_concepto():
     assert vra[0]["valor"] == 35243.84
 
 
+def test_arrpas_trunca_concepto_a_120_caracteres():
+    # Mismo Hallazgo E que en balcttos/trsd, pero por el camino propio de arrpas
+    # (no pasa por `_parsear_ancho`): el concepto sale de la cabecera, no de una
+    # columna por fila.
+    concepto_largo = "B" * 150
+    contenido = ("SUBMERCADO;" + concepto_largo + "\n3A44;10\n").encode("latin1")
+    filas, _ = parsear_arrpas(contenido, FECHA, "tx2")
+    assert len(filas[0]["concepto"]) <= 120
+
+
 def test_arrpas_fila_truncada_se_descarta_y_se_cuenta():
     truncada = ARRPAS + b"SOLO_SUBMERCADO\n"
     filas, descartadas = parsear_arrpas(truncada, FECHA, "tx2")
@@ -183,3 +207,19 @@ def test_arrpas_con_agente_no_agrega_columna_de_agente_al_esquema():
     claves_esperadas = {"tipo", "fecha_documento", "hora", "entidad", "concepto",
                          "concepto_raw", "valor", "version"}
     assert set(filas[0].keys()) == claves_esperadas
+
+
+def test_arrpas_no_produce_colisiones_de_clave_natural_entre_agentes():
+    # Al descartar el agente, la clave natural de `xm_medida`
+    # (tipo, fecha_documento, hora, entidad, concepto, version) solo distingue filas
+    # por (entidad, concepto) dentro de un archivo — hora es siempre 0 y
+    # tipo/fecha_documento/version son constantes por archivo. Eso solo es seguro si
+    # un submercado nunca se repite entre agentes dentro del mismo archivo.
+    #
+    # Verificado sobre los 537 archivos .tx2 reales del corpus el 2026-08-26: cero
+    # colisiones, en ninguno de los dos layouts (con o sin AGENTE antepuesto). Esta
+    # prueba fija esa invariante empírica con dos agentes (GENX, GENY) que traen
+    # submercados distintos (3A44, 3HYG) en el layout con AGENTE.
+    filas, _ = parsear_arrpas(ARRPAS_CON_AGENTE, FECHA, "tx2")
+    claves = [(f["entidad"], f["concepto"]) for f in filas]
+    assert len(claves) == len(set(claves))

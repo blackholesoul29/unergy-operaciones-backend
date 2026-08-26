@@ -74,6 +74,10 @@ Todos medidos sobre el corpus real el 2026-08-26. No son supuestos.
 
 | Hecho | Consecuencia en el código |
 |---|---|
+| **`arrpas` cambió de layout el 2026-03-08** | Le agregaron `AGENTE` como primera columna. 403 archivos con el layout viejo, 134 con el nuevo. El parser detecta el layout por la cabecera; asumir `col[0]` lee el agente como submercado en silencio. |
+| **Abril-2026 está corrupto en el corpus real** | 33 archivos de `BalCttos` con **62 columnas en vez de 31**, cada columna duplicada. `validar_esquema()` los rechaza; los otros 3.451 archivos del corpus pasan. |
+| Los parsers devuelven `(filas, descartadas)` | Una fila truncada se descarta pero **se cuenta**. Descartarla en silencio hace que un concepto desaparezca, y aguas abajo eso es indistinguible de "no hay exposición". |
+| La validación **falla cerrada** | Un `tipo` desconocido se rechaza. Fallar abierto deja entrar cualquier cosa a `xm_medida`. |
 | **XM define Exposición como `compras − ventas`** | El signo va documentado y con test. Invertido produce ceros donde hay deuda, sin fallar. |
 | `dspcttos` reproduce `CONTRATO DE VENTA` **exacto, 538/538 días** | El despacho no es aproximación; se puede sustituir sin costo. |
 | La identidad cierra en **526/538** días | No es 100%. El parser marca el día, no lo descarta en silencio. |

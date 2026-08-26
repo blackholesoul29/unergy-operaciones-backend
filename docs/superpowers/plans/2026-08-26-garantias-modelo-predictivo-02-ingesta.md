@@ -1102,27 +1102,119 @@ git commit -m "feat(garantias): validar_esquema detecta columnas duplicadas y de
 
 ---
 
-## Task 6: Parser de los Excel de garantía (targets y ventanas)
+## Task 6: Parser de los Excel de garantía — los DOS formatos
 
 **Files:**
 - Create: `app/services/garantias_modelo/parsers_garantia.py`
 - Test: `tests/test_gar_modelo_parsers_garantia.py`
 
-Cada archivo `GARANTIA SEMANAL MENSUAL` rinde **tres** targets: una hoja por período, con
-la ventana en el nombre de la hoja y los componentes en columnas, cabecera en la fila que
-contiene `CÓDIGO`.
+### Por qué dos formatos
+
+XM reemplaza el reporte el **2026-09-04**. Hay 8 archivos en `Garantias2026.zip`,
+subcarpeta `Periodo de prueba Res CREG 101 097 de 2026/`, pero solo **5 son del formato
+nuevo** — los otros 3 son tradicionales que quedaron ahí.
+
+**El nombre del archivo delata el formato**, y es una regla limpia:
+
+| Nombre | Hojas | Formato |
+|---|---|---|
+| `…MENSUAL 2026-05-01.xlsx` (ISO) | `DEPOSITO`, `PERIODOS A GARANTIZAR`, `PERIODO BASE` | **nuevo** |
+| `…MENSUAL 17ABR-2026.xlsx` | 5–6 hojas, ventana en el nombre de cada una | tradicional |
+
+Aun así, **la detección va por las hojas, no por el nombre**: un archivo renombrado no
+debe cambiar cómo se parsea.
+
+El **nuevo** es mucho mejor: una sola tabla, cabecera en la fila 1 sin metadatos arriba,
+y la ventana en columnas `Fecha Inicial` / `Fecha Final` en vez de embebida en el nombre
+de la hoja. Elimina la fuente de incertidumbre que §8.2 del spec midió como el 71% del
+ancho del intervalo.
+
+El **tradicional** hay que soportarlo igual: es el 100% del histórico 2025–2026 con el
+que se hace el backtest.
 
 - [ ] **Step 1: Escribir el test que falla**
 
 ```python
-"""Parseo de los Excel de garantía: ventana desde el nombre de hoja, componentes
-desde la fila de CÓDIGO."""
+"""Parseo de los Excel de garantía, en sus dos formatos.
+
+El nuevo (desde 2026-09-04) trae una tabla única con la ventana en columnas. El
+tradicional trae una hoja por período con la ventana en el nombre de la hoja.
+"""
 import datetime
 
 from app.services.garantias_modelo.parsers_garantia import (
+    FORMATO_NUEVO,
+    FORMATO_TRADICIONAL,
     componentes_de_hoja,
+    detectar_formato,
+    filas_periodos,
     ventana_de_hoja,
 )
+
+CAB_NUEVO = ("CÓDIGO", "Descripción", "Fecha Publicación", "Fecha Inicial",
+             "Fecha Final", "Exposición Energía en Bolsa ($)", "Restricciones ($)",
+             "Valor Garantía", "Garantías TIE", "Valor Garantía Final",
+             "Estimado", "Total Ajuste")
+
+PUB = datetime.datetime(2026, 4, 24)
+I1 = datetime.datetime(2026, 4, 11)
+F1 = datetime.datetime(2026, 4, 17)
+
+FILAS_NUEVO = [
+    CAB_NUEVO,
+    ("AAGC", "S-1", PUB, I1, F1, 0, 0, 0, 0, 0, 0, 0),
+    ("UNGG", "S-1", PUB, I1, F1, 45694583, 0, 51066768, 0, 51066768, 27532582, 23534186),
+    ("UNGG", "M", PUB, datetime.datetime(2026, 4, 18), datetime.datetime(2026, 4, 30),
+     65258863, 0, 75312615, 0, 75312615, 51104001, 24208614),
+    ("UNGC", "S-1", PUB, I1, F1, -56734097, 0, 0, 0, 0, 0, 0),
+]
+
+
+def test_detectar_formato_nuevo_por_las_hojas():
+    assert detectar_formato(["DEPOSITO", "PERIODOS A GARANTIZAR", "PERIODO BASE"]) == FORMATO_NUEVO
+
+
+def test_detectar_formato_tradicional_por_las_hojas():
+    hojas = ["DEPÓSITO SEM MENS 01 MAY", "AJUSTE PROY (M) 18-30 ABR",
+             "AJUSTE TX2 SEMA MENS 11-17 ABR", "PERIODO BASE"]
+    assert detectar_formato(hojas) == FORMATO_TRADICIONAL
+
+
+def test_detectar_formato_no_depende_del_nombre_del_archivo():
+    assert detectar_formato(["PERIODOS A GARANTIZAR"]) == FORMATO_NUEVO
+
+
+def test_formato_desconocido_devuelve_none():
+    assert detectar_formato(["Hoja1"]) is None
+
+
+def test_filas_periodos_devuelve_una_fila_por_periodo_del_agente():
+    r = filas_periodos(FILAS_NUEVO, "UNGG")
+    assert len(r) == 2
+    assert {x["periodo"] for x in r} == {"S-1", "M"}
+
+
+def test_filas_periodos_trae_la_ventana_como_fechas():
+    r = [x for x in filas_periodos(FILAS_NUEVO, "UNGG") if x["periodo"] == "S-1"][0]
+    assert r["periodo_ini"] == datetime.date(2026, 4, 11)
+    assert r["periodo_fin"] == datetime.date(2026, 4, 17)
+    assert r["fecha_publicacion"] == datetime.date(2026, 4, 24)
+
+
+def test_filas_periodos_trae_los_componentes_normalizados():
+    r = [x for x in filas_periodos(FILAS_NUEVO, "UNGG") if x["periodo"] == "S-1"][0]
+    assert r["componentes"]["exposicion energia en bolsa ($)"] == 45694583
+    assert r["componentes"]["valor garantia"] == 51066768
+
+
+def test_filas_periodos_no_mezcla_agentes():
+    r = filas_periodos(FILAS_NUEVO, "UNGC")
+    assert len(r) == 1
+    assert r[0]["componentes"]["exposicion energia en bolsa ($)"] == -56734097
+
+
+def test_filas_periodos_agente_ausente_devuelve_vacio():
+    assert filas_periodos(FILAS_NUEVO, "ZZZZ") == []
 
 
 def test_ventana_tx2_de_nombre_de_hoja():
@@ -1138,7 +1230,6 @@ def test_ventana_proy_de_nombre_de_hoja():
 
 
 def test_ventana_cruza_anio_hacia_atras():
-    # Hoja de DIC en un archivo con vencimiento de ENE: el período es del año anterior.
     r = ventana_de_hoja("AJUSTE TX2 SEMA MENS 13-19 DIC", datetime.date(2026, 1, 2))
     assert r[0] == datetime.date(2025, 12, 13)
     assert r[1] == datetime.date(2025, 12, 19)
@@ -1148,14 +1239,13 @@ def test_hoja_sin_ventana_devuelve_none():
     assert ventana_de_hoja("PERIODO BASE", datetime.date(2026, 8, 28)) is None
 
 
-def test_componentes_de_hoja_toma_la_fila_de_codigo():
+def test_componentes_de_hoja_busca_la_fila_de_codigo():
     filas = [
         (None, "AJUSTE GARANTÍA", None),
         (None, "FECHA DE VENCIMIENTO: 21", None),
         ("CÓDIGO", "Exposición Energía en Bolsa ($)", "Restricciones ($)"),
         ("AAGC", 0, 0),
         ("UNGG", -107701627, 5),
-        ("UNGC", 12, 0),
     ]
     r = componentes_de_hoja(filas, "UNGG")
     assert r["exposicion energia en bolsa ($)"] == -107701627
@@ -1177,9 +1267,17 @@ Expected: FAIL con `ModuleNotFoundError` sobre `parsers_garantia`
 ```python
 """Excel de garantía de XM → targets por componente y ventanas por período.
 
-Cada `GARANTIA SEMANAL MENSUAL` trae una hoja por período (`AJUSTE TX2 …`,
-`AJUSTE PROY …`, `AJUSTE (M+1) …`), con la ventana en el NOMBRE de la hoja y los 20
-componentes en columnas. La cabecera no está en la fila 0: hay metadatos arriba.
+Dos formatos conviven:
+
+- **Nuevo** (oficial desde 2026-09-04, Res CREG 101 097): hojas `DEPOSITO`,
+  `PERIODOS A GARANTIZAR`, `PERIODO BASE`. Una sola tabla, cabecera en la fila 1, y la
+  ventana en columnas `Fecha Inicial` / `Fecha Final`.
+- **Tradicional**: una hoja por período (`AJUSTE TX2 …`, `AJUSTE PROY …`), con la
+  ventana embebida en el NOMBRE de la hoja y 2 a 10 filas de metadatos antes de la
+  cabecera.
+
+La detección va por las hojas, no por el nombre del archivo: un archivo renombrado no
+debe cambiar cómo se parsea.
 """
 from __future__ import annotations
 
@@ -1188,11 +1286,83 @@ import re
 
 from app.services.garantias_modelo.normalizar import normalizar_concepto
 
+FORMATO_NUEVO = "nuevo"
+FORMATO_TRADICIONAL = "tradicional"
+
 _MESES = {
     "ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
     "JUL": 7, "AGO": 8, "SEP": 9, "SEPT": 9, "OCT": 10, "NOV": 11, "DIC": 12,
 }
 _RE_VENTANA = re.compile(r"(\d{1,2})\s*-\s*(\d{1,2})\s+([A-Z]{3,4})")
+_RE_ISO = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
+
+
+def detectar_formato(hojas: list[str]) -> str | None:
+    """`None` si no reconoce ninguno — fallar cerrado, no adivinar."""
+    normal = {normalizar_concepto(h) for h in hojas}
+    if "periodos a garantizar" in normal:
+        return FORMATO_NUEVO
+    if any(n.startswith("ajuste") for n in normal):
+        return FORMATO_TRADICIONAL
+    return None
+
+
+def _fecha(valor) -> datetime.date | None:
+    if isinstance(valor, datetime.datetime):
+        return valor.date()
+    if isinstance(valor, datetime.date):
+        return valor
+    m = _RE_ISO.match(str(valor or ""))
+    if not m:
+        return None
+    try:
+        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def filas_periodos(filas: list[tuple], agente: str) -> list[dict]:
+    """Formato NUEVO: una fila por período del agente, desde `PERIODOS A GARANTIZAR`.
+
+    `filas` son las de openpyxl con `values_only=True`. La cabecera es la fila 0 — este
+    formato no lleva metadatos arriba, a diferencia del tradicional.
+    """
+    if not filas:
+        return []
+    cols = [normalizar_concepto(c) if c else "" for c in filas[0]]
+    try:
+        i_cod = cols.index("codigo")
+        i_desc = cols.index("descripcion")
+        i_pub = cols.index("fecha publicacion")
+        i_ini = cols.index("fecha inicial")
+        i_fin = cols.index("fecha final")
+    except ValueError:
+        return []
+
+    identidad = {i_cod, i_desc, i_pub, i_ini, i_fin}
+    objetivo = agente.strip().upper()
+    salida: list[dict] = []
+    for fila in filas[1:]:
+        if not fila or len(fila) <= i_cod or not fila[i_cod]:
+            continue
+        if str(fila[i_cod]).strip().upper() != objetivo:
+            continue
+        comp: dict[str, float] = {}
+        for i in range(len(cols)):
+            if i in identidad or not cols[i] or i >= len(fila):
+                continue
+            try:
+                comp[cols[i]] = float(fila[i]) if fila[i] is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+        salida.append({
+            "periodo": str(fila[i_desc]).strip() if fila[i_desc] else "",
+            "fecha_publicacion": _fecha(fila[i_pub]),
+            "periodo_ini": _fecha(fila[i_ini]),
+            "periodo_fin": _fecha(fila[i_fin]),
+            "componentes": comp,
+        })
+    return salida
 
 
 def _etiqueta(nombre: str) -> str:
@@ -1208,7 +1378,7 @@ def _etiqueta(nombre: str) -> str:
 
 def ventana_de_hoja(nombre: str, vencimiento: datetime.date
                     ) -> tuple[datetime.date, datetime.date, str] | None:
-    """`AJUSTE TX2 SEMA MENS 01-07 AGO` + vto -> (inicio, fin, etiqueta).
+    """Formato TRADICIONAL: `AJUSTE TX2 SEMA MENS 01-07 AGO` + vto -> (ini, fin, etiqueta).
 
     El año no está en el nombre: se infiere del vencimiento. Si el mes de la ventana es
     posterior al del vencimiento, la ventana es del año anterior — el caso de una hoja
@@ -1231,11 +1401,10 @@ def ventana_de_hoja(nombre: str, vencimiento: datetime.date
 
 
 def componentes_de_hoja(filas: list[tuple], agente: str) -> dict[str, float]:
-    """Componentes del agente. `filas` son las de openpyxl con `values_only=True`.
+    """Formato TRADICIONAL: componentes del agente en una hoja `AJUSTE …`.
 
-    La cabecera se busca por la celda que contiene `CÓDIGO`: los archivos traen 2 a 10
-    filas de metadatos arriba y la posición varía. Los nombres de columna se normalizan
-    porque varían entre archivos.
+    La cabecera se busca por la celda que contiene `CÓDIGO`: estos archivos traen 2 a 10
+    filas de metadatos arriba y la posición varía entre vencimientos.
     """
     idx = None
     for i, fila in enumerate(filas):
@@ -1267,16 +1436,65 @@ def componentes_de_hoja(filas: list[tuple], agente: str) -> dict[str, float]:
 - [ ] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_parsers_garantia.py -q`
-Expected: `6 passed`
+Expected: `14 passed`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verificar contra los archivos REALES**
+
+Los fixtures no alcanzan. Este paso abre las 8 muestras del zip y confirma que la
+detección y el parseo funcionan sobre datos de verdad. Guardar como
+`/tmp/verificar_task6.py` y correrlo desde la raíz del repo:
+
+```python
+import io
+import sys
+import zipfile
+
+from openpyxl import load_workbook
+
+sys.path.insert(0, ".")
+from app.services.garantias_modelo.parsers_garantia import (  # noqa: E402
+    FORMATO_NUEVO, detectar_formato, filas_periodos,
+)
+
+Z = r"C:\Users\adhar\OneDrive\Documents\Plataforma Operaciones\Garantias2026.zip"
+nuevos = 0
+with zipfile.ZipFile(Z) as zf:
+    ns = sorted(n for n in zf.namelist()
+                if "Periodo de prueba" in n and n.endswith(".xlsx"))
+    for n in ns:
+        wb = load_workbook(io.BytesIO(zf.read(n)), data_only=True, read_only=True)
+        formato = detectar_formato(wb.sheetnames)
+        if formato == FORMATO_NUEVO:
+            nuevos += 1
+            filas = list(wb["PERIODOS A GARANTIZAR"].iter_rows(values_only=True))
+            r = filas_periodos(filas, "UNGG")
+            print(n.split("/")[-1][:34],
+                  [(x["periodo"], str(x["periodo_ini"]),
+                    int(x["componentes"].get("valor garantia", 0))) for x in r])
+        wb.close()
+print("detectados como formato nuevo:", nuevos, "de", len(ns))
+```
+
+Expected: **5 de 8** detectados como formato nuevo, y para `2026-05-01` la fila `S-1`
+con `periodo_ini` `2026-04-11` y `valor garantia` `51066768`.
+
+Si el conteo no da 5, **parar y reportar**: significa que la detección por hojas no
+coincide con lo medido sobre el corpus.
+
+- [ ] **Step 6: Correr la suite completa**
+
+Run: `python -m pytest -q`
+Expected: sin regresión.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add app/services/garantias_modelo/parsers_garantia.py tests/test_gar_modelo_parsers_garantia.py
-git commit -m "feat(garantias): parser de Excel de garantia -- ventanas y componentes"
+git commit -m "feat(garantias): parser de los Excel de garantia en sus dos formatos"
 ```
 
 ---
+
 
 ## Task 7: Ingesta idempotente
 

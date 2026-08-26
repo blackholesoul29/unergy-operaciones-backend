@@ -31,6 +31,11 @@ TOPICOS_QUE_COMPRAN = frozenset({
 # Tipos de línea de ingreso que suman. `purchase` se trata aparte.
 TIPOS_VENTA = ("dispatch", "dispatch_fazni")
 
+# Marca de origen de las líneas que produce este módulo. La vista muestra "ER"
+# cuando la fuente viene vacía, así que sin esto los ingresos y la
+# comercialización armados desde la API se veían como si salieran del Excel.
+FUENTE = "api"
+
 # La API y el Excel llaman distinto a lo mismo: "Energia en Bolsa (COP)
 # (Generador)" contra "Energía en Bolsa (Gen)". Se conservan las etiquetas del
 # Excel porque son las que contabilidad reconoce y las que muestra el espejo de
@@ -120,6 +125,7 @@ def _comercializacion(proyecto: dict[str, Any]) -> list[dict[str, Any]]:
             "valor": -abs(float(c.get("valor") or 0)),
             "hoja": None,
             "celda": None,
+            "fuente": FUENTE,
         }
         for c in (proyecto.get("comercializacion") or [])
     ]
@@ -162,7 +168,7 @@ def construir_parsed(proyecto: dict[str, Any]) -> dict[str, Any]:
         "total_ingresos": total_ingresos,
         "ingresos_detalle": [
             {"concepto": etiqueta, "valor": float(d.get("valor") or 0),
-             "hoja": None, "celda": None}
+             "hoja": None, "celda": None, "fuente": FUENTE}
             for d, etiqueta in zip(lineas, _numerar_repetidos(
                 [_etiqueta_ingreso(d.get("concepto"), d.get("data_type")) for d in lineas]))
         ],

@@ -268,3 +268,11 @@ def test_no_numera_cuando_hay_uno_solo():
     parsed = construir_parsed(_proyecto_api(ingresos_detalle=[
         {"concepto": "Terpel Venta", "data_type": "dispatch", "valor": 100.0}]))
     assert parsed["ingresos_detalle"][0]["concepto"] == "Ingreso Bruto Terpel"
+
+
+def test_las_lineas_llevan_marca_de_fuente():
+    """La vista muestra "ER" cuando la fuente viene vacía. Sin marcarlas, los
+    ingresos armados desde la API se veían como si salieran del Excel."""
+    parsed = construir_parsed(_proyecto_api(comercializacion=COMERCIALIZACION_API))
+    assert all(l["fuente"] == "api" for l in parsed["ingresos_detalle"])
+    assert all(l["fuente"] == "api" for l in parsed["comercializacion"])

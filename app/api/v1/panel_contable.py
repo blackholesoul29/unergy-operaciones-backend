@@ -178,7 +178,11 @@ def _construir_lineas_base(parsed: dict) -> list[dict]:
     tipo = (parsed.get("tipo") or "normal").lower()
 
     def _orig(d: dict) -> dict:
-        return {"hoja": d.get("hoja"), "celda": d.get("celda")}
+        # `fuente` viaja junto a hoja/celda: las líneas armadas desde la API la
+        # traen, y sin propagarla la vista las mostraba como "ER" -- que es lo
+        # que muestra cuando la fuente viene vacía.
+        return {"hoja": d.get("hoja"), "celda": d.get("celda"),
+                "fuente": d.get("fuente")}
 
     # INGRESOS. Un proyecto puede tener varias fuentes de ingreso bruto (columnas
     # "Venta ($)" independientes, ej. Terpel 1 / Terpel 2): el parser ya devuelve una

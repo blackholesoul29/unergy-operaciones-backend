@@ -473,12 +473,16 @@ Deduplicado por contenido entre los tres zips del workspace: **1.263 archivos ú
 
 Insumos del FTP, en `XM_*.zip`, cobertura **2025-01 → 2026-07**:
 
-| Tipo | Archivos | Versiones |
-|---|---|---|
-| `BalCttos` | 1.115 | 538 `.tx2` + 577 `.txf` |
-| `trsd` | 577 | `.txf` únicamente |
-| `arrpas` | 577 | `.txf` únicamente |
-| `dspcttos` | 1.123 | `.txf` únicamente |
+| Tipo | `.tx2` | Otras | Nota |
+|---|---|---|---|
+| `BalCttos` | **538** | 577 `.txf` | |
+| `trsd` | **539** | 577 `.txf`, **516 `.tx1`** | el `.tx1` habilita una estimación aún más temprana |
+| `dspcttos` | **538** | 577 `.txf` | |
+| `arrpas` | **0** | 577 `.txf` | único sin `.tx2` |
+
+**538 días con `BalCttos`, `trsd` y `dspcttos` los tres en `.tx2`**, del 2025-01-01 al
+2026-07-29, con un solo día de discrepancia entre series. Esa intersección es el rango
+efectivamente calculable sin leakage.
 
 **El CGM no es por agente.** Se verificó: los 725 CSV comunes a los dos zips son
 byte a byte **idénticos**. El nombre del archivo codifica el período y el vencimiento,
@@ -614,6 +618,18 @@ Ninguno de los cuatro términos requiere que XM haya liquidado:
 | Precio | `PBNA` diario ponderado por energía horaria | FTP público |
 
 Es literalmente la identidad de `BalCttos` reconstruida sin `BalCttos`.
+
+**Nota sobre las pérdidas.** Son el 0,38% de la generación ideal, pero el **5,8% de la
+exposición neta** — la exposición es la diferencia entre dos números grandes, así que un
+término trivial contra el bruto pesa contra el neto. No se puede descartar por pequeño.
+Mientras `arrpas` no esté en `.tx2`, este término usa `.txf` y el cálculo queda marcado
+como contaminado (riesgo 13).
+
+**TX1 como señal aún más temprana.** Hay 516 días de `trsd` en `.tx1` (2025-01 →
+2026-05). El TX1 sale antes que el TX2, así que abre la puerta a estimar antes del día
+14 — con más residual, pero con la misma maquinaria: es otra `version` en `xm_medida`,
+con su propio `disponible_desde`. No entra en este spec, pero el esquema ya lo soporta
+sin cambios.
 
 ### 8.2 El residual es el modelo
 
@@ -787,7 +803,7 @@ resultados que **se ven bien y son falsos**.
 | 10 | **Frescura de la ingesta diaria** | El margen mensual es de 0 días en el peor caso. Si `gen_sync` se cae, el margen desaparece **en silencio** — el número sigue saliendo, solo que con días proyectados en vez de medidos. La alerta de frescura no es un extra: es lo que hace confiable la anticipación mensual. |
 | 11 | Migración Solenium → SolarView en curso | `_scheduled_generation_sync` está condicionado a `SOLENIUM_USER/PASS`, y `solarview_client.py` se declara "reemplazo de Solenium, Fase 1". Si esa migración corta el sync diario, se lleva puesto el margen mensual sin que nada falle visiblemente. Coordinar antes de tocarlo. |
 | 12 | Dispersión entre ventanas candidatas | Si las ~12 ventanas posibles dan números muy distintos, el intervalo se vuelve tan ancho que no sirve. Es medible en el primer backtest y decide si vale la pena conseguir los `PERIODO BASE` históricos. |
-| 13 | **Solo `BalCttos` tiene `.tx2`** | `trsd`, `arrpas` y `dspcttos` están únicamente en `.txf`. El precio de bolsa sale de `trsd`, así que hoy ese término solo puede armarse con datos que no existían en la fecha de cálculo — el leakage que §7 prohíbe. **Bloqueante:** hay que re-descargar los tres en `.tx2` antes de que el backtest signifique algo. Mientras tanto, cualquier corrida queda marcada como contaminada. |
+| 13 | **`arrpas` sin `.tx2`** | Resuelto para `trsd` y `dspcttos` (2026-08-26). Queda `arrpas`, y no es despreciable: las pérdidas son 0,38% de la generación ideal pero **5,8% de la exposición neta**, porque la exposición es un residuo de números grandes. Acotado: la réplica del día 7 toma las pérdidas del propio `BalCttos` (concepto `PÉRDIDAS ASIGNADAS A UN GENERADOR`, con `.tx2`); `arrpas` solo hace falta en la reconstrucción del día 14. El leak queda confinado al estimador temprano y hay que marcarlo como tal. |
 | 14 | Rango de targets menor que el de insumos | CGM e Insumos cubren desde nov-2023, pero los targets solo van de **dic-2025 a ago-2026** (22 vencimientos del consolidado interno + los Excel de XM de may–ago 2026). El backtest está limitado por los targets, no por los insumos. Conseguir Excel de garantía anteriores a may-2026 amplía la muestra más que cualquier otra cosa. |
 | 15 | `.tx2` incompleto por diseño | `BalCttos` trae 28–29 días por mes en `.tx2` contra 30–31 en `.txf` (~7% ausentes). No es error de descarga: es lo que publica XM. La tab de cobertura tiene que exponerlo antes de que contamine conclusiones. |
 

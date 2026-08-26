@@ -357,11 +357,24 @@ class GaiaClient:
         return {"Authorization": f"Bearer {self._access_token}"}
 
     def _get(self, url: str, params: dict | None = None) -> dict | list | None:
-        self.ultima_llamada_fallo = False
+        """Wrapper histórico -- guarda el resultado en self.ultima_llamada_fallo
+        (bandera compartida de la instancia) para los llamadores existentes,
+        todos secuenciales hoy. Insegura bajo concurrencia -- ver
+        _get_con_estado()/get_border_report_status_con_estado() para el caso
+        de varias llamadas en paralelo sobre el mismo GaiaClient (ej.
+        reporte_cgm.py, ThreadPoolExecutor reusando un solo cliente)."""
+        data, fallo = self._get_con_estado(url, params)
+        self.ultima_llamada_fallo = fallo
+        return data
+
+    def _get_con_estado(self, url: str, params: dict | None = None) -> tuple[dict | list | None, bool]:
+        """Núcleo real de _get() -- retorna (data, fallo) como tupla LOCAL a
+        esta llamada, sin tocar self.ultima_llamada_fallo. Thread-safe: no
+        depende de ningún estado compartido de la instancia salvo el token
+        (ya protegido por _token_lock)."""
         self._ensure_token()
         if not self._access_token:
-            self.ultima_llamada_fallo = True
-            return None
+            return None, True
         try:
             resp = self._http.get(url, headers=self._headers(), params=params)
             if resp.status_code == 401:
@@ -369,17 +382,15 @@ class GaiaClient:
                 self._access_token = None
                 self._authenticate()
                 if not self._access_token:
-                    self.ultima_llamada_fallo = True
-                    return None
+                    return None, True
                 resp = self._http.get(url, headers=self._headers(), params=params)
             if resp.status_code == 404:
-                return None
+                return None, False
             resp.raise_for_status()
-            return resp.json()
+            return resp.json(), False
         except Exception as exc:
             logger.warning("gaia request failed url=%s: %s", url, exc)
-            self.ultima_llamada_fallo = True
-            return None
+            return None, True
 
     # ── Public methods ─────────────────────────────────────────────────────────
 
@@ -419,20 +430,32 @@ class GaiaClient:
         Returns a dict with 'status' ('OK'/'WARNING'/'ERROR'), and the hourly
         curves 'reported_data_main' / 'reported_data_backup' (24 floats each).
         """
+        reporte, _ = self.get_border_report_status_con_estado(border_id, date_str)
+        return reporte
+
+    def get_border_report_status_con_estado(self, border_id: int, date_str: str) -> tuple[dict | None, bool]:
+        """Igual que get_border_report_status(), pero retorna (reporte, fallo)
+        -- 'fallo' es local a ESTA llamada (usa _get_con_estado(), no
+        self.ultima_llamada_fallo, compartida entre hilos e insegura cuando
+        varias llamadas corren en paralelo sobre el mismo GaiaClient -- ver
+        reporte_cgm.py: ThreadPoolExecutor(max_workers=12) reusando un solo
+        cliente). Pensada para distinguir "Quoia dice que no hay reporte"
+        (fallo=False) de "no se pudo preguntar" (fallo=True) sin la carrera
+        de la bandera compartida."""
         url = f"{self._base}/api/cgm/v1/report_/historic/{border_id}/"
         params: dict | None = {"page_size": 100}
         for _ in range(30):
-            data = self._get(url, params=params)
+            data, fallo = self._get_con_estado(url, params=params)
             if not isinstance(data, dict):
-                return None
+                return None, fallo
             for reporte in data.get("results", []):
                 if reporte.get("report_date") == date_str:
-                    return reporte
+                    return reporte, False
             nxt = data.get("next")
             if not nxt:
-                return None
+                return None, False
             url, params = nxt, None
-        return None
+        return None, False
 
     def get_all_borders(self) -> list[dict]:
         """Fetch all borders registered in Quoia (paginated). Returns flat list of project dicts.

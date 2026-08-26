@@ -24,6 +24,11 @@ class EnvioResultado(BaseModel):
     fronteras: int
     ok: bool
     error: Optional[str] = None
+    # Envío completado (ok=True) pero con datos parciales -- ej. Quoia no
+    # respondió para algunas fronteras/días por un fallo de red/timeout, no
+    # porque de verdad no haya reporte esa fecha (ver fetch_filas() en
+    # reporte_cgm.py, estado "Error de conexión con Quoia").
+    warning: Optional[str] = None
 
 
 class EnviarReporteCGMResponse(BaseModel):

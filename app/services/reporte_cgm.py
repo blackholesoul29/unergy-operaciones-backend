@@ -83,18 +83,27 @@ def resolver_borders(gaia: GaiaClient, frt_codes: set[str]) -> dict[str, dict]:
 def fetch_filas(gaia: GaiaClient, frt_code: str, border_meta: dict | None, fecha_str: str) -> list[dict]:
     """Filas main/backup (24h + total) para una frontera. border_meta viene de
     resolver_borders(); si es None (frt_code no encontrado en Quoia hoy),
-    retorna filas en cero con estado "Sin reporte"."""
+    retorna filas en cero con estado "Sin reporte".
+
+    Si la consulta a Quoia falló de verdad (red/timeout/auth -- no que Quoia
+    dijera "no hay reporte para esa fecha"), el estado queda en "Error de
+    conexión con Quoia" en vez de "Sin reporte" -- antes ambos casos eran
+    indistinguibles y este reporte sale hacia clientes/ASIC sin ninguna
+    señal de que hubo una falla transitoria (ver auditoría 2026-08-26). Usa
+    get_border_report_status_con_estado() (no self.gaia.ultima_llamada_fallo,
+    inseguro cuando varias llamadas corren en paralelo sobre el mismo
+    cliente -- ver el ThreadPoolExecutor en reporte_cgm.py:api)."""
     nombre = border_meta.get("name", "") if border_meta else ""
     categoria = CATEGORIA.get(border_meta.get("category") if border_meta else None, "Frontera de generación")
     border_id = border_meta.get("id") if border_meta else None
 
-    reporte = gaia.get_border_report_status(border_id, fecha_str) if border_id else None
+    reporte, fallo = gaia.get_border_report_status_con_estado(border_id, fecha_str) if border_id else (None, False)
     if reporte:
         estado = ESTADO_QUOIA.get(str(reporte.get("status", "")).upper(), "Sin reporte")
         main_curva = reporte.get("reported_data_main") or [0.0] * 24
         back_curva = reporte.get("reported_data_backup") or [0.0] * 24
     else:
-        estado = "Sin reporte"
+        estado = "Error de conexión con Quoia" if fallo else "Sin reporte"
         main_curva = [0.0] * 24
         back_curva = [0.0] * 24
 

@@ -368,9 +368,18 @@ def enviar_reporte_cgm(
                 mes_str=mes_str,
                 adjuntos_extra=adjuntos_extra,
             )
+            frts_con_error_conexion = {
+                fila["border frtcode"] for fila in filas_todas
+                if fila.get("state") == "Error de conexión con Quoia"
+            }
+            warning = (
+                f"{len(frts_con_error_conexion)} frontera(s) con error de conexión a "
+                "Quoia -- dato incompleto para esa(s) fecha(s), revisar manualmente"
+                if frts_con_error_conexion else None
+            )
             resultados.append(EnvioResultado(
                 tipo=dest.tipo, id=dest.id, nombre=nombre, correos=correos,
-                fronteras=len(fronteras), ok=True,
+                fronteras=len(fronteras), ok=True, warning=warning,
             ))
         except Exception as exc:
             resultados.append(EnvioResultado(

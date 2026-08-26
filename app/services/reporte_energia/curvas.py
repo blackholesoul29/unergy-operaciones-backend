@@ -14,6 +14,7 @@ import pandas as pd
 
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import recuperacion
+from app.services.reporte_energia.utils import limite_plausible_kwh
 
 logger = logging.getLogger("reporte_energia.curvas")
 
@@ -179,11 +180,20 @@ def _curva_de_mediciones(filas: list[dict], node_id: int, campos: tuple[str, str
 
 def _curva_nodo(
     gaia: GaiaClient, node_id: int | None, fecha_str: str, label: str, var_name: str = "eae",
+    capacidad_efectiva_mw: float | None = None,
 ) -> tuple[pd.Series, bool]:
     """Retorna (curva horaria kWh, dia_completo) para un node_id.
 
     var_name: 'eae' (generación, por defecto) o 'iae' (consumo).
     Serie de None×24 y completo=False si no hay nodo o no hay datos.
+
+    Si se pasa capacidad_efectiva_mw, las horas físicamente implausibles
+    (mismo criterio que ya usan reconectador.get_curva_reconectador() y
+    solarview.curva_generacion() -- ver limite_plausible_kwh() en utils.py)
+    se tratan como huecos (None), no como lectura real: un glitch de
+    telemetría del medidor de nodo puede colarse igual que uno de
+    SolarView, y acá el riesgo es mayor -- esta curva se reporta DIRECTO
+    (sin FP de por medio) en Casos 2/4/5.
     """
     vacia = pd.Series([None] * 24, index=HORAS, dtype=float)
     if node_id is None:
@@ -192,7 +202,16 @@ def _curva_nodo(
     if not filas:
         return vacia, False
     curva = _curva_de_mediciones(filas, node_id, _CAMPOS_POR_VAR[var_name])
-    completo = dia_completo(curva, _horas_reportadas(filas))
+    horas_reportadas = _horas_reportadas(filas)
+
+    limite = limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        implausibles = curva.abs() > limite
+        if implausibles.any():
+            curva[implausibles] = None
+            horas_reportadas -= set(curva.index[implausibles])
+
+    completo = dia_completo(curva, horas_reportadas)
     return curva, completo
 
 
@@ -225,6 +244,7 @@ def curva_medidor_en_vivo(
 
 def recuperar_y_releer(
     gaia: GaiaClient, node_id: int, meter_id: int, fecha_str: str, label: str, var_name: str = "eae",
+    capacidad_efectiva_mw: float | None = None,
 ) -> tuple[pd.Series, bool, bool]:
     """Interroga el medidor (recuperación activa vía WebSocket) y vuelve a
     leer su curva desde Quoia.
@@ -239,7 +259,9 @@ def recuperar_y_releer(
     exito = recuperacion.fue_exitosa(resultado)
     if not exito:
         logger.info("recuperacion %s meter_id=%s no confirmó éxito: %s", label, meter_id, resultado)
-    curva, completo = _curva_nodo(gaia, node_id, fecha_str, f"{label} (post-recuperacion)", var_name)
+    curva, completo = _curva_nodo(
+        gaia, node_id, fecha_str, f"{label} (post-recuperacion)", var_name, capacidad_efectiva_mw,
+    )
     return curva, completo, exito
 
 
@@ -255,6 +277,7 @@ def curvas_de_frontera(
     frt_code: str,
     recuperar: bool = True,
     mediana_referencia: float | None = None,
+    capacidad_efectiva_mw: float | None = None,
 ) -> dict:
     """Curvas horarias (kWh) de generación (eae) y consumo propio (iae) del
     medidor principal y de respaldo de una frontera, para una fecha.
@@ -278,14 +301,21 @@ def curvas_de_frontera(
     doblado o partido a la mitad, solo huecos (ver MGS 0032 El Paso Norte /
     Sol&Cielo 7 Los Bongos: el medidor venía "completo" pero exactamente 2x
     su valor normal).
+
+    `capacidad_efectiva_mw` (opcional) se pasa a _curva_nodo() para
+    descartar horas físicamente implausibles -- ver MGS 0010 Villanueva
+    2026-08-26: el mismo tipo de glitch que ya se filtraba en SolarView/
+    reconectador puede venir del medidor de nodo también, y acá el riesgo
+    es mayor -- estas curvas se reportan DIRECTO (Casos 2/4/5), sin FP de
+    por medio que amortigüe un valor absurdo.
     """
     node_p = mapa_medidor_nodo.get(int(main_meter_id)) if main_meter_id else None
     node_r = mapa_medidor_nodo.get(int(backup_meter_id)) if backup_meter_id else None
 
-    curva_p, comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal", "eae")
-    curva_r, comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo", "eae")
-    cons_p, cons_comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal/consumo", "iae")
-    cons_r, cons_comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo/consumo", "iae")
+    curva_p, comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal", "eae", capacidad_efectiva_mw)
+    curva_r, comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo", "eae", capacidad_efectiva_mw)
+    cons_p, cons_comp_p = _curva_nodo(gaia, node_p, fecha_str, f"{frt_code}/principal/consumo", "iae", capacidad_efectiva_mw)
+    cons_r, cons_comp_r = _curva_nodo(gaia, node_r, fecha_str, f"{frt_code}/respaldo/consumo", "iae", capacidad_efectiva_mw)
 
     def _sospechoso(curva: pd.Series) -> bool:
         if not mediana_referencia or mediana_referencia <= 0:
@@ -298,12 +328,12 @@ def curvas_de_frontera(
     intentos: list[str] = []
     if recuperar:
         if node_p is not None and main_meter_id and (not (comp_p and cons_comp_p) or _sospechoso(curva_p)):
-            curva_p, comp_p, exito = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal", "eae")
-            cons_p, cons_comp_p, _ = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal/consumo", "iae")
+            curva_p, comp_p, exito = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal", "eae", capacidad_efectiva_mw)
+            cons_p, cons_comp_p, _ = recuperar_y_releer(gaia, node_p, int(main_meter_id), fecha_str, f"{frt_code}/principal/consumo", "iae", capacidad_efectiva_mw)
             intentos.append(f"principal: {'éxito' if exito else 'falló'}")
         if node_r is not None and backup_meter_id and (not (comp_r and cons_comp_r) or _sospechoso(curva_r)):
-            curva_r, comp_r, exito = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo", "eae")
-            cons_r, cons_comp_r, _ = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo/consumo", "iae")
+            curva_r, comp_r, exito = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo", "eae", capacidad_efectiva_mw)
+            cons_r, cons_comp_r, _ = recuperar_y_releer(gaia, node_r, int(backup_meter_id), fecha_str, f"{frt_code}/respaldo/consumo", "iae", capacidad_efectiva_mw)
             intentos.append(f"respaldo: {'éxito' if exito else 'falló'}")
 
     return {

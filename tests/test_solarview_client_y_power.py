@@ -80,6 +80,39 @@ def test_curva_de_power_vacia_si_no_hay_power():
     assert curva.isna().all()
 
 
+def test_curva_de_power_descarta_hora_implausible():
+    """Mismo criterio que curva_generacion() (ver limite_plausible_kwh()
+    en utils.py) -- acá el riesgo es mayor: curva_de_power() se reporta
+    DIRECTO como curva_final en el rescate de Caso 6/7, sin ningún FP ni
+    comparación de por medio."""
+    resp = {
+        "results": {
+            "power": {
+                "2026-08-20 10:00": 500.0,      # 500 kWh en 1h -- plausible
+                "2026-08-20 11:00": 250000.0,   # implausible para 0,99 MW
+            },
+        },
+    }
+    curva, horas_con_dato = curva_de_power(resp, capacidad_efectiva_mw=0.99)
+
+    assert curva[10] == 500.0
+    assert curva[11] is None or curva[11] != curva[11]  # NaN -- descartada
+    assert 11 not in horas_con_dato
+
+
+def test_curva_de_power_sin_capacidad_efectiva_no_filtra():
+    resp = {
+        "results": {
+            "power": {
+                "2026-08-20 11:00": 250000.0,
+                "2026-08-20 12:00": 250000.0,
+            },
+        },
+    }
+    curva, _ = curva_de_power(resp)
+    assert curva[11] == 250000.0
+
+
 class _RespuestaFalsa:
     def __init__(self, status_code, headers=None, data=None):
         self.status_code = status_code

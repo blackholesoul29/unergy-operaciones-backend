@@ -13,6 +13,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.services.mgs.gaia_client import GaiaClient
+from app.services.reporte_energia.utils import limite_plausible_kwh
 
 GAP_MAX_SEGUNDOS      = 1500  # 25 min: gap máximo tolerado entre mediciones consecutivas
 UMBRAL_GENERACION_KW  = 5.0   # potencia total mínima (kW negativo) para considerar "generando"
@@ -20,7 +21,9 @@ CAMPOS_AP             = ("app1", "app2", "app3")  # potencia activa por fase, en
 UMBRAL_PICO_MULTIPLO  = 15    # lectura > 15x la mediana del día = corrupta, se descarta
 
 
-def get_datos_crudos(gaia: GaiaClient, node_id: int, fecha_str: str) -> pd.DataFrame:
+def get_datos_crudos(
+    gaia: GaiaClient, node_id: int, fecha_str: str, capacidad_efectiva_mw: float | None = None,
+) -> pd.DataFrame:
     """Potencia activa (vars=ap) de un nodo para una fecha (YYYY-MM-DD).
 
     Retorna DataFrame con columnas 'time', 'appd1', 'appd2', 'appd3'.
@@ -41,20 +44,30 @@ def get_datos_crudos(gaia: GaiaClient, node_id: int, fecha_str: str) -> pd.DataF
     if "recovered" in df.columns:
         df = df[df["recovered"] != True].reset_index(drop=True)  # noqa: E712
 
-    return _descartar_picos_espurios(df, node_id)
+    return _descartar_picos_espurios(df, node_id, capacidad_efectiva_mw)
 
 
-def _descartar_picos_espurios(df: pd.DataFrame, node_id: int | None = None) -> pd.DataFrame:
-    """Pone en 0 las lecturas de potencia con magnitud absurda frente al resto
-    del día del mismo nodo -- picos de datos corruptos en la fuente, no pérdida
-    real (ej. mediana del día ~1 kW pero una lectura puntual de -343,964 kW,
-    ~300x la mediana, que infla la suma de Riemann del Caso 7 a millones de
-    kWh en un solo día).
+def _descartar_picos_espurios(
+    df: pd.DataFrame, node_id: int | None = None, capacidad_efectiva_mw: float | None = None,
+) -> pd.DataFrame:
+    """Pone en 0 las lecturas de potencia con magnitud absurda -- picos de
+    datos corruptos en la fuente, no generación real. Dos chequeos
+    independientes (OR):
 
-    Usa la mediana de |potencia| entre las lecturas ya significativas
-    (> UMBRAL_GENERACION_KW) como referencia -- no depende de calibrar la
-    unidad real de app1/app2/app3, solo de que un pico sea inconsistente con
-    el resto del propio día de ese nodo.
+    1. Relativo al resto del propio día del nodo -- mediana de |potencia|
+    entre lecturas ya significativas (> UMBRAL_GENERACION_KW) x
+    UMBRAL_PICO_MULTIPLO (ej. mediana ~1 kW pero una lectura puntual de
+    -343.964 kW, ~300x la mediana, que infla la suma de Riemann del Caso 7
+    a millones de kWh en un solo día). No depende de calibrar la unidad
+    real de app1/app2/app3.
+
+    2. Absoluto, contra la capacidad de la frontera (limite_plausible_kwh()
+    en utils.py, mismo criterio que medidor/CGM/SolarView/reconectador) --
+    el chequeo (1) es ciego a un error CRÓNICO de escala de unidad (ej.
+    Polaris 1/2, ~1.150x, un nodo que reporta en W en vez de kW: TODAS las
+    lecturas del día quedan igual de infladas, así que ninguna se ve
+    "atípica" frente a la mediana del propio día). Este chequeo sí lo
+    detecta, comparando contra un techo físico externo al día.
     """
     if df.empty or not any(c in df.columns for c in CAMPOS_AP):
         return df
@@ -64,15 +77,18 @@ def _descartar_picos_espurios(df: pd.DataFrame, node_id: int | None = None) -> p
         pd.to_numeric(df[c], errors="coerce").fillna(0) for c in CAMPOS_AP if c in df.columns
     ).abs()
 
+    espurias = pd.Series(False, index=df.index)
+
     significativas = potencia_abs[potencia_abs > UMBRAL_GENERACION_KW]
-    if significativas.empty:
-        return df
+    if not significativas.empty:
+        mediana = significativas.median()
+        if mediana > 0:
+            espurias = espurias | (potencia_abs > mediana * UMBRAL_PICO_MULTIPLO)
 
-    mediana = significativas.median()
-    if mediana <= 0:
-        return df
+    limite = limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        espurias = espurias | (potencia_abs > limite)
 
-    espurias = potencia_abs > mediana * UMBRAL_PICO_MULTIPLO
     if espurias.any():
         for c in CAMPOS_AP:
             if c in df.columns:

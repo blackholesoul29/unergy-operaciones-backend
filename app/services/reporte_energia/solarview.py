@@ -32,14 +32,22 @@ def _curva_de_resp(resp: dict) -> pd.Series:
     return curva
 
 
-def curva_de_power(resp: dict) -> tuple[pd.Series, set[int]]:
+def curva_de_power(
+    resp: dict, capacidad_efectiva_mw: float | None = None,
+) -> tuple[pd.Series, set[int]]:
     """Reconstruye la curva horaria a partir de /power/ (5 min) e integrando
     por Riemann -- respaldo cuando /generation/ viene vacío.
 
     Se pide con total_power=1 (ver SolarViewClient.get_power), así que
     `results.power` ya viene sumado entre todos los inversores -- a
     diferencia de la API vieja de Solenium, que devolvía potencia por
-    inversor (`{inversor: {ts: kw}}`) y había que sumar acá."""
+    inversor (`{inversor: {ts: kw}}`) y había que sumar acá.
+
+    Si se pasa capacidad_efectiva_mw, las horas físicamente implausibles
+    (ver limite_plausible_kwh() en utils.py) se descartan igual que en
+    curva_generacion() -- acá el riesgo es mayor: este resultado se reporta
+    DIRECTO como curva_final (rescate de Caso 6/7 en clasificador.py), sin
+    ningún FP ni comparación de por medio que amortigüe un valor absurdo."""
     power = resp.get("results", {}).get("power", {}) if isinstance(resp, dict) else {}
     if not power:
         return pd.Series([None] * 24, index=HORAS, dtype=float), set()
@@ -68,6 +76,14 @@ def curva_de_power(resp: dict) -> tuple[pd.Series, set[int]]:
     for h in HORAS:
         if h not in horas_con_dato:
             curva[h] = None
+
+    limite = limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        implausibles = curva.abs() > limite
+        if implausibles.any():
+            curva[implausibles] = None
+            horas_con_dato -= set(curva.index[implausibles])
+
     return curva, horas_con_dato
 
 

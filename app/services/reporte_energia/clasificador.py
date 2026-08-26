@@ -32,6 +32,7 @@ from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import curvas, datos_crudos, solarview as solarview_svc, reconectador, historial
 from app.services.reporte_energia.utils import (
     CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
+    limite_plausible_kwh,
 )
 
 HORAS = list(range(24))
@@ -379,7 +380,7 @@ def _decidir_caso(
                 "curva_reconectador_referencia": curva_a_lista(curva_reconectador),
             }
 
-    crudos = datos_crudos.get_datos_crudos(gaia, node_ppal, fecha_str) if node_ppal else pd.DataFrame()
+    crudos = datos_crudos.get_datos_crudos(gaia, node_ppal, fecha_str, capacidad_efectiva_mw) if node_ppal else pd.DataFrame()
 
     if not datos_crudos.proyecto_generando(crudos):
         # Ya se intentó el reconectador arriba -- si llegamos acá es porque
@@ -389,7 +390,7 @@ def _decidir_caso(
         # medidor", es la única lectura de generación disponible).
         if id_solarview is not None:
             resp_power = sv.get_power(int(id_solarview), fecha_str, fecha_str)
-            curva_power, _ = solarview_svc.curva_de_power(resp_power)
+            curva_power, _ = solarview_svc.curva_de_power(resp_power, capacidad_efectiva_mw)
             if curva_power.fillna(0).sum() > 0:
                 return {
                     "caso": 7, "energia_final_kwh": float(curva_power.fillna(0).sum()),
@@ -467,6 +468,21 @@ def clasificar_generacion(
     estado_reporte = str(reporte.get("status")).upper() if reporte else None
     if reporte and reporte.get("reported_data_main"):
         curva_cgm = pd.Series(reporte["reported_data_main"][:24], index=HORAS, dtype=float)
+        # Mismo criterio que medidor/SolarView/reconectador (ver
+        # limite_plausible_kwh() en utils.py) -- el reporte oficial de
+        # Quoia al ASIC tampoco es inmune a un glitch de telemetría del
+        # lado del medidor que lo alimenta. A diferencia de esas otras
+        # fuentes no se enmascara solo la hora implausible: Caso 1 usa
+        # curva_cgm DIRECTO como curva_final y no está en
+        # CASOS_CON_RELLENO_HORARIO, así que un hueco ahí quedaría sin
+        # rellenar y sin marcar revisar_manualmente. Se descarta CGM
+        # entero para esta fila -- reporte_valido=False fuerza la caída a
+        # la cadena de medidor/inversores (Casos 2/3/4), que sí maneja
+        # huecos correctamente.
+        limite = limite_plausible_kwh(capacidad_efectiva_mw)
+        if limite is not None and (curva_cgm.abs() > limite).any():
+            curva_cgm = CURVA_CERO.copy()
+            reporte_valido = False
     else:
         curva_cgm = CURVA_CERO.copy()
     e_cgm = float(curva_cgm.fillna(0).sum())
@@ -519,6 +535,7 @@ def clasificar_generacion(
     c = curvas.curvas_de_frontera(
         gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code,
         recuperar=not es_caso1_seguro, mediana_referencia=mediana_hist,
+        capacidad_efectiva_mw=capacidad_efectiva_mw,
     )
     curva_ppal, curva_resp = c["curva_ppal"], c["curva_resp"]
     completo_ppal, completo_resp = c["ppal_completo"], c["resp_completo"]

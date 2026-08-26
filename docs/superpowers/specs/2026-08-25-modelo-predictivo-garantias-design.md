@@ -686,6 +686,35 @@ cero. **No se ingiere:** el agregado por persistencia lo cubre con error menor a
 σ(Exposición), y perseguir el 0,23% no mueve la aguja. Su valor real fue revelar el
 encoding UTF-16LE.
 
+**`Finance/SIC/` evaluado y aplazado (2026-08-26).** 1.868 archivos entre los dos
+agentes, desde abr-2022. Cuatro tipos: `cartavto…SIC` (montos mínimos que se compensan a
+cero), `docfact…SIC` (**el interesante**: la factura real por secciones),
+`Informe_Especial.xlsx` y `{AGENTE}SICT…-SIC-N` (transferencias de todo el mercado, no
+por agente).
+
+Medianas de `docfactUNGGSIC` sobre 38 facturas mensuales:
+
+| Sección de la factura | n | Mediana COP |
+|---|---|---|
+| Liquidación por Transacciones en la Bolsa | 37 | 37.888.771 |
+| Servicios de Despacho y Coordinación del CND y del SIC | 38 | 4.046.714 |
+| Gravamen FAZNI | 26 | 84.708 |
+| Costos de Importación | 34 | 12.904 |
+| Ajuste por Tasa de Cambio | 32 | 879 |
+
+**No mapea directo al componente.** `Servicios CND-SIC-FAZNI` de la garantía vale 37,6M,
+pero la línea equivalente de la factura (CND-SIC + FAZNI) suma ~4,1M: un factor de 9.
+La sección que sí se parece en magnitud a 37,6M es *Liquidación por Transacciones en la
+Bolsa*, pero **esa no es ese componente** — es la exposición, que ya se modela aparte.
+Tomar esa coincidencia como equivalencia sería un error.
+
+La explicación probable es que el componente de la garantía cubra un período proyectado
+y la factura sea mensual liquidada. **Reconciliarlos es un trabajo en sí mismo.**
+
+**No se ingiere ahora**, por una razón distinta a FAZNI: FAZNI era irrelevante por
+tamaño, SIC es relevante pero **no está listo para usar**. Queda anotado como la mejor
+fuente candidata si el agregado por persistencia se queda corto.
+
 La muestra semanal pasa de 22 a **83 vencimientos: 3,8×**. Con 22 observaciones un P90
 bien calibrado falla ~2 veces y el ruido impide distinguir un modelo mal calibrado de
 mala suerte; con 83 la cobertura empieza a ser medible. El mensual pasa de ~8 a 18.

@@ -149,7 +149,11 @@ agregado por persistencia. La varianza está en un solo lugar.
 - Piso en cero aplicado sobre los cuantiles.
 - Backtesting con cobertura y ancho de intervalo, sobre el rango cubierto por los
   targets (ver §6.1).
-- Tab con cobertura de datos, tabla de backtest y detalle por vencimiento.
+- **Vista de planeación** (§10): cuánto se necesita para las próximas semanas y para el
+  mes, con los dos totales — suma de P90 semanales y P90 del horizonte completo — y la
+  brecha entre ellos.
+- Agregación del horizonte por **remuestreo de bloques históricos consecutivos**, para
+  no asumir independencia entre semanas.
 - **UNGG y UNGC**, ambos. Es el mismo camino de código con otra entidad.
 - **Semanal y mensual**, cada uno con su propio objetivo de anticipación (§1).
 - Alerta de frescura sobre la ingesta diaria de generación: si el dato más reciente
@@ -725,6 +729,17 @@ directamente sobre el total tendría más parámetros que datos. Esa es la razó
 por la que la vía determinística + residual es el camino principal y no un paso previo
 al ML.
 
+### Agregación del horizonte
+
+El P90 de un conjunto de vencimientos **no es la suma de sus P90**, y tampoco se obtiene
+asumiendo independencia. Se estima remuestreando bloques históricos consecutivos
+completos de la misma longitud que el horizonte, y tomando el cuantil empírico de sus
+sumas. Ese procedimiento preserva la correlación entre semanas sin estimarla.
+
+Se reportan las dos cifras y su brecha: la suma de P90 es el techo (reserva por semana),
+el P90 del bloque es el piso (pozo común), y la diferencia es el capital que libera
+juntar el pozo.
+
 ### Validación temporal
 
 `train_test_split` con `shuffle` está **prohibido**. Toda evaluación es train pasado /
@@ -734,24 +749,95 @@ test futuro.
 
 ## 10. Interfaz
 
-Tercera tab, sin gráficos: con un componente modelado no hay dashboard que valga. Tres
-bloques, `DataTable` de PrimeVue.
+**Es una vista de planeación, no un reporte de backtest.** La pregunta que responde es
+*cuánto necesito para las semanas que vienen y para el mes*. El backtest existe para
+justificar que ese número es creíble, no para ser la portada — va al pie, en una línea.
 
-1. **Cobertura y frescura de datos** — qué rango hay por tipo y por versión, y qué
-   archivos fueron rechazados por `validar_esquema()`. El primer problema real va a ser
-   "faltan días en `.tx2`", y conviene verlo antes de sacar conclusiones del error.
-   Arriba de todo, en rojo si aplica: **antigüedad del dato de generación más reciente**.
-   Más de 1 día compromete el margen de la anticipación mensual, y tiene que verse antes
-   que cualquier número.
-2. **Backtest** — una fila por (agente, vencimiento, período): esquema, período,
-   predicho día 14 (central y P90), predicho día 7, real, dentro-del-intervalo, ancho.
-   La **procedencia de la ventana** como chip filtrable.
-3. **Detalle** — al abrir una fila: desglose diario, qué archivos y versiones exactos
-   alimentaron el número, y la **descomposición del ancho del intervalo** por fuente
-   (liquidación / ventana candidata / días sin liquidar). Esa descomposición es la que
-   dice dónde invertir el siguiente esfuerzo.
+### 10.1 Encabezado: los dos totales
 
-Percentil configurable desde la UI, con **P90 por defecto**.
+Dos cifras arriba, y la diferencia entre ellas:
+
+| Cifra | Qué responde |
+|---|---|
+| **Suma de los P90 semanales** | Cuánto necesito si reservo semana a semana, cada una con su colchón |
+| **P90 del total del horizonte** | Cuánto necesito si mantengo un pozo común |
+| **La brecha** | El capital que libera juntar el pozo |
+
+Las dos son válidas y responden preguntas distintas de tesorería; se muestran juntas y
+etiquetadas.
+
+> **El P90 del total no se calcula asumiendo independencia.** Las semanas comparten
+> régimen de generación, precio de bolsa y plantas: están correlacionadas. Asumir
+> independencia reportaría un ahorro inexistente y dejaría corta la reserva.
+>
+> Se calcula **remuestreando bloques históricos consecutivos completos** — ventanas
+> reales de N semanas seguidas, y la distribución empírica de sus sumas. Eso preserva la
+> correlación sin estimarla ni modelarla.
+>
+> Si la correlación resulta cercana a 1 las dos cifras convergen y la brecha se va a
+> cero. Ese resultado **se muestra igual**: significa que juntar el pozo no compra nada,
+> y es información, no una falla.
+
+### 10.2 Semanal y mensual, separados por toggle
+
+No un filtro sobre una tabla común: un toggle que cambia la vista. Un filtro invita a
+quitarlo y mirar todo junto, y **la cobertura agregada sobre semanal + mensual no
+significa nada** — tienen estructuras de incertidumbre distintas (el mensual arrastra
+ventana candidata, el semanal no). Las métricas se reportan siempre por separado.
+
+| | Semanal | Mensual |
+|---|---|---|
+| Presentación | Filas de tabla | Tarjetas |
+| Filas por vencimiento | 3 (`AJUSTE`, `PROY`, `M+1`) | 1 (el mes) |
+| Fechas a mostrar | 3 | 4 — cierre de ventana, objetivo, publicación XM, mes garantizado |
+| Alerta de margen | No aplica | Siempre visible |
+| Chip de ventana | `observada` / `derivada` | `observada` / `candidatas` |
+
+El mensual va en tarjeta porque cuatro fechas no entran en una fila sin volverla
+ilegible.
+
+### 10.3 Tres estados, no dos
+
+Cada vencimiento futuro se marca con uno:
+
+| Estado | Significa | Confianza |
+|---|---|---|
+| `firme` | XM ya publicó | Exacto |
+| `estimado` | La ventana base **ya cerró**; solo falta que XM liquide días ya ocurridos | Alta |
+| `preliminar` | La ventana base **sigue abierta**: hay días futuros de verdad | Menor |
+
+La distinción entre `estimado` y `preliminar` es la que evita tratar un pronóstico real
+como si fuera una reconstrucción de días pasados. No son la misma clase de número y no
+merecen la misma confianza.
+
+### 10.4 Frescura de datos
+
+Arriba de todo, en rojo cuando aplica: **antigüedad del dato de generación más
+reciente**. Más de 1 día compromete el margen de la anticipación mensual. Va primero
+porque es el único elemento que puede invalidar todo lo demás de la pantalla — sin él,
+los números siguen saliendo pero dejan de ser medición y pasan a ser proyección, y eso
+no se nota mirando la tabla.
+
+### 10.5 Detalle por vencimiento
+
+Al abrir una fila o tarjeta:
+
+- La **cadena de cálculo** completa en dos columnas (central y P90): exposición
+  modelada → otros 19 por persistencia → suma → piso en cero → menos TIE → menos
+  estimado provisionado → total a pagar. Cada eslabón visible y rastreable.
+- Qué archivos y versiones exactos alimentaron el número.
+- La **descomposición del ancho del intervalo** por fuente (liquidación / ventana
+  candidata / días sin liquidar). Es lo más accionable de la pantalla: si el 71% del
+  ancho viene de ventana candidata, conseguir los `PERIODO BASE` históricos vale más que
+  cualquier refinamiento del modelo.
+
+### 10.6 Al pie
+
+Una línea con cobertura y ancho mediano contra el baseline, **separados por esquema**:
+`cobertura 91% semanal / 88% mensual · ancho mediano $41M vs. baseline $96M`.
+
+Percentil configurable desde la UI, con **P90 por defecto**. Sin gráficos en este spec:
+con un solo componente modelado no hay serie que graficar.
 
 ---
 
@@ -806,6 +892,7 @@ resultados que **se ven bien y son falsos**.
 | 13 | **`arrpas` sin `.tx2`** | Resuelto para `trsd` y `dspcttos` (2026-08-26). Queda `arrpas`, y no es despreciable: las pérdidas son 0,38% de la generación ideal pero **5,8% de la exposición neta**, porque la exposición es un residuo de números grandes. Acotado: la réplica del día 7 toma las pérdidas del propio `BalCttos` (concepto `PÉRDIDAS ASIGNADAS A UN GENERADOR`, con `.tx2`); `arrpas` solo hace falta en la reconstrucción del día 14. El leak queda confinado al estimador temprano y hay que marcarlo como tal. |
 | 14 | Rango de targets menor que el de insumos | CGM e Insumos cubren desde nov-2023, pero los targets solo van de **dic-2025 a ago-2026** (22 vencimientos del consolidado interno + los Excel de XM de may–ago 2026). El backtest está limitado por los targets, no por los insumos. Conseguir Excel de garantía anteriores a may-2026 amplía la muestra más que cualquier otra cosa. |
 | 15 | `.tx2` incompleto por diseño | `BalCttos` trae 28–29 días por mes en `.tx2` contra 30–31 en `.txf` (~7% ausentes). No es error de descarga: es lo que publica XM. La tab de cobertura tiene que exponerlo antes de que contamine conclusiones. |
+| 16 | Correlación entre semanas | Si la correlación es cercana a 1, el P90 del horizonte converge a la suma de P90 y la brecha se anula: juntar el pozo no libera capital. Es un resultado posible y se reporta como tal, no se esconde. Medible en el primer backtest. |
 
 ---
 

@@ -837,11 +837,39 @@ Un rango que siempre acierta pero va de $0 a $300M no sirve. Ambas se reportan s
 juntas, por vencimiento y agregadas, y **separadas por procedencia de ventana**
 (observada vs. derivada).
 
-### Baseline obligatorio
+### Baselines obligatorios
 
-Persistencia: el valor del vencimiento anterior, con intervalo de la volatilidad
-histórica ($96M de mediana semana a semana). Cualquier cosa que construyamos debe
-producir un intervalo **más angosto a igual cobertura**. Si no le gana, no sirve.
+Dos, no uno. Los tres contendientes corren sobre los mismos vencimientos y se comparan
+con la misma métrica:
+
+| Contendiente | Qué prueba |
+|---|---|
+| **Persistencia** | El piso. El valor del vencimiento anterior, con intervalo de la volatilidad histórica ($96M de mediana semana a semana). Si no le ganamos a esto, nada de esto sirve. |
+| **Fórmula de `Proyecciones`** | Si la aproximación de tres términos que ya existe en producción alcanzaba. |
+| **Réplica de 20 componentes** | La apuesta de este spec. |
+
+El segundo baseline es la implementación viva en `app/services/garantias_proyecciones.py`:
+`garantia_total = valor_energia + valor_plantas_nuevas + costo_regulatorio`, con el
+precio como promedio simple de 7 días de SIMEM y **sin piso en cero**.
+
+Difiere de la fórmula de XM en tres cosas materiales: colapsa 19 componentes en un
+"costo regulatorio del mes anterior"; usa promedio simple donde XM usa ponderado, desde
+una fuente sin versión de liquidación (así que no admite la regla anti-leakage); y al no
+tener piso reporta negativos donde XM cobra cero — que para UNGG es el caso normal.
+
+**Por qué se mide en vez de descartarse.** Replicar la fórmula es necesario pero no
+suficiente: la fórmula es aritmética exacta sobre 20 insumos, y lo difícil no es la
+fórmula sino *estimar los insumos* antes de que XM los publique. Para el día 7 la
+réplica gana casi por definición, porque usa los mismos números que usó XM. Para el día
+14 es una pregunta empírica, y una fórmula exacta con insumos estimados puede perder
+contra una aproximación burda con insumos sólidos.
+
+**Consecuencia de producto.** Cuando el motor entre en producción habrá dos tabs del
+mismo módulo mostrando cifras distintas de garantía para el mismo período, y eso erosiona
+la confianza en ambas. Este backtest decide cuál sobrevive: si la réplica gana con
+claridad, `Proyecciones` pasa a consumir el motor nuevo; si empatan, se queda la de tres
+términos por ser más barata de mantener. La decisión se toma con el resultado, no antes
+de tenerlo.
 
 ### Referencia histórica (31 semanas)
 

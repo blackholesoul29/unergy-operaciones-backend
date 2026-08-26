@@ -792,6 +792,49 @@ diaria. La réplica auditable del día 7 usa el `dspcttos` crudo ingerido en `xm
 con su propio `disponible_desde`. No entra en este spec, pero el esquema ya lo soporta
 sin cambios.
 
+### 8.1.3 Medición del día 14 (2026-08-26): queda una sola incógnita
+
+Se midió cada término de la identidad por separado, sobre 538 días con `.tx2` completo.
+
+| Término | Cómo se obtiene al día 14 | Medición |
+|---|---|---|
+| Contratos de venta | `dspcttos` | **Exacto: 538/538 días, diferencia 0** contra `CONTRATO DE VENTA` de `BalCttos` |
+| Pérdidas asignadas | `arrpas` `.tx2` | Disponible |
+| Precio (`PBNA`) | `trsd` `.tx1` | **Deriva mediana TX1→TX2 de 0,0176%** (482 días); p90 1,89% |
+| **Generación ideal** | **medición propia** | **La única incógnita** |
+
+**El despacho no es una aproximación: es el mismo número.** Reconstruir la exposición
+sustituyendo `CONTRATO DE VENTA` por `dspcttos` da un resultado idéntico en 526/538 días
+— exactamente los mismos que cierran la identidad con datos de `BalCttos`. Sustituir no
+cuesta nada.
+
+**El precio ya está resuelto al día 14.** Nunca es byte-idéntico entre `TX1` y `TX2`
+(0/482), pero la magnitud es despreciable: 0,0102% de diferencia mediana por hora. El
+residual del día 14 **no viene del precio**.
+
+**El residuo de la generación ya se está midiendo en producción.**
+`reporte_energia_generacion` guarda `energia_final_kwh` (medición propia) y
+`energia_cgm_kwh` (lo que dice XM) lado a lado, por frontera y por fecha, desde hace
+meses. La distribución que el estimador necesita calibrar **ya se está acumulando sola**;
+no hay que construirla, hay que consultarla.
+
+Consecuencia de alcance: el estimador del día 14 no es "modelar la exposición". Es tomar
+el despacho exacto, las pérdidas y el precio ya conocido, y sustituir **un solo término**
+por la medición propia, cuyo error histórico ya está tabulado.
+
+#### La revisión de liquidación posterior a TX2
+
+Comparando `.tx2` contra `.txf` sobre 538 días: la exposición diaria en kWh es
+**idéntica en 449/538 (83,5%)** y la diferencia mediana es 0%. En 20 días cambia de
+signo.
+
+**Advertencia de método:** medir esto en porcentaje engaña. La exposición neta es un
+residuo pequeño de números grandes, así que cuando se acerca a cero una revisión mínima
+produce porcentajes absurdos — el p90 semanal da 30,7% y el máximo 1800%, dominados por
+denominadores cercanos a cero. **El residual debe calibrarse en COP absolutos, no en
+porcentaje.** Es la misma lección que con las pérdidas: lo trivial contra el bruto pesa
+contra el neto.
+
 ### 8.2 El residual es el modelo
 
 ```

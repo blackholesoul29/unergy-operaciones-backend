@@ -3,7 +3,6 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
-import random
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
@@ -33,7 +32,10 @@ from app.services.reporte_energia import curvas, orquestador, excel as excel_svc
 from app.services.reporte_energia import excel_terceros
 from app.services.reporte_energia.clasificador import FRONTERAS_TERCEROS
 from app.services.reporte_energia.clasificador_consumo import rellenar_horas_faltantes_consumo
-from app.services.reporte_energia.utils import curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor
+from app.services.reporte_energia.utils import (
+    curva_a_lista, lista_a_curva, escalar_curva, rellenar_con_otro_medidor,
+    curva_respaldo_a_reportar, actualizar_respaldo_final,
+)
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solarview_client import SolarViewClient
@@ -561,6 +563,18 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         respaldo_curva_actual = curva_medidor_resp_viva
         respaldo_energia_actual_kwh = sum(v for v in respaldo_curva_actual if v is not None)
 
+    # Lo que /enviar realmente manda como "Backup" -- congelado desde que se
+    # fijó curva_final (ver actualizar_respaldo_final()); si es una fila de
+    # antes de que existiera esa columna, se calcula al vuelo igual que
+    # antes (mismo criterio de respaldo que /enviar usaría ahora mismo).
+    # Solo Generación -- Consumo no tiene estas columnas.
+    curva_respaldo_reportada = respaldo_reportado_origen = None
+    if es_generacion and rep.curva_final:
+        curva_respaldo_reportada = rep.curva_respaldo_final
+        respaldo_reportado_origen = rep.respaldo_final_origen
+        if curva_respaldo_reportada is None:
+            curva_respaldo_reportada, respaldo_reportado_origen = curva_respaldo_a_reportar(rep)
+
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
         tipo="generacion" if es_generacion else "consumo", fecha=fecha,
@@ -597,6 +611,8 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         respaldo_energia_actual_kwh=round(respaldo_energia_actual_kwh, 4) if respaldo_energia_actual_kwh is not None else None,
         respaldo_curva_actual=respaldo_curva_actual,
         curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
+        curva_respaldo_reportada=curva_respaldo_reportada,
+        respaldo_reportado_origen=respaldo_reportado_origen,
         capacidad_efectiva_mw=(
             float(front.proyecto.potencia_instalada_kwp) / 1000
             if es_generacion and front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
@@ -674,6 +690,13 @@ def editar_curva(
     # CASOS_CONFIABLES_GENERACION).
     if body.fuente in ("principal", "respaldo"):
         rep.caso = "Medidor" if Modelo is ReporteEnergiaConsumo else 5
+    # curva_final/medidor_usado (y, para 'principal', curva_medidor_principal)
+    # ya quedaron fijados arriba con lo que la persona acaba de confirmar --
+    # recalcular acá lo que se va a reportar como Backup, para que quede
+    # congelado con la corrección y no con el resultado del clasificador
+    # automático original (mismo motivo que curva_medidor_principal arriba).
+    if Modelo is ReporteEnergiaGeneracion:
+        actualizar_respaldo_final(rep)
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
@@ -1149,6 +1172,11 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
     /reportar-manual (una lista explícita de fronteras fuera del
     clasificador). Ver ADVERTENCIA en gaia_client.post_report.
 
+    El "Backup" que se envía sale de curva_respaldo_a_reportar() (utils.py)
+    -- dato real cuando existe y es confiable (terceros, o el medidor de
+    respaldo si coincide con el principal dentro de tolerancia), si no la
+    estimación ±1% de siempre.
+
     Retorna (resultado, motivo):
     - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
       (_reporte_ya_valido) -- no se llama a Quoia para nada.
@@ -1170,16 +1198,13 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
 
     curva = rep.curva_final or [0.0] * 24
     main_readings = [float(v) if v is not None else 0.0 for v in curva]
-    respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
-    if respaldo_terceros:
-        # Frontera de terceros (FRONTERAS_TERCEROS) con fila 'Backup' real
-        # en el Excel subido -- se usa tal cual, no la fórmula ±1%.
-        backup_readings = [float(v) if v is not None else 0.0 for v in respaldo_terceros]
-    else:
-        # Mismo ±1% que ya usa el Excel manual (excel.py) para "Respaldo" --
-        # ahí es una fórmula de Excel (RAND() por celda); acá se calcula una
-        # vez por hora al momento de enviar, porque la API espera números fijos.
-        backup_readings = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in main_readings]
+    # curva_respaldo_final queda congelado desde que se fijó curva_final
+    # (clasificar/editar/Excel de terceros, ver actualizar_respaldo_final())
+    # -- para Consumo (no tiene esta columna) o filas de antes de que
+    # existiera, se calcula al vuelo como antes.
+    backup_readings = getattr(rep, "curva_respaldo_final", None)
+    if backup_readings is None:
+        backup_readings, _ = curva_respaldo_a_reportar(rep)
 
     try:
         ok = gaia.post_report(border_id, main_readings, backup_readings)

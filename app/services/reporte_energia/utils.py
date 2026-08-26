@@ -1,9 +1,21 @@
 """Helpers compartidos por los módulos del pipeline de reporte de energía."""
 from __future__ import annotations
 
+import random
+
 import pandas as pd
 
 HORAS = list(range(24))
+
+# Tolerancia para aceptar curva_medidor_respaldo como dato real al reportar
+# (en vez de la estimación ±1%) -- ver curva_respaldo_a_reportar(). Definida
+# a partir del histórico real (auditoría 2026-08-25): con ambos medidores
+# completos y curva_final del medidor principal, el respaldo o coincide casi
+# exacto (58% de los días con <=0.5% de error total) o está claramente mal
+# (26% con >90% de error, medidor desconectado/descalibrado) -- casi no hay
+# término medio. 1.5 kWh de diferencia máxima POR HORA (no el total del día)
+# es el rango que confirmó el equipo de campo.
+TOLERANCIA_RESPALDO_REAL_KWH = 1.5
 
 # Ventanas horarias para el relleno horario centralizado (ver
 # reconectador.rellenar_horas_faltantes) -- fuera de estas horas la
@@ -88,3 +100,62 @@ def rellenar_con_otro_medidor(
             curva[h] = valor
             horas.add(h)
     return curva, horas
+
+
+def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
+    """Qué se reporta como 'Backup' a Quoia -- dato real cuando existe y es
+    confiable, si no la estimación ±1% de siempre. Usado tanto por
+    _enviar_a_quoia() (reporte_energia.py) como por _construir_detalle()
+    para que el frontend muestre exactamente lo que se va a enviar, antes
+    de enviarlo.
+
+    Prioridad:
+    1. curva_respaldo_terceros (FRONTERAS_TERCEROS, ej. Cedillanos) -- dato
+       real que trae el Excel del tercero, tal cual (sin cambios).
+    2. curva_medidor_respaldo -- SOLO si curva_final vino del medidor
+       principal (medidor_usado empieza con 'principal'), ambos medidores
+       quedaron completos ese día, y el respaldo está a
+       TOLERANCIA_RESPALDO_REAL_KWH o menos de diferencia (la peor de las
+       24 horas) de lo que se va a reportar como Principal. Si se aleja
+       más, no se usa -- no es dato confiable (medidor descalibrado o
+       desconectado), se cae al paso 3 igual que siempre.
+    3. Estimación ±1% sobre curva_final (comportamiento de siempre, único
+       camino disponible para Consumo -- no tiene medidor_*_completo ni
+       curva_respaldo_terceros).
+
+    Retorna (curva, origen) -- origen es 'terceros' | 'medidor' | 'estimado',
+    para que el frontend pueda distinguir dato real de estimado."""
+    curva_final = rep.curva_final or [0.0] * 24
+    principal_readings = [float(v) if v is not None else 0.0 for v in curva_final]
+
+    respaldo_terceros = getattr(rep, "curva_respaldo_terceros", None)
+    if respaldo_terceros:
+        return [float(v) if v is not None else 0.0 for v in respaldo_terceros], "terceros"
+
+    mu = rep.medidor_usado or ""
+    curva_medidor_respaldo = getattr(rep, "curva_medidor_respaldo", None)
+    if (
+        mu.startswith("principal")
+        and getattr(rep, "medidor_principal_completo", False)
+        and getattr(rep, "medidor_respaldo_completo", False)
+        and curva_medidor_respaldo
+    ):
+        respaldo_medidor = [float(v) if v is not None else 0.0 for v in curva_medidor_respaldo]
+        max_dif = max(abs(a - b) for a, b in zip(principal_readings, respaldo_medidor))
+        if max_dif <= TOLERANCIA_RESPALDO_REAL_KWH:
+            return respaldo_medidor, "medidor"
+
+    estimado = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in principal_readings]
+    return estimado, "estimado"
+
+
+def actualizar_respaldo_final(rep) -> None:
+    """Recalcula y persiste curva_respaldo_final/respaldo_final_origen en
+    `rep` -- llamar cada vez que curva_final/medidor_usado (o las curvas de
+    medidor que alimentan la comparación) se terminan de fijar: clasificar
+    (orquestador._upsert_generacion), edición manual (editar_curva) y Excel
+    de terceros (aplicar_excel_terceros). Solo aplica a
+    ReporteEnergiaGeneracion -- Consumo no tiene estas dos columnas."""
+    curva, origen = curva_respaldo_a_reportar(rep)
+    rep.curva_respaldo_final = curva
+    rep.respaldo_final_origen = origen

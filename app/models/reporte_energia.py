@@ -75,6 +75,17 @@ class ReporteEnergiaGeneracion(Base):
     # curva_final cuando esta columna es null.
     curva_respaldo_terceros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # Lo que /enviar realmente manda como "Backup" a Quoia -- congelado al
+    # mismo momento que curva_final (clasificar, editar_curva o Excel de
+    # terceros, ver utils.actualizar_respaldo_final()), no recalculado en
+    # cada consulta -- mismo motivo que curva_medidor_principal/respaldo
+    # abajo: la fórmula ±1% usa random.uniform(), así que calcularla de
+    # nuevo en cada vista daría un número DISTINTO al que ya se envió.
+    # origen: 'terceros' | 'medidor' (dato real del medidor de respaldo,
+    # dentro de tolerancia) | 'estimado' (fórmula ±1%).
+    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    respaldo_final_origen: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Curvas de referencia (medidor/Solenium) tal como estaban AL MOMENTO de
     # clasificar -- antes solo se guardaba el total (energia_medidor_..._kwh)
     # y el detalle volvía a consultarlas en vivo cada vez, lo que podía

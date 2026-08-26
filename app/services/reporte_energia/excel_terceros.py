@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.reporte_energia import ReporteEnergiaGeneracion
+from app.services.reporte_energia.utils import actualizar_respaldo_final
 
 _ENERGY_TYPE_OBJETIVO = "ENERGIAEXPORTADAACTIVA"
 _ACENTOS = str.maketrans("ÁÉÍÓÚÑ", "AEIOUN")
@@ -138,6 +139,7 @@ def aplicar_excel_terceros(db: Session, frontera_id: int, contenido: bytes) -> l
         rep.curva_respaldo_terceros = curva_respaldo_terceros
         rep.revisar_manualmente = False
         rep.editado_manualmente = True
+        actualizar_respaldo_final(rep)
         fechas_cargadas.append(fecha)
 
     return fechas_cargadas

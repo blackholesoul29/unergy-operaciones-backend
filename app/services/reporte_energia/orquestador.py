@@ -31,7 +31,7 @@ from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaC
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
-from app.services.reporte_energia.utils import curva_a_lista
+from app.services.reporte_energia.utils import curva_a_lista, actualizar_respaldo_final
 
 TIPOS_GENERACION = {TipoFronteraEnum.generacion}
 TIPOS_CONSUMO = {TipoFronteraEnum.consumo, TipoFronteraEnum.consumo_auxiliar, TipoFronteraEnum.consumo_propio}
@@ -159,6 +159,11 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     # encontrar cuáles SÍ tenían dato real (descubierto 2026-08-21).
     if resultado.get("curva_reconectador_referencia") is not None:
         fila.curva_reconectador_referencia = resultado["curva_reconectador_referencia"]
+    # Sin curva_final no hay nada que comparar/reportar (ej. 'excluida',
+    # curva_final=None a propósito) -- dejar curva_respaldo_final en None
+    # también, en vez de persistir un "estimado" de puros ceros.
+    if fila.curva_final is not None:
+        actualizar_respaldo_final(fila)
     if existente is None:
         db.add(fila)
 

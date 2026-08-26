@@ -99,6 +99,12 @@ class DetalleFronteraReporte(BaseModel):
     # de curva_medidor_respaldo (esa es telemetría en vivo del medidor de
     # nodo, que para estas fronteras no existe).
     curva_respaldo_terceros: list[float | None] | None = None
+    # Lo que /enviar realmente manda como "Backup" a Quoia -- mismo cálculo
+    # que curva_respaldo_a_reportar() (utils.py), para que esto se vea ANTES
+    # de enviar, no solo después. origen: 'terceros' | 'medidor' (dato real
+    # del medidor de respaldo) | 'estimado' (fórmula ±1%). Solo Generación.
+    curva_respaldo_reportada: list[float | None] | None = None
+    respaldo_reportado_origen: str | None = None
     # Capacidad efectiva de la frontera (MW) -- referencia visual en el chart
     # para confirmar que la curva de generación nunca la supera.
     capacidad_efectiva_mw: float | None = None

@@ -1436,7 +1436,7 @@ def componentes_de_hoja(filas: list[tuple], agente: str) -> dict[str, float]:
 - [ ] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_parsers_garantia.py -q`
-Expected: `14 passed`
+Expected: `15 passed`
 
 - [ ] **Step 5: Verificar contra los archivos REALES**
 

@@ -726,9 +726,11 @@ def test_dspcttos_solo_ingiere_el_bloque_de_despacho():
     assert {f["concepto"] for f in filas} == {"despacho"}
 
 
-def test_arrpas_es_plano_sin_hora():
+def test_arrpas_usa_el_centinela_cero_en_hora():
+    # `hora` es NOT NULL: con NULL, Postgres no dedupe (NULL != NULL en un UNIQUE)
+    # y las medidas no horarias se duplicarían en silencio. 0 = no horaria.
     filas = parsear_arrpas(ARRPAS, FECHA, "tx2")
-    assert all(f["hora"] is None for f in filas)
+    assert all(f["hora"] == 0 for f in filas)
     assert {f["entidad"] for f in filas} == {"3A44", "3HYG"}
 
 
@@ -860,8 +862,9 @@ def parsear_dspcttos(contenido: bytes, fecha: datetime.date, version: str | None
 def parsear_arrpas(contenido: bytes, fecha: datetime.date, version: str | None) -> list[dict]:
     """`arrpas` es plano por submercado, no horario: una fila por submercado y columna.
 
-    La entidad es el submercado y el concepto es el nombre de la columna. `hora` queda
-    en None, que es lo que la clave natural espera para los no horarios.
+    La entidad es el submercado y el concepto es el nombre de la columna. `hora` va en
+    **0**, el centinela de "no horaria": con NULL, Postgres no considera iguales dos
+    filas en un UNIQUE y estas medidas se duplicarían en silencio.
     """
     filas: list[dict] = []
     lineas = decodificar(contenido).splitlines()
@@ -884,7 +887,7 @@ def parsear_arrpas(contenido: bytes, fecha: datetime.date, version: str | None) 
             filas.append({
                 "tipo": "arrpas",
                 "fecha_documento": fecha,
-                "hora": None,
+                "hora": 0,
                 "entidad": submercado,
                 "concepto": normalizar_concepto(crudo),
                 "concepto_raw": crudo[:200],

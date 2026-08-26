@@ -28,33 +28,17 @@ from sqlalchemy.orm import Session
 
 from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia import historial
-from app.services.reporte_energia.utils import HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva
+from app.services.reporte_energia.utils import (
+    HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva, limite_plausible_kwh,
+)
 
 HORAS = list(range(24))
 HORA_INICIO_GENERACION = 5   # 5 am
 HORA_FIN_GENERACION    = 18  # 6 pm (exclusiva -- la hora 17 sí cuenta, la 18 no)
 
-# Un panel solar puede superar brevemente su capacidad nominal (irradiancia
-# alta + temperatura baja), pero no por un margen enorme -- un multiplicador
-# generoso (3x) sigue descartando lecturas físicamente imposibles sin
-# arriesgar falsos positivos sobre picos reales. Ver MGS 0033 Sabana de
-# Torres 2026-08-21: el reconectador reportó ~235.000 kWh en una sola hora
-# para una frontera de 0,99 MW -- ~237x su capacidad, un error de escala de
-# unidades del dispositivo, no generación real. Ese valor absurdo se
-# guardaba igual (como fuente completa en Caso 5/7, o como referencia para
-# el gráfico), y en el front inflaba la escala del eje Y hasta aplastar la
-# curva real.
-MULTIPLICADOR_MAX_PLAUSIBLE = 3.0
-
 
 def _potencia_kw(punto: dict) -> float:
     return abs(float(punto.get("kw") or 0))
-
-
-def _limite_plausible_kwh(capacidad_efectiva_mw: float | None) -> float | None:
-    if capacidad_efectiva_mw is None or capacidad_efectiva_mw <= 0:
-        return None
-    return capacidad_efectiva_mw * 1000 * MULTIPLICADOR_MAX_PLAUSIBLE
 
 
 def get_curva_reconectador(
@@ -67,7 +51,7 @@ def get_curva_reconectador(
     Retorna None si el proyecto no tiene reconectador instalado, si la
     consulta falla, o si -- pasando capacidad_efectiva_mw -- ninguna hora
     quedó dentro de un rango físicamente plausible para esa frontera (ver
-    MULTIPLICADOR_MAX_PLAUSIBLE arriba). Quien llama debe seguir con el
+    limite_plausible_kwh() en utils.py). Quien llama debe seguir con el
     flujo normal sin este relleno.
     """
     resp = sv.get_relay_historical(
@@ -105,7 +89,7 @@ def get_curva_reconectador(
         elif h not in horas_con_dato:
             curva[h] = None
 
-    limite = _limite_plausible_kwh(capacidad_efectiva_mw)
+    limite = limite_plausible_kwh(capacidad_efectiva_mw)
     if limite is not None:
         curva[curva.abs() > limite] = None
         if curva.fillna(0).abs().sum() == 0:

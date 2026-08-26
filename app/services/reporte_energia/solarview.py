@@ -16,6 +16,7 @@ import pandas as pd
 
 from app.services.mgs.solarview_client import SolarViewClient
 from app.services.reporte_energia.curvas import dia_completo
+from app.services.reporte_energia.utils import limite_plausible_kwh
 
 HORAS = list(range(24))
 
@@ -91,12 +92,24 @@ def _horas_reportadas(gen_kwh: dict) -> set[int]:
     return horas
 
 
-def curva_generacion(sv: SolarViewClient, project_id_solarview: int | None, fecha_str: str) -> tuple[pd.Series, bool]:
+def curva_generacion(
+    sv: SolarViewClient, project_id_solarview: int | None, fecha_str: str,
+    capacidad_efectiva_mw: float | None = None,
+) -> tuple[pd.Series, bool]:
     """(curva horaria kWh, completo) de generación SolarView para un proyecto y fecha.
 
     Un hueco en inversores entiende el total por debajo de lo real (fillna(0)
     en la suma), y ese total se usa como referencia para validar CGM y
     medidores -- por eso importa saber si es confiable ('completo').
+
+    Si se pasa capacidad_efectiva_mw, las horas físicamente implausibles
+    (ver limite_plausible_kwh() en utils.py -- mismo criterio que ya usa
+    reconectador.get_curva_reconectador()) se tratan como huecos (None), no
+    como generación real: ver MGS 0010 Villanueva 2026-08-26, un valor de
+    ~48.090 kWh en una sola hora para una frontera de 0,99 MW (glitch de
+    SolarView) se colaba en e_inv/curva_solenium_referencia, contaminando
+    la comparación medidor-vs-inversores de Caso 3 y aplastando la escala
+    del gráfico.
     """
     vacia = pd.Series([None] * 24, index=HORAS, dtype=float)
     if project_id_solarview is None:
@@ -105,5 +118,14 @@ def curva_generacion(sv: SolarViewClient, project_id_solarview: int | None, fech
     if not resp:
         return vacia, False
     curva = _curva_de_resp(resp)
-    completo = dia_completo(curva, _horas_reportadas(resp.get("generation_kwh", {})))
+    horas_reportadas = _horas_reportadas(resp.get("generation_kwh", {}))
+
+    limite = limite_plausible_kwh(capacidad_efectiva_mw)
+    if limite is not None:
+        implausibles = curva.abs() > limite
+        if implausibles.any():
+            curva[implausibles] = None
+            horas_reportadas -= set(curva.index[implausibles])
+
+    completo = dia_completo(curva, horas_reportadas)
     return curva, completo

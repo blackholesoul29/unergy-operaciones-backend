@@ -31,6 +31,26 @@ HORAS_RECONECTADOR = range(7, 17)   # 7am a 5pm -- más angosta: es la primera
 CURVA_CERO: pd.Series = pd.Series({h: 0.0 for h in HORAS}, dtype=float)
 CURVA_VACIA: pd.Series = pd.Series({h: None for h in HORAS}, dtype=float)  # sin dato -- no confundir con "generó 0"
 
+# Un panel solar puede superar brevemente su capacidad nominal (irradiancia
+# alta + temperatura baja), pero no por un margen enorme -- un multiplicador
+# generoso (3x) sigue descartando lecturas físicamente imposibles sin
+# arriesgar falsos positivos sobre picos reales. Ver MGS 0033 Sabana de
+# Torres 2026-08-21: el reconectador reportó ~235.000 kWh en una sola hora
+# para una frontera de 0,99 MW -- ~237x su capacidad, un error de escala de
+# unidades del dispositivo, no generación real. Mismo criterio reusado para
+# SolarView /generation/ (ver MGS 0010 Villanueva 2026-08-26: un valor de
+# ~48.090 kWh en una hora para una frontera de 0,99 MW -- ~48x su capacidad
+# -- se colaba en e_inv/curva_solenium_referencia, inflando la escala del
+# eje Y del gráfico y contaminando la comparación medidor-vs-inversores que
+# decide Caso 3).
+MULTIPLICADOR_MAX_PLAUSIBLE = 3.0
+
+
+def limite_plausible_kwh(capacidad_efectiva_mw: float | None) -> float | None:
+    if capacidad_efectiva_mw is None or capacidad_efectiva_mw <= 0:
+        return None
+    return capacidad_efectiva_mw * 1000 * MULTIPLICADOR_MAX_PLAUSIBLE
+
 
 def escalar_curva(curva: pd.Series, total_objetivo: float) -> pd.Series:
     """Escala una curva horaria al total objetivo manteniendo la distribución."""

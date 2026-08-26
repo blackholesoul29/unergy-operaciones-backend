@@ -472,7 +472,9 @@ def clasificar_generacion(
     e_cgm = float(curva_cgm.fillna(0).sum())
 
     # --- SolarView (inversores) -- ANTES del medidor a propósito, ver abajo ---
-    curva_solarview, solarview_completo = solarview_svc.curva_generacion(sv, project_id_solarview, fecha_str)
+    curva_solarview, solarview_completo = solarview_svc.curva_generacion(
+        sv, project_id_solarview, fecha_str, capacidad_efectiva_mw,
+    )
     e_inv_original = float(curva_solarview.fillna(0).sum())
 
     # Un hueco de telemetría en SolarView hace que e_inv_original sea un total

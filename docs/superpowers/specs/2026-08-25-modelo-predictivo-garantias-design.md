@@ -510,6 +510,38 @@ como clave completa mezclaría UNGG con UNGC sin que nada falle.
 (`scripts/seed_contratos_cgm.py`, `Data/contratosCGM.json`, en el contexto de
 Representación). Por eso los tipos de este módulo se llaman `gargm_*` y no `cgm_*`.
 
+#### Corpus de targets (verificado 2026-08-26)
+
+`Garantías2025.zip` (98 archivos) + `Garantias2026.zip` (77) + `GarantiasTIE.zip` (95):
+
+| Familia | Vencimientos | Rango | En el rango de insumos `.tx2` |
+|---|---|---|---|
+| `GARANTIA SEMANAL MENSUAL` | **88** | 2025-01-07 → 2026-08-28 | **83** (~249 targets de período) |
+| `GARANTIA MENSUAL` | 19 | 2025-01-22 → 2026-08-21 | 18 |
+| `GARANTIA TXR` | 11 | 2025-10-08 → 2026-08-11 | — |
+| `WEB_GARANTIES` (TIE) | 89 | 2025-01-07 → 2026-03 | — |
+
+La muestra semanal pasa de 22 a **83 vencimientos: 3,8×**. Con 22 observaciones un P90
+bien calibrado falla ~2 veces y el ruido impide distinguir un modelo mal calibrado de
+mala suerte; con 83 la cobertura empieza a ser medible. El mensual pasa de ~8 a 18.
+
+**La TIE deja de ser persistencia.** Está fuera de alcance como *modelo*, pero aparece
+como resta en la cadena (`Valor Garantía Final = max(0, VG − Garantías TIES)`). Con 89
+archivos `WEB_GARANTIES` el término se toma del dato real en vez de arrastrar el último
+valor conocido. Son `.xls` antiguo: requieren `xlrd`, no `openpyxl`.
+
+#### Trampas en los nombres de archivo
+
+Las tres verificadas sobre el corpus real. Un parser que asuma un solo formato pierde
+archivos **en silencio**, sin lanzar error:
+
+1. **Dos formatos de fecha coexisten.** 164 archivos usan `02ENE-2026`; 5 usan ISO
+   (`GARANTIA SEMANAL MENSUAL 2026-05-01.xlsx`).
+2. **`SEPT` con cuatro letras.** 6 archivos escriben septiembre como `SEPT` y no `SEP`
+   (`GARANTIA MENSUAL 19SEPT-2025.XLSX`).
+3. **Extensión en mayúsculas.** Conviven `.xlsx` y `.XLSX`; el match debe ser
+   case-insensitive.
+
 #### Cómo llega cada familia
 
 | Familia | Cómo llega |
@@ -983,7 +1015,7 @@ resultados que **se ven bien y son falsos**.
 | 11 | Migración Solenium → SolarView en curso | `_scheduled_generation_sync` está condicionado a `SOLENIUM_USER/PASS`, y `solarview_client.py` se declara "reemplazo de Solenium, Fase 1". Si esa migración corta el sync diario, se lleva puesto el margen mensual sin que nada falle visiblemente. Coordinar antes de tocarlo. |
 | 12 | Dispersión entre ventanas candidatas | Si las ~12 ventanas posibles dan números muy distintos, el intervalo se vuelve tan ancho que no sirve. Es medible en el primer backtest y decide si vale la pena conseguir los `PERIODO BASE` históricos. |
 | 13 | ~~Insumos sin `.tx2`~~ | **CERRADO (2026-08-26).** Llegaron los `.tx2` de `trsd`, `dspcttos` y finalmente `arrpas` (537 días). La intersección de los cuatro da 536 días. Importaba porque las pérdidas son 0,38% de la generación ideal pero **5,8% de la exposición neta** — un término trivial contra el bruto pesa contra el neto. Ya no hay leakage estructural en ningún término. |
-| 14 | Rango de targets menor que el de insumos | CGM e Insumos cubren desde nov-2023, pero los targets solo van de **dic-2025 a ago-2026** (22 vencimientos del consolidado interno + los Excel de XM de may–ago 2026). El backtest está limitado por los targets, no por los insumos. Conseguir Excel de garantía anteriores a may-2026 amplía la muestra más que cualquier otra cosa. |
+| 14 | ~~Rango de targets menor que el de insumos~~ | **CERRADO (2026-08-26).** Llegaron `Garantías2025.zip` y `Garantias2026.zip`: 88 vencimientos semanales (2025-01-07 → 2026-08-28) y 19 mensuales. Cruzados con los insumos `.tx2`, quedan **83 semanales y 18 mensuales backtesteables**, 3,8× la muestra anterior. El límite ya no son los targets sino el inicio de los insumos (2025-01). |
 | 15 | `.tx2` incompleto por diseño | `BalCttos` trae 28–29 días por mes en `.tx2` contra 30–31 en `.txf` (~7% ausentes). No es error de descarga: es lo que publica XM. La tab de cobertura tiene que exponerlo antes de que contamine conclusiones. |
 | 16 | Correlación entre semanas | Si la correlación es cercana a 1, el P90 del horizonte converge a la suma de P90 y la brecha se anula: juntar el pozo no libera capital. Es un resultado posible y se reporta como tal, no se esconde. Medible en el primer backtest. |
 | 17 | Precio de bolsa desde fuentes inadecuadas | `precio_bolsa_mensual` es un valor por mes y `precios_bolsa_diario` es promedio simple de un proveedor externo (EVO). Ninguna sirve: el precio cambia semana a semana y debe ser ponderado y de XM. Se usa `PBNA` horario de `trsd`, con el portal público de XM para los huecos. Riesgo si alguien conecta por comodidad las tablas existentes. |

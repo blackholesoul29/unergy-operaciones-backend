@@ -171,6 +171,70 @@ intervalo va a estar dominado por M+1, y ahí conviene concentrar el esfuerzo.
 
 ---
 
+## 2.9 ⚠️ Corrección de fondo (2026-08-26): semanal no es lo que este spec llamó semanal
+
+Dos correos de XM del 25 y 26 de agosto obligan a corregir el marco.
+
+**Los 123 archivos `GARANTIA SEMANAL MENSUAL` son el ajuste MENSUAL.** El correo del
+25-AGO lista, para el vencimiento del 28-AGO, dos bloques separados. El bloque
+*Garantías Mensuales* coincide **exactamente** con las tres hojas de ese Excel:
+
+| Correo — Mensuales | Hoja del Excel |
+|---|---|
+| Ajuste TX2 · 08 → 14 AGO | `AJUSTE TX2 SEMA MENS 08-14 AGO` |
+| Ajuste M · 15 → 31 AGO | `AJUSTE PROY (M) 15-31 AGO` |
+| Ajuste M · 01 → 30 SEP | `AJUSTE (M+1) 01-30 SEPT` |
+
+Y su hoja de depósito se titula, textual, **«AJUSTES A GARANTÍAS MENSUALES»**.
+
+**La garantía semanal tiene CINCO períodos y casi no la tenemos.** El bloque
+*Garantías Semanales* del correo es `Ajuste S-1`, `Ajuste S`, `Ajuste S+1`, `Ajuste S+2`
+y `Proyección S+3`. Existe un archivo aparte, `GARANTIA SEMANAL <fecha>.xlsx`, con
+exactamente esas cinco hojas — y en todo el corpus hay **uno solo** (12-JUN-2026).
+
+**Consecuencia:** los 83 vencimientos que §6.1 llama «semanales backtesteables» son
+ajustes **mensuales**. La medición técnica sigue siendo válida — la réplica al 0,0057%
+se hizo contra hojas `AJUSTE TX2` con ventanas reales — pero la etiqueta está mal, y
+**la garantía semanal está esencialmente sin cubrir**. Antes de prometer anticipación
+semanal hay que conseguir ese histórico.
+
+### Rutas del FTP, ahora conocidas
+
+El correo las publica. Son una rama distinta de la que usa hoy `app/services/xm/`
+(`.../UNGG/SIC/COMERCIA/`), y por eso nunca vimos estos archivos:
+
+```
+/INFORMACION_XM/USUARIOSK/{UNGG|UNGC}/Finance/InsumosPreliminares/{YYYY-MM}/
+/INFORMACION_XM/USUARIOSK/{UNGG|UNGC}/Finance/CGM/{YYYY-MM}/
+/INFORMACION_XM/USUARIOSK/{UNGG|UNGC}/Finance/CGS/{YYYY-MM}/
+```
+
+**Dos familias que no tenemos, verificado: 0 archivos de cada una.** `CGS` son los
+soportes del esquema **semanal**; `DemGarMen…` (Demanda Comercial) es el cuarto soporte
+junto a `Con`, `Car` y `Ene`.
+
+### ⚠️ El formato cambia el 2026-09-04
+
+XM anunció que el reporte pasa al formato del *Periodo de prueba Res CREG 101 097 de
+2026* y **deja de publicar el tradicional**. Los parsers de targets de este spec apuntan
+al formato que desaparece.
+
+No afecta a los insumos (`BalCttos`, `trsd`, `dspcttos`, `arrpas`), que siguen igual, ni
+al histórico ya descargado. Afecta al parser de los Excel de garantía, y hay que
+conseguir una muestra del formato nuevo antes de esa fecha.
+
+### Las re-publicaciones son raras y moderadas
+
+Medido sobre los 92 vencimientos del corpus: **17 tienen más de una versión**, y de esos
+solo **3 cambian algún valor de UNGG** — 3,3% del total. Magnitudes: 19 pesos, +0,5% y
+−8,4%. El número del día 7 es firme el **96,7%** de las veces.
+
+Esto valida el diseño append-only de §5.2: si una `_V3` pisara a la `_V1` no habría forma
+de saber que el número cambió después de publicado. Y explica el único caso de la
+validación de §7 que difería en 19 pesos: no era redondeo, era una re-publicación.
+
+---
+
 ## 3. Alcance
 
 ### Dentro

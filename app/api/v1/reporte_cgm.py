@@ -1,3 +1,4 @@
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -17,6 +18,8 @@ from app.services import reporte_cgm as svc
 from app.services.contactos import get_contactos, get_proyecto_ids_por_contacto_cliente
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.reporte_energia import curvas as curvas_energia
+
+logger = logging.getLogger("reporte_cgm")
 
 router = APIRouter(prefix="/reporte-cgm", tags=["Reporte CGM"])
 
@@ -122,6 +125,22 @@ def _datos_proyectos_para_resumen(
             if meta:
                 datos["main_meter_con"] = meta.get("main_meter")
                 datos["backup_meter_con"] = meta.get("backup_meter")
+        elif f.codigo_frontera:
+            # tipo_frontera == generacion_consumo (o cualquier tipo futuro)
+            # no encaja en ninguna de las dos ramas -- ni "generación" ni
+            # _TIPOS_CONSUMO. Hoy (2026-08-26) 0 fronteras activas tienen
+            # este tipo, así que nunca se disparó en producción, pero antes
+            # quedaba silenciosamente sin frt_gen/frt_con/medidores en el
+            # resumen (el proyecto aparecía con todo en None, sin ninguna
+            # señal de que faltó clasificar) -- auditoría CGM 2026-08-26,
+            # finding #9. Se loguea en vez de asumir un tratamiento (gen,
+            # consumo, o ambos) que nadie validó todavía con un caso real.
+            logger.warning(
+                "Frontera %s (proyecto %s) con tipo_frontera=%s sin clasificar "
+                "en el resumen de Cliente -- no encaja en generación ni en "
+                "consumo, revisar manualmente.",
+                f.codigo_frontera, f.proyecto_id, f.tipo_frontera,
+            )
     return proyectos
 
 
@@ -142,9 +161,16 @@ def _excels_cliente_por_proyecto(
         if f.proyecto_id and f.proyecto:
             por_proyecto.setdefault(f.proyecto_id, []).append(f)
 
+    # Una sola resolución para TODOS los proyectos de este cliente -- antes
+    # se llamaba _datos_proyectos_para_resumen() (1 query a ProyectoInfoTecnica
+    # cada vez) UNA VEZ POR PROYECTO dentro del loop de abajo, un N+1 real
+    # aunque de bajo impacto hoy (CLIENTES_EXCEL_POR_PROYECTO son 2 proyectos
+    # -- auditoría CGM 2026-08-26, finding #8).
+    proyectos_todos = _datos_proyectos_para_resumen(db, gaia, fronteras)
+
     adjuntos: list[tuple[bytes, str]] = []
-    for fronteras_proyecto in por_proyecto.values():
-        proyectos = _datos_proyectos_para_resumen(db, gaia, fronteras_proyecto)
+    for proyecto_id, fronteras_proyecto in por_proyecto.items():
+        proyectos = {proyecto_id: proyectos_todos[proyecto_id]} if proyecto_id in proyectos_todos else {}
         filas_todas_proyecto = [
             fila for f in fronteras_proyecto if f.codigo_frontera for fila in filas_por_frt.get(f.codigo_frontera, [])
         ]

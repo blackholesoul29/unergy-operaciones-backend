@@ -208,6 +208,14 @@ class ReporteEnergiaConsumo(Base):
     # llamada a Quoia a los ~40+ fronteras que resuelven solo con CGM).
     curva_medidor_principal: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     curva_medidor_respaldo: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # "Backup" congelado desde que se fijó curva_final -- dato real del
+    # medidor de respaldo si medidor_usado empieza con 'principal'/es 'cgm'
+    # y está dentro de TOLERANCIA_RESPALDO_REAL_KWH, si no la estimación
+    # ±1% de siempre (mismo mecanismo que ReporteEnergiaGeneracion, ver
+    # curva_respaldo_a_reportar() en utils.py -- extendido a Consumo
+    # 2026-08-26, pedido de Sara).
+    curva_respaldo_final: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    respaldo_final_origen: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     horas_rellenadas_historico: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Horas rellenadas con el OTRO medidor (el que no ganó como fuente) --

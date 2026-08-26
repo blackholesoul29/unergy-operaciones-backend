@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.base import Base
 from app.models.fronteras import Frontera, TipoFronteraEnum
-from app.models.reporte_energia import ReporteEnergiaGeneracion
+from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 from app.schemas.reporte_energia import EditarCurvaRequest
 from app.api.v1 import reporte_energia as re_api
 
@@ -33,7 +33,9 @@ def _jsonb_as_text(element, compiler, **kw):
 @pytest.fixture
 def db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[Frontera.__table__, ReporteEnergiaGeneracion.__table__])
+    Base.metadata.create_all(engine, tables=[
+        Frontera.__table__, ReporteEnergiaGeneracion.__table__, ReporteEnergiaConsumo.__table__,
+    ])
     s = sessionmaker(bind=engine)()
     yield s
     s.close()
@@ -264,3 +266,23 @@ def test_refresco_en_vivo_del_otro_medidor_falla_silenciosamente(db, monkeypatch
 
     assert detalle.curva_medidor_principal == nuevo_principal
     assert detalle.curva_medidor_respaldo == [None] * 24
+
+
+def test_consumo_tambien_usa_respaldo_real_dentro_de_tolerancia(db):
+    """Extendido a Consumo 2026-08-26 -- mismo mecanismo que Generación."""
+    principal_nuevo = [10.0] * 24
+    respaldo_cercano = [10.0] * 23 + [11.0]  # +1 kWh de diferencia total
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.consumo_auxiliar, codigo_frontera="frt001")
+    db.add(front)
+    rep = ReporteEnergiaConsumo(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso="Medidor", medidor_usado="principal",
+        curva_final=[999.0] * 24, curva_medidor_principal=[999.0] * 24, curva_medidor_respaldo=respaldo_cercano,
+    )
+    db.add(rep)
+    db.commit()
+
+    body = EditarCurvaRequest(curva_final=principal_nuevo, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.respaldo_reportado_origen == "medidor"
+    assert detalle.curva_respaldo_reportada == respaldo_cercano

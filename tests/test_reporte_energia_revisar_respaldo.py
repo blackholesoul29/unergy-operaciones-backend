@@ -12,7 +12,6 @@ from datetime import date
 
 import pandas as pd
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -121,16 +120,35 @@ def test_no_toca_curva_final_ni_medidor_usado(db, monkeypatch):
     assert detalle.editado_manualmente is False
 
 
-def test_consumo_da_400(db):
+def test_consumo_dentro_de_tolerancia_se_adopta(db, monkeypatch):
+    """Extendido a Consumo 2026-08-26 -- mismo criterio que Generación,
+    pero usa 'iae' en vez de 'eae' y no aplica el filtro de plausibilidad
+    (Consumo no tiene capacidad efectiva definida)."""
     front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.consumo_auxiliar, codigo_frontera="frt001")
     db.add(front)
+    principal = [10.0] * 24
     rep = ReporteEnergiaConsumo(
         id=1, frontera_id=1, fecha=date(2026, 8, 20), caso="Medidor", medidor_usado="principal",
-        curva_final=[10.0] * 24,
+        curva_final=principal, curva_medidor_principal=principal, curva_medidor_respaldo=[999.0] * 24,
     )
     db.add(rep)
     db.commit()
 
-    with pytest.raises(HTTPException) as exc:
-        re_api.revisar_respaldo(frontera_id=1, fecha=date(2026, 8, 20), db=db, _=None)
-    assert exc.value.status_code == 400
+    monkeypatch.setattr(curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 111, "backup_meter": 222}})
+    respaldo_vivo = [10.0] * 23 + [11.0]
+    var_usada = []
+    def _curva_en_vivo(gaia, mapa_nodo, main_id, backup_id, fecha_str, frt_code, var_name, capacidad_efectiva_mw=None):
+        var_usada.append(var_name)
+        return pd.Series(principal, dtype=float), pd.Series(respaldo_vivo, dtype=float)
+    monkeypatch.setattr(curvas, "curva_medidor_en_vivo", _curva_en_vivo)
+
+    detalle = re_api.revisar_respaldo(frontera_id=1, fecha=date(2026, 8, 20), db=db, _=None)
+
+    # _construir_detalle() al final del endpoint hace su propia consulta en
+    # vivo (para el banner "el medidor cambió", sin relación con
+    # _revisar_respaldo_en_vivo) -- puede sumar una llamada más, siempre
+    # con "iae" (nunca "eae", que sería el error real a detectar acá).
+    assert var_usada and all(v == "iae" for v in var_usada)
+    assert detalle.curva_medidor_respaldo == respaldo_vivo
+    assert detalle.respaldo_reportado_origen == "medidor"

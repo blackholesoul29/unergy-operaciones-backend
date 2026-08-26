@@ -102,7 +102,9 @@ class DetalleFronteraReporte(BaseModel):
     # de enviar, no solo después. origen: 'terceros' | 'medidor' (dato real
     # del medidor de respaldo, auto-detectado) | 'manual' (columna Respaldo
     # de la tabla de corrección, confirmada a mano) | 'estimado' (±1%).
-    # Solo Generación.
+    # Generación y Consumo (extendido 2026-08-26, pedido de Sara) --
+    # 'terceros' solo aplica a Generación (Consumo no tiene
+    # curva_respaldo_terceros).
     #
     # EXCEPCIÓN -- medidor_usado == 'cgm' (Caso 1): acá NADA se manda a
     # Quoia (_reporte_ya_valido() salta el envío entero -- el reporte
@@ -127,8 +129,8 @@ class EditarCurvaRequest(BaseModel):
     # en vez de un genérico "editado manualmente". None si la persona editó
     # celdas a mano sin pasar por ese desplegable.
     fuente: str | None = None
-    # Respaldo confirmado a mano (columna nueva de la tabla de corrección,
-    # solo Generación) -- si viene, se guarda tal cual como dato real
+    # Respaldo confirmado a mano (columna de la tabla de corrección,
+    # Generación y Consumo) -- si viene, se guarda tal cual como dato real
     # ('manual'), sin pasar por curva_respaldo_a_reportar(). None (no solo
     # todo-en-null) significa "la persona no tocó esta columna": se recalcula
     # con la lógica automática de siempre (real del medidor si aplica, si no

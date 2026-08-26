@@ -195,6 +195,10 @@ def _upsert_consumo(db: Session, frontera_id: int, fecha: date, resultado: dict)
     # estas curvas de referencia pero nunca se estaban copiando a la fila.
     fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
     fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
+    # Mismo criterio que _upsert_generacion -- sin curva_final no hay nada
+    # que comparar/reportar.
+    if fila.curva_final is not None:
+        actualizar_respaldo_final(fila)
     if existente is None:
         db.add(fila)
 

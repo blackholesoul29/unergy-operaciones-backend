@@ -159,8 +159,11 @@ def curva_respaldo_a_reportar(rep, curva_medidor_respaldo: list | None = None) -
        mucho más allá de la tolerancia (las horas sin dato cuentan como 0
        en la suma), así que solo pasan huecos fisicamente irrelevantes
        (de noche).
-    3. Estimación ±1% sobre curva_final (comportamiento de siempre, único
-       camino disponible para Consumo -- no tiene curva_respaldo_terceros).
+    3. Estimación ±1% sobre curva_final (comportamiento de siempre).
+
+    Consumo (extendido 2026-08-26) tiene acceso a los pasos 2 y 3 igual
+    que Generación -- solo el paso 1 (terceros) no aplica, no tiene
+    curva_respaldo_terceros.
 
     Retorna (curva, origen) -- origen es 'terceros' | 'medidor' | 'estimado',
     para que el frontend pueda distinguir dato real de estimado."""
@@ -208,9 +211,10 @@ def actualizar_respaldo_final(rep, curva_medidor_respaldo: list | None = None) -
     """Recalcula y persiste curva_respaldo_final/respaldo_final_origen en
     `rep` -- llamar cada vez que curva_final/medidor_usado (o las curvas de
     medidor que alimentan la comparación) se terminan de fijar: clasificar
-    (orquestador._upsert_generacion), edición manual (editar_curva) y Excel
-    de terceros (aplicar_excel_terceros). Solo aplica a
-    ReporteEnergiaGeneracion -- Consumo no tiene estas dos columnas.
+    (orquestador._upsert_generacion/_upsert_consumo), edición manual
+    (editar_curva) y Excel de terceros (aplicar_excel_terceros, solo
+    Generación). ReporteEnergiaGeneracion y ReporteEnergiaConsumo tienen
+    ambas columnas (extendido a Consumo 2026-08-26).
 
     `curva_medidor_respaldo` (opcional): ver curva_respaldo_a_reportar()."""
     curva, origen = curva_respaldo_a_reportar(rep, curva_medidor_respaldo)

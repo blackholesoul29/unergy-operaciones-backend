@@ -452,7 +452,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     # fijó curva_final (ver actualizar_respaldo_final()); si es una fila de
     # antes de que existiera esa columna, se calcula al vuelo igual que
     # antes (mismo criterio de respaldo que /enviar usaría ahora mismo).
-    # Solo Generación -- Consumo no tiene estas columnas.
+    # Generación y Consumo (extendido 2026-08-26).
     #
     # Si medidor_usado == 'cgm', /enviar en realidad NO manda nada
     # (_reporte_ya_valido() se lo salta) -- estos dos campos igual se
@@ -460,7 +460,7 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
     # curva_respaldo_a_reportar() en utils.py), pero ahí son informativos:
     # "así se vería", no "esto se va a enviar".
     curva_respaldo_reportada = respaldo_reportado_origen = None
-    if es_generacion and rep.curva_final:
+    if rep.curva_final:
         curva_respaldo_reportada = rep.curva_respaldo_final
         respaldo_reportado_origen = rep.respaldo_final_origen
         if curva_respaldo_reportada is None:
@@ -514,10 +514,11 @@ def detalle_frontera(
     return _construir_detalle(db, frontera_id, fecha)
 
 
-def _curva_respaldo_en_vivo(front: Frontera, fecha: date) -> list | None:
+def _curva_respaldo_en_vivo(front: Frontera, fecha: date, es_generacion: bool) -> list | None:
     """Trae en vivo la curva del medidor de RESPALDO -- únicamente para
     alimentar el chequeo de coherencia de curva_respaldo_a_reportar()
     cuando se confirma 'Medidor principal' como fuente (ver editar_curva).
+    Generación usa 'eae', Consumo 'iae' (extendido a Consumo 2026-08-26).
 
     A propósito NO se persiste en curva_medidor_respaldo: eso seguiría
     disparando el aviso "el medidor ya muestra un valor distinto en
@@ -536,35 +537,42 @@ def _curva_respaldo_en_vivo(front: Frontera, fecha: date) -> list | None:
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if not meta:
             return None
+        # Solo Generación -- Consumo no tiene un concepto de capacidad
+        # efectiva definido todavía (mismo criterio que drift_medidores.py).
         capacidad_efectiva_mw = (
             float(front.proyecto.potencia_instalada_kwp) / 1000
-            if front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
+            if es_generacion and front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
         )
+        var_name = "eae" if es_generacion else "iae"
         _, curva_r = curvas.curva_medidor_en_vivo(
             gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
-            str(fecha), front.codigo_frontera, "eae", capacidad_efectiva_mw,
+            str(fecha), front.codigo_frontera, var_name, capacidad_efectiva_mw,
         )
         return curva_a_lista(curva_r)
     except Exception:
         return None
 
 
-def _revisar_respaldo_en_vivo(front: Frontera, rep, fecha: date) -> None:
+def _revisar_respaldo_en_vivo(front: Frontera, rep, fecha: date, es_generacion: bool) -> None:
     """Si curva_final ya viene del medidor PRINCIPAL o de CGM ya validado
-    (Caso 1 -- ampliado 2026-08-26, ver curva_respaldo_a_reportar), vuelve
-    a evaluar el respaldo en vivo contra la tolerancia de coherencia y
-    adopta el nuevo snapshot SOLO si pasa -- llamada por editar_curva()
-    (al confirmar Principal), recuperar_medidor() y revisar_respaldo()
-    (acciones explícitas de revisar el respaldo, ver MGS Agustín 1
-    2026-08-26: Principal ya correcto y automático -- nunca pasa por
-    editar_curva() -- pero el respaldo cambió en Quoia y no había forma
-    de que el sistema lo reevaluara). Mismo criterio en los tres lugares:
-    si no pasa, el snapshot no se toca y el aviso de cambio sigue
-    visible."""
+    (Caso 1/'CGM' -- ampliado 2026-08-26, ver curva_respaldo_a_reportar),
+    vuelve a evaluar el respaldo en vivo contra la tolerancia de
+    coherencia y adopta el nuevo snapshot SOLO si pasa -- llamada por
+    editar_curva() (al confirmar Principal), recuperar_medidor() y
+    revisar_respaldo() (acciones explícitas de revisar el respaldo, ver
+    MGS Agustín 1 2026-08-26: Principal ya correcto y automático -- nunca
+    pasa por editar_curva() -- pero el respaldo cambió en Quoia y no
+    había forma de que el sistema lo reevaluara). Mismo criterio en los
+    tres lugares: si no pasa, el snapshot no se toca y el aviso de cambio
+    sigue visible.
+
+    Generación y Consumo (extendido 2026-08-26) -- var_name/capacidad
+    efectiva se resuelven según es_generacion dentro de
+    _curva_respaldo_en_vivo()."""
     mu = rep.medidor_usado or ""
     if not (mu.startswith("principal") or mu == "cgm"):
         return
-    curva_resp_viva = _curva_respaldo_en_vivo(front, fecha)
+    curva_resp_viva = _curva_respaldo_en_vivo(front, fecha, es_generacion)
     actualizar_respaldo_final(rep, curva_resp_viva)
     if curva_resp_viva is not None and rep.respaldo_final_origen == "medidor":
         rep.curva_medidor_respaldo = curva_resp_viva
@@ -641,18 +649,17 @@ def editar_curva(
     # Si la persona llenó la columna de Respaldo a mano en la tabla de
     # corrección, eso manda tal cual (origen 'manual') -- no se recalcula
     # con curva_respaldo_a_reportar().
-    if Modelo is ReporteEnergiaGeneracion:
-        if body.curva_respaldo_final is not None:
-            if len(body.curva_respaldo_final) != 24:
-                raise HTTPException(422, "curva_respaldo_final debe tener 24 valores")
-            curva_resp = lista_a_curva(body.curva_respaldo_final)
-            rep.curva_respaldo_final = curva_a_lista(curva_resp)
-            rep.respaldo_final_origen = "manual"
-        else:
-            # Si se confirma Principal, revisa el respaldo en vivo contra
-            # la tolerancia y adopta su snapshot SOLO si pasa -- ver
-            # _revisar_respaldo_en_vivo().
-            _revisar_respaldo_en_vivo(front, rep, fecha)
+    if body.curva_respaldo_final is not None:
+        if len(body.curva_respaldo_final) != 24:
+            raise HTTPException(422, "curva_respaldo_final debe tener 24 valores")
+        curva_resp = lista_a_curva(body.curva_respaldo_final)
+        rep.curva_respaldo_final = curva_a_lista(curva_resp)
+        rep.respaldo_final_origen = "manual"
+    else:
+        # Si se confirma Principal, revisa el respaldo en vivo contra
+        # la tolerancia y adopta su snapshot SOLO si pasa -- ver
+        # _revisar_respaldo_en_vivo(). Generación y Consumo.
+        _revisar_respaldo_en_vivo(front, rep, fecha, es_generacion)
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
@@ -845,12 +852,13 @@ def recuperar_medidor(
     refresca datos de referencia (alternativa más chica que reclasificar
     la frontera completa, decidido 2026-08-20).
 
-    Si curva_final ya viene del medidor PRINCIPAL (Generación), además
-    revisa el respaldo recién recuperado contra la tolerancia de
-    coherencia y adopta su snapshot si pasa (ver _revisar_respaldo_en_vivo
-    -- MGS Agustín 1 2026-08-26: Principal ya correcto y automático, nunca
-    pasa por editar_curva(), pero el respaldo cambió en Quoia y no había
-    ninguna acción que lo reevaluara).
+    Si curva_final ya viene del medidor PRINCIPAL o de CGM (Generación y
+    Consumo), además revisa el respaldo recién recuperado contra la
+    tolerancia de coherencia y adopta su snapshot si pasa (ver
+    _revisar_respaldo_en_vivo -- MGS Agustín 1 2026-08-26: Principal ya
+    correcto y automático, nunca pasa por editar_curva(), pero el
+    respaldo cambió en Quoia y no había ninguna acción que lo
+    reevaluara).
     """
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     fecha_str = str(fecha)
@@ -880,8 +888,7 @@ def recuperar_medidor(
         intentos = [f.result() for f in futuros]
 
     rep.recuperacion_datos = ", ".join(intentos) or None
-    if Modelo is ReporteEnergiaGeneracion:
-        _revisar_respaldo_en_vivo(front, rep, fecha)
+    _revisar_respaldo_en_vivo(front, rep, fecha, Modelo is ReporteEnergiaGeneracion)
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
 
@@ -902,11 +909,10 @@ def revisar_respaldo(
     en vivo ya está disponible pasivamente sin necesidad de recuperación
     activa (ver MGS Agustín 1 2026-08-26: Principal ya correcto y
     automático, el respaldo cambió en Quoia y el banner ya mostraba el
-    valor nuevo, pero no había ninguna acción liviana para adoptarlo)."""
+    valor nuevo, pero no había ninguna acción liviana para adoptarlo).
+    Generación y Consumo (extendido 2026-08-26)."""
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
-    if Modelo is not ReporteEnergiaGeneracion:
-        raise HTTPException(400, "Esta acción solo aplica a fronteras de Generación")
-    _revisar_respaldo_en_vivo(front, rep, fecha)
+    _revisar_respaldo_en_vivo(front, rep, fecha, Modelo is ReporteEnergiaGeneracion)
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
 
@@ -1187,8 +1193,8 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
     main_readings = [float(v) if v is not None else 0.0 for v in curva]
     # curva_respaldo_final queda congelado desde que se fijó curva_final
     # (clasificar/editar/Excel de terceros, ver actualizar_respaldo_final())
-    # -- para Consumo (no tiene esta columna) o filas de antes de que
-    # existiera, se calcula al vuelo como antes.
+    # -- Generación y Consumo tienen esta columna; getattr solo por si es
+    # una fila de antes de que existiera, se calcula al vuelo como antes.
     backup_readings = getattr(rep, "curva_respaldo_final", None)
     if backup_readings is None:
         backup_readings, _ = curva_respaldo_a_reportar(rep)

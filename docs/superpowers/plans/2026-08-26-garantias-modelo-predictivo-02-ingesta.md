@@ -1343,7 +1343,7 @@ def filas_periodos(filas: list[tuple], agente: str) -> list[dict]:
     objetivo = agente.strip().upper()
     salida: list[dict] = []
     for fila in filas[1:]:
-        if not fila or len(fila) <= i_cod or not fila[i_cod]:
+        if not fila or len(fila) <= max(i_cod, i_desc, i_pub, i_ini, i_fin) or not fila[i_cod]:
             continue
         if str(fila[i_cod]).strip().upper() != objetivo:
             continue
@@ -1380,9 +1380,13 @@ def ventana_de_hoja(nombre: str, vencimiento: datetime.date
                     ) -> tuple[datetime.date, datetime.date, str] | None:
     """Formato TRADICIONAL: `AJUSTE TX2 SEMA MENS 01-07 AGO` + vto -> (ini, fin, etiqueta).
 
-    El año no está en el nombre: se infiere del vencimiento. Si el mes de la ventana es
-    posterior al del vencimiento, la ventana es del año anterior — el caso de una hoja
-    de DIC en un archivo de ENE.
+    El año no está en el nombre: se infiere del vencimiento y de la dirección de la
+    hoja. `AJUSTE TX2` / `AJUSTE PROY` / `AJUSTE` miran hacia atrás: si el mes de la
+    ventana es posterior al del vencimiento, la ventana es del año anterior — el caso
+    de una hoja de DIC en un archivo de ENE. `AJUSTE M+1` mira hacia adelante — es el
+    mes siguiente al vencimiento — así que la regla es la inversa: si el mes de la
+    ventana es anterior al del vencimiento, la ventana es del año siguiente (el caso de
+    un vencimiento de DIC con una hoja M+1 de ENE).
     """
     u = nombre.upper()
     if not u.startswith("AJUSTE"):
@@ -1391,13 +1395,17 @@ def ventana_de_hoja(nombre: str, vencimiento: datetime.date
     if not m or m.group(3) not in _MESES:
         return None
     mes = _MESES[m.group(3)]
-    anio = vencimiento.year - 1 if mes > vencimiento.month else vencimiento.year
+    etiqueta = _etiqueta(nombre)
+    if etiqueta == "AJUSTE M+1":
+        anio = vencimiento.year + 1 if mes < vencimiento.month else vencimiento.year
+    else:
+        anio = vencimiento.year - 1 if mes > vencimiento.month else vencimiento.year
     try:
         ini = datetime.date(anio, mes, int(m.group(1)))
         fin = datetime.date(anio, mes, int(m.group(2)))
     except ValueError:
         return None
-    return ini, fin, _etiqueta(nombre)
+    return ini, fin, etiqueta
 
 
 def componentes_de_hoja(filas: list[tuple], agente: str) -> dict[str, float]:
@@ -1436,7 +1444,7 @@ def componentes_de_hoja(filas: list[tuple], agente: str) -> dict[str, float]:
 - [ ] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_parsers_garantia.py -q`
-Expected: `15 passed`
+Expected: `19 passed`
 
 - [ ] **Step 5: Verificar contra los archivos REALES**
 

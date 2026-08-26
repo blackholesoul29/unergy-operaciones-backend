@@ -96,3 +96,10 @@ from app.models.registros_cnd import (
     RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )
 from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado, BalCttosNeto  # noqa: F401
+from app.models.garantias_modelo import (  # noqa: F401
+    GarCalculo,
+    GarComponentePred,
+    GarComponenteReal,
+    XMArchivo,
+    XMMedida,
+)

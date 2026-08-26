@@ -71,6 +71,9 @@ class ContratoServicioCreate(BaseModel):
     servicio_aplica: str  # representacion | operacion | rec
     contratante_id: Optional[int] = None
     prestador_id: Optional[int] = None
+    # El inversionista como relacion; `inversionista_nombre` queda como el texto
+    # que trajo el acta. Ver services/representacion_inversionista.py.
+    inversionista_id: Optional[int] = None
     contratante_nombre: Optional[str] = None
     contratante_nit: Optional[str] = None
     prestador_nombre: Optional[str] = None
@@ -132,6 +135,7 @@ class ContratoServicioUpdate(BaseModel):
     proyecto_id: Optional[int] = None
     contratante_id: Optional[int] = None
     prestador_id: Optional[int] = None
+    inversionista_id: Optional[int] = None
     contratante_nombre: Optional[str] = None
     contratante_nit: Optional[str] = None
     prestador_nombre: Optional[str] = None
@@ -199,6 +203,10 @@ class ContratoServicioOut(BaseModel):
     prestador_id: Optional[int] = None
     contratante: Optional[ClienteBasico] = None
     prestador: Optional[ClienteBasico] = None
+    inversionista_id: Optional[int] = None
+    # Cuando viene NULL el contrato aun no esta vinculado a un inversionista de
+    # la planta, y por eso no se puede saber si su participacion sigue vigente.
+    inversionista: Optional[ClienteBasico] = None
     contratante_nombre: Optional[str] = None
     contratante_nit: Optional[str] = None
     prestador_nombre: Optional[str] = None

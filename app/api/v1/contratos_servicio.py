@@ -24,6 +24,7 @@ def _load_options():
         # del proyecto (112 contratos de representación = 112 queries).
         selectinload(ContratoServicio.proyecto),
         selectinload(ContratoServicio.fronteras),
+        selectinload(ContratoServicio.inversionista),
     ]
 
 

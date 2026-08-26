@@ -1524,6 +1524,90 @@ _PENDING_DDLS = [
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_estado VARCHAR(30)",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_exitoso BOOLEAN",
     "ALTER TABLE reporte_energia_generacion ADD COLUMN IF NOT EXISTS xm_verificado_en TIMESTAMP WITH TIME ZONE",
+    # El inversionista del contrato de representacion como relacion, no solo como
+    # texto. Es lo que permite saber si ese inversionista sigue participando en la
+    # planta: su vigencia vive en proyecto_inversionistas (cliente_id +
+    # fecha_inicio/fecha_fin).
+    "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS inversionista_id BIGINT",
+    """DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'fk_contratos_servicio_inversionista') THEN
+          ALTER TABLE contratos_servicio
+            ADD CONSTRAINT fk_contratos_servicio_inversionista
+            FOREIGN KEY (inversionista_id) REFERENCES clientes(id) ON DELETE SET NULL;
+        END IF;
+      END $$;""",
+    "CREATE INDEX IF NOT EXISTS ix_contratos_servicio_inversionista_id ON contratos_servicio (inversionista_id)",
+    # ── Modelo Predictivo de Garantías (plan 2) ──
+    # Respaldo de `create_all`, que corre dentro de un try/except que solo imprime.
+    # Si falla en silencio, sin esto el módulo entero responde 500.
+    """CREATE TABLE IF NOT EXISTS xm_archivo (
+        id BIGSERIAL PRIMARY KEY,
+        tipo VARCHAR(30) NOT NULL,
+        nombre_archivo VARCHAR(300) NOT NULL,
+        version VARCHAR(10),
+        periodo_ini DATE,
+        periodo_fin DATE,
+        disponible_desde TIMESTAMPTZ NOT NULL,
+        origen_disponibilidad VARCHAR(12) NOT NULL,
+        sha256 VARCHAR(64) NOT NULL UNIQUE,
+        bytes_len INTEGER NOT NULL DEFAULT 0,
+        filas_ingeridas INTEGER NOT NULL DEFAULT 0,
+        esquema_ok BOOLEAN NOT NULL DEFAULT true,
+        esquema_detalle JSONB,
+        ingerido_en TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_xm_archivo_tipo ON xm_archivo (tipo)",
+    """CREATE TABLE IF NOT EXISTS xm_medida (
+        id BIGSERIAL PRIMARY KEY,
+        archivo_id BIGINT NOT NULL REFERENCES xm_archivo(id) ON DELETE RESTRICT,
+        tipo VARCHAR(30) NOT NULL,
+        fecha_documento DATE NOT NULL,
+        hora SMALLINT NOT NULL DEFAULT 0,
+        entidad VARCHAR(60) NOT NULL,
+        concepto VARCHAR(120) NOT NULL,
+        concepto_raw VARCHAR(200),
+        valor NUMERIC(22,6) NOT NULL,
+        version VARCHAR(10),
+        CONSTRAINT uq_xm_medida_natural UNIQUE (tipo, fecha_documento, hora, entidad, concepto, version)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_xm_medida_archivo_id ON xm_medida (archivo_id)",
+    "CREATE INDEX IF NOT EXISTS ix_xm_medida_tipo_fecha_ver ON xm_medida (tipo, fecha_documento, version)",
+    "CREATE INDEX IF NOT EXISTS ix_xm_medida_entidad_concepto ON xm_medida (entidad, concepto, fecha_documento)",
+    """CREATE TABLE IF NOT EXISTS gar_calculo (
+        id BIGSERIAL PRIMARY KEY,
+        agente VARCHAR(10) NOT NULL,
+        esquema VARCHAR(10) NOT NULL,
+        fecha_vencimiento DATE NOT NULL,
+        fecha_calculo DATE,
+        periodo_ini DATE NOT NULL,
+        periodo_fin DATE NOT NULL,
+        etiqueta_periodo VARCHAR(40),
+        base_30d_ini DATE, base_30d_fin DATE,
+        base_sem_ini DATE, base_sem_fin DATE,
+        procedencia JSONB, discrepancias JSONB,
+        CONSTRAINT uq_gar_calculo_natural UNIQUE (agente, esquema, fecha_vencimiento, periodo_ini, periodo_fin)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_gar_calculo_fecha_vencimiento ON gar_calculo (fecha_vencimiento)",
+    """CREATE TABLE IF NOT EXISTS gar_componente_real (
+        id BIGSERIAL PRIMARY KEY,
+        calculo_id BIGINT NOT NULL REFERENCES gar_calculo(id) ON DELETE CASCADE,
+        componente VARCHAR(80) NOT NULL,
+        valor NUMERIC(22,2) NOT NULL,
+        CONSTRAINT uq_gar_comp_real UNIQUE (calculo_id, componente)
+    )""",
+    """CREATE TABLE IF NOT EXISTS gar_componente_pred (
+        id BIGSERIAL PRIMARY KEY,
+        calculo_id BIGINT NOT NULL REFERENCES gar_calculo(id) ON DELETE CASCADE,
+        componente VARCHAR(80) NOT NULL,
+        horizonte_dias SMALLINT NOT NULL,
+        cuantil NUMERIC(4,3) NOT NULL,
+        valor NUMERIC(22,2) NOT NULL,
+        modelo_version VARCHAR(40) NOT NULL,
+        insumos JSONB,
+        calculado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_gar_comp_pred UNIQUE (calculo_id, componente, horizonte_dias, cuantil, modelo_version)
+    )""",
 ]
 
 
@@ -2509,6 +2593,86 @@ class _CgmIndice:
         if pid is not None:
             return self.por_pid.get((inv_n, pid))
         return None
+
+
+def _run_representacion_inversionista_sync() -> None:
+    """Vincula cada contrato de representacion con el inversionista de su planta
+    y cierra los que quedaron colgando.
+
+    Existe porque `contratos_servicio.inversionista_nombre` es texto libre y la
+    participacion real vive en `proyecto_inversionistas`. Sin este puente, la
+    tabla de Representacion mostraba "Vigente" contratos cuyo inversionista ya
+    habia salido: MGS 0024 San Diego Sur salia con tres, cuando solo uno de los
+    tres inversionistas seguia participando.
+
+    Corre en cada arranque y es idempotente. Lo que NO hace:
+      - no inventa vinculos: si el nombre no identifica a un unico inversionista
+        de la planta, el contrato queda sin vincular y se resuelve a mano;
+      - no pisa una `fecha_fin` puesta a mano, solo rellena la que este vacia;
+      - no reabre nada: solo pasa de 'vigente' a 'terminado'.
+
+    La decision de cerrar automaticamente la tomo el equipo (2026-08-26). Un
+    contrato reabierto a mano se volvera a cerrar en el siguiente arranque
+    mientras la participacion siga terminada, porque el estado se deriva del
+    dato duro y no al contrario.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from sqlalchemy.orm import sessionmaker
+    from app.models.contratos import ContratoServicio
+    from app.models.proyectos import ProyectoInversionista
+    from app.services.representacion_inversionista import cierre_de, emparejar
+
+    # Colombia es UTC-5 sin horario de verano y el contenedor corre en UTC. Con
+    # `date.today()`, entre las 19:00 y medianoche de Bogota el servidor ya esta
+    # en el dia siguiente y cerraria un contrato un dia antes de tiempo.
+    hoy = _dt.now(_tz(_td(hours=-5))).date()
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        contratos = db.query(ContratoServicio).filter(
+            ContratoServicio.servicio_aplica == "representacion",
+            ContratoServicio.proyecto_id.isnot(None),
+        ).all()
+        if not contratos:
+            return
+
+        proyecto_ids = {c.proyecto_id for c in contratos}
+        participaciones: dict[int, list] = {}
+        for p in db.query(ProyectoInversionista).filter(
+                ProyectoInversionista.proyecto_id.in_(proyecto_ids)).all():
+            participaciones.setdefault(p.proyecto_id, []).append(p)
+
+        vinculados, sin_vincular = 0, 0
+        for c in contratos:
+            if c.inversionista_id is not None:
+                continue
+            pareja = emparejar(c, participaciones.get(c.proyecto_id, []))
+            if pareja:
+                c.inversionista_id = pareja.cliente_id
+                vinculados += 1
+            elif c.inversionista_nombre:
+                sin_vincular += 1
+
+        cerrados = 0
+        for c in contratos:
+            cierre = cierre_de(c, participaciones.get(c.proyecto_id, []), hoy)
+            if not cierre:
+                continue
+            c.estado = "terminado"
+            if cierre.poner_fecha:
+                c.fecha_fin = cierre.fecha_fin
+            cerrados += 1
+
+        db.commit()
+        if vinculados or cerrados or sin_vincular:
+            print(f"[repr inversionista] {vinculados} vinculados, {cerrados} cerrados, "
+                  f"{sin_vincular} sin vincular (se resuelven a mano)")
+    except Exception as e:
+        db.rollback()
+        print(f"[repr inversionista] ERROR: {e}")
+    finally:
+        db.close()
 
 
 def _run_cgm_seed() -> None:
@@ -3732,6 +3896,8 @@ def _deferred_init():
         ("tipo_migration", _run_tipo_migration),
         ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),
+        # Va DESPUES del seed CGM: vincula y cierra sobre lo que ese ya sembro.
+        ("repr_inversionista_sync", _run_representacion_inversionista_sync),
         ("om_seed", _run_om_seed),
         ("arr_seed", _run_arr_seed),
         ("arr_backfill_contratos", _run_arr_backfill_contratos),

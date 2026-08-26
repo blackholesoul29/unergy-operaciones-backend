@@ -81,6 +81,9 @@ COLUMNAS_DEL_INCIDENTE = [
     ('reporte_energia_generacion', 'xm_estado'),
     ('reporte_energia_generacion', 'xm_exitoso'),
     ('reporte_energia_generacion', 'xm_verificado_en'),
+    # No es del incidente, pero se agrego despues sobre una tabla que ya existia
+    # y le aplica la misma regla: sin ALTER, /contratos-servicio devolveria 500.
+    ('contratos_servicio', 'inversionista_id'),
 ]
 
 

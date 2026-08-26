@@ -65,6 +65,14 @@ class ContratoServicio(Base):
     prestador_nit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     contratante_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     prestador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
+    # El inversionista del contrato de representación, como relación y no solo
+    # como el texto de `inversionista_nombre`. Sin esta FK no hay forma de saber
+    # si ese inversionista sigue participando en la planta: su vigencia vive en
+    # `proyecto_inversionistas` (cliente_id + fecha_inicio/fecha_fin), y cruzar
+    # por nombre falla justo en los patrimonios autónomos, cuyo cliente lleva un
+    # sufijo que el contrato no tiene ("… SOCIEDAD FIDUCIARIA - 17844 SOL DE LA
+    # SIERRA"). NULL = todavía sin asociar, y se resuelve a mano en la ficha.
+    inversionista_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     tiene_cgm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     tiene_promotor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     cgm_codigo_sic: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -123,6 +131,7 @@ class ContratoServicio(Base):
     proyecto: Mapped["Proyecto"] = relationship("Proyecto", back_populates="contratos_servicio")
     contratante: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[contratante_id])
     prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
+    inversionista: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[inversionista_id])
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
     # Puntos de medida especificos que cubre este contrato -- proyecto_id
     # vincula al proyecto completo, esto permite granularidad cuando dos

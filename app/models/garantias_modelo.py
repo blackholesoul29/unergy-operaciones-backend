@@ -62,7 +62,10 @@ class XMMedida(Base):
         BigInteger, ForeignKey("xm_archivo.id", ondelete="RESTRICT"), nullable=False, index=True)
     tipo: Mapped[str] = mapped_column(String(30), nullable=False)
     fecha_documento: Mapped[date] = mapped_column(Date, nullable=False)
-    hora: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # 0 = medida no horaria (ej. arrpas), 1-24 = hora del dia. Se usa 0 como
+    # centinela en vez de NULL porque Postgres no trata dos NULL como iguales
+    # en un UNIQUE, lo que rompería la idempotencia de uq_xm_medida_natural.
+    hora: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="0")
     entidad: Mapped[str] = mapped_column(String(60), nullable=False)
     concepto: Mapped[str] = mapped_column(String(120), nullable=False)
     concepto_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -80,7 +83,9 @@ class GarCalculo(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    agente: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    # Sin index=True: `agente` es la columna líder de uq_gar_calculo_natural,
+    # que ya cubre ese acceso por la regla de prefijo izquierdo.
+    agente: Mapped[str] = mapped_column(String(10), nullable=False)
     esquema: Mapped[str] = mapped_column(String(10), nullable=False)
     fecha_vencimiento: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     fecha_calculo: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -105,8 +110,10 @@ class GarComponenteReal(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Sin index=True: `calculo_id` es la columna líder de uq_gar_comp_real,
+    # que ya cubre ese acceso por la regla de prefijo izquierdo.
     calculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("gar_calculo.id", ondelete="CASCADE"), nullable=False, index=True)
+        BigInteger, ForeignKey("gar_calculo.id", ondelete="CASCADE"), nullable=False)
     componente: Mapped[str] = mapped_column(String(80), nullable=False)
     valor: Mapped[float] = mapped_column(Numeric(22, 2), nullable=False)
 
@@ -120,8 +127,10 @@ class GarComponentePred(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Sin index=True: `calculo_id` es la columna líder de uq_gar_comp_pred,
+    # que ya cubre ese acceso por la regla de prefijo izquierdo.
     calculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("gar_calculo.id", ondelete="CASCADE"), nullable=False, index=True)
+        BigInteger, ForeignKey("gar_calculo.id", ondelete="CASCADE"), nullable=False)
     componente: Mapped[str] = mapped_column(String(80), nullable=False)
     horizonte_dias: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     cuantil: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)

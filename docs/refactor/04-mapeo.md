@@ -463,6 +463,26 @@ indice     = 'IPC'  (o el de indice_indexacion)
 indice_pct = P
 ```
 
+### El orden real de la migración, tras confirmarse la hipótesis B (2026-08-26)
+
+Ya no es «copiar el escalar y desplegar el JSONB». Son **cuatro pasos, en este orden**:
+
+| # | Paso | Fuente | Resultado |
+|---|---|---|---|
+| 1 | **Extraer de `audit_log`** todo cambio de las tres tarifas desde el 2026-05-19 | `audit_log.cambios` (consulta en D-24 § c) | filas con fecha **real**, `origen = 'renegociacion'` o `'indexacion'` |
+| 2 | **Desplegar los JSONB** `indexacion_*` | las 4 columnas | filas con vigencia anual, `origen = 'indexacion'` |
+| 3 | **Desplegar `ppa_tarifas`** | la tabla | filas mensuales, `concepto = 'energia'` |
+| 4 | **Rellenar el hueco inicial** con el escalar de hoy | `tarifa_*` | **una fila `origen = 'migracion'`** con `nota` obligatoria |
+
+El paso 4 solo cubre lo que los pasos 1-3 no alcanzaron: el tramo entre el inicio del contrato y el
+primer cambio conocido. **Si el paso 1 devuelve un cambio para ese contrato, la fila migrada se cierra
+ahí**; si no devuelve nada, queda abierta hasta hoy.
+
+**El inicio de la fila migrada**, en cascada: `fecha_inicio` (18,6 %) → `fecha_firma_contrato` (73,4 %)
+→ y si no hay ninguna, `daterange(NULL, ...)` abierta hacia atrás. Unos **47 de 177 contratos** caen en el
+tercer caso. La apertura hacia atrás no es un problema **porque está etiquetada**: `origen = 'migracion'`
+tiene índice parcial propio y una liquidación puede detectar que su tarifa no tiene fecha confirmada.
+
 ⚠️ **Tres cosas que la migración tiene que medir antes, no después:**
 
 1. **Series con años solapados o repetidos** — el `EXCLUDE` las rechaza. Hay que listarlas primero.
@@ -477,17 +497,17 @@ indice_pct = P
 cada mes—, no tarifas de un contrato. Se quedan donde están, fuera del núcleo. `contrato_tarifas.indice`
 apunta a cuál se usó; el valor del índice se busca en ellos.
 
-### ⚠️ Y un hallazgo que no esperaba
+### ✅ `tarifa_admin`: resuelto el 2026-08-26 — se renegocia
 
-**`tarifa_admin` no tiene serie de indexación.** `tarifa_cgm` y `tarifa_representacion` tienen la suya
-(`indexacion_cgm`, `indexacion_representacion`), y el canon de mantenimiento tiene `indexacion_anual` /
-`indexacion_mensual`. La de administración, no.
+`tarifa_admin` era la única sin serie de indexación, y eso abría dos hipótesis. **Juan confirmó con el
+negocio: todas las tarifas se renegocian, incluida administración.** No se indexa por IPC — se acuerda
+entre las partes — pero cambia, y ese histórico **se está perdiendo hoy** cada vez que alguien edita el
+campo.
 
-Dos lecturas posibles y **no sé cuál es**: o la administración no se indexa —es un porcentaje sobre el
-ingreso, así que sube sola cuando sube el ingreso—, o **sí se renegocia y ese histórico se está
-perdiendo** cada vez que alguien edita el campo. La segunda explicaría por qué Cedillanos está al 5 % y
-el resto al 3,8 %.
+Consecuencia para este mapeo: `tarifa_admin` migra **igual que las demás**, con `origen =
+'renegociacion'` en vez de `'indexacion'`. Lo que la diferencia es que **no tiene JSONB del que sacar
+historia**: su único pasado recuperable está en `audit_log`, desde el 2026-05-19.
 
-La tabla nueva soporta las dos: si no se indexa, tendrá una sola fila con vigencia abierta. Pero **si es
-la segunda, hoy se está perdiendo historia de liquidación**, y eso merece preguntarle a Jessica antes de
-migrar.
+**Lo anterior a esa fecha es irrecuperable** salvo abriendo a mano las actas de `enlace_drive` (70,1 % de
+los contratos lo tienen). El detalle completo de qué se recupera y qué no está en `01-decisiones.md`
+D-24 § c.

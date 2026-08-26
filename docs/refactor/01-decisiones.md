@@ -1024,10 +1024,19 @@ Dos lecturas y no sé cuál es: o no se indexa —es un porcentaje sobre el ingr
 **sí se renegocia y ese histórico se pierde** cada vez que alguien edita el campo. La segunda explicaría
 por qué Cedillanos está al 5 % y el resto al 3,8 %.
 
-La tabla soporta las dos, así que el diseño no depende de la respuesta. Pero **la migración sí**.
+### ✅ RESUELTO 2026-08-26: **es la hipótesis B**
 
-🔲 **PENDIENTE — Juan se lo pregunta a Jessica (2026-08-26).** Las dos hipótesis, para que la pregunta
-sea concreta:
+Juan confirmó con el negocio: **todas las tarifas se pueden renegociar, incluida administración.** El
+requisito que sale de ahí es explícito — *«histórico completo de tarifas: cada valor con su vigencia, y
+renegociar nunca borra el valor anterior. Consultar qué tarifa aplicaba a este contrato en tal fecha
+tiene que ser siempre respondible.»*
+
+Eso confirma lo que temía: **hoy se está perdiendo historia de liquidación.** Cada vez que alguien edita
+`tarifa_admin` el valor anterior desaparece, y con él la capacidad de recalcular un periodo pasado. No es
+un hueco del modelo nuevo: es un bug activo del actual. Las tres consecuencias van en §§ a, b y c de
+abajo.
+
+*(Las dos hipótesis quedan acá como registro de lo que se preguntó y por qué.)*
 
 | | Hipótesis A | Hipótesis B |
 |---|---|---|
@@ -1036,12 +1045,146 @@ sea concreta:
 | **Qué implica en la migración** | Una fila por contrato, `es_base = TRUE`, vigencia abierta. Trivial | Hay que **recuperar el histórico de otra fuente** (actas, correos, el Excel del panel) antes de migrar, o las liquidaciones pasadas quedan con la tarifa de hoy |
 | **Cómo se distingue** | Preguntando. En los datos no se puede: el histórico que faltaría es justamente el que no está | |
 
-**Si es la B, es un bug de liquidación activo hoy**, no solo un hueco del modelo: cualquier
-recálculo de un periodo pasado usa la tarifa actual. La tabla nueva lo cierra hacia adelante, pero lo
-que ya se perdió no lo devuelve.
+**Era la B.** Es un bug de liquidación activo hoy: cualquier recálculo de un periodo pasado usa la tarifa
+actual. La tabla nueva lo cierra hacia adelante; lo que ya se perdió se recupera solo en parte (§ c).
+
+### a · Administración va versionada igual, y el modelo distingue por qué cambió
+
+La administración no se indexa por IPC: **se renegocia**. Las demás hacen las dos cosas. Para que el
+modelo lo refleje sin inventar dos tablas, la columna `origen` (`tarifa_origen_enum`) dice de dónde salió
+cada valor:
+
+| `origen` | Qué significa | Lleva `indice`/`indice_pct` |
+|---|---|---|
+| `pactada` | el valor inicial del contrato | no |
+| `indexacion` | ajuste automático por IPC/IPP sobre el valor anterior | **sí, obligatorio** |
+| `renegociacion` | acuerdo entre las partes, sin índice — **el caso de administración** | no |
+| `correccion` | se corrigió un valor mal cargado | no |
+| `migracion` | viene del escalar de hoy: **la fecha de inicio no se conoce** (§ b) | no |
+
+Un `CHECK` lo impone: solo una `indexacion` puede traer índice, y ninguna otra puede traerlo. Con eso,
+«¿esta tarifa subió por IPC o porque se renegoció?» deja de ser una pregunta sin respuesta, que es
+justamente lo que hoy no se puede distinguir en un `Numeric` suelto.
+
+**No hace falta ninguna tabla ni columna extra para administración**: es una fila más, con
+`origen = 'renegociacion'` en vez de `'indexacion'`.
+
+### b · La migración: qué vigencia darle al valor que hay hoy
+
+El problema es real y no tiene solución perfecta: **el escalar de hoy no dice desde cuándo vale.** Las
+tres opciones que planteó Juan, con lo que implica cada una:
+
+| Opción | Qué afirma | Qué implica para las liquidaciones pasadas |
+|---|---|---|
+| **A · vigencia abierta hacia atrás** `daterange(NULL, X)` | «esta tarifa aplicó desde siempre» | La consulta siempre responde, **pero puede responder mal y sin avisar**. Afirma algo que sabemos falso en los casos renegociados. Peor: cubre periodos anteriores al contrato |
+| **B · desde la fecha del contrato** | «la tarifa no cambió desde la firma» | Es la misma afirmación falsa, acotada. Y **no es aplicable en la cuarta parte de los contratos**: `fecha_inicio` está al **18,6 %** (33 de 177) y `fecha_firma_contrato` al **73,4 %** (130). Unos 47 contratos no tienen ninguna de las dos |
+| **C · marcada como origen desconocido** | «este es el valor actual; desde cuándo aplica, no se sabe» | La consulta responde **y la respuesta se sabe incierta**. Una liquidación puede detectar que está usando un valor migrado y marcar su propio resultado |
+
+**Propongo C, combinada con B para la fecha y con la recuperación de § c encima.** Concretamente, por
+cada tarifa escalar de hoy:
+
+1. **Lo que `audit_log` sí sabe** (§ c) se reconstruye como filas reales, con su fecha exacta y
+   `origen = 'renegociacion'` o `'indexacion'` según el caso.
+2. **El valor anterior al primer cambio auditado** —o el valor actual, si nunca se auditó— entra como
+   **una fila con `origen = 'migracion'`**, cuya `nota` es obligatoria por CHECK y dice de dónde salió.
+3. **El inicio de esa fila** es `fecha_inicio` → `fecha_firma_contrato` → y si no hay ninguna,
+   `daterange(NULL, ...)`, abierta hacia atrás **pero etiquetada**.
+
+La diferencia con la opción A no es el rango: **es que la incertidumbre queda en el dato**, no en la
+cabeza de quien lo consulta. `origen = 'migracion'` es consultable, tiene su índice parcial, y una
+liquidación de un periodo cubierto por una fila así puede decir «este número usa una tarifa cuya vigencia
+no está confirmada» en vez de presentarlo como un hecho.
+
+⚠️ **Lo que ninguna opción arregla:** si una tarifa se renegoció **antes** del 2026-05-19 y nadie lo
+anotó, ese valor no existe en ninguna parte. Ver § c.
 
 ### Dónde quedó escrito
 
 `03-esquema.sql` (tabla + 2 enums + 3 índices, validado: 37 tablas, orden de dependencias correcto),
 `02-modelo.md` (ER y cardinalidades) y `04-mapeo.md` §F (qué se migra y cómo se convierte cada JSONB).
 **La Fase 6 sigue esperando**: esto es diseño, no implementación.
+
+### c · Qué histórico se puede recuperar, y qué es irrecuperable
+
+Busqué en las cuatro fuentes posibles. **Hay una que sirve y sirve bastante.**
+
+#### ✅ `audit_log` — la fuente real
+
+| Hecho | Verificado en |
+|---|---|
+| **`contratos_servicio` está auditada**, y desde el primer día | `app/services/audit.py:20-31`, `_AUDITED_TABLES` |
+| Guarda `{campo: {old, new}}` por UPDATE, con usuario y timestamp | `_diff_attrs()` + la columna `cambios` JSONB |
+| La auditoría arrancó el **2026-05-19** | `git log --diff-filter=A -- app/services/audit.py` |
+| Tiene **12 765 filas** y `cambios` al **99,9 %** | `uso_real.json`, medición del 2026-08-23 |
+| **No hay política de retención ni purga** — nada borra lo viejo | grep sobre `app/` |
+
+O sea: **todo cambio de `tarifa_admin`, `tarifa_cgm` o `tarifa_representacion` hecho desde el 2026-05-19
+por la API es recuperable**, con su valor anterior, su valor nuevo, quién lo hizo y cuándo. Son unos tres
+meses de historia real, no una estimación.
+
+La consulta que lo extrae —**para correr contra producción, no la corrí**:
+
+```sql
+SELECT registro_id AS contrato_id, created_at, usuario_nombre,
+       cambios -> 'tarifa_admin'          AS admin,
+       cambios -> 'tarifa_cgm'            AS cgm,
+       cambios -> 'tarifa_representacion' AS representacion
+  FROM audit_log
+ WHERE tabla = 'contratos_servicio'
+   AND accion = 'UPDATE'
+   AND (cambios ? 'tarifa_admin' OR cambios ? 'tarifa_cgm' OR cambios ? 'tarifa_representacion')
+ ORDER BY registro_id, created_at;
+```
+
+Su resultado decide cuántas filas de la migración son reales y cuántas quedan como `'migracion'`.
+
+#### ⚠️ Las otras tres fuentes: poco o nada
+
+| Fuente | Veredicto |
+|---|---|
+| **Los JSONB `indexacion_*`** | Sirven para CGM (67,8 % lleno), representación y canon (22,6 %). **Para administración, no existe ninguno.** Es la asimetría que originó la pregunta |
+| **`fecha_indexacion` / `indice_indexacion`** | Inservibles: **0 %** y **0,6 %** de llenado — un contrato de 177. Los campos existen y nadie los llenó |
+| **`enlace_drive`** (actas y contratos en Drive) | **70,1 %** de los contratos tienen enlace. Es la única vía para lo anterior a mayo, pero **no es automatizable**: alguien tiene que abrir el documento y leer la tarifa. Sirve para los casos que importen, no para una migración masiva |
+| **La historia de git del seed** | 5 commits tocaron `tarifa_admin` en `app/main.py`. Pero el seed **solo inserta, nunca actualiza** — si un valor cambió después por la UI, el seed no se enteró. Sirve para saber el valor *inicial* declarado, no la trayectoria |
+
+#### 🛑 Lo irrecuperable, dicho sin rodeos
+
+**Cualquier renegociación anterior al 2026-05-19 que solo haya vivido en la columna escalar está
+perdida.** No hay backup de esos valores, no hay JSONB para administración, `fecha_indexacion` está
+vacía, y el seed no registra actualizaciones.
+
+Y hay un segundo hueco más chico: **la auditoría arranca *después* de los seeds.** `init_audit()` está en
+`app/main.py:3408` y `_run_cgm_seed` en `:3386`, así que **lo que escriben los seeds no queda auditado**.
+La carga inicial de tarifas de Cedillanos y Sabana de Torres del 2026-08-25, por ejemplo, no dejó rastro
+en `audit_log`. Para esas el valor de hoy *es* el valor inicial, así que no se pierde nada — pero conviene
+saberlo antes de leer `audit_log` como si fuera completo.
+
+### d · ✅ Confirmado: el diseño ahora **sí** impide sobrescribir — no lo hacía
+
+Juan pidió confirmarlo, y la respuesta honesta es que **el diseño anterior no lo impedía**. El `EXCLUDE`
+prohíbe dos vigencias solapadas, pero **nada impedía un `UPDATE contrato_tarifas SET valor = ...`** sobre
+una fila existente — que es exactamente cómo se pierde la historia hoy en la columna escalar. Habría sido
+el mismo bug con otra forma.
+
+Se cierra con `fn_tarifa_append_only()`, un trigger `BEFORE UPDATE OR DELETE` que hace la tabla
+**append-only**:
+
+| Operación | Resultado |
+|---|---|
+| Cambiar `valor`, `unidad`, `concepto`, `contrato_id` u `origen` | **rechazada** — *«Renegociar = cerrar la vigencia de la fila actual e INSERTAR una fila nueva»* |
+| Cambiar el **inicio** de la vigencia | **rechazada** |
+| Cerrar el **fin** de una vigencia abierta | **permitida** — es la mitad legítima de una renegociación |
+| Modificar el fin de una vigencia **ya cerrada** | **rechazada** |
+| `DELETE` | **rechazada** — *«si se cargó por error, se ANULA»* |
+| Anular (`anulada_en`, `anulada_motivo`, `anulada_por_id`) | **permitida** — y las anuladas salen del `EXCLUDE`, que ahora es parcial (`WHERE anulada_en IS NULL`) |
+
+**Entonces una renegociación son dos operaciones en una transacción, y no hay tercera vía:** cerrar la
+vigencia de la fila viva e insertar la nueva. El valor anterior **no se puede borrar ni editar**, que es
+literalmente el requisito.
+
+Un error de carga tampoco borra: se anula, con motivo y autor, y la fila sigue ahí. El histórico completo
+se mantiene incluso cuando lo que se registró estaba mal.
+
+⚠️ **Costo:** es el cuarto trigger del modelo objetivo (con los tres de D-21) en una base que hoy tiene
+cero. La alternativa —confiar en que la aplicación no haga `UPDATE`— es exactamente la que produjo el bug
+que estamos cerrando.

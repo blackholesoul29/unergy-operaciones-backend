@@ -114,6 +114,17 @@ CREATE TYPE tarifa_concepto_enum AS ENUM (
 -- columnas del mismo tipo, y sin unidad son indistinguibles.
 CREATE TYPE tarifa_unidad_enum AS ENUM ('porcentaje', 'cop_kwh', 'cop_mes', 'cop_total');
 
+-- Por que este valor reemplazo al anterior. Distingue el ajuste automatico por
+-- indice del acuerdo entre las partes, y marca lo que vino de la migracion sin
+-- fecha real conocida (ver D-24).
+CREATE TYPE tarifa_origen_enum AS ENUM (
+    'pactada',        -- el valor inicial del contrato
+    'indexacion',     -- ajuste por IPC/IPP sobre el valor anterior
+    'renegociacion',  -- acuerdo entre las partes, sin indice
+    'correccion',     -- se corrigio un valor mal cargado
+    'migracion'       -- viene del escalar de contratos_servicio: la fecha de inicio NO se conoce
+);
+
 -- Qué originó la falla. 'red' y 'evento_natural' son las causas externas del brief.
 CREATE TYPE falla_origen_enum AS ENUM ('equipo', 'red', 'evento_natural', 'externo');
 
@@ -631,6 +642,8 @@ CREATE TABLE contrato_partes (
 );
 COMMENT ON TABLE contrato_partes IS 'Qué papel juega cada cliente en un contrato; reemplaza las columnas contratante/prestador/comprador/vendedor.';
 
+-- --- Tarifas: que se cobra, por concepto y con vigencia (D-24) ---
+
 CREATE TABLE contrato_tarifas (
     id            BIGSERIAL PRIMARY KEY,
     contrato_id   BIGINT NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
@@ -639,11 +652,19 @@ CREATE TABLE contrato_tarifas (
     unidad        tarifa_unidad_enum   NOT NULL,
     vigencia      DATERANGE            NOT NULL,
 
-    -- De donde salio este valor: la base pactada, o una indexacion sobre la
-    -- anterior. Reemplaza el {ipc, esBase} de los JSONB indexacion_* de hoy.
-    es_base       BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Por que este valor reemplazo al anterior. Reemplaza el {ipc, esBase} de los
+    -- JSONB indexacion_* de hoy, y ademas distingue la indexacion automatica de
+    -- la renegociacion manual -- que es como se ajusta la administracion.
+    origen        tarifa_origen_enum NOT NULL,
     indice        VARCHAR(20),
     indice_pct    NUMERIC(8,4),
+    nota          TEXT,
+
+    -- Una tarifa cargada por error se ANULA, no se borra: el historico completo
+    -- es el requisito, y un DELETE lo rompe. Las anuladas salen del EXCLUDE.
+    anulada_en    TIMESTAMPTZ,
+    anulada_motivo TEXT,
+    anulada_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
 
     registrado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -654,15 +675,25 @@ CREATE TABLE contrato_tarifas (
     CONSTRAINT ck_contrato_tarifas_pct      CHECK (
         unidad <> 'porcentaje' OR valor <= 1
     ),
-    -- La base no se indexa; lo indexado dice sobre que indice y cuanto.
+    -- Solo una indexacion dice sobre que indice y cuanto; el resto, no.
     CONSTRAINT ck_contrato_tarifas_indice   CHECK (
-        (es_base AND indice IS NULL AND indice_pct IS NULL)
-        OR NOT es_base
+        (origen = 'indexacion' AND indice IS NOT NULL)
+        OR (origen <> 'indexacion' AND indice IS NULL AND indice_pct IS NULL)
+    ),
+    -- Lo que viene de la migracion tiene que decir por que su fecha es incierta.
+    CONSTRAINT ck_contrato_tarifas_migracion CHECK (
+        origen <> 'migracion' OR nota IS NOT NULL
+    ),
+    CONSTRAINT ck_contrato_tarifas_anulada  CHECK (
+        (anulada_en IS NULL AND anulada_motivo IS NULL)
+        OR (anulada_en IS NOT NULL AND anulada_motivo IS NOT NULL)
     ),
     -- Un concepto no puede tener dos valores vigentes a la vez en el mismo
     -- contrato. Es el mismo mecanismo que protege la composicion accionaria.
+    -- Las anuladas quedan fuera: siguen en la tabla, pero no compiten.
     CONSTRAINT ex_contrato_tarifas_sin_solape
         EXCLUDE USING gist (contrato_id WITH =, concepto WITH =, vigencia WITH &&)
+        WHERE (anulada_en IS NULL)
 );
 COMMENT ON TABLE contrato_tarifas IS 'Qué se cobra en un contrato, por concepto y con vigencia: las tarifas se renegocian e indexan cada año.';
 COMMENT ON COLUMN contrato_tarifas.vigencia IS 'Rango [desde, hasta); la liquidación de un periodo usa la tarifa vigente EN ese periodo, no la actual.';
@@ -821,6 +852,55 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION fn_composicion_suma_100() IS 'Verifica al COMMIT que las líneas de una composición accionaria sumen exactamente 100 por ciento.';
 
+-- ---------------------------------------------------------------------------
+-- Las tarifas son append-only: renegociar es cerrar la vigente e insertar otra,
+-- nunca editar la fila que ya existe (D-24). El EXCLUDE impide dos vigencias
+-- solapadas, pero NO impide un UPDATE de `valor` sobre una fila existente, que
+-- es justamente como se pierde el historico hoy. Esto lo cierra.
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION fn_tarifa_append_only() RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION
+            'Una tarifa no se borra: si se cargo por error, se ANULA (anulada_en, '
+            'anulada_motivo). El historico completo es un requisito del negocio.'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    -- Lo unico editable de una fila viva es CERRAR su vigencia y anularla.
+    IF NEW.contrato_id     IS DISTINCT FROM OLD.contrato_id
+       OR NEW.concepto     IS DISTINCT FROM OLD.concepto
+       OR NEW.valor        IS DISTINCT FROM OLD.valor
+       OR NEW.unidad       IS DISTINCT FROM OLD.unidad
+       OR NEW.origen       IS DISTINCT FROM OLD.origen
+       OR lower(NEW.vigencia) IS DISTINCT FROM lower(OLD.vigencia) THEN
+        RAISE EXCEPTION
+            'Una tarifa no se edita. Renegociar = cerrar la vigencia de la fila '
+            'actual e INSERTAR una fila nueva con el valor nuevo. Lo unico que se '
+            'puede modificar es el fin de la vigencia y la anulacion.'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    -- Y una vigencia ya cerrada no se reabre ni se mueve.
+    IF upper(OLD.vigencia) IS NOT NULL
+       AND upper(NEW.vigencia) IS DISTINCT FROM upper(OLD.vigencia) THEN
+        RAISE EXCEPTION
+            'La vigencia de una tarifa ya cerrada no se puede modificar.'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION fn_tarifa_append_only() IS 'Hace que contrato_tarifas sea append-only: renegociar es cerrar e insertar, no editar. Ver D-24.';
+
+CREATE TRIGGER tg_tarifa_append_only
+    BEFORE UPDATE OR DELETE ON contrato_tarifas
+    FOR EACH ROW EXECUTE FUNCTION fn_tarifa_append_only();
+
+
 CREATE CONSTRAINT TRIGGER tg_composicion_suma_100
     AFTER INSERT OR UPDATE OR DELETE ON proyecto_composicion_lineas
     DEFERRABLE INITIALLY DEFERRED
@@ -896,6 +976,10 @@ CREATE INDEX ix_contrato_tarifas_contrato_id        ON contrato_tarifas (contrat
 CREATE INDEX ix_contrato_tarifas_registrado_por_id  ON contrato_tarifas (registrado_por_id);
 -- «La tarifa de CGM de este contrato en junio de 2026» en un solo predicado.
 CREATE INDEX ix_contrato_tarifas_vigencia           ON contrato_tarifas USING gist (vigencia);
+CREATE INDEX ix_contrato_tarifas_vivas              ON contrato_tarifas (contrato_id, concepto) WHERE anulada_en IS NULL;
+CREATE INDEX ix_contrato_tarifas_anulada_por_id     ON contrato_tarifas (anulada_por_id);
+-- Las migradas: su fecha de inicio no es real y hay que poder listarlas.
+CREATE INDEX ix_contrato_tarifas_migradas           ON contrato_tarifas (contrato_id) WHERE origen = 'migracion';
 
 -- Fallas
 CREATE INDEX ix_fallas_estado_id                    ON fallas (estado_id);

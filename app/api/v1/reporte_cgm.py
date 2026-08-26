@@ -241,12 +241,27 @@ def enviar_reporte_cgm(
         })
 
     # 2. Un solo lote de llamadas a Quoia -- solo los frt_codes que realmente
-    #    hacen falta para esta request, dedupeados entre todos los destinatarios.
-    frt_codes: set[str] = set()
+    #    hacen falta, y solo por los días que cada destinatario en verdad
+    #    necesita. Antes dias_fetch (el mes completo cuando es_dia_unico) se
+    #    aplicaba a TODOS los frt_codes de la request por igual, aunque un
+    #    Operador de Red normal (no fin de mes) solo usa filas_dia -- pedir
+    #    el mes entero para él era puro desperdicio (auditoría CGM
+    #    2026-08-26, finding #3). Cliente sí necesita mes-a-la-fecha siempre
+    #    (hoja "Diario acumulado"); Operador solo cuando es_ultimo_dia_mes
+    #    (Excel consolidado adicional, ver más abajo).
+    dias_por_frt: dict[str, list[str]] = {}
     for item in items:
+        necesita_mes = item["dest"].tipo == "cliente" or es_ultimo_dia_mes or not es_dia_unico
+        dias_item = dias_fetch if necesita_mes else dias
         for f in item["fronteras"]:
-            if f.codigo_frontera:
-                frt_codes.add(f.codigo_frontera)
+            if not f.codigo_frontera:
+                continue
+            actual = dias_por_frt.get(f.codigo_frontera)
+            # Si otro destinatario que comparte esta misma frontera ya pidió
+            # el superset (mes completo), no lo reducimos a un solo día.
+            if actual is None or len(dias_item) > len(actual):
+                dias_por_frt[f.codigo_frontera] = dias_item
+    frt_codes = set(dias_por_frt)
 
     gaia = GaiaClient()
     filas_por_frt: dict[str, list[dict]] = {}
@@ -269,7 +284,7 @@ def enviar_reporte_cgm(
             # fila para este frt_code. Distinto del caso "sí está en Quoia
             # pero no reportó este día" (eso sí se deja como "Sin reporte"
             # dentro de fetch_filas).
-            for dia in dias_fetch
+            for dia in dias_por_frt[frt_code]
         ]
         if tareas:
             with ThreadPoolExecutor(max_workers=12) as pool:

@@ -1381,6 +1381,27 @@ _PENDING_DDLS = [
     # `fuente` por línea, pero los ingresos no tenían marca y no había forma de
     # saber con qué se construyó un panel. Lo existente es todo 'er'.
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS origen VARCHAR(10) NOT NULL DEFAULT 'er'",
+    # El consecutivo contable es POR INVERSIONISTA, no por proyecto: Uruaco en
+    # 2026-07 lleva 1185/1186/1187 de ingresos para sus tres partícipes. El par de
+    # campos de `panel_contable` solo alcanza para los proyectos de un único
+    # inversionista. Tabla aparte -- y no en la línea -- porque las líneas se
+    # borran y se regeneran al rearmar el panel, y el consecutivo debe sobrevivir.
+    """CREATE TABLE IF NOT EXISTS panel_consecutivo (
+        id BIGSERIAL PRIMARY KEY,
+        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        periodo VARCHAR(7) NOT NULL,
+        tipo VARCHAR(20) NOT NULL,
+        proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL,
+        inversionista_nombre VARCHAR(255) NOT NULL,
+        consecutivo_ingresos INTEGER,
+        consecutivo_costos INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uq_panel_consec_proy_per_tipo_inv
+            UNIQUE (proyecto_id, periodo, tipo, inversionista_nombre)
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_panel_consec_periodo_tipo ON panel_consecutivo (periodo, tipo)",
+    "CREATE INDEX IF NOT EXISTS ix_panel_consec_proyecto ON panel_consecutivo (proyecto_id)",
     """INSERT INTO contratos_servicio (proyecto_id, servicio_aplica, estado,
                                        tarifa_admin, tarifa_representacion, tarifa_cgm)
          SELECT p.id, 'representacion', 'vigente', 0.05, NULL, NULL

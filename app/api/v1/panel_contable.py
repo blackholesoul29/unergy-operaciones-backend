@@ -30,7 +30,7 @@ import json
 
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, ClasificacionLiquidacion, MapeoCeldaConcepto,
-    AliasFuenteIngreso, PanelSoporte,
+    AliasFuenteIngreso, PanelSoporte, PanelConsecutivo,
 )
 from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
@@ -1047,10 +1047,19 @@ def listar(
             }
     overrides = _overrides_tasa_servicio(db, {r["cliente_id"] for r in rates_por_pi.values()})
 
+    # Consecutivos por partícipe del período, en una sola consulta.
+    consec_map = {
+        (c.proyecto_id, c.periodo, c.tipo, c.inversionista_nombre):
+            (c.consecutivo_ingresos, c.consecutivo_costos)
+        for c in db.query(PanelConsecutivo).filter(
+            PanelConsecutivo.periodo == periodo_norm, PanelConsecutivo.tipo == tipo).all()
+    }
+
     return {
         "periodo": periodo_norm,
         "tipo": tipo,
-        "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi, overrides) for p in paneles],
+        "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi, overrides, consec_map)
+                    for p in paneles],
     }
 
 
@@ -1071,10 +1080,15 @@ def _overrides_tasa_servicio(db, cliente_ids) -> dict:
 
 
 def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None,
-                      rates_por_pi: dict | None = None, overrides: dict | None = None) -> dict:
+                      rates_por_pi: dict | None = None, overrides: dict | None = None,
+                      consec_map: dict | None = None) -> dict:
     sop_map = sop_map or {}
     rates_por_pi = rates_por_pi or {}
     overrides = overrides or {}
+    # {(proyecto_id, periodo, tipo, inversionista_nombre): (ingresos, costos)}.
+    # El consecutivo es por partícipe: el par que vive en el panel solo alcanza
+    # para los proyectos de un único inversionista.
+    consec_map = consec_map or {}
     def _sop(grupo, concepto):
         return sop_map.get((p.proyecto_id, grupo, concepto))
     # Agrupar líneas por inversionista.
@@ -1082,10 +1096,14 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
     for ln in sorted(p.lineas, key=lambda x: x.orden):
         key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
         if key not in inv_map:
+            consec = consec_map.get(
+                (p.proyecto_id, p.periodo, p.tipo, ln.inversionista_nombre), (None, None))
             inv_map[key] = {
                 "proyecto_inversionista_id": ln.proyecto_inversionista_id,
                 "nombre": ln.inversionista_nombre,
                 "porcentaje": float(ln.porcentaje) if ln.porcentaje is not None else None,
+                "consecutivo_ingresos": consec[0],
+                "consecutivo_costos": consec[1],
                 "lineas": [],
             }
         base_val = float(ln.valor_cop) if ln.valor_cop is not None else 0.0

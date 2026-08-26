@@ -238,3 +238,52 @@ class PanelSoporte(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PanelConsecutivo(Base):
+    """El consecutivo contable de UN inversionista en un panel.
+
+    En el negocio el consecutivo es por partícipe, no por proyecto: Uruaco en
+    julio de 2026 lleva 1185, 1186 y 1187 de ingresos para sus tres
+    inversionistas, con 1246, 1247 y 1248 de costos. `PanelContable` tiene un
+    solo par de campos, que sirve para los proyectos de un único inversionista
+    pero pierde los demás; de ahí esta tabla.
+
+    Vive aparte de `PanelContableLinea` a propósito: las líneas se borran y se
+    regeneran cada vez que se rearma el panel, y el consecutivo tiene que
+    sobrevivir a eso -- por la misma razón por la que ya vivía en el panel.
+
+    La clave es la identidad de negocio (proyecto, período, tipo, inversionista)
+    y no el `panel_id`, para que tampoco se pierda si el panel se borra y se
+    vuelve a crear.
+    """
+    __tablename__ = "panel_consecutivo"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "periodo", "tipo", "inversionista_nombre",
+                         name="uq_panel_consec_proy_per_tipo_inv"),
+        Index("ix_panel_consec_periodo_tipo", "periodo", "tipo"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    proyecto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    periodo: Mapped[str] = mapped_column(String(7), nullable=False)   # "YYYY-MM"
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)     # preliquidacion | oficial
+    # Se guarda el nombre y no solo el id porque el id puede quedar en NULL
+    # (proyectos sin inversionista cargado) y en Postgres un UNIQUE con NULL
+    # admite duplicados, que es justo lo que hay que evitar aquí.
+    proyecto_inversionista_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("proyecto_inversionistas.id", ondelete="SET NULL"), nullable=True
+    )
+    inversionista_nombre: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    consecutivo_ingresos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    consecutivo_costos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

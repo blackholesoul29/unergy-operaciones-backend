@@ -38,7 +38,7 @@ from app.models.informe_om import ProyectoInformeOM
 from app.models.panel_contable import (
     PanelContable, PanelContableLinea, TipoPanelEnum, GrupoLineaEnum,
     ClasificacionLiquidacion, TipoLiquidacionEnum, MapeoCeldaConcepto,
-    AliasFuenteIngreso,
+    AliasFuenteIngreso, PanelConsecutivo,
 )
 from app.models.mandatos import (
     Mandato, MandatoInversionista, EstadoMandatoCostoEnum,
@@ -77,7 +77,7 @@ __all__ = [
     "ProyectoInicioOperacion",
     "PanelContable", "PanelContableLinea", "TipoPanelEnum", "GrupoLineaEnum",
     "ClasificacionLiquidacion", "TipoLiquidacionEnum", "MapeoCeldaConcepto",
-    "AliasFuenteIngreso",
+    "AliasFuenteIngreso", "PanelConsecutivo",
     "Mandato", "MandatoInversionista", "EstadoMandatoCostoEnum",
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",

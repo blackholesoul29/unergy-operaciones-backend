@@ -194,26 +194,6 @@ class RankingIncompletoItem(BaseModel):
     dias_con_fila: int
 
 
-class RankingIntervencionItem(BaseModel):
-    frontera_id: int
-    nombre_proyecto: str
-    tipo: str  # "generacion" | "consumo"
-    veces_revisar_manualmente: int
-    veces_editado_manualmente: int
-    dias_con_fila: int
-
-
-class RecuperacionActivaItem(BaseModel):
-    """Cuenta de intentos/éxitos de recuperación activa por medidor,
-    parseado de recuperacion_datos (texto libre, ver curvas.py)."""
-    frontera_id: int
-    nombre_proyecto: str
-    intentos_principal: int
-    exitos_principal: int
-    intentos_respaldo: int
-    exitos_respaldo: int
-
-
 class DesgloseFuenteItem(BaseModel):
     """Una fuente cruda (ej. 'Inversores × FP') y cuántos días aportó --
     el detalle detrás del número agrupado de una tarjeta KPI."""
@@ -251,10 +231,6 @@ class ResumenHistoricoResponse(BaseModel):
     detalle_fuente_consumo: list[DetalleFuenteFronteraItem]
     incompletos: list[RankingIncompletoItem]
     incompletos_callouts: list[ResumenCallout]
-    intervencion_manual: list[RankingIntervencionItem]
-    intervencion_manual_callouts: list[ResumenCallout]
-    recuperacion_activa: list[RecuperacionActivaItem]
-    recuperacion_activa_callouts: list[ResumenCallout]
 
 
 class EstadoCorridaResponse(BaseModel):

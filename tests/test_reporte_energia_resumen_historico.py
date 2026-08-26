@@ -4,12 +4,13 @@ Patrones a través de varios días, por frontera -- distinto de /resumen
 (un solo día). Distribución de fuente agrupada en Medidor/Inversor/
 Estimación/Sin fuente (decidido con el usuario 2026-08-21 -- el
 vocabulario crudo de medidor_usado/caso es demasiado técnico para un KPI
-de negocio), con drill-down por frontera; datos incompletos de medidor/
-inversores (solo Generación); intervención manual recurrente; y
-éxito/fallo de recuperación activa por medidor (parseado de
-recuperacion_datos, texto libre). Cada sección trae además un par de
+de negocio), con drill-down por frontera; y datos incompletos de medidor/
+inversores (solo Generación). Cada sección trae además un par de
 'callouts' -- métricas de una sola línea para mostrar arriba de su tabla.
-"""
+
+'Intervención manual recurrente' y 'Recuperación activa de medidores' --
+las otras dos secciones que tenía este endpoint -- se quitaron
+(2026-08-26, pedido de Sara); sus tests también."""
 from datetime import date
 
 import pytest
@@ -192,91 +193,3 @@ def test_incompletos_se_ordena_de_mas_a_menos_critico(db):
 
     resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 4), db=db, _=None)
     assert [i.frontera_id for i in resp.incompletos] == [2, 1]
-
-
-def test_intervencion_manual_combina_generacion_y_consumo(db):
-    _frontera(db, 1, "Planta A")
-    _frontera(db, 2, "Planta A Consumo", tipo=TipoFronteraEnum.consumo_auxiliar)
-    _gen(db, 1, 1, date(2026, 8, 1), revisar_manualmente=True, editado_manualmente=False)
-    _gen(db, 2, 1, date(2026, 8, 2), revisar_manualmente=True, editado_manualmente=True)
-    _con(db, 1, 2, date(2026, 8, 1), revisar_manualmente=False, editado_manualmente=True)
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 2), db=db, _=None)
-    por_tipo = {i.tipo: i for i in resp.intervencion_manual}
-    assert por_tipo["generacion"].veces_revisar_manualmente == 2
-    assert por_tipo["generacion"].veces_editado_manualmente == 1
-    assert por_tipo["consumo"].veces_revisar_manualmente == 0
-    assert por_tipo["consumo"].veces_editado_manualmente == 1
-
-    callouts = {c.etiqueta: c.valor for c in resp.intervencion_manual_callouts}
-    assert callouts["fronteras necesitaron revisión manual"] == "1"  # solo generación
-    assert callouts["ya corregidas a mano al menos una vez"] == "2"  # generación + consumo
-
-
-def test_intervencion_manual_sin_ninguna_bandera_no_aparece(db):
-    _frontera(db, 1, "Planta perfecta")
-    _gen(db, 1, 1, date(2026, 8, 1), revisar_manualmente=False, editado_manualmente=False)
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 1), db=db, _=None)
-    assert resp.intervencion_manual == []
-
-
-def test_intervencion_manual_se_ordena_de_mas_a_menos_critico(db):
-    _frontera(db, 1, "Poco afectada")
-    _frontera(db, 2, "Muy afectada")
-    _gen(db, 1, 1, date(2026, 8, 1), revisar_manualmente=True, editado_manualmente=False)
-    _gen(db, 2, 1, date(2026, 8, 2), revisar_manualmente=False, editado_manualmente=False)
-    _gen(db, 3, 2, date(2026, 8, 1), revisar_manualmente=True, editado_manualmente=False)
-    _gen(db, 4, 2, date(2026, 8, 2), revisar_manualmente=True, editado_manualmente=False)
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 2), db=db, _=None)
-    assert [i.frontera_id for i in resp.intervencion_manual] == [2, 1]
-
-
-def test_recuperacion_activa_parsea_principal_y_respaldo_por_separado(db):
-    _frontera(db, 1, "Planta A")
-    _gen(db, 1, 1, date(2026, 8, 1), recuperacion_datos="principal: éxito")
-    _gen(db, 2, 1, date(2026, 8, 2), recuperacion_datos="principal: falló, respaldo: éxito")
-    _gen(db, 3, 1, date(2026, 8, 3), recuperacion_datos=None)  # no cuenta -- sin intento
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 3), db=db, _=None)
-    assert len(resp.recuperacion_activa) == 1
-    item = resp.recuperacion_activa[0]
-    assert item.intentos_principal == 2
-    assert item.exitos_principal == 1
-    assert item.intentos_respaldo == 1
-    assert item.exitos_respaldo == 1
-
-    callouts = {c.etiqueta: c.valor for c in resp.recuperacion_activa_callouts}
-    assert callouts["tasa de éxito global de la recuperación activa"] == "67%"  # 2/3
-    # respaldo solo tuvo 1 intento -- no alcanza el mínimo de 2 para juzgarlo
-    assert callouts["medidores que casi nunca responden"] == "0"
-
-
-def test_medidor_con_dos_o_mas_intentos_y_baja_tasa_cuenta_como_problema(db):
-    _frontera(db, 1, "Planta A")
-    _gen(db, 1, 1, date(2026, 8, 1), recuperacion_datos="principal: falló")
-    _gen(db, 2, 1, date(2026, 8, 2), recuperacion_datos="principal: falló")
-    _gen(db, 3, 1, date(2026, 8, 3), recuperacion_datos="principal: éxito")
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 3), db=db, _=None)
-    callouts = {c.etiqueta: c.valor for c in resp.recuperacion_activa_callouts}
-    assert callouts["medidores que casi nunca responden"] == "1"  # 1/3 = 33% < 34%, 3 intentos
-
-
-def test_recuperacion_activa_se_ordena_de_menor_a_mayor_tasa_de_exito(db):
-    _frontera(db, 1, "Casi siempre falla")
-    _frontera(db, 2, "Casi siempre funciona")
-    _gen(db, 1, 1, date(2026, 8, 1), recuperacion_datos="principal: falló")
-    _gen(db, 2, 1, date(2026, 8, 2), recuperacion_datos="principal: falló")
-    _gen(db, 3, 2, date(2026, 8, 1), recuperacion_datos="principal: éxito")
-    _gen(db, 4, 2, date(2026, 8, 2), recuperacion_datos="principal: éxito")
-    db.commit()
-
-    resp = re_api.resumen_historico(desde=date(2026, 8, 1), hasta=date(2026, 8, 2), db=db, _=None)
-    assert [i.frontera_id for i in resp.recuperacion_activa] == [1, 2]

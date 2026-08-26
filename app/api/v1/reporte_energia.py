@@ -3,7 +3,6 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
-import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
@@ -24,8 +23,8 @@ from app.schemas.reporte_energia import (
     EstadoCorridaResponse, CancelarCorridaResponse,
     CrearExclusionRequest, ExclusionOut, EditarExclusionRequest, CurvaTipicaResponse,
     CargaExcelTercerosResponse, EstadoXMFrontera, EstadoXMResponse,
-    DistribucionFuenteItem, RankingIncompletoItem, RankingIntervencionItem,
-    RecuperacionActivaItem, ResumenHistoricoResponse, DesgloseFuenteItem,
+    DistribucionFuenteItem, RankingIncompletoItem,
+    ResumenHistoricoResponse, DesgloseFuenteItem,
     DetalleFuenteFronteraItem, ResumenCallout,
 )
 from app.services.reporte_energia import curvas, orquestador, excel as excel_svc, historial, reconectador, recuperacion
@@ -85,11 +84,6 @@ def resumen(fecha: date = Query(...), db: Session = Depends(get_db), _=Depends(g
         confiado=confiado, puede_enviar=(revisar == 0 and total > 0),
     )
 
-
-_RECUPERACION_RE = {
-    "principal": re.compile(r"principal:\s*(éxito|falló)", re.IGNORECASE),
-    "respaldo": re.compile(r"respaldo:\s*(éxito|falló)", re.IGNORECASE),
-}
 
 # Agrupación de fuente para el Resumen histórico (decidido con el usuario
 # 2026-08-21) -- los vocabularios crudos de medidor_usado/caso tienen
@@ -204,11 +198,11 @@ def resumen_historico(
     db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
     """Patrones a través de varios días, por frontera -- distinto de
-    /resumen (un solo día). Responde: qué tan seguido se usa cada fuente,
-    qué medidores tienen datos incompletos/comunicación intermitente, si
-    la recuperación activa de verdad funciona (y qué medidor le falla), y
-    qué fronteras caen en Revisar Manualmente/corrección manual una y otra
-    vez (2026-08-21)."""
+    /resumen (un solo día). Responde: qué tan seguido se usa cada fuente, y
+    qué medidores tienen datos incompletos/comunicación intermitente
+    (2026-08-21). 'Intervención manual recurrente' y 'Recuperación activa
+    de medidores' -- las otras dos secciones que tenía este endpoint --
+    se quitaron (2026-08-26, pedido de Sara)."""
     if hasta < desde:
         raise HTTPException(422, "'hasta' no puede ser anterior a 'desde'")
 
@@ -281,100 +275,6 @@ def resumen_historico(
         ResumenCallout(valor=str(len(_incompletos_graves)), etiqueta="con más del 30% de sus días afectados"),
     ]
 
-    # 3) Intervención manual -- ambos árboles, señales distintas
-    # (revisar_manualmente=pendiente, editado_manualmente=ya corregido).
-    # Mismo criterio que incompletos: sin ninguna de las dos banderas es
-    # ruido, no se muestra.
-    def _intervencion(Modelo, tipo):
-        filas = db.execute(
-            select(
-                Modelo.frontera_id, Frontera.nombre_frontera,
-                func.sum(case((Modelo.revisar_manualmente.is_(True), 1), else_=0)),
-                func.sum(case((Modelo.editado_manualmente.is_(True), 1), else_=0)),
-                func.count(),
-            )
-            .join(Frontera, Frontera.id == Modelo.frontera_id)
-            .where(Modelo.fecha.between(desde, hasta))
-            .group_by(Modelo.frontera_id, Frontera.nombre_frontera)
-        ).all()
-        return [
-            RankingIntervencionItem(
-                frontera_id=fid, nombre_proyecto=_NOMBRES_CORREGIDOS.get(fid, nombre), tipo=tipo,
-                veces_revisar_manualmente=int(v_rev or 0), veces_editado_manualmente=int(v_edit or 0),
-                dias_con_fila=dias,
-            )
-            for fid, nombre, v_rev, v_edit, dias in filas
-            if v_rev or v_edit
-        ]
-    intervencion_manual = sorted(
-        _intervencion(ReporteEnergiaGeneracion, "generacion") + _intervencion(ReporteEnergiaConsumo, "consumo"),
-        key=lambda i: i.veces_revisar_manualmente / i.dias_con_fila, reverse=True,
-    )
-    intervencion_manual_callouts = [
-        ResumenCallout(
-            valor=str(sum(1 for i in intervencion_manual if i.veces_revisar_manualmente > 0)),
-            etiqueta="fronteras necesitaron revisión manual",
-        ),
-        ResumenCallout(
-            valor=str(sum(1 for i in intervencion_manual if i.veces_editado_manualmente > 0)),
-            etiqueta="ya corregidas a mano al menos una vez",
-        ),
-    ]
-
-    # 4) Recuperación activa -- recuperacion_datos es texto libre (ver
-    # curvas.py:298-315), no hay columna estructurada por medidor -- se
-    # trae solo lo no-nulo (pocas filas) y se parsea acá.
-    def _recuperacion_filas(Modelo):
-        return db.execute(
-            select(Modelo.frontera_id, Frontera.nombre_frontera, Modelo.recuperacion_datos)
-            .join(Frontera, Frontera.id == Modelo.frontera_id)
-            .where(Modelo.fecha.between(desde, hasta), Modelo.recuperacion_datos.is_not(None))
-        ).all()
-
-    conteos: dict[int, dict] = {}
-    for fid, nombre, texto in _recuperacion_filas(ReporteEnergiaGeneracion) + _recuperacion_filas(ReporteEnergiaConsumo):
-        c = conteos.setdefault(fid, {
-            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
-            "intentos_principal": 0, "exitos_principal": 0,
-            "intentos_respaldo": 0, "exitos_respaldo": 0,
-        })
-        for medidor in ("principal", "respaldo"):
-            m = _RECUPERACION_RE[medidor].search(texto or "")
-            if m:
-                c[f"intentos_{medidor}"] += 1
-                if m.group(1).lower() == "éxito":
-                    c[f"exitos_{medidor}"] += 1
-    # Más crítico primero = menor tasa de éxito (a la que le falla más la
-    # recuperación); una fila sin ningún intento real (regex no matcheó
-    # nada del texto libre) se manda al final, no arriba como si fuera la
-    # peor.
-    def _tasa_exito(r):
-        total = r.intentos_principal + r.intentos_respaldo
-        return (r.exitos_principal + r.exitos_respaldo) / total if total else 1.0
-    recuperacion_activa = sorted(
-        (
-            RecuperacionActivaItem(frontera_id=fid, nombre_proyecto=c["nombre"], **{
-                k: v for k, v in c.items() if k != "nombre"
-            })
-            for fid, c in conteos.items()
-        ),
-        key=_tasa_exito,
-    )
-    _intentos_totales = sum(r.intentos_principal + r.intentos_respaldo for r in recuperacion_activa)
-    _exitos_totales = sum(r.exitos_principal + r.exitos_respaldo for r in recuperacion_activa)
-    _tasa_global = round(_exitos_totales / _intentos_totales * 100) if _intentos_totales else 0
-    # "Casi nunca responde" -- al menos 2 intentos (para no juzgar con una
-    # sola muestra) y menos de 1 de cada 3 exitosos.
-    _medidores_problema = sum(
-        1 for r in recuperacion_activa for intentos, exitos in (
-            (r.intentos_principal, r.exitos_principal), (r.intentos_respaldo, r.exitos_respaldo),
-        ) if intentos >= 2 and exitos / intentos < 0.34
-    )
-    recuperacion_activa_callouts = [
-        ResumenCallout(valor=f"{_tasa_global}%", etiqueta="tasa de éxito global de la recuperación activa"),
-        ResumenCallout(valor=str(_medidores_problema), etiqueta="medidores que casi nunca responden"),
-    ]
-
     return ResumenHistoricoResponse(
         desde=desde, hasta=hasta,
         distribucion_fuente_generacion=dist_gen,
@@ -383,10 +283,6 @@ def resumen_historico(
         detalle_fuente_consumo=detalle_con,
         incompletos=incompletos,
         incompletos_callouts=incompletos_callouts,
-        intervencion_manual=intervencion_manual,
-        intervencion_manual_callouts=intervencion_manual_callouts,
-        recuperacion_activa=recuperacion_activa,
-        recuperacion_activa_callouts=recuperacion_activa_callouts,
     )
 
 

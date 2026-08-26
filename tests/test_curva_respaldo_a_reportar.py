@@ -7,12 +7,17 @@ válido -- mala práctica reportando estimado teniendo el dato real (pedido
 2026-08-25).
 
 Ahora se usa el dato real del medidor de respaldo cuando: curva_final vino
-del medidor principal (medidor_usado empieza con 'principal'), ambos
-medidores quedaron completos ese día, y el TOTAL DIARIO de generación del
-respaldo está a TOLERANCIA_RESPALDO_REAL_KWH (1.5 kWh, arriba o abajo) o
-menos de diferencia del total de curva_final -- umbral confirmado con el
-equipo de campo y contrastado contra el histórico real (41/140 días
-pasan). Si no, sigue cayendo al ±1% de siempre.
+del medidor principal (medidor_usado empieza con 'principal') y el TOTAL
+DIARIO de generación del respaldo está a TOLERANCIA_RESPALDO_REAL_KWH (1.5
+kWh, arriba o abajo) o menos de diferencia del total de curva_final --
+umbral confirmado con el equipo de campo y contrastado contra el histórico
+real (41/140 días pasan). Si no, sigue cayendo al ±1% de siempre.
+
+No se exige que el respaldo esté 100% completo (quitado 2026-08-26, ver
+MGS 0025 El Copey Occidente: respaldo con huecos solo en horas nocturnas
+de generación ~0, descartado igual aunque coincidía casi exacto con el
+principal) -- la tolerancia del total ya protege sola, ver
+test_medidor_incompleto_pero_dentro_de_tolerancia_usa_medidor.
 
 Matriz de medidor_usado verificada contra clasificador.py/
 clasificador_consumo.py/editar_curva (grep exhaustivo 2026-08-25): SOLO
@@ -35,8 +40,6 @@ def _rep(**kw):
         curva_final=[100.0] * 24,
         medidor_usado="principal",
         curva_respaldo_terceros=None,
-        medidor_principal_completo=True,
-        medidor_respaldo_completo=True,
         curva_medidor_respaldo=[100.0] * 24,
     )
     base.update(kw)
@@ -119,14 +122,29 @@ def test_las_dos_variantes_de_principal_si_activan_el_camino_medidor(medidor_usa
     assert origen == "medidor"
 
 
-def test_medidor_principal_incompleto_cae_a_estimado_aunque_respaldo_coincida():
-    rep = _rep(medidor_principal_completo=False)
+def test_medidor_incompleto_pero_dentro_de_tolerancia_usa_medidor():
+    """MGS 0025 El Copey Occidente 2026-08-25: respaldo con huecos (None)
+    en horas nocturnas -- sin generación real ahí (principal también en
+    0), así que no mueven el total. Antes esto caía a estimado solo por
+    no estar 100% completo, aunque el total ya coincidiera casi exacto
+    con el principal."""
+    curva_principal = [0.0] * 6 + [100.0] * 12 + [0.0] * 6  # 6h-18h generando
+    curva_resp = list(curva_principal)
+    curva_resp[1] = None   # hueco de noche -- principal también es 0 ahí
+    curva_resp[23] = None
+    rep = _rep(curva_final=curva_principal, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
-    assert origen == "estimado"
+    assert origen == "medidor"
 
 
-def test_medidor_respaldo_incompleto_cae_a_estimado_aunque_principal_coincida():
-    rep = _rep(medidor_respaldo_completo=False)
+def test_hueco_en_hora_con_generacion_real_saca_el_total_de_tolerancia():
+    """Un hueco en una hora que SÍ generaba (principal=100) cuenta como 0
+    en la suma del respaldo -- la diferencia de esa sola hora ya supera la
+    tolerancia, así que sigue cayendo a estimado sin necesitar el chequeo
+    de completitud explícito."""
+    curva_resp = [100.0] * 24
+    curva_resp[10] = None  # principal tiene 100 kWh reales en esa hora
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "estimado"
 

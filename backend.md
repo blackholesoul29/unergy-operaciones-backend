@@ -63,12 +63,14 @@ app/
 └── seeds/
     └── seed_data.py     # usuarios iniciales + catálogos (fallas, etc.)
 
-alembic/                 # presente (env.py, versions/) — no es el flujo habitual
+alembic/                 # 79 revisiones, un solo head; start.sh aplica upgrade head
 init_db.py               # crea tablas + add_columns() (ALTER idempotente) + seed
 ```
 
 ## Migraciones de BD (importante)
-El proyecto **no usa Alembic en la práctica**. El esquema evoluciona con DDL idempotente:
+**Corrección (2026-08-24): el proyecto SÍ usa Alembic.** Hay un solo head y `start.sh` corre
+`alembic upgrade head` en cada deploy; las revisiones 035-075 son trabajo real. Lo que sigue
+describe el DDL idempotente, que convive con Alembic y corre **antes** que él:
 
 - **Columna nueva en tabla existente** → agregar un `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
   en `init_db.py` → `add_columns()`. (Para columnas críticas en producción también se
@@ -77,8 +79,11 @@ El proyecto **no usa Alembic en la práctica**. El esquema evoluciona con DDL id
   `Base.metadata.create_all()` la cree (corre en `init_db.py` y al arranque).
 - Los `ALTER ... IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` son seguros de re-ejecutar.
 
-> Evitar `alembic revision --autogenerate` salvo que se decida migrar el flujo completo:
-> mezclarlo con el DDL idempotente puede dejar el historial inconsistente.
+> **Escribe las revisiones con los helpers de `alembic_idempotencia.py`** (`tabla_existe`,
+> `columna_existe`, `agregar_columna_si_falta`, …). Como el DDL idempotente corre antes,
+> una revisión que asuma que un objeto no existe puede fallar — y al ir todo el
+> `upgrade head` en una transacción, ese fallo revierte la cadena completa.
+> `--autogenerate` sirve como borrador, pero revisa la salida: no conoce `_PENDING_DDLS`.
 
 ## Cómo agregar un nuevo endpoint
 

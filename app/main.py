@@ -26,18 +26,6 @@ _PENDING_DDLS = [
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS fotos_urls JSONB",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS centinela VARCHAR(200)",
     "ALTER TABLE fallas ADD COLUMN IF NOT EXISTS notificacion BOOLEAN NOT NULL DEFAULT FALSE",
-    """CREATE TABLE IF NOT EXISTS generacion_diaria (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        fecha DATE NOT NULL,
-        kwh_real NUMERIC(14,3),
-        kwh_p90 NUMERIC(14,3),
-        kwh_autoconsumo NUMERIC(14,3),
-        fuente VARCHAR(50) NOT NULL DEFAULT 'manual',
-        notas TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_proyecto_fecha ON generacion_diaria (proyecto_id, fecha)",
     "CREATE INDEX IF NOT EXISTS ix_generacion_fecha ON generacion_diaria (fecha)",
@@ -50,75 +38,17 @@ _PENDING_DDLS = [
     # impuestos por cliente — reteiva (retención de IVA), separada de reteica
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS reteiva_pct NUMERIC(5,2)",
     # soportes/comprobantes (archivo Drive) por transacción del panel contable
-    """CREATE TABLE IF NOT EXISTS panel_soporte (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        periodo VARCHAR(7) NOT NULL,
-        tipo VARCHAR(20) NOT NULL,
-        grupo VARCHAR(20) NOT NULL,
-        concepto VARCHAR(255) NOT NULL,
-        archivo_url VARCHAR(1000) NOT NULL,
-        archivo_nombre VARCHAR(300),
-        drive_file_id VARCHAR(120),
-        created_by_id BIGINT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_soporte ON panel_soporte (proyecto_id, periodo, tipo, grupo, concepto)",
     "CREATE INDEX IF NOT EXISTS ix_panel_soporte_lookup ON panel_soporte (proyecto_id, periodo, tipo)",
     # excepciones de tasa de impuesto por (cliente, servicio[, proyecto])
-    """CREATE TABLE IF NOT EXISTS cliente_tasa_servicio (
-        id BIGSERIAL PRIMARY KEY,
-        cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-        servicio VARCHAR(30) NOT NULL,
-        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE CASCADE,
-        iva_pct NUMERIC(5,2),
-        retencion_pct NUMERIC(5,2),
-        reteiva_pct NUMERIC(5,2),
-        reteica_pct NUMERIC(5,2),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_tasa_servicio ON cliente_tasa_servicio (cliente_id, servicio, COALESCE(proyecto_id, 0))",
     # IPP mensual global (numerador de la indexación de PPAs de energía) — fuente DANE
-    """CREATE TABLE IF NOT EXISTS ipp_mensual (
-        id BIGSERIAL PRIMARY KEY,
-        año INT NOT NULL,
-        mes INT NOT NULL,
-        valor NUMERIC(12,4) NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipp_mensual_periodo ON ipp_mensual (año, mes)",
     # energía mensual por contrato XM (ingesta del despacho) — insumo facturación v2
-    """CREATE TABLE IF NOT EXISTS despacho_contrato_mensual (
-        id BIGSERIAL PRIMARY KEY,
-        periodo VARCHAR(7) NOT NULL,
-        codigo_sic_contrato VARCHAR(40) NOT NULL,
-        vendedor VARCHAR(40),
-        comprador VARCHAR(40),
-        tipo VARCHAR(20),
-        kwh NUMERIC(18,4) NOT NULL DEFAULT 0,
-        archivo VARCHAR(200),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_periodo_contrato ON despacho_contrato_mensual (periodo, codigo_sic_contrato)",
     # precio de bolsa manual por mes (valoriza la energía sin PPA / UNGC)
-    """CREATE TABLE IF NOT EXISTS precio_bolsa_mensual (
-        id BIGSERIAL PRIMARY KEY,
-        año INT NOT NULL,
-        mes INT NOT NULL,
-        valor NUMERIC(12,4) NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_precio_bolsa_periodo ON precio_bolsa_mensual (año, mes)",
     # energía diaria por contrato (para ver el despacho día a día)
-    """CREATE TABLE IF NOT EXISTS despacho_contrato_dia (
-        id BIGSERIAL PRIMARY KEY,
-        periodo VARCHAR(7) NOT NULL,
-        codigo_sic_contrato VARCHAR(40) NOT NULL,
-        fecha DATE NOT NULL,
-        kwh NUMERIC(18,4) NOT NULL DEFAULT 0
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_despacho_dia ON despacho_contrato_dia (periodo, codigo_sic_contrato, fecha)",
     "ALTER TABLE factura_emitida ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(80)",
     "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS fuente VARCHAR(20)",
@@ -127,13 +57,7 @@ _PENDING_DDLS = [
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_min DATE",
     "ALTER TABLE despacho_contrato_mensual ADD COLUMN IF NOT EXISTS fecha_max DATE",
     # agrupación manual de CONTRATOS en facturas con nombre (dividir un PPA)
-    """CREATE TABLE IF NOT EXISTS factura_agrupacion (
-        id BIGSERIAL PRIMARY KEY,
-        codigo_sic_contrato VARCHAR(40),
-        nombre VARCHAR(120) NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    # migración: la primera versión llaveaba por proyecto_id (un proyecto puede tener
+        # migración: la primera versión llaveaba por proyecto_id (un proyecto puede tener
     # varios contratos con tarifas distintas). Se pasa a codigo_sic_contrato.
     "ALTER TABLE factura_agrupacion ADD COLUMN IF NOT EXISTS codigo_sic_contrato VARCHAR(40)",
     "ALTER TABLE factura_agrupacion ALTER COLUMN proyecto_id DROP NOT NULL",
@@ -142,32 +66,8 @@ _PENDING_DDLS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_agrupacion_contrato ON factura_agrupacion (codigo_sic_contrato)",
     "ALTER TABLE factura_agrupacion ADD COLUMN IF NOT EXISTS porcentaje NUMERIC(9,6)",
     # Orden manual (fijo) y marca de emitida (por período) de las facturas de energía.
-    """CREATE TABLE IF NOT EXISTS factura_orden (
-        id BIGSERIAL PRIMARY KEY,
-        nombre VARCHAR(120) NOT NULL UNIQUE,
-        orden INTEGER NOT NULL DEFAULT 0,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS factura_emitida (
-        id BIGSERIAL PRIMARY KEY,
-        nombre VARCHAR(120) NOT NULL,
-        periodo VARCHAR(7) NOT NULL,
-        emitida_por VARCHAR(120),
-        emitida_at TIMESTAMPTZ DEFAULT NOW()
-    )""",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_emitida_nombre_periodo ON factura_emitida (nombre, periodo)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_emitida_nombre_periodo ON factura_emitida (nombre, periodo)",
     # migration 007 — tabla de gestión de proyectos (T16)
-    """CREATE TABLE IF NOT EXISTS gestion_registros (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        tipo VARCHAR(50) NOT NULL,
-        titulo VARCHAR(500) NOT NULL,
-        descripcion TEXT,
-        archivos_json JSONB,
-        created_by VARCHAR(255),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_gestion_proyecto ON gestion_registros (proyecto_id)",
     "CREATE INDEX IF NOT EXISTS ix_gestion_tipo ON gestion_registros (tipo)",
     # migration 008 — columnas faltantes en proyecto_inversionistas
@@ -180,28 +80,7 @@ _PENDING_DDLS = [
     "CREATE TYPE tipo_servicio_cliente_enum AS ENUM ('operacion', 'representacion', 'cgm', 'promotor')",
     "CREATE TYPE tipo_documento_cliente_enum AS ENUM ('oferta', 'contrato')",
     "CREATE TYPE estado_documento_cliente_enum AS ENUM ('borrador', 'enviado', 'aceptado', 'firmado', 'rechazado')",
-    """CREATE TABLE IF NOT EXISTS cliente_servicios (
-        id BIGSERIAL PRIMARY KEY,
-        cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-        tipo tipo_servicio_cliente_enum NOT NULL,
-        fecha_inicio DATE,
-        notas TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS cliente_documentos_comerciales (
-        id BIGSERIAL PRIMARY KEY,
-        cliente_id BIGINT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-        tipo tipo_documento_cliente_enum NOT NULL,
-        nombre VARCHAR(255) NOT NULL,
-        numero VARCHAR(100),
-        fecha DATE,
-        estado estado_documento_cliente_enum NOT NULL DEFAULT 'borrador',
-        archivo_url VARCHAR(1000),
-        notas TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rut_url VARCHAR(1000)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rut_url VARCHAR(1000)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'rut'",
@@ -258,69 +137,18 @@ _PENDING_DDLS = [
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS vendedor_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     # Empresa responsable del PPA (catálogo). incluir_en_cumplimiento=false esconde
     # sus contratos de la Matriz anual de /mem/cumplimiento.
-    """CREATE TABLE IF NOT EXISTS ppa_responsables (
-        id BIGSERIAL PRIMARY KEY,
-        nombre VARCHAR(120) NOT NULL UNIQUE,
-        incluir_en_cumplimiento BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS responsable_id BIGINT REFERENCES ppa_responsables(id) ON DELETE SET NULL",
+        "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS responsable_id BIGINT REFERENCES ppa_responsables(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_ppa_contratos_responsable_id ON ppa_contratos (responsable_id)",
     # Drop stale columns from old schema
     "ALTER TABLE ppa_contratos DROP COLUMN IF EXISTS proyecto_id",
     # Create the join table (idempotent)
-    """CREATE TABLE IF NOT EXISTS ppa_contrato_proyectos (
-        contrato_id BIGINT NOT NULL REFERENCES ppa_contratos(id) ON DELETE CASCADE,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        PRIMARY KEY (contrato_id, proyecto_id)
-    )""",
-    # migration 012 — ASIC / GESCON tables
+        # migration 012 — ASIC / GESCON tables
     "CREATE TYPE tipo_solicitud_asic_enum AS ENUM ('registro', 'modificacion', 'terminacion', 'desistimiento')",
     "CREATE TYPE estado_solicitud_asic_enum AS ENUM ('en_proceso', 'publicado', 'rechazado', 'desistido')",
-    """CREATE TABLE IF NOT EXISTS asic_solicitudes (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
-        requerimiento_asic VARCHAR(20),
-        tipo_solicitud tipo_solicitud_asic_enum NOT NULL,
-        prioridad_limitacion INTEGER,
-        codigo_sic_contrato VARCHAR(20),
-        codigo_sic_vendedor VARCHAR(10),
-        codigo_sic_comprador VARCHAR(10),
-        contrato_interno VARCHAR(100),
-        nombre_contacto_solicitante VARCHAR(255),
-        fecha_solicitud DATE,
-        fecha_inicio DATE,
-        fecha_fin DATE,
-        tipo_mercado VARCHAR(50) DEFAULT 'No regulado',
-        tipo_asignacion VARCHAR(100),
-        porcentaje_fncer NUMERIC(5,2),
-        porcentaje_despacho NUMERIC(5,2),
-        estado_solicitud estado_solicitud_asic_enum NOT NULL DEFAULT 'en_proceso',
-        observaciones TEXT,
-        link_archivo VARCHAR(1000),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_asic_codigo_sic ON asic_solicitudes (codigo_sic_contrato)",
     "CREATE INDEX IF NOT EXISTS ix_asic_proyecto ON asic_solicitudes (proyecto_id)",
     "CREATE INDEX IF NOT EXISTS ix_asic_estado_sic_fecha ON asic_solicitudes (estado_solicitud, codigo_sic_contrato, fecha_solicitud DESC NULLS LAST)",
-    """CREATE TABLE IF NOT EXISTS asic_cambios_contratos (
-        id BIGSERIAL PRIMARY KEY,
-        solicitud_id BIGINT REFERENCES asic_solicitudes(id) ON DELETE SET NULL,
-        codigo_sic_contrato VARCHAR(20),
-        contrato_interno VARCHAR(100),
-        proyecto_original_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
-        codigo_frt_original VARCHAR(20),
-        energia_mensual_mwh_original NUMERIC(10,3),
-        proyecto_nuevo_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
-        codigo_frt_nuevo VARCHAR(20),
-        energia_mensual_mwh_nuevo NUMERIC(10,3),
-        accion VARCHAR(100),
-        nombre_archivo VARCHAR(500),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    # migration 013 — Fronteras extended GESCON fields + diccionario + asic nombre_interno
+        # migration 013 — Fronteras extended GESCON fields + diccionario + asic nombre_interno
     "ALTER TABLE fronteras ALTER COLUMN proyecto_id DROP NOT NULL",
     "ALTER TYPE tipo_frontera_enum ADD VALUE IF NOT EXISTS 'consumo_auxiliar'",
     "ALTER TYPE tipo_frontera_enum ADD VALUE IF NOT EXISTS 'consumo_propio'",
@@ -345,13 +173,7 @@ _PENDING_DDLS = [
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_calibracion_med_resp DATE",
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS fecha_actualizacion_resp DATE",
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS nombre_interno VARCHAR(200)",
-    """CREATE TABLE IF NOT EXISTS gescon_diccionario_contratos (
-        id BIGSERIAL PRIMARY KEY,
-        codigo_contrato VARCHAR(100) NOT NULL UNIQUE,
-        nombre VARCHAR(255),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    # migration 014 — contratos_servicio: vinculación clientes + campos CGM/Promotor/REC
+        # migration 014 — contratos_servicio: vinculación clientes + campos CGM/Promotor/REC
     "ALTER TABLE contratos_servicio ALTER COLUMN proyecto_id DROP NOT NULL",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS contratante_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS prestador_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
@@ -384,29 +206,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
     # migration 016 — informes_guardados: flujo editorial de informes operacionales
-    """CREATE TABLE IF NOT EXISTS informes_guardados (
-        id BIGSERIAL PRIMARY KEY,
-        tipo VARCHAR(20) NOT NULL,
-        sub_project VARCHAR(200) NOT NULL,
-        periodo_desde VARCHAR(10) NOT NULL,
-        periodo_hasta VARCHAR(10) NOT NULL,
-        periodo_display VARCHAR(100),
-        proyecto_nombre VARCHAR(300),
-        html_content TEXT NOT NULL,
-        charts_data JSONB,
-        estado VARCHAR(20) NOT NULL DEFAULT 'borrador',
-        creado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
-        editado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
-        aprobado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
-        creado_por_nombre VARCHAR(255),
-        editado_por_nombre VARCHAR(255),
-        aprobado_por_nombre VARCHAR(255),
-        creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        editado_en TIMESTAMPTZ,
-        aprobado_en TIMESTAMPTZ,
-        correo_enviado BOOLEAN NOT NULL DEFAULT FALSE,
-        correo_enviado_en TIMESTAMPTZ
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_informes_tipo_sp_periodo ON informes_guardados (tipo, sub_project, periodo_desde, periodo_hasta)",
     "CREATE INDEX IF NOT EXISTS ix_informes_sub_project ON informes_guardados (sub_project)",
     "CREATE INDEX IF NOT EXISTS ix_informes_estado ON informes_guardados (estado)",
@@ -538,27 +337,6 @@ _PENDING_DDLS = [
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS es_duplicado BOOLEAN NOT NULL DEFAULT FALSE",
     # migration — cumplimiento_mensual: PPA compliance snapshots
     "CREATE TYPE estado_cumplimiento_enum AS ENUM ('pendiente', 'cerrado', 'facturado')",
-    """CREATE TABLE IF NOT EXISTS cumplimiento_mensual (
-        id BIGSERIAL PRIMARY KEY,
-        contrato_ppa_id BIGINT NOT NULL REFERENCES ppa_contratos(id) ON DELETE CASCADE,
-        proyecto_id BIGINT REFERENCES proyectos(id) ON DELETE SET NULL,
-        anio INTEGER NOT NULL,
-        mes INTEGER NOT NULL,
-        gen_total_mwh NUMERIC(14,3),
-        compromiso_mwh NUMERIC(14,3),
-        compras_bolsa_mwh NUMERIC(14,3),
-        excedentes_bolsa_mwh NUMERIC(14,3),
-        precio_bolsa_promedio NUMERIC(12,4),
-        compras_bolsa_cop NUMERIC(18,2),
-        excedentes_bolsa_cop NUMERIC(18,2),
-        estado estado_cumplimiento_enum NOT NULL DEFAULT 'pendiente',
-        tarifa_ppa_cop_mwh NUMERIC(12,4),
-        valoracion_contrato_cop NUMERIC(18,2),
-        liquidacion_id BIGINT REFERENCES liquidaciones(id) ON DELETE SET NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(contrato_ppa_id, anio, mes)
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_cumplimiento_contrato ON cumplimiento_mensual (contrato_ppa_id)",
     "CREATE INDEX IF NOT EXISTS ix_cumplimiento_periodo ON cumplimiento_mensual (anio, mes)",
     "CREATE INDEX IF NOT EXISTS ix_cumplimiento_estado ON cumplimiento_mensual (estado)",
@@ -580,16 +358,6 @@ _PENDING_DDLS = [
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS titular_cuenta VARCHAR(255)",
     # migration — Notificaciones table
     "CREATE TYPE tipo_notificacion_enum AS ENUM ('alerta', 'info', 'accion')",
-    """CREATE TABLE IF NOT EXISTS notificaciones (
-        id BIGSERIAL PRIMARY KEY,
-        usuario_id BIGINT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-        tipo tipo_notificacion_enum NOT NULL,
-        titulo VARCHAR(500) NOT NULL,
-        mensaje TEXT NOT NULL,
-        leida BOOLEAN NOT NULL DEFAULT FALSE,
-        link VARCHAR(1000),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_notificaciones_usuario ON notificaciones (usuario_id)",
     "CREATE INDEX IF NOT EXISTS ix_notificaciones_leida ON notificaciones (usuario_id, leida) WHERE leida = FALSE",
     # migration — fronteras: quoia_meter_id + estado_operacional + soft delete
@@ -641,16 +409,6 @@ _PENDING_DDLS = [
     # frontera no se clasifica en absoluto (ej. CT en falla ya reportado a
     # XM) -- no depende de Fallas (requiere monitoreo/representación, que no
     # todas las fronteras tienen)
-    """CREATE TABLE IF NOT EXISTS reporte_energia_exclusiones (
-        id BIGSERIAL PRIMARY KEY,
-        frontera_id BIGINT NOT NULL REFERENCES fronteras(id) ON DELETE CASCADE,
-        motivo VARCHAR(500) NOT NULL,
-        fecha_inicio DATE NOT NULL,
-        fecha_fin_estimada DATE,
-        creado_por_id BIGINT NOT NULL REFERENCES usuarios(id),
-        resuelta_en TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_reporte_energia_exclusiones_frontera ON reporte_energia_exclusiones (frontera_id)",
     # migration — reporte_energia_generacion: curva de respaldo real subida
     # por un tercero (Excel) para fronteras en FRONTERAS_TERCEROS -- si es
@@ -678,6 +436,9 @@ _PENDING_DDLS = [
     # medidor (2026-08-12, ver MGS 0021 Ibirico Consumo)
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     # migration — ASIC porcentaje_despacho domain constraint (fix bad data first)
+    # OJO: este backfill tiene que correr ANTES del chk_porcentaje_despacho
+    # de abajo, o el constraint falla. Por eso no esta en
+    # _BACKFILLS_REFERENCIA. No los separes.
     "UPDATE asic_solicitudes SET porcentaje_despacho = porcentaje_despacho / 100.0 WHERE porcentaje_despacho > 1.0",
     "ALTER TABLE asic_solicitudes ADD CONSTRAINT chk_porcentaje_despacho CHECK (porcentaje_despacho >= 0 AND porcentaje_despacho <= 1.0)",
     # migration — ASIC ↔ PPA foreign key
@@ -800,15 +561,7 @@ _PENDING_DDLS = [
     # migration 022 — portafolio compuesto: miembros (proyectos) del informe de portafolio
     "ALTER TABLE informes_guardados ADD COLUMN IF NOT EXISTS miembros JSONB",
     # migration 023 — gestión de portafolios (capas de proyectos)
-    """CREATE TABLE IF NOT EXISTS portafolios (
-        id BIGSERIAL PRIMARY KEY,
-        nombre VARCHAR(255) UNIQUE NOT NULL,
-        descripcion TEXT,
-        activo BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS portafolio_id BIGINT REFERENCES portafolios(id) ON DELETE SET NULL",
+        "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS portafolio_id BIGINT REFERENCES portafolios(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_proyectos_portafolio_id ON proyectos (portafolio_id)",
     # migration 024 — contratos CGM/Representación: campos específicos
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS inversionista_nombre VARCHAR(255)",
@@ -826,122 +579,21 @@ _PENDING_DDLS = [
     "ALTER TABLE liquidacion_facturas ADD COLUMN IF NOT EXISTS proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidacion_facturas_inv_id ON liquidacion_facturas (proyecto_inversionista_id) WHERE proyecto_inversionista_id IS NOT NULL",
     # migration O&M — panel mensual de facturación O&M
-    """CREATE TABLE IF NOT EXISTS om_ipc_tasas (
-        id          BIGSERIAL PRIMARY KEY,
-        año         INTEGER NOT NULL UNIQUE,
-        tasa        NUMERIC(8,6) NOT NULL,
-        confirmado  BOOLEAN NOT NULL DEFAULT FALSE,
-        fuente      VARCHAR(100),
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS om_seleccion_mensual (
-        id          BIGSERIAL PRIMARY KEY,
-        contrato_id BIGINT NOT NULL REFERENCES contratos_servicio(id) ON DELETE CASCADE,
-        periodo     VARCHAR(7) NOT NULL,
-        incluido    BOOLEAN NOT NULL DEFAULT TRUE,
-        facturado   BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        CONSTRAINT uq_om_seleccion_contrato_periodo UNIQUE (contrato_id, periodo)
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_om_seleccion_periodo ON om_seleccion_mensual (periodo)",
+            "CREATE INDEX IF NOT EXISTS ix_om_seleccion_periodo ON om_seleccion_mensual (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_om_seleccion_contrato ON om_seleccion_mensual (contrato_id)",
     "ALTER TABLE om_seleccion_mensual ADD COLUMN IF NOT EXISTS valor_manual NUMERIC(14,0)",
     "ALTER TABLE contratos_servicio ADD COLUMN IF NOT EXISTS fecha_inicio_om DATE",
-    """CREATE TABLE IF NOT EXISTS arr_proyectos (
-        id          BIGSERIAL PRIMARY KEY,
-        codigo      VARCHAR(120) UNIQUE,
-        nombre      VARCHAR(255) NOT NULL,
-        fecha_firma_contrato DATE,
-        valor_base    NUMERIC(14,2),
-        canon_archivo NUMERIC(14,2),
-        activo      BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS arr_ipc_tasas (
-        id          BIGSERIAL PRIMARY KEY,
-        año         INTEGER NOT NULL UNIQUE,
-        tasa        NUMERIC(8,6) NOT NULL,
-        confirmado  BOOLEAN NOT NULL DEFAULT FALSE,
-        fuente      VARCHAR(100),
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS arr_seleccion_mensual (
-        id              BIGSERIAL PRIMARY KEY,
-        arr_proyecto_id BIGINT NOT NULL REFERENCES arr_proyectos(id) ON DELETE CASCADE,
-        periodo         VARCHAR(7) NOT NULL,
-        incluido        BOOLEAN NOT NULL DEFAULT TRUE,
-        facturado       BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        CONSTRAINT uq_arr_seleccion_proyecto_periodo UNIQUE (arr_proyecto_id, periodo)
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_periodo ON arr_seleccion_mensual (periodo)",
+                "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_periodo ON arr_seleccion_mensual (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_arr_seleccion_proyecto ON arr_seleccion_mensual (arr_proyecto_id)",
     # Factura consolidada mensual del proveedor
-    """CREATE TABLE IF NOT EXISTS om_factura_mensual (
-        id             BIGSERIAL PRIMARY KEY,
-        periodo        VARCHAR(7) NOT NULL UNIQUE,
-        nombre_archivo VARCHAR(500),
-        enlace_pdf     VARCHAR(2000),
-        ruta_local     VARCHAR(1000),
-        subido_en      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_om_factura_periodo ON om_factura_mensual (periodo)",
     # migration — garantias_ajustes: ajustes XM (semanal/txr/mensual)
     "CREATE TYPE tipo_ajuste_xm_enum AS ENUM ('semanal', 'txr', 'mensual')",
-    """CREATE TABLE IF NOT EXISTS garantias_ajustes (
-    id BIGSERIAL PRIMARY KEY,
-    tipo tipo_ajuste_xm_enum NOT NULL,
-    fecha DATE NOT NULL,
-    pb NUMERIC(18,2), restricciones NUMERIC(18,2), stn NUMERIC(18,2),
-    trm NUMERIC(18,2), ptb NUMERIC(18,2), total_ungc NUMERIC(18,2),
-    total_ungg NUMERIC(18,2), total_consignar NUMERIC(18,2),
-    disponible_custodia NUMERIC(18,2), congelado NUMERIC(18,2),
-    saldo NUMERIC(18,2), total_ajuste_txr NUMERIC(18,2),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)""",
     "CREATE INDEX IF NOT EXISTS ix_garantias_ajustes_fecha ON garantias_ajustes (fecha)",
     "ALTER TABLE garantias_ajustes ADD COLUMN IF NOT EXISTS snapshot JSONB",
     # migration — Panel Contable (preliquidaciones / liquidaciones oficiales)
-    """CREATE TABLE IF NOT EXISTS panel_contable (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        periodo VARCHAR(7) NOT NULL,
-        tipo VARCHAR(20) NOT NULL DEFAULT 'preliquidacion',
-        liquidar BOOLEAN NOT NULL DEFAULT TRUE,
-        generar_mandatos BOOLEAN NOT NULL DEFAULT FALSE,
-        tiene_bolsa BOOLEAN NOT NULL DEFAULT FALSE,
-        tiene_costos BOOLEAN NOT NULL DEFAULT FALSE,
-        ingreso_bruto_cop NUMERIC(18,2),
-        comercializador VARCHAR(120),
-        fecha_firma DATE,
-        consecutivo_ingresos INTEGER,
-        consecutivo_costos INTEGER,
-        er_filename VARCHAR(300),
-        generado_por_id BIGINT REFERENCES usuarios(id),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_panel_proyecto_periodo_tipo ON panel_contable (proyecto_id, periodo, tipo)",
     "CREATE INDEX IF NOT EXISTS ix_panel_periodo_tipo ON panel_contable (periodo, tipo)",
-    """CREATE TABLE IF NOT EXISTS panel_contable_linea (
-        id BIGSERIAL PRIMARY KEY,
-        panel_id BIGINT NOT NULL REFERENCES panel_contable(id) ON DELETE CASCADE,
-        proyecto_inversionista_id BIGINT REFERENCES proyecto_inversionistas(id) ON DELETE SET NULL,
-        inversionista_nombre VARCHAR(255),
-        porcentaje NUMERIC(10,7),
-        grupo VARCHAR(20) NOT NULL,
-        concepto VARCHAR(255) NOT NULL,
-        valor_cop NUMERIC(18,2),
-        comprobante_contable VARCHAR(120),
-        orden INTEGER NOT NULL DEFAULT 0
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_panel_linea_panel ON panel_contable_linea (panel_id)",
     # Panel Contable — liquidación de ingresos y costos independientes
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_ingresos BOOLEAN NOT NULL DEFAULT TRUE",
@@ -954,25 +606,9 @@ _PENDING_DDLS = [
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origen VARCHAR(20) DEFAULT 'manual'",
     # migration — Clasificación de liquidación por período (normal | neu | nitro)
-    """CREATE TABLE IF NOT EXISTS clasificacion_liquidacion (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        periodo VARCHAR(7) NOT NULL,
-        tipo VARCHAR(10) NOT NULL DEFAULT 'normal',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_clasif_proyecto_periodo ON clasificacion_liquidacion (proyecto_id, periodo)",
     "CREATE INDEX IF NOT EXISTS ix_clasif_periodo ON clasificacion_liquidacion (periodo)",
     # migration 024 — mapeo de celdas por concepto (Panel Contable: PROPONER/CORREGIR/RECORDAR)
-    """CREATE TABLE IF NOT EXISTS mapeo_celda_concepto (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        concepto VARCHAR(255) NOT NULL,
-        hoja VARCHAR(120) NOT NULL,
-        celda VARCHAR(20) NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_mapeo_proyecto_concepto ON mapeo_celda_concepto (proyecto_id, concepto)",
     "CREATE INDEX IF NOT EXISTS ix_mapeo_proyecto ON mapeo_celda_concepto (proyecto_id)",
     # snapshot del ER recalculado por panel (releer celda al cambiar el mapeo)
@@ -981,14 +617,6 @@ _PENDING_DDLS = [
     "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS hoja VARCHAR(120)",
     "ALTER TABLE panel_contable_linea ADD COLUMN IF NOT EXISTS celda VARCHAR(20)",
     # Fase 2 — alias persistente de fuentes de ingreso (celda del ER → etiqueta)
-    """CREATE TABLE IF NOT EXISTS alias_fuente_ingreso (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
-        columna_origen VARCHAR(40) NOT NULL,
-        etiqueta VARCHAR(255) NOT NULL,
-        orden INTEGER NOT NULL DEFAULT 0,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_proyecto_columna ON alias_fuente_ingreso (proyecto_id, columna_origen)",
     "CREATE INDEX IF NOT EXISTS ix_alias_proyecto ON alias_fuente_ingreso (proyecto_id)",
     # ── Mandatos (pestaña Costos) ──────────────────────────────────────────
@@ -998,87 +626,17 @@ _PENDING_DDLS = [
             'firmado','enviado_inversionista','sin_inversionista'
         );
     EXCEPTION WHEN duplicate_object THEN null; END $$;""",
-    """CREATE TABLE IF NOT EXISTS mandato_inversionistas (
-        id BIGSERIAL PRIMARY KEY,
-        nombre VARCHAR(255) NOT NULL,
-        correos JSONB NOT NULL DEFAULT '[]'::jsonb,
-        proyectos JSONB NOT NULL DEFAULT '[]'::jsonb,
-        activo BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS mandatos (
-        id BIGSERIAL PRIMARY KEY,
-        cmu VARCHAR(20) NOT NULL,
-        periodo DATE NOT NULL,
-        proyecto VARCHAR(255),
-        tercero VARCHAR(255),
-        inversionista_id BIGINT REFERENCES mandato_inversionistas(id) ON DELETE SET NULL,
-        estado estado_mandato_costo_enum NOT NULL DEFAULT 'pendiente_envio',
-        observacion TEXT,
-        fecha_envio_revisoria DATE,
-        fecha_firmado DATE,
-        fecha_envio_inversionista DATE,
-        pdf_firmado_ruta VARCHAR(1000),
-        pdf_firmado_nombre VARCHAR(500),
-        correo_ref_revisoria VARCHAR(255),
-        correo_ref_envio VARCHAR(255),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_mandato_cmu_periodo ON mandatos (cmu, periodo)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mandato_cmu_periodo ON mandatos (cmu, periodo)",
     "CREATE INDEX IF NOT EXISTS ix_mandatos_cmu ON mandatos (cmu)",
     "CREATE INDEX IF NOT EXISTS ix_mandatos_periodo ON mandatos (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_mandatos_inversionista_id ON mandatos (inversionista_id)",
     "ALTER TABLE mandatos ADD COLUMN IF NOT EXISTS archivo_zip_nombre VARCHAR(500)",
-    """CREATE TABLE IF NOT EXISTS gmail_credenciales (
-        id BIGSERIAL PRIMARY KEY,
-        cuenta VARCHAR(255) NOT NULL UNIQUE,
-        refresh_token TEXT,
-        token_actualizado_en TIMESTAMPTZ,
-        ultimo_sync_en TIMESTAMPTZ,
-        estado VARCHAR(20) NOT NULL DEFAULT 'desconectado',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    """CREATE TABLE IF NOT EXISTS mandato_correos (
-        id BIGSERIAL PRIMARY KEY,
-        message_id VARCHAR(998) NOT NULL UNIQUE,
-        fecha TIMESTAMPTZ NOT NULL,
-        remitente VARCHAR(255) NOT NULL,
-        asunto VARCHAR(1000),
-        fuente VARCHAR(20) NOT NULL,
-        clasificacion VARCHAR(20) NOT NULL,
-        resultado VARCHAR(20) NOT NULL,
-        requiere_revision BOOLEAN NOT NULL DEFAULT FALSE,
-        detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
-        revertido BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
-    "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
+            "CREATE INDEX IF NOT EXISTS ix_mandato_correos_fecha ON mandato_correos (fecha)",
     "CREATE INDEX IF NOT EXISTS ix_mandato_correos_revision ON mandato_correos (requiere_revision)",
     # La tabla ya existe en producción, creada por Base.metadata.create_all().
     # Se declara acá por consistencia con el resto del esquema y para que un
     # ALTER TYPE sobre su enum (ver más abajo) tenga su tabla al lado. El
     # IF NOT EXISTS la vuelve un no-op donde ya está.
-    """CREATE TABLE IF NOT EXISTS finanzas_mandatos (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto VARCHAR(255) NOT NULL,
-        tercero VARCHAR(255) NOT NULL DEFAULT '',
-        periodo DATE NOT NULL,
-        tipo tipo_mandato_fin_enum NOT NULL,
-        cmu VARCHAR(20),
-        cmu_anterior VARCHAR(20),
-        estado estado_firma_fin_enum NOT NULL DEFAULT 'sin_firma',
-        comentario TEXT,
-        fecha_envio DATE,
-        fecha_firma DATE,
-        drive_file_id VARCHAR(255),
-        drive_url VARCHAR(1000),
-        correo_ref VARCHAR(500),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_finmandato_identidad ON finanzas_mandatos (proyecto, tercero, periodo, tipo)",
     "CREATE INDEX IF NOT EXISTS ix_finmandatos_periodo ON finanzas_mandatos (periodo)",
     "CREATE INDEX IF NOT EXISTS ix_finmandatos_cmu ON finanzas_mandatos (cmu)",
@@ -1090,36 +648,7 @@ _PENDING_DDLS = [
     # enviado_inversionista (ver upsert_mandato).
     "ALTER TABLE finanzas_mandatos ADD COLUMN IF NOT EXISTS fecha_envio_inversionista DATE",
     # Populate quoia_meter_id from FRONTERA_NODE_MAP (principal node per frontera)
-    "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 606  WHERE LOWER(codigo_frontera) = 'frt55093' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 845  WHERE LOWER(codigo_frontera) = 'frt58839' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 848  WHERE LOWER(codigo_frontera) = 'frt60629' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1022 WHERE LOWER(codigo_frontera) = 'frt63879' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1283 WHERE LOWER(codigo_frontera) = 'frt65205' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1459 WHERE LOWER(codigo_frontera) = 'frt66597' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 860  WHERE LOWER(codigo_frontera) = 'frt_olimpo14' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1481 WHERE LOWER(codigo_frontera) = 'frt67475' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1489 WHERE LOWER(codigo_frontera) = 'frt67496' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1514 WHERE LOWER(codigo_frontera) = 'frt68269' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1590 WHERE LOWER(codigo_frontera) = 'frt73414' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1584 WHERE LOWER(codigo_frontera) = 'frt74080' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1656 WHERE LOWER(codigo_frontera) = 'frt76578' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1654 WHERE LOWER(codigo_frontera) = 'frt76581' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1658 WHERE LOWER(codigo_frontera) = 'frt76586' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1664 WHERE LOWER(codigo_frontera) = 'frt82546' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1662 WHERE LOWER(codigo_frontera) = 'frt82576' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1692 WHERE LOWER(codigo_frontera) = 'frt82846' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1712 WHERE LOWER(codigo_frontera) = 'frt84587' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1660 WHERE LOWER(codigo_frontera) = 'frt86234' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1722 WHERE LOWER(codigo_frontera) = 'frt87017' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1724 WHERE LOWER(codigo_frontera) = 'frt87018' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1716 WHERE LOWER(codigo_frontera) = 'frt87336' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1719 WHERE LOWER(codigo_frontera) = 'frt89202' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1730 WHERE LOWER(codigo_frontera) = 'frt92219' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1739 WHERE LOWER(codigo_frontera) = 'frt92221' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1578 WHERE LOWER(codigo_frontera) = 'frt_reserva' AND quoia_meter_id IS NULL",
-    # ppa_compromisos_energia: plantas inscritas exigidas por mes (condición a cumplir; denominador del indicador de cumplimiento de plantas)
+                                                                                                                        # ppa_compromisos_energia: plantas inscritas exigidas por mes (condición a cumplir; denominador del indicador de cumplimiento de plantas)
     "ALTER TABLE ppa_compromisos_energia ADD COLUMN IF NOT EXISTS cantidad_proyectos INTEGER",
     # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.
     "ALTER TABLE ppa_compromisos_energia ALTER COLUMN cantidad_proyectos SET DEFAULT 0",
@@ -1152,15 +681,6 @@ _PENDING_DDLS = [
     "ALTER TABLE proyecto_inversores ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE proyecto_inversores ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE",
     # falla_inversores: inversores afectados por una falla (1 fila por inversor)
-    """CREATE TABLE IF NOT EXISTS falla_inversores (
-        id BIGSERIAL PRIMARY KEY,
-        falla_id BIGINT NOT NULL REFERENCES fallas(id),
-        proyecto_inversor_id BIGINT REFERENCES proyecto_inversores(id),
-        nombre VARCHAR(120),
-        potencia_kw NUMERIC(10,3),
-        tipos JSONB,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_falla ON falla_inversores (falla_id)",
     "CREATE INDEX IF NOT EXISTS ix_falla_inversores_inversor ON falla_inversores (proyecto_inversor_id)",
     # migration 031 — ID estable de Sun Factory en proyectos (Alembic roto: la
@@ -1192,26 +712,7 @@ _PENDING_DDLS = [
     # Vínculo Starlink ↔ minigranja (2026-07): mapeo editable sitio→proyecto y
     # líneas de factura resueltas por proyecto. Tablas nuevas (Alembic no es el
     # camino de deploy en este repo — ver nota de migration 031 arriba).
-    """CREATE TABLE IF NOT EXISTS starlink_mapeo_sitio (
-        id BIGSERIAL PRIMARY KEY,
-        patron VARCHAR(255) NOT NULL UNIQUE,
-        proyecto_id BIGINT REFERENCES proyectos(id),
-        activo BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ DEFAULT now(),
-        updated_at TIMESTAMPTZ DEFAULT now()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_starlink_mapeo_sitio_proyecto ON starlink_mapeo_sitio (proyecto_id)",
-    """CREATE TABLE IF NOT EXISTS starlink_factura_linea (
-        id BIGSERIAL PRIMARY KEY,
-        factura_id BIGINT NOT NULL REFERENCES starlink_facturas(id) ON DELETE CASCADE,
-        proyecto_id BIGINT REFERENCES proyectos(id),
-        descripcion VARCHAR(255) NOT NULL,
-        sin_iva NUMERIC(15,2) NOT NULL,
-        iva NUMERIC(15,2) NOT NULL,
-        monto_total NUMERIC(15,2) NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT now(),
-        updated_at TIMESTAMPTZ DEFAULT now()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_factura ON starlink_factura_linea (factura_id)",
     "CREATE INDEX IF NOT EXISTS ix_starlink_factura_linea_proyecto ON starlink_factura_linea (proyecto_id)",
     # Vínculo estructurado de operador de red también en proyectos (2026-07-10)
@@ -1294,6 +795,8 @@ _PENDING_DDLS = [
        FROM oportunidades p
        WHERE p.id = o.oportunidad_id AND o.estado IS NULL""",
     # Red de seguridad por si alguna oferta quedó huérfana del UPDATE anterior.
+    # OJO: este backfill y el siguiente tienen que correr ANTES de los
+    # ALTER COLUMN ... SET NOT NULL de oportunidad_ofertas. No los separes.
     "UPDATE oportunidad_ofertas SET estado = 'oportunidad' WHERE estado IS NULL",
     "UPDATE oportunidad_ofertas SET estado_desde = COALESCE(created_at, NOW()) WHERE estado_desde IS NULL",
     "ALTER TABLE oportunidad_ofertas ALTER COLUMN estado SET DEFAULT 'oportunidad'",
@@ -1479,28 +982,6 @@ _PENDING_DDLS = [
     # Informe de Puesta en Marcha / O&M (pestaña "Informe" en Costos Variables,
     # junto a Inicio de Operación). Alembic roto: se provisiona aquí.
     "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
-    """CREATE TABLE IF NOT EXISTS proyecto_informe_om (
-        id BIGSERIAL PRIMARY KEY,
-        proyecto_id BIGINT NOT NULL UNIQUE REFERENCES proyectos(id),
-        version VARCHAR(100),
-        elaborado_por VARCHAR(255),
-        actividad VARCHAR(255),
-        objetivo_alcance JSONB NOT NULL DEFAULT '{}'::jsonb,
-        datos_generales JSONB NOT NULL DEFAULT '{}'::jsonb,
-        arquitectura_comunicacion JSONB NOT NULL DEFAULT '{}'::jsonb,
-        equipos JSONB NOT NULL DEFAULT '[]'::jsonb,
-        variables_monitoreadas JSONB NOT NULL DEFAULT '[]'::jsonb,
-        configuracion_monitoreo JSONB NOT NULL DEFAULT '{}'::jsonb,
-        protocolo_pruebas JSONB NOT NULL DEFAULT '[]'::jsonb,
-        eventos_operativos JSONB NOT NULL DEFAULT '[]'::jsonb,
-        observaciones JSONB NOT NULL DEFAULT '{}'::jsonb,
-        recomendaciones JSONB NOT NULL DEFAULT '[]'::jsonb,
-        conclusion TEXT,
-        firmas JSONB NOT NULL DEFAULT '[]'::jsonb,
-        evidencia_arquitectura JSONB NOT NULL DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )""",
     "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
     # ── Columnas del modelo que Alembic no alcanzo a provisionar (2026-08-25) ──
     # Mismo caso que `sunfactory_project_id` mas arriba: `start.sh` corre
@@ -1609,6 +1090,79 @@ _PENDING_DDLS = [
         CONSTRAINT uq_gar_comp_pred UNIQUE (calculo_id, componente, horizonte_dias, cuantil, modelo_version)
     )""",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Datos de referencia que vivian dentro de _PENDING_DDLS disfrazados de DDL
+# (hallazgo F12 de esquema-bd-produccion/DEPURACION.md: sentencias que modifican
+# datos corriendo en cada arranque). Es el mapeo hardcodeado de codigo FRT -> id
+# de medidor en Quoia. Todas llevan guarda "AND quoia_meter_id IS NULL", asi que
+# una vez aplicadas no vuelven a tocar ninguna fila.
+#
+# Estan aca, y no en _PENDING_DDLS, por dos razones: no son esquema, y ninguna
+# sentencia de DDL depende de ellas.
+#
+# Lo que NO se movio, a proposito:
+#   - Los UPDATE de topico_liquidaciones: upstream los mantiene en _PENDING_DDLS
+#     y los amplio el 2026-08-25 (Cedillanos). Se respetan donde estan.
+#   - El UPDATE de asic_solicitudes.porcentaje_despacho, que tiene que correr
+#     ANTES de chk_porcentaje_despacho.
+#   - Los dos UPDATE de oportunidad_ofertas.estado / estado_desde, que tienen que
+#     correr ANTES de sus ALTER ... SET NOT NULL.
+#   Esos tres casos tienen un constraint colgando y el orden importa.
+#
+# Lo correcto a futuro es que este mapeo salga de la API de Quoia o de una tabla
+# de catalogo, no de una lista en el codigo.
+# Ver docs/refactor/06-plan-migracion.md, paso 0.3.
+# ---------------------------------------------------------------------------
+_BACKFILLS_REFERENCIA = [
+    "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 606  WHERE LOWER(codigo_frontera) = 'frt55093' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 845  WHERE LOWER(codigo_frontera) = 'frt58839' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 848  WHERE LOWER(codigo_frontera) = 'frt60629' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1022 WHERE LOWER(codigo_frontera) = 'frt63879' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1283 WHERE LOWER(codigo_frontera) = 'frt65205' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1459 WHERE LOWER(codigo_frontera) = 'frt66597' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 860  WHERE LOWER(codigo_frontera) = 'frt_olimpo14' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1481 WHERE LOWER(codigo_frontera) = 'frt67475' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1489 WHERE LOWER(codigo_frontera) = 'frt67496' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1514 WHERE LOWER(codigo_frontera) = 'frt68269' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1590 WHERE LOWER(codigo_frontera) = 'frt73414' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1584 WHERE LOWER(codigo_frontera) = 'frt74080' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1656 WHERE LOWER(codigo_frontera) = 'frt76578' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1654 WHERE LOWER(codigo_frontera) = 'frt76581' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1658 WHERE LOWER(codigo_frontera) = 'frt76586' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1664 WHERE LOWER(codigo_frontera) = 'frt82546' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1662 WHERE LOWER(codigo_frontera) = 'frt82576' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1692 WHERE LOWER(codigo_frontera) = 'frt82846' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1712 WHERE LOWER(codigo_frontera) = 'frt84587' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1660 WHERE LOWER(codigo_frontera) = 'frt86234' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1722 WHERE LOWER(codigo_frontera) = 'frt87017' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1724 WHERE LOWER(codigo_frontera) = 'frt87018' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1716 WHERE LOWER(codigo_frontera) = 'frt87336' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1719 WHERE LOWER(codigo_frontera) = 'frt89202' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1730 WHERE LOWER(codigo_frontera) = 'frt92219' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1739 WHERE LOWER(codigo_frontera) = 'frt92221' AND quoia_meter_id IS NULL",
+    "UPDATE fronteras SET quoia_meter_id = 1578 WHERE LOWER(codigo_frontera) = 'frt_reserva' AND quoia_meter_id IS NULL",
+]
+
+
+def _run_backfills_referencia() -> None:
+    """Aplica los backfills de datos de referencia. Idempotente por su WHERE."""
+    aplicados = 0
+    with engine.connect() as conn:
+        for stmt in _BACKFILLS_REFERENCIA:
+            try:
+                res = conn.execute(text(stmt))
+                conn.commit()
+                if res.rowcount and res.rowcount > 0:
+                    aplicados += res.rowcount
+            except Exception as e:
+                conn.rollback()
+                print(f"[startup backfill skipped] {e}")
+    if aplicados:
+        print(f"[startup] backfills_referencia: {aplicados} filas actualizadas")
 
 
 def _run_column_migrations() -> None:
@@ -3888,6 +3442,7 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
+        ("backfills_referencia", _run_backfills_referencia),
         ("comercial_dedup", _run_comercial_dedup),
         ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),

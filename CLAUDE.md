@@ -25,8 +25,18 @@ Si el segundo número no es 0, lo que estás leyendo no es lo que corre en produ
 **El working tree puede traer trabajo de otra persona.** Revisa `git status` y el
 conteo del diff antes de commitear, o desplegarás cambios ajenos.
 
-**Migraciones sin Alembic.** Columna nueva = `ALTER ... IF NOT EXISTS` en el
-`add_columns()` de `init_db.py`. Tabla nueva = modelo + `create_all`.
+**Alembic SI se usa, y corre ultimo.** Un solo head, y `start.sh` aplica
+`alembic upgrade head` en cada deploy. Lo que confunde es el orden: `create_all()` y las
+~518 sentencias de `_PENDING_DDLS` (`app/main.py`) corren **antes**, asi que pueden crear
+objetos que luego hagan fallar una revision — y como todo el `upgrade head` va en una
+transaccion, un `Duplicate*Error` hace rollback de **toda** la cadena. Por eso las
+migraciones se escriben con los helpers de `alembic_idempotencia.py`.
+
+**Donde va cada cambio.** Esquema (CREATE/ALTER/indice/constraint) = revision de Alembic.
+Datos (backfill, migracion de filas) = tarea `*_seed` idempotente en `_deferred_init`, nunca
+en Alembic: retrasaria el arranque y su fallo es silencioso. Tabla nueva = modelo +
+`create_all`; **no** agregues su `CREATE TABLE` a `_PENDING_DDLS` (habia 44 duplicadas asi y
+15 declaraban menos columnas que su modelo).
 
 **Producción no se escribe desde local.** El `.env` local no apunta a producción. La
 única vía es una tarea `*_seed` en `_deferred_init`, que corre dentro del contenedor.

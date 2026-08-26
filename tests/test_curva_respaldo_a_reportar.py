@@ -8,10 +8,11 @@ válido -- mala práctica reportando estimado teniendo el dato real (pedido
 
 Ahora se usa el dato real del medidor de respaldo cuando: curva_final vino
 del medidor principal (medidor_usado empieza con 'principal'), ambos
-medidores quedaron completos ese día, y el respaldo está a
-TOLERANCIA_RESPALDO_REAL_KWH (1.5 kWh, la peor de las 24 horas) o menos de
-diferencia -- umbral confirmado con el equipo de campo y contrastado contra
-el histórico real. Si no, sigue cayendo al ±1% de siempre.
+medidores quedaron completos ese día, y el TOTAL DIARIO de generación del
+respaldo está a TOLERANCIA_RESPALDO_REAL_KWH (1.5 kWh, arriba o abajo) o
+menos de diferencia del total de curva_final -- umbral confirmado con el
+equipo de campo y contrastado contra el histórico real (41/140 días
+pasan). Si no, sigue cayendo al ±1% de siempre.
 
 Matriz de medidor_usado verificada contra clasificador.py/
 clasificador_consumo.py/editar_curva (grep exhaustivo 2026-08-25): SOLO
@@ -50,32 +51,51 @@ def test_terceros_gana_siempre_sin_importar_medidor_usado():
 
 
 def test_medidor_respaldo_real_cuando_coincide_dentro_de_tolerancia():
-    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=[101.0] * 24)  # 1 kWh de diferencia
+    curva_resp = [100.0] * 23 + [101.0]  # total: +1 kWh
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "medidor"
-    assert curva == [101.0] * 24
+    assert curva == curva_resp
 
 
-def test_medidor_respaldo_en_el_limite_exacto_de_tolerancia_pasa():
-    dif = TOLERANCIA_RESPALDO_REAL_KWH
-    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=[100.0 + dif] * 24)
+def test_total_diario_en_el_limite_exacto_de_tolerancia_pasa():
+    # Total principal = 2400.0; total respaldo = 2400.0 + 1.5 exacto
+    curva_resp = [100.0] * 23 + [101.5]
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "medidor"
 
 
-def test_medidor_respaldo_fuera_de_tolerancia_cae_a_estimado():
-    dif = TOLERANCIA_RESPALDO_REAL_KWH + 0.01
-    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=[100.0 + dif] * 24)
+def test_total_diario_apenas_fuera_de_tolerancia_cae_a_estimado():
+    curva_resp = [100.0] * 23 + [101.51]  # total: +1.51 kWh
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "estimado"
     # Estimado ±1% sobre 100 -> entre 99 y 101
     assert all(99.0 <= v <= 101.0 for v in curva)
 
 
-def test_una_sola_hora_fuera_de_tolerancia_ya_descarta_el_dia_completo():
-    """max_dif es la PEOR de las 24 horas, no el total ni el promedio --
-    una sola hora mal ya es motivo para no confiar en el medidor ese día."""
-    curva_resp = [100.0] * 23 + [200.0]  # 1 hora con 100 kWh de diferencia
+def test_diferencia_por_debajo_tambien_cuenta_no_solo_por_arriba():
+    curva_resp = [100.0] * 23 + [98.4]  # total: -1.6 kWh, fuera de tolerancia
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
+    curva, origen = curva_respaldo_a_reportar(rep)
+    assert origen == "estimado"
+
+
+def test_horas_que_se_cancelan_entre_si_pasan_aunque_una_hora_diste_mucho():
+    """Es el TOTAL del día lo que se compara, no la peor hora -- una hora
+    con una desviación grande que se cancela con otra en sentido contrario
+    puede terminar dentro de tolerancia igual."""
+    curva_resp = [100.0] * 24
+    curva_resp[0] = 150.0   # +50 en una hora
+    curva_resp[1] = 50.0    # -50 en otra -- el total del día no cambia
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
+    curva, origen = curva_respaldo_a_reportar(rep)
+    assert origen == "medidor"
+
+
+def test_una_sola_hora_desviada_sin_cancelar_saca_el_total_de_tolerancia():
+    curva_resp = [100.0] * 23 + [200.0]  # 1 hora con 100 kWh de más, nada la cancela
     rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "estimado"
@@ -127,7 +147,8 @@ def test_objeto_tipo_consumo_sin_los_campos_nuevos_no_revienta():
 
 
 def test_actualizar_respaldo_final_persiste_en_el_objeto():
-    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=[100.5] * 24)
+    curva_resp = [100.0] * 23 + [100.5]  # total: +0.5 kWh
+    rep = _rep(curva_final=[100.0] * 24, curva_medidor_respaldo=curva_resp)
     actualizar_respaldo_final(rep)
     assert rep.respaldo_final_origen == "medidor"
-    assert rep.curva_respaldo_final == [100.5] * 24
+    assert rep.curva_respaldo_final == curva_resp

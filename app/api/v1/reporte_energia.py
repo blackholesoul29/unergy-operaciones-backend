@@ -695,8 +695,18 @@ def editar_curva(
     # recalcular acá lo que se va a reportar como Backup, para que quede
     # congelado con la corrección y no con el resultado del clasificador
     # automático original (mismo motivo que curva_medidor_principal arriba).
+    # Si la persona llenó la columna de Respaldo a mano en la tabla de
+    # corrección, eso manda tal cual (origen 'manual') -- no se recalcula
+    # con curva_respaldo_a_reportar().
     if Modelo is ReporteEnergiaGeneracion:
-        actualizar_respaldo_final(rep)
+        if body.curva_respaldo_final is not None:
+            if len(body.curva_respaldo_final) != 24:
+                raise HTTPException(422, "curva_respaldo_final debe tener 24 valores")
+            curva_resp = lista_a_curva(body.curva_respaldo_final)
+            rep.curva_respaldo_final = curva_a_lista(curva_resp)
+            rep.respaldo_final_origen = "manual"
+        else:
+            actualizar_respaldo_final(rep)
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.

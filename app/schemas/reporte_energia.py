@@ -102,7 +102,9 @@ class DetalleFronteraReporte(BaseModel):
     # Lo que /enviar realmente manda como "Backup" a Quoia -- mismo cálculo
     # que curva_respaldo_a_reportar() (utils.py), para que esto se vea ANTES
     # de enviar, no solo después. origen: 'terceros' | 'medidor' (dato real
-    # del medidor de respaldo) | 'estimado' (fórmula ±1%). Solo Generación.
+    # del medidor de respaldo, auto-detectado) | 'manual' (columna Respaldo
+    # de la tabla de corrección, confirmada a mano) | 'estimado' (±1%).
+    # Solo Generación.
     curva_respaldo_reportada: list[float | None] | None = None
     respaldo_reportado_origen: str | None = None
     # Capacidad efectiva de la frontera (MW) -- referencia visual en el chart
@@ -118,6 +120,14 @@ class EditarCurvaRequest(BaseModel):
     # en vez de un genérico "editado manualmente". None si la persona editó
     # celdas a mano sin pasar por ese desplegable.
     fuente: str | None = None
+    # Respaldo confirmado a mano (columna nueva de la tabla de corrección,
+    # solo Generación) -- si viene, se guarda tal cual como dato real
+    # ('manual'), sin pasar por curva_respaldo_a_reportar(). None (no solo
+    # todo-en-null) significa "la persona no tocó esta columna": se recalcula
+    # con la lógica automática de siempre (real del medidor si aplica, si no
+    # ±1%). Distinto de "24 valores en null", que SÍ es una confirmación
+    # explícita (sin dato real de respaldo para reportar).
+    curva_respaldo_final: list[float | None] | None = None
 
 
 class ValidarResponse(BaseModel):

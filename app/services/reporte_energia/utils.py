@@ -13,8 +13,9 @@ HORAS = list(range(24))
 # completos y curva_final del medidor principal, el respaldo o coincide casi
 # exacto (58% de los días con <=0.5% de error total) o está claramente mal
 # (26% con >90% de error, medidor desconectado/descalibrado) -- casi no hay
-# término medio. 1.5 kWh de diferencia máxima POR HORA (no el total del día)
-# es el rango que confirmó el equipo de campo.
+# término medio. 1.5 kWh de diferencia en el TOTAL DIARIO de generación
+# (arriba o abajo, no por hora) es el rango que confirmó el equipo de campo
+# -- 41/140 días del histórico pasan este criterio.
 TOLERANCIA_RESPALDO_REAL_KWH = 1.5
 
 # Ventanas horarias para el relleno horario centralizado (ver
@@ -114,10 +115,10 @@ def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
        real que trae el Excel del tercero, tal cual (sin cambios).
     2. curva_medidor_respaldo -- SOLO si curva_final vino del medidor
        principal (medidor_usado empieza con 'principal'), ambos medidores
-       quedaron completos ese día, y el respaldo está a
-       TOLERANCIA_RESPALDO_REAL_KWH o menos de diferencia (la peor de las
-       24 horas) de lo que se va a reportar como Principal. Si se aleja
-       más, no se usa -- no es dato confiable (medidor descalibrado o
+       quedaron completos ese día, y el TOTAL DIARIO de generación del
+       respaldo está a TOLERANCIA_RESPALDO_REAL_KWH o menos de diferencia
+       (arriba o abajo) del que se va a reportar como Principal. Si se
+       aleja más, no se usa -- no es dato confiable (medidor descalibrado o
        desconectado), se cae al paso 3 igual que siempre.
     3. Estimación ±1% sobre curva_final (comportamiento de siempre, único
        camino disponible para Consumo -- no tiene medidor_*_completo ni
@@ -141,8 +142,8 @@ def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
         and curva_medidor_respaldo
     ):
         respaldo_medidor = [float(v) if v is not None else 0.0 for v in curva_medidor_respaldo]
-        max_dif = max(abs(a - b) for a, b in zip(principal_readings, respaldo_medidor))
-        if max_dif <= TOLERANCIA_RESPALDO_REAL_KWH:
+        dif_total = abs(sum(respaldo_medidor) - sum(principal_readings))
+        if dif_total <= TOLERANCIA_RESPALDO_REAL_KWH:
             return respaldo_medidor, "medidor"
 
     estimado = [round(v * (1 + random.uniform(-0.01, 0.01)), 4) for v in principal_readings]

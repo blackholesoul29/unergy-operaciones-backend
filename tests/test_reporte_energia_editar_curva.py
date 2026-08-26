@@ -100,3 +100,47 @@ def test_fuente_no_medidor_no_toca_los_snapshots(db):
 
     assert detalle.curva_medidor_principal == viejo_principal
     assert detalle.medidor_usado == "inversores"
+
+
+def test_sin_columna_respaldo_llena_sigue_la_logica_automatica(db):
+    """Si la persona no toca la columna de Respaldo (queda None, no una
+    lista de 24 nulos), se recalcula con curva_respaldo_a_reportar() --
+    mismo comportamiento de siempre."""
+    principal_nuevo = [100.0] * 24
+    respaldo_cercano = [100.0] * 23 + [101.0]  # +1 kWh de diferencia total
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=[999.0] * 24, curva_medidor_respaldo=respaldo_cercano, curva_final=[999.0] * 24)
+    rep = db.get(ReporteEnergiaGeneracion, 1)
+    rep.medidor_principal_completo = True
+    rep.medidor_respaldo_completo = True
+    db.commit()
+
+    body = EditarCurvaRequest(curva_final=principal_nuevo, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.respaldo_reportado_origen == "medidor"
+    assert detalle.curva_respaldo_reportada == respaldo_cercano
+
+
+def test_columna_respaldo_llena_a_mano_manda_tal_cual_como_manual(db):
+    """La persona confirma un respaldo a mano en la tabla, aunque esté MUY
+    lejos del principal (fuera de la tolerancia de 1.5 kWh que usa la
+    detección automática) -- se guarda igual, es una confirmación explícita."""
+    principal_nuevo = [100.0] * 24
+    respaldo_a_mano = [80.0] * 24  # 480 kWh de diferencia total -- no pasaría el chequeo automático
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=[999.0] * 24, curva_medidor_respaldo=[999.0] * 24, curva_final=[999.0] * 24)
+
+    body = EditarCurvaRequest(curva_final=principal_nuevo, fuente="principal", curva_respaldo_final=respaldo_a_mano)
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.respaldo_reportado_origen == "manual"
+    assert detalle.curva_respaldo_reportada == respaldo_a_mano
+
+
+def test_columna_respaldo_con_menos_de_24_valores_se_rechaza(db):
+    from fastapi import HTTPException
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=[100.0] * 24, curva_medidor_respaldo=[100.0] * 24, curva_final=[100.0] * 24)
+
+    body = EditarCurvaRequest(curva_final=[100.0] * 24, fuente="principal", curva_respaldo_final=[1.0, 2.0, 3.0])
+    with pytest.raises(HTTPException) as exc:
+        re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+    assert exc.value.status_code == 422

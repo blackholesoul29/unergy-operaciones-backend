@@ -677,6 +677,15 @@ Representación). Por eso los tipos de este módulo se llaman `gargm_*` y no `cg
 | `GARANTIA TXR` | 11 | 2025-10-08 → 2026-08-11 | — |
 | `WEB_GARANTIES` (TIE) | 89 | 2025-01-07 → 2026-03 | — |
 
+**`Finance/FAZNI/` evaluado y descartado (2026-08-26).** 50 archivos, jul-2023 →
+ago-2026. `FAZNI` es el *Fondo Apoyo Zonas No Interconectadas*, y el valor mediano de
+Unergy es **84.708 COP: el 0,23%** del componente `Servicios CND-SIC-FAZNI`, que vale
+37,6M. El nombre del componente son tres cosas (CND + SIC + FAZNI) y esta carpeta trae
+solo la más chica; encima suele compensarse contra `Menos Valor Prepago Garantías` y dar
+cero. **No se ingiere:** el agregado por persistencia lo cubre con error menor al 5% de
+σ(Exposición), y perseguir el 0,23% no mueve la aguja. Su valor real fue revelar el
+encoding UTF-16LE.
+
 La muestra semanal pasa de 22 a **83 vencimientos: 3,8×**. Con 22 observaciones un P90
 bien calibrado falla ~2 veces y el ruido impide distinguir un modelo mal calibrado de
 mala suerte; con 83 la cobertura empieza a ser medible. El mensual pasa de ~8 a 18.
@@ -740,6 +749,10 @@ significa no enterarse de los otros 722; procesar todo y fallar al final cumple 
 ### 6.3 Notas de parseo ya descubiertas
 
 - Encoding: `utf-8-sig` con fallback a `latin1`. Separador `;`. CRLF.
+- **Hay una tercera codificación: UTF-16LE sin BOM.** Los archivos de `Finance/FAZNI/`
+  vienen así. Leídos como `latin1` **no fallan**: devuelven `U N E …`, texto
+  basura sin lanzar error. La detección correcta es, en orden: BOM → dos bytes nulos
+  alternados (UTF-16LE) → `utf-8-sig` → `latin1`.
 - Nombres FTP: `{tipo}MMDD.{ext}` diarios, `{tipo}MM.{ext}` mensuales.
 - `BalCttos` llega con extensión `.txf`, en formato horario ancho.
 - `dspcttos` es por **contrato bilateral**, no por planta:

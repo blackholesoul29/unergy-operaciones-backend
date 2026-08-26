@@ -46,17 +46,20 @@ def _stub_comunes(monkeypatch, llamadas: list):
     monkeypatch.setattr(rc_api.svc, "resolver_borders",
                          lambda gaia, codes: {c.lower(): {"id": 1, "category": 1, "name": "X"} for c in codes})
 
-    def _fake_fetch_filas(gaia, frt_code, meta, dia):
-        llamadas.append((frt_code, dia))
-        fila = {
-            "report date": dia, "border frtcode": frt_code, "border sic code": "X",
-            "border category": "cat", "meter": "main", "state": "Exitoso",
-            "total reported energy": 0.0,
-        }
-        fila.update({f"hour {h}": 0.0 for h in range(24)})
-        return [fila]
+    def _fake_fetch_filas_rango(gaia, frt_code, meta, dias_str):
+        filas = []
+        for dia in dias_str:
+            llamadas.append((frt_code, dia))
+            fila = {
+                "report date": dia, "border frtcode": frt_code, "border sic code": "X",
+                "border category": "cat", "meter": "main", "state": "Exitoso",
+                "total reported energy": 0.0,
+            }
+            fila.update({f"hour {h}": 0.0 for h in range(24)})
+            filas.append(fila)
+        return filas
 
-    monkeypatch.setattr(rc_api.svc, "fetch_filas", _fake_fetch_filas)
+    monkeypatch.setattr(rc_api.svc, "fetch_filas_rango", _fake_fetch_filas_rango)
     monkeypatch.setattr(rc_api.svc, "generar_excel", lambda filas, **kw: b"xlsx")
     monkeypatch.setattr(rc_api.svc, "generar_excel_cliente", lambda *a, **kw: b"xlsx")
     monkeypatch.setattr(rc_api.svc, "calcular_resumen_diario", lambda gaia, proyectos, filas_por_frt, dia: [])

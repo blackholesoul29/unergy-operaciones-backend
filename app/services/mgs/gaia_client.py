@@ -442,20 +442,44 @@ class GaiaClient:
         cliente). Pensada para distinguir "Quoia dice que no hay reporte"
         (fallo=False) de "no se pudo preguntar" (fallo=True) sin la carrera
         de la bandera compartida."""
+        encontrados, fallo = self.get_border_reports_status_con_estado(border_id, {date_str})
+        return encontrados.get(date_str), fallo
+
+    def get_border_reports_status_con_estado(
+        self, border_id: int, date_strs: set[str],
+    ) -> tuple[dict[str, dict], bool]:
+        """Igual que get_border_report_status_con_estado(), pero para VARIAS
+        fechas del mismo border en una sola pasada paginada -- evita una
+        llamada HTTP por cada (frontera, día) cuando se piden varios días de
+        la misma frontera (ej. reporte mensual de Cliente, hasta 31 llamadas
+        por frontera antes -- todas leyendo básicamente las mismas páginas,
+        ya que /report_/historic/ trae 100 reportes por página, "más
+        reciente primero" -- auditoría CGM 2026-08-26, finding #4).
+
+        Retorna ({fecha: reporte} solo las encontradas, fallo) -- una fecha
+        ausente del dict significa "sin reporte esa fecha", no error; fallo
+        solo es True si una llamada de red real falló antes de terminar de
+        recorrer las páginas necesarias."""
         url = f"{self._base}/api/cgm/v1/report_/historic/{border_id}/"
         params: dict | None = {"page_size": 100}
+        pendientes = set(date_strs)
+        encontrados: dict[str, dict] = {}
         for _ in range(30):
+            if not pendientes:
+                break
             data, fallo = self._get_con_estado(url, params=params)
             if not isinstance(data, dict):
-                return None, fallo
+                return encontrados, fallo
             for reporte in data.get("results", []):
-                if reporte.get("report_date") == date_str:
-                    return reporte, False
+                rd = reporte.get("report_date")
+                if rd in pendientes:
+                    encontrados[rd] = reporte
+                    pendientes.discard(rd)
             nxt = data.get("next")
             if not nxt:
-                return None, False
+                break
             url, params = nxt, None
-        return None, False
+        return encontrados, False
 
     def get_all_borders(self) -> list[dict]:
         """Fetch all borders registered in Quoia (paginated). Returns flat list of project dicts.

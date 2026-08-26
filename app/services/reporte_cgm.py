@@ -87,24 +87,15 @@ def resolver_borders(gaia: GaiaClient, frt_codes: set[str]) -> dict[str, dict]:
     return resultado
 
 
-def fetch_filas(gaia: GaiaClient, frt_code: str, border_meta: dict | None, fecha_str: str) -> list[dict]:
-    """Filas main/backup (24h + total) para una frontera. border_meta viene de
-    resolver_borders(); si es None (frt_code no encontrado en Quoia hoy),
-    retorna filas en cero con estado "Sin reporte".
-
-    Si la consulta a Quoia falló de verdad (red/timeout/auth -- no que Quoia
-    dijera "no hay reporte para esa fecha"), el estado queda en "Error de
-    conexión con Quoia" en vez de "Sin reporte" -- antes ambos casos eran
-    indistinguibles y este reporte sale hacia clientes/ASIC sin ninguna
-    señal de que hubo una falla transitoria (ver auditoría 2026-08-26). Usa
-    get_border_report_status_con_estado() (no self.gaia.ultima_llamada_fallo,
-    inseguro cuando varias llamadas corren en paralelo sobre el mismo
-    cliente -- ver el ThreadPoolExecutor en reporte_cgm.py:api)."""
+def _filas_desde_reporte(
+    frt_code: str, border_meta: dict | None, fecha_str: str, reporte: dict | None, fallo: bool,
+) -> list[dict]:
+    """Arma las 2 filas (main/backup) para una frontera+fecha a partir de un
+    reporte ya resuelto (o None) -- núcleo compartido de fetch_filas() y
+    fetch_filas_rango()."""
     nombre = border_meta.get("name", "") if border_meta else ""
     categoria = CATEGORIA.get(border_meta.get("category") if border_meta else None, "Frontera de generación")
-    border_id = border_meta.get("id") if border_meta else None
 
-    reporte, fallo = gaia.get_border_report_status_con_estado(border_id, fecha_str) if border_id else (None, False)
     if reporte:
         estado = ESTADO_QUOIA.get(str(reporte.get("status", "")).upper(), "Sin reporte")
         main_curva = reporte.get("reported_data_main") or [0.0] * 24
@@ -128,6 +119,55 @@ def fetch_filas(gaia: GaiaClient, frt_code: str, border_meta: dict | None, fecha
             fila[f"hour {h}"] = round(float(curva[h]), 3) if h < len(curva) else 0.0
         fila["total reported energy"] = round(sum(float(v) for v in curva), 3)
         filas.append(fila)
+    return filas
+
+
+def fetch_filas(gaia: GaiaClient, frt_code: str, border_meta: dict | None, fecha_str: str) -> list[dict]:
+    """Filas main/backup (24h + total) para una frontera, UN día. border_meta
+    viene de resolver_borders(); si es None (frt_code no encontrado en Quoia
+    hoy), retorna filas en cero con estado "Sin reporte".
+
+    Si la consulta a Quoia falló de verdad (red/timeout/auth -- no que Quoia
+    dijera "no hay reporte para esa fecha"), el estado queda en "Error de
+    conexión con Quoia" en vez de "Sin reporte" -- antes ambos casos eran
+    indistinguibles y este reporte sale hacia clientes/ASIC sin ninguna
+    señal de que hubo una falla transitoria (ver auditoría 2026-08-26). Usa
+    get_border_report_status_con_estado() (no self.gaia.ultima_llamada_fallo,
+    inseguro cuando varias llamadas corren en paralelo sobre el mismo
+    cliente -- ver el ThreadPoolExecutor en reporte_cgm.py:api).
+
+    Para varios días de la MISMA frontera (ej. reporte mensual), usar
+    fetch_filas_rango() en vez de llamar a esta función una vez por día --
+    esa evita repaginar por Quoia para cada fecha (finding #4)."""
+    border_id = border_meta.get("id") if border_meta else None
+    reporte, fallo = gaia.get_border_report_status_con_estado(border_id, fecha_str) if border_id else (None, False)
+    return _filas_desde_reporte(frt_code, border_meta, fecha_str, reporte, fallo)
+
+
+def fetch_filas_rango(
+    gaia: GaiaClient, frt_code: str, border_meta: dict | None, fecha_strs: list[str],
+) -> list[dict]:
+    """Igual que fetch_filas(), pero para VARIOS días de la misma frontera en
+    una sola pasada paginada a Quoia (get_border_reports_status_con_estado)
+    en vez de una llamada HTTP por día -- antes, pedir un mes completo de
+    una frontera disparaba hasta 31 llamadas que en la práctica repaginaban
+    básicamente lo mismo (el endpoint trae 100 reportes por página, "más
+    reciente primero"). Auditoría CGM 2026-08-26, finding #4."""
+    border_id = border_meta.get("id") if border_meta else None
+    if not border_id:
+        encontrados: dict[str, dict] = {}
+        fallo_general = False
+    else:
+        encontrados, fallo_general = gaia.get_border_reports_status_con_estado(border_id, set(fecha_strs))
+
+    filas: list[dict] = []
+    for fecha_str in fecha_strs:
+        reporte = encontrados.get(fecha_str)
+        # fallo_general solo aplica a las fechas que quedaron sin resolver --
+        # si Quoia respondió antes de fallar, las que sí se encontraron no
+        # deben marcarse como error de conexión.
+        fallo = fallo_general and reporte is None
+        filas.extend(_filas_desde_reporte(frt_code, border_meta, fecha_str, reporte, fallo))
     return filas
 
 

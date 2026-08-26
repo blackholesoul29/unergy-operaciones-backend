@@ -159,6 +159,11 @@ agregado por persistencia. La varianza está en un solo lugar.
 - Alerta de frescura sobre la ingesta diaria de generación: si el dato más reciente
   tiene más de 1 día, el margen de la anticipación mensual está en riesgo y hay que
   avisarlo antes de que el número salga mal.
+- **Cron de descarga FTP**, con credenciales en variables de entorno de Railway. Estaba
+  fuera de alcance y se corrigió: de los cuatro insumos del día 14, tres exigen hoy
+  acción manual (despachos, `trsd`, `arrpas`), y eso es incompatible con un margen de 0
+  días. El objetivo es que **nadie tenga que subir nada**. El downloader ya existe y
+  funciona; lo que falta es persistir las credenciales, que hoy se teclean en cada uso.
 
 ### Fuera
 
@@ -167,8 +172,8 @@ agregado por persistencia. La varianza está en un solo lugar.
 | Garantía TIE | Proyecta hacia adelante mientras la nacional ajusta hacia atrás. Se reparte por participación en compras en bolsa y usa TRM del día. Lógica aparte, spec aparte. |
 | Los otros 19 componentes en detalle | Entran como agregado por persistencia. Se refinan cuando el backtest muestre que su error es material. |
 | Cualquier modelo de ML | Fase 3 del brief, contingente a que la vía determinística + residual deje error material. |
-| Cron automático de **descarga FTP** | Se deja el enganche y las variables de entorno documentadas; en este spec la carga de archivos XM es manual. **No confundir** con la ingesta diaria de generación, que sí es requisito y ya existe (ver §1). |
 | Saldo de cuenta custodia / "efectivo a conseguir" | Retirado del alcance por la adenda corregida del 2026-08-25. |
+| Pronóstico de precio de mercado | El sistema predice qué cobrará XM, no qué hará el mercado. XM proyecta con los 3 últimos meses facturados; acertarle al precio real nos alejaría de su número (§8.2.1). |
 
 ---
 
@@ -700,6 +705,7 @@ componer en vez de reportarse por separado:
 | **Liquidación** — qué dirá TX2 sobre días ya ocurridos | Cuantiles empíricos del residual | Cuando XM publica (día 7) |
 | **Ventana base** — cierra entre 5 y 16 días antes del cálculo, sin patrón | Calcular sobre todas las ventanas candidatas; la dispersión entre ellas es el aporte | Cuando aparece el `PERIODO BASE` observado |
 | **Días sin liquidar al final de la ventana** | Se cubren con generación **medida** de la API de Unergy, no con proyección | Cuando XM liquida esos días |
+| **Precio en períodos proyectados** (§8.2.1) | Error de replicar la metodología de XM, calibrado sobre la diferencia histórica entre lo que XM proyectó y lo que terminó liquidando | Cuando el período pasa a estar liquidado |
 
 La tercera es la que justifica el requisito de ingesta diaria: si el dato medido llega
 tarde, esos días no se pueden cubrir con medición y hay que proyectarlos, lo que
@@ -709,6 +715,46 @@ ensancha el intervalo justo en el momento en que más importa que sea angosto.
 aporta cada fuente. Es lo que dice dónde invertir el siguiente esfuerzo — si el 80% del
 ancho viene de ventanas candidatas, conseguir los `PERIODO BASE` históricos vale más que
 cualquier refinamiento del modelo de residual.
+
+#### 8.2.1 Períodos proyectados: replicar a XM, no pronosticar el mercado
+
+El precio de bolsa se mueve con violencia. Medido sobre los 539 días de `trsd` en
+`.tx2`, el promedio mensual va de **111 $/kWh (jun-2025) a 786 $/kWh (jul-2026)** — un
+factor de 7 — con saltos mes a mes de hasta **+87%**:
+
+| Mes | $/kWh | vs. anterior |
+|---|---|---|
+| 2026-04 | 275,04 | +25,9% |
+| 2026-05 | 514,06 | **+86,9%** |
+| 2026-06 | 531,74 | +3,4% |
+| 2026-07 | **786,12** | **+47,8%** |
+
+Eso importa distinto según el período:
+
+- **Ventana ya cerrada** (`estimado`): el precio de esos días **ya se formó y XM ya lo
+  publicó** en `trsd`. No hay incertidumbre de precio. Solo falta la liquidación.
+- **Períodos proyectados** (`AJUSTE PROY`, `AJUSTE M+1`, garantía mensual del mes
+  siguiente, estado `preliminar`): el precio es futuro.
+
+**Para los proyectados no se pronostica el mercado.** El sistema predice *qué va a
+cobrar XM*, y XM tampoco pronostica: su metodología, declarada en el propio archivo de
+Insumos Preliminares, es *"variables proyectadas con los 3 últimos meses facturados"*.
+XM proyecta mirando hacia atrás.
+
+Acertarle al precio real nos **alejaría** del número de XM. Lo correcto es replicar su
+método y usar su propia proyección como ancla: los bloques *Proyección 3 meses* y
+*Proyección 1 mes* de los Insumos Preliminares.
+
+**Disponibilidad al día 14.** Los Insumos Preliminares semanales se publican casi
+siempre miércoles o jueves, así que el de *nuestro* cálculo todavía no existe el día 14.
+Sí existe el de la semana anterior. Como la base son 3 meses facturados, ese número se
+mueve lento y sirve de ancla; la diferencia entre versiones consecutivas se calibra y
+alimenta el intervalo.
+
+**Consecuencia aprovechable.** Cuando un salto como el de julio (+47,8%) entre a la
+ventana de 3 meses de XM, sus proyecciones darán un escalón. Nosotros ya sabemos que el
+salto ocurrió, así que podemos anticipar ese escalón antes de que la proyección de XM lo
+incorpore.
 
 ### 8.3 El piso en cero se resuelve por monotonía
 
@@ -932,6 +978,7 @@ resultados que **se ven bien y son falsos**.
 | 16 | Correlación entre semanas | Si la correlación es cercana a 1, el P90 del horizonte converge a la suma de P90 y la brecha se anula: juntar el pozo no libera capital. Es un resultado posible y se reporta como tal, no se esconde. Medible en el primer backtest. |
 | 17 | Precio de bolsa desde fuentes inadecuadas | `precio_bolsa_mensual` es un valor por mes y `precios_bolsa_diario` es promedio simple de un proveedor externo (EVO). Ninguna sirve: el precio cambia semana a semana y debe ser ponderado y de XM. Se usa `PBNA` horario de `trsd`, con el portal público de XM para los huecos. Riesgo si alguien conecta por comodidad las tablas existentes. |
 | 18 | `despacho_contrato_dia` no está versionada | Se llena con delete+insert por período. Usarla en la réplica auditable rompería el anti-leakage sin fallar visiblemente. Solo se usa en el estimador del día 14, a granularidad diaria. |
+| 19 | Meses de salto de precio | La réplica de la metodología de XM tiene su mayor error justo cuando el precio salta, porque es cuando más difieren lo que XM proyectó y lo que ocurrió. El intervalo debe ensancharse en esos meses, no mantenerse. Detectable: el salto se conoce antes que el escalón en la proyección de XM. |
 
 ---
 

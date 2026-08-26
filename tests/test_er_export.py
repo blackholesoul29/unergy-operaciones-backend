@@ -1,11 +1,8 @@
-"""El ER que generamos nosotros, en Excel.
+"""El ER que recibe el inversionista.
 
-Conserva la estructura del que usan hoy (ejemplo: QUANTUM ENERGY · GRANJA SOLAR
-SAN AGUSTIN 7 2026): tabla diaria arriba con la columna de Importación, los tres
-bloques de totales, y el detalle del partícipe a la derecha.
-
-Con los valores ya calculados -- no fórmulas sin evaluar, que es el defecto del
-archivo de la API y la razón por la que hoy hace falta LibreOffice.
+Es un entregable, no un volcado: va con fórmulas vivas para que se pueda auditar,
+sin cuadrícula, con la marca, y con el resumen arriba -- que es lo que se mira
+primero.
 """
 import io
 import types
@@ -27,7 +24,7 @@ PANEL = types.SimpleNamespace(
         _linea("ingresos", "Venta en bolsa", 118_673_860.5),
         _linea("comercializacion", "Energía en Bolsa (Gen)", -603_083.64),
         _linea("comercializacion", "Arranque y parada", -171_129.13),
-        _linea("costos", "Cobro OPEX: Representación", -1_011_610.02),
+        _linea("costos", "Servicio de Internet", -64_706.31),
         _linea("facturas", "CGM", -1_011_610.02),
     ],
 )
@@ -40,84 +37,131 @@ DIARIO = [
 ]
 
 
+def _hoja(contenido):
+    return load_workbook(io.BytesIO(contenido)).active
+
+
 def _celdas(contenido):
-    wb = load_workbook(io.BytesIO(contenido), data_only=True)
-    return [c.value for fila in wb.active.iter_rows() for c in fila]
+    return [c.value for f in _hoja(contenido).iter_rows() for c in f]
 
 
-# ── Tabla diaria ─────────────────────────────────────────────────────────────
+# ── Es un entregable, no un volcado ──────────────────────────────────────────
+
+def test_no_muestra_la_cuadricula():
+    """Una cuadrícula de fondo hace que parezca una hoja de trabajo."""
+    assert _hoja(generar_er_xlsx(PANEL, "X", DIARIO)).sheet_view.showGridLines is False
+
+
+def test_lleva_el_titulo_y_el_proyecto():
+    valores = _celdas(generar_er_xlsx(PANEL, "GD Agustín 3", DIARIO))
+    assert "ESTADO DE RESULTADOS" in valores
+    assert "GD Agustín 3" in valores
+    assert any(isinstance(v, str) and "2026-07" in v for v in valores)
+
+
+def test_el_resumen_va_arriba_del_detalle():
+    """Es lo que mira el inversionista primero."""
+    hoja = _hoja(generar_er_xlsx(PANEL, "X", DIARIO))
+    pos = {}
+    for f in hoja.iter_rows():
+        for c in f:
+            if c.value in ("RESUMEN DEL PERÍODO", "INGRESOS", "DETALLE DIARIO"):
+                pos.setdefault(c.value, c.row)
+    assert pos["RESUMEN DEL PERÍODO"] < pos["INGRESOS"] < pos["DETALLE DIARIO"]
+
+
+def test_el_resumen_trae_utilidad_y_tarifa():
+    valores = _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+    for etiqueta in ("Energía generada", "Ingresos brutos", "UTILIDAD DEL PERÍODO",
+                     "Tarifa neta"):
+        assert etiqueta in valores, etiqueta
+
+
+# ── Fórmulas vivas ───────────────────────────────────────────────────────────
+
+def test_los_totales_son_formulas_no_valores():
+    """Pegar el número impide auditar de dónde sale."""
+    formulas = [v for v in _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+                if isinstance(v, str) and v.startswith("=")]
+    assert any(f.startswith("=SUM(") for f in formulas)
+
+
+def test_las_funciones_van_en_ingles_para_verse_en_espanol():
+    """Un .xlsx guarda las funciones SIEMPRE en inglés y Excel las localiza:
+    escribir SUMA daría #¿NOMBRE? en cualquier idioma."""
+    formulas = [v for v in _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+                if isinstance(v, str) and v.startswith("=")]
+    assert not any("SUMA(" in f for f in formulas)
+
+
+def test_la_utilidad_suma_las_lineas_del_resumen():
+    formulas = [v for v in _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+                if isinstance(v, str) and v.startswith("=SUM(D")]
+    assert formulas, "la utilidad debe salir de sumar el resumen"
+
+
+def test_la_tarifa_no_divide_por_cero():
+    """Sin energía, la fórmula tiene que protegerse sola dentro del Excel."""
+    formulas = [v for v in _celdas(generar_er_xlsx(PANEL, "X", diario=[]))
+                if isinstance(v, str) and v.startswith("=IF(")]
+    assert formulas, "la tarifa debe llevar guarda de división por cero"
+
+
+def test_el_total_diario_es_formula():
+    hoja = _hoja(generar_er_xlsx(PANEL, "X", DIARIO))
+    fs = [c.value for f in hoja.iter_rows() for c in f
+          if isinstance(c.value, str) and c.value.startswith("=SUM(C")]
+    assert fs
+
+
+# ── Formato ──────────────────────────────────────────────────────────────────
+
+def test_la_participacion_va_en_porcentaje():
+    """El 1.0 crudo se leía como "1", no como 100%."""
+    hoja = _hoja(generar_er_xlsx(PANEL, "X", DIARIO, inversionista="QUANTUM ENERGY S.A.S"))
+    pcts = [c for f in hoja.iter_rows() for c in f if c.number_format == "0.0%"]
+    assert pcts and pcts[0].value == 1.0
+
+
+def test_los_valores_van_en_moneda():
+    hoja = _hoja(generar_er_xlsx(PANEL, "X", DIARIO))
+    assert any('"$"' in (c.number_format or "") for f in hoja.iter_rows() for c in f)
+
+
+def test_la_energia_lleva_su_unidad():
+    hoja = _hoja(generar_er_xlsx(PANEL, "X", DIARIO))
+    assert any("kWh" in (c.number_format or "") for f in hoja.iter_rows() for c in f)
+
+
+# ── Contenido ────────────────────────────────────────────────────────────────
+
+def test_trae_los_tres_bloques():
+    valores = _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+    for t in ("INGRESOS", "COMERCIALIZACIÓN (XM)", "COSTOS OPERATIVOS", "DETALLE DIARIO"):
+        assert t in valores, t
+
 
 def test_la_tabla_diaria_trae_la_importacion():
     """El consumo es una columna del ER, no un dato aparte."""
-    valores = _celdas(generar_er_xlsx(PANEL, "San Agustin", diario=DIARIO))
-    assert "Importación (kWh)" in valores
+    valores = _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
+    assert any(isinstance(v, str) and "Importación" in v for v in valores)
     assert 22.52 in valores
 
 
-def test_la_tabla_diaria_trae_una_fila_por_dia():
-    valores = _celdas(generar_er_xlsx(PANEL, "San Agustin", diario=DIARIO))
-    assert "2026-07-01" in valores and "2026-07-02" in valores
-
-
-def test_la_fila_total_suma_las_columnas():
-    valores = _celdas(generar_er_xlsx(PANEL, "San Agustin", diario=DIARIO))
-    assert "TOTAL" in valores
-    assert round(5629.63 + 3597.46, 2) in valores      # generación
-    assert round(22.52 + 23.62, 2) in valores          # importación
-
-
 def test_el_encabezado_de_venta_nombra_al_comercializador():
-    valores = _celdas(generar_er_xlsx(PANEL, "San Agustin", diario=DIARIO))
+    valores = _celdas(generar_er_xlsx(PANEL, "X", DIARIO))
     assert any(isinstance(v, str) and "UNERGY ENERGIA DIGITAL" in v for v in valores)
 
 
+def test_un_bloque_vacio_lo_dice_en_vez_de_quedar_en_blanco():
+    """Agustín 3 no tiene costos cargados: hay que verlo, no adivinarlo."""
+    panel = types.SimpleNamespace(periodo="2026-07", comercializador="X", lineas=[
+        _linea("ingresos", "Venta", 100.0)])
+    assert "Sin movimientos en el período" in _celdas(generar_er_xlsx(panel, "X", []))
+
+
 def test_sin_datos_diarios_no_revienta():
-    """Un período sin FTP descargado igual tiene que poder verse."""
     assert _celdas(generar_er_xlsx(PANEL, "X", diario=[]))
-
-
-# ── Bloques de totales ───────────────────────────────────────────────────────
-
-def test_trae_los_tres_bloques():
-    valores = _celdas(generar_er_xlsx(PANEL, "San Agustin", diario=DIARIO))
-    for titulo in ("Ingresos y costos XM", "Total Comercialización",
-                   "Total Ingresos", "Total Costos Operativos fijos",
-                   "Total de costos operativos + Comercialización"):
-        assert titulo in valores, titulo
-
-
-def test_los_valores_van_calculados_no_como_formula():
-    """Si fueran fórmulas haría falta LibreOffice para leerlos, que es justo lo
-    que este cambio elimina."""
-    assert 118_673_860.5 in _celdas(generar_er_xlsx(PANEL, "X", diario=DIARIO))
-
-
-def test_las_facturas_se_leen_dentro_de_costos_operativos():
-    """En el ER de hoy los cobros de Unergy van en ese bloque."""
-    wb = load_workbook(io.BytesIO(generar_er_xlsx(PANEL, "X", diario=DIARIO)), data_only=True)
-    filas = [[c.value for c in f] for f in wb.active.iter_rows()]
-    conceptos = [f[2] for f in filas if len(f) > 2]
-    assert "CGM" in conceptos
-
-
-# ── Bloque del partícipe ─────────────────────────────────────────────────────
-
-def test_trae_el_valor_a_pagar():
-    valores = _celdas(generar_er_xlsx(PANEL, "X", diario=DIARIO))
-    assert "Valor a pagar" in valores
-    assert "Porcentaje participación" in valores
-    assert "Factura UNERGY" in valores
-
-
-def test_calcula_las_tarifas_bruta_y_neta():
-    valores = _celdas(generar_er_xlsx(PANEL, "X", diario=DIARIO))
-    assert "Tarifa bruta" in valores and "Tarifa neta" in valores
-
-
-def test_sin_energia_no_calcula_tarifas():
-    """Dividir por cero reventaría; sin energía esas filas no aplican."""
-    valores = _celdas(generar_er_xlsx(PANEL, "X", diario=[]))
-    assert "Tarifa bruta" not in valores
 
 
 # ── Filtro por inversionista ─────────────────────────────────────────────────
@@ -127,21 +171,12 @@ def test_filtrar_por_inversionista_deja_solo_lo_suyo():
         _linea("ingresos", "Venta", 100.0, inv="ACME", pct=60.0),
         _linea("ingresos", "Venta", 40.0, inv="OTRA", pct=40.0),
     ])
-    valores = _celdas(generar_er_xlsx(panel, "X", diario=[], inversionista="ACME"))
+    valores = _celdas(generar_er_xlsx(panel, "X", [], inversionista="ACME"))
     assert 100.0 in valores and 40.0 not in valores
 
 
-def test_el_encabezado_nombra_al_inversionista_filtrado():
+def test_el_encabezado_nombra_al_inversionista():
     panel = types.SimpleNamespace(periodo="2026-07", comercializador="X", lineas=[
         _linea("ingresos", "Venta", 100.0, inv="ACME", pct=60.0)])
-    assert "ACME" in _celdas(generar_er_xlsx(panel, "X", diario=[], inversionista="ACME"))
-
-
-def test_sin_inversionista_trae_el_proyecto_completo():
-    panel = types.SimpleNamespace(periodo="2026-07", comercializador="X", lineas=[
-        _linea("ingresos", "Venta", 100.0, inv="ACME", pct=60.0),
-        _linea("ingresos", "Venta", 40.0, inv="OTRA", pct=40.0),
-    ])
-    valores = _celdas(generar_er_xlsx(panel, "X", diario=[]))
-    assert 140.0 in valores
-    assert "Proyecto (100%)" in valores
+    valores = _celdas(generar_er_xlsx(panel, "X", [], inversionista="ACME"))
+    assert any(isinstance(v, str) and "ACME" in v for v in valores)

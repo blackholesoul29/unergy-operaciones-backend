@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -279,8 +280,12 @@ def _col_today() -> str:
 class GaiaClient:
     """JWT-authenticated client for the Gaia CGM API.
 
-    Handles token refresh automatically. Thread-safe for concurrent reads
-    within a single request (multiple measurement vars fetched in parallel).
+    Handles token refresh automatically. _authenticate()/_try_refresh() (las
+    únicas dos funciones que escriben _access_token/_refresh_token) están
+    protegidas por _token_lock -- sin eso, dos hilos usando el mismo cliente
+    en paralelo (ver curva_medidor_en_vivo, principal+respaldo a la vez)
+    podían renovar el token cada uno por su cuenta y pisarse el resultado si
+    uno de los dos fallaba.
     """
 
     def __init__(self):
@@ -290,6 +295,7 @@ class GaiaClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0
+        self._token_lock = threading.Lock()
         self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
         # `_get()` traga cualquier excepción y devuelve None -- indistinguible
         # de "no hay dato" para quien llama. Esta bandera se resetea a False
@@ -309,33 +315,35 @@ class GaiaClient:
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _authenticate(self) -> None:
-        try:
-            resp = self._http.post(f"{self._base}/api/auth/token/", json={
-                "username": self._username,
-                "password": self._password,
-            })
-            resp.raise_for_status()
-            data = resp.json()
-            self._access_token = data["access"]
-            self._refresh_token = data["refresh"]
-            self._token_time = time.time()
-        except Exception as exc:
-            logger.error("gaia auth failed: %s", exc)
-            self._access_token = None
-            self._refresh_token = None
+        with self._token_lock:
+            try:
+                resp = self._http.post(f"{self._base}/api/auth/token/", json={
+                    "username": self._username,
+                    "password": self._password,
+                })
+                resp.raise_for_status()
+                data = resp.json()
+                self._access_token = data["access"]
+                self._refresh_token = data["refresh"]
+                self._token_time = time.time()
+            except Exception as exc:
+                logger.error("gaia auth failed: %s", exc)
+                self._access_token = None
+                self._refresh_token = None
 
     def _try_refresh(self) -> bool:
-        if not self._refresh_token:
-            return False
-        try:
-            resp = self._http.post(f"{self._base}/api/auth/token/refresh/",
-                                   json={"refresh": self._refresh_token})
-            resp.raise_for_status()
-            self._access_token = resp.json()["access"]
-            self._token_time = time.time()
-            return True
-        except Exception:
-            return False
+        with self._token_lock:
+            if not self._refresh_token:
+                return False
+            try:
+                resp = self._http.post(f"{self._base}/api/auth/token/refresh/",
+                                       json={"refresh": self._refresh_token})
+                resp.raise_for_status()
+                self._access_token = resp.json()["access"]
+                self._token_time = time.time()
+                return True
+            except Exception:
+                return False
 
     def _ensure_token(self) -> None:
         if not self._access_token:

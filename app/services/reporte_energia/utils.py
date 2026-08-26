@@ -142,19 +142,23 @@ def curva_respaldo_a_reportar(rep, curva_medidor_respaldo: list | None = None) -
     1. curva_respaldo_terceros (FRONTERAS_TERCEROS, ej. Cedillanos) -- dato
        real que trae el Excel del tercero, tal cual (sin cambios).
     2. curva_medidor_respaldo -- SOLO si curva_final vino del medidor
-       principal (medidor_usado empieza con 'principal') y el TOTAL DIARIO
-       de generación del respaldo está a TOLERANCIA_RESPALDO_REAL_KWH o
-       menos de diferencia (arriba o abajo) del que se va a reportar como
-       Principal. Si se aleja más, no se usa -- no es dato confiable
-       (medidor descalibrado o desconectado), se cae al paso 3 igual que
-       siempre. No se exige que el respaldo esté 100% completo (decidido
-       2026-08-26, ver MGS 0025 El Copey Occidente: respaldo con huecos en
-       horas nocturnas de generación ~0, descartado igual aunque coincidía
-       casi exacto con el principal) -- la tolerancia de 1.5 kWh en el
-       TOTAL ya protege sola: un hueco en una hora con generación real
-       infla la diferencia mucho más allá de la tolerancia (las horas sin
-       dato cuentan como 0 en la suma), así que solo pasan huecos
-       fisicamente irrelevantes (de noche).
+       principal (medidor_usado empieza con 'principal') o del reporte CGM
+       ya validado (medidor_usado == 'cgm', Caso 1 -- ampliado 2026-08-26
+       por consistencia visual: el medidor de nodo se sigue leyendo en
+       pasivo incluso en Caso 1, así que hay el mismo dato con qué
+       comparar), y el TOTAL DIARIO de generación del respaldo está a
+       TOLERANCIA_RESPALDO_REAL_KWH o menos de diferencia (arriba o abajo)
+       del que se va a reportar como Principal/CGM. Si se aleja más, no se
+       usa -- no es dato confiable (medidor descalibrado o desconectado),
+       se cae al paso 3 igual que siempre. No se exige que el respaldo
+       esté 100% completo (decidido 2026-08-26, ver MGS 0025 El Copey
+       Occidente: respaldo con huecos en horas nocturnas de generación
+       ~0, descartado igual aunque coincidía casi exacto con el
+       principal) -- la tolerancia de 1.5 kWh en el TOTAL ya protege
+       sola: un hueco en una hora con generación real infla la diferencia
+       mucho más allá de la tolerancia (las horas sin dato cuentan como 0
+       en la suma), así que solo pasan huecos fisicamente irrelevantes
+       (de noche).
     3. Estimación ±1% sobre curva_final (comportamiento de siempre, único
        camino disponible para Consumo -- no tiene curva_respaldo_terceros).
 
@@ -170,7 +174,7 @@ def curva_respaldo_a_reportar(rep, curva_medidor_respaldo: list | None = None) -
     mu = rep.medidor_usado or ""
     if curva_medidor_respaldo is None:
         curva_medidor_respaldo = getattr(rep, "curva_medidor_respaldo", None)
-    if mu.startswith("principal") and curva_medidor_respaldo:
+    if (mu.startswith("principal") or mu == "cgm") and curva_medidor_respaldo:
         respaldo_medidor = [float(v) if v is not None else 0.0 for v in curva_medidor_respaldo]
         dif_total = abs(sum(respaldo_medidor) - sum(principal_readings))
         if dif_total <= TOLERANCIA_RESPALDO_REAL_KWH:

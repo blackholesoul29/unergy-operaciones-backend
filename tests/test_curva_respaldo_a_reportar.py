@@ -20,12 +20,16 @@ principal) -- la tolerancia del total ya protege sola, ver
 test_medidor_incompleto_pero_dentro_de_tolerancia_usa_medidor.
 
 Matriz de medidor_usado verificada contra clasificador.py/
-clasificador_consumo.py/editar_curva (grep exhaustivo 2026-08-25): SOLO
-'principal' y 'principal_sin_cgm' deben activar el camino 'medidor' -- todo
-lo demás (cgm, respaldo, respaldo_sin_cgm, revisar, inversores,
-reconectador, solenium_power, ninguno, crudos, crudos_parcial, externo,
-relleno_horario, excluida, excel_terceros, historico, editado_manualmente)
-debe seguir cayendo al ±1%."""
+clasificador_consumo.py/editar_curva (grep exhaustivo 2026-08-25, ampliada
+2026-08-26 -- ver MGS 0032 El Paso Norte): 'principal', 'principal_sin_cgm'
+y 'cgm' activan el camino 'medidor' -- todo lo demás (respaldo,
+respaldo_sin_cgm, revisar, inversores, reconectador, solenium_power,
+ninguno, crudos, crudos_parcial, externo, relleno_horario, excluida,
+excel_terceros, historico, editado_manualmente) sigue cayendo al ±1%. 'cgm'
+se agregó por consistencia visual -- el medidor de nodo se sigue leyendo en
+pasivo incluso en Caso 1 (CGM válido), así que hay el mismo dato con qué
+comparar; el tratamiento especial del respaldo en el envío a Quoia para
+CGM queda pendiente de revisar aparte."""
 from types import SimpleNamespace
 
 import pytest
@@ -105,18 +109,21 @@ def test_una_sola_hora_desviada_sin_cancelar_saca_el_total_de_tolerancia():
 
 
 @pytest.mark.parametrize("medidor_usado", [
-    "cgm", "respaldo", "respaldo_sin_cgm", "revisar", "inversores", "reconectador",
+    "respaldo", "respaldo_sin_cgm", "revisar", "inversores", "reconectador",
     "solenium_power", "ninguno", "crudos", "crudos_parcial", "externo",
     "relleno_horario", "excluida", "excel_terceros", "historico", "editado_manualmente",
 ])
-def test_solo_principal_activa_el_camino_medidor_el_resto_cae_a_estimado(medidor_usado):
+def test_solo_principal_o_cgm_activan_el_camino_medidor_el_resto_cae_a_estimado(medidor_usado):
     rep = _rep(medidor_usado=medidor_usado, curva_final=[100.0] * 24, curva_medidor_respaldo=[100.0] * 24)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "estimado", f"{medidor_usado!r} no deberia activar el camino 'medidor'"
 
 
-@pytest.mark.parametrize("medidor_usado", ["principal", "principal_sin_cgm"])
-def test_las_dos_variantes_de_principal_si_activan_el_camino_medidor(medidor_usado):
+@pytest.mark.parametrize("medidor_usado", ["principal", "principal_sin_cgm", "cgm"])
+def test_principal_sus_variantes_y_cgm_activan_el_camino_medidor(medidor_usado):
+    """'cgm' se agregó 2026-08-26 (MGS 0032 El Paso Norte) por consistencia
+    visual -- el medidor de nodo se sigue leyendo en pasivo incluso en
+    Caso 1, así que hay el mismo dato con qué comparar."""
     rep = _rep(medidor_usado=medidor_usado, curva_final=[100.0] * 24, curva_medidor_respaldo=[100.0] * 24)
     curva, origen = curva_respaldo_a_reportar(rep)
     assert origen == "medidor"

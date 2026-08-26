@@ -544,17 +544,19 @@ def _curva_respaldo_en_vivo(front: Frontera, fecha: date) -> list | None:
 
 
 def _revisar_respaldo_en_vivo(front: Frontera, rep, fecha: date) -> None:
-    """Si curva_final ya viene del medidor PRINCIPAL, vuelve a evaluar el
-    respaldo en vivo contra la tolerancia de coherencia (curva_respaldo_a_
-    reportar) y adopta el nuevo snapshot SOLO si pasa -- llamada tanto por
-    editar_curva() (al confirmar Principal) como por recuperar_medidor()
-    (acción explícita de revisar ambos medidores, ver MGS Agustín 1
+    """Si curva_final ya viene del medidor PRINCIPAL o de CGM ya validado
+    (Caso 1 -- ampliado 2026-08-26, ver curva_respaldo_a_reportar), vuelve
+    a evaluar el respaldo en vivo contra la tolerancia de coherencia y
+    adopta el nuevo snapshot SOLO si pasa -- llamada por editar_curva()
+    (al confirmar Principal), recuperar_medidor() y revisar_respaldo()
+    (acciones explícitas de revisar el respaldo, ver MGS Agustín 1
     2026-08-26: Principal ya correcto y automático -- nunca pasa por
     editar_curva() -- pero el respaldo cambió en Quoia y no había forma
-    de que el sistema lo reevaluara). Mismo criterio en los dos lugares:
+    de que el sistema lo reevaluara). Mismo criterio en los tres lugares:
     si no pasa, el snapshot no se toca y el aviso de cambio sigue
     visible."""
-    if not (rep.medidor_usado or "").startswith("principal"):
+    mu = rep.medidor_usado or ""
+    if not (mu.startswith("principal") or mu == "cgm"):
         return
     curva_resp_viva = _curva_respaldo_en_vivo(front, fecha)
     actualizar_respaldo_final(rep, curva_resp_viva)

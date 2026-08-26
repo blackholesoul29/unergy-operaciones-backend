@@ -37,6 +37,47 @@ def test_archivo_vacio_se_rechaza():
     assert not ok
 
 
+def test_columnas_de_identidad_reordenadas_se_rechaza():
+    # CONCEPTO y MERCADO intercambiados: mismo conteo de columnas, sin nombres
+    # duplicados, 24 horas -> antes de la fix esto pasaba en silencio y
+    # `parsear_balcttos` (col_concepto=0 fijo) leía "nacional" como el concepto.
+    reordenada = ["MERCADO", "CONCEPTO", "CÓDIGO CONTRATO", "COMPRADOR", "VENDEDOR",
+                  "TIPO DE DESPACHO", "TIPO ASIGNA"]
+    ok, detalle = validar_estructura(_cab(reordenada + HORAS), "balcttos")
+    assert not ok
+    assert "identidad" in detalle["motivo"].lower()
+
+
+def test_tipo_desconocido_se_rechaza():
+    # Fallar cerrado: un `tipo` no reconocido (typo, tipo nuevo sin dar de alta)
+    # no debe pasar la validación solo porque no hay reglas para él.
+    ok, detalle = validar_estructura(_cab(BASE + HORAS), "tipo_que_no_existe")
+    assert not ok
+    assert "tipo_que_no_existe" in detalle["motivo"]
+
+
+def test_arrpas_con_cabecera_basura_se_rechaza():
+    # `arrpas` no tenía entrada en _IDENTIDAD/_HORAS_ESPERADAS: una cabecera de
+    # 3 columnas cualquiera pasaba con ok=True.
+    ok, detalle = validar_estructura(_cab(["A", "B", "C"]), "arrpas")
+    assert not ok
+
+
+def test_arrpas_layout_clasico_pasa():
+    cols = ["SUBMERCADO", "DELN $/KWH", "DELI $/KWH", "VRAN $", "VRAI $", "VRAT $",
+            "VRA $", "VDA $", "FA $"]
+    ok, detalle = validar_estructura(_cab(cols), "arrpas")
+    assert ok, detalle
+
+
+def test_arrpas_layout_con_agente_pasa():
+    # Desde 2026-03-08 XM antepone AGENTE a la cabecera de arrpas (Hallazgo D).
+    cols = ["AGENTE", "SUBMERCADO", "DELN $/KWH", "DELI $/KWH", "VRAN $", "VRAI $",
+            "VRAT $", "VRA $", "VDA $", "FA $"]
+    ok, detalle = validar_estructura(_cab(cols), "arrpas")
+    assert ok, detalle
+
+
 def test_identidad_balcttos_cierra():
     # GI - contratos - perdidas == ventas - compras
     ok, resid = verificar_identidad_balcttos(

@@ -10,15 +10,15 @@ Idempotente por el mismo motivo que las migraciones recientes de esta
 sesion: alembic upgrade head no siempre corre limpio en el deploy de
 Railway.
 
-Revision ID: 101
-Revises: 100
+Revision ID: 102
+Revises: 101
 Create Date: 2026-08-26
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "101"
-down_revision = "100"
+revision = "102"
+down_revision = "101"
 branch_labels = None
 depends_on = None
 

@@ -97,8 +97,7 @@ FRONTERAS_CONSUMO_IGNORAR_CGM: set[int] = {90}  # Chiriguaná Norte 2 Consumo
 # frontera_id (Consumo) con un patrón de consumo atípico confirmado --
 # ninguna validación automática (CGM vs mediana, medidor vs mediana) es
 # confiable para decidir sola si un día puntual es normal o no. Siempre
-# queda para revisar a mano sin importar qué Caso resultó ganador ese día
-# (mismo criterio que FRONTERAS_MEDIDOR_SOSPECHOSO en clasificador.py).
+# queda para revisar a mano sin importar qué Caso resultó ganador ese día.
 FRONTERAS_CONSUMO_SIEMPRE_REVISAR: set[int] = {78}  # La Catedral Consumo
 
 # %: qué tan lejos puede quedar un medidor del otro (principal vs respaldo)

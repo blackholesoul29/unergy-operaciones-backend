@@ -80,6 +80,17 @@ def test_filas_periodos_agente_ausente_devuelve_vacio():
     assert filas_periodos(FILAS_NUEVO, "ZZZZ") == []
 
 
+def test_filas_periodos_omite_fila_corta_sin_romper_las_demas():
+    filas = [
+        CAB_NUEVO,
+        ("UNGG",),  # fila truncada: no alcanza para descripcion/fechas
+        ("UNGG", "S-1", PUB, I1, F1, 45694583, 0, 51066768, 0, 51066768, 27532582, 23534186),
+    ]
+    r = filas_periodos(filas, "UNGG")
+    assert len(r) == 1
+    assert r[0]["periodo"] == "S-1"
+
+
 def test_ventana_tx2_de_nombre_de_hoja():
     r = ventana_de_hoja("AJUSTE TX2 SEMA MENS 01-07 AGO", datetime.date(2026, 8, 28))
     assert r == (datetime.date(2026, 8, 1), datetime.date(2026, 8, 7), "AJUSTE TX2")
@@ -93,6 +104,25 @@ def test_ventana_proy_de_nombre_de_hoja():
 
 
 def test_ventana_cruza_anio_hacia_atras():
+    r = ventana_de_hoja("AJUSTE TX2 SEMA MENS 13-19 DIC", datetime.date(2026, 1, 2))
+    assert r[0] == datetime.date(2025, 12, 13)
+    assert r[1] == datetime.date(2025, 12, 19)
+
+
+def test_ventana_m_mas_1_mira_hacia_adelante():
+    r = ventana_de_hoja("AJUSTE (M+1) 01-31 MAY", datetime.date(2026, 4, 17))
+    assert r[0] == datetime.date(2026, 5, 1)
+    assert r[1] == datetime.date(2026, 5, 31)
+    assert r[2] == "AJUSTE M+1"
+
+
+def test_ventana_m_mas_1_cruza_anio_hacia_adelante():
+    r = ventana_de_hoja("AJUSTE (M+1) 01-31 ENE", datetime.date(2026, 12, 24))
+    assert r[0] == datetime.date(2027, 1, 1)
+    assert r[1] == datetime.date(2027, 1, 31)
+
+
+def test_ventana_tx2_sigue_mirando_hacia_atras():
     r = ventana_de_hoja("AJUSTE TX2 SEMA MENS 13-19 DIC", datetime.date(2026, 1, 2))
     assert r[0] == datetime.date(2025, 12, 13)
     assert r[1] == datetime.date(2025, 12, 19)

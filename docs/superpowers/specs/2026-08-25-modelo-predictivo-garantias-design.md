@@ -134,6 +134,41 @@ pregunta de negocio es unidimensional: **¿alcanza la exposición negativa a tap
 Por eso este spec modela Exposición en serio y trata los otros 19 componentes como un
 agregado por persistencia. La varianza está en un solo lugar.
 
+### Medición empírica (2026-08-26): la decisión está validada
+
+Extraídos los componentes de UNGG de las hojas `AJUSTE …` de todo el corpus —**286
+observaciones de período**, 2025-01 → 2026-08— separadas por tipo de bloque:
+
+| Bloque | n | mediana Exposición | σ Exposición | σ resto |
+|---|---|---|---|---|
+| TX2 (semana liquidada) | 104 | 12,0M | 19,6M | 3,1M |
+| PROY (resto del mes) | 100 | 46,7M | 78,1M | 9,1M |
+| **M+1 (mes siguiente)** | 82 | 84,8M | **151,9M** | 10,5M |
+
+Y el test que decide si la persistencia sirve para los otros componentes — el error de
+usar el período anterior:
+
+| Bloque | Error mediano | Como % de σ Exposición |
+|---|---|---|
+| TX2 | 180 mil | **0,9%** |
+| PROY | 3,4M | **4,3%** |
+| M+1 | **0** | **0,0%** |
+
+En M+1 los otros componentes son **literalmente idénticos** período a período. La
+persistencia no es una simplificación aceptable: es prácticamente exacta.
+
+**M+1 es el bloque difícil.** σ de 152M contra 20M del TX2, casi 8×. El ancho del
+intervalo va a estar dominado por M+1, y ahí conviene concentrar el esfuerzo.
+
+### Dos correcciones a supuestos anteriores del propio spec
+
+- **El piso casi no se activa.** `Valor Garantía == 0` en **20 de 286** casos: 7%. La
+  afirmación de que "operamos justo en la frontera del piso" venía del ejemplo de julio
+  y no describe el régimen habitual. El tratamiento por cuantiles con `max(0, ·)` sigue
+  siendo correcto — solo deja de ser la característica dominante del problema.
+- **La exposición es mayormente positiva.** Mediana +12M, +47M y +85M según el bloque.
+  El −107,7M del desglose de julio era un caso, no la norma.
+
 ---
 
 ## 3. Alcance
@@ -541,6 +576,11 @@ archivos **en silencio**, sin lanzar error:
    (`GARANTIA MENSUAL 19SEPT-2025.XLSX`).
 3. **Extensión en mayúsculas.** Conviven `.xlsx` y `.XLSX`; el match debe ser
    case-insensitive.
+4. **Los nombres de columna varían entre archivos.** Al extraer las 286 observaciones se
+   encontraron 16 columnas sumables donde la fórmula declara 20, y la identidad
+   `max(0, Σ) == Valor Garantía` se cumplió en 259/286 — el resto falla por columnas que
+   cambian de nombre. El parser debe **normalizar nombres de columna**, no solo de
+   concepto, y **fallar ruidosamente** si la identidad no cierra en un archivo.
 
 #### Cómo llega cada familia
 
@@ -857,7 +897,27 @@ Difiere de la fórmula de XM en tres cosas materiales: colapsa 19 componentes en
 una fuente sin versión de liquidación (así que no admite la regla anti-leakage); y al no
 tener piso reporta negativos donde XM cobra cero — que para UNGG es el caso normal.
 
-**Por qué se mide en vez de descartarse.** Replicar la fórmula es necesario pero no
+**Resultado de la medición (2026-08-26).** Ya está hecha en parte, y es más matizada de
+lo que sugiere "20 componentes contra 3": **estructuralmente las dos son la misma cosa.**
+Los datos muestran que los otros componentes son casi constantes, así que "Exposición +
+un término estable" describe correctamente el problema. La fórmula de `Proyecciones` no
+está mal concebida.
+
+La réplica es mejor, pero **no por tener 20 términos**. Es mejor por tres detalles:
+
+1. **El precio.** Exposición = energía × precio, y la exposición carga ~90% de la
+   varianza. Promedio simple de 7 días de SIMEM contra `PBNA` horario ponderado y
+   versionado: esa sola diferencia pesa más que los otros 17 componentes juntos.
+2. **El piso en cero**, que `Proyecciones` no tiene.
+3. **La versión de liquidación.** SIMEM no publica `tx2`, así que no admite la regla
+   anti-leakage y no se puede backtestear honestamente.
+
+Dicho de otro modo: si a la fórmula de tres términos se le arregla el precio y se le
+pone el piso, queda muy cerca. **El valor del motor no está en enumerar componentes,
+está en el rigor sobre el precio y sobre qué se sabía en cada momento.** Eso reordena la
+prioridad de implementación: el precio primero.
+
+**Por qué igual se mide en vez de descartarse.** Replicar la fórmula es necesario pero no
 suficiente: la fórmula es aritmética exacta sobre 20 insumos, y lo difícil no es la
 fórmula sino *estimar los insumos* antes de que XM los publique. Para el día 7 la
 réplica gana casi por definición, porque usa los mismos números que usó XM. Para el día

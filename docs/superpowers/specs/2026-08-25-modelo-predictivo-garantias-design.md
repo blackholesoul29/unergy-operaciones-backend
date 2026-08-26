@@ -192,8 +192,11 @@ Y su hoja de depósito se titula, textual, **«AJUSTES A GARANTÍAS MENSUALES»*
 y `Proyección S+3`. Existe un archivo aparte, `GARANTIA SEMANAL <fecha>.xlsx`, con
 exactamente esas cinco hojas — y en todo el corpus hay **uno solo** (12-JUN-2026).
 
-**Consecuencia:** los 83 vencimientos que §6.1 llama «semanales backtesteables» son
-ajustes **mensuales**. La medición técnica sigue siendo válida — la réplica al 0,0057%
+**Precisión (corregida el 2026-08-26 con el formato nuevo a la vista):** el archivo es
+**combinado**, y sus tres períodos son `S-1`, `M` y `M+1` — una semana liquidada más dos
+meses. Por eso se llama «SEMANAL MENSUAL». La hoja `AJUSTE TX2` es el período `S-1`, o
+sea el **ajuste semanal liquidado**, que es exactamente lo que valida §7 con error de
+0,0057%. Lo que falta es el producto **puramente semanal** de cinco períodos. La medición técnica sigue siendo válida — la réplica al 0,0057%
 se hizo contra hojas `AJUSTE TX2` con ventanas reales — pero la etiqueta está mal, y
 **la garantía semanal está esencialmente sin cubrir**. Antes de prometer anticipación
 semanal hay que conseguir ese histórico.
@@ -242,15 +245,40 @@ con cabecera válida es correcto y no debe marcarse `esquema_ok = false`.
 **`CGM` solo trae `Con`, `Car` y `Ene`** — verificado por FTP. `Dem` y `LC` existen
 únicamente en `CGS`.
 
-### ⚠️ El formato cambia el 2026-09-04
+### El formato del 2026-09-04 es una MEJORA, no una amenaza
 
-XM anunció que el reporte pasa al formato del *Periodo de prueba Res CREG 101 097 de
-2026* y **deja de publicar el tradicional**. Los parsers de targets de este spec apuntan
-al formato que desaparece.
+XM reemplaza el reporte por el del *Periodo de prueba Res CREG 101 097 de 2026*. Hay
+**8 archivos de muestra** dentro de `Garantias2026.zip`, en la subcarpeta
+`Periodo de prueba Res CREG 101 097 de 2026/`, de abril a junio 2026.
 
-No afecta a los insumos (`BalCttos`, `trsd`, `dspcttos`, `arrpas`), que siguen igual, ni
-al histórico ya descargado. Afecta al parser de los Excel de garantía, y hay que
-conseguir una muestra del formato nuevo antes de esa fecha.
+**Estructura nueva:** 3 hojas (`DEPOSITO`, `PERIODOS A GARANTIZAR`, `PERIODO BASE`) — la
+misma que los `GARANTIA TXR`. `PERIODOS A GARANTIZAR` es **una sola tabla** de ~1.460
+filas × 30 columnas, una fila por (agente, período):
+
+| Columna | Qué resuelve |
+|---|---|
+| `Descripción` | La etiqueta del período (`S-1`, `M`, `M+1`) |
+| **`Fecha Inicial` / `Fecha Final`** | **La ventana, explícita** |
+| `Fecha Publicación` | El `disponible_desde`, observado en vez de derivado |
+| Los 20 componentes | Todos, incluidos `LC`, `Ajustes SIC` y `Servicios CND-SIC-FAZNI` |
+| `Valor Garantía` → `Garantías TIE` → `Valor Garantía Final` → `Estimado` → `Total Ajuste` | La cadena completa de §2 |
+
+**Tres consecuencias que simplifican el diseño:**
+
+1. **Las «ventanas candidatas» de §5.3 dejan de existir** para los períodos publicados en
+   el formato nuevo: la ventana viene en columnas. Eso elimina la fuente de
+   incertidumbre que §8.2 midió como el **71% del ancho del intervalo**.
+2. **`disponible_desde` pasa a ser `observado`** en vez de derivado, sin backfill.
+3. **El parser no hay que reescribirlo desde cero:** es el mismo de los `GARANTIA TXR`
+   que §5.4 ya describe. Lo que cambia es que ahora aplica a todos los vencimientos, no
+   solo a los TXR.
+
+**Los nombres en ISO no eran una trampa de parseo:** los 5 archivos con fecha
+`2026-05-01` en vez de `01MAY-2026` son del formato nuevo. La convención de nombre
+cambió junto con la estructura.
+
+**Sigue faltando** el histórico del producto puramente semanal (5 períodos) y ver si el
+formato nuevo lo cubre también.
 
 ### Las re-publicaciones son raras y moderadas
 

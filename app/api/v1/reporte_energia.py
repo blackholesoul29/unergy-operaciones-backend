@@ -508,32 +508,58 @@ def detalle_frontera(
     return _construir_detalle(db, frontera_id, fecha)
 
 
-def _refrescar_otro_medidor_en_vivo(front: Frontera, rep, fecha: date, fuente: str) -> None:
-    """Trae en vivo el medidor que NO se acaba de confirmar como `fuente`
-    (ver editar_curva) y refresca su snapshot persistido -- best-effort: si
-    Quoia falla o la frontera no tiene match en Quoia, se queda con lo que
-    ya había, sin bloquear el guardado."""
+def _curva_respaldo_en_vivo(front: Frontera, fecha: date) -> list | None:
+    """Trae en vivo la curva del medidor de RESPALDO -- únicamente para
+    alimentar el chequeo de coherencia de curva_respaldo_a_reportar()
+    cuando se confirma 'Medidor principal' como fuente (ver editar_curva).
+
+    A propósito NO se persiste en curva_medidor_respaldo: eso seguiría
+    disparando el aviso "el medidor ya muestra un valor distinto en
+    Quoia" hasta que la persona revise y confirme ESE medidor
+    explícitamente -- una actualización silenciosa del snapshot al
+    adoptar Principal apagaba el aviso de Respaldo sin que nadie lo
+    hubiera revisado (pedido de Sara 2026-08-26, tras ver que el aviso ya
+    no aparecía en 'Detalle de las fuentes' después de guardar).
+
+    Best-effort: None si Quoia falla o no hay match -- quien llama debe
+    seguir sin este dato (curva_respaldo_a_reportar cae a estimado)."""
     try:
         gaia = GaiaClient()
         mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
         borders = curvas.construir_mapa_borders(gaia)
         meta = borders.get((front.codigo_frontera or "").strip().lower())
         if not meta:
-            return
+            return None
         capacidad_efectiva_mw = (
             float(front.proyecto.potencia_instalada_kwp) / 1000
             if front.proyecto and front.proyecto.potencia_instalada_kwp is not None else None
         )
-        curva_p, curva_r = curvas.curva_medidor_en_vivo(
+        _, curva_r = curvas.curva_medidor_en_vivo(
             gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
             str(fecha), front.codigo_frontera, "eae", capacidad_efectiva_mw,
         )
-        if fuente == "principal":
-            rep.curva_medidor_respaldo = curva_a_lista(curva_r)
-        else:
-            rep.curva_medidor_principal = curva_a_lista(curva_p)
+        return curva_a_lista(curva_r)
     except Exception:
-        pass
+        return None
+
+
+def _revisar_respaldo_en_vivo(front: Frontera, rep, fecha: date) -> None:
+    """Si curva_final ya viene del medidor PRINCIPAL, vuelve a evaluar el
+    respaldo en vivo contra la tolerancia de coherencia (curva_respaldo_a_
+    reportar) y adopta el nuevo snapshot SOLO si pasa -- llamada tanto por
+    editar_curva() (al confirmar Principal) como por recuperar_medidor()
+    (acción explícita de revisar ambos medidores, ver MGS Agustín 1
+    2026-08-26: Principal ya correcto y automático -- nunca pasa por
+    editar_curva() -- pero el respaldo cambió en Quoia y no había forma
+    de que el sistema lo reevaluara). Mismo criterio en los dos lugares:
+    si no pasa, el snapshot no se toca y el aviso de cambio sigue
+    visible."""
+    if not (rep.medidor_usado or "").startswith("principal"):
+        return
+    curva_resp_viva = _curva_respaldo_en_vivo(front, fecha)
+    actualizar_respaldo_final(rep, curva_resp_viva)
+    if curva_resp_viva is not None and rep.respaldo_final_origen == "medidor":
+        rep.curva_medidor_respaldo = curva_resp_viva
 
 
 @router.patch("/fronteras/{frontera_id}", response_model=DetalleFronteraReporte)
@@ -584,17 +610,6 @@ def editar_curva(
         rep.curva_medidor_principal = rep.curva_final
     elif body.fuente == "respaldo":
         rep.curva_medidor_respaldo = rep.curva_final
-    # El medidor que NO se acaba de confirmar como fuente también puede
-    # tener un valor fresco en Quoia (ej. "Recuperar medidor" trae ambos a
-    # la vez) -- sin esto, el chequeo de coherencia de
-    # curva_respaldo_a_reportar() más abajo comparaba contra el snapshot
-    # vacío/viejo de la clasificación original y siempre caía a estimado,
-    # aunque el respaldo en vivo coincidiera con el principal recién
-    # confirmado (ver MGS GD La Hormiguita 2026-08-26: ambos medidores
-    # recuperados con éxito y casi idénticos, pero solo Principal se
-    # refrescaba). Solo Generación -- es la única con este chequeo.
-    if es_generacion and body.fuente in ("principal", "respaldo"):
-        _refrescar_otro_medidor_en_vivo(front, rep, fecha, body.fuente)
     # Si la persona confirma que el MEDIDOR (no una estimación) es la
     # fuente correcta, 'caso' se actualiza para que esta fila SÍ pueda
     # alimentar la mediana/forma histórica de días futuros -- antes quedaba
@@ -626,7 +641,10 @@ def editar_curva(
             rep.curva_respaldo_final = curva_a_lista(curva_resp)
             rep.respaldo_final_origen = "manual"
         else:
-            actualizar_respaldo_final(rep)
+            # Si se confirma Principal, revisa el respaldo en vivo contra
+            # la tolerancia y adopta su snapshot SOLO si pasa -- ver
+            # _revisar_respaldo_en_vivo().
+            _revisar_respaldo_en_vivo(front, rep, fecha)
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.
@@ -818,6 +836,13 @@ def recuperar_medidor(
     no necesita ningún guard de "no pisar lo ya editado/validado": solo
     refresca datos de referencia (alternativa más chica que reclasificar
     la frontera completa, decidido 2026-08-20).
+
+    Si curva_final ya viene del medidor PRINCIPAL (Generación), además
+    revisa el respaldo recién recuperado contra la tolerancia de
+    coherencia y adopta su snapshot si pasa (ver _revisar_respaldo_en_vivo
+    -- MGS Agustín 1 2026-08-26: Principal ya correcto y automático, nunca
+    pasa por editar_curva(), pero el respaldo cambió en Quoia y no había
+    ninguna acción que lo reevaluara).
     """
     front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
     fecha_str = str(fecha)
@@ -847,6 +872,33 @@ def recuperar_medidor(
         intentos = [f.result() for f in futuros]
 
     rep.recuperacion_datos = ", ".join(intentos) or None
+    if Modelo is ReporteEnergiaGeneracion:
+        _revisar_respaldo_en_vivo(front, rep, fecha)
+    db.commit()
+    return _construir_detalle(db, frontera_id, fecha)
+
+
+@router.post("/fronteras/{frontera_id}/revisar-respaldo", response_model=DetalleFronteraReporte)
+def revisar_respaldo(
+    frontera_id: int, fecha: date = Query(...),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """Revisa el valor EN VIVO del medidor de respaldo -- el mismo que ya
+    muestra el banner "el medidor ya muestra un valor distinto en Quoia"
+    en el detalle -- contra la tolerancia de coherencia, y adopta su
+    snapshot si pasa (ver _revisar_respaldo_en_vivo).
+
+    Acción explícita y liviana: NO pasa por "Recuperar medidor"
+    (interrogación activa de hasta 90s al dispositivo) ni por editar
+    Principal -- pensada para el botón "Usar" del banner, cuando el valor
+    en vivo ya está disponible pasivamente sin necesidad de recuperación
+    activa (ver MGS Agustín 1 2026-08-26: Principal ya correcto y
+    automático, el respaldo cambió en Quoia y el banner ya mostraba el
+    valor nuevo, pero no había ninguna acción liviana para adoptarlo)."""
+    front, rep, Modelo = _fila_por_id(db, frontera_id, fecha)
+    if Modelo is not ReporteEnergiaGeneracion:
+        raise HTTPException(400, "Esta acción solo aplica a fronteras de Generación")
+    _revisar_respaldo_en_vivo(front, rep, fecha)
     db.commit()
     return _construir_detalle(db, frontera_id, fecha)
 

@@ -151,12 +151,12 @@ class _GaiaDummy:
     pass
 
 
-def test_adoptar_principal_refresca_tambien_el_respaldo_en_vivo(db, monkeypatch):
+def test_respaldo_en_vivo_dentro_de_tolerancia_actualiza_snapshot_y_curva(db, monkeypatch):
     """GD La Hormiguita 2026-08-26: ambos medidores recuperados con éxito,
-    la persona adopta 'Medidor principal (actualizado)' -- el respaldo
-    también tiene un valor fresco en Quoia y debe quedar disponible para
-    el chequeo de coherencia, no seguir comparando contra el snapshot
-    vacío de la clasificación original."""
+    la persona adopta 'Medidor principal (actualizado)' -- el respaldo en
+    vivo coincide dentro de tolerancia, así que se usa como dato real Y se
+    adopta como el nuevo snapshot de referencia (el aviso 'el medidor
+    cambió' debe desaparecer, ya quedó validado)."""
     monkeypatch.setattr(re_api, "GaiaClient", lambda: _GaiaDummy())
     monkeypatch.setattr(re_api.curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
     monkeypatch.setattr(re_api.curvas, "construir_mapa_borders",
@@ -180,20 +180,51 @@ def test_adoptar_principal_refresca_tambien_el_respaldo_en_vivo(db, monkeypatch)
 
     assert detalle.curva_medidor_principal == nuevo_principal
     assert detalle.curva_medidor_respaldo == respaldo_vivo, (
-        "el respaldo debia refrescarse con el valor en vivo, no seguir en None"
+        "paso la tolerancia -- el snapshot debia adoptar el valor en vivo"
     )
     assert detalle.respaldo_reportado_origen == "medidor"
     assert detalle.curva_respaldo_reportada == respaldo_vivo
 
 
-def test_adoptar_respaldo_refresca_tambien_el_principal_en_vivo(db, monkeypatch):
+def test_respaldo_en_vivo_fuera_de_tolerancia_no_toca_snapshot(db, monkeypatch):
+    """MGS GD La Hormiguita 2026-08-26 (caso real): la diferencia (1,54
+    kWh) queda apenas fuera de la tolerancia de 1,5 -- sigue cayendo a
+    estimado, y el snapshot de curva_medidor_respaldo NO se toca, para que
+    el aviso 'el medidor cambió' siga visible (la discrepancia sigue sin
+    resolver, no corresponde apagarlo silenciosamente)."""
     monkeypatch.setattr(re_api, "GaiaClient", lambda: _GaiaDummy())
     monkeypatch.setattr(re_api.curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
     monkeypatch.setattr(re_api.curvas, "construir_mapa_borders",
                          lambda gaia: {"frt001": {"main_meter": 1, "backup_meter": 2}})
-    principal_vivo = [50.0] * 24
+    respaldo_vivo = [100.0] * 23 + [102.0]  # +2 kWh -- fuera de tolerancia
     monkeypatch.setattr(re_api.curvas, "curva_medidor_en_vivo",
-                         lambda *a, **kw: (pd.Series(principal_vivo, dtype=float), pd.Series([None] * 24, dtype=float)))
+                         lambda *a, **kw: (pd.Series([None] * 24, dtype=float), pd.Series(respaldo_vivo, dtype=float)))
+
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    viejo_respaldo = [None] * 24
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=6, medidor_usado="ninguno",
+        curva_final=[0.0] * 24, curva_medidor_principal=[None] * 24, curva_medidor_respaldo=viejo_respaldo,
+    )
+    db.add(rep)
+    db.commit()
+
+    nuevo_principal = [100.0] * 24
+    body = EditarCurvaRequest(curva_final=nuevo_principal, fuente="principal")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.respaldo_reportado_origen == "estimado"
+    assert detalle.curva_medidor_respaldo == viejo_respaldo, (
+        "no paso la tolerancia -- el snapshot no debia tocarse, el aviso de cambio debe seguir visible"
+    )
+
+
+def test_adoptar_respaldo_no_refresca_el_snapshot_de_principal(db, monkeypatch):
+    """El chequeo de coherencia solo aplica cuando curva_final viene del
+    medidor PRINCIPAL -- elegir 'respaldo' como fuente no debe consultar
+    ni tocar el snapshot de curva_medidor_principal."""
+    monkeypatch.setattr(re_api, "GaiaClient", lambda: (_ for _ in ()).throw(AssertionError("no debia consultar Quoia")))
 
     front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
     db.add(front)
@@ -209,9 +240,7 @@ def test_adoptar_respaldo_refresca_tambien_el_principal_en_vivo(db, monkeypatch)
     detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
 
     assert detalle.curva_medidor_respaldo == nuevo_respaldo
-    assert detalle.curva_medidor_principal == principal_vivo, (
-        "el principal debia refrescarse con el valor en vivo, no seguir en None"
-    )
+    assert detalle.curva_medidor_principal == [None] * 24
 
 
 def test_refresco_en_vivo_del_otro_medidor_falla_silenciosamente(db, monkeypatch):

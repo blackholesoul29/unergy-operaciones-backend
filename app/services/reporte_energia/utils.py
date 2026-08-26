@@ -123,12 +123,20 @@ def rellenar_con_otro_medidor(
     return curva, horas
 
 
-def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
+def curva_respaldo_a_reportar(rep, curva_medidor_respaldo: list | None = None) -> tuple[list[float], str]:
     """Qué se reporta como 'Backup' a Quoia -- dato real cuando existe y es
     confiable, si no la estimación ±1% de siempre. Usado tanto por
     _enviar_a_quoia() (reporte_energia.py) como por _construir_detalle()
     para que el frontend muestre exactamente lo que se va a enviar, antes
     de enviarlo.
+
+    `curva_medidor_respaldo` (opcional): override explícito -- si se pasa,
+    se usa esto en vez de `rep.curva_medidor_respaldo` para el chequeo del
+    paso 2, SIN persistirlo en el objeto. Pensado para editar_curva()
+    (reporte_energia.py): alimentar la decisión con un valor en vivo más
+    fresco que el snapshot guardado, sin pisar ese snapshot -- pisarlo
+    apagaría el aviso "el medidor cambió" para un medidor que la persona
+    nunca revisó explícitamente (ver MGS GD La Hormiguita 2026-08-26).
 
     Prioridad:
     1. curva_respaldo_terceros (FRONTERAS_TERCEROS, ej. Cedillanos) -- dato
@@ -160,7 +168,8 @@ def curva_respaldo_a_reportar(rep) -> tuple[list[float], str]:
         return [float(v) if v is not None else 0.0 for v in respaldo_terceros], "terceros"
 
     mu = rep.medidor_usado or ""
-    curva_medidor_respaldo = getattr(rep, "curva_medidor_respaldo", None)
+    if curva_medidor_respaldo is None:
+        curva_medidor_respaldo = getattr(rep, "curva_medidor_respaldo", None)
     if mu.startswith("principal") and curva_medidor_respaldo:
         respaldo_medidor = [float(v) if v is not None else 0.0 for v in curva_medidor_respaldo]
         dif_total = abs(sum(respaldo_medidor) - sum(principal_readings))
@@ -191,13 +200,15 @@ def curva_cambio(persistida: list | None, viva: list | None, tolerancia: float =
     return abs(total_p - total_v) / base > tolerancia
 
 
-def actualizar_respaldo_final(rep) -> None:
+def actualizar_respaldo_final(rep, curva_medidor_respaldo: list | None = None) -> None:
     """Recalcula y persiste curva_respaldo_final/respaldo_final_origen en
     `rep` -- llamar cada vez que curva_final/medidor_usado (o las curvas de
     medidor que alimentan la comparación) se terminan de fijar: clasificar
     (orquestador._upsert_generacion), edición manual (editar_curva) y Excel
     de terceros (aplicar_excel_terceros). Solo aplica a
-    ReporteEnergiaGeneracion -- Consumo no tiene estas dos columnas."""
-    curva, origen = curva_respaldo_a_reportar(rep)
+    ReporteEnergiaGeneracion -- Consumo no tiene estas dos columnas.
+
+    `curva_medidor_respaldo` (opcional): ver curva_respaldo_a_reportar()."""
+    curva, origen = curva_respaldo_a_reportar(rep, curva_medidor_respaldo)
     rep.curva_respaldo_final = curva
     rep.respaldo_final_origen = origen

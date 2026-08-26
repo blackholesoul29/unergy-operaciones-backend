@@ -10,6 +10,7 @@ caso/editado_manualmente.
 """
 from datetime import date
 
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -104,3 +105,83 @@ def test_solo_respaldo_configurado_no_pide_principal(db, monkeypatch):
 
     assert llamados == [333]
     assert detalle.recuperacion_datos == "respaldo: éxito"
+
+
+def test_principal_ya_automatico_revisa_respaldo_en_vivo_y_lo_adopta_si_pasa(db, monkeypatch):
+    """MGS Agustín 1 2026-08-26: Principal ya correcto y automático (nunca
+    pasa por editar_curva()), pero el respaldo cambió en Quoia -- 'Recuperar
+    medidor' debe re-evaluarlo y adoptarlo si pasa la tolerancia."""
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    principal = [100.0] * 24
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=2, medidor_usado="principal",
+        curva_final=principal, curva_medidor_principal=principal, curva_medidor_respaldo=[999.0] * 24,
+        editado_manualmente=False,
+    )
+    db.add(rep)
+    db.commit()
+
+    monkeypatch.setattr(curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 111, "backup_meter": 222}})
+    monkeypatch.setattr(curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
+    monkeypatch.setattr(recuperacion, "recuperar_datos_medidor", lambda *a, **kw: {"status": "success"})
+    respaldo_vivo = [100.0] * 23 + [101.0]  # +1 kWh -- dentro de tolerancia
+    monkeypatch.setattr(curvas, "curva_medidor_en_vivo",
+                         lambda *a, **kw: (pd.Series(principal, dtype=float), pd.Series(respaldo_vivo, dtype=float)))
+
+    detalle = re_api.recuperar_medidor(frontera_id=1, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_respaldo == respaldo_vivo
+    assert detalle.respaldo_reportado_origen == "medidor"
+
+
+def test_principal_ya_automatico_respaldo_fuera_de_tolerancia_no_lo_adopta(db, monkeypatch):
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    principal = [100.0] * 24
+    viejo_respaldo = [999.0] * 24
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=2, medidor_usado="principal",
+        curva_final=principal, curva_medidor_principal=principal, curva_medidor_respaldo=viejo_respaldo,
+        editado_manualmente=False,
+    )
+    db.add(rep)
+    db.commit()
+
+    monkeypatch.setattr(curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 111, "backup_meter": 222}})
+    monkeypatch.setattr(curvas, "construir_mapa_medidor_nodo", lambda gaia: {})
+    monkeypatch.setattr(recuperacion, "recuperar_datos_medidor", lambda *a, **kw: {"status": "success"})
+    respaldo_vivo = [75.93] * 24  # bien lejos de tolerancia (caso real Agustín 1)
+    monkeypatch.setattr(curvas, "curva_medidor_en_vivo",
+                         lambda *a, **kw: (pd.Series(principal, dtype=float), pd.Series(respaldo_vivo, dtype=float)))
+
+    detalle = re_api.recuperar_medidor(frontera_id=1, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.curva_medidor_respaldo == viejo_respaldo
+    assert detalle.respaldo_reportado_origen == "estimado"
+
+
+def test_medidor_usado_no_principal_no_revisa_respaldo(db, monkeypatch):
+    """Si curva_final no vino del medidor principal, no tiene sentido
+    revisar el respaldo -- no debe consultarse Quoia para eso."""
+    front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion, codigo_frontera="frt001")
+    db.add(front)
+    rep = ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 20), caso=5, medidor_usado="historico",
+        curva_final=[1.0] * 24, curva_medidor_principal=None, curva_medidor_respaldo=None,
+        editado_manualmente=False,
+    )
+    db.add(rep)
+    db.commit()
+
+    monkeypatch.setattr(curvas, "construir_mapa_borders",
+                         lambda gaia: {"frt001": {"main_meter": 111, "backup_meter": 222}})
+    monkeypatch.setattr(recuperacion, "recuperar_datos_medidor", lambda *a, **kw: {"status": "success"})
+
+    detalle = re_api.recuperar_medidor(frontera_id=1, fecha=date(2026, 8, 20), db=db, _=None)
+
+    # El guard de _revisar_respaldo_en_vivo() debe cortar ANTES de tocar
+    # nada -- curva_medidor_respaldo se queda exactamente como estaba.
+    assert detalle.curva_medidor_respaldo is None

@@ -88,6 +88,29 @@ Todos medidos sobre el corpus real el 2026-08-26. No son supuestos.
 
 ---
 
+## Encaje con el refactor del núcleo (verificado 2026-08-26)
+
+Juanjo arrancó un refactor de 8 fases (`docs/refactor/`). Tres cosas que salen de leerlo:
+
+**No hay colisión.** `02-modelo.md` deja **garantías XM explícitamente fuera de alcance**,
+junto con arriendos, O&M, mandatos y series de clima. Sus 19 tablas nuevas son del núcleo
+—equipos, red, contratos, satélites de falla— y ninguna se cruza con `xm_medida` ni
+`gar_*`. Este plan avanza en paralelo, sin esperar sus puertas de aprobación.
+
+**El esquema va por `create_all`, no por `_PENDING_DDLS`.** La Fase 0 quitó 44
+`CREATE TABLE` de tablas que ya tenían modelo ORM, porque `create_all()` corre antes y los
+volvía no-ops mientras el DDL crudo se quedaba atrás — 15 declaraban menos columnas que su
+modelo. El `CLAUDE.md` ahora lo prohíbe. La Task 3 de este plan **queda revertida** por esa
+razón; el modelo es la única fuente.
+
+**Los tests corren en SQLite.** 104 de 130 archivos usan `sqlite:///:memory:` con
+`@compiles` traduciendo `JSONB → TEXT` y `BigInteger → INTEGER`. Consecuencia para este
+plan: los campos JSONB (`esquema_detalle`, `procedencia`, `discrepancias`, `insumos`) no se
+comportan como JSONB en los tests, así que **la idempotencia se prueba sobre la clave
+natural en una función pura**, no confiando en que el `UNIQUE` dispare. El centinela
+`hora = 0` ayuda justamente acá: evita depender de la semántica de NULL, que es donde
+SQLite y Postgres divergen.
+
 ## Estructura de archivos
 
 | Archivo | Responsabilidad |

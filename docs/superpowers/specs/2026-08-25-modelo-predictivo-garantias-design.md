@@ -213,6 +213,35 @@ El correo las publica. Son una rama distinta de la que usa hoy `app/services/xm/
 soportes del esquema **semanal**; `DemGarMen…` (Demanda Comercial) es el cuarto soporte
 junto a `Con`, `Car` y `Ene`.
 
+### Llegaron los CGS (2026-08-26): el carril semanal existe y es profundo
+
+Descargados de `Finance/CGS/` para los dos agentes. El corpus pasa de **1.263 a 3.233
+archivos únicos** — 1.970 inéditos.
+
+| Prefijo | Esquema | Únicos | Vencimientos |
+|---|---|---|---|
+| `Con` / `CarCon` / `Ene` | MENSUAL | 262 / 289 / 298 | 185 · 2023-06 → 2026-08 |
+| `Con` / `CarCon` / `Ene` | **SEMANAL** | 727 / 205 / 868 | **232 · 2022-02 → 2026-08** |
+| **`LC`** | SEMANAL | 151 | 123 |
+| `Dem` | SEMANAL | 1 | 106 |
+
+**232 vencimientos semanales de soportes, desde febrero de 2022.** Es el carril que
+§2.9 señalaba como descubierto. Falta todavía el histórico de los Excel
+`GARANTIA SEMANAL` (targets), del que hay uno solo.
+
+**`LC` es un componente de la fórmula que no sabíamos calcular.** Sus 162 líneas traen
+`Demanda Comercializador STR1/STR2`, `Constante K`, `TRM` y `LC STR1`. Aporta el
+componente `LC` de los 20 y además la TRM, que la garantía TIE necesita.
+
+**`Dem` está vacío para nuestros agentes, y no es un error.** Los 388 archivos pesan 30
+bytes: solo la cabecera `Fecha,Entidad,Concepto,Valor`, cero filas — por eso hay un solo
+hash único. Somos generadores, no distribuidores con demanda STR. **No hay que ingerirlo**,
+pero sí hay que distinguir «vacío legítimo» de «descarga fallida»: un archivo de 30 bytes
+con cabecera válida es correcto y no debe marcarse `esquema_ok = false`.
+
+**`CGM` solo trae `Con`, `Car` y `Ene`** — verificado por FTP. `Dem` y `LC` existen
+únicamente en `CGS`.
+
 ### ⚠️ El formato cambia el 2026-09-04
 
 XM anunció que el reporte pasa al formato del *Periodo de prueba Res CREG 101 097 de

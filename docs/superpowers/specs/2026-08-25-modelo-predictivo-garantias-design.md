@@ -433,6 +433,12 @@ Trampas verificadas en ese archivo, todas silenciosas:
 - Un mismo tipo de ajuste puede aparecer **dos veces** en una hoja cuando el período
   cruza fin de mes (`AJUSTE 1 25 AL 30 ABR` y `AJUSTE 1 01 AL 01 MAY` en la hoja
   `15MAY`). El parser no puede asumir uno por tipo.
+- **El año no está en ninguna parte del contenido.** Verificado celda por celda sobre las
+  22 hojas: ni como texto ni como fecha. `26DIC` es solo eso. El único lugar donde
+  aparece el año es el **nombre del archivo** (`Automatizado_2026_...`). El parser debe
+  tomarlo de ahí y registrarlo explícitamente; si algún día existe un `Automatizado_2025`
+  con el mismo formato, sus hojas serán indistinguibles de las de 2026. Además hay que
+  manejar el cruce de año: en `Automatizado_2026`, la hoja `26DIC` es de **2025**.
 
 ### 5.5 `gar_componente_pred` — la predicción
 

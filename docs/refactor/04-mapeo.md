@@ -322,10 +322,10 @@ tres — Cedillanos al 5 % de administración sin representación ni CGM, Sabana
 6 y 6 — y hay lógica de negocio leyéndolas (`4024c1c Costos del panel: elegir el contrato de
 representacion por regla, no por id`).
 
-⚠️ **Sin resolver, por indicación de Juan.** Las opciones y mi inclinación (una tabla
-`contrato_tarifa(contrato_id, concepto, valor)`) están en el apéndice de `01-decisiones.md`, sección
-D-10. **Mientras no se decida, la Fase 6 no se puede ejecutar**, porque es la fase que fusiona
-`contratos_servicio` y perdería las tres.
+✅ **RESUELTO el 2026-08-26 (D-24).** Van a `contrato_tarifas`, y **versionada**: la investigación
+mostró que las tarifas no solo pueden cambiar, cambian todos los años por indexación. El detalle del
+mapeo está en el **§F** de este mismo documento, y la decisión con su evidencia en `01-decisiones.md`
+D-24. **La Fase 6 sigue esperando implementación**, pero ya no por falta de decisión.
 
 ### Y una pregunta que esto abre
 
@@ -423,3 +423,71 @@ conteo de filas.
 ⚠️ Y queda un pendiente heredado del diagnóstico de agosto: el detector sigue creando alarmas y **ya no
 hay UI web para resolverlas** (la vista `/alertas/monitoreo` se retiró). Eso no lo decide este refactor,
 pero explica por qué la tabla puede acumular filas que nadie cierra.
+
+---
+
+## F · 2026-08-26 · `contrato_tarifas`: el hueco del §A, cerrado
+
+El §A dejó las tres tarifas de servicio como 🛑 sin destino. **Ya lo tienen**: la tabla
+`contrato_tarifas` del `03-esquema.sql`. Y la investigación que pidió Juan cambió el diseño — no es una
+tabla de tres columnas, es una tabla **versionada**.
+
+### Qué se migra, y de dónde
+
+| Origen en `contratos_servicio` | Destino | Concepto | Unidad |
+|---|---|---|---|
+| `tarifa_admin` (`Numeric(8,4)`) | `contrato_tarifas` | `administracion` | **`porcentaje`** |
+| `tarifa_cgm` (`Numeric(10,6)`) | ídem | `cgm` | `cop_kwh` |
+| `tarifa_representacion` (`Numeric(10,6)`) | ídem | `representacion` | `cop_kwh` |
+| `tarifa_base`, `tarifa_mensual` | ídem | `canon` | `cop_mes` |
+| **`indexacion_cgm`** (JSONB) | **una fila por año** | `cgm` | `cop_kwh` |
+| **`indexacion_representacion`** (JSONB) | ídem | `representacion` | `cop_kwh` |
+| **`indexacion_anual`** / **`indexacion_mensual`** (JSONB) | ídem | `canon` | `cop_mes` |
+| `ppa_tarifas` (tabla, `(contrato_id, año, mes) → tarifa`) | ídem | `energia` | `cop_kwh` |
+| `indice_indexacion`, `fecha_indexacion` | `contrato_tarifas.indice` + la `vigencia` de cada fila | | |
+
+**Las columnas escalares desaparecen.** Hoy `tarifa_cgm` guarda el valor **base** y el JSONB guarda la
+serie indexada — se comprueba en el seed: `tarifa_cgm=5.0` junto a una serie cuyo primer elemento es
+`{"año": 2024, "valor": 5.0, "esBase": true}`. En el modelo nuevo la base es simplemente la fila con
+`es_base = TRUE`, y no hay dos sitios que puedan discrepar.
+
+### Cómo se migra cada JSONB
+
+Cada elemento `{"año": Y, "ipc": P, "valor": V, "esBase": B}` se vuelve una fila:
+
+```
+vigencia   = [Y-01-01, (Y+1)-01-01)   -- acotada por fecha_inicio/fecha_fin del contrato
+valor      = V
+es_base    = B
+indice     = 'IPC'  (o el de indice_indexacion)
+indice_pct = P
+```
+
+⚠️ **Tres cosas que la migración tiene que medir antes, no después:**
+
+1. **Series con años solapados o repetidos** — el `EXCLUDE` las rechaza. Hay que listarlas primero.
+2. **Series que empiezan antes de `fecha_inicio` del contrato**, o que siguen después de `fecha_fin`.
+   La vigencia se acota al contrato, y si eso deja una fila vacía es un dato a revisar, no a descartar.
+3. **Contratos con escalar pero sin serie** (Cedillanos y Sabana de Torres, cargados el 2026-08-25):
+   se migran como una única fila con `es_base = TRUE` y `vigencia` abierta.
+
+### Lo que NO se migra acá
+
+`om_ipc_tasas`, `arr_ipc_tasas` e `ipp_mensual` son **catálogos de tasas** —el IPC de cada año, el IPP de
+cada mes—, no tarifas de un contrato. Se quedan donde están, fuera del núcleo. `contrato_tarifas.indice`
+apunta a cuál se usó; el valor del índice se busca en ellos.
+
+### ⚠️ Y un hallazgo que no esperaba
+
+**`tarifa_admin` no tiene serie de indexación.** `tarifa_cgm` y `tarifa_representacion` tienen la suya
+(`indexacion_cgm`, `indexacion_representacion`), y el canon de mantenimiento tiene `indexacion_anual` /
+`indexacion_mensual`. La de administración, no.
+
+Dos lecturas posibles y **no sé cuál es**: o la administración no se indexa —es un porcentaje sobre el
+ingreso, así que sube sola cuando sube el ingreso—, o **sí se renegocia y ese histórico se está
+perdiendo** cada vez que alguien edita el campo. La segunda explicaría por qué Cedillanos está al 5 % y
+el resto al 3,8 %.
+
+La tabla nueva soporta las dos: si no se indexa, tendrá una sola fila con vigencia abierta. Pero **si es
+la segunda, hoy se está perdiendo historia de liquidación**, y eso merece preguntarle a Jessica antes de
+migrar.

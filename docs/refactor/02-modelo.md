@@ -1,7 +1,7 @@
 # 02 · Modelo de datos objetivo
 
 **Qué es esto:** el diagrama ER del núcleo y qué representa cada entidad. Sale de `03-esquema.sql`,
-que está validado: **36 tablas, 20 enums, 4 vistas**, orden de dependencias correcto, índice en las 55 FK.
+que está validado: **37 tablas, 22 enums, 4 vistas**, orden de dependencias correcto, índice en las 55 FK.
 **Lo central:** el proyecto queda como hub y aparecen tres entidades que hoy no existen — **equipo**,
 **punto de conexión de red** y **composición accionaria con vigencia**.
 **Hueco declarado:** la frontera **no está**. Decisión D-06 pendiente de tu confirmación (ver `01-decisiones.md`).
@@ -48,6 +48,7 @@ erDiagram
     clientes                  ||--o{ proyecto_composicion_lineas : "es dueño de"
     contratos                 ||--o{ contrato_partes          : "involucra"
     clientes                  ||--o{ contrato_partes          : "actua como rol"
+    contratos                 ||--o{ contrato_tarifas         : "cobra por concepto con vigencia"
     contratos                 ||--o{ contrato_proyectos       : "cubre"
     proyectos                 ||--o{ contrato_proyectos       : "esta cubierto por"
     contratos                 ||--o{ proyecto_composicion_lineas : "sustenta"
@@ -91,6 +92,7 @@ erDiagram
 | falla → proyectos | **N:M** | PK compuesta en `falla_proyectos` |
 | contrato → proyectos | **N:M** | PK compuesta en `contrato_proyectos` |
 | contrato → clientes por rol | N:M con rol | `UNIQUE (contrato_id, cliente_id, rol)` |
+| contrato → tarifas | 1:N, **una vigente por concepto** | `EXCLUDE USING gist (contrato_id WITH =, concepto WITH =, vigencia WITH &&)` |
 | equipo → equipo (componente) | jerarquía | `parent_equipo_id` autorreferencial |
 | proyecto + serial → equipo | único | `UNIQUE (proyecto_id, numero_serie) WHERE numero_serie IS NOT NULL` |
 | proyecto + área → contacto | 1 solo | `UNIQUE (proyecto_id, tipo)` |
@@ -214,6 +216,19 @@ Los 8 roles son un enum: `propietario`, `arrendador`, `arrendatario`, `comprador
 
 **`contrato_proyectos`** — N:M. Unifica los dos mecanismos de hoy: el escalar nullable de
 `contratos_servicio` y la N:M de los PPA. Un contrato que cubre 3 plantas deja de ser 3 contratos.
+
+**`contrato_tarifas`** — qué se cobra, por concepto y **con vigencia**. No es una columna del contrato
+porque **las tarifas se renegocian**: la misma tarifa de CGM vale 5,0 en 2024, 5,26 en 2025 y 5,52826 en
+2026 en los contratos de Ayura 1, indexada por IPC. Hoy ese histórico existe pero vive en cuatro JSONB
+sin esquema (`indexacion_cgm`, `indexacion_representacion`, `indexacion_anual`, `indexacion_mensual`).
+
+Cinco conceptos, como enum: `administracion`, `cgm`, `representacion`, `canon`, `energia`. Y **`unidad`
+es obligatoria**, porque en los datos de hoy conviven porcentajes (administración = `0.038`, o sea 3,8 %)
+y COP/kWh (CGM = `6.0`) en columnas del mismo tipo, donde son indistinguibles.
+
+El `EXCLUDE` impide que un concepto tenga dos valores vigentes a la vez en el mismo contrato — el mismo
+mecanismo que protege la composición accionaria. Con eso, **la liquidación de un periodo puede pedir la
+tarifa vigente en ese periodo** en vez de la actual, que es la razón de ser de la tabla.
 
 > **Y la relación cliente–proyecto no se duplica**, que era la otra exigencia. Un cliente llega a un
 > proyecto por dos caminos que dicen cosas distintas y ninguno es redundante: por **propiedad**

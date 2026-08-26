@@ -103,6 +103,17 @@ CREATE TYPE contrato_rol_enum AS ENUM (
     'operador', 'mantenedor', 'representante'
 );
 
+-- Qué se cobra en un contrato. Cerrado a proposito: agregar un concepto es un
+-- cambio de modelo de negocio, no un dato que administre el usuario (D-15).
+CREATE TYPE tarifa_concepto_enum AS ENUM (
+    'administracion', 'cgm', 'representacion', 'canon', 'energia'
+);
+
+-- En que unidad esta expresada una tarifa. Es OBLIGATORIA: en los datos de hoy
+-- conviven porcentajes (administracion = 0.038 -> 3,8%) y COP/kWh (cgm = 6.0) en
+-- columnas del mismo tipo, y sin unidad son indistinguibles.
+CREATE TYPE tarifa_unidad_enum AS ENUM ('porcentaje', 'cop_kwh', 'cop_mes', 'cop_total');
+
 -- Qué originó la falla. 'red' y 'evento_natural' son las causas externas del brief.
 CREATE TYPE falla_origen_enum AS ENUM ('equipo', 'red', 'evento_natural', 'externo');
 
@@ -620,6 +631,43 @@ CREATE TABLE contrato_partes (
 );
 COMMENT ON TABLE contrato_partes IS 'Qué papel juega cada cliente en un contrato; reemplaza las columnas contratante/prestador/comprador/vendedor.';
 
+CREATE TABLE contrato_tarifas (
+    id            BIGSERIAL PRIMARY KEY,
+    contrato_id   BIGINT NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
+    concepto      tarifa_concepto_enum NOT NULL,
+    valor         NUMERIC(14,6) NOT NULL,
+    unidad        tarifa_unidad_enum   NOT NULL,
+    vigencia      DATERANGE            NOT NULL,
+
+    -- De donde salio este valor: la base pactada, o una indexacion sobre la
+    -- anterior. Reemplaza el {ipc, esBase} de los JSONB indexacion_* de hoy.
+    es_base       BOOLEAN NOT NULL DEFAULT FALSE,
+    indice        VARCHAR(20),
+    indice_pct    NUMERIC(8,4),
+
+    registrado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT ck_contrato_tarifas_valor    CHECK (valor >= 0),
+    CONSTRAINT ck_contrato_tarifas_vigencia CHECK (NOT isempty(vigencia)),
+    -- Un porcentaje se guarda como fraccion (0.038 = 3,8%), como ya esta hoy.
+    CONSTRAINT ck_contrato_tarifas_pct      CHECK (
+        unidad <> 'porcentaje' OR valor <= 1
+    ),
+    -- La base no se indexa; lo indexado dice sobre que indice y cuanto.
+    CONSTRAINT ck_contrato_tarifas_indice   CHECK (
+        (es_base AND indice IS NULL AND indice_pct IS NULL)
+        OR NOT es_base
+    ),
+    -- Un concepto no puede tener dos valores vigentes a la vez en el mismo
+    -- contrato. Es el mismo mecanismo que protege la composicion accionaria.
+    CONSTRAINT ex_contrato_tarifas_sin_solape
+        EXCLUDE USING gist (contrato_id WITH =, concepto WITH =, vigencia WITH &&)
+);
+COMMENT ON TABLE contrato_tarifas IS 'Qué se cobra en un contrato, por concepto y con vigencia: las tarifas se renegocian e indexan cada año.';
+COMMENT ON COLUMN contrato_tarifas.vigencia IS 'Rango [desde, hasta); la liquidación de un periodo usa la tarifa vigente EN ese periodo, no la actual.';
+COMMENT ON COLUMN contrato_tarifas.unidad IS 'Obligatoria: administracion es un porcentaje y cgm es COP/kWh, y en las columnas de hoy son indistinguibles.';
+
 CREATE TABLE contrato_proyectos (
     contrato_id BIGINT NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
     proyecto_id BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
@@ -844,6 +892,10 @@ CREATE INDEX ix_contratos_deleted                   ON contratos (deleted_at) WH
 CREATE INDEX ix_contrato_partes_contrato_id         ON contrato_partes (contrato_id);
 CREATE INDEX ix_contrato_partes_cliente_id          ON contrato_partes (cliente_id);
 CREATE INDEX ix_contrato_proyectos_proyecto_id      ON contrato_proyectos (proyecto_id);
+CREATE INDEX ix_contrato_tarifas_contrato_id        ON contrato_tarifas (contrato_id);
+CREATE INDEX ix_contrato_tarifas_registrado_por_id  ON contrato_tarifas (registrado_por_id);
+-- «La tarifa de CGM de este contrato en junio de 2026» en un solo predicado.
+CREATE INDEX ix_contrato_tarifas_vigencia           ON contrato_tarifas USING gist (vigencia);
 
 -- Fallas
 CREATE INDEX ix_fallas_estado_id                    ON fallas (estado_id);

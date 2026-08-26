@@ -906,3 +906,142 @@ strings justamente porque no hay id.
 **Cuándo se paga:** cuando el consumidor externo confirme que puede recibir un id, o cuando aparezca un
 segundo consumidor que necesite cruzar por municipio. Entra el catálogo y los dos strings se conservan
 como campos derivados de la salida.
+
+---
+
+## D-24 · `contrato_tarifas`, **versionada** — cerrada 2026-08-26
+
+Juan confirmó: las tarifas van en el contrato, no en el inversionista. **El inversionista las alcanza
+vía `contrato_partes`**, y `proyecto_composicion` NO las duplica. Y pidió revisar si hay evidencia de
+que se renegocien, porque si la hay la tabla necesita vigencia.
+
+### La evidencia: no es que *puedan* cambiar, es que **cambian todos los años**
+
+Busqué en el código y en los datos que ya están cargados. Cinco pruebas, de más a menos concluyente:
+
+**1 · La misma tarifa con tres valores distintos, en el propio repo.** `app/main.py:1478-1482`, la serie
+que alimenta los contratos de Ayura 1:
+
+```python
+_IDX_AYURA1 = [
+    {"año": 2024, "ipc": None, "valor": 5.0,     "esBase": True},
+    {"año": 2025, "ipc": 5.2,  "valor": 5.26},
+    {"año": 2026, "ipc": 5.1,  "valor": 5.52826},
+]
+```
+
+Eso no es una tarifa con historia posible: es una tarifa **con historia real, ya cargada**, indexada por
+IPC año a año. Se usa como `indexacion_cgm` y `indexacion_representacion` en 14 contratos.
+
+**2 · `ppa_tarifas` ya está versionada, en la misma base.** `(contrato_id, año, mes) → tarifa`, con
+`UNIQUE (contrato_id, "año", mes)` (`app/models/contratos.py`). El precio de la energía de un PPA se
+guarda **por mes** desde siempre. La pregunta ya está respondida para un tipo de contrato; lo raro es
+que no lo esté para los otros.
+
+**3 · Cuatro columnas JSONB que son series temporales.** `indexacion_anual`, `indexacion_mensual`,
+`indexacion_cgm`, `indexacion_representacion` (`contratos.py:114-127`). Son exactamente el histórico que
+esta decisión necesita, guardado sin esquema.
+
+**4 · Un endpoint de carga masiva de indexación.** `POST /contratos-servicio/importar-indexacion?tipo=anual|mensual`
+(`app/api/v1/contratos_servicio.py:150-185`) recibe `[{anio, ipc_aplicado, valor}]` por proyecto. Existe
+una operación de negocio dedicada a **cargar el histórico de tarifas**.
+
+**5 · Tres catálogos de tasas y la fórmula escrita.** `om_ipc_tasas`, `arr_ipc_tasas`, `ipp_mensual`, más
+las columnas `indice_indexacion`, `fecha_indexacion`, `periodicidad_indexacion`,
+`periodo_indexacion_base`, `valor_indexacion_base`. Y el docstring de `contratos.py:225`:
+`tarifa_indexada = tarifa_base × (IPP_del_mes / valor_indexacion_base_del_PPA)`.
+
+**Conclusión: versionada, sin duda.** No hay que descartar nada — la evidencia es positiva y abundante.
+
+### El diseño
+
+`contrato_tarifas` con `vigencia DATERANGE` y
+`EXCLUDE USING gist (contrato_id WITH =, concepto WITH =, vigencia WITH &&)`: un concepto no puede tener
+dos valores vigentes a la vez en el mismo contrato. Es el mismo mecanismo de D-08, y por la misma razón
+que Juan señaló: **la liquidación de un periodo se calcula con la tarifa vigente en ese periodo.**
+
+Las columnas escalares (`tarifa_admin`, `tarifa_cgm`, `tarifa_representacion`, `tarifa_base`)
+**desaparecen**. Hoy el escalar guarda el valor base y el JSONB la serie indexada — dos sitios que pueden
+discrepar. En el modelo nuevo la base es la fila con `es_base = TRUE`.
+
+### `concepto` como enum, y son **cinco**, no tres
+
+Juan nombró tres: administración, CGM y representación. En los datos hay dos más:
+
+| Concepto | De dónde sale |
+|---|---|
+| `administracion` | `contratos_servicio.tarifa_admin` |
+| `cgm` | `tarifa_cgm` + `indexacion_cgm` |
+| `representacion` | `tarifa_representacion` + `indexacion_representacion` |
+| **`canon`** | `tarifa_base` / `tarifa_mensual` + `indexacion_anual`/`_mensual` — el canon de mantenimiento, arriendo e internet |
+| **`energia`** | `ppa_tarifas` — el precio del PPA |
+
+Va como **enum nativo**, no como catálogo tabla: agregar un concepto es un cambio de modelo de negocio
+que necesita código de todos modos, no un dato que administre el usuario. Es el criterio de D-15.
+
+### ✅ Verificado: `btree_gist` sí soporta enums en un `EXCLUDE`
+
+El `EXCLUDE` incluye `concepto WITH =`, así que `btree_gist` tiene que soportar el tipo enum. La
+documentación lo dice desde 9.1, pero **este repo no tiene ni un `EXCLUDE` ni una FK compuesta en
+producción**, así que no había precedente propio. **Se probó** (2026-08-26) contra la base local de
+desarrollo, dentro de una transacción con `ROLLBACK` — no quedó ni el tipo ni la tabla:
+
+| Paso | Resultado |
+|---|---|
+| `CREATE EXTENSION btree_gist` | **OK** — no estaba instalada en la base local; se instala sin problema |
+| `CREATE TYPE ... AS ENUM` con los 5 conceptos | **OK** |
+| `EXCLUDE USING gist (contrato_id WITH =, concepto WITH =, vigencia WITH &&)` | **OK, aceptado** |
+| Dos periodos **consecutivos** del mismo concepto | aceptados ✔ (es lo correcto: 2024→2025 no se solapa con 2025→2026) |
+| Mismo periodo, **otro concepto** | aceptado ✔ (CGM y representación conviven en el mismo año) |
+| **Solapamiento del mismo concepto** | **RECHAZADO** ✔ `llave en conflicto viola la restricción de exclusión` |
+
+Entorno: PostgreSQL **17.9**, la misma versión mayor que produccion. No hace falta el plan B del catálogo
+tabla con `id` entero.
+
+⚠️ **Lo único que queda dicho de esto:** `btree_gist` **no estaba instalada** en la base local, así que la
+migración tiene que crearla — y ya hay precedente de que hace falta, porque D-08 y D-09 la necesitan
+igual para la composición accionaria. Va en la misma revisión, antes de cualquier tabla con `EXCLUDE`,
+y con la verificación de permisos que la Fase 2 ya tiene como condición de entrada.
+
+### 🛑 `unidad` es obligatoria, y esto lo descubrí mirando los datos
+
+`tarifa_admin` vale `0.038` y `0.05`. `tarifa_cgm` vale `6.0`. **No son la misma magnitud:** el commit
+que cargó Cedillanos lo dice explícito — *«Cedillanos administra al 5 % (no al 3,8 % del resto) y no
+cobra representación ni CGM; Sabana va al 3,8 % con 6 y 6»*.
+
+O sea: **administración es un porcentaje, CGM y representación son COP/kWh**, y hoy viven en columnas
+`Numeric` del mismo aspecto donde son indistinguibles. Meterlas en una sola tabla sin `unidad` sería
+empeorar el problema, no arreglarlo. Por eso `tarifa_unidad_enum` (`porcentaje`, `cop_kwh`, `cop_mes`,
+`cop_total`) es `NOT NULL`, con un CHECK que obliga a que un porcentaje se guarde como fracción ≤ 1,
+como ya está hoy.
+
+### ⚠️ El hallazgo que no esperaba: administración no tiene serie
+
+`tarifa_cgm` y `tarifa_representacion` tienen su `indexacion_*`. El canon tiene la suya. **La
+administración no.**
+
+Dos lecturas y no sé cuál es: o no se indexa —es un porcentaje sobre el ingreso, así que sube sola—, o
+**sí se renegocia y ese histórico se pierde** cada vez que alguien edita el campo. La segunda explicaría
+por qué Cedillanos está al 5 % y el resto al 3,8 %.
+
+La tabla soporta las dos, así que el diseño no depende de la respuesta. Pero **la migración sí**.
+
+🔲 **PENDIENTE — Juan se lo pregunta a Jessica (2026-08-26).** Las dos hipótesis, para que la pregunta
+sea concreta:
+
+| | Hipótesis A | Hipótesis B |
+|---|---|---|
+| **Qué dice** | La administración **no se indexa**. Es un porcentaje sobre el ingreso, así que sube sola cuando sube el ingreso: renegociar el porcentaje sería raro | La administración **sí se renegocia**, y ese histórico **se está perdiendo** cada vez que alguien edita `tarifa_admin` |
+| **Qué explicaría** | Que nunca se haya construido una `indexacion_admin`, a diferencia de CGM y representación | Que Cedillanos esté al 5 % y el resto al 3,8 % — dos valores distintos para el mismo concepto |
+| **Qué implica en la migración** | Una fila por contrato, `es_base = TRUE`, vigencia abierta. Trivial | Hay que **recuperar el histórico de otra fuente** (actas, correos, el Excel del panel) antes de migrar, o las liquidaciones pasadas quedan con la tarifa de hoy |
+| **Cómo se distingue** | Preguntando. En los datos no se puede: el histórico que faltaría es justamente el que no está | |
+
+**Si es la B, es un bug de liquidación activo hoy**, no solo un hueco del modelo: cualquier
+recálculo de un periodo pasado usa la tarifa actual. La tabla nueva lo cierra hacia adelante, pero lo
+que ya se perdió no lo devuelve.
+
+### Dónde quedó escrito
+
+`03-esquema.sql` (tabla + 2 enums + 3 índices, validado: 37 tablas, orden de dependencias correcto),
+`02-modelo.md` (ER y cardinalidades) y `04-mapeo.md` §F (qué se migra y cómo se convierte cada JSONB).
+**La Fase 6 sigue esperando**: esto es diseño, no implementación.

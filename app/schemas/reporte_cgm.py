@@ -1,6 +1,17 @@
 from datetime import date
 from typing import Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+# Tope de tamaño de rango -- sin esto, una request con fecha_inicio/fecha_fin
+# muy separadas dispara una llamada paginada a Quoia por CADA frontera
+# involucrada, cubriendo todo ese rango (ver fetch_filas_rango en
+# reporte_cgm.py), y arma un Excel/correo con esa cantidad de filas -- sin
+# guardrail, un rango de meses/años multiplicado por "Operaciones Unergy"
+# (~300 fronteras) puede tardar minutos o agotar memoria. 92 días (~3 meses)
+# cubre con margen el uso real (un día, o el mes-a-la-fecha en curso) sin
+# permitir un rango arbitrariamente grande (auditoría CGM 2026-08-26,
+# finding #5).
+RANGO_MAXIMO_DIAS = 92
 
 
 class DestinatarioSeleccionado(BaseModel):
@@ -14,6 +25,16 @@ class EnviarReporteCGMRequest(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     destinatarios: list[DestinatarioSeleccionado]
+
+    @model_validator(mode="after")
+    def _validar_rango_de_fechas(self) -> "EnviarReporteCGMRequest":
+        dias = abs((self.fecha_fin - self.fecha_inicio).days) + 1
+        if dias > RANGO_MAXIMO_DIAS:
+            raise ValueError(
+                f"El rango de fechas no puede superar {RANGO_MAXIMO_DIAS} días "
+                f"(pediste {dias})."
+            )
+        return self
 
 
 class EnvioResultado(BaseModel):

@@ -38,10 +38,16 @@ def _correos_or(proyecto: Proyecto) -> list[str]:
 
 
 def _capacidad_mw(proyecto: Proyecto) -> str:
-    for attr in ("potencia_con_cen_mw", "capacidad_efectiva_neta_mw"):
-        v = getattr(proyecto, attr, None)
-        if v:
-            return f"{float(v):.3f}"
+    # 'capacidad_efectiva_neta_mw' era un fallback intermedio a un campo que
+    # nunca existió en Proyecto (getattr(..., None) siempre caía a None) --
+    # eliminado, auditoría de Proyectos 2026-08-27. potencia_con_cen_mw
+    # sigue en 0% de los proyectos hoy (dato regulatorio que nadie ha
+    # cargado), así que en la práctica esta función siempre resuelve por
+    # potencia_instalada_kwp -- que desde el fix del 2026-08-19 sí es
+    # potencia AC confiable, no un valor arbitrario.
+    v = getattr(proyecto, "potencia_con_cen_mw", None)
+    if v:
+        return f"{float(v):.3f}"
     kwp = getattr(proyecto, "potencia_instalada_kwp", None)
     if kwp:
         return f"{float(kwp) / 1000:.3f}"

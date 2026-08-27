@@ -288,6 +288,16 @@ def confirmar_proyecto_pendiente(
             it.potencia_ac_kw = potencia_ac_kw
         if it.capacidad_instalada_kwp is None and capacidad_instalada_kwp is not None:
             it.capacidad_instalada_kwp = capacidad_instalada_kwp
+        # Mismo espejo que upsert_info_tecnica() (fix 2026-08-19):
+        # proyectos.potencia_instalada_kwp guarda la potencia AC pese al
+        # nombre, no la DC -- sin este espejo, un proyecto creado o
+        # vinculado desde acá quedaba con potencia_instalada_kwp en NULL
+        # para siempre, a menos que alguien volviera a editar Información
+        # técnica a mano después (auditoría de Proyectos 2026-08-27,
+        # hallazgo #3: 35 proyectos con este vacío, la mayoría creados por
+        # este mismo camino de "confirmar pendiente").
+        if proyecto.potencia_instalada_kwp is None and it.potencia_ac_kw is not None:
+            proyecto.potencia_instalada_kwp = it.potencia_ac_kw
         db.commit()
 
     return _get_proyecto_or_404(proyecto_id, db)

@@ -93,10 +93,6 @@ class DetalleFronteraReporte(BaseModel):
     principal_curva_actual: list[float | None] | None = None
     respaldo_energia_actual_kwh: float | None = None
     respaldo_curva_actual: list[float | None] | None = None
-    # Curva 'Backup' del Excel de terceros (FRONTERAS_TERCEROS) -- distinta
-    # de curva_medidor_respaldo (esa es telemetría en vivo del medidor de
-    # nodo, que para estas fronteras no existe).
-    curva_respaldo_terceros: list[float | None] | None = None
     # Lo que /enviar realmente manda como "Backup" a Quoia -- mismo cálculo
     # que curva_respaldo_a_reportar() (utils.py), para que esto se vea ANTES
     # de enviar, no solo después. origen: 'terceros' | 'medidor' (dato real

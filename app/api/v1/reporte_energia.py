@@ -499,7 +499,6 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         respaldo_actualizado_en_quoia=respaldo_actualizado_en_quoia,
         respaldo_energia_actual_kwh=round(respaldo_energia_actual_kwh, 4) if respaldo_energia_actual_kwh is not None else None,
         respaldo_curva_actual=respaldo_curva_actual,
-        curva_respaldo_terceros=rep.curva_respaldo_terceros if es_generacion else None,
         curva_respaldo_reportada=curva_respaldo_reportada,
         respaldo_reportado_origen=respaldo_reportado_origen,
         capacidad_efectiva_mw=capacidad_efectiva_mw,
@@ -1160,10 +1159,12 @@ def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
 
 
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
-    """Envía UNA fila a Quoia (gaia.post_report) -- factorizado para
-    reusarse tanto en /enviar (todas las fronteras del día) como en
-    /reportar-manual (una lista explícita de fronteras fuera del
-    clasificador). Ver ADVERTENCIA en gaia_client.post_report.
+    """Envía UNA fila a Quoia (gaia.post_report) -- usado por /enviar (todas
+    las fronteras del día). Antes también se reusaba desde /reportar-manual
+    (una lista explícita de fronteras fuera del clasificador), endpoint
+    eliminado el 2026-08-21 (commit 250558f); post_report() ya está
+    verificado en producción (91/91 envíos exitosos desde entonces), no
+    "sin probar en vivo" como decía la ADVERTENCIA original.
 
     El "Backup" que se envía sale de curva_respaldo_a_reportar() (utils.py)
     -- dato real cuando existe y es confiable (terceros, o el medidor de

@@ -259,11 +259,64 @@ alcance: se les cambia el padre sin tocarles nada más.
 | 6.4 | `contrato_proyectos` | Desde `contratos_servicio.proyecto_id` (92,1 %) y desde `ppa_contrato_proyectos` (42 filas) |
 | 6.5 | Re-apuntar las FK de los satélites a `contratos.id` | `ppa_tarifas`, `ppa_compromisos_energia`, `cumplimiento_mensual`, `clasificacion_energia_mensual`, `pagos_servicio`, `oportunidad_ofertas.ppa_contrato_id` (0 %), `oportunidad_ofertas.contrato_servicio_id` (0 %). **Gracias a 6.1, las de los PPA no necesitan remapeo** |
 | 6.6 | El bloque internet/Starlink (13 columnas) → `equipos.especificaciones` | No es contrato, es equipo (`04-mapeo.md` §5.3) |
+| 6.7 | Las tarifas escalares y los JSONB `indexacion_*` → **`contrato_tarifas`** | Decisión D-24. El orden de los 3 pasos está en `04-mapeo.md` §F. Dos reglas duras, abajo |
+
+#### ⚠️ Las dos reglas duras del paso 6.7
+
+Las dos salen de haber corrido la consulta de `audit_log` contra producción el 2026-08-27
+(`01-decisiones.md` D-24 §e, salida en `esquema-bd-produccion/historico_tarifas.txt`).
+
+**Regla 1 · Todas las filas nacen con `origen = 'migracion'`.** No hay ninguna con
+`origen = 'renegociacion'`, porque no hay ninguna renegociación recuperable: la ventana de auditoría
+existe desde el 2026-05-19 y **está vacía** de cambios de valor. Cualquier script que intente
+reconstruir historia desde `audit_log` está trabajando sobre nada.
+
+**Regla 2 · Un `0.0` no se migra: se omite la fila.** En estos datos un cero no es «tarifa cero», es
+«todavía no lo lleno» — quedó demostrado con el contrato 108, cuyos `tarifa_cgm` y
+`tarifa_representacion` pasaron de `0.0` a `5.0` tres minutos después de cargarse. Una fila de
+`contrato_tarifas` que afirme «vale 0» es **peor que la ausencia de fila**, porque una liquidación la
+consume sin dudar y no tiene forma de saber que era un relleno.
+
+- Se omite la fila y **el escalar se deja como está** hasta que alguien ponga el valor real.
+- El script loguea `omitidas_por_cero` con el `contrato_id` y el concepto. **Es un informe, no un
+  error**: es la lista de tarifas que falta cargar.
+- ⚠️ **Antes de correrlo hay que medir cuántas son**, con
+  `esquema-bd-produccion/verificar_auditoria_y_ceros.py`. Si el número es alto, la decisión de qué hacer
+  con esos contratos es previa a la migración, no posterior.
+- **`NULL` y `0.0` se tratan igual**: ninguno produce fila. La diferencia es que el `NULL` ya era
+  explícito y el `0.0` engañaba.
+
+**Medido en producción el 2026-08-27** (`esquema-bd-produccion/verificacion_auditoria_ceros.txt`): son
+**7 contratos**, todos de `servicio_aplica = 'representacion'` y todos `vigente`, contra **68 vigentes
+con `NULL`** en cgm y otros 68 en representación. O sea: el cero es la excepción, no la norma. Y se
+parten en dos grupos que **no son el mismo caso**:
+
+| Grupo | Contratos | Forma | Lectura |
+|---|---|---|---|
+| **a · relleno probable** | 54, 115, 197, 209, 210 | `cgm = 0` **y** `repr = 0`, con `admin = 0.0380` | Las dos tarifas en cero a la vez y la de administración puesta: es el patrón del contrato 108 antes de corregirse. **Se omiten** |
+| **b · ⚠️ cero que convive con un valor real** | **62, 69** | `cgm = 0` pero `repr = 6.0`, con `admin = NULL` | Acá el cero **puede ser intencional**: alguien puso la representación y dejó el CGM en cero a propósito. No es la misma evidencia que el grupo a |
+
+🛑 **El grupo b está en espera de una respuesta de negocio, no de una decisión técnica.** Juan le va a
+preguntar a Jessica si un contrato de representación puede tener **CGM cero legítimo**. Hasta que
+responda:
+
+- **La regla 2 se aplica igual a los dos grupos** —ningún `0.0` produce fila— porque omitir es la opción
+  reversible: agregar la fila después es un `INSERT`, quitarla después es corregir liquidaciones ya
+  emitidas.
+- Pero el log tiene que **separarlos**: `omitidas_por_cero` marca el grupo b con
+  `motivo='cero_conviviendo_con_valor'`, para que la respuesta de Jessica se pueda aplicar sobre una
+  lista de dos contratos y no sobre las siete.
+- Si Jessica confirma que el cero es legítimo, esos dos **entran como fila con `valor = 0`** y su
+  `nota` dice que es un cero confirmado por negocio, no un relleno. Es el único caso en que la regla 2
+  admite excepción, y exige la confirmación escrita.
 
 **Verificación:** `COUNT(*) = 211` en `contratos`; los 34 ids de PPA son idénticos a los de
 `ppa_contratos`; **la pestaña Cumplimiento da los mismos números que antes de la fase** (es la prueba de
 que 6.5 salió bien, y hay que compararla contra una captura previa); `/liquidaciones` abre;
 `GET /comercial/proyectos-operando` devuelve el mismo `ppa.id` para los mismos contratos.
+Y para el 6.7, las dos reglas se comprueban con dos consultas:
+`SELECT count(*) FROM contrato_tarifas WHERE valor = 0` → **0 filas**, y
+`SELECT count(*) FROM contrato_tarifas WHERE origen = 'renegociacion'` → **0 filas**.
 **Rollback:** las tablas viejas siguen existiendo con sus datos y sus FK originales hasta la Fase 7. Se
 revierte el commit de lectura y se vuelve a apuntar. **Es la razón por la que la Fase 7 va aparte.**
 

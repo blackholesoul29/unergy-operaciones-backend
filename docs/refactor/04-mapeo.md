@@ -465,18 +465,26 @@ indice_pct = P
 
 ### El orden real de la migración, tras confirmarse la hipótesis B (2026-08-26)
 
-Ya no es «copiar el escalar y desplegar el JSONB». Son **cuatro pasos, en este orden**:
+Ya no es «copiar el escalar y desplegar el JSONB». Son **tres pasos, en este orden**:
+
+⚠️ **Corregido el 2026-08-27:** este cuadro tenía un paso 1 que extraía de `audit_log` los cambios de
+tarifa desde el 2026-05-19. **Se corrió la consulta contra producción y no hay nada que extraer**
+(D-24 § e): 25 filas, todas de un solo día, 22 de ellas diffs fantasma y las 3 restantes primeros
+llenados. El paso se borró y la numeración se corrió.
 
 | # | Paso | Fuente | Resultado |
 |---|---|---|---|
-| 1 | **Extraer de `audit_log`** todo cambio de las tres tarifas desde el 2026-05-19 | `audit_log.cambios` (consulta en D-24 § c) | filas con fecha **real**, `origen = 'renegociacion'` o `'indexacion'` |
-| 2 | **Desplegar los JSONB** `indexacion_*` | las 4 columnas | filas con vigencia anual, `origen = 'indexacion'` |
-| 3 | **Desplegar `ppa_tarifas`** | la tabla | filas mensuales, `concepto = 'energia'` |
-| 4 | **Rellenar el hueco inicial** con el escalar de hoy | `tarifa_*` | **una fila `origen = 'migracion'`** con `nota` obligatoria |
+| 1 | **Desplegar los JSONB** `indexacion_*` | las 4 columnas | filas con vigencia anual, `origen = 'indexacion'` |
+| 2 | **Desplegar `ppa_tarifas`** | la tabla | filas mensuales, `concepto = 'energia'` |
+| 3 | **Rellenar el hueco inicial** con el escalar de hoy | `tarifa_*` | **una fila `origen = 'migracion'`** con `nota` obligatoria |
 
-El paso 4 solo cubre lo que los pasos 1-3 no alcanzaron: el tramo entre el inicio del contrato y el
-primer cambio conocido. **Si el paso 1 devuelve un cambio para ese contrato, la fila migrada se cierra
-ahí**; si no devuelve nada, queda abierta hasta hoy.
+El paso 3 solo cubre lo que los pasos 1-2 no alcanzaron: el tramo entre el inicio del contrato y el
+primer cambio conocido. Como no hay ningún cambio recuperable, en la práctica **queda abierta hasta hoy**
+en todos los contratos que no tengan serie de indexación.
+
+⚠️ **Y no se migra ningún `0.0`.** Un cero en `tarifa_admin`, `tarifa_cgm` o `tarifa_representacion` es un
+relleno pendiente, no un precio (D-24 § e). Esas filas se omiten. Regla completa en
+`06-plan-migracion.md` Fase 6.
 
 **El inicio de la fila migrada**, en cascada: `fecha_inicio` (18,6 %) → `fecha_firma_contrato` (73,4 %)
 → y si no hay ninguna, `daterange(NULL, ...)` abierta hacia atrás. Unos **47 de 177 contratos** caen en el

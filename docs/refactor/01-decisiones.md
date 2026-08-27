@@ -1080,15 +1080,20 @@ tres opciones que planteó Juan, con lo que implica cada una:
 | **B · desde la fecha del contrato** | «la tarifa no cambió desde la firma» | Es la misma afirmación falsa, acotada. Y **no es aplicable en la cuarta parte de los contratos**: `fecha_inicio` está al **18,6 %** (33 de 177) y `fecha_firma_contrato` al **73,4 %** (130). Unos 47 contratos no tienen ninguna de las dos |
 | **C · marcada como origen desconocido** | «este es el valor actual; desde cuándo aplica, no se sabe» | La consulta responde **y la respuesta se sabe incierta**. Una liquidación puede detectar que está usando un valor migrado y marcar su propio resultado |
 
-**Propongo C, combinada con B para la fecha y con la recuperación de § c encima.** Concretamente, por
-cada tarifa escalar de hoy:
+**Propongo C, combinada con B para la fecha.** Concretamente, por cada tarifa escalar de hoy:
 
-1. **Lo que `audit_log` sí sabe** (§ c) se reconstruye como filas reales, con su fecha exacta y
-   `origen = 'renegociacion'` o `'indexacion'` según el caso.
-2. **El valor anterior al primer cambio auditado** —o el valor actual, si nunca se auditó— entra como
-   **una fila con `origen = 'migracion'`**, cuya `nota` es obligatoria por CHECK y dice de dónde salió.
-3. **El inicio de esa fila** es `fecha_inicio` → `fecha_firma_contrato` → y si no hay ninguna,
+⚠️ **Corregido el 2026-08-27 — Juan aprobó el borrado.** Este párrafo decía «combinada con la
+recuperación de § c encima», y tenía un primer paso que reconstruía desde `audit_log` las filas con
+`origen = 'renegociacion'`. **Ese paso ya no existe: se corrió la consulta y no hay nada que
+reconstruir** (§ e). Todas las filas nacen con `origen = 'migracion'`.
+
+1. **El valor actual del escalar** entra como **una fila con `origen = 'migracion'`** —todas, sin
+   excepción—, cuya `nota` es obligatoria por CHECK y dice de dónde salió.
+2. **El inicio de esa fila** es `fecha_inicio` → `fecha_firma_contrato` → y si no hay ninguna,
    `daterange(NULL, ...)`, abierta hacia atrás **pero etiquetada**.
+3. ⚠️ **Un `0.0` no se migra como valor: se omite la fila.** No significa «tarifa cero», significa
+   «todavía no lo lleno» (§ e, contrato 108). La regla completa, con su verificación, está en
+   `06-plan-migracion.md` Fase 6.
 
 La diferencia con la opción A no es el rango: **es que la incertidumbre queda en el dato**, no en la
 cabeza de quien lo consulta. `origen = 'migracion'` es consultable, tiene su índice parcial, y una
@@ -1188,3 +1193,155 @@ se mantiene incluso cuando lo que se registró estaba mal.
 ⚠️ **Costo:** es el cuarto trigger del modelo objetivo (con los tres de D-21) en una base que hoy tiene
 cero. La alternativa —confiar en que la aplicación no haga `UPDATE`— es exactamente la que produjo el bug
 que estamos cerrando.
+
+### e · ✅ 2026-08-27 · La consulta del §c, corrida contra producción: **no hay histórico recuperable**
+
+Juan la corrió. Salida completa en `esquema-bd-produccion/historico_tarifas.txt`.
+
+| | |
+|---|---|
+| Filas | **25** |
+| Contratos distintos | **23** |
+| Ventana | **2026-08-24 17:00:35 → 21:09:45 UTC** (12:00 → 16:09 hora Colombia). **Un solo día** |
+| `usuario_nombre` | **NULL en las 25** |
+| Cambios de valor reales | **4 filas, 4 contratos** |
+| Diffs que no cambiaron nada | **22 de 25** |
+
+**Conclusión: la hipótesis de recuperar renegociaciones desde `audit_log` se cae.** No hay ni una sola
+fila fuera del 2026-08-24, así que entre el 2026-05-19 (arranque de la auditoría) y hoy **ninguna tarifa
+escalar cambió de valor por el ORM**, salvo los primeros llenados de ese día. El §c decía «unos tres
+meses de historia real»: **la ventana existe, pero está vacía**.
+
+#### Los 22 diffs fantasma: `{"antes": 0.038, "despues": 0.038}`
+
+No es un script de reescritura masiva. Es un artefacto de comparación, y la cadena está verificada de
+punta a punta:
+
+1. `RepresentacionView.vue:458-473` arma el payload del `PATCH` con **las tres tarifas siempre incluidas**,
+   toque el usuario el campo o no. Además hace `tarifa_admin × 100` al abrir el diálogo y `÷ 100` al
+   guardar — el redondeo es limpio (`0.038*100/100 == 0.038`), así que **el valor que viaja es idéntico**.
+2. El esquema Pydantic las declara `Optional[float]` (`app/schemas/contratos_servicio.py:125-127`), así
+   que llegan como `float`.
+3. `update_contrato` (`app/api/v1/contratos_servicio.py:278`) usa `exclude_unset=True` — pero el campo
+   **sí vino en el body**, así que cuenta como set y se asigna.
+4. La columna es `Numeric(8,4)` (`app/models/contratos.py:123`), así que el valor cargado es
+   `Decimal('0.0380')`. En `_diff_attrs` (`app/services/audit.py:86`) la comparación es
+   `old != new` sobre los valores crudos, y **`Decimal('0.0380') != 0.038` es `True`** en Python.
+5. `_serialize` castea el `Decimal` a `float`, y los dos lados salen `0.038`.
+
+**Por qué solo pasa con `tarifa_admin`:** 0.038 no es representable exacto en binario. Los valores de
+`tarifa_cgm` y `tarifa_representacion` que hay en los datos —5.0, 7.0, 3.0, 6.0, 0.0— sí lo son, y
+`Decimal('5.000000') != 5.0` da `False`. Por eso las 22 filas fantasma son todas del mismo campo.
+
+⚠️ **Deuda que esto abre, y no es del refactor:** cada guardado de un contrato de representación escribe
+una fila de auditoría que afirma un cambio de tarifa que no ocurrió. Ensucia la única fuente histórica
+que hay. El arreglo es de una línea —comparar `_serialize(old) != _serialize(new)` en vez de los valores
+crudos— y conviene hacerlo **antes** de que `contrato_tarifas` exista, porque el mismo patrón va a
+alimentar el `origen` de las filas nuevas.
+
+#### `usuario_nombre` NULL en las 25: la atribución está rota, no es un script
+
+El §c daba por hecho que `audit_log` guarda «quién lo hizo». **No lo hace.** El ritmo de las 25 filas
+—intervalos irregulares de 1 a 3 minutos a lo largo de una tarde de trabajo— es de una persona guardando
+formularios uno por uno, no de un bucle. Lo que falla es la propagación del autor:
+
+- `set_audit_user()` solo se llama desde `get_current_user` (`app/api/v1/auth.py:41-54`), que es una
+  dependencia **síncrona** (`def`).
+- FastAPI ejecuta las dependencias `def` y los endpoints `def` con `run_in_threadpool`, y **cada llamada
+  recibe una copia del contexto**. Un `ContextVar` escrito dentro de la dependencia muere con esa copia.
+- Verificado con el `starlette`/`anyio` de este repo: dependencia `def` que hace `v.set((7,'Juan'))` +
+  endpoint `def` que hace `v.get()` → el endpoint lee **`(None, None)`**.
+
+O sea: **toda escritura hecha desde la API queda con `usuario_id` y `usuario_nombre` en NULL**, en las 10
+tablas auditadas, desde el 2026-05-19. Lo único que sí queda atribuido son los seeds de arranque desde el
+2026-08-26 (`'sistema (seed de arranque)'`), porque `_run_init_audit` corre en el mismo hilo y contexto
+que ellos (`app/main.py:3369-3389`).
+
+**Consecuencia para leer la ventana:** un NULL **no** significa «lo hizo un script». No significa nada.
+La columna es inservible tal como está, y arreglarla es cambiar la dependencia a `async def` o mover el
+`set_audit_user` a un middleware.
+
+#### El contrato 108, tres guardados en 3 minutos
+
+`20:38:40`, `20:40:24`, `20:41:30`. Los dos primeros solo traen el fantasma de `tarifa_admin`: alguien
+abrió el formulario y guardó sin cambiar nada. El tercero trae, además, `tarifa_cgm` y
+`tarifa_representacion` de **`0.0` a `5.0`**.
+
+**No es una renegociación.** El `"antes"` es `0.0`, no un precio anterior: es un cero de relleno que se
+corrigió al tercer intento. Lo mismo, en su versión limpia, con los contratos 1, 2 y 205, donde el
+`"antes"` es `null` — primer llenado de un campo vacío.
+
+⚠️ **Y deja una advertencia para la migración:** en este modelo **`0.0` no significa «tarifa cero», significa
+«todavía no lo lleno»**. Antes de migrar hay que contar cuántos contratos siguen con `0.0` en alguna de las
+tres columnas y decidir si esas filas entran a `contrato_tarifas` o se quedan fuera. Una fila de tarifa que
+afirma «vale 0» es peor que la ausencia de fila, porque una liquidación la usa sin dudar.
+
+#### Qué queda para el mapeo
+
+**Las 25 filas no aportan ni una vigencia.** Ninguna registra un valor anterior que hoy no esté en la
+columna: 22 no cambiaron nada, 3 son `null → valor` y 1 es `0.0 → valor`. En los cuatro casos el valor
+posterior **es el que está hoy en el escalar**.
+
+Entonces el §b se aplica sin la parte de recuperación: **todas** las filas de `contrato_tarifas` nacen con
+`origen = 'migracion'`, con la cascada `fecha_inicio` → `fecha_firma_contrato` → rango abierto etiquetado,
+y ninguna con `'renegociacion'`. El paso 1 del §b —«lo que `audit_log` sí sabe se reconstruye como filas
+reales»— queda **sin insumo**, y hay que borrarlo del plan de la Fase 6 en vez de dejarlo como trabajo
+pendiente que nadie va a poder hacer.
+
+Lo único que la salida sí prueba, y que vale conservar como nota: **las tarifas de representación se
+cargaron el 2026-08-24**, así que para esos 23 contratos el escalar de hoy tiene a lo sumo tres días menos
+de antigüedad que la fecha del contrato. No es una vigencia, es una cota.
+
+#### Corroboración lateral del `unidad` obligatoria (§ del 🛑)
+
+`RepresentacionView.vue` multiplica `tarifa_admin` por 100 para mostrarla y divide al guardar; a
+`tarifa_cgm` y `tarifa_representacion` no les hace nada. Es la confirmación en el código de lo que el
+🛑 dedujo de los datos: **administración es una fracción, las otras dos no.** `unidad` no es opcional.
+
+#### ✅ 2026-08-27 · Medido en producción: el bug de atribución, confirmado
+
+Salida en `esquema-bd-produccion/verificacion_auditoria_ceros.txt`.
+
+| Autor | Filas | Tablas | Ventana |
+|---|---|---|---|
+| `(NULL)` | **13 303** | **9** | 2026-05-19 → 2026-08-27 |
+| `sistema (seed de arranque)` | 50 860 | 1 | 2026-08-27 → 2026-08-27 |
+| **un autor real** | **0** | — | — |
+
+**Cero filas con autor real en tres meses.** El reparto por tabla —`fallas` 10 363, `proyectos` 885,
+`reporte_energia_generacion` 617, `reporte_energia_consumo` 471, `contratos_servicio` 345,
+`liquidaciones` 309, `clientes` 137, `ppa_contratos` 120, `fronteras` 56— confirma que no es un
+endpoint suelto: es toda la API. Arreglado pasando el autor en la sesión en vez del `ContextVar`
+(`app/services/audit.py`, `app/api/v1/auth.py`), con `tests/test_audit_atribucion.py` de regresión.
+
+**Por qué ningún test lo detectó en tres meses:** `tests/conftest.py` reemplaza el módulo
+`app.api.v1.auth` completo por un stub, así que `get_current_user` no se ejecuta nunca en la suite.
+
+⚠️ **Corrección del 2026-08-27, mismo día:** una versión anterior de este párrafo decía que
+`liquidaciones.py` y `panel_contable.py` tenían «13 rutas de escritura sin dependencia de auth» y que
+sus filas seguirían en NULL. **Es falso, y el error era del grep**, que solo reconocía
+`get_current_user` y `_require_admin`. Las 13 dependen de `_require_liquidaciones_write` y
+`_require_write`, que envuelven a `get_current_user` y **además** exigen rol
+(`admin`/`liquidaciones`). Resuelto el cierre transitivo, **las únicas rutas de escritura sin auth en
+los 48 routers son las 4 de `auth.py`** —`/token`, `/token/mobile`, `/forgot-password`,
+`/reset-password`—, que son públicas por definición. No hay hallazgo de control de acceso, y esas 13
+rutas **sí quedan atribuidas** con este arreglo, porque `get_current_user` corre como
+sub-dependencia.
+
+#### ⚠️ 2026-08-27 · Las 50.860 filas firmadas por el arranque — sin causa confirmada
+
+Una sola tabla, un solo día, y `fallas` deja de tener filas NULL justo el 2026-08-26, que es cuando se
+movió `init_audit` antes de los seeds. Todo apunta a que el cambio de orden **destapó** escrituras de
+arranque que antes no se auditaban, pero **qué tarea las produce no está determinado**, y no se puede
+determinar leyendo el código: son 22 tareas y varias recorren tablas auditadas fila por fila.
+
+Lo que sí se hizo, porque era la causa de no poder saberlo: **el rótulo dejó de ser único.**
+`_run_init_audit` ya no firma nada, y `_deferred_init` firma cada tarea con su nombre
+(`sistema (startup: cgm_seed)`, `sistema (startup: fallas_tipo_backfill)`, …), y al terminar los seeds
+limpia la firma para que el scheduler no herede el rótulo de arranque. En el próximo deploy, el mismo
+corte por autor dice cuál fue.
+
+Para el ruido de ahora, `esquema-bd-produccion/diagnosticar_ruido_seed.py` da la tabla, los campos, las
+ráfagas por minuto —que dicen si fue un arranque o veinte— y diez ejemplos de `cambios`. ⚠️ **Si esos
+ejemplos salen con `{"antes": X, "despues": X}`, buena parte del ruido es el mismo diff fantasma de este
+apéndice**, y el arreglo de `_diff_attrs` lo baja sin tocar ninguna tarea.

@@ -15,7 +15,6 @@ from app.schemas.fronteras import (
     FronteraCreate, FronteraUpdate, FronteraOut,
     FronteraQuoiaPendiente, FronteraQuoiaConfirmar,
 )
-from app.services.mgs.quoia_client import QuoiaClient
 from app.services.mgs.gaia_client import GaiaClient, _mgs_number, get_frt_meter_info
 from app.services.contactos import get_contactos, get_clientes_contacto
 from app.services.operadores_red_sync import sincronizar_operador_red
@@ -23,7 +22,6 @@ from app.utils.nombre_matching import mejor_candidato
 
 router = APIRouter(prefix="/fronteras", tags=["Fronteras"])
 
-_quoia: QuoiaClient | None = None
 _gaia: GaiaClient | None = None
 
 
@@ -42,15 +40,6 @@ def _sync_operador_red_para_proyecto(db: Session, proyecto_id: int | None) -> No
         return
     sincronizar_operador_red(db, proyecto)
     db.commit()
-
-
-def _get_quoia() -> QuoiaClient:
-    global _quoia
-    if _quoia is None:
-        _quoia = QuoiaClient()
-    if not _quoia.enabled:
-        raise HTTPException(503, "QUOIA_API_TOKEN not configured")
-    return _quoia
 
 
 def _get_gaia() -> GaiaClient:
@@ -704,49 +693,3 @@ def ignorar_frontera_quoia(
         # unico) -- la segunda solicitud pierde la carrera contra el chequeo
         # de arriba; no es un error real para quien lo pidio, ya quedo ignorado.
         db.rollback()
-
-
-# ── Quoia endpoints (legacy: token estatico, medidores/nodos) ──────────────────
-
-@router.get("/quoia/meters")
-def quoia_meters(
-    search: str = Query("", description="Filter meters by name"),
-    _=Depends(get_current_user),
-):
-    """All Quoia smart meters (300 total)."""
-    client = _get_quoia()
-    meters = client.get_meters(search=search)
-    stats = {"total": len(meters)}
-    for m in meters:
-        name = (m.get("name") or "").lower()
-        if name.startswith("mgs"):
-            stats["mgs"] = stats.get("mgs", 0) + 1
-        elif name.startswith("minigranja"):
-            stats["minigranja"] = stats.get("minigranja", 0) + 1
-        elif name.startswith("gd"):
-            stats["gd"] = stats.get("gd", 0) + 1
-    return {"stats": stats, "meters": meters}
-
-
-@router.get("/quoia/meters/{meter_id}/curves")
-def quoia_meter_curves(meter_id: int, _=Depends(get_current_user)):
-    """Typical consumption/generation curves for a meter (7 weekdays x 96 points)."""
-    client = _get_quoia()
-    curves = client.get_typical_curves(node_id=meter_id)
-    if not curves:
-        return {"meter_id": meter_id, "curves": []}
-
-    summary = []
-    for c in curves:
-        iae = c.get("iae", [])
-        eae = c.get("eae", [])
-        summary.append({
-            "weekday": c.get("weekday"),
-            "quality_score": c.get("quality_score"),
-            "days_used": c.get("days_used"),
-            "total_import_kwh": round(sum(iae), 2) if iae else 0,
-            "total_export_kwh": round(sum(eae), 2) if eae else 0,
-            "iae": iae,
-            "eae": eae,
-        })
-    return {"meter_id": meter_id, "curves": summary}

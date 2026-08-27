@@ -43,35 +43,3 @@ class QuoiaClient:
     def get_all_nodes(self) -> list[dict]:
         data = self._get(f"{self._base_url}/nodes/")
         return data if isinstance(data, list) else []
-
-    def get_meters(self, search: str = "", archived: bool | None = None) -> list[dict]:
-        """Fetch all meters (paginated). Returns flat list."""
-        all_meters: list[dict] = []
-        url = f"{self._base_url}/meter/"
-        params: dict = {}
-        if search:
-            params["search"] = search
-        if archived is not None:
-            params["archived"] = str(archived).lower()
-
-        while url:
-            data = self._get(url, params=params if not all_meters else None)
-            if not data or not isinstance(data, dict):
-                break
-            all_meters.extend(data.get("results", []))
-            url = data.get("next")
-        return all_meters
-
-    def get_typical_curves(self, node_id: int | None = None) -> list[dict]:
-        """Fetch typical consumption/generation curves."""
-        url = f"{self._base_url}/measurement/typical_curve/"
-        params = {"node": node_id} if node_id else None
-        all_curves: list[dict] = []
-
-        while url:
-            data = self._get(url, params=params if not all_curves else None)
-            if not data or not isinstance(data, dict):
-                break
-            all_curves.extend(data.get("results", []))
-            url = data.get("next")
-        return all_curves

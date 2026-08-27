@@ -95,6 +95,19 @@ def revisar_correo_cedillanos() -> None:
                     continue
 
                 cargado = False
+                if len(adjuntos) > 1:
+                    # No debería pasar (Cedillanos manda un Excel diario, un
+                    # solo adjunto por correo) -- si llega a pasar, antes se
+                    # aplicaban TODOS en el orden de msg.walk(), y el último
+                    # que cargara bien pisaba en silencio lo que ya había
+                    # cargado uno anterior para las mismas fechas. Se avisa
+                    # para que quede a la vista (auditoría Reporte ASIC
+                    # 2026-08-26).
+                    logger.warning(
+                        "IMAP: correo de Cedillanos con %d adjuntos Excel -- se aplica solo el "
+                        "primero que cargue con éxito, el resto se ignora. asunto=%r",
+                        len(adjuntos), msg.get("Subject"),
+                    )
                 for nombre, contenido in adjuntos:
                     try:
                         fechas = aplicar_excel_terceros(db, CEDILLANOS_FRONTERA_ID, contenido)
@@ -109,6 +122,7 @@ def revisar_correo_cedillanos() -> None:
                     db.commit()
                     logger.info("IMAP: cargado %s -- fechas %s", nombre, sorted(fechas))
                     cargado = True
+                    break  # solo el primero que cargue con éxito -- ver docstring de esta función
 
                 if cargado:
                     imap.store(msg_id, "+FLAGS", "\\Seen")

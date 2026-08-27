@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -1323,21 +1324,50 @@ _OLD_CAT_TO_TIPO = {
 }
 
 
+_NUMERICO = re.compile(r"^\d+\.\d+$")
+
+
+def es_tipo_legacy(codigo: str | None, estructurados: set[str]) -> bool:
+    """¿Este `FallaCatTipo.codigo` es de la taxonomia vieja, la snake_case?
+
+    En `fallas_cat_tipos` conviven TRES generaciones de codigos:
+
+        "corte_energia"      -> legacy de verdad; esto tiene que migrarse
+        "2.1"                -> numerico; es el destino de la migracion
+        "red.baja_tension"   -> estructurado (D-11); NO se toca
+
+    Hasta el 2026-08-27 la regla era "legacy = no numerico", y eso se comia al
+    catalogo estructurado entero: `tipo_migration` re-apuntaba 5.086 fallas a un
+    tipo numerico de respaldo en CADA arranque, y `fallas_tipo_backfill` -- que
+    corre despues -- las devolvia. 23 arranques en 16 horas, con la base
+    sirviendo el dato equivocado en la ventana entre las dos tareas.
+
+    Por eso los estructurados se excluyen preguntandole a la estructura, no
+    mirando la forma del codigo: agregar una categoria no puede volver a
+    reabrir esto.
+    """
+    if not codigo:
+        return False
+    if _NUMERICO.match(codigo):
+        return False
+    return codigo not in estructurados
+
+
 def _run_tipo_migration() -> None:
     """Re-point faults that use old snake_case tipo codes to the new numeric ones."""
-    import re
     from sqlalchemy.orm import sessionmaker, joinedload
     from app.models.fallas import Falla, FallaCatTipo
+    from app.services.fallas.estructura import codigos_estructurados
 
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
-        numeric_pattern = re.compile(r'^\d+\.\d+$')
+        estructurados = codigos_estructurados()
 
         new_tipos: dict[str, int] = {
             t.codigo: t.id
             for t in db.query(FallaCatTipo).filter(FallaCatTipo.activa == True).all()
-            if numeric_pattern.match(t.codigo or "")
+            if _NUMERICO.match(t.codigo or "")
         }
         if not new_tipos:
             print("[tipo migration] No new numeric tipos found — run catalog seed first")
@@ -1348,7 +1378,7 @@ def _run_tipo_migration() -> None:
             .options(joinedload(FallaCatTipo.categoria))
             .all()
         )
-        old_tipos = [t for t in old_tipos if not numeric_pattern.match(t.codigo or "")]
+        old_tipos = [t for t in old_tipos if es_tipo_legacy(t.codigo, estructurados)]
 
         if not old_tipos:
             print("[tipo migration] No old tipos found — already clean")
@@ -3392,6 +3422,11 @@ def _deferred_init():
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
         ("tipo_migration", _run_tipo_migration),
+        # Pegado a tipo_migration a proposito. Con el regex arreglado la pelea
+        # por `fallas.tipo_id` ya no puede pasar; esto es la red de seguridad:
+        # si alguna vez vuelve a haber dos escritores, la ventana de datos
+        # inconsistentes servidos por la API dura una tarea y no trece.
+        ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
         ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),
         # Va DESPUES del seed CGM: vincula y cierra sobre lo que ese ya sembro.
@@ -3405,7 +3440,6 @@ def _deferred_init():
         ("arr_limpiar_canon_archivo", _run_arr_limpiar_canon_archivo),
         ("inversores_minigranja_seed", _run_inversores_minigranja_seed),
         ("ppa_responsables_seed", _run_ppa_responsables_seed),
-        ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:
             # Cada tarea firma sus propias escrituras. init_audit ya corrio como

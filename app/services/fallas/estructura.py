@@ -180,6 +180,25 @@ def tipo_codigo(categoria_codigo: str, subtipo_codigo: str) -> str:
     return f"{categoria_codigo}.{subtipo_codigo}"
 
 
+def codigos_estructurados() -> set[str]:
+    """Todos los `FallaCatTipo.codigo` que esta estructura posee.
+
+    Se deriva de ESTRUCTURA_FALLAS, no de una lista aparte, para que agregar una
+    categoria no obligue a tocar nada mas -- es el mismo criterio que ya sigue
+    `_aplicar_clasificacion`.
+
+    Existe porque hay DOS taxonomias vivas en `fallas_cat_tipos`: la numerica
+    legacy ("2.1") y esta ("red.baja_tension"). Cualquier cosa que necesite
+    distinguirlas tiene que preguntar aca, no adivinar por la forma del codigo.
+    """
+    codigos: set[str] = set()
+    for cat in ESTRUCTURA_FALLAS:
+        for clave in ("opciones", "tipos_falla"):
+            for item in cat.get(clave, []):
+                codigos.add(tipo_codigo(cat["codigo"], item["codigo"]))
+    return codigos
+
+
 def etiqueta_subtipo(categoria_codigo: str, subtipo_codigo: str) -> str | None:
     """Etiqueta legible de una opción/equipo/tipo de falla de inversor."""
     cat = get_categoria(categoria_codigo)

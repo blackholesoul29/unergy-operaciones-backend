@@ -52,7 +52,7 @@ def _sin_quoia(monkeypatch):
     monkeypatch.setattr(re_api, "GaiaClient", _raise)
 
 
-def _frontera_y_reporte(db, medidor_usado, curva_medidor_principal, curva_medidor_respaldo, curva_final):
+def _frontera_y_reporte(db, medidor_usado, curva_medidor_principal, curva_medidor_respaldo, curva_final, curva_respaldo_final=None, respaldo_final_origen=None):
     front = Frontera(id=1, nombre_frontera="Test", tipo_frontera=TipoFronteraEnum.generacion)
     db.add(front)
     rep = ReporteEnergiaGeneracion(
@@ -61,6 +61,8 @@ def _frontera_y_reporte(db, medidor_usado, curva_medidor_principal, curva_medido
         curva_final=curva_final,
         curva_medidor_principal=curva_medidor_principal,
         curva_medidor_respaldo=curva_medidor_respaldo,
+        curva_respaldo_final=curva_respaldo_final,
+        respaldo_final_origen=respaldo_final_origen,
     )
     db.add(rep)
     db.commit()
@@ -117,6 +119,33 @@ def test_fuente_reconectador_queda_etiquetada_no_generica(db):
 
     assert detalle.medidor_usado == "reconectador"
     assert detalle.curva_medidor_principal == viejo_principal, "no es una lectura del medidor, no debe pisar el snapshot"
+
+
+def test_fuente_no_medidor_limpia_el_respaldo_viejo_en_vez_de_dejarlo_stale(db):
+    """Bug real (Chiriguaná Norte 2, Verso, 2026-08-27): al elegir una fuente
+    que no es 'principal'/'cgm' (reconectador, inversores, histórico, edición
+    celda por celda), _revisar_respaldo_en_vivo() no hace nada -- así que
+    curva_respaldo_final se quedaba con el snapshot calculado contra el
+    Principal VIEJO, y _construir_detalle()/_enviar_a_quoia() lo mostraban y
+    enviaban tal cual (respaldo ~2x el nuevo Principal en vez de ±1%) porque
+    solo recalculan cuando el campo es None. Debe limpiarse para que se
+    recalcule fresco contra la curva recién guardada."""
+    principal_viejo = [1000.0] * 24
+    respaldo_viejo_stale = [995.0] * 24  # ~1% del Principal VIEJO -- coherente en su momento
+    _frontera_y_reporte(
+        db, "principal", curva_medidor_principal=principal_viejo, curva_medidor_respaldo=None,
+        curva_final=principal_viejo, curva_respaldo_final=respaldo_viejo_stale, respaldo_final_origen="estimado",
+    )
+
+    principal_nuevo = [100.0] * 24  # Principal corregido a una décima parte
+    body = EditarCurvaRequest(curva_final=principal_nuevo, fuente="reconectador")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.respaldo_reportado_origen == "estimado"
+    total_respaldo = sum(detalle.curva_respaldo_reportada)
+    assert 95 * 24 <= total_respaldo <= 105 * 24, (
+        f"el respaldo debe quedar ~1% del Principal NUEVO (2400), no del viejo (23880): {total_respaldo}"
+    )
 
 
 def test_sin_columna_respaldo_llena_sigue_la_logica_automatica(db):

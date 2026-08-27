@@ -655,10 +655,27 @@ def editar_curva(
         rep.curva_respaldo_final = curva_a_lista(curva_resp)
         rep.respaldo_final_origen = "manual"
     else:
-        # Si se confirma Principal, revisa el respaldo en vivo contra
-        # la tolerancia y adopta su snapshot SOLO si pasa -- ver
+        # Si se confirma Principal (o CGM), revisa el respaldo en vivo
+        # contra la tolerancia y adopta su snapshot SOLO si pasa -- ver
         # _revisar_respaldo_en_vivo(). Generación y Consumo.
-        _revisar_respaldo_en_vivo(front, rep, fecha, es_generacion)
+        #
+        # Para cualquier OTRA fuente (reconectador, inversores, histórico,
+        # edición celda por celda) _revisar_respaldo_en_vivo() no hace
+        # nada -- así que curva_respaldo_final se quedaba con el snapshot
+        # de la clasificación ANTERIOR, calculado contra el curva_final
+        # VIEJO. _construir_detalle()/_enviar_a_quoia()/el Excel solo
+        # recalculan cuando el campo es None (mismo criterio en los tres),
+        # así que ese respaldo desactualizado se seguía mostrando y
+        # enviando tal cual, sin relación con el Principal recién guardado
+        # (bug real: Chiriguaná Norte 2 y Verso, respaldo ~2x el nuevo
+        # Principal en vez de ±1%). Se limpia para que los tres lo
+        # recalculen al vuelo contra la curva que se acaba de guardar.
+        mu = rep.medidor_usado or ""
+        if mu.startswith("principal") or mu == "cgm":
+            _revisar_respaldo_en_vivo(front, rep, fecha, es_generacion)
+        else:
+            rep.curva_respaldo_final = None
+            rep.respaldo_final_origen = None
     # La corrección manual queda registrada por el sistema de auditoría
     # (audit_log, vía el usuario autenticado) -- no se toca aquí
     # 'revisar_manualmente': queda pendiente de un "Validar" explícito.

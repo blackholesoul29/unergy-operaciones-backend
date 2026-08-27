@@ -1412,19 +1412,11 @@ def _run_tipo_migration() -> None:
 
 
 def _run_srv_operacion_sync() -> None:
-    """Marca srv_operacion=True para proyectos que:
-    - Tienen registro en servicio_operacion (relación explícita), o
-    - Son de tipo autoconsumo/minigranja y están en operación.
-    Idempotente — solo actualiza filas que aún tienen el campo en False/NULL.
+    """Marca srv_operacion=True para proyectos de tipo autoconsumo/minigranja
+    que están en operación. Idempotente — solo actualiza filas que aún
+    tienen el campo en False/NULL.
     """
     stmts = [
-        # Proyectos con ServicioOperacion explícito
-        """
-        UPDATE proyectos SET srv_operacion = TRUE
-        WHERE id IN (SELECT proyecto_id FROM servicio_operacion)
-          AND (srv_operacion IS NULL OR srv_operacion = FALSE)
-        """,
-        # Proyectos autoconsumo y minigranja en operación
         """
         UPDATE proyectos SET srv_operacion = TRUE
         WHERE estado = 'en_operacion'

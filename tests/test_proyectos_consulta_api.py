@@ -27,7 +27,6 @@ from app.models.proyectos import (
     ProyectoInversor,
 )
 from app.models.contactos import ProyectoAreaContacto, Contacto
-from app.models.servicios import ServicioRepresentacion
 from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
 from app.models.operadores_red import OperadorRed
@@ -62,7 +61,6 @@ def db():
             Proyecto.__table__, Cliente.__table__, ProyectoInversionista.__table__,
             ProyectoInfoTecnica.__table__,
             ProyectoInversor.__table__, ProyectoAreaContacto.__table__, Contacto.__table__,
-            ServicioRepresentacion.__table__,
             # _get_proyecto_or_404 hace selectinload(Proyecto.fronteras)
             # .selectinload(Frontera.operador) -- sin estas dos tablas el eager
             # load falla con "no such table: fronteras".

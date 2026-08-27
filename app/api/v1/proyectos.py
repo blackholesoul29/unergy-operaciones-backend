@@ -41,7 +41,6 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.info_tecnica),
             selectinload(Proyecto.inversores),
             selectinload(Proyecto.area_contactos),
-            selectinload(Proyecto.servicio_representacion),
             selectinload(Proyecto.ppa_contratos),
             selectinload(Proyecto.operador),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
@@ -83,7 +82,6 @@ def list_proyectos(
         selectinload(Proyecto.info_tecnica),
         selectinload(Proyecto.inversores),
         selectinload(Proyecto.area_contactos),
-        selectinload(Proyecto.servicio_representacion),
         selectinload(Proyecto.ppa_contratos),
         selectinload(Proyecto.operador),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
@@ -739,7 +737,6 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
         p.fallas or p.mantenimientos or p.liquidaciones
         or p.asic_solicitudes or p.rec_procesos or p.promotor_seguimientos
         or p.contratos_servicio or p.ppa_contratos
-        or p.servicio_operacion or p.servicio_representacion
         or p.fronteras or p.generaciones
     )
     tabla_bloqueante = None if business_records else _tabla_cascade_bloqueante(db, id)
@@ -794,8 +791,7 @@ _MERGE_COMPOSITE = [
     ("proyecto_area_contacto", ["tipo"]),
 ]
 _MERGE_ONE_TO_ONE = [
-    "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
-    "proyecto_inicio_operacion", "proyecto_informe_om",
+    "proyecto_info_tecnica", "proyecto_inicio_operacion", "proyecto_informe_om",
 ]
 _MERGE_SCALAR_UNIQUE = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
 # Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el

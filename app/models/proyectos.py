@@ -231,8 +231,6 @@ class Proyecto(Base):
     promotor_seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
     contratos_servicio: Mapped[list["ContratoServicio"]] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
     ppa_contratos: Mapped[list["PPAContrato"]] = relationship("PPAContrato", secondary="ppa_contrato_proyectos", uselist=True, viewonly=True)
-    servicio_operacion: Mapped["ServicioOperacion | None"] = relationship("ServicioOperacion", back_populates="proyecto", uselist=False)
-    servicio_representacion: Mapped["ServicioRepresentacion | None"] = relationship("ServicioRepresentacion", back_populates="proyecto", uselist=False)
 
     @property
     def operador_red_legal(self) -> str | None:

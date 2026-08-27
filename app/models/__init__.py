@@ -7,7 +7,6 @@ from app.models.proyectos import (
     ProyectoPendienteIgnorado,
 )
 from app.models.contactos import Contacto, ProyectoAreaContacto, TipoContactoEnum
-from app.models.servicios import ServicioOperacion, ServicioRepresentacion
 from app.models.contratos import ContratoServicio, PPAContrato, PPATarifa, PPACompromisoEnergia, PPAResponsable
 from app.models.fronteras import Frontera, FronteraQuoiaIgnorada
 from app.models.contrato_frontera import ContratoFrontera
@@ -56,8 +55,7 @@ from app.models.retos import RetoTrimestre, RetoMetrica, RetoValorSemanal
 __all__ = [
     "Base", "Usuario", "Cliente", "Proyecto", "ProyectoInfoTecnica",
     "ProyectoInversor", "Contacto", "ProyectoAreaContacto", "TipoContactoEnum",
-    "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado", "ServicioOperacion",
-    "ServicioRepresentacion",
+    "ProyectoInversionista", "Portafolio", "ProyectoPendienteIgnorado",
     "ContratoServicio", "PPAContrato", "PPATarifa", "PPACompromisoEnergia", "PPAResponsable",
     "Frontera", "FronteraQuoiaIgnorada", "ContratoFrontera", "Alerta", "OperadorRed", "OperadorRedContacto",
     "FallaCatCategoria", "FallaCatTipo", "FallaCatEstado", "FallaCatPrioridad",

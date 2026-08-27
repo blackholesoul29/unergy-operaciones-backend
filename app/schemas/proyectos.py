@@ -183,22 +183,6 @@ class ProyectoAreaContactoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Servicio Representación ───────────────────────────────────────────────────
-
-class ServicioRepresentacionOut(BaseModel):
-    id: int
-    proyecto_id: int
-    nit_rf: Optional[str] = None
-    nombre_rf: Optional[str] = None
-    fecha_inicio_representacion: Optional[date] = None
-    modalidad_venta: Optional[str] = None
-    nombre_comercializador: Optional[str] = None
-    codigo_despacho_xm: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    model_config = {"from_attributes": True}
-
-
 # ── PPA asociado (resumen) ────────────────────────────────────────────────────
 # Lo justo para identificar y filtrar por el contrato desde el listado de
 # proyectos. El detalle completo del PPA sigue viviendo en /ppa.
@@ -351,7 +335,6 @@ class ProyectoOut(BaseModel):
     fecha_estimada_energizacion: Optional[date] = None
     avance_obra_pct: Optional[float] = None
     origen: Optional[str] = None
-    servicio_representacion: Optional[ServicioRepresentacionOut] = None
     ppa_contratos: list[ProyectoPPAResumenOut] = []
     inversionistas: list[ProyectoInversionistaOut] = []
     info_tecnica: Optional[ProyectoInfoTecnicaOut] = None

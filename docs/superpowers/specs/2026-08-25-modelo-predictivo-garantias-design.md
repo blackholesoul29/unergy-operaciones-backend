@@ -292,6 +292,83 @@ validación de §7 que difería en 19 pesos: no era redondeo, era una re-publica
 
 ---
 
+## 2.10 El calendario, derivado de los archivos (2026-08-27)
+
+Esta seccion **elimina el riesgo mas caro del modelo**. La §8 media que la
+incertidumbre sobre que ventana usa XM valia el **71% del ancho del intervalo**. Ya no
+hay que estimarla: los propios archivos de garantia la declaran.
+
+### De donde sale
+
+Cada Excel de garantia trae una hoja **`PERIODO BASE`** que lista la ventana **dia por
+dia**, ademas de `FECHA DE VENCIMIENTO` y `FECHA DE CALCULO` en texto. Ejemplo real
+(`GARANTIA MENSUAL 21AGO-2026.xlsx`):
+
+```
+FECHA DE VENCIMIENTO: 21 DE AGO DE 2026
+FECHA DE CALCULO: 2026-08-06
+Dia 1 | 2026-06-30 ... Dia 30 | 2026-07-29
+```
+
+Se extrajeron los **175 archivos** de `Garantias2025.zip` + `Garantias2026.zip`: 145
+tienen `PERIODO BASE`, 142 traen vencimiento y fecha de calculo, **0 errores de lectura**.
+
+### Semanal: regla verificada
+
+En el regimen actual (ventana de 30 dias), **`fin_ventana = vencimiento - 14` en 69 de
+74 archivos**. Las 5 excepciones no son ruido: **todas caen en martes**, es decir
+pertenecen al regimen anterior, y una viene marcada `EXTRAORDINARIA` por el propio XM.
+
+```
+vencimiento    = viernes            (desde 2025-10-31)
+fin ventana    = vencimiento - 14
+ventana        = 30 dias corridos terminando en fin_ventana
+fecha calculo  = vencimiento - 7
+```
+
+**La fecha de calculo se corre por festivos; la ventana no.** Los vencimientos del
+2026-04-03, 2026-05-01 y 2026-08-07 salen con `venc - calc = 8`, pero compensan con
+`calc - fin = 6`: `venc - fin` sigue siendo 14. Esto importa porque **la ventana
+determina el monto** y la fecha de calculo solo determina cuando XM lo publica. Los
+festivos no mueven el numero.
+
+### Mensual: la ventana si, la fecha exacta no
+
+- **Fecha de calculo: entre el dia 5 y el 10 del mes, 17 de 17.**
+- **Ventana = el ultimo mes liquidado**: 30 o 31 dias corridos que terminan alrededor
+  del dia 29 del mes anterior al vencimiento. 16 de 17 (la excepcion es enero-2025, el
+  arranque de la serie, con 28 dias). El archivo lo dice con esas palabras:
+  *"Ultimo mes liquidado: 2026-06-30 al 2026-07-29"*.
+
+El **vencimiento** mensual cae entre el 17 y el 24 **sin regla aritmetica limpia** —se
+probaron "n-esimo viernes", "viernes de la semana del 20" y "16 dias antes del inicio
+del mes" y ninguna cuadra—. Se deja como dato de entrada: se lee del archivo o del
+calendario que XM publica. Pesa poco: define *cuando* hay que tener la caja, no
+*cuanta*.
+
+### Dos cambios de regimen en 20 meses
+
+| Fecha | Que cambio |
+|---|---|
+| 2025-09-26 | La ventana semanal paso de **7 a 30 dias** |
+| 2025-10-31 | El vencimiento paso de **martes a viernes** |
+
+Antes de esos cambios el regimen martes tenia `venc - fin = 11` con ventana de 7 dias,
+igual de consistente (43 de 47).
+
+> **Consecuencia de diseno:** el calendario va como **tabla de regimenes con fecha de
+> vigencia**, nunca como constantes en el codigo. Van dos cambios en 20 meses y XM ya
+> anuncio otro para el 2026-09-04. El proximo debe ser editar datos, no tocar logica.
+
+### Que habilita
+
+1. **`gar_calculo` se genera sin depender de XM.** Los periodos salen del calendario, no
+   de esperar a que XM publique. Ese es el objetivo del proyecto.
+2. **Los Excel pasan de dependencia a fuente de validacion.** Sirven para derivar la
+   regla una vez y como target del backtest (`gar_componente_real`), no para operar.
+3. **Se cae el 71% del ancho.** Lo que quedaba de incertidumbre de ventana desaparece
+   para todo el historico.
+
 ## 3. Alcance
 
 ### Dentro

@@ -103,3 +103,5 @@ from app.models.garantias_modelo import (  # noqa: F401
     XMArchivo,
     XMMedida,
 )
+from app.models.garantias_ajustes import GarantiaAjuste, TipoAjusteEnum  # noqa: F401
+from app.models.informes import InformeGuardado, TipoInformeEnum, EstadoInformeEnum  # noqa: F401

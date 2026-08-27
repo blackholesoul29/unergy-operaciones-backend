@@ -9,7 +9,7 @@ en más se gestiona manualmente (drag-and-drop en el frontend).
 Endpoints:
   GET    /api/v1/portafolios              — capas con sus proyectos + pool 'sin portafolio'
   POST   /api/v1/portafolios              — crear capa
-  PATCH  /api/v1/portafolios/{id}         — renombrar / descripción / activo
+  PATCH  /api/v1/portafolios/{id}         — renombrar / activo
   DELETE /api/v1/portafolios/{id}         — eliminar capa (sus proyectos quedan sin portafolio)
   PATCH  /api/v1/portafolios/asignar      — asignar/desasignar un proyecto a una capa
 """
@@ -33,12 +33,10 @@ router = APIRouter(prefix="/portafolios", tags=["Portafolios"])
 # ── Schemas ─────────────────────────────────────────────────────────────────
 class PortafolioCreate(BaseModel):
     nombre: str
-    descripcion: Optional[str] = None
 
 
 class PortafolioUpdate(BaseModel):
     nombre: Optional[str] = None
-    descripcion: Optional[str] = None
     activo: Optional[bool] = None
 
 
@@ -127,7 +125,6 @@ def _port_out(pt: Portafolio, proyectos: list[dict]) -> dict:
     return {
         "id": pt.id,
         "nombre": pt.nombre,
-        "descripcion": pt.descripcion,
         "activo": pt.activo,
         "proyectos": proyectos,
     }
@@ -166,7 +163,7 @@ def create_portafolio(payload: PortafolioCreate, db: Session = Depends(get_db), 
         raise HTTPException(400, "El nombre del portafolio no puede estar vacío")
     if db.query(Portafolio).filter(func.lower(Portafolio.nombre) == nombre.lower()).first():
         raise HTTPException(409, f"Ya existe un portafolio llamado '{nombre}'")
-    pt = Portafolio(nombre=nombre, descripcion=(payload.descripcion or None))
+    pt = Portafolio(nombre=nombre)
     db.add(pt)
     db.commit()
     db.refresh(pt)
@@ -200,8 +197,6 @@ def update_portafolio(portafolio_id: int, payload: PortafolioUpdate, db: Session
         if dup:
             raise HTTPException(409, f"Ya existe un portafolio llamado '{nombre}'")
         pt.nombre = nombre
-    if payload.descripcion is not None:
-        pt.descripcion = payload.descripcion or None
     if payload.activo is not None:
         pt.activo = payload.activo
     db.commit()

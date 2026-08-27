@@ -49,13 +49,6 @@ def _fp_fallback(frontera_id: int, fecha: date) -> float:
     lo, hi = FP_FALLBACK_RANGO
     return round(rng.uniform(lo, hi), 4)
 
-# Fronteras de Consumo sin telemedida propia que comparten predio físico con
-# otra frontera que sí reporta con normalidad -- para el Caso 'Histórico' de
-# consumo, se usa el histórico del vecino en vez de rendirse en 'Sin dato'.
-# Clave/valor: frontera_id. Confirmar los ids reales contra la BD antes de
-# usar en producción ("MGS 0033 - Sabana de Torres" -> "MGS 0012 - La
-# Reserva" en el pipeline original).
-VECINO_HISTORICO_CONSUMO: dict[int, int] = {}
 
 
 # ---------------------------------------------------------------------------

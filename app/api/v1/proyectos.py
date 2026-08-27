@@ -692,6 +692,41 @@ def vincular_sunfactory(
     return _get_proyecto_or_404(id, db)
 
 
+# Tablas con FK ON DELETE CASCADE hacia proyectos que NO tienen relationship
+# en el modelo Proyecto (a diferencia de fallas/mantenimientos/etc, que sí lo
+# tienen y ya se chequean abajo vía el ORM) -- hallazgo de la auditoría de
+# Proyectos 2026-08-27: el guard de delete_proyecto() solo cubría 11
+# relaciones, así que Postgres borraba estas 6 en cascada sin ningún aviso
+# (ej. historial de generación diaria, paneles contables ya calculados,
+# registros de conexión CND). Todas usan proyecto_id -- ojo con arr_documento,
+# que tiene DOS columnas de proyecto: arr_proyecto_id (FK a arr_proyectos, el
+# módulo de Arriendos, sin relación con esto) y proyecto_id (FK real a
+# proyectos.id, nullable, la que importa acá). No incluye cumplimiento_mensual
+# (ON DELETE SET NULL, no CASCADE -- huérfana, no se pierde el dato) ni
+# generacion_diaria (SÍ tiene relationship: Proyecto.generaciones, chequeada
+# abajo con el resto).
+_TABLAS_CASCADE_SIN_RELATIONSHIP = [
+    ("panel_contable", "proyecto_id"),
+    ("panel_consecutivo", "proyecto_id"),
+    ("clasificacion_energia_mensual", "proyecto_id"),
+    ("clasificacion_liquidacion", "proyecto_id"),
+    ("registro_conexion", "proyecto_id"),
+    ("arr_documento", "proyecto_id"),
+]
+
+
+def _tabla_cascade_bloqueante(db: Session, proyecto_id: int) -> str | None:
+    """Nombre de la primera tabla (de _TABLAS_CASCADE_SIN_RELATIONSHIP) que
+    sí tiene filas para este proyecto -- None si ninguna."""
+    for tabla, columna in _TABLAS_CASCADE_SIN_RELATIONSHIP:
+        existe = db.execute(
+            text(f"SELECT 1 FROM {tabla} WHERE {columna} = :pid LIMIT 1"), {"pid": proyecto_id}
+        ).first()
+        if existe:
+            return tabla
+    return None
+
+
 @router.delete("/{id}", status_code=204)
 def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     p = db.query(Proyecto).filter(Proyecto.id == id).first()
@@ -704,9 +739,10 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
         or p.asic_solicitudes or p.rec_procesos or p.promotor_seguimientos
         or p.contratos_servicio or p.ppa_contratos
         or p.servicio_operacion or p.servicio_representacion
-        or p.fronteras
+        or p.fronteras or p.generaciones
     )
-    if business_records:
+    tabla_bloqueante = None if business_records else _tabla_cascade_bloqueante(db, id)
+    if business_records or tabla_bloqueante:
         raise HTTPException(
             409,
             "No se puede eliminar el proyecto porque tiene registros operativos asociados "

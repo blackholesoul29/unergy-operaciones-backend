@@ -360,14 +360,15 @@ _PENDING_DDLS = [
     "CREATE TYPE tipo_notificacion_enum AS ENUM ('alerta', 'info', 'accion')",
     "CREATE INDEX IF NOT EXISTS ix_notificaciones_usuario ON notificaciones (usuario_id)",
     "CREATE INDEX IF NOT EXISTS ix_notificaciones_leida ON notificaciones (usuario_id, leida) WHERE leida = FALSE",
-    # migration — fronteras: quoia_meter_id + estado_operacional + soft delete
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS quoia_meter_id INTEGER",
-    "CREATE INDEX IF NOT EXISTS ix_fronteras_quoia_meter ON fronteras (quoia_meter_id) WHERE quoia_meter_id IS NOT NULL",
-    "CREATE TYPE estado_operacional_enum AS ENUM ('activo', 'inactivo', 'en_registro', 'descomisionado')",
-    "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS estado_operacional estado_operacional_enum DEFAULT 'activo'",
+    # migration — fronteras: soft delete
+    # quoia_meter_id/estado_operacional (y sus índices/enum) vivieron acá,
+    # ADD antes de su propio DROP más abajo en la lista -- funcionaba porque
+    # _run_column_migrations() corre TODA la lista en orden en cada arranque,
+    # pero era frágil (si algo reordenaba la lista, resucitaban de verdad).
+    # Ambas columnas ya están confirmadas fuera de producción -- se limpiaron
+    # las dos entradas (auditoría de envío de correos/_PENDING_DDLS, 2026-08-26).
     "ALTER TABLE fronteras ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "CREATE INDEX IF NOT EXISTS ix_fronteras_soft_deleted ON fronteras (deleted_at) WHERE deleted_at IS NOT NULL",
-    "CREATE INDEX IF NOT EXISTS ix_fronteras_estado_op ON fronteras (estado_operacional) WHERE estado_operacional IS NOT NULL",
     # migration — ASIC: XM tracking fields
     # Modalidad de pago del contrato ('plg' | 'plc'). Una planta repartida entre
     # dos contratos, uno de cada modalidad, no está duplicada: entre los dos
@@ -450,8 +451,7 @@ _PENDING_DDLS = [
     "ALTER TABLE reporte_energia_consumo ADD COLUMN IF NOT EXISTS horas_rellenadas_medidor_cruzado JSONB",
     # migration — ASIC porcentaje_despacho domain constraint (fix bad data first)
     # OJO: este backfill tiene que correr ANTES del chk_porcentaje_despacho
-    # de abajo, o el constraint falla. Por eso no esta en
-    # _BACKFILLS_REFERENCIA. No los separes.
+    # de abajo, o el constraint falla -- no lo separes del ALTER que sigue.
     "UPDATE asic_solicitudes SET porcentaje_despacho = porcentaje_despacho / 100.0 WHERE porcentaje_despacho > 1.0",
     "ALTER TABLE asic_solicitudes ADD CONSTRAINT chk_porcentaje_despacho CHECK (porcentaje_despacho >= 0 AND porcentaje_despacho <= 1.0)",
     # migration — ASIC ↔ PPA foreign key
@@ -612,8 +612,8 @@ _PENDING_DDLS = [
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_ingresos BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE panel_contable ADD COLUMN IF NOT EXISTS liquidar_costos BOOLEAN NOT NULL DEFAULT TRUE",
     # migration 020 — pipeline TSF / próximos a energizarse
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS origina_code VARCHAR(100)",
-    "CREATE INDEX IF NOT EXISTS ix_proyectos_origina_code ON proyectos (origina_code) WHERE origina_code IS NOT NULL",
+    # (origina_code + su índice ya se agregaron arriba -- migración 016 -- se
+    # quitó el duplicado acá, auditoría _PENDING_DDLS 2026-08-26)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fase_construccion VARCHAR(40)",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fecha_estimada_energizacion DATE",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS avance_obra_pct NUMERIC(5,2)",
@@ -831,18 +831,10 @@ _PENDING_DDLS = [
     # Idempotente: una vez es 'OP...' el LIKE 'OF%' deja de coincidir.
     "UPDATE oportunidad_ofertas SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
     "UPDATE oportunidades SET numero_oferta = 'OP' || SUBSTRING(numero_oferta FROM 3) WHERE numero_oferta LIKE 'OF%'",
-    # migration — drop fronteras.estado_operacional: campo manual sin ninguna
-    # sincronizacion automatica, nunca reflejaba el estado real y quedaba
-    # desactualizado; el estado real de operacion vive en Proyecto.estado (2026-07-22)
-    "ALTER TABLE fronteras DROP COLUMN IF EXISTS estado_operacional",
-    "DROP TYPE IF EXISTS estado_operacional_enum",
-    # migration — drop fronteras.quoia_meter_id: nunca lo leyo ningun servicio
-    # del backend, solo se mostraba/editaba en el frontend; quoia_border_id
-    # (que se mantiene) es un campo distinto -- aunque tampoco lo lee hoy
-    # ningun servicio del reporte CGM, que sigue resolviendo el border en
-    # vivo por frt_code (ver comentario en el modelo Frontera, auditoria CGM
-    # 2026-08-26 finding #6) (2026-07-22)
-    "ALTER TABLE fronteras DROP COLUMN IF EXISTS quoia_meter_id",
+    # (fronteras.estado_operacional/quoia_meter_id: los DROP que corrían acá
+    # ya cumplieron su función hace tiempo -- confirmado en producción
+    # 2026-08-26 que ninguna de las dos columnas existe. Se retiran junto con
+    # sus ADD/índices más arriba en la lista, ver comentario en esa sección.)
     # IDs de Quoia por proyecto — reportes generación/consumo y nodo (2026-07-23)
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_generacion_id INTEGER",
     "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
@@ -1038,77 +1030,14 @@ _PENDING_DDLS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Datos de referencia que vivian dentro de _PENDING_DDLS disfrazados de DDL
-# (hallazgo F12 de esquema-bd-produccion/DEPURACION.md: sentencias que modifican
-# datos corriendo en cada arranque). Es el mapeo hardcodeado de codigo FRT -> id
-# de medidor en Quoia. Todas llevan guarda "AND quoia_meter_id IS NULL", asi que
-# una vez aplicadas no vuelven a tocar ninguna fila.
-#
-# Estan aca, y no en _PENDING_DDLS, por dos razones: no son esquema, y ninguna
-# sentencia de DDL depende de ellas.
-#
-# Lo que NO se movio, a proposito:
-#   - Los UPDATE de topico_liquidaciones: upstream los mantiene en _PENDING_DDLS
-#     y los amplio el 2026-08-25 (Cedillanos). Se respetan donde estan.
-#   - El UPDATE de asic_solicitudes.porcentaje_despacho, que tiene que correr
-#     ANTES de chk_porcentaje_despacho.
-#   - Los dos UPDATE de oportunidad_ofertas.estado / estado_desde, que tienen que
-#     correr ANTES de sus ALTER ... SET NOT NULL.
-#   Esos tres casos tienen un constraint colgando y el orden importa.
-#
-# Lo correcto a futuro es que este mapeo salga de la API de Quoia o de una tabla
-# de catalogo, no de una lista en el codigo.
-# Ver docs/refactor/06-plan-migracion.md, paso 0.3.
-# ---------------------------------------------------------------------------
-_BACKFILLS_REFERENCIA = [
-    "UPDATE fronteras SET quoia_meter_id = 603  WHERE LOWER(codigo_frontera) = 'frt55044' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 609  WHERE LOWER(codigo_frontera) = 'frt55090' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 606  WHERE LOWER(codigo_frontera) = 'frt55093' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 845  WHERE LOWER(codigo_frontera) = 'frt58839' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 848  WHERE LOWER(codigo_frontera) = 'frt60629' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1022 WHERE LOWER(codigo_frontera) = 'frt63879' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1283 WHERE LOWER(codigo_frontera) = 'frt65205' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1459 WHERE LOWER(codigo_frontera) = 'frt66597' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 860  WHERE LOWER(codigo_frontera) = 'frt_olimpo14' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1481 WHERE LOWER(codigo_frontera) = 'frt67475' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1489 WHERE LOWER(codigo_frontera) = 'frt67496' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1514 WHERE LOWER(codigo_frontera) = 'frt68269' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1590 WHERE LOWER(codigo_frontera) = 'frt73414' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1584 WHERE LOWER(codigo_frontera) = 'frt74080' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1656 WHERE LOWER(codigo_frontera) = 'frt76578' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1654 WHERE LOWER(codigo_frontera) = 'frt76581' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1658 WHERE LOWER(codigo_frontera) = 'frt76586' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1664 WHERE LOWER(codigo_frontera) = 'frt82546' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1662 WHERE LOWER(codigo_frontera) = 'frt82576' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1692 WHERE LOWER(codigo_frontera) = 'frt82846' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1712 WHERE LOWER(codigo_frontera) = 'frt84587' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1660 WHERE LOWER(codigo_frontera) = 'frt86234' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1722 WHERE LOWER(codigo_frontera) = 'frt87017' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1724 WHERE LOWER(codigo_frontera) = 'frt87018' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1716 WHERE LOWER(codigo_frontera) = 'frt87336' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1719 WHERE LOWER(codigo_frontera) = 'frt89202' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1730 WHERE LOWER(codigo_frontera) = 'frt92219' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1739 WHERE LOWER(codigo_frontera) = 'frt92221' AND quoia_meter_id IS NULL",
-    "UPDATE fronteras SET quoia_meter_id = 1578 WHERE LOWER(codigo_frontera) = 'frt_reserva' AND quoia_meter_id IS NULL",
-]
-
-
-def _run_backfills_referencia() -> None:
-    """Aplica los backfills de datos de referencia. Idempotente por su WHERE."""
-    aplicados = 0
-    with engine.connect() as conn:
-        for stmt in _BACKFILLS_REFERENCIA:
-            try:
-                res = conn.execute(text(stmt))
-                conn.commit()
-                if res.rowcount and res.rowcount > 0:
-                    aplicados += res.rowcount
-            except Exception as e:
-                conn.rollback()
-                print(f"[startup backfill skipped] {e}")
-    if aplicados:
-        print(f"[startup] backfills_referencia: {aplicados} filas actualizadas")
+# _BACKFILLS_REFERENCIA / _run_backfills_referencia() vivieron acá: backfill
+# hardcodeado de fronteras.quoia_meter_id (mapeo FRT -> id de medidor en
+# Quoia, ver hallazgo F12 de esquema-bd-produccion/DEPURACION.md). La columna
+# se dropeó el 2026-07-22 -- el mapeo lo reemplazó FRONTERA_NODE_MAP
+# (app/services/mgs/gaia_client.py), que ya no depende de una columna propia.
+# Retirado 2026-08-26 (auditoría de _PENDING_DDLS): las 28 sentencias
+# fallaban en silencio en CADA arranque desde entonces (columna inexistente),
+# sin ningún efecto real -- confirmado en producción antes de borrar.
 
 
 def _run_column_migrations() -> None:
@@ -3408,7 +3337,6 @@ def _deferred_init():
         # Justo aca: despues del DDL que crea audit_log, y ANTES de los seeds,
         # que escriben con sesiones ORM sobre tablas auditadas.
         ("init_audit", _run_init_audit),
-        ("backfills_referencia", _run_backfills_referencia),
         ("comercial_dedup", _run_comercial_dedup),
         ("comercial_actualizacion", _run_comercial_actualizacion),
         ("starlink_mapeo_seed", _run_starlink_mapeo_seed),

@@ -31,6 +31,7 @@ class _FakeIMAP:
     def __init__(self, mensaje_bytes):
         self._mensaje_bytes = mensaje_bytes
         self.marcado_leido = []
+        self.criterios_buscados = []
 
     def login(self, user, password):
         pass
@@ -39,6 +40,7 @@ class _FakeIMAP:
         pass
 
     def search(self, charset, criterio):
+        self.criterios_buscados.append(criterio)
         return "OK", [b"1"]
 
     def fetch(self, msg_id, spec):
@@ -56,7 +58,7 @@ class _FakeIMAP:
 
 def _correo_con_adjuntos(nombres: list[str]) -> bytes:
     msg = MIMEMultipart()
-    msg["From"] = mod.CEDILLANOS_REMITENTE
+    msg["From"] = f"cgm@{mod.CEDILLANOS_DOMINIO_REMITENTE}"
     msg["Subject"] = f"RE: {mod.CEDILLANOS_ASUNTO_CLAVE} - Alsec Llanos"
     for nombre in nombres:
         parte = MIMEApplication(b"contenido-fake", _subtype="xlsx")
@@ -119,3 +121,31 @@ def test_primer_adjunto_invalido_cae_al_segundo(monkeypatch):
     assert llamadas["n"] == 2  # probó el primero (falló), luego el segundo (éxito)
     assert fake_db.commits == 1
     assert fake_imap.marcado_leido == [b"1"]
+
+
+def test_busca_por_dominio_no_por_casilla_exacta(monkeypatch):
+    """Bug real 2026-08-27: el correo diario no siempre lo manda la misma
+    casilla -- ese día lo mandó otra persona del mismo dominio/hilo
+    (jgonzaleso@erco.energy en vez de cgm@erco.energy) y el filtro por
+    remitente EXACTO hizo que las 9 corridas entre 4-6am no encontraran el
+    correo, sin ningún error visible (una búsqueda sin resultados es una
+    corrida válida). El criterio de búsqueda debe anclarse al dominio, no a
+    una casilla puntual."""
+    mensaje = _correo_con_adjuntos(["reporte.xlsx"])
+    fake_imap = _FakeIMAP(mensaje)
+    fake_db = _FakeDB()
+
+    monkeypatch.setattr(mod.settings, "SMTP_USER", "user@test.com")
+    monkeypatch.setattr(mod.settings, "SMTP_PASSWORD", "pass")
+    monkeypatch.setattr(mod.imaplib, "IMAP4_SSL", lambda host, port: fake_imap)
+    monkeypatch.setattr(mod, "SessionLocal", lambda: fake_db)
+
+    from datetime import date
+    monkeypatch.setattr(mod, "aplicar_excel_terceros", lambda db, fid, contenido: [date(2026, 8, 25)])
+
+    mod.revisar_correo_cedillanos()
+
+    assert len(fake_imap.criterios_buscados) == 1
+    criterio = fake_imap.criterios_buscados[0]
+    assert mod.CEDILLANOS_DOMINIO_REMITENTE in criterio
+    assert "cgm@erco.energy" not in criterio, "no debe anclarse a una casilla puntual, cualquier remitente del dominio debe hacer match"

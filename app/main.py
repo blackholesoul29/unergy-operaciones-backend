@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -7,6 +8,19 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.api.v1.router import api_router
+
+# El proyecto nunca configuró logging.basicConfig() en ningún lado -- sin
+# eso, el root logger no tiene handler propio, y Python cae a
+# `logging.lastResort` (un StreamHandler a stderr, pero SOLO a partir de
+# WARNING). Resultado real: todo logger.info()/logger.debug() de CUALQUIER
+# módulo del backend (no solo este archivo) queda invisible en los logs de
+# Railway, indistinguible de "no corrió" -- así se investigó en vano por
+# qué el Excel de Cedillanos no se cargó un día (2026-08-27): el job había
+# corrido bien sus 9 intentos, cada uno logueando "sin correos nuevos" a
+# INFO, pero ninguna de esas líneas llegó a verse. Con esto, cualquier
+# logger.info() del proyecto queda visible sin tener que ir a buscar el
+# dato directo en la base de datos.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 # Idempotent DDL run at startup — safe to run on every boot
 _PENDING_DDLS = [

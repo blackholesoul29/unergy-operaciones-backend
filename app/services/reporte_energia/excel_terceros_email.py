@@ -25,7 +25,15 @@ from app.services.reporte_energia.excel_terceros import aplicar_excel_terceros
 logger = logging.getLogger("reporte_energia.excel_terceros_email")
 
 CEDILLANOS_FRONTERA_ID = 79  # Cedillanos_excedentes, Frt88292
-CEDILLANOS_REMITENTE = "cgm@erco.energy"
+# Dominio, no una casilla puntual -- el correo diario le llega a este mismo
+# hilo, pero no siempre lo manda "cgm@erco.energy": el 2026-08-27 lo mandó
+# Johan Felipe González (jgonzaleso@erco.energy), otra persona del mismo
+# hilo/organización, y el filtro exacto por remitente hizo que las 9
+# corridas entre 4-6am no encontraran el correo (llegó a las 4:41am, dentro
+# de la ventana) -- sin ningún error en el log, porque "sin correos nuevos"
+# es una corrida válida, no una falla. Filtrar por dominio es robusto a
+# cualquier persona de Cedillanos que responda o envíe desde ese hilo.
+CEDILLANOS_DOMINIO_REMITENTE = "erco.energy"
 # El SEARCH de Gmail busca por TOKEN completo, no por subcadena (probado en
 # vivo 2026-08-14): "85329" nunca hace match con "FRT85329" en el asunto,
 # aunque sí sea una subcadena real -- hay que usar el token completo tal
@@ -48,7 +56,7 @@ def _extraer_adjuntos_excel(msg: email.message.Message) -> list[tuple[str, bytes
 
 def revisar_correo_cedillanos() -> None:
     """Busca en operaciones@unergy.io correos SIN LEER de Cedillanos (ver
-    CEDILLANOS_REMITENTE/CEDILLANOS_ASUNTO_CLAVE), aplica el primer adjunto
+    CEDILLANOS_DOMINIO_REMITENTE/CEDILLANOS_ASUNTO_CLAVE), aplica el primer adjunto
     Excel que cargue con éxito a CEDILLANOS_FRONTERA_ID, y marca el correo
     como leído solo si algo se cargó -- si falla (adjunto con formato
     inesperado, sin filas 'Primary', etc.) queda sin leer para reintentar
@@ -71,7 +79,7 @@ def revisar_correo_cedillanos() -> None:
 
     try:
         imap.select("INBOX")
-        criterio = f'(UNSEEN FROM "{CEDILLANOS_REMITENTE}" SUBJECT "{CEDILLANOS_ASUNTO_CLAVE}")'
+        criterio = f'(UNSEEN FROM "{CEDILLANOS_DOMINIO_REMITENTE}" SUBJECT "{CEDILLANOS_ASUNTO_CLAVE}")'
         status, data = imap.search(None, criterio)
         if status != "OK":
             logger.error("IMAP: búsqueda falló: %s", data)

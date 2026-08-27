@@ -112,13 +112,17 @@ def _diff_attrs(obj: Any) -> dict[str, dict[str, Any]] | None:
             continue
         hist = attr.history
         if hist.has_changes():
-            old = hist.deleted[0] if hist.deleted else None
-            new = hist.added[0] if hist.added else None
+            old = _serialize(hist.deleted[0] if hist.deleted else None)
+            new = _serialize(hist.added[0] if hist.added else None)
+            # Se compara DESPUES de serializar, y no antes. Las columnas de
+            # dinero son NUMERIC, asi que el valor cargado es un Decimal y el
+            # que llega del JSON del PATCH es un float:
+            # `Decimal('0.0380') != 0.038` es True en Python aunque sea el mismo
+            # numero. Comparando crudo, 22 de las 25 filas del historico de
+            # tarifas quedaron registradas como cambios que decian
+            # {"antes": 0.038, "despues": 0.038}. Ver D-24 §e.
             if old != new:
-                changes[attr.key] = {
-                    "antes": _serialize(old),
-                    "despues": _serialize(new),
-                }
+                changes[attr.key] = {"antes": old, "despues": new}
     return changes or None
 
 

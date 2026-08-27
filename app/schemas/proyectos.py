@@ -264,7 +264,6 @@ class ProyectoCreate(BaseModel):
     altitud_msnm: Optional[int] = Field(default=None, ge=-100, le=6000)
     operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
-    carpeta_drive_codigo: Optional[str] = None
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None
@@ -346,7 +345,6 @@ class ProyectoOut(BaseModel):
     operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]
-    carpeta_drive_codigo: Optional[str]
     p90_mensual_kwh: Optional[list] = None
     p50_mensual_kwh: Optional[list] = None
     p99_mensual_kwh: Optional[list] = None

@@ -207,7 +207,6 @@ def test_acepta_el_payload_literal_del_formulario_de_proyectos(db, operador, neg
         "longitud": -75.58,
         "operador_red_id": operador.id,
         "clasificacion_regulatoria": "GD",
-        "carpeta_drive_codigo": "TAU-09",
         "sub_project": "taurus9",
         "codigo_tsf": "COLTAU09",
         # serializeMonthArray() manda un string JSON, no una lista.
@@ -227,7 +226,6 @@ def test_acepta_el_payload_literal_del_formulario_de_proyectos(db, operador, neg
 
     guardado = db.query(Proyecto).filter(Proyecto.id == p["id"]).first()
     assert guardado.codigo_tsf == "COLTAU09"
-    assert guardado.carpeta_drive_codigo == "TAU-09"
     # El validador coerce_json_list convierte el string a lista.
     assert guardado.p50_mensual_kwh[0] == 120
     assert float(guardado.potencia_instalada_kwp) == pytest.approx(1200.5)

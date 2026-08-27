@@ -41,7 +41,6 @@ RAIZ = Path(__file__).resolve().parent.parent
 COLUMNAS_ORIGINALES_PROYECTOS = {
     # Verificadas una por una con `git log -S <col> -- app/models/proyectos.py`:
     # todas entraron en el commit inicial o antes de que el repo exigiera ALTER.
-    'carpeta_drive_codigo',
     'clasificacion_regulatoria',
     'codigo_cnd',
     'created_at',

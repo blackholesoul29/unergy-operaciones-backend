@@ -532,6 +532,15 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
     }
     ignorados = {c.lower() for (c,) in db.query(FronteraQuoiaIgnorada.frt_code).all()}
     proyectos = db.query(Proyecto.id, Proyecto.nombre_comercial).filter(Proyecto.deleted_at.is_(None)).all()
+    # Una sola pasada por proyecto en vez de un scan lineal por cada pendiente
+    # -- antes era O(pendientes × proyectos); el primer proyecto con cada
+    # número gana (mismo criterio que el "break" que reemplaza, ver auditoría
+    # de eficiencia 2026-08-26).
+    proyectos_por_numero: dict[int, tuple[int, str]] = {}
+    for pid, pnombre in proyectos:
+        num = _mgs_number(pnombre or "")
+        if num is not None and num not in proyectos_por_numero:
+            proyectos_por_numero[num] = (pid, pnombre)
 
     pendientes: list[FronteraQuoiaPendiente] = []
     vistos: set[str] = set()
@@ -542,11 +551,8 @@ def fronteras_quoia_pendientes(db: Session = Depends(get_db), _=Depends(get_curr
 
         sugerido_id, sugerido_nombre = None, None
         num = _mgs_number(nombre_quoia)
-        if num is not None:
-            for pid, pnombre in proyectos:
-                if _mgs_number(pnombre or "") == num:
-                    sugerido_id, sugerido_nombre = pid, pnombre
-                    break
+        if num is not None and num in proyectos_por_numero:
+            sugerido_id, sugerido_nombre = proyectos_por_numero[num]
 
         pendientes.append(FronteraQuoiaPendiente(
             frt_code=frt_code,

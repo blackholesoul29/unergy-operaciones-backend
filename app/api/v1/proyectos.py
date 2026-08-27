@@ -19,7 +19,7 @@ from app.schemas.proyectos import (
     ProyectoInfoTecnicaCreate, ProyectoInfoTecnicaOut,
     ProyectoInversorCreate, ProyectoInversorUpdate, ProyectoInversorOut,
     ProyectoAreaContactoSet, ProyectoAreaContactoOut,
-    ProyectoPendienteOut, ProyectoPendienteConfirmar, ProyectoPendienteIgnorar,
+    ProyectoPendienteOut, ProyectoPendienteConfirmar,
 )
 from app.schemas.common import PaginatedResponse
 from app.services.mgs.gaia_client import GaiaClient
@@ -306,13 +306,12 @@ def confirmar_proyecto_pendiente(
 @router.post("/pendientes/{clave}/ignorar", status_code=204)
 def ignorar_proyecto_pendiente(
     clave: str,
-    body: ProyectoPendienteIgnorar,
     db: Session = Depends(get_db),
     usuario=Depends(get_current_user),
 ):
     if db.query(ProyectoPendienteIgnorado).filter(ProyectoPendienteIgnorado.clave == clave).first():
         return
-    db.add(ProyectoPendienteIgnorado(clave=clave, motivo=body.motivo, ignorado_por_usuario_id=usuario.id))
+    db.add(ProyectoPendienteIgnorado(clave=clave, ignorado_por_usuario_id=usuario.id))
     db.commit()
 
 

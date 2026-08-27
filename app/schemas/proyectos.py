@@ -469,7 +469,3 @@ class ProyectoPendienteConfirmar(BaseModel):
     departamento: Optional[str] = None
     potencia_ac_kw: Optional[float] = None
     capacidad_instalada_kwp: Optional[float] = None
-
-
-class ProyectoPendienteIgnorar(BaseModel):
-    motivo: Optional[str] = None

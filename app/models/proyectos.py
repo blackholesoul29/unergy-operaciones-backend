@@ -359,6 +359,5 @@ class ProyectoPendienteIgnorado(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     clave: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
-    motivo: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ignorado_por_usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -10,6 +10,7 @@ de la API**: ver la docstring de `set_audit_user`.
 from __future__ import annotations
 
 import json
+import re
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
@@ -65,6 +66,13 @@ def set_audit_user(
         session.info["audit_user"] = (user_id, user_name)
     else:
         _audit_user.set((user_id, user_name))
+
+
+def _autor(session: Session) -> tuple[int | None, str | None]:
+    """Quien esta escribiendo. La sesion primero: es la unica via que sobrevive
+    al threadpool de FastAPI (ver `set_audit_user`). El ContextVar queda para
+    los seeds de arranque y el scheduler."""
+    return session.info.get("audit_user") or _audit_user.get()
 
 
 def _table_name(obj: Any) -> str | None:
@@ -144,8 +152,7 @@ def _queue_audit(session: Session, action: str, obj: Any) -> None:
     if not hasattr(session, "_audit_queue"):
         session._audit_queue = []
 
-    # La sesion primero: es la unica via que sobrevive al threadpool de FastAPI.
-    user_id, user_name = session.info.get("audit_user") or _audit_user.get()
+    user_id, user_name = _autor(session)
 
     session._audit_queue.append({
         "tabla": table,
@@ -157,6 +164,86 @@ def _queue_audit(session: Session, action: str, obj: Any) -> None:
     })
 
 
+_INSERT_AUDIT_BASE = (
+    "INSERT INTO audit_log "
+    "(tabla, registro_id, accion, usuario_id, usuario_nombre, cambios) "
+    "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, {cambios})"
+)
+
+
+def _insert_audit(dialecto: str) -> str:
+    """El INSERT, con el CAST a jsonb solo donde existe jsonb.
+
+    En SQLite `CAST(x AS jsonb)` no falla: aplica afinidad numerica y guarda un
+    0 en vez del JSON, en silencio. Los tests del merge corren sobre SQLite, asi
+    que el CAST tiene que depender del dialecto y no del optimismo.
+    """
+    return _INSERT_AUDIT_BASE.format(
+        cambios="CAST(:cambios AS jsonb)" if dialecto == "postgresql" else ":cambios")
+
+# Nombre de tabla valido. `registrar_borrado` lo interpola en el SQL, asi que
+# no puede aceptar cualquier cosa aunque hoy solo lo llamen con literales.
+_NOMBRE_TABLA = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def registrar_borrado(
+    session: Session,
+    tabla: str,
+    registro_id: int,
+    *,
+    contexto: dict | None = None,
+    tipo: str = "hard",
+) -> bool:
+    """Deja constancia de un borrado que los hooks del ORM no van a ver.
+
+    Los borrados masivos --`DELETE FROM x WHERE ...`-- no pasan por el unit of
+    work, asi que `_queue_audit` nunca se entera. Los dos endpoints de fusion de
+    duplicados borran asi, y hasta el 2026-08-27 **borrar una planta no dejaba
+    ni una fila en `audit_log`**: la operacion mas destructiva de la app era la
+    unica sin rastro.
+
+    Guarda el **snapshot completo de la fila** antes de que desaparezca, que es
+    justo lo que un hook generico sobre `do_orm_execute` no podria dar: ese ve
+    la sentencia y el rowcount, no el contenido.
+
+    ⚠️ **Hay que llamarla ANTES de tocar la fila.** Los dos merges vacian campos
+    del perdedor antes de borrarlo (`UPDATE ... SET campo=NULL WHERE id=:loser`),
+    asi que llamarla al final guardaria una foto ya mutilada.
+
+    El `SELECT *` es deliberado: enumerar columnas a mano queda viejo en dias
+    --upstream lleva diez revisiones esta semana borrando columnas de
+    `proyectos`-- y ademas funciona en cualquier dialecto, que `row_to_json` no.
+
+    Devuelve False si la fila no existe: no hay nada que retratar.
+    """
+    if not _NOMBRE_TABLA.match(tabla):
+        raise ValueError(f"nombre de tabla no valido: {tabla!r}")
+
+    fila = session.execute(
+        text(f"SELECT * FROM {tabla} WHERE id = :id"), {"id": registro_id}
+    ).mappings().first()
+    if fila is None:
+        return False
+
+    cambios: dict[str, Any] = {
+        "snapshot": {k: _serialize(v) for k, v in fila.items()},
+        "tipo_borrado": tipo,
+    }
+    if contexto:
+        cambios["contexto"] = contexto
+
+    user_id, user_name = _autor(session)
+    session.execute(text(_insert_audit(session.get_bind().dialect.name)), {
+        "tabla": tabla,
+        "registro_id": registro_id,
+        "accion": "DELETE",
+        "usuario_id": user_id,
+        "usuario_nombre": user_name,
+        "cambios": json.dumps(cambios, ensure_ascii=False),
+    })
+    return True
+
+
 def _flush_audit(session: Session) -> None:
     queue = getattr(session, "_audit_queue", None)
     if not queue:
@@ -164,14 +251,7 @@ def _flush_audit(session: Session) -> None:
 
     conn = session.connection()
     for entry in queue:
-        conn.execute(
-            text(
-                "INSERT INTO audit_log "
-                "(tabla, registro_id, accion, usuario_id, usuario_nombre, cambios) "
-                "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, CAST(:cambios AS jsonb))"
-            ),
-            entry,
-        )
+        conn.execute(text(_insert_audit(conn.dialect.name)), entry)
     session._audit_queue.clear()
 
 

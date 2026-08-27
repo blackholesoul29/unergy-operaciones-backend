@@ -285,7 +285,7 @@ class FallaInversor(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     falla_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas.id"), nullable=False, index=True)
     proyecto_inversor_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("proyecto_inversores.id"), nullable=True, index=True)
+        BigInteger, ForeignKey("proyecto_inversores.id", ondelete="SET NULL"), nullable=True, index=True)
     nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
     potencia_kw: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
     tipos: Mapped[list | None] = mapped_column(JSONB, nullable=True)

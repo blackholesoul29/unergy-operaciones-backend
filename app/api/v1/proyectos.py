@@ -1032,7 +1032,14 @@ def add_inversor(id: int, data: ProyectoInversorCreate, db: Session = Depends(ge
     _validar_suma_inversores(id, db, data.potencia_nominal_kw)
     inv = ProyectoInversor(proyecto_id=id, **data.model_dump(exclude_none=True))
     db.add(inv)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Doble clic o dos requests casi simultáneas (p. ej. el prefill de
+        # inversores típicos en FallaForm.vue/FallaCreateSheet.vue): sin esto,
+        # sube como 500 crudo de Postgres en vez de un mensaje accionable.
+        db.rollback()
+        raise HTTPException(409, f"Ya existe un inversor llamado \"{inv.nombre}\" en este proyecto.")
     db.refresh(inv)
     return inv
 
@@ -1047,7 +1054,11 @@ def update_inversor(id: int, inv_id: int, data: ProyectoInversorUpdate, db: Sess
         _validar_suma_inversores(id, db, cambios["potencia_nominal_kw"], excluir_id=inv_id)
     for k, v in cambios.items():
         setattr(inv, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, f"Ya existe un inversor llamado \"{inv.nombre}\" en este proyecto.")
     db.refresh(inv)
     return inv
 

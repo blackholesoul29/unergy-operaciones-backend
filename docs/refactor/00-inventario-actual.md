@@ -869,3 +869,32 @@ Fuera del alcance del refactor, anotado para que exista:
   arranque, que es justo lo que se evitó al moverlo a un hilo.
 - Como mínimo: que **ninguna columna tenga dos escritores de arranque**. Es la regla más barata de
   verificar, y el mapa de arriba es reproducible.
+
+### Tareas que salieron de este apéndice y quedaron sin hacer
+
+**`tsf_sync`: `stats["actualizados"]` no distingue lo que cambió de lo que no.**
+`app/services/tsf_sync.py:415` declara `"sin_cambios": 0` en el diccionario de estadísticas **y no
+lo incrementa nunca**. Cada fila que el sync toca cuenta como `actualizados`, haya cambiado algo o
+no — y como el `UPDATE` es `COALESCE(campo, :nuevo)`, la mayoría de las veces no cambia nada. Su
+propio informe exagera lo que hizo, y el contador que iba a distinguirlo se declaró y se olvidó.
+
+Arreglarlo es agregar `IS DISTINCT FROM` al `WHERE` y leer el `rowcount`, o comparar antes de
+escribir. **No es urgente:** `tsf_sync` no corre en el arranque —no está en `_deferred_init` ni en
+ninguno de los 12 jobs del scheduler—, se dispara a mano desde `monitoreo.py:547`. Así que no puede
+estar reescribiendo en cada deploy; sólo miente sobre cuánto trabajó.
+
+⚠️ Mientras tanto, para saber cuándo corrió y cuánto tocó **sí sirve `updated_at`**, porque su SQL
+lo escribe explícitamente:
+
+```sql
+SELECT date_trunc('minute', updated_at) AS minuto, count(*) AS filas
+  FROM proyectos
+ WHERE updated_at > now() - interval '30 days'
+ GROUP BY 1 ORDER BY 1 DESC LIMIT 40;
+```
+
+🛑 **Y una advertencia general que salió de acá:** `updated_at` **no es una auditoría de repuesto**.
+Sólo se actualiza cuando el ORM hace flush (el `onupdate` de los modelos es del lado de Python) o
+cuando el SQL lo escribe a mano. La base **no tiene ni un trigger**, así que las 32 escrituras de
+SQL crudo modifican filas sin dejar rastro ni en `audit_log` ni en `updated_at`. `cgm_seed` es el
+ejemplo: repara `contratos_servicio.proyecto_id` y no toca ninguna de las dos cosas.

@@ -250,6 +250,18 @@ class Proyecto(Base):
         return None
 
 
+class TipoTrackerEnum(str, enum.Enum):
+    p1 = "1P"
+    p2 = "2P"
+
+
+# Este enum guarda el VALOR en Postgres ("1P"/"2P"), no el nombre del miembro
+# ("p1"/"p2" -- "1P" no es un identificador Python válido). Mismo patrón que
+# ClaseCtEnum/ClasePtEnum en app/models/fronteras.py.
+def _tracker_por_valor(enum_cls):
+    return [m.value for m in enum_cls]
+
+
 class ProyectoInfoTecnica(Base):
     __tablename__ = "proyecto_info_tecnica"
 
@@ -260,7 +272,7 @@ class ProyectoInfoTecnica(Base):
     voltaje_red: Mapped[str | None] = mapped_column(String(50), nullable=True)
     potencia_ac_kw: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     capacidad_instalada_kwp: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
-    tipo_tracker: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    tipo_tracker: Mapped[str | None] = mapped_column(SAEnum(TipoTrackerEnum, name="tipo_tracker_enum", values_callable=_tracker_por_valor), nullable=True)
 
     # Paneles
     cantidad_total_paneles: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -290,7 +302,7 @@ class ProyectoInfoTecnica(Base):
     cctv_estado: Mapped[str | None] = mapped_column(Text, nullable=True)
     marca_cctv: Mapped[str | None] = mapped_column(String(255), nullable=True)
     seguridad_fisica: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tiene_internet: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    tiene_internet: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

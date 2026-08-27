@@ -1074,7 +1074,7 @@ def _ficha_tecnica(proyecto) -> dict:
         "potencia_ac_kw": _num(_it("potencia_ac_kw")),
         "capacidad_instalada_kwp": _num(_it("capacidad_instalada_kwp")),
         "produccion_especifica_kwh_kwp": _num(proyecto.produccion_especifica_kwh_kwp),
-        "tipo_tracker": _it("tipo_tracker"),
+        "tipo_tracker": _valor_enum(_it("tipo_tracker")),
         "paneles": {
             # El conteo vive SOLO en la ficha técnica. Hasta 2026-08-19 estaba
             # duplicado en `proyectos.cantidad_total_paneles` y acá se elegía uno

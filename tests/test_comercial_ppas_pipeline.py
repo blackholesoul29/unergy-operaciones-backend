@@ -875,7 +875,7 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     # estaba duplicado en `proyectos.cantidad_total_paneles`, y esa columna se
     # eliminó.
     _info_tecnica(db, proy, voltaje_red="13.2 kV", potencia_ac_kw=900,
-                  capacidad_instalada_kwp=990, tipo_tracker="1E",
+                  capacidad_instalada_kwp=990, tipo_tracker="1P",
                   cantidad_total_paneles=1800,
                   marca_paneles="Trina", potencia_panel_kwp="0.55",
                   cantidad_inversores=5, marca_inversores="Huawei",

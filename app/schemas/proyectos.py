@@ -78,7 +78,7 @@ class ProyectoInfoTecnicaCreate(BaseModel):
     cctv_estado: Optional[str] = None
     marca_cctv: Optional[str] = None
     seguridad_fisica: Optional[str] = None
-    tiene_internet: Optional[str] = None
+    tiene_internet: Optional[bool] = None
 
 
 class ProyectoInfoTecnicaOut(ProyectoInfoTecnicaCreate):

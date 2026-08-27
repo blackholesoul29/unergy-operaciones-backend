@@ -1,7 +1,7 @@
 """Prevencion de duplicados al crear/editar proyectos manualmente:
 
-1. Chequeo proactivo de columnas UNIQUE (sub_project, topic_slug,
-   project_id_solenium, sunfactory_project_id) con mensaje accionable.
+1. Chequeo proactivo de columnas UNIQUE (sub_project, project_id_solenium,
+   sunfactory_project_id) con mensaje accionable.
 2. Alerta de nombre muy parecido (match exacto normalizado) antes de crear,
    con opcion de forzar la creacion si de verdad es un proyecto distinto.
 """

@@ -2,7 +2,7 @@
 
 `primer_dia_con_generacion` es una función pura sobre lecturas de un contador
 acumulado; devuelve el primer día (Col) con generación real. Se testea sin red.
-`identificador_monitoreo` resuelve el identificador de la API con COALESCE.
+`identificador_monitoreo` resuelve el identificador de la API (sub_project).
 """
 from datetime import date
 
@@ -68,18 +68,11 @@ def test_continuacion_entre_bloques_con_prev_cum():
     assert cum == 15.0
 
 
-def test_identificador_monitoreo_coalesce():
+def test_identificador_monitoreo():
     class P:
-        sub_project = None
-        topic_slug = "sabana_de_torres"
-    assert identificador_monitoreo(P()) == "sabana_de_torres"
-
-    class Q:
         sub_project = "sp_x"
-        topic_slug = "slug_z"
-    assert identificador_monitoreo(Q()) == "sp_x"
+    assert identificador_monitoreo(P()) == "sp_x"
 
     class R:
         sub_project = None
-        topic_slug = None
     assert identificador_monitoreo(R()) is None

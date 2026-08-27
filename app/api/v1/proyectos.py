@@ -594,7 +594,6 @@ def debug_generacion(id: int, db: Session = Depends(get_db), _=Depends(get_curre
 # sube como 500 sin detalle y el frontend solo muestra "Error" (ver bug API ID Unergy).
 _UNIQUE_COLS = {
     "sub_project": "API ID Unergy",
-    "topic_slug": "topic slug",
     "project_id_solenium": "ID de Solenium (generación)",
     "sunfactory_project_id": "ID de Sun Factory",
 }
@@ -765,7 +764,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 #                         "conservar la del ganador"); el resto se repunta.
 #   _MERGE_ONE_TO_ONE   : 1-a-1 (proyecto_id UNIQUE) -> si el ganador ya tiene fila,
 #                         se descarta la del perdedor; si no, se mueve.
-# Campos escalares únicos del propio proyecto (sub_project=API ID Unergy, topic_slug,
+# Campos escalares únicos del propio proyecto (sub_project=API ID Unergy,
 # project_id_solenium) se copian del perdedor al ganador solo si el ganador los tiene
 # vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
 _MERGE_SIMPLE = [
@@ -792,7 +791,7 @@ _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
     "proyecto_inicio_operacion",
 ]
-_MERGE_SCALAR_UNIQUE = ["sub_project", "topic_slug", "project_id_solenium", "sunfactory_project_id"]
+_MERGE_SCALAR_UNIQUE = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
 # Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el
 # valor del perdedor (a diferencia de _MERGE_SCALAR_UNIQUE, no hace falta
 # liberarlos en el perdedor antes de copiar: no hay constraint que choque).

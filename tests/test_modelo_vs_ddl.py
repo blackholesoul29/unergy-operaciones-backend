@@ -65,7 +65,6 @@ COLUMNAS_ORIGINALES_PROYECTOS = {
     'tipo_conexion',
     'tipo_proyecto',
     'tipo_tecnologia',
-    'topic_slug',
     'updated_at',
 }
 

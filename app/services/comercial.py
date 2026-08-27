@@ -985,7 +985,6 @@ def _identificacion(proyecto) -> dict:
     """
     return {
         "nombre_comercial": proyecto.nombre_comercial,
-        "topic_slug": proyecto.topic_slug,
         # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo.
         "sub_project": proyecto.sub_project,
         "codigo_cnd": proyecto.codigo_cnd,

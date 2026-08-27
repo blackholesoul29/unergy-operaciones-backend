@@ -828,7 +828,7 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
     una integración, así que van los tres con el sistema en la clave."""
     porta = Portafolio(nombre="Portafolio Caribe")
     db.add(porta); db.flush()
-    proy = _proyecto(db, nombre_comercial="GD Catedral", topic_slug="gd-catedral",
+    proy = _proyecto(db, nombre_comercial="GD Catedral",
                      sub_project="catedral", codigo_cnd="CND-0912",
                      codigo_tsf="TSF-77", project_id_solenium="SOL-45",
                      sunfactory_project_id=310, origina_code="MF-CAT",

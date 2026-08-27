@@ -6,13 +6,6 @@ real de energía. Se obtiene consultando la API de generación de Unergy
 (``project_generation``) y detectando el primer incremento del contador
 acumulado.
 
-El identificador que acepta la API (parámetro ``sub_project``) es, en la
-práctica, el mismo namespace que ``topic_slug`` en nuestra tabla ``proyectos``
-(verificado contra producción). Por eso resolvemos el identificador con un
-COALESCE ``sub_project → topic_slug``: para las plantas que ya tienen
-``sub_project`` no cambia nada, y para las que solo tienen ``topic_slug``
-(p. ej. minigranjas nuevas) queda cubierto.
-
 Funciones puras (``primer_dia_con_generacion``) separadas de la E/S (``_fetch_*``)
 para poder testearlas sin red.
 """
@@ -37,16 +30,8 @@ _PISO_BUSQUEDA = date(2021, 1, 1)
 
 
 def identificador_monitoreo(proyecto) -> str | None:
-    """Identificador que acepta la API de generación para este proyecto.
-
-    ``sub_project`` es el canónico; si falta, cae a ``topic_slug``. Solo AGREGA
-    cobertura: para plantas con ``sub_project`` el resultado es idéntico al de
-    antes.
-    """
-    return (
-        getattr(proyecto, "sub_project", None)
-        or getattr(proyecto, "topic_slug", None)
-    )
+    """Identificador que acepta la API de generación para este proyecto."""
+    return getattr(proyecto, "sub_project", None)
 
 
 def unergy_token() -> str:

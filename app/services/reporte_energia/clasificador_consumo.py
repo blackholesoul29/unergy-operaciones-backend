@@ -384,16 +384,29 @@ def _decidir_medidor_o_historico(
         fuente_id = VECINO_HISTORICO_CONSUMO[frontera_id]
         mediana, _ = historial.get_mediana_consumo(db, fuente_id, fecha)
 
+    # Bug real (La Catedral Consumo, MINIGRANJA SOLAR CAÑAHUATE SER AUX --
+    # 13/96 filas 'Histórico' en producción, confirmado 2026-08-27): antes,
+    # con mediana pero SIN forma horaria (get_mediana_consumo y
+    # get_forma_consumo exigen ventanas distintas -- mediana solo pide un
+    # total válido por día, forma exige además la curva COMPLETA y con
+    # total > 0), se reportaba igual "caso: Histórico" con
+    # energia_final_kwh = mediana (ej. 6.9 kWh) pero curva_final en
+    # CURVA_CERO -- el total y la curva quedaban contradictorios, y la
+    # tabla de corrección manual del frontend mostraba 24 ceros aunque el
+    # resumen dijera otro número. Mismo criterio que ya usa
+    # reconectador.rellenar_horas_faltantes: la mediana sola nunca alcanza,
+    # hace falta la forma también antes de reportar nada como Histórico.
     if mediana is not None:
         forma, _ = historial.get_forma_consumo(db, fuente_id, fecha)
-        curva_historico = escalar_curva(forma, mediana) if forma is not None else CURVA_CERO.copy()
-        medidor_usado = "historico" if fuente_id == frontera_id else "historico_vecino"
-        return {
-            "caso": "Histórico", "energia_final_kwh": mediana, "curva_final": curva_historico,
-            "medidor_usado": medidor_usado, "revisar_manualmente": True,
-            "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
-            "recuperacion_datos": recuperacion_datos,
-        }
+        if forma is not None:
+            curva_historico = escalar_curva(forma, mediana)
+            medidor_usado = "historico" if fuente_id == frontera_id else "historico_vecino"
+            return {
+                "caso": "Histórico", "energia_final_kwh": mediana, "curva_final": curva_historico,
+                "medidor_usado": medidor_usado, "revisar_manualmente": True,
+                "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+                "recuperacion_datos": recuperacion_datos,
+            }
 
     return {
         "caso": "Sin dato", "energia_final_kwh": None, "curva_final": CURVA_VACIA.copy(),

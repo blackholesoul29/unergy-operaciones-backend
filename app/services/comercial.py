@@ -1096,11 +1096,7 @@ def _ficha_tecnica(proyecto) -> dict:
                 {
                     "id": i.id,
                     "nombre": i.nombre,
-                    "marca": i.marca,
-                    "modelo": i.modelo,
                     "potencia_nominal_kw": _num(i.potencia_nominal_kw),
-                    "tipo": _valor_enum(i.tipo),
-                    "numero_serie": i.numero_serie,
                 }
                 for i in inversores
             ],

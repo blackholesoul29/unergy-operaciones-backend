@@ -880,8 +880,7 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
                   marca_paneles="Trina", potencia_panel_kwp="0.55",
                   cantidad_inversores=5, marca_inversores="Huawei",
                   cantidad_strings=48, marca_transformador="Siemens")
-    _inversor(db, proy, nombre="Inversor 2", potencia_nominal_kw=300, orden=2,
-              marca="Huawei", tipo="central")
+    _inversor(db, proy, nombre="Inversor 2", potencia_nominal_kw=300, orden=2)
     _inversor(db, proy, nombre="Inversor 1", potencia_nominal_kw=300, orden=1)
     _inversor(db, proy, nombre="Retirado", potencia_nominal_kw=50, orden=3,
               activo=False)
@@ -900,7 +899,6 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     # inversor retirado no está en la planta y sumaría potencia que no existe.
     assert [i["nombre"] for i in t["inversores"]["equipos"]] == [
         "Inversor 1", "Inversor 2"]
-    assert t["inversores"]["equipos"][1]["tipo"] == "central"
     assert t["equipos_marcas"]["transformador"] == "Siemens"
 
 

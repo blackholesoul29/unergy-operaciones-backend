@@ -1,7 +1,8 @@
 import enum
 from datetime import datetime, date
 from sqlalchemy import (BigInteger, String, Numeric, Boolean, Date,
-                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, CheckConstraint)
+                        DateTime, Integer, ForeignKey, Enum as SAEnum, Text, CheckConstraint,
+                        UniqueConstraint)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -49,14 +50,6 @@ class TipoProyectoEnum(str, enum.Enum):
     autoconsumo = "autoconsumo"
     gd = "gd"
     movilidad_electrica = "movilidad_electrica"
-    otro = "otro"
-
-
-class TipoInversorEnum(str, enum.Enum):
-    string = "string"
-    central = "central"
-    microinversor = "microinversor"
-    hibrido = "hibrido"
     otro = "otro"
 
 
@@ -307,15 +300,22 @@ class ProyectoInfoTecnica(Base):
 
 class ProyectoInversor(Base):
     __tablename__ = "proyecto_inversores"
+    __table_args__ = (
+        # `nombre` es el identificador real de cada inversor (con qué se
+        # reporta una falla) -- sin este constraint, una condicion de
+        # carrera en el extinto backfill_inversores_minigranjas() (dos
+        # llamadas cercanas veian "0 inversores" antes de que la primera
+        # confirmara) duplicaba el set completo de 5 en silencio. Confirmado
+        # en produccion 2026-08-27: 6 proyectos con hasta 3 copias identicas
+        # (MGS 0032 El Paso Norte, 15 filas en vez de 5), ya limpiados; todo
+        # el mecanismo de backfill/seed automatico se eliminó ese mismo día.
+        UniqueConstraint("proyecto_id", "nombre", name="uq_proyecto_inversor_nombre"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     nombre: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    marca: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modelo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     potencia_nominal_kw: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
-    numero_serie: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    tipo: Mapped[str | None] = mapped_column(SAEnum(TipoInversorEnum, name="tipo_inversor_enum"), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

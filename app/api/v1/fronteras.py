@@ -208,6 +208,13 @@ def list_fronteras(
     proyecto_id: int | None = Query(None),
     tipo_frontera: str | None = Query(None, description="Filter by tipo_frontera"),
     estado: str | None = Query(None, description="Filter by estado (activa, en_registro, cancelada, en_falla)"),
+    incluir_clientes_cgm: bool = Query(
+        False,
+        description="Trae clientes_cgm por fila (2 queries extra por proyecto distinto + 1 por "
+        "cliente distinto) -- solo lo usan las vistas de Reporte CGM. Default False: auditoría "
+        "2026-08-26 encontró que el catálogo de Fronteras y otras 5 vistas pagaban ~216 queries "
+        "extra en cada GET plano sin leer nunca este campo.",
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -226,7 +233,10 @@ def list_fronteras(
         q = q.filter(Frontera.estado == estado)
     fronteras = q.order_by(Frontera.codigo_frontera).offset(skip).limit(limit).all()
     generaciones = _ultimas_generaciones(db, [f.id for f in fronteras])
-    clientes_cgm = _clientes_cgm_por_proyecto(db, [f.proyecto_id for f in fronteras])
+    clientes_cgm = (
+        _clientes_cgm_por_proyecto(db, [f.proyecto_id for f in fronteras])
+        if incluir_clientes_cgm else {}
+    )
     return [
         _to_out(f, db, generaciones.get(f.id), clientes_cgm.get(f.proyecto_id, []))
         for f in fronteras

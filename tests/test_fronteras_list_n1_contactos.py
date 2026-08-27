@@ -72,7 +72,7 @@ def test_fronteras_del_mismo_proyecto_no_repiten_la_consulta_de_contactos(db):
 
     resultado, con_5_fronteras = _contar_queries(
         db, lambda: api.list_fronteras(
-            proyecto_id=None, tipo_frontera=None, estado=None,
+            proyecto_id=None, tipo_frontera=None, estado=None, incluir_clientes_cgm=True,
             skip=0, limit=100, db=db, _=ADMIN,
         ),
     )
@@ -93,7 +93,7 @@ def test_fronteras_del_mismo_proyecto_no_repiten_la_consulta_de_contactos(db):
 
     resultado_10, con_10_fronteras = _contar_queries(
         db, lambda: api.list_fronteras(
-            proyecto_id=None, tipo_frontera=None, estado=None,
+            proyecto_id=None, tipo_frontera=None, estado=None, incluir_clientes_cgm=True,
             skip=0, limit=100, db=db, _=ADMIN,
         ),
     )
@@ -103,3 +103,39 @@ def test_fronteras_del_mismo_proyecto_no_repiten_la_consulta_de_contactos(db):
         f"{con_5_fronteras} consultas con 5 fronteras y {con_10_fronteras} con 10 "
         f"(mismo proyecto en ambos casos): hay N+1 por fila en vez de por proyecto"
     )
+
+
+def test_sin_incluir_clientes_cgm_no_paga_ninguna_consulta_extra(db):
+    """Auditoría de eficiencia 2026-08-26: clientes_cgm solo lo leen 3 vistas
+    de Reporte CGM -- el catálogo de Fronteras y otras 5 vistas llamaban a
+    GET /fronteras sin usarlo nunca, pagando igual ~2 queries por proyecto +
+    1 por cliente distinto. Ahora es opt-in (incluir_clientes_cgm=True);
+    sin el flag, clientes_cgm queda en [] sin ninguna consulta extra."""
+    cli = Cliente(id=1, razon_social_nombre="INVERSIONES TEST S.A.S.")
+    db.add(cli)
+    proy = Proyecto(id=1, nombre_comercial="Planta Compartida")
+    db.add(proy)
+    db.add(ProyectoInversionista(id=1, proyecto_id=1, cliente_id=1, porcentaje_participacion=100))
+    db.add(Contacto(id=1, cliente_id=1, email="cgm@test.com", tipo="cgm"))
+    db.add(Frontera(
+        id=1, proyecto_id=1, nombre_frontera="Frontera 0",
+        codigo_frontera="frt00000", tipo_frontera="generacion", estado="activa",
+    ))
+    db.commit()
+
+    resultado, con_flag = _contar_queries(
+        db, lambda: api.list_fronteras(
+            proyecto_id=None, tipo_frontera=None, estado=None, incluir_clientes_cgm=True,
+            skip=0, limit=100, db=db, _=ADMIN,
+        ),
+    )
+    resultado_sin, sin_flag = _contar_queries(
+        db, lambda: api.list_fronteras(
+            proyecto_id=None, tipo_frontera=None, estado=None, incluir_clientes_cgm=False,
+            skip=0, limit=100, db=db, _=ADMIN,
+        ),
+    )
+
+    assert resultado[0].clientes_cgm == [{"id": 1, "nombre": "INVERSIONES TEST S.A.S.", "correos": ["cgm@test.com"]}]
+    assert resultado_sin[0].clientes_cgm == []
+    assert sin_flag < con_flag, "sin el flag debería pagar menos queries que con él"

@@ -41,6 +41,45 @@ def disponible_desde_derivado(fecha_documento: datetime.date,
     )
 
 
+# Las columnas de `uq_xm_medida_natural`, en orden.
+CLAVE_NATURAL = ("tipo", "fecha_documento", "hora", "entidad", "concepto", "version")
+
+
+def agregar_por_clave_natural(filas: list[dict]) -> tuple[list[dict], int]:
+    """Colapsa las filas que comparten la clave natural, sumando el valor.
+
+    Hace falta porque **BalCttos trae una línea por contrato**: en un día de enero-2025
+    `CONTRATO DE VENTA` aparece 8 veces y en julio-2026, 50. Como el parser identifica
+    la serie por `CONCEPTO` y descarta `CÓDIGO CONTRATO`, esas líneas comparten la clave
+    natural y el INSERT choca contra `uq_xm_medida_natural`.
+
+    Sumar es lo correcto y no pierde información:
+
+    - Los tres conceptos que usa la réplica (`neto de compras en bolsa`,
+      `neto de ventas en bolsa`, `pbna`) aparecen **una sola vez** por día, así que la
+      agregación ni los toca.
+    - El único que se repite es `contrato de venta`, y su total es justamente lo que se
+      concilia contra `dspcttos`.
+    - El detalle por contrato sigue disponible en `dspcttos`, donde `concepto` ES el
+      código de contrato y por lo tanto no colisiona.
+
+    Devuelve `(filas, colapsadas)`. El conteo se devuelve para poder reportarlo: agregar
+    en silencio sería otra transformación invisible, del mismo tipo que este proyecto ya
+    viene atrapando.
+    """
+    acum: dict[tuple, dict] = {}
+    colapsadas = 0
+    for f in filas:
+        k = tuple(f.get(c) for c in CLAVE_NATURAL)
+        previo = acum.get(k)
+        if previo is None:
+            acum[k] = dict(f)
+        else:
+            previo["valor"] = float(previo["valor"]) + float(f["valor"])
+            colapsadas += 1
+    return list(acum.values()), colapsadas
+
+
 def filas_a_medidas(filas: list[dict], *, archivo_id: int) -> list[dict]:
     """Anexa `archivo_id` a las filas que devolvió un parser, listas para `xm_medida`."""
     return [dict(f, archivo_id=archivo_id) for f in filas]

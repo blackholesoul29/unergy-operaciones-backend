@@ -121,7 +121,7 @@ hace testeables sin base, que es como está el resto del repo.
 Es el corazón del sistema y no necesita base de datos: recibe series horarias y devuelve
 pesos.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```python
 """La réplica de Exposición Energía en Bolsa, como aritmética pura.
@@ -198,12 +198,12 @@ def test_precio_implicito_sin_energia_es_none():
     assert precio_implicito(energia=[0.0] * 24, precio=[100.0] * 24) is None
 ```
 
-- [ ] **Step 2: Correr y verificar que falla**
+- [x] **Step 2: Correr y verificar que falla**
 
 Run: `python -m pytest tests/test_gar_modelo_replica.py -q`
 Expected: FAIL con `ModuleNotFoundError` sobre `replica`
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 ```python
 """Réplica determinística de Exposición Energía en Bolsa.
@@ -263,12 +263,12 @@ def precio_implicito(*, energia: list[float], precio: list[float]) -> float | No
     return sum(energia[i] * precio[i] for i in range(len(energia))) / total
 ```
 
-- [ ] **Step 4: Correr y verificar que pasa**
+- [x] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_replica.py -q`
 Expected: `8 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/garantias_modelo/replica.py tests/test_gar_modelo_replica.py
@@ -286,7 +286,7 @@ git commit -m "feat(garantias): la replica de exposicion como funcion pura"
 Toma los archivos ya parseados y los persiste. **Acá se suministra `disponible_desde`**,
 que el plan 2 se niega a inventar.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```python
 """Carga de insumos FTP: idempotencia y la regla de disponible_desde."""
@@ -338,12 +338,12 @@ def test_filas_a_medidas_vacio():
     assert filas_a_medidas([], archivo_id=1) == []
 ```
 
-- [ ] **Step 2: Correr y verificar que falla**
+- [x] **Step 2: Correr y verificar que falla**
 
 Run: `python -m pytest tests/test_gar_modelo_cargador.py -q`
 Expected: FAIL con `ModuleNotFoundError` sobre `cargador`
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 ```python
 """Carga de insumos de XM a `xm_archivo` + `xm_medida`.
@@ -394,12 +394,12 @@ def filas_a_medidas(filas: list[dict], *, archivo_id: int) -> list[dict]:
     return [dict(f, archivo_id=archivo_id) for f in filas]
 ```
 
-- [ ] **Step 4: Correr y verificar que pasa**
+- [x] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_cargador.py -q`
 Expected: `6 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/garantias_modelo/cargador.py tests/test_gar_modelo_cargador.py
@@ -414,7 +414,7 @@ git commit -m "feat(garantias): cargador de insumos con la regla de disponible_d
 - Create: `app/services/garantias_modelo/backtest.py`
 - Test: `tests/test_gar_modelo_backtest.py`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```python
 """Backtest: error por componente, no solo del total."""
@@ -466,12 +466,12 @@ def test_resumen_error_cuenta_dentro_de_umbrales():
     assert r["dentro_5"] == 3
 ```
 
-- [ ] **Step 2: Correr y verificar que falla**
+- [x] **Step 2: Correr y verificar que falla**
 
 Run: `python -m pytest tests/test_gar_modelo_backtest.py -q`
 Expected: FAIL con `ModuleNotFoundError` sobre `backtest`
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 ```python
 """Métricas del backtest, puras.
@@ -515,12 +515,12 @@ def resumen_error(errores: list[float | None]) -> dict:
     }
 ```
 
-- [ ] **Step 4: Correr y verificar que pasa**
+- [x] **Step 4: Correr y verificar que pasa**
 
 Run: `python -m pytest tests/test_gar_modelo_backtest.py -q`
 Expected: `7 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/garantias_modelo/backtest.py tests/test_gar_modelo_backtest.py
@@ -538,7 +538,7 @@ Es el único módulo de este plan que toca la base. Su responsabilidad: para un
 `GarCalculo`, leer de `xm_medida` **solo lo disponible en su `fecha_calculo`**, armar las
 series horarias y llamar a `replica.exposicion_periodo`.
 
-- [ ] **Step 1: Implementar**
+- [x] **Step 1: Implementar**
 
 ```python
 """Motor de la réplica: lee la base con el filtro anti-leakage y calcula.
@@ -640,7 +640,7 @@ def exposicion_de_calculo(db: Session, calculo: GarCalculo) -> dict:
     }
 ```
 
-- [ ] **Step 2: Verificar que importa y que la app sigue arrancando**
+- [x] **Step 2: Verificar que importa y que la app sigue arrancando**
 
 Run:
 ```bash
@@ -649,12 +649,12 @@ python -c "import app.main; print('ok')"
 ```
 Expected: `ok` dos veces.
 
-- [ ] **Step 3: Correr la suite**
+- [x] **Step 3: Correr la suite**
 
 Run: `python -m pytest -q`
 Expected: sin regresión.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/services/garantias_modelo/motor.py
@@ -681,7 +681,7 @@ Dos notas del contrato que hay que respetar:
 - Mientras solo exista la réplica, cada fila va con `estado = "firme"`, `central = null`
   y `p90` = el número firme. El contrato ya lo contempla.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```python
 """Los endpoints del Modelo Predictivo respetan el contrato que el frontend consume."""
@@ -703,12 +703,12 @@ def test_las_rutas_son_get():
         assert "GET" in r.methods
 ```
 
-- [ ] **Step 2: Correr y verificar que falla**
+- [x] **Step 2: Correr y verificar que falla**
 
 Run: `python -m pytest tests/test_gar_modelo_endpoints.py -q`
 Expected: FAIL con `ModuleNotFoundError` sobre `garantias_modelo`
 
-- [ ] **Step 3: Implementar el router**
+- [x] **Step 3: Implementar el router**
 
 ```python
 """Modelo Predictivo de Garantías: el plan de la semana y el detalle de un vencimiento.
@@ -753,7 +753,7 @@ def get_detalle(
     return construir_detalle(db, id=id)
 ```
 
-- [ ] **Step 4: Registrar el router**
+- [x] **Step 4: Registrar el router**
 
 En `app/api/v1/router.py`, agregar `garantias_modelo` a la lista de imports de la línea 2
 (al final, después de `retos`), y al final del archivo:
@@ -762,13 +762,13 @@ En `app/api/v1/router.py`, agregar `garantias_modelo` a la lista de imports de l
 api_router.include_router(garantias_modelo.router)
 ```
 
-- [ ] **Step 5: Correr el test y la suite**
+- [x] **Step 5: Correr el test y la suite**
 
 Run: `python -m pytest tests/test_gar_modelo_endpoints.py -q` → `3 passed`
 Run: `python -m pytest -q` → sin regresión
 Run: `python -c "import app.main; print('ok')"` → `ok`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/api/v1/garantias_modelo.py app/api/v1/router.py tests/test_gar_modelo_endpoints.py
@@ -785,7 +785,7 @@ git commit -m "feat(garantias): endpoints del modelo predictivo"
 Construye exactamente la forma que el frontend espera, leyendo `GarCalculo`,
 `GarComponenteReal` y `GarComponentePred`.
 
-- [ ] **Step 1: Implementar**
+- [x] **Step 1: Implementar**
 
 ```python
 """Arma las respuestas de los endpoints, con la forma exacta del contrato del plan 1.
@@ -909,17 +909,17 @@ def construir_detalle(db: Session, *, id: str) -> dict:
     }
 ```
 
-- [ ] **Step 2: Verificar que importa**
+- [x] **Step 2: Verificar que importa**
 
 Run: `python -c "import app.main; print('ok')"`
 Expected: `ok`
 
-- [ ] **Step 3: Correr la suite**
+- [x] **Step 3: Correr la suite**
 
 Run: `python -m pytest -q`
 Expected: sin regresión.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/services/garantias_modelo/servicio.py
@@ -933,7 +933,7 @@ git commit -m "feat(garantias): servicio que arma el contrato del frontend"
 **Files:**
 - Create: `scripts/cargar_corpus_garantias.py`
 
-- [ ] **Step 1: Escribir el comando**
+- [x] **Step 1: Escribir el comando**
 
 Es un script, no un endpoint: la carga del histórico se corre a mano una vez.
 
@@ -1075,7 +1075,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Probar en seco contra los zips reales**
+- [x] **Step 2: Probar en seco contra los zips reales**
 
 **Cuál zip tiene los `.tx2` de cada tipo** (verificado el 2026-08-27; no es obvio y los
 nombres engañan — hay pares donde el zip "limpio" solo trae `.txf`):
@@ -1105,7 +1105,7 @@ Expected: ~538 archivos nuevos, ~180.000 medidas, cero rechazados.
 Si hay rechazados, **parar y reportar** con el motivo: significa que un archivo real no
 pasa `validar_estructura`, y eso hay que entenderlo antes de cargar nada.
 
-- [ ] **Step 2b: Verificar que el motor no devuelve cero**
+- [x] **Step 2b: Verificar que el motor no devuelve cero**
 
 El riesgo real del motor no es que falle, es que devuelva `0.0` en silencio porque un
 concepto o una entidad no coinciden. Después de la carga en vivo de trsd y BalCttos,
@@ -1132,12 +1132,12 @@ Referencia medida directamente de los archivos el 2026-08-27, sin pasar por la b
 la exposición del **2025-01-01 es -497.440,05 COP** (vendedor neto ese día). El motor
 tiene que reproducir ese número.
 
-- [ ] **Step 3: Correr la suite completa**
+- [x] **Step 3: Correr la suite completa**
 
 Run: `python -m pytest -q`
 Expected: sin regresión desde 2107 passed / 1 skipped.
 
-- [ ] **Step 4: Verificar sincronía y commitear**
+- [x] **Step 4: Verificar sincronía y commitear**
 
 ```bash
 git fetch origin && git rev-list --left-right --count master...origin/master
@@ -1167,3 +1167,88 @@ git commit -m "feat(garantias): comando de carga masiva del corpus"
 - **No implementa la frescura ni la descomposición del ancho.** El contrato las declara
   y el servicio devuelve `null`; el frontend ya las maneja como opcionales.
 - **No activa el cron de FTP.** La carga es manual en este plan.
+
+
+---
+
+# Resultado de la ejecucion — 2026-08-27
+
+Las 7 tareas quedaron completas, en la rama `feat/garantias-modelo-replica`, seis
+commits. Suite: **2158 passed, 1 skipped** (linea base 2107). Lo que sigue es lo que el
+plan no habia previsto.
+
+## Lo que se desvio del plan
+
+**Se invirtio el orden de las tareas 5 y 6.** El router de la tarea 5 importa el
+servicio de la tarea 6, asi que en el orden escrito no compilaba. Se implemento primero
+el servicio.
+
+**El generador de claves del backtest tenia un bug.** El plan usaba
+`UMBRALES = (0.01, 1.0, 5.0)` y armaba la clave con `str(u)`: `1.0` produce
+`dentro_1_0`, no `dentro_1`. Se cambio a `(0.01, 1, 5)`.
+
+**Se le agregaron tests al motor, que el plan no le habia puesto.** Es la pieza que
+puede devolver `0.0` en silencio si un concepto o una entidad no coinciden. Siete tests
+sobre SQLite: el par disponible/no-disponible con los mismos datos prueba que el corte
+es lo que decide, mas `esquema_ok=False`, otro agente, concepto mal escrito y periodo
+incompleto.
+
+**`--dry-run` ya no abre sesion.** Como estaba escrito exigia que las tablas existieran,
+justo lo que uno no tiene antes de la primera carga. Validar el corpus no necesita base.
+
+## El defecto de diseno que solo aparecio al insertar
+
+Los tests unitarios del plan 2 parsean pero **nunca insertan**, asi que no podian verlo:
+
+> **BalCttos trae una linea por contrato** y `_parsear_ancho` identifica la serie solo
+> por `CONCEPTO`, descartando `CODIGO CONTRATO`. En enero-2025 `CONTRATO DE VENTA`
+> aparece 8 veces; en julio-2026, 50. Todas comparten `uq_xm_medida_natural`.
+
+Se resolvio en el cargador con `agregar_por_clave_natural()`, que suma y reporta cuantas
+filas colapso. No pierde nada: los tres conceptos de la replica aparecen una sola vez
+por dia, el unico que se repite es `contrato de venta` —cuyo total es lo que se concilia
+contra `dspcttos`— y el detalle por contrato vive en `dspcttos`, donde `concepto` ES el
+codigo de contrato.
+
+## Seis archivos corruptos de XM, confirmados
+
+El validador rechazo, en **2026-04-26, 27 y 28**, tanto `BalCttos` como `dspcttos`:
+cabecera con **cada nombre de columna duplicado** (62 en vez de 31; 108 en vez de 54)
+mientras las filas de datos traen el ancho correcto. Sin el validador, el bloque horario
+se habria leido con 7 posiciones de desfase: numeros plausibles y falsos.
+
+**No hay version corregida.** Se reviso el `.txf` final de los seis y trae la misma
+cabecera doblada: XM nunca lo arreglo.
+
+**El contenido es recuperable** —solo la linea de cabecera esta doblada— pero reparar
+datos malformados del proveedor es una decision de politica, no un fix mecanico, y se
+dejo fuera a proposito. Hoy el hueco es visible: `exposicion_de_calculo` devuelve
+`dias_usados`, `dias_esperados` y `completo`, y la semana del 22 al 28 de abril de 2026
+sale **4/7 con `completo=False`**.
+
+**Cuidado con esa semana:** da +18.479.576,62 COP (comprador neto, o sea deuda) sobre
+solo 4 de 7 dias, asi que **subestima** un pasivo real. No usarla como esta.
+
+## Verificacion end-to-end contra la base local
+
+`localhost:5432/operaciones`, no produccion.
+
+| Que | Resultado |
+|---|---|
+| trsd | 539 archivos, 423.648 medidas, 0 rechazados |
+| balcttos | 535 archivos, 99.960 medidas, 3 rechazados (los corruptos) |
+| arrpas (en seco) | 537 archivos, 2.077.504 medidas, 0 rechazados |
+| dspcttos 2025 / 2026 (en seco) | 340 y 195 archivos, 3 rechazados en 2026 |
+| Replica desde la base | **-497.440,05 COP** el 2025-01-01, exacto |
+| Anti-leakage en el borde | 0 dias en D+6, 1 dia en D+7 — sin off-by-one |
+| Semanas completas | 7/7 en ene-2025 y jul-2026 |
+
+## Lo que sigue (plan 4)
+
+- El estimador del dia 14 y el intervalo. Hoy toda fila sale `estado=firme`,
+  `central=null`.
+- Cargar los targets: los Excel de garantia publicados, que son los que llenan
+  `gar_calculo` y `gar_componente_real`. **Sin eso la tab sigue vacia en produccion**:
+  este plan dejo el motor y los endpoints, pero nadie escribe todavia `gar_calculo`.
+- Cargar `.tx1` con su propio lag medido, para estimar antes del dia 14.
+- Decidir si se reparan los seis archivos de abril-2026.

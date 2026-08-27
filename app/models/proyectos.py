@@ -346,7 +346,6 @@ class ProyectoInversionista(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
-    contrato_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     porcentaje_participacion: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     es_patrimonio_autonomo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)

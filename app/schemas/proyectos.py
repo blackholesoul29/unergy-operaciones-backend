@@ -10,7 +10,6 @@ class ProyectoInversionistaCreate(BaseModel):
     cliente_id: int
     porcentaje_participacion: Optional[float] = None
     es_patrimonio_autonomo: bool = False
-    contrato_ref: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
@@ -25,7 +24,6 @@ class ProyectoInversionistaCreate(BaseModel):
 class ProyectoInversionistaUpdate(BaseModel):
     porcentaje_participacion: Optional[float] = None
     es_patrimonio_autonomo: Optional[bool] = None
-    contrato_ref: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 

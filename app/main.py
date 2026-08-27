@@ -2366,6 +2366,36 @@ def _scheduled_bolsa_ingest():
         print(f"[bolsa_ingest] Failed: {e}")
 
 
+def _scheduled_gen_promedio_recalcular():
+    """Recalcula gen_mensual_promedio_mwh (ventana móvil de 30 días) para
+    todos los proyectos en operación. Antes solo se recalculaba por llamada
+    manual al endpoint (POST /proyectos/gen-promedio/recalcular) -- sin
+    scheduler ni botón en el frontend que lo disparara, quedaba desactualizado
+    en silencio (17 días sin tocar, confirmado 2026-08-27) mientras
+    comercial.py/vista_contratos.py lo siguen tratando como dato confiable
+    para las vistas de contrato. Respeta los valores cargados a mano
+    (force=False, ver gen_promedio.decidir) -- mismo criterio que
+    comercializacion_backfill, con quien comparte franja horaria."""
+    import asyncio
+    try:
+        db = SessionLocal()
+        try:
+            from app.services import gen_promedio
+            res = asyncio.run(gen_promedio.recalcular(db, dry_run=False, force=False))
+            if "error" in res:
+                print(f"[gen_promedio_recalcular] Failed: {res['error']}")
+            else:
+                print(f"[gen_promedio_recalcular] OK — {res['n_actualizados']} actualizados, "
+                      f"{res['n_sin_datos']} sin datos, {res['n_saltados']} saltados, "
+                      f"{res['n_fallidos']} fallidos")
+        except Exception as e:
+            print(f"[gen_promedio_recalcular] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[gen_promedio_recalcular] Failed to get DB session: {e}")
+
+
 def _scheduled_comercializacion_backfill():
     """Rellena la fecha de inicio de comercialización (primer día con generación
     real) para proyectos que aún no la tienen. Corre diariamente; idempotente y
@@ -3447,6 +3477,16 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="comercializacion_backfill",
                 name="Backfill fecha inicio comercializacion",
+            )
+
+            # 10 min antes de comercializacion_backfill -- ambos leen la misma
+            # API de generación de Unergy; separarlos evita que compitan por
+            # el mismo rate limit al mismo segundo exacto.
+            _mgs_scheduler.add_job(
+                _scheduled_gen_promedio_recalcular,
+                CronTrigger(hour=3, minute=20, timezone=settings.TIMEZONE),
+                id="gen_promedio_recalcular",
+                name="Recalcular generación mensual promedio",
             )
 
             _mgs_scheduler.add_job(

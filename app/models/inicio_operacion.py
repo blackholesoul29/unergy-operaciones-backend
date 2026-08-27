@@ -9,9 +9,11 @@ from app.models.base import Base
 class ProyectoInicioOperacion(Base):
     """Ficha de inicio de operación de un proyecto.
 
-    Una fila por proyecto. Las secciones flexibles (checklist, pruebas,
-    documentos, pendientes) se guardan como JSONB; el catálogo de ítems lo
-    define el frontend, el backend solo persiste el estado.
+    La vista que la editaba se retiró del frontend (2026-08-21); se conserva
+    como fuente de lectura de app/api/v1/informe_om.py (fecha_energizacion,
+    fecha_inicio_operacion, empresa_contratista, pendientes, y checklist para
+    derivar 4 semáforos). `pruebas`/`documentos` se eliminaron 2026-08-27 por
+    no tener ningún lector.
     """
     __tablename__ = "proyecto_inicio_operacion"
 
@@ -26,10 +28,6 @@ class ProyectoInicioOperacion(Base):
 
     # Sección 1 — checklist de sistemas: { item_key: 'aprobado'|'rechazado'|'na' }
     checklist = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
-    # Sección 3 — pruebas: { prueba_key: { estado, observacion } }
-    pruebas = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
-    # Sección 4 — documentación: { doc_key: { estado, link, nombre } }
-    documentos = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     # Sección 5 — pendientes: [ { descripcion, responsable, fecha_compromiso, clasificacion, estado, observaciones } ]
     pendientes = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 

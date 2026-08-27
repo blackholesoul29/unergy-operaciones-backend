@@ -34,9 +34,30 @@ migraciones se escriben con los helpers de `alembic_idempotencia.py`.
 
 **Donde va cada cambio.** Esquema (CREATE/ALTER/indice/constraint) = revision de Alembic.
 Datos (backfill, migracion de filas) = tarea `*_seed` idempotente en `_deferred_init`, nunca
-en Alembic: retrasaria el arranque y su fallo es silencioso. Tabla nueva = modelo +
-`create_all`; **no** agregues su `CREATE TABLE` a `_PENDING_DDLS` (habia 44 duplicadas asi y
-15 declaraban menos columnas que su modelo).
+en Alembic: retrasaria el arranque y su fallo es silencioso.
+
+**Tabla nueva = revision de Alembic.** No `_PENDING_DDLS`, y no alcanza con declarar el
+modelo y dejarselo a `create_all()`. Las tres razones, en orden de cuanto duelen:
+
+1. `_PENDING_DDLS` no tiene control de version: corre entero en cada arranque y no sabe
+   que ya se aplico. Asi se llego a **44 `CREATE TABLE` duplicados**, 15 de ellos
+   declarando **menos columnas** que su modelo — no rompia solo porque `create_all()`
+   ganaba la carrera.
+2. `create_all()` solo sabe crear lo que el modelo sabe expresar. Una `EXCLUDE`
+   constraint, un indice parcial, una extension, un trigger o una columna generada no
+   viajan por ahi. Toda la Fase 2 del refactor depende de eso.
+3. Una revision deja el cambio con fecha, autor, motivo y `downgrade`. Una linea suelta
+   en una lista de 478 sentencias, no.
+
+⚠️ **Si ademas declaras el modelo** —que es lo normal, porque el ORM lo necesita—
+`create_all()` va a crear la tabla **antes** de que corra tu revision. No es un error, pero
+obliga a que la revision sea idempotente: escribila con los helpers de
+`alembic_idempotencia.py` y no asumas que la tabla no existe.
+
+⚠️ **Y `_PENDING_DDLS` no es la via rapida para cargar datos.** Se limpio en la Fase 0 (de
+551 sentencias a 478, 47 `UPDATE`/`INSERT` movidos a tareas `*_seed`) y el 2026-08-25 ya
+habia sentencias de datos nuevas ahi. Cada vez que se usa asi, la limpieza se deshace y el
+arranque se alarga para todos.
 
 **Producción no se escribe desde local.** El `.env` local no apunta a producción. La
 única vía es una tarea `*_seed` en `_deferred_init`, que corre dentro del contenedor.

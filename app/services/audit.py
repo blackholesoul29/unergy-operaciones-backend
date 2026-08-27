@@ -2,9 +2,10 @@
 Audit middleware — auto-logs INSERT/UPDATE/DELETE on critical tables.
 
 Hooks into SQLAlchemy session events. Writes to audit_log table.
-Usage: call `init_audit(engine)` once at startup.
-Call `set_audit_user(db, user_id, user_name)` in endpoints that
-need user attribution (via get_current_user dependency).
+Usage: call `init_audit()` once at startup.
+Call `set_audit_user(user_id, user_name, db)` desde la dependencia de auth
+para que la escritura quede atribuida. **La sesion no es opcional en el flujo
+de la API**: ver la docstring de `set_audit_user`.
 """
 from __future__ import annotations
 
@@ -30,13 +31,40 @@ _AUDITED_TABLES: frozenset[str] = frozenset({
     "reporte_energia_consumo",
 })
 
+# Solo sirve dentro de un mismo contexto de ejecucion: los seeds de arranque y
+# el scheduler, que escriben en el hilo donde se llamo a set_audit_user. Para la
+# API no alcanza -- ver `set_audit_user`.
 _audit_user: ContextVar[tuple[int | None, str | None]] = ContextVar(
     "_audit_user", default=(None, None)
 )
 
 
-def set_audit_user(user_id: int | None, user_name: str | None) -> None:
-    _audit_user.set((user_id, user_name))
+def set_audit_user(
+    user_id: int | None,
+    user_name: str | None,
+    session: Session | None = None,
+) -> None:
+    """Registra quien escribe, para que `audit_log` lo pueda atribuir.
+
+    `session` es lo que hace que funcione desde la API, y no es un detalle:
+    FastAPI ejecuta las dependencias `def` y los endpoints `def` en llamadas
+    distintas a `run_in_threadpool`, y cada una recibe una **copia** del
+    contexto. Un ContextVar escrito en la dependencia muere con esa copia y el
+    endpoint lee el default -- que es como `audit_log` acumulo tres meses de
+    filas sin autor en las 10 tablas auditadas.
+
+    La sesion, en cambio, es el mismo objeto en las dos: FastAPI cachea
+    `Depends(get_db)` por peticion, asi que la dependencia y el endpoint
+    reciben la misma instancia, y el autor viaja con ella hasta el flush.
+
+    Sin `session` cae al ContextVar, que sigue siendo lo correcto para los
+    seeds de arranque y el scheduler: corren en su propio hilo y el flush pasa
+    por el mismo contexto donde se seteo.
+    """
+    if session is not None:
+        session.info["audit_user"] = (user_id, user_name)
+    else:
+        _audit_user.set((user_id, user_name))
 
 
 def _table_name(obj: Any) -> str | None:
@@ -112,7 +140,8 @@ def _queue_audit(session: Session, action: str, obj: Any) -> None:
     if not hasattr(session, "_audit_queue"):
         session._audit_queue = []
 
-    user_id, user_name = _audit_user.get()
+    # La sesion primero: es la unica via que sobrevive al threadpool de FastAPI.
+    user_id, user_name = session.info.get("audit_user") or _audit_user.get()
 
     session._audit_queue.append({
         "tabla": table,

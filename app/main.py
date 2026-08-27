@@ -3362,11 +3362,16 @@ def _run_init_audit() -> None:
     en audit_log se distingan de una escritura anonima por API. El ContextVar es
     por contexto de ejecucion y esto corre en el hilo de _deferred_init, asi que
     no se filtra a las peticiones.
+
+    El rotulo lo pone _deferred_init tarea por tarea (`sistema (startup: X)`), no
+    esta funcion: con un solo rotulo para las 22 tareas, un pico de ruido en
+    audit_log no dice cual lo produjo. El 2026-08-27 aparecieron 50.860 filas
+    marcadas "sistema (seed de arranque)" en una sola tabla y en un solo dia, y
+    no hubo forma de atribuirlas sin ir tarea por tarea a mano.
     """
-    from app.services.audit import init_audit, set_audit_user
+    from app.services.audit import init_audit
 
     init_audit()
-    set_audit_user(None, "sistema (seed de arranque)")
 
 
 def _deferred_init():
@@ -3403,10 +3408,26 @@ def _deferred_init():
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
     ]:
         try:
+            # Cada tarea firma sus propias escrituras. init_audit ya corrio como
+            # una tarea mas, asi que a partir de ahi el rotulo es efectivo; las
+            # dos que van antes escriben DDL, no ORM.
+            try:
+                from app.services.audit import set_audit_user
+                set_audit_user(None, f"sistema (startup: {label})")
+            except Exception:
+                pass
             fn()
             print(f"[startup] {label} OK ({_t.time() - _t0:.1f}s)")
         except Exception as e:
             print(f"[startup] {label} FAILED: {e}")
+
+    # Se acabaron los seeds: lo que este hilo haga de aca en adelante no lleva
+    # el rotulo de arranque.
+    try:
+        from app.services.audit import set_audit_user
+        set_audit_user(None, None)
+    except Exception:
+        pass
 
     if settings.MGS_ENABLED:
         try:

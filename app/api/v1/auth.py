@@ -39,7 +39,7 @@ def get_current_user(
         if not user or not user.activo:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no encontrado")
         from app.services.audit import set_audit_user
-        set_audit_user(user.id, user.nombre)
+        set_audit_user(user.id, user.nombre, db)
         return user
 
     if not token:
@@ -51,7 +51,7 @@ def get_current_user(
     if not user or not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no encontrado")
     from app.services.audit import set_audit_user
-    set_audit_user(user.id, user.nombre)
+    set_audit_user(user.id, user.nombre, db)
     return user
 
 

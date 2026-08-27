@@ -828,8 +828,7 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
     una integración, así que van los tres con el sistema en la clave."""
     porta = Portafolio(nombre="Portafolio Caribe")
     db.add(porta); db.flush()
-    proy = _proyecto(db, nombre_comercial="GD Catedral", nombre_bitacora="Catedral OP",
-                     nombre_clientes="Catedral", topic_slug="gd-catedral",
+    proy = _proyecto(db, nombre_comercial="GD Catedral", topic_slug="gd-catedral",
                      sub_project="catedral", codigo_cnd="CND-0912",
                      codigo_tsf="TSF-77", project_id_solenium="SOL-45",
                      sunfactory_project_id=310, origina_code="MF-CAT",
@@ -840,8 +839,6 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
     ident = _detalles(db)["identificacion"]
 
     assert ident["nombre_comercial"] == "GD Catedral"
-    assert ident["nombre_bitacora"] == "Catedral OP"
-    assert ident["nombre_clientes"] == "Catedral"
     assert ident["sub_project"] == "catedral"
     assert ident["project_id_solenium"] == "SOL-45"
     assert ident["sunfactory_project_id"] == 310

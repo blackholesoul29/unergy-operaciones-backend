@@ -473,32 +473,18 @@ def _id_por_nombre(db: Session, nombre: str) -> int:
     encadenando llamadas, y devolverle el proyecto equivocado en silencio es
     peor que devolverle un error. (El matcher permisivo `mejor_candidato` existe
     y se usa para avisar de duplicados al crear, pero acá no.)
-
-    Dos etapas: primero `nombre_comercial`; solo si ahí no hubo nada, se prueba
-    `nombre_bitacora`/`nombre_clientes`. Un match por nombre comercial siempre
-    gana y la segunda etapa no le suma candidatos.
     """
     clave = _clave_nombre(nombre)
     if not clave:
         raise HTTPException(422, "El parámetro 'nombre' no puede estar vacío.")
 
     filas = (
-        db.query(
-            Proyecto.id,
-            Proyecto.nombre_comercial,
-            Proyecto.nombre_bitacora,
-            Proyecto.nombre_clientes,
-        )
+        db.query(Proyecto.id, Proyecto.nombre_comercial)
         .filter(Proyecto.deleted_at.is_(None))
         .all()
     )
 
     coincidencias = [f for f in filas if _clave_nombre(f.nombre_comercial) == clave]
-    if not coincidencias:
-        coincidencias = [
-            f for f in filas
-            if clave in (_clave_nombre(f.nombre_bitacora), _clave_nombre(f.nombre_clientes))
-        ]
 
     if not coincidencias:
         raise HTTPException(

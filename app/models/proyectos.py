@@ -91,8 +91,6 @@ class Proyecto(Base):
     portafolio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("portafolios.id"), nullable=True, index=True)
 
     nombre_comercial: Mapped[str] = mapped_column(String(255), nullable=False)
-    nombre_bitacora: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    nombre_clientes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     topic_slug: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     sub_project: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     # Tópico de la planta en la API de LIQUIDACIONES, cuando difiere del que usa

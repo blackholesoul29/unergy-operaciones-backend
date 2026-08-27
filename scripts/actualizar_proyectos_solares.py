@@ -59,10 +59,6 @@ def find_proj(db, keyword: str):
     r = db.query(Proyecto).filter(Proyecto.nombre_comercial.ilike(f"%{kw}%")).first()
     if r:
         return r
-    # 3. ilike nombre_bitacora
-    r = db.query(Proyecto).filter(Proyecto.nombre_bitacora.ilike(f"%{kw}%")).first()
-    if r:
-        return r
     return None
 
 

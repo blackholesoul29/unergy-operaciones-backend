@@ -236,8 +236,6 @@ class ProyectoPPAResumenOut(BaseModel):
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
     portafolio_id: Optional[int] = None
-    nombre_bitacora: Optional[str] = None
-    nombre_clientes: Optional[str] = None
     topic_slug: Optional[str] = None
     sub_project: Optional[str] = None
     # Tópico en la API de Liquidaciones cuando difiere del de generación.
@@ -318,8 +316,6 @@ class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
     portafolio_id: Optional[int]
-    nombre_bitacora: Optional[str]
-    nombre_clientes: Optional[str]
     topic_slug: Optional[str]
     sub_project: Optional[str]
     topico_liquidaciones: Optional[str] = None

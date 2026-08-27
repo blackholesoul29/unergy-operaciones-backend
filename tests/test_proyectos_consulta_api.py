@@ -207,36 +207,6 @@ def test_buscar_con_nombre_ambiguo_da_409_con_candidatos(db):
     assert {c["id"] for c in exc.value.detail["candidatos"]} == {p1.id, p2.id}
 
 
-def test_buscar_cae_a_nombre_bitacora_cuando_no_hay_match_comercial(db):
-    p = _proyecto(db, nombre_comercial="Minigranja 0031 - El Carmen",
-                  nombre_bitacora="Carmen de Bolívar")
-
-    out = proyectos_api.buscar_proyecto_por_nombre(nombre="carmen de bolivar", db=db, _=None)
-
-    assert out.id == p.id
-
-
-def test_buscar_cae_a_nombre_clientes_cuando_no_hay_match_comercial(db):
-    p = _proyecto(db, nombre_comercial="Minigranja 0044 - Sincelejo",
-                  nombre_clientes="Planta Sincelejo Norte")
-
-    out = proyectos_api.buscar_proyecto_por_nombre(
-        nombre="planta sincelejo norte", db=db, _=None)
-
-    assert out.id == p.id
-
-
-def test_buscar_prefiere_nombre_comercial_sobre_bitacora(db):
-    # Etapa 1 (nombre_comercial) gana: la etapa 2 no corre ni suma candidatos,
-    # asi que esto NO es ambiguo.
-    ganador = _proyecto(db, nombre_comercial="Marimonda")
-    _proyecto(db, nombre_comercial="Otro", nombre_bitacora="Marimonda")
-
-    out = proyectos_api.buscar_proyecto_por_nombre(nombre="Marimonda", db=db, _=None)
-
-    assert out.id == ganador.id
-
-
 def test_buscar_ignora_proyectos_borrados(db):
     _proyecto(db, nombre_comercial="Marimonda", deleted_at=datetime.now(timezone.utc))
 

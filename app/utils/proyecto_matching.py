@@ -3,8 +3,7 @@ Matching entre nombres de proyectos externos (Excel / fallas-unergy / webhooks)
 y los registros en la tabla proyectos.
 
 Estrategia por orden de prioridad:
-  1. Exacto (case-insensitive, sin tildes) sobre nombre_comercial, nombre_bitacora
-     o nombre_clientes
+  1. Exacto (case-insensitive, sin tildes) sobre nombre_comercial
   2. app.utils.nombre_matching.mejor_candidato() -- ver ese módulo para el detalle
      del algoritmo (compartido con scripts/cargar_fronteras_gescon.py).
 """
@@ -14,12 +13,7 @@ from app.utils.nombre_matching import normalizar, mejor_candidato
 
 
 def _all_names(proyecto: Proyecto) -> list[str]:
-    names = [proyecto.nombre_comercial or ""]
-    if proyecto.nombre_bitacora:
-        names.append(proyecto.nombre_bitacora)
-    if proyecto.nombre_clientes:
-        names.append(proyecto.nombre_clientes)
-    return [n for n in names if n]
+    return [proyecto.nombre_comercial] if proyecto.nombre_comercial else []
 
 
 def find_proyecto_by_name(db: Session, nombre_externo: str) -> Proyecto | None:

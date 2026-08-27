@@ -32,7 +32,6 @@ class InformeOMProyecto(BaseModel):
 
     id: int
     nombre_comercial: str
-    nombre_clientes: Optional[str] = None
     sub_project: Optional[str] = None
     municipio: Optional[str] = None
     departamento: Optional[str] = None

@@ -58,10 +58,6 @@ class UsuarioResumen(BaseModel):
 class ProyectoResumen(BaseModel):
     id: int
     nombre_comercial: str
-    # Alias adicionales para cruzar la falla con proyectos en informes/monitoreo
-    # (el nombre puede diferir entre sistemas). Ver InformesMensualesPanel.getFaultsForRange.
-    nombre_clientes: Optional[str] = None
-    nombre_bitacora: Optional[str] = None
     sub_project: Optional[str] = None
     model_config = {"from_attributes": True}
 

@@ -106,7 +106,7 @@ def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
             pass
 
     # 2/3. Matching por nombre
-    candidates = [p.nombre_comercial, p.nombre_bitacora]
+    candidates = [p.nombre_comercial]
     for name in candidates:
         norm = _normalize_name(name or "")
         if not norm:
@@ -624,8 +624,7 @@ def debug_matching(
         if sol_id is not None:
             matched.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "sol_id": sol_id})
         else:
-            unmatched_ours.append({"proyecto_id": p.id, "nombre": p.nombre_comercial,
-                                   "bitacora": p.nombre_bitacora})
+            unmatched_ours.append({"proyecto_id": p.id, "nombre": p.nombre_comercial})
 
     matched_sol_ids = {m["sol_id"] for m in matched}
     unmatched_solenium = [

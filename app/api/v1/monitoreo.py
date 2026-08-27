@@ -187,9 +187,6 @@ def _action_get_projects(db: Session) -> dict:
             {
                 "sub_project": p.sub_project,
                 "nombre_comercial": p.nombre_comercial,
-                "nombre_clientes": p.nombre_clientes or p.nombre_comercial,
-                "nombre_bitacora": p.nombre_bitacora or "",
-                "nombre_display": p.nombre_clientes or p.nombre_bitacora or p.nombre_comercial,
                 "municipio": p.municipio or "—",
                 "departamento": p.departamento or "—",
                 "potencia_instalada_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
@@ -232,7 +229,7 @@ def _action_get_all_contratos(db: Session) -> dict:
             continue
         contratos.append({
             "sub_project": slug,
-            "nombre_clientes": p.nombre_clientes or p.nombre_comercial,
+            "nombre_comercial": p.nombre_comercial,
             "disponibilidad_garantizada_pct": "97",
             "contratista": cs.prestador_nombre or "Unergy S.A.S.",
             "valor_estimado_ano1_cop": str(round(float(cs.tarifa_base) * 12)) if cs.tarifa_base else "0",
@@ -295,8 +292,6 @@ async def _solenium_inverters(proyecto: Proyecto) -> tuple[list, str | None]:
             sol_id = proyecto.project_id_solenium or ""
             if not sol_id:
                 candidates = [
-                    (proyecto.nombre_clientes or "").lower(),
-                    (proyecto.nombre_bitacora or "").lower(),
                     (proyecto.nombre_comercial or "").lower(),
                     (proyecto.sub_project or "").lower(),
                 ]
@@ -354,7 +349,7 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
         if cs:
             contrato = {
                 "sub_project": sub_project,
-                "nombre_clientes": proyecto.nombre_clientes or proyecto.nombre_comercial,
+                "nombre_comercial": proyecto.nombre_comercial,
                 "disponibilidad_garantizada_pct": "97",
                 "contratista": cs.prestador_nombre or "Unergy S.A.S.",
                 "valor_estimado_ano1_cop": str(round(float(cs.tarifa_base) * 12)) if cs.tarifa_base else "0",

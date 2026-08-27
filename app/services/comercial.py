@@ -495,7 +495,7 @@ def proponer_vinculos_proyecto(db, estados=ETAPAS_ENTREGABLES,
     ofertas = q.all()
 
     candidatos = [
-        (p, [n for n in (p.nombre_comercial, p.nombre_bitacora, p.nombre_clientes) if n])
+        (p, [p.nombre_comercial] if p.nombre_comercial else [])
         for p in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).all()
     ]
 
@@ -974,7 +974,7 @@ def _num(v):
 
 
 def _identificacion(proyecto) -> dict:
-    """Cómo se llama esta planta y con qué código se cruza en cada sistema.
+    """Con qué código se cruza esta planta en cada sistema.
 
     Van todos los identificadores juntos porque el error clásico de una
     integración es cruzar por el id equivocado: `sub_project` (API de generación
@@ -982,15 +982,9 @@ def _identificacion(proyecto) -> dict:
     `sunfactory_project_id` (el pipeline de obra) son tres espacios de ids
     distintos aunque los tres se lean como "el id de la planta". El nombre del
     sistema está en la clave a propósito.
-
-    Los tres nombres también son datos distintos: la misma planta se llama de
-    una forma en la bitácora de operación y de otra en los documentos del
-    cliente, y quien integre necesita saber contra cuál está comparando.
     """
     return {
         "nombre_comercial": proyecto.nombre_comercial,
-        "nombre_bitacora": proyecto.nombre_bitacora,
-        "nombre_clientes": proyecto.nombre_clientes,
         "topic_slug": proyecto.topic_slug,
         # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo.
         "sub_project": proyecto.sub_project,

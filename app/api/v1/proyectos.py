@@ -28,6 +28,7 @@ from app.services import gen_promedio
 from app.services.proyectos_pendientes import _generacion_real_por_frt, resolver_pendientes
 from app.services.proyectos_backfill_unergy import sincronizar_datos_unergy_si_aplica
 from app.services.tsf_sync import sincronizar_ubicacion_tsf_si_aplica
+from app.services.audit import registrar_borrado
 from app.services.proyectos_backfill_solenium import sincronizar_info_tecnica_solenium_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
@@ -886,6 +887,18 @@ def merge_proyectos(
 
     # ── Ejecución real (transacción única) ──
     try:
+        # 0) Retrato del perdedor ANTES de tocarlo. Va primero a propósito: el
+        #    paso 5 le vacía los campos únicos, así que más abajo la foto ya
+        #    saldría mutilada. Es el único rastro que queda de la planta.
+        registrar_borrado(db, "proyectos", perdedor.id, tipo="hard", contexto={
+            "operacion": "merge_proyectos",
+            "ganador_id": ganador.id,
+            "ganador_nombre": ganador.nombre_comercial,
+            "movimientos": movimientos,
+            "campos_copiados_al_ganador": campos_copiados,
+            "total_filas_movidas": sum(m["a_mover"] for m in movimientos),
+        })
+
         # 1) Doble FK ASIC
         db.execute(text("UPDATE asic_cambios_contratos SET proyecto_original_id=:keeper WHERE proyecto_original_id=:loser"), p)
         db.execute(text("UPDATE asic_cambios_contratos SET proyecto_nuevo_id=:keeper WHERE proyecto_nuevo_id=:loser"), p)

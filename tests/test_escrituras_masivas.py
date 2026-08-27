@@ -27,11 +27,13 @@ from escrituras_masivas import (
 # lo que escribe en tablas no auditadas es igual de invisible, pero ahí no hay
 # auditoría que engañar.
 INVENTARIO_CONOCIDO: dict[tuple[str, str], tuple[int, str]] = {
-    # ── Fusión de duplicados. El caso más grave del inventario ───────────────
+    # ── Fusión de duplicados ─────────────────────────────────────────────────
     # `POST /proyectos/{ganador}/merge/{perdedor}` y su gemelo de clientes
     # mueven las relaciones con UPDATE por tabla y después borran al perdedor.
-    # 🛑 Incluye el ÚNICO hard-delete de un proyecto en toda la app, y no deja
-    # ni una fila en audit_log: hoy, borrar un proyecto no tiene rastro.
+    # ✅ Cubiertos a mano desde el 2026-08-27: `registrar_borrado()` guarda el
+    # snapshot completo de la fila antes de que desaparezca. Siguen apareciendo
+    # acá porque siguen siendo escrituras masivas -- lo que cambió es que ya no
+    # son invisibles.
     ("app/api/v1/proyectos.py", "proyectos"): (3, "merge: reasigna FKs y borra al perdedor"),
     ("app/api/v1/clientes.py", "clientes"): (3, "merge de clientes: limpia campos y soft-delete"),
     ("app/api/v1/clientes.py", "ppa_contratos"): (2, "merge de clientes: repunta comprador/vendedor"),
@@ -94,18 +96,28 @@ def test_el_inventario_declarado_no_tiene_entradas_muertas():
                   for (a, t), v in sorted(muertas.items())))
 
 
-def test_el_hard_delete_de_proyectos_sigue_siendo_invisible():
-    """Documenta el peor caso, para que arreglarlo sea un cambio consciente.
+def test_el_hard_delete_de_proyectos_sigue_cubierto_a_mano():
+    """El peor caso del inventario, y el único con cobertura explícita.
 
-    Borrar un proyecto es la operación más destructiva de la app y hoy no deja
-    ni una fila en `audit_log`. El día que el hook lo cubra, este test cae y hay
-    que borrarlo con una sonrisa.
+    Borrar un proyecto es la operación más destructiva de la app. Hasta el
+    2026-08-27 no dejaba ni una fila en `audit_log`; ahora `registrar_borrado()`
+    guarda el snapshot completo antes del DELETE. Sigue siendo una escritura
+    masiva --por eso aparece en el inventario-- pero ya no es invisible.
+
+    Si alguien quita esa llamada, el borrado vuelve a no tener rastro y nadie
+    se entera. De ahí este test.
     """
+    import inspect
+
+    from app.api.v1 import proyectos as api
+
     sitios = [s for s in escanear()
               if s.archivo == "app/api/v1/proyectos.py" and s.tabla == "proyectos"
               and "DELETE FROM proyectos" in s.fragmento]
+    assert sitios, "el hard-delete de proyectos ya no aparece: ¿se reescribió el merge?"
 
-    assert sitios, "el hard-delete de proyectos ya no aparece: ¿lo cubrió el hook?"
+    assert 'registrar_borrado(db, "proyectos"' in inspect.getsource(api), (
+        "el merge borra la planta sin dejar constancia: volvió el agujero")
 
 
 # ── Que el escáner detecte de verdad ─────────────────────────────────────────

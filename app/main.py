@@ -2246,8 +2246,16 @@ def _run_cgm_seed() -> None:
                 )
                 reparados += 1
         db.commit()
-        if reparados:
-            print(f"[cgm seed] {reparados} proyecto_id reparados")
+        # Sin `if`: el silencio era ambiguo -- podia significar "repare 0" o
+        # "revente antes de llegar aca". Y el pendiente sale en el mismo log,
+        # para no tener que ir a consultarlo: si `reparados` es 0 y `sin_pid`
+        # no baja nunca, son contratos cuyo nombre no cruza y el seed reintenta
+        # el mismo matching fallido en cada arranque.
+        sin_pid_restantes = db.execute(text(
+            "SELECT count(*) FROM contratos_servicio WHERE proyecto_id IS NULL"
+        )).scalar()
+        print(f"[cgm seed] {reparados} proyecto_id reparados; "
+              f"{sin_pid_restantes} contratos siguen sin proyecto_id")
 
     except Exception as e:
         db.rollback()

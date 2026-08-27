@@ -20,6 +20,7 @@ import app.models  # noqa: F401
 from app.models import Proyecto
 from app.models.informe_om import ProyectoInformeOM
 from app.api.v1 import proyectos as proyectos_api
+from audit_sqlite import crear_audit_log
 
 
 @compiles(JSONB, "sqlite")
@@ -41,6 +42,9 @@ def db():
         conn.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
+    # El merge audita el borrado del perdedor, y `audit_log` no tiene modelo
+    # ORM: create_all() no la crea. Ver `registrar_borrado`.
+    crear_audit_log(engine)
     s = sessionmaker(bind=engine)()
     yield s
     s.close()

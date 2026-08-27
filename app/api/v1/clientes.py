@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.services.audit import registrar_borrado
 from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
 from app.models.clientes import ClienteTasaServicio
 from app.models.contactos import Contacto, ProyectoAreaContacto
@@ -919,6 +920,19 @@ def merge_clientes(
         return reporte
 
     try:
+        # 0) Retrato del perdedor ANTES de tocarlo, igual que en el merge de
+        #    proyectos: el paso 4 le vacía los campos únicos y más abajo la foto
+        #    saldría mutilada. Acá el borrado es lógico y no físico, pero para
+        #    el negocio el cliente deja de existir.
+        registrar_borrado(db, "clientes", perdedor.id, tipo="soft", contexto={
+            "operacion": "merge_clientes",
+            "ganador_id": ganador.id,
+            "ganador_nombre": ganador.razon_social_nombre,
+            "movimientos": movimientos,
+            "campos_copiados_al_ganador": campos_copiados,
+            "total_filas_movidas": sum(m["a_mover"] for m in movimientos),
+        })
+
         # 1) ppa_contratos: doble FK
         db.execute(text("UPDATE ppa_contratos SET comprador_id=:keeper WHERE comprador_id=:loser"), p)
         db.execute(text("UPDATE ppa_contratos SET vendedor_id=:keeper WHERE vendedor_id=:loser"), p)

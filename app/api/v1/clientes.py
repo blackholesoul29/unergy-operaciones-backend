@@ -78,8 +78,8 @@ def vista_comercial(
     )
     ids = {c.id for c in clientes}
     proys = proyectos_por_cliente(db, ids)
-    servs = servicios_por_cliente(db, ids)
-    alertas = alerta_contratos_por_cliente(db, ids, hoy)
+    servs = servicios_por_cliente(db, ids, plantas=proys)
+    alertas = alerta_contratos_por_cliente(db, ids, hoy, plantas=proys)
     comerciales = contacto_comercial_por_cliente(db, ids)
 
     filas = []
@@ -575,6 +575,7 @@ def list_client_servicios_contratos(
     if plant_ids:
         condiciones.append(ContratoServicio.proyecto_id.in_(plant_ids))
     condiciones.append(ContratoServicio.contratante_id == id)  # por si contrata sin planta ligada
+    condiciones.append(ContratoServicio.prestador_id == id)  # por si presta sin planta ligada
     contratos = (
         db.query(ContratoServicio)
         .filter(or_(*condiciones))
@@ -660,17 +661,25 @@ def get_cliente_panel(
     from app.models.contratos import ContratoServicio, PPAContrato
     from app.models.proyectos import Proyecto, ProyectoInversionista
     from app.services.clientes_panel import (
-        peor_semaforo, renovacion_combinada, semaforo_contrato,
+        peor_semaforo, proyectos_por_cliente, renovacion_combinada, semaforo_contrato,
     )
     from app.schemas.clientes import ClienteOut
 
     hoy = hoy or date.today()
     cliente = _get_cliente_or_404(id, db)
 
+    # contratante_id/prestador_id casi nunca se pobla en la práctica (el campo
+    # del wizard es texto libre); mismo fallback que list_client_servicios_contratos
+    # -- también por planta del cliente (inversionista/contratante/PPA), no solo
+    # por el ID directo en el contrato. Sin esto, "condiciones económicas" y
+    # buena parte de "contratos" del panel 360 quedaban vacíos siempre.
+    plant_ids = proyectos_por_cliente(db, {id}).get(id, set())
+    condiciones_filtro = [ContratoServicio.contratante_id == id, ContratoServicio.prestador_id == id]
+    if plant_ids:
+        condiciones_filtro.append(ContratoServicio.proyecto_id.in_(plant_ids))
     contratos_serv = (
         db.query(ContratoServicio)
-        .filter(or_(ContratoServicio.contratante_id == id,
-                    ContratoServicio.prestador_id == id))
+        .filter(or_(*condiciones_filtro))
         .all()
     )
     ppas = (

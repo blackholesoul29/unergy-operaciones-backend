@@ -879,8 +879,7 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
                   cantidad_total_paneles=1800,
                   marca_paneles="Trina", potencia_panel_kwp="0.55",
                   cantidad_inversores=5, marca_inversores="Huawei",
-                  cantidad_strings=48, marca_transformador="Siemens",
-                  tiene_almacenamiento=True, capacidad_almacenamiento_kwh=250)
+                  cantidad_strings=48, marca_transformador="Siemens")
     _inversor(db, proy, nombre="Inversor 2", potencia_nominal_kw=300, orden=2,
               marca="Huawei", tipo="central")
     _inversor(db, proy, nombre="Inversor 1", potencia_nominal_kw=300, orden=1)
@@ -902,8 +901,6 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     assert [i["nombre"] for i in t["inversores"]["equipos"]] == [
         "Inversor 1", "Inversor 2"]
     assert t["inversores"]["equipos"][1]["tipo"] == "central"
-    assert t["almacenamiento"] == {"tiene": True, "capacidad_kwh": 250.0,
-                                   "marca": None, "modelo": None}
     assert t["equipos_marcas"]["transformador"] == "Siemens"
 
 
@@ -919,8 +916,6 @@ def test_sin_ficha_tecnica_el_bloque_viaja_igual_todo_en_null(db):
     assert t["voltaje_red"] is None
     assert t["potencia_ac_kw"] is None
     assert t["inversores"]["equipos"] == []
-    # `tiene` es un booleano, no un null: sin ficha, no hay almacenamiento.
-    assert t["almacenamiento"]["tiene"] is False
 
 
 def test_las_fronteras_traen_su_codigo(db):

@@ -1105,12 +1105,6 @@ def _ficha_tecnica(proyecto) -> dict:
                 for i in inversores
             ],
         },
-        "almacenamiento": {
-            "tiene": bool(_it("tiene_almacenamiento")),
-            "capacidad_kwh": _num(_it("capacidad_almacenamiento_kwh")),
-            "marca": _it("marca_almacenamiento"),
-            "modelo": _it("modelo_almacenamiento"),
-        },
         "equipos_marcas": {
             "transformador": _it("marca_transformador"),
             "reconectador_rele": _it("marca_reconectador_rele"),
@@ -1122,7 +1116,6 @@ def _ficha_tecnica(proyecto) -> dict:
         },
         "seguridad_fisica": _it("seguridad_fisica"),
         "tiene_internet": _it("tiene_internet"),
-        "retie_url": _it("retie_url"),
     }
 
 

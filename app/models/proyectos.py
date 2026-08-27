@@ -293,20 +293,11 @@ class ProyectoInfoTecnica(Base):
     # Ubicación
     url_ubicacion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # RETIE — enlace al documento (Google Drive u otro)
-    retie_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-
     # CCTV y seguridad
     cctv_estado: Mapped[str | None] = mapped_column(Text, nullable=True)
     marca_cctv: Mapped[str | None] = mapped_column(String(255), nullable=True)
     seguridad_fisica: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tiene_internet: Mapped[str | None] = mapped_column(String(10), nullable=True)
-
-    # Almacenamiento
-    tiene_almacenamiento: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    capacidad_almacenamiento_kwh: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
-    marca_almacenamiento: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modelo_almacenamiento: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

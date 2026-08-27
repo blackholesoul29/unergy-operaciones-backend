@@ -790,3 +790,82 @@ Para no dar por verificado lo que no lo está:
 - **El dominio de Liquidaciones / Panel Contable**, que recibió ~15 commits en estos días. Está
   fuera del alcance del refactor, pero su acople con la composición accionaria (`04-mapeo.md` §5.4)
   se decidió sobre un código que ya cambió. ⚠️ Hay que revisarlo antes de la Fase 6.
+
+---
+
+# Apéndice II · 2026-08-27 · El arranque escribe con la API ya sirviendo
+
+## Antipatrón K · `_deferred_init` expone estados intermedios por la API
+
+`_deferred_init` corre en un **hilo de fondo que arranca después de que el servidor está
+atendiendo** (`app/main.py`). Sus 22 tareas se ejecutan **en secuencia**, y varias escriben sobre
+las mismas tablas. Mientras esa secuencia avanza, **la API responde con lo que haya en la base en
+ese instante**.
+
+La consecuencia general, y es la que importa más allá del caso que la destapó:
+
+> **Cualquier tarea de arranque que deje datos inconsistentes a mitad de camino los publica por la
+> API.** No hay barrera, ni bandera de «arranque en curso», ni endpoint que diga «todavía no».
+> Y como el hilo corre después de que el health check pasa, el balanceador ya está mandando
+> tráfico.
+
+Eso convierte una tarea lenta en una ventana de datos malos, y una pareja de tareas que se
+contradicen en una ventana de datos malos **en cada deploy**.
+
+### El caso que lo destapó
+
+`fallas.tipo_id`, encontrado el 2026-08-27 al rotular la auditoría por tarea:
+
+| | |
+|---|---|
+| Tareas en conflicto | `tipo_migration` (9ª) y `fallas_tipo_backfill` (22ª, la última) |
+| Filas | **5.086** fallas |
+| Frecuencia | **23 arranques en 16 horas** |
+| Ventana de dato equivocado | las **13 tareas** que había entre las dos |
+
+`tipo_migration` daba por «legacy» a todo código que no fuera numérico (`^\d+\.\d+$`), y los
+**31 códigos** de la taxonomía estructurada (`red.baja_tension`) tampoco lo son: se comía el
+catálogo nuevo entero y re-apuntaba las fallas a un tipo numérico de respaldo. El backfill, trece
+tareas después, las devolvía. Durante la ventana, `GET /fallas?tipo_codigo=` devolvía el conjunto
+equivocado y la UI mostraba el título equivocado.
+
+⚠️ **Y solo se veía la mitad de la pelea.** `tipo_migration` escribe con
+`.update(synchronize_session=False)`, un UPDATE masivo que **no pasa por los hooks del ORM y por lo
+tanto no deja rastro en `audit_log`**. Es la única de las 22 tareas que escribe así. La auditoría
+registró a la víctima 23 veces y nunca al culpable.
+
+### Qué se revisó de las otras 21 tareas
+
+Se mapeó qué columna escribe cada tarea, incluyendo las funciones a las que delegan. **Nueve
+columnas tienen más de un escritor de arranque**, y ocho son inofensivas porque tocan filas
+disjuntas:
+
+| Columna | Tareas | Veredicto |
+|---|---|---|
+| `tipo_id` | `tipo_migration`, `fallas_tipo_backfill` | 🛑 **la pelea real** |
+| `activa`, `categoria_id`, `color_hex`, `etiqueta`, `icono`, `orden` | `catalog_seed`, `estructura_fallas_seed` | Filas disjuntas: `catalog_seed` toca los códigos numéricos, y la desactivación de `estructura_fallas_seed` filtra por `codigo LIKE 'inversores.%'` |
+| `estado` | `cgm_seed`, `repr_inversionista_sync` | `cgm_seed` solo lo escribe al **insertar** una fila nueva; `repr_inversionista_sync` solo lo **lee** |
+| `fecha_firma_contrato` | `om_seed`, `arr_seed` | Tablas distintas: `contratos_servicio` (mantenimiento) y `arr_proyecto` |
+| `proyecto_id` | `comercial_dedup`, `cgm_seed`, `arr_arrendador_id_backfill` | Tablas distintas, y las dos últimas solo rellenan cuando está en `NULL` |
+
+### Los dos puntos ciegos que quedan
+
+Este análisis **no puede cerrar** el caso general, y conviene no creer que sí:
+
+1. **Las escrituras masivas no dejan rastro.** Hoy solo `tipo_migration` usa `.update()` en bloque,
+   pero la próxima que lo haga volverá a ser invisible para la auditoría.
+2. **Solo 10 tablas están auditadas.** `arr_*`, `oportunidades`, `panel_contable` y los catálogos
+   **no lo están**, y cinco tareas de arranque escriben sobre todo ahí (`arr_seed`,
+   `arr_backfill_contratos`, `arr_arrendador_backfill`, `arr_arrendador_id_backfill`,
+   `arr_documento_proyecto_id_backfill`). Si alguna reescribe en cada arranque, nada lo mostraría.
+
+### Lo que haría falta para cerrarlo de verdad
+
+Fuera del alcance del refactor, anotado para que exista:
+
+- Que las tareas de arranque que dejan un estado intermedio corran **dentro de una transacción**, o
+  que el estado intermedio no sea observable.
+- O que el health check no pase hasta que `_deferred_init` termine — tiene el costo de retrasar el
+  arranque, que es justo lo que se evitó al moverlo a un hilo.
+- Como mínimo: que **ninguna columna tenga dos escritores de arranque**. Es la regla más barata de
+  verificar, y el mapa de arriba es reproducible.

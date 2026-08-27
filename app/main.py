@@ -3366,6 +3366,29 @@ def _run_comercial_actualizacion() -> None:
         db.close()
 
 
+def _run_init_audit() -> None:
+    """Engancha los hooks de auditoria de SQLAlchemy.
+
+    Va DENTRO de la lista de tareas y no al final, porque los seeds escriben con
+    sesiones ORM sobre tablas auditadas -- contratos_servicio, proyectos, fallas,
+    clientes -- y hasta el 2026-08-26 corria despues de todas ellas: lo que
+    sembraba el arranque no dejaba rastro en audit_log.
+
+    Y no puede ir mas arriba: `audit_log` la crea _PENDING_DDLS, asi que tiene
+    que correr DESPUES de column_migrations o el primer INSERT auditado falla
+    porque la tabla todavia no existe.
+
+    Las escrituras de los seeds quedan marcadas con un autor sintetico, para que
+    en audit_log se distingan de una escritura anonima por API. El ContextVar es
+    por contexto de ejecucion y esto corre en el hilo de _deferred_init, asi que
+    no se filtra a las peticiones.
+    """
+    from app.services.audit import init_audit, set_audit_user
+
+    init_audit()
+    set_audit_user(None, "sistema (seed de arranque)")
+
+
 def _deferred_init():
     """Heavy initialization that runs in a background thread after the server is ready."""
     import time as _t
@@ -3375,6 +3398,9 @@ def _deferred_init():
     for label, fn in [
         ("create_tables", _run_create_tables),
         ("column_migrations", _run_column_migrations),
+        # Justo aca: despues del DDL que crea audit_log, y ANTES de los seeds,
+        # que escriben con sesiones ORM sobre tablas auditadas.
+        ("init_audit", _run_init_audit),
         ("backfills_referencia", _run_backfills_referencia),
         ("comercial_dedup", _run_comercial_dedup),
         ("comercial_actualizacion", _run_comercial_actualizacion),
@@ -3402,12 +3428,6 @@ def _deferred_init():
             print(f"[startup] {label} OK ({_t.time() - _t0:.1f}s)")
         except Exception as e:
             print(f"[startup] {label} FAILED: {e}")
-
-    try:
-        from app.services.audit import init_audit
-        init_audit()
-    except Exception as e:
-        print(f"[startup] audit init FAILED: {e}")
 
     if settings.MGS_ENABLED:
         try:

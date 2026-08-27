@@ -1,4 +1,4 @@
-"""
+r"""
 Parser de facturas PDF de Starlink Colombia.
 
 Estrategia (igual al script starlink_pdf_a_excel.py):

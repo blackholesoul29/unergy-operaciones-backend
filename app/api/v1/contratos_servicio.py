@@ -12,6 +12,7 @@ from app.schemas.contratos_servicio import (
     ImportarIndexacionEntry, FilaFactura,
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
+from app.utils.nombre_matching import mejor_candidato, core_tokens
 
 router = APIRouter(prefix="/contratos-servicio", tags=["ContratoServicio"])
 
@@ -66,7 +67,45 @@ def _sync_fronteras(contrato: ContratoServicio, frontera_ids: list[int], db: Ses
     contrato.fronteras = fronteras
 
 
+def _resolver_cliente_id(db: Session, nombre: str | None, nit: str | None) -> int | None:
+    """Resuelve un cliente_id a partir del nombre/NIT de texto libre del
+    wizard -- el campo nunca obliga a elegir del autocomplete, así que
+    contratante_id/prestador_id casi nunca se poblaban (auditoría de
+    Clientes 2026-08-27: 0/162 contratos_servicio en producción). Sin esto,
+    "condiciones económicas" del panel 360 y otras vistas de /clientes
+    quedaban silenciosamente vacías.
+
+    NIT primero (exacto, normalizado); si no, nombre parecido -- pero exige
+    ADEMÁS solapamiento real de tokens (no solo similitud de texto): el
+    backfill manual del mismo día encontró casos reales como "BALI ENERGY
+    S.A.S." emparejando por error con "INENERGY S.A.S." (0 tokens en común,
+    solo parecido de caracteres)."""
+    if nit:
+        key = "".join(ch for ch in nit if ch.isalnum())
+        if key:
+            con_nit = (
+                db.query(Cliente)
+                .filter(Cliente.deleted_at.is_(None), Cliente.nit_cedula.isnot(None))
+                .all()
+            )
+            iguales = [c for c in con_nit if "".join(ch for ch in c.nit_cedula if ch.isalnum()) == key]
+            if len(iguales) == 1:
+                return iguales[0].id
+    if nombre:
+        clientes = db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
+        candidatos = [(c, [c.razon_social_nombre]) for c in clientes]
+        item, _score = mejor_candidato(nombre, candidatos)
+        if item and (core_tokens(nombre) & core_tokens(item.razon_social_nombre)):
+            return item.id
+    return None
+
+
 def _sync_partes(contrato: ContratoServicio, db: Session):
+    if not contrato.contratante_id:
+        contrato.contratante_id = _resolver_cliente_id(db, contrato.contratante_nombre, contrato.contratante_nit)
+    if not contrato.prestador_id:
+        contrato.prestador_id = _resolver_cliente_id(db, contrato.prestador_nombre, contrato.prestador_nit)
+
     if contrato.contratante_id:
         cl = db.query(Cliente).filter(Cliente.id == contrato.contratante_id).first()
         if cl:

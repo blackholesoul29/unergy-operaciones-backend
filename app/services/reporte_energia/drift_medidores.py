@@ -35,7 +35,7 @@ from app.services.reporte_energia.utils import curva_a_lista, curva_cambio
 
 def _revisar_tabla(
     db: Session, Modelo, gaia, mapa_nodo, borders, fecha: date, var_name: str, es_generacion: bool,
-) -> int:
+) -> tuple[int, int]:
     filas = db.execute(
         select(Modelo, Frontera, Proyecto)
         .join(Frontera, Frontera.id == Modelo.frontera_id)
@@ -44,6 +44,7 @@ def _revisar_tabla(
     ).all()
 
     marcadas = 0
+    fallos = 0
     for rep, front, proyecto in filas:
         if not rep.curva_medidor_principal and not rep.curva_medidor_respaldo:
             continue  # nada persistido con qué comparar (Caso CGM sin medidor consultado, o fila vieja)
@@ -61,15 +62,26 @@ def _revisar_tabla(
                 gaia, mapa_nodo, meta.get("main_meter"), meta.get("backup_meter"),
                 str(fecha), front.codigo_frontera, var_name, capacidad_efectiva_mw,
             )
-        except Exception:
-            continue  # el aviso es informativo -- si Quoia falla acá, se sigue con las demás fronteras
+        except Exception as exc:
+            # El aviso es informativo -- si Quoia falla para ESTA frontera se
+            # sigue con las demás, pero antes esto se tragaba en silencio sin
+            # ningún log: una falla sistemática (ej. token de Gaia vencido,
+            # que fallaría para TODAS las filas) corría cada 5 min de 4:00 a
+            # 5:30am sin que nadie se enterara -- "marcadas=0" se veía igual
+            # a "no hay drift" que a "no se pudo revisar nada" (auditoría
+            # Reporte ASIC 2026-08-26). Se cuenta y se imprime -- mismo
+            # patrón print-based del resto de este módulo.
+            fallos += 1
+            print(f"[reporte_energia] drift_medidores frontera={front.codigo_frontera} fecha={fecha} "
+                  f"error consultando Quoia: {exc}")
+            continue
 
         cambio_ppal = curva_cambio(rep.curva_medidor_principal, curva_a_lista(curva_p))
         cambio_resp = curva_cambio(rep.curva_medidor_respaldo, curva_a_lista(curva_r))
         if cambio_ppal or cambio_resp:
             rep.revisar_manualmente = True
             marcadas += 1
-    return marcadas
+    return marcadas, fallos
 
 
 def verificar_drift_medidores(db: Session, fecha: date) -> dict:
@@ -77,15 +89,16 @@ def verificar_drift_medidores(db: Session, fecha: date) -> dict:
     recuperación activa) para cada fila SIN revisar_manualmente y, si el
     medidor ya muestra un valor distinto, marca revisar_manualmente=True.
 
-    Retorna {'generacion': N, 'consumo': N} -- cuántas filas se marcaron en
-    cada tabla."""
+    Retorna {'generacion': N, 'consumo': N, 'fallos': M} -- cuántas filas se
+    marcaron en cada tabla, y cuántas no se pudieron ni siquiera consultar
+    (sumado entre ambas tablas) -- ver _revisar_tabla()."""
     gaia = GaiaClient()
     mapa_nodo = curvas.construir_mapa_medidor_nodo(gaia)
     borders = curvas.construir_mapa_borders(gaia)
-    marcadas_gen = _revisar_tabla(db, ReporteEnergiaGeneracion, gaia, mapa_nodo, borders, fecha, "eae", True)
-    marcadas_con = _revisar_tabla(db, ReporteEnergiaConsumo, gaia, mapa_nodo, borders, fecha, "iae", False)
+    marcadas_gen, fallos_gen = _revisar_tabla(db, ReporteEnergiaGeneracion, gaia, mapa_nodo, borders, fecha, "eae", True)
+    marcadas_con, fallos_con = _revisar_tabla(db, ReporteEnergiaConsumo, gaia, mapa_nodo, borders, fecha, "iae", False)
     db.commit()
-    return {"generacion": marcadas_gen, "consumo": marcadas_con}
+    return {"generacion": marcadas_gen, "consumo": marcadas_con, "fallos": fallos_gen + fallos_con}
 
 
 def verificar_drift_medidores_background(fecha: date) -> dict:

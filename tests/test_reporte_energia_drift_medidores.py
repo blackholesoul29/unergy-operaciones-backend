@@ -73,7 +73,7 @@ def test_medidor_sin_cambio_no_marca(db, monkeypatch):
 
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
-    assert resultado == {"generacion": 0, "consumo": 0}
+    assert resultado == {"generacion": 0, "consumo": 0, "fallos": 0}
     assert rep.revisar_manualmente is False
 
 
@@ -94,7 +94,7 @@ def test_medidor_principal_cambio_marca_revisar(db, monkeypatch):
 
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
-    assert resultado == {"generacion": 1, "consumo": 0}
+    assert resultado == {"generacion": 1, "consumo": 0, "fallos": 0}
     assert rep.revisar_manualmente is True
 
 
@@ -117,7 +117,7 @@ def test_medidor_respaldo_cambio_tambien_marca_aunque_no_se_haya_usado(db, monke
 
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
-    assert resultado == {"generacion": 1, "consumo": 0}
+    assert resultado == {"generacion": 1, "consumo": 0, "fallos": 0}
     assert rep.revisar_manualmente is True
 
 
@@ -142,7 +142,7 @@ def test_fila_ya_marcada_revisar_no_se_vuelve_a_consultar(db, monkeypatch):
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
     assert not llamado
-    assert resultado == {"generacion": 0, "consumo": 0}
+    assert resultado == {"generacion": 0, "consumo": 0, "fallos": 0}
 
 
 def test_sin_curva_medidor_persistida_no_se_consulta(db, monkeypatch):
@@ -165,7 +165,7 @@ def test_sin_curva_medidor_persistida_no_se_consulta(db, monkeypatch):
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
     assert not llamado
-    assert resultado == {"generacion": 0, "consumo": 0}
+    assert resultado == {"generacion": 0, "consumo": 0, "fallos": 0}
 
 
 def test_sin_match_en_borders_no_se_consulta(db, monkeypatch):
@@ -185,10 +185,10 @@ def test_sin_match_en_borders_no_se_consulta(db, monkeypatch):
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
     assert not llamado
-    assert resultado == {"generacion": 0, "consumo": 0}
+    assert resultado == {"generacion": 0, "consumo": 0, "fallos": 0}
 
 
-def test_error_de_quoia_en_una_frontera_no_tumba_las_demas(db, monkeypatch):
+def test_error_de_quoia_en_una_frontera_no_tumba_las_demas(db, monkeypatch, capsys):
     _frontera(db, id_=1, codigo="frt001")
     _frontera(db, id_=2, codigo="frt002")
     rep1 = ReporteEnergiaGeneracion(
@@ -216,9 +216,11 @@ def test_error_de_quoia_en_una_frontera_no_tumba_las_demas(db, monkeypatch):
 
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
-    assert resultado == {"generacion": 1, "consumo": 0}
+    assert resultado == {"generacion": 1, "consumo": 0, "fallos": 1}
     assert rep1.revisar_manualmente is False  # falló la consulta -- no se pudo evaluar
     assert rep2.revisar_manualmente is True   # frt002 sí se evaluó y cambió
+    salida = capsys.readouterr().out
+    assert "frt001" in salida and "Quoia caído" in salida  # el fallo queda logueado, no en silencio
 
 
 def test_consumo_usa_iae_y_es_independiente_de_generacion(db, monkeypatch):
@@ -242,7 +244,7 @@ def test_consumo_usa_iae_y_es_independiente_de_generacion(db, monkeypatch):
     resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
 
     assert vars_usadas == ["iae"]
-    assert resultado == {"generacion": 0, "consumo": 1}
+    assert resultado == {"generacion": 0, "consumo": 1, "fallos": 0}
     assert rep.revisar_manualmente is True
 
 
@@ -279,3 +281,36 @@ def test_capacidad_efectiva_se_propaga_solo_para_generacion(db, monkeypatch):
     capacidades_por_frt = dict(capacidades)
     assert capacidades_por_frt["frt001"] == 0.99  # 990 kWp / 1000
     assert capacidades_por_frt["frt002"] is None
+
+
+def test_fallo_sistematico_no_se_confunde_con_sin_drift(db, monkeypatch, capsys):
+    """Si TODAS las consultas fallan (ej. token de Gaia vencido), el
+    resultado antes se veía IDÉNTICO a 'no hay drift' -- {'generacion': 0,
+    'consumo': 0} en ambos casos, sin ninguna señal de que en realidad no
+    se pudo revisar nada. Ahora 'fallos' distingue los dos casos (auditoría
+    Reporte ASIC 2026-08-26)."""
+    _frontera(db, id_=1, codigo="frt001")
+    _frontera(db, id_=2, codigo="frt002")
+    db.add(ReporteEnergiaGeneracion(
+        id=1, frontera_id=1, fecha=date(2026, 8, 25), caso=2, medidor_usado="principal",
+        curva_medidor_principal=[100.0] * 24, curva_medidor_respaldo=None, revisar_manualmente=False,
+    ))
+    db.add(ReporteEnergiaGeneracion(
+        id=2, frontera_id=2, fecha=date(2026, 8, 25), caso=2, medidor_usado="principal",
+        curva_medidor_principal=[50.0] * 24, curva_medidor_respaldo=None, revisar_manualmente=False,
+    ))
+    db.commit()
+    monkeypatch.setattr(curvas, "construir_mapa_borders", lambda gaia: {
+        "frt001": {"main_meter": 1, "backup_meter": 2},
+        "frt002": {"main_meter": 3, "backup_meter": 4},
+    })
+
+    def _token_vencido(*a, **kw):
+        raise RuntimeError("401 token expirado")
+    monkeypatch.setattr(curvas, "curva_medidor_en_vivo", _token_vencido)
+
+    resultado = drift_medidores.verificar_drift_medidores(db, date(2026, 8, 25))
+
+    assert resultado == {"generacion": 0, "consumo": 0, "fallos": 2}
+    salida = capsys.readouterr().out
+    assert salida.count("token expirado") == 2  # cada fila fallida queda logueada, no en silencio

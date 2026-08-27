@@ -869,7 +869,7 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     """El conteo de la ficha y la lista de inversores son datos distintos y los
     dos viajan: uno es lo que declaró el diseño, el otro lo que está cargado
     (y es lo que se usa para reportar fallas por inversor)."""
-    proy = _proyecto(db, nombre_comercial="GD Catedral", tipo_conexion="trifásica",
+    proy = _proyecto(db, nombre_comercial="GD Catedral",
                      produccion_especifica_kwh_kwp=1450.5)
     # El conteo de paneles vive en la ficha técnica y solo ahí: hasta 2026-08-19
     # estaba duplicado en `proyectos.cantidad_total_paneles`, y esa columna se
@@ -891,7 +891,6 @@ def test_la_ficha_tecnica_trae_lo_declarado_y_los_equipos_cargados(db):
     t = _detalles(db)["tecnica"]
 
     assert t["voltaje_red"] == "13.2 kV"
-    assert t["tipo_conexion"] == "trifásica"
     assert t["potencia_ac_kw"] == 900.0
     assert t["produccion_especifica_kwh_kwp"] == 1450.5
     assert t["paneles"]["cantidad_total"] == 1800

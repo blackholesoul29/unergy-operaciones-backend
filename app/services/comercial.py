@@ -1069,7 +1069,6 @@ def _ficha_tecnica(proyecto) -> dict:
         key=lambda i: (i.orden if i.orden is not None else 0, i.id))
     return {
         "voltaje_red": _it("voltaje_red"),
-        "tipo_conexion": proyecto.tipo_conexion,
         # Potencia AC (la del punto de conexión) contra kWp instalados (DC): no
         # son el mismo número y la relación entre las dos es el sobredimensionado.
         "potencia_ac_kw": _num(_it("potencia_ac_kw")),

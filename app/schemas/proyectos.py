@@ -262,7 +262,6 @@ class ProyectoCreate(BaseModel):
     latitud: Optional[float] = Field(default=None, ge=-90, le=90)
     longitud: Optional[float] = Field(default=None, ge=-180, le=180)
     altitud_msnm: Optional[int] = Field(default=None, ge=-100, le=6000)
-    tipo_conexion: Optional[str] = None
     operador_red_id: Optional[int] = None
     project_id_solenium: Optional[str] = None
     carpeta_drive_codigo: Optional[str] = None
@@ -344,7 +343,6 @@ class ProyectoOut(BaseModel):
     latitud: Optional[float]
     longitud: Optional[float]
     altitud_msnm: Optional[int] = None
-    tipo_conexion: Optional[str]
     operador_red_id: Optional[int] = None
     operador_red_legal: Optional[str] = None
     project_id_solenium: Optional[str]

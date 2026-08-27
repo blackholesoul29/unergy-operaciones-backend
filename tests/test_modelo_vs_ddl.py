@@ -62,7 +62,6 @@ COLUMNAS_ORIGINALES_PROYECTOS = {
     'srv_promotor',
     'srv_rec',
     'srv_representacion',
-    'tipo_conexion',
     'tipo_proyecto',
     'tipo_tecnologia',
     'updated_at',

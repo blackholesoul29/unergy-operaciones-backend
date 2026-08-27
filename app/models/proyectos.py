@@ -151,7 +151,6 @@ class Proyecto(Base):
     # Fronteras) para no dejar la altitud como el unico dato de ubicacion
     # que solo vivia en Frontera.
     altitud_msnm: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tipo_conexion: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Vínculo estructurado al catálogo (mismo patrón que Frontera.operador_red_id).
     # Se sincroniza con las fronteras del proyecto: si el proyecto no tiene
     # valor, se rellena desde la primera frontera que sí lo tenga; si se edita

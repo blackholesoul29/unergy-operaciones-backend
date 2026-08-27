@@ -21,6 +21,8 @@ from app.models.panel_contable import PanelContable, PanelConsecutivo, Clasifica
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual
 from app.models.registros_cnd import RegistroConexion
 from app.models.arriendos import ArrDocumento
+from app.models.inicio_operacion import ProyectoInicioOperacion
+from app.models.informe_om import ProyectoInformeOM
 from app.api.v1 import proyectos as proyectos_api
 
 
@@ -86,10 +88,18 @@ def test_generacion_diaria_bloquea_el_borrado(db):
         proyecto_id=1, periodo="2026-08", pago_id=1, codigo_contrato="C1",
         tipo_documento="factura_electronica", nombre_archivo="a.pdf", ruta_local="/a.pdf",
     )),
+    # A diferencia de las 6 de arriba, estas dos NO son ON DELETE CASCADE
+    # (son NO ACTION) -- el riesgo no es perder el dato en silencio, sino un
+    # IntegrityError sin capturar (500 crudo) al borrar el proyecto.
+    ("proyecto_inicio_operacion", lambda: ProyectoInicioOperacion(proyecto_id=1)),
+    ("proyecto_informe_om", lambda: ProyectoInformeOM(proyecto_id=1)),
 ])
 def test_tabla_sin_relationship_en_el_modelo_bloquea_el_borrado(db, tabla, fila):
-    """Estas 6 tablas no tienen relationship en Proyecto -- antes del fix,
-    el guard no las veía y Postgres las borraba en cascada sin aviso."""
+    """Ninguna de estas tablas tiene relationship en Proyecto -- antes del
+    fix, el guard no las veía. Para las primeras 6 (ON DELETE CASCADE),
+    Postgres las borraba en cascada sin aviso; para las últimas 2
+    (proyecto_inicio_operacion/proyecto_informe_om, ON DELETE NO ACTION),
+    el borrado reventaba con un IntegrityError sin capturar."""
     _proyecto(db)
     db.add(fila())
     db.commit()

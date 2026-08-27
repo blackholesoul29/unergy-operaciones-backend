@@ -686,12 +686,12 @@ def vincular_sunfactory(
     return _get_proyecto_or_404(id, db)
 
 
-# Tablas con FK ON DELETE CASCADE hacia proyectos que NO tienen relationship
-# en el modelo Proyecto (a diferencia de fallas/mantenimientos/etc, que sí lo
-# tienen y ya se chequean abajo vía el ORM) -- hallazgo de la auditoría de
-# Proyectos 2026-08-27: el guard de delete_proyecto() solo cubría 11
-# relaciones, así que Postgres borraba estas 6 en cascada sin ningún aviso
-# (ej. historial de generación diaria, paneles contables ya calculados,
+# Tablas hacia proyectos que NO tienen relationship en el modelo Proyecto (a
+# diferencia de fallas/mantenimientos/etc, que sí lo tienen y ya se chequean
+# abajo vía el ORM) -- hallazgo de la auditoría de Proyectos 2026-08-27: el
+# guard de delete_proyecto() solo cubría 11 relaciones. Las primeras 6 tienen
+# FK ON DELETE CASCADE, así que Postgres las borraba en cascada sin ningún
+# aviso (ej. historial de generación diaria, paneles contables ya calculados,
 # registros de conexión CND). Todas usan proyecto_id -- ojo con arr_documento,
 # que tiene DOS columnas de proyecto: arr_proyecto_id (FK a arr_proyectos, el
 # módulo de Arriendos, sin relación con esto) y proyecto_id (FK real a
@@ -699,6 +699,11 @@ def vincular_sunfactory(
 # (ON DELETE SET NULL, no CASCADE -- huérfana, no se pierde el dato) ni
 # generacion_diaria (SÍ tiene relationship: Proyecto.generaciones, chequeada
 # abajo con el resto).
+#
+# proyecto_inicio_operacion/proyecto_informe_om (agregadas 2026-08-27, revisión
+# de esas tablas): FK en NO ACTION, no CASCADE -- el riesgo no es perder el
+# dato en silencio, sino un IntegrityError sin capturar (500 crudo) al borrar
+# un proyecto que ya tiene ficha de Inicio de Operación o Informe O&M.
 _TABLAS_CASCADE_SIN_RELATIONSHIP = [
     ("panel_contable", "proyecto_id"),
     ("panel_consecutivo", "proyecto_id"),
@@ -706,6 +711,8 @@ _TABLAS_CASCADE_SIN_RELATIONSHIP = [
     ("clasificacion_liquidacion", "proyecto_id"),
     ("registro_conexion", "proyecto_id"),
     ("arr_documento", "proyecto_id"),
+    ("proyecto_inicio_operacion", "proyecto_id"),
+    ("proyecto_informe_om", "proyecto_id"),
 ]
 
 
@@ -788,7 +795,7 @@ _MERGE_COMPOSITE = [
 ]
 _MERGE_ONE_TO_ONE = [
     "proyecto_info_tecnica", "servicio_operacion", "servicio_representacion",
-    "proyecto_inicio_operacion",
+    "proyecto_inicio_operacion", "proyecto_informe_om",
 ]
 _MERGE_SCALAR_UNIQUE = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
 # Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el

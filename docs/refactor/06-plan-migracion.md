@@ -649,17 +649,35 @@ consulta de control de `§7.2`: 0 FK sin índice.
 
 ### Paso 1.2 · Quitar uno de cada par de índices redundantes
 
-Eran **46 pares** en el inventario del 23-ago. ⚠️ **Hay que recontar antes de ejecutar:** las
-migraciones 077-097 crearon y borraron índices de `fronteras`, así que ese número está desactualizado y
-no se puede recalcular sin leer los índices reales de la base.
+Eran **46 pares** en el inventario del 23-ago, un número que quedó desactualizado cuando las
+migraciones 077-097 rehicieron los índices de `fronteras`.
 
-**Script:** una revisión que, para cada par, dropee el índice **no** asociado a un constraint —
-Postgres no deja dropear el que respalda un `UNIQUE` sin dropear el constraint.
-**Precondición:** correr primero la consulta que lista los pares reales (va en el paso, no acá, porque
-exige la base).
-**Verificación:** el conteo de índices baja en exactamente el número de pares detectados; ninguna
-consulta de control cambia de plan.
-**Rollback:** recrear. Los nombres quedan en la migración.
+✅ **Recontado contra producción el 2026-08-27** con
+`esquema-bd-produccion/recontar_indices_redundantes.py`:
+
+| | |
+|---|---|
+| Pares redundantes | **34** (eran 46) |
+| Dropeables | **34 — todos** |
+| Que respaldan un constraint | **0** |
+
+**Que los 34 sean dropeables simplifica el paso de forma sustancial.** El riesgo que tenía previsto era
+justo el otro caso: un índice redundante que resulta ser el respaldo de un `UNIQUE`, donde Postgres no
+deja hacer `DROP INDEX` sin dropear antes el constraint, y hay que decidir cuál de los dos sobra. **Ese
+caso no existe acá**, así que el paso queda mecánico: 34 `DROP INDEX`, ninguna decisión de por medio.
+
+Qué cuenta como par: dos índices de la misma tabla, mismo método y misma condición parcial, donde las
+columnas de uno son **prefijo** de las del otro — Postgres resuelve con el largo lo que resolvería con
+el corto. El patrón dominante en este esquema es el índice de una FK que quedó cubierto por un
+compuesto posterior: `ix_alias_proyecto (proyecto_id)` bajo
+`uq_alias_proyecto_columna (proyecto_id, columna_origen)`.
+
+**Script:** una revisión con los **34 `DROP INDEX` escritos uno por uno**, con el nombre del índice que
+cubre a cada uno en el comentario. No un bucle sobre la consulta: la lista se audita antes de correr,
+no después.
+**Verificación:** el conteo de índices baja en exactamente 34; ninguna consulta de control cambia de
+plan (`EXPLAIN` antes y después de las tres del paso 1.1).
+**Rollback:** recrear. Los nombres y sus columnas quedan escritos en la migración.
 
 ### Paso 1.3 · Las FK que faltan
 

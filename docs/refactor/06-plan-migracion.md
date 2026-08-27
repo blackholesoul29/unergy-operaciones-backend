@@ -133,7 +133,8 @@ con `ROLLBACK`; tests verdes.
 19 tablas nuevas más la extensión, el trigger y las 4 vistas. **Nadie las lee ni las escribe todavía**, así
 que el riesgo es casi solo el de arranque.
 
-Orden dentro de la revisión de Alembic: `CREATE EXTENSION btree_gist` → catálogos (`fabricantes`,
+Orden dentro de la revisión de Alembic —y la extensión va **en esta misma revisión**, no en una previa:
+`CREATE EXTENSION btree_gist` → catálogos (`fabricantes`,
 `equipo_tipos`) → red (`red_circuitos`, `red_puntos_conexion`) → satélites de proyecto → equipos →
 propiedad → contratos → satélites de falla → función y trigger → índices → vistas → seeds de catálogo
 (13 `equipo_tipos`, 4 `fallas_cat_estados` con `ON CONFLICT DO NOTHING`).
@@ -141,9 +142,12 @@ propiedad → contratos → satélites de falla → función y trigger → índi
 ⚠️ **Dos condiciones de entrada:**
 - Si 0.1 encontró una tabla `equipos` en producción: **decidir antes** entre borrarla (si está en 0 filas)
   o renombrar la del modelo. **No se ejecuta un `CREATE TABLE equipos` a ciegas.**
-- `CREATE EXTENSION btree_gist` necesita permisos en el rol de Railway. Si falla, `proyecto_composiciones`
-  y `proyecto_estado_historial` no pueden crear su `EXCLUDE`. **Probarlo primero, solo**, en su propia
-  revisión.
+- ✅ **`CREATE EXTENSION btree_gist` ya está probado, dos veces** (2026-08-26/27, ver D-24). Contra
+  **producción**: el rol de Railway **sí tiene permiso**, verificado dentro de una transacción con
+  `ROLLBACK`. Y contra la base local: el `EXCLUDE` con un enum acepta periodos consecutivos y rechaza
+  los solapados. **Deja de ser una condición de entrada.** El `CREATE EXTENSION` va **dentro de la misma
+  revisión que crea las tablas con `EXCLUDE`**, antes de la primera de ellas — no en una revisión aparte,
+  que era la precaución de cuando no se sabía si el permiso existía.
 
 **Verificación:** las 19 tablas existen y están en 0 filas; `app.main` importa; la app arranca; las 4
 vistas responden `SELECT ... LIMIT 1`; el trigger existe (`\dft` / `pg_trigger`); tests verdes; **el
@@ -532,8 +536,9 @@ aprobación se pide con la verificación de §7 ya corrida y su salida a la vist
 1. **`python comparar_con_prod.py "<DATABASE_URL>"`** — es la entrada de la Fase 0. Responde si existe una
    tabla `equipos` en producción (colisión de nombre con el modelo nuevo) y si siguen vivas las 14 tablas
    del hallazgo F3. **La Fase 2 no se puede planear sin esa salida.**
-2. **Probar `CREATE EXTENSION btree_gist`** en su propia revisión de Alembic. Si el rol de Railway no tiene
-   permiso, dos tablas no pueden llevar su `EXCLUDE` y hay que resolverlo antes, no en la Fase 2.
+2. ~~Probar `CREATE EXTENSION btree_gist` en su propia revisión de Alembic.~~ ✅ **Hecho** el
+   2026-08-26/27, contra producción y contra la base local (D-24). El permiso existe y el `EXCLUDE` con
+   enum funciona; la extensión se crea dentro de la revisión que crea las tablas que la necesitan.
 3. **Capturar el golden de `/comercial/proyectos-operando`** hoy, antes de tocar nada. Cuanto antes, mejor:
    es la única forma de demostrar después que la salida no cambió.
 

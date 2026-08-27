@@ -998,10 +998,15 @@ desarrollo, dentro de una transacción con `ROLLBACK` — no quedó ni el tipo n
 Entorno: PostgreSQL **17.9**, la misma versión mayor que produccion. No hace falta el plan B del catálogo
 tabla con `id` entero.
 
-⚠️ **Lo único que queda dicho de esto:** `btree_gist` **no estaba instalada** en la base local, así que la
-migración tiene que crearla — y ya hay precedente de que hace falta, porque D-08 y D-09 la necesitan
-igual para la composición accionaria. Va en la misma revisión, antes de cualquier tabla con `EXCLUDE`,
-y con la verificación de permisos que la Fase 2 ya tiene como condición de entrada.
+✅ **Y probado también contra producción** (2026-08-27): **el rol de Railway sí tiene permiso** para
+`CREATE EXTENSION btree_gist`. Se verificó dentro de una transacción con `ROLLBACK`, así que la extensión
+no quedó instalada. Con eso caen las dos incógnitas que quedaban —si el permiso existía y si el `EXCLUDE`
+con enum se comportaba— y **deja de ser una condición de entrada de la Fase 2**.
+
+⚠️ **Lo único que queda dicho de esto:** `btree_gist` **no está instalada** en ninguna de las dos bases,
+así que la migración tiene que crearla. Va **dentro de la misma revisión que cree las tablas con
+`EXCLUDE`**, antes de la primera de ellas — no en una revisión aparte: eso era la precaución de cuando no
+se sabía si el permiso existía. D-08 y D-09 la necesitan igual para la composición accionaria.
 
 ### 🛑 `unidad` es obligatoria, y esto lo descubrí mirando los datos
 

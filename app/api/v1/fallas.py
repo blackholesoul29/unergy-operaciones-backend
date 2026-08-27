@@ -701,6 +701,7 @@ def _enviar_notificacion(
         accion=accion,
         frontend_url=settings.FRONTEND_URL,
         falla_id=falla.id,
+        proyecto_id=falla.proyecto_id,
     )
     resultado["sin_correos"] = False
 

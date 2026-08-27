@@ -287,7 +287,7 @@ def upsert_informe(
 
 @router.get("/envios", summary="Email send history")
 def list_envios(
-    tipo: Optional[str] = Query(None, description="Filter by email type (otp, informe, alarma)"),
+    tipo: Optional[str] = Query(None, description="Filter by email type (informe, alarma, falla, reporte_cgm, alerta_cgm, alerta_ppa_vencimiento, reset_password, prueba)"),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
@@ -657,6 +657,7 @@ def enviar_informe(
             periodo_display=inf.periodo_display or f"{inf.periodo_desde} — {inf.periodo_hasta}",
             aprobado_por=inf.aprobado_por_nombre or current_user.nombre,
             html_content=html_to_send,
+            proyecto_id=proyecto_id,
         )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc

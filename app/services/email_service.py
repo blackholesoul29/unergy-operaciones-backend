@@ -1,5 +1,5 @@
 """
-Servicio de email — informes aprobados, OTP, alarmas, reset password.
+Servicio de email — informes aprobados, alarmas, reset password, reporte CGM.
 """
 import logging
 import smtplib
@@ -94,8 +94,17 @@ def _log_send(
     error_msg: str | None = None,
     proyectos: list[str] | None = None,
     proyectos_total: int | None = None,
+    cliente_id: int | None = None,
+    operador_red_id: int | None = None,
+    proyecto_id: int | None = None,
 ) -> None:
-    """Log email send to database (fire-and-forget)."""
+    """Log email send to database (fire-and-forget).
+
+    cliente_id/operador_red_id/proyecto_id: FKs reales opcionales (auditoría
+    2026-08-26) -- antes email_envios no tenía ninguna, aunque cada llamador
+    ya resolvía el id correspondiente antes de loguear. Solo uno (o ninguno)
+    aplica según el tipo de envío -- no es un vínculo polimórfico real a
+    nivel de BD, son tres columnas nullable independientes."""
     try:
         from app.core.database import SessionLocal
         from sqlalchemy import text as sa_text
@@ -103,8 +112,10 @@ def _log_send(
         try:
             db.execute(sa_text("""
                 INSERT INTO email_envios
-                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total)
-                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total)
+                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total,
+                     cliente_id, operador_red_id, proyecto_id)
+                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total,
+                        :cliente_id, :operador_red_id, :proyecto_id)
             """), {
                 "to": to_email,
                 "cc": ",".join(cc) if cc else None,
@@ -115,6 +126,9 @@ def _log_send(
                 "ts": datetime.now(timezone.utc),
                 "proyectos": ",".join(proyectos) if proyectos else None,
                 "proyectos_total": proyectos_total,
+                "cliente_id": cliente_id,
+                "operador_red_id": operador_red_id,
+                "proyecto_id": proyecto_id,
             })
             db.commit()
         except Exception as e:
@@ -134,53 +148,6 @@ def _smtp_send(msg: MIMEMultipart, recipients: list[str]) -> None:
         server.starttls(context=context)
         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         server.sendmail(settings.SMTP_FROM, recipients, msg.as_string())
-
-
-def send_otp_email(*, to_email: str, codigo: str) -> None:
-    """
-    Envía el código OTP de 6 dígitos al correo indicado.
-    Si SMTP no está configurado, imprime el código en los logs del servidor
-    (útil para desarrollo/staging).
-    """
-    if not settings.SMTP_HOST:
-        print(f"[OTP] Código para {to_email}: {codigo}  (SMTP no configurado — solo en logs)")
-        return
-
-    subject = "Tu código de acceso — Monitoreo Unergy"
-    body_html = f"""
-<html>
-<body style="font-family:Arial,sans-serif;color:#1A0F2E;max-width:480px;margin:0 auto;padding:0">
-  <div style="background:#1A0F2E;padding:24px 28px;border-radius:10px 10px 0 0">
-    <div style="color:#F6FF72;font-size:20px;font-weight:800;letter-spacing:1px">UNERGY</div>
-    <div style="color:#6B5F80;font-size:11px;letter-spacing:.8px;text-transform:uppercase;margin-top:2px">Código de acceso</div>
-  </div>
-  <div style="background:#F7F4FD;padding:28px;border:1px solid #EDE8F5;border-top:none;border-radius:0 0 10px 10px">
-    <p style="margin:0 0 20px">Usa el siguiente código para ingresar al módulo de monitoreo:</p>
-    <div style="background:#fff;border:2px solid #915BD8;border-radius:10px;padding:20px;text-align:center;margin:0 0 20px">
-      <div style="font-size:38px;font-weight:900;letter-spacing:10px;color:#1A0F2E;font-family:monospace">{codigo}</div>
-      <div style="font-size:12px;color:#A89EC0;margin-top:8px">Válido por 10 minutos</div>
-    </div>
-    <p style="color:#6B5F80;font-size:12px;margin:0">
-      Si no solicitaste este código, ignora este correo.<br>
-      Contacto: <a href="mailto:operaciones@unergy.io" style="color:#915BD8">operaciones@unergy.io</a>
-    </p>
-  </div>
-</body>
-</html>"""
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = settings.SMTP_FROM
-    msg["To"] = to_email
-    msg.attach(MIMEText(body_html, "html", "utf-8"))
-
-    try:
-        _smtp_send(msg, [to_email])
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="otp", success=True)
-    except Exception as exc:
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="otp", success=False, error_msg=str(exc))
-        print(f"[OTP] Error enviando email a {to_email}: {exc} — código: {codigo}")
-        raise RuntimeError(f"No se pudo enviar el código: {exc}") from exc
 
 
 def send_reset_password_email(*, to_email: str, token: str) -> None:
@@ -225,8 +192,10 @@ def send_reset_password_email(*, to_email: str, token: str) -> None:
 
     try:
         _smtp_send(msg, [to_email])
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="reset_password", success=True)
     except Exception as exc:
         print(f"[RESET] Error enviando email a {to_email}: {exc}")
+        _log_send(to_email=to_email, cc=None, subject=subject, tipo="reset_password", success=False, error_msg=str(exc))
         raise RuntimeError(f"No se pudo enviar el email: {exc}") from exc
 
 
@@ -238,6 +207,7 @@ def send_informe_email(
     periodo_display: str,
     aprobado_por: str,
     html_content: str,
+    proyecto_id: int | None = None,
 ) -> None:
     """
     Envía el informe como email HTML con el contenido embebido.
@@ -295,9 +265,12 @@ def send_informe_email(
 
     try:
         _smtp_send(msg, recipients)
-        _log_send(to_email=to_emails[0], cc=cc, subject=subject, tipo="informe", success=True)
+        for to_email in to_emails:
+            _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=True, proyecto_id=proyecto_id)
     except Exception as exc:
-        _log_send(to_email=to_emails[0], cc=cc, subject=subject, tipo="informe", success=False, error_msg=str(exc))
+        for to_email in to_emails:
+            _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=False,
+                       error_msg=str(exc), proyecto_id=proyecto_id)
         raise
 
 
@@ -355,10 +328,12 @@ def send_alarm_notification_email(
 
     try:
         _smtp_send(msg, to_emails)
-        _log_send(to_email=to_emails[0], cc=to_emails[1:] or None, subject=subject, tipo="alarma", success=True)
+        for to_email in to_emails:
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="alarma", success=True)
         print(f"[ALARM_EMAIL] Sent to {to_emails} for {proyecto_nombre}")
     except Exception as exc:
-        _log_send(to_email=to_emails[0], cc=to_emails[1:] or None, subject=subject, tipo="alarma", success=False, error_msg=str(exc))
+        for to_email in to_emails:
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="alarma", success=False, error_msg=str(exc))
         print(f"[ALARM_EMAIL] Failed to send to {to_emails}: {exc}")
 
 
@@ -379,6 +354,7 @@ def send_falla_notification_email(
     accion: str = "creada",
     frontend_url: str = "",
     falla_id: int | None = None,
+    proyecto_id: int | None = None,
     # backwards-compat
     estado_color: str = "",
     tipo_nombre: str = "",
@@ -570,12 +546,13 @@ def send_falla_notification_email(
             msg["To"]      = to_email
             msg.attach(MIMEText(body_html, "html", "utf-8"))
             _smtp_send(msg, [to_email])
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=True)
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=True, proyecto_id=proyecto_id)
             enviados.append(to_email)
             logger.info("[FALLA_EMAIL] Sent to %s for %s", to_email, codigo_falla)
         except Exception as exc:
             err_msg = str(exc)
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=False, error_msg=err_msg)
+            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=False,
+                       error_msg=err_msg, proyecto_id=proyecto_id)
             errores.append(f"{to_email}: {err_msg}")
             logger.error("[FALLA_EMAIL] Failed to send to %s for %s: %s", to_email, codigo_falla, exc)
 
@@ -595,9 +572,17 @@ def send_reporte_cgm_email(
     filename_mensual: str | None = None,
     mes_str: str | None = None,
     adjuntos_extra: list[tuple[bytes, str]] | None = None,
+    cliente_id: int | None = None,
+    operador_red_id: int | None = None,
 ) -> None:
     """
     Envía el reporte CGM (Excel adjunto) a un operador de red o cliente.
+
+    cliente_id/operador_red_id: exactamente uno de los dos debería venir
+    poblado (según el tipo de destinatario que resolvió el llamador) -- se
+    pasan tal cual a _log_send() para dar trazabilidad real en email_envios
+    (auditoría 2026-08-26, antes no había ninguna FK, solo el nombre en texto
+    libre de destinatario_nombre/proyectos).
 
     excel_mensual_bytes/filename_mensual/mes_str son opcionales -- se usan
     solo cuando el envío cubre el último día de un mes, para adjuntar
@@ -680,15 +665,19 @@ def send_reporte_cgm_email(
 
     try:
         _smtp_send(msg, sobres)
-        _log_send(
-            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=True,
-            proyectos=proyectos, proyectos_total=proyectos_total,
-        )
+        for to_email in to_emails:
+            _log_send(
+                to_email=to_email, cc=cco or None, subject=subject, tipo="reporte_cgm", success=True,
+                proyectos=proyectos, proyectos_total=proyectos_total,
+                cliente_id=cliente_id, operador_red_id=operador_red_id,
+            )
     except Exception as exc:
-        _log_send(
-            to_email=to_emails[0], cc=cco or None, subject=subject, tipo="reporte_cgm", success=False,
-            error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
-        )
+        for to_email in to_emails:
+            _log_send(
+                to_email=to_email, cc=cco or None, subject=subject, tipo="reporte_cgm", success=False,
+                error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
+                cliente_id=cliente_id, operador_red_id=operador_red_id,
+            )
         raise RuntimeError(f"No se pudo enviar el reporte CGM: {exc}") from exc
 
 

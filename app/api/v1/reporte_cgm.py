@@ -411,6 +411,8 @@ def enviar_reporte_cgm(
                 filename_mensual=filename_mensual,
                 mes_str=mes_str,
                 adjuntos_extra=adjuntos_extra,
+                cliente_id=dest.id if dest.tipo == "cliente" else None,
+                operador_red_id=dest.id if dest.tipo == "operador" else None,
             )
             frts_con_error_conexion = {
                 fila["border frtcode"] for fila in filas_todas

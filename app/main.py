@@ -394,6 +394,19 @@ _PENDING_DDLS = [
     # NULL para otros tipos y para envíos previos a esta migración)
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos TEXT",
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyectos_total INTEGER",
+    # migration — email_envios: FKs reales en vez de solo texto libre (auditoría
+    # 2026-08-26) -- cada llamador de _log_send() ya resuelve estos ids antes de
+    # loguear (dest.id en reporte_cgm.py, falla.proyecto_id en fallas.py,
+    # proyecto_id en informes.py), simplemente nunca se los pasaba. Tres
+    # columnas nullable en vez de una FK polimórfica -- una tabla no puede
+    # apuntar a dos tablas distintas según el caso. Solo una (o ninguna) se
+    # llena por fila, según el tipo de envío.
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS cliente_id BIGINT REFERENCES clientes(id)",
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyecto_id BIGINT REFERENCES proyectos(id)",
+    "CREATE INDEX IF NOT EXISTS ix_email_envios_cliente_id ON email_envios (cliente_id) WHERE cliente_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_email_envios_operador_red_id ON email_envios (operador_red_id) WHERE operador_red_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_email_envios_proyecto_id ON email_envios (proyecto_id) WHERE proyecto_id IS NOT NULL",
     # migration — reporte_energia_{generacion,consumo}: fila-placeholder cuando
     # el clasificador falla (error_clasificacion) + resultado del envío a
     # Quoia/ASIC (enviado_quoia_*)
@@ -2590,7 +2603,6 @@ def _scheduled_representacion_alertas():
     try:
         from app.services.email_service import _smtp_send, _log_send
         from app.core.config import settings as _s
-        import smtplib, ssl
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
         if not _s.SMTP_HOST:
@@ -2711,12 +2723,7 @@ def _scheduled_representacion_alertas():
                 msg.attach(MIMEText(body_html, "html", "utf-8"))
 
                 try:
-                    context = ssl.create_default_context()
-                    with smtplib.SMTP(_s.SMTP_HOST, _s.SMTP_PORT) as server:
-                        server.ehlo()
-                        server.starttls(context=context)
-                        server.login(_s.SMTP_USER, _s.SMTP_PASSWORD)
-                        server.sendmail(_s.SMTP_FROM, _ALERTA_EMAILS, msg.as_string())
+                    _smtp_send(msg, _ALERTA_EMAILS)
                     _log_send(
                         to_email=_ALERTA_EMAILS[0],
                         cc=_ALERTA_EMAILS[1:],

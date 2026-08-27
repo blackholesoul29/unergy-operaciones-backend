@@ -1,14 +1,20 @@
-"""_PENDING_DDLS (app/main.py) -- corre en CADA arranque de la app,
-independiente de Alembic (ver _run_column_migrations()). Si una columna se
-elimina vía una migración Alembic pero su entrada original
-"ADD COLUMN IF NOT EXISTS" queda viva en _PENDING_DDLS, el próximo reinicio
-la vuelve a crear (vacía) -- ya pasó una vez de verdad (fronteras, migración
-097; feedback_pending_ddls_al_eliminar_columnas) y se repitió el 2026-08-26
-con fronteras.quoia_meter_id/estado_operacional (ya limpiado).
+"""_PENDING_DDLS (app/main.py) e init_db.py::add_columns() -- los DOS corren
+en CADA arranque de la app, independiente de Alembic (ver
+_run_column_migrations() y start.sh: "Running DB init + seed..." corre
+init_db.py ANTES de "alembic upgrade head"). Si una columna se elimina vía
+una migración Alembic pero su entrada original "ADD COLUMN IF NOT EXISTS"
+queda viva en cualquiera de los dos, el próximo reinicio la vuelve a crear
+(vacía) -- ya pasó una vez de verdad (fronteras, migración 097;
+feedback_pending_ddls_al_eliminar_columnas), se repitió el 2026-08-26 con
+fronteras.quoia_meter_id/estado_operacional (ya limpiado), y otra vez el
+2026-08-27 con proyectos.nombre_bitacora/nombre_clientes -- esta última en
+init_db.py, no en _PENDING_DDLS, así que la primera versión de este archivo
+(que solo vigilaba main.py) no la habría detectado.
 
-Estos tests corren el mismo cruce automatizado usado en esa limpieza, para
-que una futura eliminación de columna que se olvide de _PENDING_DDLS falle
-acá en vez de resucitar en producción semanas después."""
+Estos tests corren el mismo cruce automatizado usado en esas limpiezas,
+sobre AMBAS fuentes, para que una futura eliminación de columna que se
+olvide de alguna de las dos falle acá en vez de resucitar en producción
+semanas después."""
 from __future__ import annotations
 
 import glob
@@ -69,6 +75,24 @@ def _tablas_de_bucle(cuerpo_upgrade: str, archivo_completo: str, var: str) -> li
     return re.findall(r"['\"](\w+)['\"]", m_lista.group(1))
 
 
+def _parse_init_db_add_columns():
+    """[(indice_de_linea, tabla, columna, 'ADD'), ...] dentro de
+    init_db.py::add_columns() -- mismo formato que _parse_pending_ddls() para
+    poder mezclar ambas fuentes. init_db.py nunca tiene DROP (solo agrega),
+    así que no hace falta buscarlo."""
+    init_db_py = (REPO_ROOT / "init_db.py").read_text(encoding="utf-8")
+    inicio = init_db_py.index("def add_columns():")
+    fin = init_db_py.index("\n\n", init_db_py.index("stmts = [", inicio))
+    lineas = init_db_py[inicio:fin].split("\n")
+
+    eventos = []
+    for i, linea in enumerate(lineas):
+        m = re.search(r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)", linea)
+        if m:
+            eventos.append((i, m.group(1), m.group(2), "ADD"))
+    return eventos
+
+
 def _parse_alembic_upgrade_drops():
     """{(tabla, columna)} -- todo lo que algún upgrade() de Alembic dropea
     (downgrade() se ignora a propósito: nunca corre en producción)."""
@@ -80,6 +104,18 @@ def _parse_alembic_upgrade_drops():
             continue
         cuerpo = m_up.group(1)
         for tabla, col in re.findall(r"op\.drop_column\(\s*['\"](\w+)['\"]\s*,\s*['\"](\w+)['\"]\s*\)", cuerpo):
+            drops.add((tabla, col))
+        # Buena parte de las migraciones de este repo dropean columnas con SQL
+        # crudo (`op.execute("ALTER TABLE x DROP COLUMN [IF EXISTS] y")`) en
+        # vez de la API declarativa `op.drop_column()` -- ver 101/104/105 y
+        # ~20 migraciones más (013, 047, 061, 082, etc.). Sin este patrón, el
+        # cruce de abajo no detectaba NINGUNA de esas -- confirmado al probar
+        # el guard reintroduciendo a mano nombre_bitacora en init_db.py
+        # (2026-08-27): el test seguía en verde porque no reconocía el DROP
+        # de la migración 105 como tal.
+        for tabla, col in re.findall(
+            r"ALTER TABLE (\w+) DROP COLUMN(?: IF EXISTS)? (\w+)", cuerpo,
+        ):
             drops.add((tabla, col))
         for bm in re.finditer(
             r"with op\.batch_alter_table\(\s*(['\"]?)(\w+)\1[^)]*\)\s*as\s*batch_op\s*:\n"
@@ -96,7 +132,7 @@ def _parse_alembic_upgrade_drops():
 
 
 def test_ninguna_columna_dropeada_por_alembic_sigue_viva_en_pending_ddls():
-    eventos = _parse_pending_ddls()
+    eventos = _parse_pending_ddls() + _parse_init_db_add_columns()
     adds_vivos = {(tabla, col) for _, tabla, col, accion in eventos if accion == "ADD"}
     dropeadas_por_alembic = _parse_alembic_upgrade_drops()
 
@@ -104,11 +140,12 @@ def test_ninguna_columna_dropeada_por_alembic_sigue_viva_en_pending_ddls():
 
     assert not resurrecciones, (
         "Estas columnas fueron eliminadas por una migración Alembic (upgrade()) "
-        "pero _PENDING_DDLS todavía tiene un 'ADD COLUMN IF NOT EXISTS' vivo -- "
-        "el próximo arranque de la app las va a resucitar vacías. Borrá la "
-        "entrada de _PENDING_DDLS, o si la columna sí debería seguir existiendo "
-        "(porque una migración posterior la re-creó a propósito), agregá el par "
-        f"a RESURRECCIONES_LEGITIMAS en este archivo: {sorted(resurrecciones)}"
+        "pero _PENDING_DDLS (app/main.py) o add_columns() (init_db.py) todavía "
+        "tiene un 'ADD COLUMN IF NOT EXISTS' vivo -- el próximo arranque de la "
+        "app las va a resucitar vacías. Borrá esa entrada, o si la columna sí "
+        "debería seguir existiendo (porque una migración posterior la re-creó "
+        "a propósito), agregá el par a RESURRECCIONES_LEGITIMAS en este "
+        f"archivo: {sorted(resurrecciones)}"
     )
 
 

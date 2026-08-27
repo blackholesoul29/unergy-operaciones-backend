@@ -105,6 +105,20 @@ def test_fuente_no_medidor_no_toca_los_snapshots(db):
     assert detalle.medidor_usado == "inversores"
 
 
+def test_fuente_reconectador_queda_etiquetada_no_generica(db):
+    """'Reconectador' es una fuente manual válida (2026-08-27, dropdown
+    'Reportar con otra fuente') -- sin registrarla en FUENTES_MANUALES_VALIDAS
+    caería en el genérico 'editado_manualmente', perdiendo la etiqueta real."""
+    viejo_principal = [100.0] * 24
+    _frontera_y_reporte(db, "principal", curva_medidor_principal=viejo_principal, curva_medidor_respaldo=None, curva_final=viejo_principal)
+
+    body = EditarCurvaRequest(curva_final=[15.0] * 24, fuente="reconectador")
+    detalle = re_api.editar_curva(frontera_id=1, body=body, fecha=date(2026, 8, 20), db=db, _=None)
+
+    assert detalle.medidor_usado == "reconectador"
+    assert detalle.curva_medidor_principal == viejo_principal, "no es una lectura del medidor, no debe pisar el snapshot"
+
+
 def test_sin_columna_respaldo_llena_sigue_la_logica_automatica(db):
     """Si la persona no toca la columna de Respaldo (queda None, no una
     lista de 24 nulos), se recalcula con curva_respaldo_a_reportar() --

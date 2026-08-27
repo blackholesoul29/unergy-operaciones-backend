@@ -612,7 +612,7 @@ def editar_curva(
     # edición celda por celda sin pasar por ahí, o si se usó 'Matriz de
     # ceros' (no es una fuente real, solo un valor de reemplazo), queda el
     # genérico "Editado manualmente".
-    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico"}
+    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico", "reconectador"}
     rep.medidor_usado = body.fuente if body.fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
     # Si la fuente elegida es un medidor, lo que se acaba de guardar pasa a
     # ser el nuevo snapshot de ESE medidor -- si no se actualiza, 'Detalle de

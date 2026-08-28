@@ -14,16 +14,16 @@ Las tres van con guarda `has_table` porque en este backend `create_all()` corre
 en el arranque y puede haberlas creado antes de que llegue la migracion (mismo
 criterio que 085_contrato_frontera y 086_alertas_vencimiento_ppa).
 
-Revision ID: 120
-Revises: 119
+Revision ID: 124
+Revises: 123
 Create Date: 2026-08-27
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "120"
-down_revision = "119"
+revision = "124"
+down_revision = "123"
 branch_labels = None
 depends_on = None
 

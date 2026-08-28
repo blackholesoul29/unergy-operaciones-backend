@@ -12,13 +12,14 @@
 | `Backend Operaciones` | `feat/registros-proyecto-documentos` | `170e6c9` |
 | `unergy-operaciones-frontend` | `feat/registros-proyecto-documentos` | `b1ab43d` |
 
-**Sobre la cadena Alembic:** el repo tiene **tres heads** (`019`, `036` y la nueva) más un
-`down_revision` huérfano (`5650ccf73b5c`). Los tres preexisten en `origin/master`: esta rama
-agrega **una sola** revisión. Detalle y forma de medirlo en §10 de
-`docs/registros-proyecto-decisiones.md`.
+**Sobre la cadena Alembic:** `origin/master` tiene **un solo head** (`123`), sin colgantes ni
+ids repetidos. La migración se renumeró de `120` a **`124`** porque upstream ocupó la 120 el
+2026-08-28. Los dos tests de cadena fallan *en esta rama* porque su árbol todavía no contiene
+las revisiones 120–123; en el estado post-merge la cadena resuelve con un único head. Detalle
+en §10 de `docs/registros-proyecto-decisiones.md`.
 
 **Nada fue empujado a ningún remoto.** El commit del backend contiene la migración
-Alembic `120_registros_proyecto_expediente.py`, así que no debe empujarse sin revisión
+Alembic `124_registros_proyecto_expediente.py`, así que no debe empujarse sin revisión
 explícita.
 
 `master` en el backend quedó exactamente en `origin/master` (`140b274`), sin tocar.
@@ -40,7 +41,7 @@ con su evidencia). Este archivo es solo el traspaso operativo.
 Todo el alcance pedido, verificado:
 
 - **Backend** — 3 tablas (`documentos_proyecto`, `documentos_proyecto_archivo`,
-  `parametros_proyecto`), migración 120, 11 endpoints CRUD bajo
+  `parametros_proyecto`), migración 124, 11 endpoints CRUD bajo
   `/api/v1/registros-proyecto`, catálogos de ítems y parámetros, y el mapa de
   deduplicación documento→parámetro.
 - **Frontend** — `/registros` (índice con avance por proceso) y `/registros/:proyectoId`
@@ -55,7 +56,7 @@ Todo el alcance pedido, verificado:
 | Tests nuevos | 62 pasan (eran 60; la cifra original de 63 estaba mal contada) |
 | Tests de registros en total | 92 pasan (incluye `registros_cnd`) |
 | Suite completa del backend | 2302 pasan, 4 saltados |
-| Cadena Alembic | la rama agrega **una** revisión; el repo tiene 3 heads, ver abajo |
+| Cadena Alembic | resuelve post-merge (head único `124`); en la rama sola falla, ver abajo |
 | Build del frontend | `npm run build` OK |
 
 ---
@@ -98,7 +99,7 @@ npm run build
 ```
 
 Después: revisar `docs/registros-proyecto-decisiones.md` (§1, §2 y §7), decidir sobre los
-8 pendientes de arriba, y recién ahí mergear y correr la migración 120.
+8 pendientes de arriba, y recién ahí mergear y correr la migración 124.
 
 ---
 

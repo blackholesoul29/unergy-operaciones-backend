@@ -85,7 +85,8 @@ proyectos (existente)
             documento_origen_id ──> documentos_proyecto
 ```
 
-**Migración:** `alembic/versions/120_registros_proyecto_expediente.py` (head anterior: 119).
+**Migración:** `alembic/versions/124_registros_proyecto_expediente.py` (head anterior: 123).
+Renumerada desde la `120` original el 2026-08-28; ver §10.2.
 
 ### Por qué un ítem y sus archivos son dos tablas
 
@@ -239,7 +240,7 @@ app/services/registros_proyecto/
     mapa_documentos.py                                  el mapa de deduplicación
     service.py                                          lógica
 scripts/generar_catalogo_parametros.py                  regenera el catálogo SIC
-alembic/versions/120_registros_proyecto_expediente.py   migración
+alembic/versions/124_registros_proyecto_expediente.py   migración
 tests/test_registros_proyecto_catalogo.py               31 tests
 tests/test_registros_proyecto_service.py                19 tests
 tests/test_registros_proyecto_api.py                    13 tests
@@ -284,8 +285,8 @@ el mouse dice en cuáles — que es lo que explica al usuario por qué solo lo e
 |---|---|
 | Tests nuevos | **62**, todos en verde |
 | Tests de registros en total (incluye `registros_cnd`) | **92**, todos en verde |
-| Suite completa del backend | ver §10 |
-| Cadena Alembic | ver §10 |
+| Suite completa del backend | **2316 pasan, 4 saltados, 2 fallan** — los 2 son `test_alembic_chain_integrity`, explicados en §10.3 |
+| Cadena Alembic | un head post-merge (`124`); ver §10 |
 | Build del frontend | `npm run build` OK, chunks generados |
 
 **Corrección (2026-08-28):** la primera versión de este documento decía **63 tests nuevos**.
@@ -537,55 +538,82 @@ Los demás ítems del expediente están `CONFIRMADO` contra la carpeta real.
 
 ---
 
-## 10. Verificación: el estado real de la cadena Alembic
+## 10. La cadena Alembic y la renumeración a 124
+
+### 10.1 La cadena de `origin/master` está limpia
 
 La primera versión de este documento decía que la cadena estaba *"íntegra (120 sobre head
-119)"*. Es cierto **para la línea principal**, pero deja fuera algo que conviene saber
-antes de correr migraciones: **el repositorio tiene tres heads, no uno.**
-
-Contando las revisiones del árbol de trabajo:
-
-```
-revisiones totales:  123
-heads:               019, 036, 120
-down_revision huérfano:  5650ccf73b5c  (referenciado, pero ese archivo no existe)
-```
-
-**Nada de esto lo introdujo esta rama.** Lo mismo calculado sobre `origin/master`:
+119)"*. Una revisión posterior afirmó lo contrario —que había tres heads y un
+`down_revision` huérfano—. **Esa segunda afirmación era falsa**, producto de un parser
+propio mal escrito. Medido correctamente:
 
 ```
-revisiones totales:  122
-heads:               019, 036, 119
-down_revision huérfano:  5650ccf73b5c
+origin/master:  127 revisiones,  heads = ['123'],  colgantes = ninguno,  duplicados = ninguno
 ```
 
-Es decir: `019`, `036` y el huérfano `5650ccf73b5c` **ya venían así en `origin/master`**.
-Esta rama agrega **exactamente una revisión** y mueve la punta de la línea principal de
-`119` a la nueva. Los otros dos heads y el huérfano quedan igual que estaban.
+Un solo head, sin colgantes, sin ids repetidos. **La cadena upstream está sana.**
 
-**Qué significa en la práctica:** un `alembic upgrade head` puede fallar por ambigüedad de
-heads, y eso pasaría con o sin esta rama. Sanearlo (unir los heads con una revisión de
-merge y resolver el huérfano) es trabajo del módulo que los dejó así, no de este
-expediente. Se deja medido y documentado, no arreglado.
+**Qué falló en la medición anterior.** El script ad-hoc tenía dos errores, y cada uno
+fabricó un problema inexistente:
 
-**Cómo reproducir la medición** (sin Alembic instalado; el paquete queda ensombrecido por
-la carpeta `alembic/` del repo):
+| Error del parser | Fantasma que produjo |
+|---|---|
+| Tomaba solo el **primer** padre de `down_revision`. `037_contactos_unificados.py` es una revisión de *merge* con dos padres — `("019", "036")` — así que `036` nunca entró como referenciado | `019` y `036` parecían heads sueltos |
+| Exigía `^revision =`. El archivo `5650ccf73b5c_add_starlink_facturas.py` usa la forma anotada `revision: str = ...`, así que la revisión no se registró | `5650ccf73b5c` parecía un `down_revision` huérfano |
 
-```bash
-python - <<'PY'
-import re, glob, collections
-downs, revs = {}, collections.Counter()
-for p in glob.glob('alembic/versions/*.py'):
-    s = open(p, encoding='utf-8', errors='replace').read()
-    r = re.search(r'^revision\s*=\s*["\']([^"\']+)', s, re.M)
-    d = re.search(r'^down_revision\s*=\s*(?:["\']([^"\']+)|None)', s, re.M)
-    if r:
-        revs[r.group(1)] += 1
-        downs[r.group(1)] = d.group(1) if (d and d.group(1)) else None
-parents = {v for v in downs.values() if v}
-print('revisiones:', len(revs))
-print('ids duplicados:', [k for k, v in revs.items() if v > 1] or 'ninguno')
-print('heads:', sorted(r for r in revs if r not in parents))
-print('huérfanos:', [d for d in downs.values() if d and d not in revs] or 'ninguno')
-PY
+**La lección concreta:** el repo **ya tiene** un test que hace esta verificación bien,
+`tests/test_alembic_chain_integrity.py` (estático, sin BD ni Alembic instalado). Había que
+correr ese, no escribir un parser nuevo. Sus tres pruebas —ids únicos, un solo head,
+`down_revision` que resuelven— cubren exactamente esto y contemplan tanto los merges de
+varios padres como la forma anotada.
+
+### 10.2 La renumeración: de 120 a 124
+
+Cuando se escribió la migración, el head era `119` y el número libre era el `120`. Para el
+2026-08-28 upstream ya había metido cuatro revisiones más:
+
 ```
+120_email_envios_cliente_id_set_null      121_drop_clientes_info_bancaria
+122_generalizar_documentos_comerciales    123_eliminar_cliente_servicios
+```
+
+O sea que la `120` original **colisionaba de frente** con `120_email_envios_cliente_id_set_null`.
+La migración pasó a ser:
+
+```
+alembic/versions/124_registros_proyecto_expediente.py
+revision      = "124"
+down_revision = "123"
+```
+
+**Verificación del estado post-merge** (las 127 revisiones de `origin/master` más esta):
+
+```
+128 revisiones,  ids duplicados = ninguno,  heads = ['124'],  colgantes = ninguno
+cadena desde 124 hasta la raíz: 88 pasos, resuelve
+```
+
+### 10.3 Por qué el test de cadena falla *en esta rama* (y por qué está bien)
+
+Corriendo la suite en la rama tal como está:
+
+```
+FAILED tests/test_alembic_chain_integrity.py::test_all_down_revisions_resolve
+FAILED tests/test_alembic_chain_integrity.py::test_single_head
+```
+
+**No es un defecto de la migración.** La rama salió de un commit anterior a que existieran
+las revisiones 120–123, así que su árbol no las contiene: `down_revision = "123"` apunta a
+un archivo que en esta rama no está, y `119` queda sin hijo. Medido sobre la rama sola:
+
+```
+heads = ['119', '124'],  colgantes = [('124', '123')]
+```
+
+Las dos fallas **desaparecen en cuanto la rama incorpore master**, que es el estado
+verificado en §10.2. Se dejó así a propósito: la alternativa —apuntar `down_revision` a
+`119` para que la rama se vea verde— dejaría dos heads (`123` y `124`) *después* del merge,
+que es cuando de verdad importa. Se prefiere que el número sea correcto donde va a vivir.
+
+**Antes de mergear:** actualizar la rama contra master y volver a correr
+`pytest tests/test_alembic_chain_integrity.py`. Debe dar los 3 en verde. Si no, no mergear.

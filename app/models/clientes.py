@@ -45,11 +45,6 @@ class Cliente(Base):
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # Banking info
-    banco: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    tipo_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    numero_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    titular_cuenta: Mapped[str | None] = mapped_column(String(255), nullable=True)
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)

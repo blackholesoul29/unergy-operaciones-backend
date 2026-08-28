@@ -364,12 +364,8 @@ _PENDING_DDLS = [
     # migration — Password recovery fields on usuarios
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)",
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMPTZ",
-    # migration — Client contact & banking fields
+    # migration — Client contact fields
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS departamento VARCHAR(100)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS banco VARCHAR(200)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tipo_cuenta VARCHAR(50)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS numero_cuenta VARCHAR(50)",
-    "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS titular_cuenta VARCHAR(255)",
     # migration — Notificaciones table
     "CREATE TYPE tipo_notificacion_enum AS ENUM ('alerta', 'info', 'accion')",
     "CREATE INDEX IF NOT EXISTS ix_notificaciones_usuario ON notificaciones (usuario_id)",

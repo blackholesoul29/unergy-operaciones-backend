@@ -60,10 +60,6 @@ class ClienteCreate(BaseModel):
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
-    banco: Optional[str] = None
-    tipo_cuenta: Optional[str] = None
-    numero_cuenta: Optional[str] = None
-    titular_cuenta: Optional[str] = None
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
@@ -121,10 +117,6 @@ class ClienteBase(BaseModel):
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
-    banco: Optional[str] = None
-    tipo_cuenta: Optional[str] = None
-    numero_cuenta: Optional[str] = None
-    titular_cuenta: Optional[str] = None
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None

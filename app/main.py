@@ -416,7 +416,7 @@ _PENDING_DDLS = [
     # columnas nullable en vez de una FK polimórfica -- una tabla no puede
     # apuntar a dos tablas distintas según el caso. Solo una (o ninguna) se
     # llena por fila, según el tipo de envío.
-    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS cliente_id BIGINT REFERENCES clientes(id)",
+    "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS cliente_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL",
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS operador_red_id BIGINT REFERENCES operadores_red(id)",
     "ALTER TABLE email_envios ADD COLUMN IF NOT EXISTS proyecto_id BIGINT REFERENCES proyectos(id)",
     "CREATE INDEX IF NOT EXISTS ix_email_envios_cliente_id ON email_envios (cliente_id) WHERE cliente_id IS NOT NULL",

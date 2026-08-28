@@ -179,30 +179,53 @@ def update_cliente(id: int, data: ClienteUpdate, db: Session = Depends(get_db), 
     return _get_cliente_or_404(id, db)
 
 
+# Tablas con FK a clientes.id en NO ACTION (sin relationship de cascada en el
+# modelo) que de verdad deben BLOQUEAR el borrado -- representan una relación
+# de negocio real, no solo un log. auditoría de Clientes 2026-08-28: antes de
+# esto, el único mensaje posible asumía siempre "es inversionista de un
+# proyecto", aunque en realidad lo bloqueara una Oportunidad (mensaje
+# incorrecto para ese caso). email_envios (otro NO ACTION real, un log de
+# correos sin ninguna relación de negocio) se corrigió aparte a SET NULL
+# (migración 120) -- no debía bloquear nunca.
+_TABLAS_BLOQUEAN_BORRADO_CLIENTE = [
+    ("proyecto_inversionistas", "cliente_id", "es inversionista de uno o más proyectos"),
+    ("oportunidades", "cliente_id", "tiene una o más oportunidades comerciales registradas"),
+]
+
+
+def _motivo_bloqueo_borrado_cliente(db: Session, id: int) -> str | None:
+    for tabla, columna, motivo in _TABLAS_BLOQUEAN_BORRADO_CLIENTE:
+        existe = db.execute(
+            text(f"SELECT 1 FROM {tabla} WHERE {columna} = :id LIMIT 1"), {"id": id}
+        ).first()
+        if existe:
+            return motivo
+    return None
+
+
 @router.delete("/{id}", status_code=204)
 def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     cliente = db.query(Cliente).filter(Cliente.id == id).first()
     if not cliente:
         raise HTTPException(404, "Cliente no encontrado")
 
+    motivo = _motivo_bloqueo_borrado_cliente(db, id)
+    if motivo:
+        raise HTTPException(409, f"No se puede eliminar: este cliente {motivo}. Desvincúlalo primero.")
+
     # Vínculos inofensivos: punteros de contacto (CGM/operacional/liquidación)
     # que un proyecto tenga apuntando a este cliente. Se borran en cascada --
     # el proyecto simplemente vuelve a usar sus inversionistas por defecto.
     # Contactos/servicios/documentos propios ya cascaden vía relationship().
-    # proyecto_inversionistas (participación real) NO se toca: si el cliente
-    # es inversionista de un proyecto, el borrado debe seguir bloqueado.
     db.query(ProyectoAreaContacto).filter(ProyectoAreaContacto.cliente_id == id).delete()
 
     db.delete(cliente)
     try:
         db.commit()
     except IntegrityError:
+        # Backstop ante alguna otra relación no cubierta arriba.
         db.rollback()
-        raise HTTPException(
-            409,
-            "No se puede eliminar: este cliente es inversionista de uno o más "
-            "proyectos. Desvincúlalo primero.",
-        )
+        raise HTTPException(409, "No se puede eliminar: este cliente tiene registros asociados. Desvincúlalo primero.")
 
 
 @router.post("/{id}/test-correo")

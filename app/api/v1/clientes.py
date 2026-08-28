@@ -910,6 +910,21 @@ def merge_clientes(
     if ppa_compra or ppa_venta:
         movimientos.append({"tabla": "ppa_contratos", "a_mover": ppa_compra + ppa_venta, "descartadas_por_colision": 0})
 
+    # contratos_servicio: triple FK (contratante_id / prestador_id / inversionista_id),
+    # tampoco tiene unicidad por cliente -- varios contratos pueden compartir el mismo
+    # contratante/prestador/inversionista sin problema. Auditoria de Clientes 2026-08-27:
+    # faltaba aca, asi que fusionar un cliente que fuera parte de algun contrato de
+    # servicio lo dejaba apuntando al perdedor (ya dado de baja, invisible en la UI).
+    cs_contratante = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE contratante_id=:loser", p)
+    cs_prestador = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE prestador_id=:loser", p)
+    cs_inversionista = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE inversionista_id=:loser", p)
+    if cs_contratante or cs_prestador or cs_inversionista:
+        movimientos.append({
+            "tabla": "contratos_servicio",
+            "a_mover": cs_contratante + cs_prestador + cs_inversionista,
+            "descartadas_por_colision": 0,
+        })
+
     # Campos escalares vacíos en el ganador: qué se copiaría del perdedor.
     campos_copiados = []
     for f in _MERGE_CLIENTE_SCALAR_UNIQUE + _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY:
@@ -935,6 +950,11 @@ def merge_clientes(
         # 1) ppa_contratos: doble FK
         db.execute(text("UPDATE ppa_contratos SET comprador_id=:keeper WHERE comprador_id=:loser"), p)
         db.execute(text("UPDATE ppa_contratos SET vendedor_id=:keeper WHERE vendedor_id=:loser"), p)
+
+        # 1b) contratos_servicio: triple FK
+        db.execute(text("UPDATE contratos_servicio SET contratante_id=:keeper WHERE contratante_id=:loser"), p)
+        db.execute(text("UPDATE contratos_servicio SET prestador_id=:keeper WHERE prestador_id=:loser"), p)
+        db.execute(text("UPDATE contratos_servicio SET inversionista_id=:keeper WHERE inversionista_id=:loser"), p)
 
         # 2) Tablas con colisión por clave compuesta: descartar la del perdedor, mover el resto
         for t, keys in _MERGE_CLIENTE_COMPOSITE:

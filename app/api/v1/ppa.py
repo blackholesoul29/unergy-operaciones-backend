@@ -12,6 +12,7 @@ from app.models.cumplimiento import CumplimientoMensual
 logger = logging.getLogger(__name__)
 from app.models.clientes import Cliente
 from app.models.contratos import ppa_contrato_proyectos_table, IppMensual, PPAResponsable
+from app.services.documentos import set_enlace_documento
 from pydantic import BaseModel
 from app.schemas.ppa import (
     PPAContratoCreate, PPAContratoUpdate, PPAContratoOut,
@@ -31,6 +32,9 @@ def _load_options():
         selectinload(PPAContrato.vendedor),
         selectinload(PPAContrato.tarifas),
         selectinload(PPAContrato.compromisos_energia),
+        # El @property `carpeta_link` recorre esta relacion en cada fila
+        # serializada -- sin esto, un listado dispara un SELECT por fila.
+        selectinload(PPAContrato.documentos_comerciales),
     ]
 
 
@@ -139,12 +143,16 @@ def create_contrato(
     _=Depends(get_current_user),
 ):
     payload = data.model_dump(exclude={"proyecto_ids"})
+    carpeta_link = payload.pop("carpeta_link", None)
     contrato = PPAContrato(**payload)
     db.add(contrato)
     db.flush()
     _validar_fecha_fin_vs_asic(contrato, db)
     _set_proyectos(contrato, data.proyecto_ids, db)
     _sync_partes_from_clientes(contrato, db)
+    if carpeta_link:
+        set_enlace_documento(db, ppa_contrato_id=contrato.id, url=carpeta_link,
+                              nombre="Enlace Drive del contrato")
     db.commit()
     return _get_contrato_or_404(contrato.id, db)
 
@@ -475,8 +483,13 @@ def update_contrato(
 ):
     contrato = _get_contrato_or_404(id, db)
     update_data = data.model_dump(exclude_unset=True, exclude={"proyecto_ids"})
+    carpeta_link_set = "carpeta_link" in update_data
+    carpeta_link = update_data.pop("carpeta_link", None)
     for k, v in update_data.items():
         setattr(contrato, k, v)
+    if carpeta_link_set:
+        set_enlace_documento(db, ppa_contrato_id=contrato.id, url=carpeta_link,
+                              nombre="Enlace Drive del contrato")
     if data.proyecto_ids is not None:
         _set_proyectos(contrato, data.proyecto_ids, db)
     _sync_partes_from_clientes(contrato, db)

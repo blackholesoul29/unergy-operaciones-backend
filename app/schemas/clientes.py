@@ -64,7 +64,6 @@ class ClienteCreate(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
-    rut_url: Optional[str] = None
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
     contactos: list[ContactoParaClienteCreate] = []
@@ -102,7 +101,11 @@ class ClienteDocumentoUpdate(BaseModel):
 
 class ClienteDocumentoOut(ClienteDocumentoCreate):
     id: int
-    cliente_id: int
+    # Nullable desde la generalizacion (migracion 122): un documento puede
+    # pertenecer a un ContratoServicio o un PPAContrato en vez de a un Cliente.
+    cliente_id: Optional[int] = None
+    contrato_servicio_id: Optional[int] = None
+    ppa_contrato_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -121,7 +124,6 @@ class ClienteBase(BaseModel):
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
-    rut_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

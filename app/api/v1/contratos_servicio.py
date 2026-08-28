@@ -13,6 +13,7 @@ from app.schemas.contratos_servicio import (
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
 from app.utils.nombre_matching import mejor_candidato, core_tokens
+from app.services.documentos import set_enlace_documento
 
 router = APIRouter(prefix="/contratos-servicio", tags=["ContratoServicio"])
 
@@ -26,6 +27,10 @@ def _load_options():
         selectinload(ContratoServicio.proyecto),
         selectinload(ContratoServicio.fronteras),
         selectinload(ContratoServicio.inversionista),
+        # Igual: el @property `enlace_drive` recorre esta relacion en cada
+        # fila serializada -- sin esto, un listado de ~112 contratos de
+        # representacion dispara un SELECT por fila.
+        selectinload(ContratoServicio.documentos_comerciales),
     ]
 
 
@@ -174,11 +179,15 @@ def create_contrato(
 ):
     payload = data.model_dump()
     frontera_ids = payload.pop("frontera_ids", []) or []
+    enlace_drive = payload.pop("enlace_drive", None)
     contrato = ContratoServicio(**payload)
     db.add(contrato)
     db.flush()
     _sync_partes(contrato, db)
     _sync_fronteras(contrato, frontera_ids, db)
+    if enlace_drive:
+        set_enlace_documento(db, contrato_servicio_id=contrato.id, url=enlace_drive,
+                              nombre="Enlace Drive del contrato")
     db.commit()
     return _get_or_404(contrato.id, db)
 
@@ -287,6 +296,12 @@ def fusionar_representacion(
 
         conservado = por_id[r["conservar"]]
         for campo, valor in r["valores"].items():
+            if campo == "enlace_drive":
+                # No es una columna real (property de solo lectura, ver
+                # services/documentos.py) -- no admite setattr.
+                set_enlace_documento(db, contrato_servicio_id=conservado.id, url=valor,
+                                      nombre="Enlace Drive del contrato")
+                continue
             setattr(conservado, campo, valor)
             if campo in ("indexacion_cgm", "indexacion_representacion"):
                 flag_modified(conservado, campo)
@@ -317,8 +332,13 @@ def update_contrato(
     payload = data.model_dump(exclude_unset=True)
     # None/ausente = no tocar las fronteras actuales; [] = desvincular todas
     frontera_ids = payload.pop("frontera_ids", None)
+    enlace_drive_set = "enlace_drive" in payload
+    enlace_drive = payload.pop("enlace_drive", None)
     for k, v in payload.items():
         setattr(contrato, k, v)
+    if enlace_drive_set:
+        set_enlace_documento(db, contrato_servicio_id=contrato.id, url=enlace_drive,
+                              nombre="Enlace Drive del contrato")
     _sync_partes(contrato, db)
     if frontera_ids is not None:
         _sync_fronteras(contrato, frontera_ids, db)

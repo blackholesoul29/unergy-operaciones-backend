@@ -94,9 +94,25 @@ _PENDING_DDLS = [
     "CREATE TYPE tipo_servicio_cliente_enum AS ENUM ('operacion', 'representacion', 'cgm', 'promotor')",
     "CREATE TYPE tipo_documento_cliente_enum AS ENUM ('oferta', 'contrato')",
     "CREATE TYPE estado_documento_cliente_enum AS ENUM ('borrador', 'enviado', 'aceptado', 'firmado', 'rechazado')",
-            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rut_url VARCHAR(1000)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
+    # migration 122 — generalizacion de documentos: cliente_documentos_comerciales
+    # tambien puede pertenecer a un ContratoServicio o un PPAContrato (ver
+    # models/clientes.py:ClienteDocumentoComercial). cliente_id se vuelve nullable.
+    "ALTER TABLE cliente_documentos_comerciales ALTER COLUMN cliente_id DROP NOT NULL",
+    "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS contrato_servicio_id BIGINT REFERENCES contratos_servicio(id) ON DELETE CASCADE",
+    "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS ppa_contrato_id BIGINT REFERENCES ppa_contratos(id) ON DELETE CASCADE",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_documentos_contrato_servicio ON cliente_documentos_comerciales (contrato_servicio_id)",
+    "CREATE INDEX IF NOT EXISTS ix_cliente_documentos_ppa_contrato ON cliente_documentos_comerciales (ppa_contrato_id)",
+    """DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                         WHERE conname = 'ck_documento_un_solo_dueno') THEN
+           ALTER TABLE cliente_documentos_comerciales ADD CONSTRAINT ck_documento_un_solo_dueno
+             CHECK (CAST(cliente_id IS NOT NULL AS INTEGER)
+                    + CAST(contrato_servicio_id IS NOT NULL AS INTEGER)
+                    + CAST(ppa_contrato_id IS NOT NULL AS INTEGER) = 1);
+         END IF;
+       END $$""",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'rut'",
     "ALTER TYPE tipo_documento_cliente_enum ADD VALUE IF NOT EXISTS 'certificado_bancario'",
     "ALTER TYPE periodicidad_enum ADD VALUE IF NOT EXISTS 'semestral'",
@@ -342,9 +358,8 @@ _PENDING_DDLS = [
     # created_at DESC en el 100% de sus páginas, así que necesita su propio índice.
     "CREATE INDEX IF NOT EXISTS ix_fallas_activas_created ON fallas (created_at DESC) WHERE deleted_at IS NULL",
     "CREATE INDEX IF NOT EXISTS ix_liquidaciones_deleted ON liquidaciones (deleted_at) WHERE deleted_at IS NOT NULL",
-    # migration — PPA tipo_contrato + carpeta_link for purchase contract support
+    # migration — PPA tipo_contrato for purchase contract support
     "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
-    "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",
     "UPDATE ppa_contratos SET tipo_contrato = 'venta' WHERE tipo_contrato IS NULL",
     # migration — ASIC coexistence flag for multi-plant SIC codes
     "ALTER TABLE asic_solicitudes ADD COLUMN IF NOT EXISTS reemplaza_anterior BOOLEAN NOT NULL DEFAULT TRUE",
@@ -2171,6 +2186,7 @@ def _run_cgm_seed() -> None:
             indice.indexar(reg)
 
         insertados = 0
+        docs_pendientes = []  # (nuevo, enlace) -- se crean tras el commit, cuando nuevo.id ya existe
         for c in _CGM_CONTRATOS:
             nombre  = c.get("proyecto_nombre", "")
             inv     = c.get("inversionista_nombre")
@@ -2205,9 +2221,11 @@ def _run_cgm_seed() -> None:
                 indexacion_cgm=c.get("indexacion_cgm") or [],
                 indexacion_representacion=c.get("indexacion_representacion") or [],
                 fecha_firma_contrato=fecha,
-                enlace_drive=c.get("enlace_drive"),
             )
             db.add(nuevo)
+            enlace = c.get("enlace_drive")
+            if enlace:
+                docs_pendientes.append((nuevo, enlace))
             # Indexar el recien creado: si el propio seed repite la misma dupla
             # (inversionista + planta), la segunda vuelta lo encuentra en vez de
             # insertar otra copia.
@@ -2217,6 +2235,13 @@ def _run_cgm_seed() -> None:
         db.commit()
         if insertados:
             print(f"[cgm seed] {insertados} contratos nuevos insertados")
+
+        if docs_pendientes:
+            from app.services.documentos import set_enlace_documento
+            for nuevo, enlace in docs_pendientes:
+                set_enlace_documento(db, contrato_servicio_id=nuevo.id, url=enlace,
+                                      nombre="Enlace Drive del contrato")
+            db.commit()
 
         # ── Paso 2: reparar proyecto_id = NULL en registros existentes ────────────
         # Repara menos que antes, a proposito: _cgm_buscar_proyecto ya no adivina

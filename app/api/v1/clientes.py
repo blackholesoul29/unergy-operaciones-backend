@@ -605,6 +605,7 @@ def list_client_servicios_contratos(
     condiciones.append(ContratoServicio.prestador_id == id)  # por si presta sin planta ligada
     contratos = (
         db.query(ContratoServicio)
+        .options(selectinload(ContratoServicio.documentos_comerciales))  # lo lee `enlace_drive` abajo
         .filter(or_(*condiciones))
         .all()
     )
@@ -706,12 +707,14 @@ def get_cliente_panel(
         condiciones_filtro.append(ContratoServicio.proyecto_id.in_(plant_ids))
     contratos_serv = (
         db.query(ContratoServicio)
+        .options(selectinload(ContratoServicio.documentos_comerciales))  # lo lee `enlace_drive` abajo
         .filter(or_(*condiciones_filtro))
         .all()
     )
     ppas = (
         db.query(PPAContrato)
-        .options(selectinload(PPAContrato.proyectos))
+        .options(selectinload(PPAContrato.proyectos),
+                 selectinload(PPAContrato.documentos_comerciales))  # lo lee `carpeta_link` abajo
         .filter(PPAContrato.deleted_at.is_(None),
                 or_(PPAContrato.comprador_id == id, PPAContrato.vendedor_id == id))
         .all()

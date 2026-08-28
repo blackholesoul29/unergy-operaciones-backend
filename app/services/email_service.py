@@ -155,7 +155,16 @@ def send_reset_password_email(*, to_email: str, token: str) -> None:
     Envía el enlace de restablecimiento de contraseña al correo indicado.
     Si SMTP no está configurado, imprime el token en los logs del servidor.
     """
-    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+    # El token va en el PATH, no en el query. Las dos generaciones del frontend
+    # declaran la ruta con el token como segmento --el legacy en
+    # `src/router/index.js` (`/reset-password/:token`) y el Nuxt en
+    # `app/pages/reset-password/[token]/index.vue`, que lo lee de
+    # `route.params.token`--, asi que con `?token=` no hay ruta que empareje: la
+    # peticion cae en el catch-all, que redirige a `/dashboard`, y el usuario
+    # termina en el login sin haber podido cambiar la clave.
+    # El token es un `uuid4().hex` (32 caracteres hex), o sea que viaja en un
+    # segmento de ruta sin escapar nada.
+    reset_url = f"{settings.FRONTEND_URL}/reset-password/{token}"
 
     if not settings.SMTP_HOST:
         print(f"[RESET] Token para {to_email}: {token}  (SMTP no configurado — solo en logs)")

@@ -85,7 +85,7 @@ proyectos (existente)
             documento_origen_id ──> documentos_proyecto
 ```
 
-**Migración:** `alembic/versions/125_registros_proyecto_expediente.py` (head anterior: 124).
+**Migración:** `alembic/versions/126_registros_proyecto_expediente.py` (head anterior: 125).
 Renumerada desde la `120` original el 2026-08-28; ver §10.2.
 
 ### Por qué un ítem y sus archivos son dos tablas
@@ -240,7 +240,7 @@ app/services/registros_proyecto/
     mapa_documentos.py                                  el mapa de deduplicación
     service.py                                          lógica
 scripts/generar_catalogo_parametros.py                  regenera el catálogo SIC
-alembic/versions/125_registros_proyecto_expediente.py   migración
+alembic/versions/126_registros_proyecto_expediente.py   migración
 tests/test_registros_proyecto_catalogo.py               31 tests
 tests/test_registros_proyecto_service.py                19 tests
 tests/test_registros_proyecto_api.py                    13 tests
@@ -285,8 +285,8 @@ el mouse dice en cuáles — que es lo que explica al usuario por qué solo lo e
 |---|---|
 | Tests nuevos | **62**, todos en verde |
 | Tests de registros en total (incluye `registros_cnd`) | **92**, todos en verde |
-| Suite completa del backend | **2354 pasan, 4 saltados, 0 fallan** (rama al día con `origin/master`) |
-| Cadena Alembic | los 3 tests de `test_alembic_chain_integrity` en verde; head único `125`. Ver §10 |
+| Suite completa del backend | **2356 pasan, 4 saltados, 0 fallan** (rama al día con `origin/master`) |
+| Cadena Alembic | los 3 tests de `test_alembic_chain_integrity` en verde; head único `126`. Ver §10 |
 | Build del frontend | `npm run build` OK, chunks generados |
 
 **Corrección (2026-08-28):** la primera versión de este documento decía **63 tests nuevos**.
@@ -538,7 +538,7 @@ Los demás ítems del expediente están `CONFIRMADO` contra la carpeta real.
 
 ---
 
-## 10. La cadena Alembic y la renumeración a 125
+## 10. La cadena Alembic y la renumeración a 126
 
 ### 10.1 La cadena de `origin/master` está limpia
 
@@ -567,7 +567,7 @@ correr ese, no escribir un parser nuevo. Sus tres pruebas —ids únicos, un sol
 `down_revision` que resuelven— cubren exactamente esto y contemplan tanto los merges de
 varios padres como la forma anotada.
 
-### 10.2 La renumeración: de 120 a 125, en dos tiempos
+### 10.2 La renumeración: de 120 a 126, en tres tiempos
 
 Cuando se escribió la migración el head era `119` y el número libre era el `120`. Upstream
 mete revisiones a diario, y la renumeración hubo que hacerla **dos veces el mismo día**:
@@ -576,14 +576,15 @@ mete revisiones a diario, y la renumeración hubo que hacerla **dos veces el mis
 |---|---|---|---|
 | Al escribir la migración | `119` | `120` | Libre en ese momento |
 | Primer intento de cierre | `123` | `124` | La `120` ya la había tomado `120_email_envios_cliente_id_set_null`; entraron además 121, 122 y 123 |
-| Al actualizar contra master | `124` | **`125`** | Upstream metió `124_redrop_columnas_resucitadas` mientras tanto |
+| Al actualizar contra master | `124` | `125` | Upstream metió `124_redrop_columnas_resucitadas` mientras tanto |
+| Justo antes del merge | `125` | **`126`** | Upstream metió `125_eliminar_operacion_de_servicio_aplica_enum` |
 
 Estado final:
 
 ```
-alembic/versions/125_registros_proyecto_expediente.py
-revision      = "125"
-down_revision = "124"      # 124_redrop_columnas_resucitadas
+alembic/versions/126_registros_proyecto_expediente.py
+revision      = "126"
+down_revision = "125"      # 125_eliminar_operacion_de_servicio_aplica_enum
 ```
 
 **Es la razón por la que la renumeración se hace al final y no antes:** cualquier número
@@ -602,7 +603,7 @@ tests/test_alembic_chain_integrity.py::test_all_down_revisions_resolve PASSED
 tests/test_alembic_chain_integrity.py::test_single_head                PASSED
 ```
 
-Un solo head (`125`), sin ids duplicados y sin `down_revision` colgantes.
+Un solo head (`126`), sin ids duplicados y sin `down_revision` colgantes.
 
 **Nota histórica:** antes del merge estos dos últimos tests fallaban, porque el árbol de la
 rama no contenía todavía las revisiones 120–123 a las que apuntaba `down_revision`. No era

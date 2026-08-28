@@ -13,12 +13,12 @@
 | `unergy-operaciones-frontend` | `feat/registros-proyecto-documentos` | `b1ab43d` |
 
 **Sobre la cadena Alembic:** la rama ya está **actualizada contra `origin/master`** (por merge,
-sin reescribir master). La migración se renumeró de `120` a **`125`**: upstream tomó la 120 y,
-más tarde el mismo día, la 124. Los 3 tests de `test_alembic_chain_integrity` pasan, con head
-único `125`. Detalle en §10 de `docs/registros-proyecto-decisiones.md`.
+sin reescribir master). La migración se renumeró de `120` a **`126`**: upstream tomó la 120, la 124
+y la 125 en el mismo día. Los 3 tests de `test_alembic_chain_integrity` pasan, con head
+único `126`. Detalle en §10 de `docs/registros-proyecto-decisiones.md`.
 
 **Nada fue empujado a ningún remoto.** El commit del backend contiene la migración
-Alembic `125_registros_proyecto_expediente.py`, así que no debe empujarse sin revisión
+Alembic `126_registros_proyecto_expediente.py`, así que no debe empujarse sin revisión
 explícita.
 
 `master` en el backend quedó exactamente en `origin/master` (`140b274`), sin tocar.
@@ -40,7 +40,7 @@ con su evidencia). Este archivo es solo el traspaso operativo.
 Todo el alcance pedido, verificado:
 
 - **Backend** — 3 tablas (`documentos_proyecto`, `documentos_proyecto_archivo`,
-  `parametros_proyecto`), migración 125, 11 endpoints CRUD bajo
+  `parametros_proyecto`), migración 126, 11 endpoints CRUD bajo
   `/api/v1/registros-proyecto`, catálogos de ítems y parámetros, y el mapa de
   deduplicación documento→parámetro.
 - **Frontend** — `/registros` (índice con avance por proceso) y `/registros/:proyectoId`
@@ -54,8 +54,8 @@ Todo el alcance pedido, verificado:
 |---|---|
 | Tests nuevos | 62 pasan (eran 60; la cifra original de 63 estaba mal contada) |
 | Tests de registros en total | 92 pasan (incluye `registros_cnd`) |
-| Suite completa del backend | 2354 pasan, 4 saltados, 0 fallan |
-| Cadena Alembic | los 3 tests en verde, head único `125` |
+| Suite completa del backend | 2356 pasan, 4 saltados, 0 fallan |
+| Cadena Alembic | los 3 tests en verde, head único `126` |
 | Build del frontend | `npm run build` OK |
 
 ---
@@ -98,7 +98,7 @@ npm run build
 ```
 
 Después: revisar `docs/registros-proyecto-decisiones.md` (§1, §2 y §7), decidir sobre los
-8 pendientes de arriba, y recién ahí mergear y correr la migración 125.
+8 pendientes de arriba, y recién ahí mergear y correr la migración 126.
 
 ---
 

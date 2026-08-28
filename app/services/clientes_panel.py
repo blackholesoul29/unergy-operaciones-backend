@@ -101,16 +101,11 @@ def proyectos_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[i
 
 def servicios_por_cliente(db: Session, cliente_ids: set[int],
                           plantas: dict[int, set[int]] | None = None) -> dict[int, set[str]]:
-    from app.models.clientes import ClienteServicio
     from app.models.contratos import ContratoServicio, PPAContrato
 
     res: dict[int, set[str]] = defaultdict(set)
     if not cliente_ids:
         return res
-
-    for cid, tipo in (db.query(ClienteServicio.cliente_id, ClienteServicio.tipo)
-                      .filter(ClienteServicio.cliente_id.in_(cliente_ids)).all()):
-        res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
 
     # Fix 2026-08-19: el panel 360 (clientes.py::get_panel) tambien cuenta los
     # contratos donde el cliente es prestador, no solo contratante -- sin esto,

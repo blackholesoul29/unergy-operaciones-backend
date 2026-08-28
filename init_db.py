@@ -24,7 +24,6 @@ def add_columns():
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
-        "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
         # liquidaciones detalle
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS estado_resultados_url VARCHAR(1000)",
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS informe_html TEXT",

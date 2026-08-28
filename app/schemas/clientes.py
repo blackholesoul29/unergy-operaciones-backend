@@ -39,19 +39,6 @@ class TasaServicioOut(TasaServicioUpsert):
     model_config = {"from_attributes": True}
 
 
-class ClienteServicioCreate(BaseModel):
-    tipo: str
-    fecha_inicio: Optional[date] = None
-    notas: Optional[str] = None
-
-
-class ClienteServicioOut(ClienteServicioCreate):
-    id: int
-    cliente_id: int
-    created_at: datetime
-    model_config = {"from_attributes": True}
-
-
 class ClienteCreate(BaseModel):
     razon_social_nombre: str
     nit_cedula: Optional[str] = None
@@ -67,7 +54,6 @@ class ClienteCreate(BaseModel):
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
     contactos: list[ContactoParaClienteCreate] = []
-    servicios: list[ClienteServicioCreate] = []
 
 
 class ClienteUpdate(ClienteCreate):
@@ -82,7 +68,6 @@ class ClienteDocumentoCreate(BaseModel):
     estado: Optional[str] = "borrador"
     archivo_url: Optional[str] = None
     archivo_nombre: Optional[str] = None
-    servicio_id: Optional[int] = None
     notas: Optional[str] = None
     oportunidad_id: Optional[int] = None
 
@@ -94,7 +79,6 @@ class ClienteDocumentoUpdate(BaseModel):
     estado: Optional[str] = None
     archivo_url: Optional[str] = None
     archivo_nombre: Optional[str] = None
-    servicio_id: Optional[int] = None
     notas: Optional[str] = None
     oportunidad_id: Optional[int] = None
 
@@ -136,10 +120,9 @@ class ClienteListOut(ClienteBase):
 class ClienteOut(ClienteBase):
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
-    servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 
-    @field_validator("servicios", "documentos_comerciales", mode="before")
+    @field_validator("documentos_comerciales", mode="before")
     @classmethod
     def none_to_list(cls, v):
         if v is None:

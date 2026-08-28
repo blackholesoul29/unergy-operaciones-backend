@@ -1,6 +1,6 @@
 from app.models.base import Base
 from app.models.usuarios import Usuario, RolEnum
-from app.models.clientes import Cliente, TipoPersonaEnum, ClienteServicio, ClienteDocumentoComercial
+from app.models.clientes import Cliente, TipoPersonaEnum, ClienteDocumentoComercial
 from app.models.proyectos import (
     Proyecto, ProyectoInfoTecnica,
     ProyectoInversor, ProyectoInversionista, Portafolio,

@@ -91,11 +91,9 @@ _PENDING_DDLS = [
     "ALTER TABLE proyecto_inversionistas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     # migration 009 — tablas de servicios y documentos de clientes
     # CREATE TYPE falla si ya existe → excepción capturada y saltada, sin problema
-    "CREATE TYPE tipo_servicio_cliente_enum AS ENUM ('operacion', 'representacion', 'cgm', 'promotor')",
     "CREATE TYPE tipo_documento_cliente_enum AS ENUM ('oferta', 'contrato')",
     "CREATE TYPE estado_documento_cliente_enum AS ENUM ('borrador', 'enviado', 'aceptado', 'firmado', 'rechazado')",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
-    "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
     # migration 122 — generalizacion de documentos: cliente_documentos_comerciales
     # tambien puede pertenecer a un ContratoServicio o un PPAContrato (ver
     # models/clientes.py:ClienteDocumentoComercial). cliente_id se vuelve nullable.

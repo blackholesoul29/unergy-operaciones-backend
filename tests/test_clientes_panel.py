@@ -9,7 +9,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
 import app.models  # noqa: F401  (registra todos los modelos en Base.metadata)
-from app.models.clientes import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.models.contratos import ContratoServicio, PPAContrato, ppa_contrato_proyectos_table
 from app.models.proyectos import Proyecto, ProyectoInversionista
@@ -35,7 +35,7 @@ def db():
     Base.metadata.create_all(
         engine,
         tables=[
-            Cliente.__table__, ClienteServicio.__table__, Contacto.__table__,
+            Cliente.__table__, Contacto.__table__,
             ClienteDocumentoComercial.__table__,
             Proyecto.__table__, ProyectoInversionista.__table__,
             ContratoServicio.__table__, PPAContrato.__table__,
@@ -85,7 +85,6 @@ def _seed_basico(db):
         ProyectoInversionista(id=1, proyecto_id=10, cliente_id=1,
                               porcentaje_participacion=60,
                               fecha_inicio=dt.date(2025, 1, 1)),
-        ClienteServicio(id=1, cliente_id=1, tipo="representacion"),
         ContratoServicio(id=1, proyecto_id=20, contratante_id=1,
                          servicio_aplica="cgm", estado="vigente",
                          fecha_fin=dt.date(2026, 8, 1), tarifa_cgm=12.5,
@@ -151,7 +150,7 @@ def test_proyectos_por_cliente(db):
 def test_servicios_por_cliente(db):
     _seed_basico(db)
     res = cp.servicios_por_cliente(db, {1, 2})
-    assert res[1] == {"representacion", "cgm", "ppa"}
+    assert res[1] == {"cgm", "ppa"}
     assert res.get(2, set()) == set()
 
 
@@ -181,7 +180,7 @@ def test_vista_comercial(db):
     por_id = {f["id"]: f for f in filas}
     acme = por_id[1]
     assert acme["num_plantas"] == 3
-    assert set(acme["servicios"]) == {"representacion", "cgm", "ppa"}
+    assert set(acme["servicios"]) == {"cgm", "ppa"}
     assert acme["alerta_contrato"] == "por_vencer"
     assert acme["proximo_vencimiento"] == "2026-08-01"
     assert acme["contacto_comercial_nombre"] == "Ana Pérez"
@@ -204,7 +203,7 @@ def test_panel_cliente(db):
 
     assert panel["kpis"]["num_plantas"] == 3
     assert panel["kpis"]["proximo_vencimiento"] == "2026-08-01"
-    assert set(panel["kpis"]["servicios"]) == {"representacion", "cgm", "ppa"}
+    assert set(panel["kpis"]["servicios"]) == {"cgm", "ppa"}
 
     plantas = {p["proyecto_id"]: p for p in panel["plantas"]}
     assert plantas[20]["fecha_fin_contrato"] == "2026-08-01"

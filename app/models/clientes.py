@@ -12,13 +12,6 @@ class TipoPersonaEnum(str, enum.Enum):
     juridica = "juridica"
 
 
-class TipoServicioClienteEnum(str, enum.Enum):
-    operacion = "operacion"
-    representacion = "representacion"
-    cgm = "cgm"
-    promotor = "promotor"
-
-
 class TipoDocumentoClienteEnum(str, enum.Enum):
     rut = "rut"
     certificado_bancario = "certificado_bancario"
@@ -61,22 +54,8 @@ class Cliente(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     participaciones: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
-    servicios: Mapped[list["ClienteServicio"]] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
     documentos_comerciales: Mapped[list["ClienteDocumentoComercial"]] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
     contactos: Mapped[list["Contacto"]] = relationship("Contacto", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
-
-
-class ClienteServicio(Base):
-    __tablename__ = "cliente_servicios"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
-    tipo: Mapped[str] = mapped_column(SAEnum(TipoServicioClienteEnum, name="tipo_servicio_cliente_enum"), nullable=False)
-    fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
-    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="servicios")
 
 
 class ClienteDocumentoComercial(Base):
@@ -119,7 +98,6 @@ class ClienteDocumentoComercial(Base):
     )
     archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     archivo_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True, index=True)
     # Oportunidad del CRM a la que pertenece este documento (oferta/CC/RUT).
     oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -127,7 +105,6 @@ class ClienteDocumentoComercial(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="documentos_comerciales")
-    servicio: Mapped["ClienteServicio | None"] = relationship("ClienteServicio")
     contrato_servicio: Mapped["ContratoServicio | None"] = relationship(
         "ContratoServicio", back_populates="documentos_comerciales")
     ppa_contrato: Mapped["PPAContrato | None"] = relationship(

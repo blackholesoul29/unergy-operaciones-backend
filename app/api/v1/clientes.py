@@ -9,12 +9,11 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models import Cliente, ClienteDocumentoComercial
 from app.models.clientes import ClienteTasaServicio
 from app.models.contactos import Contacto, ProyectoAreaContacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
-    ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
     TasaServicioUpsert, TasaServicioOut,
 )
@@ -31,7 +30,6 @@ router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 def _get_cliente_or_404(id: int, db: Session) -> Cliente:
     c = db.query(Cliente).options(
-        selectinload(Cliente.servicios),
         selectinload(Cliente.documentos_comerciales),
     ).filter(Cliente.id == id).first()
     if not c:
@@ -147,7 +145,7 @@ def create_cliente(
                     "candidato_nombre": duplicado.razon_social_nombre,
                 },
             )
-    payload = data.model_dump(exclude={"contactos", "servicios"})
+    payload = data.model_dump(exclude={"contactos"})
     cliente = Cliente(**payload)
     db.add(cliente)
     try:
@@ -158,9 +156,6 @@ def create_cliente(
     for c in data.contactos:
         db.add(Contacto(cliente_id=cliente.id, nombre=c.nombre, telefono=c.telefono,
                          email=c.email, tipo=c.tipo))
-    for s in data.servicios:
-        db.add(ClienteServicio(cliente_id=cliente.id, tipo=s.tipo,
-                                fecha_inicio=s.fecha_inicio, notas=s.notas))
     db.commit()
     return _get_cliente_or_404(cliente.id, db)
 
@@ -302,36 +297,6 @@ def eliminar_tasa_servicio(id: int, tasa_id: int,
     ).delete()
     db.commit()
     return {"ok": True}
-
-
-# ── Servicios ────────────────────────────────────────────────────────────────
-
-@router.get("/{id}/servicios", response_model=list[ClienteServicioOut])
-def list_servicios(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_cliente_or_404(id, db)
-    return db.query(ClienteServicio).filter(ClienteServicio.cliente_id == id).all()
-
-
-@router.post("/{id}/servicios", response_model=ClienteServicioOut, status_code=201)
-def add_servicio(id: int, data: ClienteServicioCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_cliente_or_404(id, db)
-    existing = db.query(ClienteServicio).filter_by(cliente_id=id, tipo=data.tipo).first()
-    if existing:
-        raise HTTPException(400, f"El cliente ya tiene el servicio '{data.tipo}' registrado")
-    s = ClienteServicio(cliente_id=id, **data.model_dump())
-    db.add(s)
-    db.commit()
-    db.refresh(s)
-    return s
-
-
-@router.delete("/{id}/servicios/{servicio_id}", status_code=204)
-def remove_servicio(id: int, servicio_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    s = db.query(ClienteServicio).filter_by(id=servicio_id, cliente_id=id).first()
-    if not s:
-        raise HTTPException(404, "Servicio no encontrado")
-    db.delete(s)
-    db.commit()
 
 
 # ── Contactos ─────────────────────────────────────────────────────────────────
@@ -579,7 +544,7 @@ def list_client_servicios_contratos(
     hoy: date | None = None,  # inyectable en tests
 ):
     """Servicios que Unergy le presta a este cliente, DERIVADOS de los contratos
-    de servicio reales de sus plantas (no de la lista manual `cliente_servicios`).
+    de servicio reales de sus plantas.
 
     "Plantas del cliente" = misma unión que usa el panel 360 (inversionista +
     contratante de un contrato de servicio + comprador/vendedor de un PPA). Toma
@@ -845,8 +810,7 @@ def get_cliente_panel(
     # ── KPIs ──
     activos = [x for x in contratos if x["semaforo"] != "vencido"]
     vencimientos = [x["fecha_fin"] for x in activos if x["fecha_fin"]]
-    servicios_kpi = sorted({x["tipo"] for x in contratos}
-                           | {_enum_val(s.tipo) for s in cliente.servicios})
+    servicios_kpi = sorted({x["tipo"] for x in contratos})
     kpis = {
         "num_plantas": len(plantas),
         "contratos_activos": len(activos),
@@ -873,7 +837,6 @@ def get_cliente_panel(
 _MERGE_CLIENTE_SIMPLE = ["cliente_documentos_comerciales", "oportunidades", "proyecto_area_contacto"]
 _MERGE_CLIENTE_COMPOSITE = [
     ("contactos", ["email", "tipo"]),                  # UNIQUE (cliente_id, email, tipo)
-    ("cliente_servicios", ["tipo"]),                    # unicidad de app: un servicio por tipo
     ("proyecto_inversionistas", ["proyecto_id"]),       # evita duplicar al cliente como inversionista del mismo proyecto
 ]
 # nit_cedula es UNIQUE en la BD -- necesita liberarse en el perdedor antes de

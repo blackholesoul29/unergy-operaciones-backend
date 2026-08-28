@@ -150,7 +150,11 @@ def create_cliente(
     payload = data.model_dump(exclude={"contactos", "servicios"})
     cliente = Cliente(**payload)
     db.add(cliente)
-    db.flush()  # asigna cliente.id sin cerrar la transacción
+    try:
+        db.flush()  # asigna cliente.id sin cerrar la transacción -- el UNIQUE de nit_cedula se valida aquí
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe un cliente con ese NIT/cédula.")
     for c in data.contactos:
         db.add(Contacto(cliente_id=cliente.id, nombre=c.nombre, telefono=c.telefono,
                          email=c.email, tipo=c.tipo))

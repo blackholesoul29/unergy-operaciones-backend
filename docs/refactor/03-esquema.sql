@@ -128,6 +128,17 @@ CREATE TYPE tarifa_origen_enum AS ENUM (
 -- Qué originó la falla. 'red' y 'evento_natural' son las causas externas del brief.
 CREATE TYPE falla_origen_enum AS ENUM ('equipo', 'red', 'evento_natural', 'externo');
 
+-- Qué clase de documento es. Cerrado a proposito, como los demas enums (D-15):
+-- agregar un tipo de documento es una decision de negocio, no un dato de usuario.
+CREATE TYPE documento_tipo_enum AS ENUM (
+    'datasheet', 'planos', 'ficha_tecnica', 'manual',          -- equipo
+    'rut', 'camara_comercio', 'certificacion_bancaria',        -- cliente (los del brief)
+    'contrato_firmado', 'acta', 'poliza',                      -- contrato / propiedad
+    'evidencia_falla', 'fotografia',                           -- falla
+    'mapa_ubicacion',                                          -- proyecto
+    'otro'
+);
+
 
 -- =====================================================================================
 -- BLOQUE 3 · Catálogos sin dependencias
@@ -353,7 +364,9 @@ CREATE TABLE proyectos (
     direccion_vereda          VARCHAR(500),
     latitud                   NUMERIC(9,6),
     longitud                  NUMERIC(9,6),
-    url_ubicacion             VARCHAR(500),
+    -- url_ubicacion: pasa a `documentos` con tipo 'mapa_ubicacion' (D-22). La API
+    -- externa la sigue devolviendo en detalles.ubicacion.url_mapa, leida de ahi
+    -- (05-impacto-campos-congelados.md §F: la salida queda identica).
 
     -- Red
     operador_red_id           BIGINT REFERENCES operadores_red(id) ON DELETE SET NULL,
@@ -480,7 +493,7 @@ CREATE TABLE equipo_modelos (
     fabricante_id     BIGINT REFERENCES fabricantes(id) ON DELETE SET NULL,
     nombre            VARCHAR(180) NOT NULL,
     especificaciones  JSONB NOT NULL DEFAULT '{}'::jsonb,
-    datasheet_url     VARCHAR(500),
+    -- datasheet_url: pasa a `documentos` con tipo 'datasheet' (D-22).
     activo            BOOLEAN NOT NULL DEFAULT TRUE,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -518,7 +531,7 @@ CREATE TABLE equipos (
     fecha_puesta_servicio        DATE,
     garantia_dias                INTEGER,
     mantenimiento_intervalo_dias INTEGER,
-    documentacion_url            VARCHAR(500),
+    -- documentacion_url: pasa a `documentos` con tipo 'manual' (D-22).
 
     -- Derivado GARANTIZADO por Postgres, indexable. Excepción documentada (D-04).
     garantia_vence_el   DATE GENERATED ALWAYS AS (fecha_puesta_servicio + garantia_dias) STORED,
@@ -582,7 +595,8 @@ CREATE TABLE proyecto_composiciones (
     proyecto_id       BIGINT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
     vigencia          DATERANGE NOT NULL,
     motivo            TEXT,
-    documento_url     VARCHAR(500),
+    -- documento_url: el acta pasa a `documentos` con tipo 'acta' y colgando del
+    -- PROYECTO, no de la composicion: se decidieron seis brazos, no siete (D-22).
     registrado_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ck_proyecto_composiciones_vigencia CHECK (NOT isempty(vigencia)),
@@ -623,7 +637,8 @@ CREATE TABLE contratos (
     periodicidad_pago   periodicidad_enum,
     indice_indexacion   VARCHAR(60),
     renovacion_automatica BOOLEAN NOT NULL DEFAULT FALSE,
-    documento_url       VARCHAR(500),
+    -- documento_url: pasa a `documentos` con tipo 'contrato_firmado' y brazo
+    -- contrato_id, en ON DELETE RESTRICT porque tiene valor legal (D-22).
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMPTZ,
@@ -786,17 +801,11 @@ CREATE TABLE falla_estado_historial (
 );
 COMMENT ON TABLE falla_estado_historial IS 'Bitácora de cambios de estado de una falla, con el estado anterior y el nuevo.';
 
-CREATE TABLE falla_adjuntos (
-    id            BIGSERIAL PRIMARY KEY,
-    falla_id      BIGINT NOT NULL REFERENCES fallas(id) ON DELETE CASCADE,
-    url           VARCHAR(1000) NOT NULL,
-    nombre        VARCHAR(255),
-    content_type  VARCHAR(120),
-    tamano_bytes  BIGINT,
-    subido_por_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
-    subido_en     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE falla_adjuntos IS 'Archivos adjuntos de una falla; reemplaza el JSONB fotos_urls con doble codificación histórica.';
+-- falla_adjuntos NO existe: la absorbe `documentos` (BLOQUE 9 bis, decision D-22).
+-- Tenia las mismas seis columnas -- url, nombre, content_type, tamano_bytes,
+-- subido_por_id, subido_en -- y mantenerla aparte dejaria dos entidades para lo
+-- mismo, que es justo lo que esa decision corrige. Los adjuntos de una falla son
+-- filas de `documentos` con `falla_id` y tipo 'evidencia_falla' o 'fotografia'.
 
 CREATE TABLE falla_impactos (
     id                    BIGSERIAL PRIMARY KEY,
@@ -811,6 +820,55 @@ CREATE TABLE falla_impactos (
 );
 COMMENT ON TABLE falla_impactos IS 'Energía y dinero perdidos por falla y por planta; si el incidente afecta a varias, el impacto es de cada una.';
 COMMENT ON COLUMN falla_impactos.metodo IS 'Con qué método se estimó; hoy hay tres formas distintas de calcular energía esperada en el código.';
+
+
+-- =====================================================================================
+-- BLOQUE 9 bis · Documentos — decisión D-22
+-- Una sola entidad para todo archivo que hoy vive como una columna `*_url` suelta o
+-- como una tabla propia. Va después de fallas porque referencia a las seis entidades.
+-- =====================================================================================
+
+CREATE TABLE documentos (
+    id              BIGSERIAL PRIMARY KEY,
+    tipo            documento_tipo_enum NOT NULL,
+
+    -- Arco exclusivo: exactamente UNO de estos SEIS tiene valor.
+    -- cliente_id y contrato_id van con RESTRICT, no CASCADE: un RUT o un contrato
+    -- firmado tienen valor legal y no desaparecen porque se borre su fila padre.
+    -- El borrado tiene que fallar ruidosamente y obligar a decidir qué se hace con
+    -- ellos. Mismo criterio que la migración 083 aplicó al historial regulatorio.
+    -- Los otros cuatro van en CASCADE: un datasheet sin su modelo, un manual sin su
+    -- equipo o una foto sin su falla no son documentos huérfanos, son ruido.
+    proyecto_id      BIGINT REFERENCES proyectos(id)       ON DELETE CASCADE,
+    contrato_id      BIGINT REFERENCES contratos(id)       ON DELETE RESTRICT,
+    equipo_id        BIGINT REFERENCES equipos(id)         ON DELETE CASCADE,
+    equipo_modelo_id BIGINT REFERENCES equipo_modelos(id)  ON DELETE CASCADE,
+    cliente_id       BIGINT REFERENCES clientes(id)        ON DELETE RESTRICT,
+    falla_id         BIGINT REFERENCES fallas(id)          ON DELETE CASCADE,
+
+    nombre           VARCHAR(300),
+    url              VARCHAR(1000) NOT NULL,
+    content_type     VARCHAR(120),
+    tamano_bytes     BIGINT,
+    fecha_documento  DATE,
+    fecha_expiracion DATE,
+    subido_por_id    BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    subido_en        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at       TIMESTAMPTZ,
+
+    CONSTRAINT ck_documentos_arco_exclusivo CHECK (
+        num_nonnulls(proyecto_id, contrato_id, equipo_id,
+                     equipo_modelo_id, cliente_id, falla_id) = 1
+    ),
+    CONSTRAINT ck_documentos_expiracion CHECK (
+        fecha_expiracion IS NULL OR fecha_documento IS NULL
+        OR fecha_expiracion >= fecha_documento
+    )
+);
+COMMENT ON TABLE documentos IS 'Todo archivo del sistema, colgando de exactamente una entidad. Reemplaza las columnas *_url sueltas y la tabla falla_adjuntos (D-22).';
+COMMENT ON COLUMN documentos.proyecto_id IS 'También cuelga de acá el acta de una composición accionaria: se decidieron SEIS brazos, no siete, y la composición se recupera cruzando fecha_documento con su vigencia (D-22).';
+COMMENT ON COLUMN documentos.fecha_expiracion IS 'Para «qué documentos de cliente están por vencer»: el equivalente documental de la consulta de garantías de D-04.';
+COMMENT ON CONSTRAINT ck_documentos_arco_exclusivo ON documentos IS 'num_nonnulls() es IMMUTABLE y existe desde PG 9.6: el arco lo impone la base, no la aplicación. Es la diferencia con audit_log.registro_id, polimórfica sin FK y por eso capaz de apuntar a filas que ya no existen.';
 
 
 -- =====================================================================================
@@ -997,8 +1055,21 @@ CREATE INDEX ix_falla_estado_hist_falla_id          ON falla_estado_historial (f
 CREATE INDEX ix_falla_estado_hist_anterior_id       ON falla_estado_historial (estado_anterior_id);
 CREATE INDEX ix_falla_estado_hist_nuevo_id          ON falla_estado_historial (estado_nuevo_id);
 CREATE INDEX ix_falla_estado_hist_usuario_id        ON falla_estado_historial (usuario_id);
-CREATE INDEX ix_falla_adjuntos_falla_id             ON falla_adjuntos (falla_id);
-CREATE INDEX ix_falla_adjuntos_subido_por_id        ON falla_adjuntos (subido_por_id);
+
+-- Documentos · uno parcial por brazo del arco: cada consulta filtra por uno solo,
+-- y el parcial evita indexar los cinco NULL que trae cada fila.
+CREATE INDEX ix_documentos_proyecto_id              ON documentos (proyecto_id)      WHERE proyecto_id IS NOT NULL;
+CREATE INDEX ix_documentos_contrato_id              ON documentos (contrato_id)      WHERE contrato_id IS NOT NULL;
+CREATE INDEX ix_documentos_equipo_id                ON documentos (equipo_id)        WHERE equipo_id IS NOT NULL;
+CREATE INDEX ix_documentos_equipo_modelo_id         ON documentos (equipo_modelo_id) WHERE equipo_modelo_id IS NOT NULL;
+CREATE INDEX ix_documentos_cliente_id               ON documentos (cliente_id)       WHERE cliente_id IS NOT NULL;
+CREATE INDEX ix_documentos_falla_id                 ON documentos (falla_id)         WHERE falla_id IS NOT NULL;
+CREATE INDEX ix_documentos_tipo                     ON documentos (tipo);
+CREATE INDEX ix_documentos_subido_por_id            ON documentos (subido_por_id);
+-- «Qué documentos de cliente están por vencer»: el equivalente documental de la
+-- consulta de garantías de D-04.
+CREATE INDEX ix_documentos_expiracion               ON documentos (fecha_expiracion) WHERE fecha_expiracion IS NOT NULL;
+CREATE INDEX ix_documentos_deleted                  ON documentos (deleted_at)       WHERE deleted_at IS NOT NULL;
 CREATE INDEX ix_falla_impactos_falla_id             ON falla_impactos (falla_id);
 CREATE INDEX ix_falla_impactos_proyecto_id          ON falla_impactos (proyecto_id);
 
@@ -1088,7 +1159,9 @@ INSERT INTO equipo_tipos (codigo, nombre, granularidad, admite_componentes, es_b
 ('tracker',      'Tracker',            'cantidad',   FALSE, TRUE,
  '{"type":"object","properties":{"tipo":{"enum":["1P","2P"]}}}'),
 ('subestacion',  'Subestación',        'individual', TRUE,  TRUE,
- '{"type":"object","required":["tipo"],"properties":{"tipo":{"enum":["shelter","skid","mamposteria"]},"planos_url":{"type":"string"}}}'),
+ -- planos_url sale del esquema: los planos son una fila de `documentos` con tipo
+ -- 'planos' y brazo equipo_id. Es el ajuste que D-22 le hace a D-01.
+ '{"type":"object","required":["tipo"],"properties":{"tipo":{"enum":["shelter","skid","mamposteria"]}}}'),
 ('camara',       'Sistema de cámaras', 'individual', FALSE, TRUE,
  '{"type":"object","properties":{"resolucion":{"type":"string"},"ubicacion":{"type":"string"}}}'),
 ('starlink',     'Starlink',           'individual', TRUE,  TRUE,

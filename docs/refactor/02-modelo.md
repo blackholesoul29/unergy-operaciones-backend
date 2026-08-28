@@ -61,7 +61,7 @@ erDiagram
     fallas                    ||--o{ falla_equipos            : "involucra"
     equipos                   ||--o{ falla_equipos            : "falla en"
     fallas                    ||--o{ falla_estado_historial   : "cambia de estado"
-    fallas                    ||--o{ falla_adjuntos           : "documenta"
+    fallas                    ||--o{ documentos              : "documenta"
     fallas                    ||--o{ falla_impactos           : "cuesta por planta"
     proyectos                 ||--o{ falla_impactos           : "pierde energia"
     red_puntos_conexion       ||--o{ fallas                   : "origina falla de red"
@@ -75,7 +75,7 @@ erDiagram
     %% ---------- USUARIOS (PRE, fuera de alcance) ----------
     usuarios                  ||--o{ fallas                   : "PRE registra y atiende"
     usuarios                  ||--o{ falla_estado_historial    : "PRE cambia"
-    usuarios                  ||--o{ falla_adjuntos            : "PRE sube"
+    usuarios                  ||--o{ documentos               : "PRE sube"
     usuarios                  ||--o{ proyecto_estado_historial : "PRE registra"
     usuarios                  ||--o{ proyecto_composiciones    : "PRE registra"
     usuarios                  ||--o{ equipo_mantenimientos     : "PRE registra"
@@ -246,7 +246,7 @@ compra nada). Lo que cambia es que **deja de tener `proyecto_id` escalar** y gan
 | **`falla_proyectos`** | Una falla de red es **un incidente** que afecta N plantas, no N fallas duplicadas |
 | **`falla_equipos`** | El equipo involucrado, por FK. Generaliza `falla_inversores`, cuya FK está al 0,3 % |
 | **`falla_estado_historial`** | Historial con **estado anterior y nuevo**; hoy solo se guarda el nuevo |
-| **`falla_adjuntos`** | Los «varios archivos adjuntos» del brief como entidad, no como JSONB |
+| **`documentos`** | Todo archivo del sistema como entidad, colgando de exactamente una de seis entidades (D-22). Absorbe `falla_adjuntos` y las columnas `*_url` sueltas |
 | **`falla_impactos`** | Energía perdida **por planta**: si el incidente afecta a varias, el impacto es de cada una. `metodo` deja constancia de cómo se estimó |
 
 Los cinco catálogos `fallas_cat_*` se conservan intactos; solo se le agrega el índice que le falta a

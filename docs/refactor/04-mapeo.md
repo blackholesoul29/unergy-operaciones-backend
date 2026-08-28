@@ -66,7 +66,7 @@ CHECK de comunidad energética, el segundo lo expone la ficha técnica de la API
 | `cctv_estado`, `marca_cctv` | → `equipos` tipo `camara` |
 | `tiene_internet` varchar(10), `seguridad_fisica` | → `equipos` tipo `starlink` / booleano derivado |
 | `tiene_almacenamiento`, `capacidad_almacenamiento_kwh`, `marca_almacenamiento`, `modelo_almacenamiento` | → `equipos` tipo nuevo `almacenamiento` (lo crea el usuario, sin migración). Las 3 últimas están al **0 %** |
-| `url_ubicacion` | → **`proyectos.url_ubicacion`** (lo expone la API congelada) |
+| `url_ubicacion` | → **`documentos`** con `tipo='mapa_ubicacion'` y brazo `proyecto_id` (D-22). La API congelada la sigue devolviendo en `detalles.ubicacion.url_mapa`, leída de ahí |
 | `retie_url` | **se elimina: 0 %** |
 
 ⚠️ **Riesgo del que hay que ser consciente:** convertir «marca_paneles = Jinko» en una fila de `equipos`
@@ -246,7 +246,7 @@ El brief pide señalarlo. Tres decisiones de hoy que Liquidaciones va a heredar:
 | `fallas.proyecto_id` (NOT NULL, escalar) | 6 478 | → **una fila en `falla_proyectos`** por cada falla. Migración mecánica, sin pérdida |
 | `falla_inversores` | 4 213 | → **`falla_equipos`**. ⚠️ **Solo 11 filas tienen `proyecto_inversor_id`.** Las otras 4 202 hay que resolverlas por `nombre` + `proyecto_id`, y lo que no cruce **no se puede migrar a una FK**: va a `falla_equipos.detalle` con el texto original preservado. **Esto hay que medirlo antes, no después** |
 | `fallas_seguimientos` | 1 134 | → **`falla_estado_historial`**. `estado_nuevo_id` se conserva; `estado_anterior_id` queda NULL en las 1 134 filas históricas, porque nunca se guardó |
-| `fallas.fotos_urls` jsonb | 82,2 % de 6 478 | → **`falla_adjuntos`**, una fila por URL. Hay que manejar los tres formatos legados (lista, string JSON, doble codificación) |
+| `fallas.fotos_urls` jsonb | 82,2 % de 6 478 | → **`documentos`** con brazo `falla_id` y `tipo` `'evidencia_falla'`/`'fotografia'`, una fila por URL. Hay que manejar los tres formatos legados (lista, string JSON, doble codificación). ⚠️ **Cambió con D-22:** el destino era `falla_adjuntos`, que dejó de existir |
 | `fallas_intervalos` | — | **se conserva**, gana CHECK `fin > inicio` |
 | `fallas_cat_*` (5) | — | **intactas**; solo se agrega índice a `fallas_cat_tipos.categoria_id` |
 | `fallas.tipo_id` (99,8 %) + `tipo_libre` (78,7 %) + `categoria_codigo` (78,5 %) + `subtipo_codigo` (13,5 %) | | ⚠️ **No se unifican en esta fase.** Dos taxonomías vivas, ninguna completa: unificarlas es una decisión de dominio que necesita a Laura, no un mapeo. Se conservan las cuatro y se deja señalado |
@@ -519,3 +519,44 @@ historia**: su único pasado recuperable está en `audit_log`, desde el 2026-05-
 **Lo anterior a esa fecha es irrecuperable** salvo abriendo a mano las actas de `enlace_drive` (70,1 % de
 los contratos lo tienen). El detalle completo de qué se recupera y qué no está en `01-decisiones.md`
 D-24 § c.
+
+
+---
+
+# Apéndice III · 2026-08-27 · `documentos`, el destino de las columnas `*_url`
+
+D-22 quedó cerrada el 2026-08-26 pero no había bajado al DDL: `03-esquema.sql` seguía con las columnas
+`*_url` que la decisión reemplaza. Ya está escrita (BLOQUE 9 bis), y esto es lo que le entra.
+
+## Los ocho orígenes
+
+| Origen | `tipo` | Brazo | Nota |
+|---|---|---|---|
+| `proyectos.url_ubicacion` | `mapa_ubicacion` | `proyecto_id` | La API congelada la sigue exponiendo; ver `05` §F |
+| `equipo_modelos.datasheet_url` | `datasheet` | `equipo_modelo_id` | |
+| `equipos.documentacion_url` | `manual` | `equipo_id` | |
+| `contratos.documento_url` | `contrato_firmado` | `contrato_id` | `ON DELETE RESTRICT`: tiene valor legal |
+| `proyecto_composiciones.documento_url` | `acta` | **`proyecto_id`** | Seis brazos, no siete: la composición se recupera cruzando `fecha_documento` con su `vigencia` |
+| `planos_url` del JSON Schema de `subestacion` | `planos` | `equipo_id` | Sale de `equipo_tipos.esquema_especificaciones`: los documentos no son una especificación técnica |
+| **`falla_adjuntos` (tabla entera)** | `evidencia_falla` / `fotografia` | `falla_id` | La tabla **se absorbe y desaparece** |
+| — (nuevos, del brief) | `rut`, `camara_comercio`, `certificacion_bancaria` | `cliente_id` | `ON DELETE RESTRICT` |
+
+## Lo que esto cambia en el resto del plan
+
+⚠️ **`falla_adjuntos` ya no es un destino.** El paso `_run_falla_adjuntos_seed` de la Fase 3
+(`06-plan-migracion.md`) apuntaba a esa tabla; ahora apunta a `documentos` con brazo `falla_id`. El
+conteo de la Fase 2 **no cambia**: sigue siendo 19 tablas nuevas, porque `documentos` ocupa el lugar
+que tenía `falla_adjuntos`.
+
+⚠️ **Y el orden entre fases se vuelve obligatorio, no conveniente.** `cliente_id` y `contrato_id` van
+en `RESTRICT`, así que **borrar un cliente con documentos pasa a fallar**. Hoy eso devuelve un 500
+porque la API no captura `IntegrityError`, así que el paso **1.5 de la Fase 1** (traducirlo a un 409
+legible) tiene que estar **antes** de que esta tabla exista. No es una preferencia de orden: sin él,
+la Fase 2 convierte un borrado bloqueado en un error opaco para el usuario.
+
+## Lo que NO se decidió acá
+
+El `deleted_at` de `documentos` existe en el DDL, pero **quién puede borrar un documento y si el
+borrado es lógico o físico no está decidido**. Con `RESTRICT` en dos brazos, la pregunta se vuelve
+concreta: si un contrato no se puede borrar por tener documentos, ¿la salida es anular el documento o
+mover el documento? Queda para cuando se implemente la Fase 2.

@@ -215,7 +215,11 @@ def _action_get_all_contratos(db: Session) -> dict:
     rows = (
         db.query(ContratoServicio)
         .filter(
-            ContratoServicio.servicio_aplica == "operacion",
+            # "operacion" nunca se usa como servicio_aplica: el contrato O&M
+            # real es "mantenimiento" (ver ServiciosUnificadoView.vue en el
+            # frontend, mismo hallazgo). Con "operacion" este filtro devolvia
+            # 0 filas siempre.
+            ContratoServicio.servicio_aplica == "mantenimiento",
             ContratoServicio.estado.in_(["vigente", "en_renovacion"]),
         )
         .options(selectinload(ContratoServicio.proyecto))
@@ -341,7 +345,7 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
             db.query(ContratoServicio)
             .filter(
                 ContratoServicio.proyecto_id == proyecto.id,
-                ContratoServicio.servicio_aplica == "operacion",
+                ContratoServicio.servicio_aplica == "mantenimiento",
                 ContratoServicio.estado.in_(["vigente", "en_renovacion"]),
             )
             .first()

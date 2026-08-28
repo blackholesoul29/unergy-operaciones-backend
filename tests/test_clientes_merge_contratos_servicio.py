@@ -59,7 +59,7 @@ def test_fusionar_mueve_contratante_prestador_e_inversionista(db):
     db.add_all([
         ContratoServicio(id=10, servicio_aplica="representacion", contratante_id=2),
         ContratoServicio(id=11, servicio_aplica="cgm", prestador_id=2),
-        ContratoServicio(id=12, servicio_aplica="operacion", inversionista_id=2),
+        ContratoServicio(id=12, servicio_aplica="mantenimiento", inversionista_id=2),
     ])
     db.commit()
 

@@ -48,7 +48,7 @@ _ids = iter(range(1, 100_000))
 
 def _contrato(db, **kw):
     kw.setdefault("id", next(_ids))
-    kw.setdefault("servicio_aplica", "operacion")
+    kw.setdefault("servicio_aplica", "mantenimiento")
     c = ContratoServicio(**kw)
     db.add(c)
     db.commit()
@@ -152,7 +152,7 @@ def test_ppa_contrato_carpeta_link_property_lee_documento(db):
 # ── API: ContratoServicio ─────────────────────────────────────────────────────
 
 def test_crear_contrato_con_enlace_drive_lo_expone_en_el_out(db):
-    body = ContratoServicioCreate(servicio_aplica="operacion", enlace_drive="https://drive/nuevo")
+    body = ContratoServicioCreate(servicio_aplica="mantenimiento", enlace_drive="https://drive/nuevo")
     out = cs_api.create_contrato(body, db=db, _=ADMIN)
 
     assert out.enlace_drive == "https://drive/nuevo"

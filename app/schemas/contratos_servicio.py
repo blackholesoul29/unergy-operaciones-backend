@@ -68,7 +68,7 @@ class FronteraBasico(BaseModel):
 
 class ContratoServicioCreate(BaseModel):
     proyecto_id: Optional[int] = None
-    servicio_aplica: str  # representacion | operacion | rec
+    servicio_aplica: str  # representacion | mantenimiento | arriendo | internet | rec
     contratante_id: Optional[int] = None
     prestador_id: Optional[int] = None
     # El inversionista como relacion; `inversionista_nombre` queda como el texto

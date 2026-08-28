@@ -71,7 +71,7 @@ def test_crear_contrato_con_frontera_ids_las_vincula(db):
     f1 = _frontera(db, proy.id)
     f2 = _frontera(db, proy.id)
 
-    body = ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion",
+    body = ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento",
                                    frontera_ids=[f1.id, f2.id])
     out = api.create_contrato(body, db=db, _=ADMIN)
 
@@ -81,7 +81,7 @@ def test_crear_contrato_con_frontera_ids_las_vincula(db):
 def test_crear_contrato_sin_frontera_ids_no_vincula_nada(db):
     proy = _proyecto(db)
     out = api.create_contrato(
-        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion"),
+        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento"),
         db=db, _=ADMIN,
     )
     assert out.fronteras == []
@@ -94,7 +94,7 @@ def test_editar_agrega_y_quita_fronteras(db):
     f3 = _frontera(db, proy.id)
 
     contrato = api.create_contrato(
-        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[f1.id]),
+        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[f1.id]),
         db=db, _=ADMIN,
     )
 
@@ -108,7 +108,7 @@ def test_editar_sin_tocar_frontera_ids_deja_los_vinculos_intactos(db):
     proy = _proyecto(db)
     f1 = _frontera(db, proy.id)
     contrato = api.create_contrato(
-        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[f1.id]),
+        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[f1.id]),
         db=db, _=ADMIN,
     )
 
@@ -124,7 +124,7 @@ def test_editar_con_lista_vacia_desvincula_todas(db):
     proy = _proyecto(db)
     f1 = _frontera(db, proy.id)
     contrato = api.create_contrato(
-        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[f1.id]),
+        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[f1.id]),
         db=db, _=ADMIN,
     )
 
@@ -136,7 +136,7 @@ def test_ids_repetidos_colapsan_sin_violar_el_unique(db):
     proy = _proyecto(db)
     f1 = _frontera(db, proy.id)
     out = api.create_contrato(
-        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion",
+        ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento",
                                 frontera_ids=[f1.id, f1.id, f1.id]),
         db=db, _=ADMIN,
     )
@@ -147,7 +147,7 @@ def test_frontera_inexistente_da_400(db):
     proy = _proyecto(db)
     with pytest.raises(HTTPException) as exc:
         api.create_contrato(
-            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[999999]),
+            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[999999]),
             db=db, _=ADMIN,
         )
     assert exc.value.status_code == 400
@@ -161,7 +161,7 @@ def test_frontera_borrada_da_400(db):
 
     with pytest.raises(HTTPException) as exc:
         api.create_contrato(
-            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[f1.id]),
+            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[f1.id]),
             db=db, _=ADMIN,
         )
     assert exc.value.status_code == 400
@@ -174,7 +174,7 @@ def test_frontera_de_otro_proyecto_da_400(db):
 
     with pytest.raises(HTTPException) as exc:
         api.create_contrato(
-            ContratoServicioCreate(proyecto_id=proy_a.id, servicio_aplica="operacion", frontera_ids=[f_de_b.id]),
+            ContratoServicioCreate(proyecto_id=proy_a.id, servicio_aplica="mantenimiento", frontera_ids=[f_de_b.id]),
             db=db, _=ADMIN,
         )
     assert exc.value.status_code == 400
@@ -200,7 +200,7 @@ def test_get_no_dispara_una_query_por_frontera(db):
     for _ in range(3):
         f = _frontera(db, proy.id)
         api.create_contrato(
-            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="operacion", frontera_ids=[f.id]),
+            ContratoServicioCreate(proyecto_id=proy.id, servicio_aplica="mantenimiento", frontera_ids=[f.id]),
             db=db, _=ADMIN,
         )
 

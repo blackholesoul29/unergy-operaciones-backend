@@ -88,3 +88,27 @@ la rama no traía trabajo ajeno).
 Si hay dos sesiones trabajando sobre este mismo directorio, conviene que cada una use su propio
 worktree. Mientras tanto: **verificar `git branch --show-current` antes de cada commit**, que es lo
 que hice el resto de la noche.
+
+### Y al cierre, esa otra sesión seguía trabajando
+
+A las 23:49-23:50 aparecieron en el working tree, **sin commitear**, archivos que no son míos:
+
+```
+ M app/api/v1/router.py
+ M app/models/__init__.py
+?? alembic/versions/120_registros_proyecto_expediente.py
+```
+
+Tres consecuencias, en orden de importancia:
+
+1. 🛑 **La revisión 120 está siendo reclamada por dos sitios a la vez.** Esa migración sin commitear
+   la usa, y la rama `fase1-indices-fk` también. Es la cuarta colisión de numeración de la jornada
+   (`107 → 108 → 119 → 120`), y renumerar otra vez persiguiendo un número que se mueve no sirve:
+   **la renumeración va justo antes de empujar, no antes**. Es la regla que ya estaba escrita y esta
+   es la cuarta vez que se confirma.
+2. ⚠️ **Las corridas de la suite incluyeron ese trabajo ajeno.** El «2266 passed» es verde con esos
+   dos archivos modificados en el árbol. No los rompí ni los rompieron, pero no es una medición
+   limpia de solo mis cambios.
+3. ✅ **Ninguno de mis commits los tocó.** Verificado archivo por archivo con `git log --name-only`:
+   cada commit staged con rutas explícitas, nunca con `git add -A` ni `git add .`. Es exactamente el
+   caso que la nota de «commitear solo lo mío» venía advirtiendo.

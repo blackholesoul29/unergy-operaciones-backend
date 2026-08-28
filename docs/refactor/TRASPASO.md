@@ -65,18 +65,19 @@ revisión `120_registros_proyecto_expediente`). **Su trabajo no se toca**: tiene
 renumerar por adelantado**: el número se mueve. Se renumera justo antes de empujar, comprobando el
 head real.
 
-**3 · Hay un `stash@{0}: autostash` que no es mío.** Un `autostash` suele quedar de un
-`rebase`/`pull --rebase`. Los otros tres stashes tampoco son míos:
+**3 · ~~El `stash@{0}: autostash`~~ — ✅ resuelto el 2026-08-28, no era deuda.** Juan lo revisó antes
+de reiniciar: es residuo del rebase que se interrumpió cuando se le cerró la consola el 2026-08-26, y
+contiene el diff de `CLAUDE.md` de la Fase 0, **ya commiteado y desplegado**. No hay nada que rescatar.
+Se deja sin borrar, junto a los otros tres, que tampoco son míos:
 
 ```
-stash@{0}: autostash                                    ← ojo con este
+stash@{0}: autostash                                    ← revisado, sin nada que rescatar
 stash@{1}: On master: fase-0-refactor-nucleo-20260825
 stash@{2}: On main: migration-file-004
 stash@{3}: On main: cambios-locales-en-progreso-20260502
 ```
 
-No toqué ninguno. Si alguien no reconoce el `autostash`, conviene mirarlo con
-`git stash show -p stash@{0}` **antes** de hacer cualquier rebase.
+No toqué ninguno.
 
 **4 · Los scripts de producción viven fuera de git.** `esquema-bd-produccion/` está en la raíz del
 workspace, que no es un repositorio. Los cinco scripts —`verificar_arreglo_tipo_migration.py`,

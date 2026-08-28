@@ -54,7 +54,7 @@ Todo el alcance pedido, verificado:
 |---|---|
 | Tests nuevos | 62 pasan (eran 60; la cifra original de 63 estaba mal contada) |
 | Tests de registros en total | 92 pasan (incluye `registros_cnd`) |
-| Suite completa del backend | 2351 pasan, 4 saltados, 0 fallan |
+| Suite completa del backend | 2354 pasan, 4 saltados, 0 fallan |
 | Cadena Alembic | los 3 tests en verde, head único `125` |
 | Build del frontend | `npm run build` OK |
 

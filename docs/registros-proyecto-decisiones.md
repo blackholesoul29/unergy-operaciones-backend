@@ -285,7 +285,7 @@ el mouse dice en cuáles — que es lo que explica al usuario por qué solo lo e
 |---|---|
 | Tests nuevos | **62**, todos en verde |
 | Tests de registros en total (incluye `registros_cnd`) | **92**, todos en verde |
-| Suite completa del backend | **2351 pasan, 4 saltados, 0 fallan** (rama ya actualizada contra master) |
+| Suite completa del backend | **2354 pasan, 4 saltados, 0 fallan** (rama al día con `origin/master`) |
 | Cadena Alembic | los 3 tests de `test_alembic_chain_integrity` en verde; head único `125`. Ver §10 |
 | Build del frontend | `npm run build` OK, chunks generados |
 

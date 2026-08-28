@@ -39,19 +39,6 @@ class TasaServicioOut(TasaServicioUpsert):
     model_config = {"from_attributes": True}
 
 
-class ClienteServicioCreate(BaseModel):
-    tipo: str
-    fecha_inicio: Optional[date] = None
-    notas: Optional[str] = None
-
-
-class ClienteServicioOut(ClienteServicioCreate):
-    id: int
-    cliente_id: int
-    created_at: datetime
-    model_config = {"from_attributes": True}
-
-
 class ClienteCreate(BaseModel):
     razon_social_nombre: str
     nit_cedula: Optional[str] = None
@@ -60,19 +47,13 @@ class ClienteCreate(BaseModel):
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
-    banco: Optional[str] = None
-    tipo_cuenta: Optional[str] = None
-    numero_cuenta: Optional[str] = None
-    titular_cuenta: Optional[str] = None
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
-    rut_url: Optional[str] = None
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
     contactos: list[ContactoParaClienteCreate] = []
-    servicios: list[ClienteServicioCreate] = []
 
 
 class ClienteUpdate(ClienteCreate):
@@ -87,7 +68,6 @@ class ClienteDocumentoCreate(BaseModel):
     estado: Optional[str] = "borrador"
     archivo_url: Optional[str] = None
     archivo_nombre: Optional[str] = None
-    servicio_id: Optional[int] = None
     notas: Optional[str] = None
     oportunidad_id: Optional[int] = None
 
@@ -99,14 +79,17 @@ class ClienteDocumentoUpdate(BaseModel):
     estado: Optional[str] = None
     archivo_url: Optional[str] = None
     archivo_nombre: Optional[str] = None
-    servicio_id: Optional[int] = None
     notas: Optional[str] = None
     oportunidad_id: Optional[int] = None
 
 
 class ClienteDocumentoOut(ClienteDocumentoCreate):
     id: int
-    cliente_id: int
+    # Nullable desde la generalizacion (migracion 122): un documento puede
+    # pertenecer a un ContratoServicio o un PPAContrato en vez de a un Cliente.
+    cliente_id: Optional[int] = None
+    contrato_servicio_id: Optional[int] = None
+    ppa_contrato_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -121,15 +104,10 @@ class ClienteBase(BaseModel):
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     departamento: Optional[str] = None
-    banco: Optional[str] = None
-    tipo_cuenta: Optional[str] = None
-    numero_cuenta: Optional[str] = None
-    titular_cuenta: Optional[str] = None
     iva_pct: Optional[float] = None
     retencion_pct: Optional[float] = None
     reteica_pct: Optional[float] = None
     reteiva_pct: Optional[float] = None
-    rut_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
@@ -142,10 +120,9 @@ class ClienteListOut(ClienteBase):
 class ClienteOut(ClienteBase):
     origen_tipo: Optional[str] = None
     origen_detalle: Optional[str] = None
-    servicios: list[ClienteServicioOut] = []
     documentos_comerciales: list[ClienteDocumentoOut] = []
 
-    @field_validator("servicios", "documentos_comerciales", mode="before")
+    @field_validator("documentos_comerciales", mode="before")
     @classmethod
     def none_to_list(cls, v):
         if v is None:

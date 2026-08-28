@@ -12,6 +12,8 @@ from app.schemas.contratos_servicio import (
     ImportarIndexacionEntry, FilaFactura,
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
+from app.utils.nombre_matching import mejor_candidato, core_tokens
+from app.services.documentos import set_enlace_documento
 
 router = APIRouter(prefix="/contratos-servicio", tags=["ContratoServicio"])
 
@@ -25,6 +27,10 @@ def _load_options():
         selectinload(ContratoServicio.proyecto),
         selectinload(ContratoServicio.fronteras),
         selectinload(ContratoServicio.inversionista),
+        # Igual: el @property `enlace_drive` recorre esta relacion en cada
+        # fila serializada -- sin esto, un listado de ~112 contratos de
+        # representacion dispara un SELECT por fila.
+        selectinload(ContratoServicio.documentos_comerciales),
     ]
 
 
@@ -66,7 +72,45 @@ def _sync_fronteras(contrato: ContratoServicio, frontera_ids: list[int], db: Ses
     contrato.fronteras = fronteras
 
 
+def _resolver_cliente_id(db: Session, nombre: str | None, nit: str | None) -> int | None:
+    """Resuelve un cliente_id a partir del nombre/NIT de texto libre del
+    wizard -- el campo nunca obliga a elegir del autocomplete, así que
+    contratante_id/prestador_id casi nunca se poblaban (auditoría de
+    Clientes 2026-08-27: 0/162 contratos_servicio en producción). Sin esto,
+    "condiciones económicas" del panel 360 y otras vistas de /clientes
+    quedaban silenciosamente vacías.
+
+    NIT primero (exacto, normalizado); si no, nombre parecido -- pero exige
+    ADEMÁS solapamiento real de tokens (no solo similitud de texto): el
+    backfill manual del mismo día encontró casos reales como "BALI ENERGY
+    S.A.S." emparejando por error con "INENERGY S.A.S." (0 tokens en común,
+    solo parecido de caracteres)."""
+    if nit:
+        key = "".join(ch for ch in nit if ch.isalnum())
+        if key:
+            con_nit = (
+                db.query(Cliente)
+                .filter(Cliente.deleted_at.is_(None), Cliente.nit_cedula.isnot(None))
+                .all()
+            )
+            iguales = [c for c in con_nit if "".join(ch for ch in c.nit_cedula if ch.isalnum()) == key]
+            if len(iguales) == 1:
+                return iguales[0].id
+    if nombre:
+        clientes = db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
+        candidatos = [(c, [c.razon_social_nombre]) for c in clientes]
+        item, _score = mejor_candidato(nombre, candidatos)
+        if item and (core_tokens(nombre) & core_tokens(item.razon_social_nombre)):
+            return item.id
+    return None
+
+
 def _sync_partes(contrato: ContratoServicio, db: Session):
+    if not contrato.contratante_id:
+        contrato.contratante_id = _resolver_cliente_id(db, contrato.contratante_nombre, contrato.contratante_nit)
+    if not contrato.prestador_id:
+        contrato.prestador_id = _resolver_cliente_id(db, contrato.prestador_nombre, contrato.prestador_nit)
+
     if contrato.contratante_id:
         cl = db.query(Cliente).filter(Cliente.id == contrato.contratante_id).first()
         if cl:
@@ -135,11 +179,15 @@ def create_contrato(
 ):
     payload = data.model_dump()
     frontera_ids = payload.pop("frontera_ids", []) or []
+    enlace_drive = payload.pop("enlace_drive", None)
     contrato = ContratoServicio(**payload)
     db.add(contrato)
     db.flush()
     _sync_partes(contrato, db)
     _sync_fronteras(contrato, frontera_ids, db)
+    if enlace_drive:
+        set_enlace_documento(db, contrato_servicio_id=contrato.id, url=enlace_drive,
+                              nombre="Enlace Drive del contrato")
     db.commit()
     return _get_or_404(contrato.id, db)
 
@@ -248,6 +296,12 @@ def fusionar_representacion(
 
         conservado = por_id[r["conservar"]]
         for campo, valor in r["valores"].items():
+            if campo == "enlace_drive":
+                # No es una columna real (property de solo lectura, ver
+                # services/documentos.py) -- no admite setattr.
+                set_enlace_documento(db, contrato_servicio_id=conservado.id, url=valor,
+                                      nombre="Enlace Drive del contrato")
+                continue
             setattr(conservado, campo, valor)
             if campo in ("indexacion_cgm", "indexacion_representacion"):
                 flag_modified(conservado, campo)
@@ -278,8 +332,13 @@ def update_contrato(
     payload = data.model_dump(exclude_unset=True)
     # None/ausente = no tocar las fronteras actuales; [] = desvincular todas
     frontera_ids = payload.pop("frontera_ids", None)
+    enlace_drive_set = "enlace_drive" in payload
+    enlace_drive = payload.pop("enlace_drive", None)
     for k, v in payload.items():
         setattr(contrato, k, v)
+    if enlace_drive_set:
+        set_enlace_documento(db, contrato_servicio_id=contrato.id, url=enlace_drive,
+                              nombre="Enlace Drive del contrato")
     _sync_partes(contrato, db)
     if frontera_ids is not None:
         _sync_fronteras(contrato, frontera_ids, db)

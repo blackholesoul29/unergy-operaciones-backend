@@ -32,6 +32,7 @@ from app.models.comercial import (
     oportunidad_oferta_proyectos_table,
 )
 from app.models.contratos import PPAContrato, PPATarifa
+from app.services.documentos import set_enlace_documento
 from app.schemas.comercial import (
     OportunidadCreate, OportunidadUpdate, EstadoChangeIn, GestionCreate, ProyectoDesdeCRMIn,
     OfertaCreate, OfertaUpdate, FirmarOfertaIn, RegistroComercialIn,
@@ -1235,7 +1236,6 @@ def firmar_oferta(
         indice_indexacion=data.indice_indexacion,
         periodo_indexacion_base=data.periodo_indexacion_base,
         cantidad_minima_kwh_mes=data.cantidad_minima_kwh_mes,
-        carpeta_link=data.carpeta_link,
         tipo_contrato="compra",
         # La característica pasa a vivir en el contrato: si mañana se borra la
         # oferta, el PPA sigue sabiendo lo que es.
@@ -1247,6 +1247,9 @@ def firmar_oferta(
     contrato.proyectos = _plantas_de_la_oferta(o, db)
     db.add(contrato)
     db.flush()
+    if data.carpeta_link:
+        set_enlace_documento(db, ppa_contrato_id=contrato.id, url=data.carpeta_link,
+                              nombre="Enlace Drive del contrato")
 
     # La tabla de precios por año se expande a las 12 filas mensuales que espera
     # ppa_tarifas, acotada al periodo de suministro real.

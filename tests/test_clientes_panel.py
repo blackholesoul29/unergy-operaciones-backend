@@ -9,7 +9,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
 import app.models  # noqa: F401  (registra todos los modelos en Base.metadata)
-from app.models.clientes import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.models.contratos import ContratoServicio, PPAContrato, ppa_contrato_proyectos_table
 from app.models.proyectos import Proyecto, ProyectoInversionista
@@ -35,7 +35,7 @@ def db():
     Base.metadata.create_all(
         engine,
         tables=[
-            Cliente.__table__, ClienteServicio.__table__, Contacto.__table__,
+            Cliente.__table__, Contacto.__table__,
             ClienteDocumentoComercial.__table__,
             Proyecto.__table__, ProyectoInversionista.__table__,
             ContratoServicio.__table__, PPAContrato.__table__,
@@ -45,6 +45,28 @@ def db():
     session = sessionmaker(bind=engine)()
     yield session
     session.close()
+
+
+def _seed_contrato_sin_id_directo(db):
+    """Caso real de producción (auditoría 2026-08-27): contratante_id/
+    prestador_id casi nunca se pueblan (el campo del wizard es texto libre).
+    Cliente 3 es inversionista de Planta Cuarenta, y esa planta tiene un
+    contrato de representación SIN contratante_id ni prestador_id -- debe
+    seguir viéndose vía el fallback por planta (proyecto_id)."""
+    db.add_all([
+        Cliente(id=3, razon_social_nombre="Gamma"),
+        Proyecto(id=40, nombre_comercial="Planta Cuarenta"),
+    ])
+    db.flush()
+    db.add_all([
+        ProyectoInversionista(id=2, proyecto_id=40, cliente_id=3,
+                              porcentaje_participacion=100,
+                              fecha_inicio=dt.date(2025, 1, 1)),
+        ContratoServicio(id=2, proyecto_id=40, contratante_id=None, prestador_id=None,
+                         servicio_aplica="representacion", estado="vigente",
+                         fecha_fin=dt.date(2026, 8, 1)),
+    ])
+    db.commit()
 
 
 def _seed_basico(db):
@@ -63,7 +85,6 @@ def _seed_basico(db):
         ProyectoInversionista(id=1, proyecto_id=10, cliente_id=1,
                               porcentaje_participacion=60,
                               fecha_inicio=dt.date(2025, 1, 1)),
-        ClienteServicio(id=1, cliente_id=1, tipo="representacion"),
         ContratoServicio(id=1, proyecto_id=20, contratante_id=1,
                          servicio_aplica="cgm", estado="vigente",
                          fecha_fin=dt.date(2026, 8, 1), tarifa_cgm=12.5,
@@ -129,7 +150,7 @@ def test_proyectos_por_cliente(db):
 def test_servicios_por_cliente(db):
     _seed_basico(db)
     res = cp.servicios_por_cliente(db, {1, 2})
-    assert res[1] == {"representacion", "cgm", "ppa"}
+    assert res[1] == {"cgm", "ppa"}
     assert res.get(2, set()) == set()
 
 
@@ -159,7 +180,7 @@ def test_vista_comercial(db):
     por_id = {f["id"]: f for f in filas}
     acme = por_id[1]
     assert acme["num_plantas"] == 3
-    assert set(acme["servicios"]) == {"representacion", "cgm", "ppa"}
+    assert set(acme["servicios"]) == {"cgm", "ppa"}
     assert acme["alerta_contrato"] == "por_vencer"
     assert acme["proximo_vencimiento"] == "2026-08-01"
     assert acme["contacto_comercial_nombre"] == "Ana Pérez"
@@ -182,7 +203,7 @@ def test_panel_cliente(db):
 
     assert panel["kpis"]["num_plantas"] == 3
     assert panel["kpis"]["proximo_vencimiento"] == "2026-08-01"
-    assert set(panel["kpis"]["servicios"]) == {"representacion", "cgm", "ppa"}
+    assert set(panel["kpis"]["servicios"]) == {"cgm", "ppa"}
 
     plantas = {p["proyecto_id"]: p for p in panel["plantas"]}
     assert plantas[20]["fecha_fin_contrato"] == "2026-08-01"
@@ -209,3 +230,55 @@ def test_panel_cliente_404(db):
     from app.api.v1 import clientes as clientes_api
     with pytest.raises(HTTPException):
         clientes_api.get_cliente_panel(999, db=db, _=None, hoy=HOY)
+
+
+# ── Fallback por planta cuando contratante_id/prestador_id no se pueblan ────
+# Auditoría de Clientes 2026-08-27: en producción, 0/162 contratos_servicio
+# tienen contratante_id o prestador_id (el campo del wizard es texto libre).
+# Sin este fallback, "condiciones económicas" del panel 360 siempre estaba
+# vacío, y la columna Servicios / alerta de vencimiento de /clientes
+# ignoraban en silencio los contratos de servicio reales.
+
+def test_servicios_por_cliente_via_planta_sin_contratante_id(db):
+    _seed_contrato_sin_id_directo(db)
+    res = cp.servicios_por_cliente(db, {3})
+    assert res[3] == {"representacion"}
+
+
+def test_alerta_contratos_por_cliente_via_planta_sin_contratante_id(db):
+    _seed_contrato_sin_id_directo(db)
+    res = cp.alerta_contratos_por_cliente(db, {3}, HOY)
+    assert res[3]["alerta"] == "por_vencer"
+    assert res[3]["proximo_vencimiento"] == dt.date(2026, 8, 1)
+
+
+def test_vista_comercial_via_planta_sin_contratante_id(db):
+    from app.api.v1 import clientes as clientes_api
+    _seed_contrato_sin_id_directo(db)
+
+    filas = clientes_api.vista_comercial(db=db, _=None, hoy=HOY)
+    gamma = {f["id"]: f for f in filas}[3]
+    assert gamma["servicios"] == ["representacion"]
+    assert gamma["alerta_contrato"] == "por_vencer"
+
+
+def test_panel_cliente_condiciones_via_planta_sin_contratante_id(db):
+    from app.api.v1 import clientes as clientes_api
+    _seed_contrato_sin_id_directo(db)
+
+    panel = clientes_api.get_cliente_panel(3, db=db, _=None, hoy=HOY)
+
+    assert len(panel["condiciones"]) == 1
+    assert panel["condiciones"][0]["contrato_id"] == 2
+    assert panel["condiciones"][0]["servicio"] == "representacion"
+    assert set(panel["kpis"]["servicios"]) == {"representacion"}
+
+
+def test_servicios_contratos_endpoint_via_planta_sin_contratante_id(db):
+    from app.api.v1 import clientes as clientes_api
+    _seed_contrato_sin_id_directo(db)
+
+    grupos = clientes_api.list_client_servicios_contratos(3, db=db, _=None, hoy=HOY)
+    assert len(grupos) == 1
+    assert grupos[0]["servicio"] == "representacion"
+    assert grupos[0]["num_plantas"] == 1

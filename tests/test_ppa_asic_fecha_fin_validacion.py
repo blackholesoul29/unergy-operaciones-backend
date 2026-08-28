@@ -16,7 +16,7 @@ import app.models  # noqa: F401
 from app.models import AsicSolicitud, PPAContrato
 from app.models.contratos import ppa_contrato_proyectos_table, PPATarifa, PPACompromisoEnergia
 from app.models.proyectos import Proyecto
-from app.models.clientes import Cliente
+from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.asic import TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.schemas.asic import AsicSolicitudUpdate
 from app.schemas.ppa import PPAContratoUpdate
@@ -38,6 +38,9 @@ def db():
             Proyecto.__table__, Cliente.__table__, AsicSolicitud.__table__,
             PPAContrato.__table__, PPATarifa.__table__, PPACompromisoEnergia.__table__,
             ppa_contrato_proyectos_table,
+            # _load_options() (api/v1/ppa.py) hace selectinload de esta relacion
+            # desde la generalizacion de documentos (migracion 122).
+            ClienteDocumentoComercial.__table__,
         ],
     )
     s = sessionmaker(bind=engine)()

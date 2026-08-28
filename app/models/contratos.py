@@ -96,7 +96,6 @@ class ContratoServicio(Base):
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fecha_indexacion: Mapped[date | None] = mapped_column(Date, nullable=True)  # fecha de indexación de tarifas
     responsable_iva: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    enlace_drive: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     estado_pago: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Campos informativos del plan de Internet (solo aplican a servicio_aplica='internet')
     plan_datos_gb: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -140,6 +139,26 @@ class ContratoServicio(Base):
     fronteras: Mapped[list["Frontera"]] = relationship(
         "Frontera", secondary="contrato_frontera", back_populates="contratos",
     )
+    # lazy="select" (default) a proposito, no "selectin": muchos tests de otros
+    # modulos crean un subset de tablas via Base.metadata.create_all(tables=[...])
+    # sin cliente_documentos_comerciales, y un default eager dispararia esa
+    # consulta en CADA carga de un ContratoServicio sin importar si algo pide
+    # `enlace_drive` -- rompia 79 tests ajenos a este cambio. El N+1 real (listados
+    # de ~100-200 contratos) se evita con selectinload() explicito en la query,
+    # no aqui (ver _load_options() en api/v1/contratos_servicio.py).
+    documentos_comerciales: Mapped[list["ClienteDocumentoComercial"]] = relationship(
+        "ClienteDocumentoComercial", back_populates="contrato_servicio",
+        cascade="all, delete-orphan", uselist=True,
+    )
+
+    @property
+    def enlace_drive(self) -> str | None:
+        """Sucesor de la columna `enlace_drive` (eliminada, migracion 122):
+        ahora vive en cliente_documentos_comerciales (tipo='contrato'), pero se
+        expone con el mismo nombre para que ContratoServicioOut y el frontend
+        no cambien -- ver services/documentos.set_enlace_documento."""
+        doc = next((d for d in self.documentos_comerciales if d.tipo == "contrato"), None)
+        return doc.archivo_url if doc else None
 
 
 class PPAResponsable(Base):
@@ -200,7 +219,6 @@ class PPAContrato(Base):
     gescon_cantidades_kwh: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     codigo_sic: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tipo_contrato: Mapped[str | None] = mapped_column(String(20), nullable=True, server_default="venta")
-    carpeta_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # NULL = sin dato (la UI muestra "—"); False = explícitamente no renueva
     renovacion_automatica: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Comunidad energética NO es otro tipo de contrato: es una CARACTERISTICA de
@@ -218,6 +236,18 @@ class PPAContrato(Base):
     vendedor: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[vendedor_id])
     tarifas: Mapped[list["PPATarifa"]] = relationship("PPATarifa", back_populates="contrato", cascade="all, delete-orphan")
     compromisos_energia: Mapped[list["PPACompromisoEnergia"]] = relationship("PPACompromisoEnergia", back_populates="contrato", cascade="all, delete-orphan")
+    # lazy="select" (default): mismo motivo que ContratoServicio.documentos_comerciales.
+    documentos_comerciales: Mapped[list["ClienteDocumentoComercial"]] = relationship(
+        "ClienteDocumentoComercial", back_populates="ppa_contrato",
+        cascade="all, delete-orphan", uselist=True,
+    )
+
+    @property
+    def carpeta_link(self) -> str | None:
+        """Sucesor de la columna `carpeta_link` (eliminada, migracion 122): ver
+        ContratoServicio.enlace_drive, mismo patron."""
+        doc = next((d for d in self.documentos_comerciales if d.tipo == "contrato"), None)
+        return doc.archivo_url if doc else None
 
 
 class IppMensual(Base):

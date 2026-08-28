@@ -2,7 +2,7 @@
 
 "Planta con nosotros" = proyecto donde el cliente cumple cualquiera de:
 - es inversionista (proyecto_inversionistas),
-- es contratante de un contrato de servicio sobre el proyecto (contratos_servicio),
+- es contratante O prestador de un contrato de servicio sobre el proyecto (contratos_servicio),
 - es comprador o vendedor de un PPA que cubre el proyecto (ppa_contrato_proyectos).
 """
 from __future__ import annotations
@@ -69,6 +69,18 @@ def proyectos_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[i
     for cid, pid in filas_serv:
         res[cid].add(pid)
 
+    # Igual que contratante_id: un cliente que PRESTA el servicio (no solo lo
+    # contrata) también tiene esa planta "con nosotros" -- mismo criterio que
+    # ya aplica servicios_por_cliente (auditoría de Clientes 2026-08-27).
+    filas_serv_prestador = (
+        db.query(ContratoServicio.prestador_id, ContratoServicio.proyecto_id)
+        .filter(ContratoServicio.prestador_id.in_(cliente_ids),
+                ContratoServicio.proyecto_id.isnot(None))
+        .all()
+    )
+    for cid, pid in filas_serv_prestador:
+        res[cid].add(pid)
+
     filas_ppa = (
         db.query(PPAContrato.comprador_id, PPAContrato.vendedor_id,
                  ppa_contrato_proyectos_table.c.proyecto_id)
@@ -87,17 +99,13 @@ def proyectos_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[i
     return res
 
 
-def servicios_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[str]]:
-    from app.models.clientes import ClienteServicio
+def servicios_por_cliente(db: Session, cliente_ids: set[int],
+                          plantas: dict[int, set[int]] | None = None) -> dict[int, set[str]]:
     from app.models.contratos import ContratoServicio, PPAContrato
 
     res: dict[int, set[str]] = defaultdict(set)
     if not cliente_ids:
         return res
-
-    for cid, tipo in (db.query(ClienteServicio.cliente_id, ClienteServicio.tipo)
-                      .filter(ClienteServicio.cliente_id.in_(cliente_ids)).all()):
-        res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
 
     # Fix 2026-08-19: el panel 360 (clientes.py::get_panel) tambien cuenta los
     # contratos donde el cliente es prestador, no solo contratante -- sin esto,
@@ -113,6 +121,24 @@ def servicios_por_cliente(db: Session, cliente_ids: set[int]) -> dict[int, set[s
         .filter(ContratoServicio.prestador_id.in_(cliente_ids)).all()
     ):
         res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
+
+    # contratante_id/prestador_id casi nunca se pobla en la práctica (el campo
+    # del wizard de contrato es texto libre) -- auditoría de Clientes
+    # 2026-08-27. Sin este fallback por planta del cliente (mismo criterio de
+    # "planta con nosotros" que proyectos_por_cliente), la columna Servicios de
+    # /clientes ignoraba en silencio los contratos de servicio reales.
+    plantas = plantas if plantas is not None else proyectos_por_cliente(db, cliente_ids)
+    proyecto_a_clientes: dict[int, set[int]] = defaultdict(set)
+    for cid, pids in plantas.items():
+        for pid in pids:
+            proyecto_a_clientes[pid].add(cid)
+    if proyecto_a_clientes:
+        for pid, tipo in (
+            db.query(ContratoServicio.proyecto_id, ContratoServicio.servicio_aplica)
+            .filter(ContratoServicio.proyecto_id.in_(proyecto_a_clientes.keys())).all()
+        ):
+            for cid in proyecto_a_clientes[pid]:
+                res[cid].add(tipo.value if hasattr(tipo, "value") else tipo)
 
     filas_ppa = (
         db.query(PPAContrato.comprador_id, PPAContrato.vendedor_id)
@@ -159,7 +185,8 @@ def contacto_comercial_por_cliente(db: Session, cliente_ids: set[int]) -> dict[i
 
 
 def alerta_contratos_por_cliente(db: Session, cliente_ids: set[int],
-                                 hoy: date) -> dict[int, dict]:
+                                 hoy: date,
+                                 plantas: dict[int, set[int]] | None = None) -> dict[int, dict]:
     """Peor semáforo entre los contratos no terminados del cliente y la
     fecha de fin futura más cercana."""
     from app.models.contratos import ContratoServicio, PPAContrato
@@ -183,6 +210,31 @@ def alerta_contratos_por_cliente(db: Session, cliente_ids: set[int],
         sem = semaforo_contrato(fecha_fin, hoy)
         for cid in (contratante_id, prestador_id):
             if cid in cliente_ids:
+                semaforos[cid].append(sem)
+                if fecha_fin and fecha_fin >= hoy:
+                    vencimientos[cid].append(fecha_fin)
+
+    # contratante_id/prestador_id casi nunca se pobla en la práctica -- mismo
+    # fallback por planta del cliente que servicios_por_cliente (auditoría de
+    # Clientes 2026-08-27). Sin esto, el semáforo "Por vencer"/"Vencidos" de
+    # /clientes solo veía PPAs, nunca contratos de servicio reales.
+    plantas = plantas if plantas is not None else proyectos_por_cliente(db, cliente_ids)
+    proyecto_a_clientes: dict[int, set[int]] = defaultdict(set)
+    for cid, pids in plantas.items():
+        for pid in pids:
+            proyecto_a_clientes[pid].add(cid)
+    if proyecto_a_clientes:
+        filas_serv_planta = (
+            db.query(ContratoServicio.proyecto_id, ContratoServicio.fecha_fin, ContratoServicio.estado)
+            .filter(ContratoServicio.proyecto_id.in_(proyecto_a_clientes.keys()))
+            .all()
+        )
+        for pid, fecha_fin, estado in filas_serv_planta:
+            estado_val = estado.value if hasattr(estado, "value") else estado
+            if estado_val == "terminado":
+                continue
+            sem = semaforo_contrato(fecha_fin, hoy)
+            for cid in proyecto_a_clientes[pid]:
                 semaforos[cid].append(sem)
                 if fecha_fin and fecha_fin >= hoy:
                     vencimientos[cid].append(fecha_fin)

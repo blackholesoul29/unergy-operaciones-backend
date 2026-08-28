@@ -12,7 +12,6 @@ from app.seeds.seed_data import seed
 
 def add_columns():
     stmts = [
-        "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rut_url VARCHAR(1000)",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_liquidacion VARCHAR(255)",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_monitoreo VARCHAR(255)",
         "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS correo_soporte VARCHAR(255)",
@@ -25,7 +24,6 @@ def add_columns():
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_reporte_consumo_id INTEGER",
         "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS quoia_nodo_id INTEGER",
         "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS archivo_nombre VARCHAR(500)",
-        "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS servicio_id BIGINT REFERENCES cliente_servicios(id) ON DELETE SET NULL",
         # liquidaciones detalle
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS estado_resultados_url VARCHAR(1000)",
         "ALTER TABLE liquidaciones ADD COLUMN IF NOT EXISTS informe_html TEXT",
@@ -52,9 +50,8 @@ def add_columns():
         "ALTER TABLE oportunidad_gestiones ADD COLUMN IF NOT EXISTS oferta_id BIGINT",
         "CREATE INDEX IF NOT EXISTS ix_oportunidad_gestiones_oferta_id "
         "ON oportunidad_gestiones (oferta_id)",
-        # ppa_contratos: tipo_contrato y carpeta_link (migración 009)
+        # ppa_contratos: tipo_contrato (migración 009)
         "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS tipo_contrato VARCHAR(20) DEFAULT 'venta'",
-        "ALTER TABLE ppa_contratos ADD COLUMN IF NOT EXISTS carpeta_link VARCHAR(1000)",
         # ppa_compromisos_energia: plantas inscritas exigidas por mes (condición a cumplir; denominador del indicador de cumplimiento de plantas)
         "ALTER TABLE ppa_compromisos_energia ADD COLUMN IF NOT EXISTS cantidad_proyectos INTEGER",
         # Toda fila arranca en 0 (el equipo completa los valores reales luego); default 0 para filas futuras.

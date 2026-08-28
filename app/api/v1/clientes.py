@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -10,12 +10,11 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.services.audit import registrar_borrado
-from app.models import Cliente, ClienteServicio, ClienteDocumentoComercial
+from app.models import Cliente, ClienteDocumentoComercial
 from app.models.clientes import ClienteTasaServicio
 from app.models.contactos import Contacto, ProyectoAreaContacto
 from app.schemas.clientes import (
     ClienteCreate, ClienteUpdate, ClienteOut, ClienteListOut,
-    ClienteServicioCreate, ClienteServicioOut,
     ClienteDocumentoCreate, ClienteDocumentoUpdate, ClienteDocumentoOut,
     TasaServicioUpsert, TasaServicioOut,
 )
@@ -32,7 +31,6 @@ router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
 def _get_cliente_or_404(id: int, db: Session) -> Cliente:
     c = db.query(Cliente).options(
-        selectinload(Cliente.servicios),
         selectinload(Cliente.documentos_comerciales),
     ).filter(Cliente.id == id).first()
     if not c:
@@ -79,8 +77,8 @@ def vista_comercial(
     )
     ids = {c.id for c in clientes}
     proys = proyectos_por_cliente(db, ids)
-    servs = servicios_por_cliente(db, ids)
-    alertas = alerta_contratos_por_cliente(db, ids, hoy)
+    servs = servicios_por_cliente(db, ids, plantas=proys)
+    alertas = alerta_contratos_por_cliente(db, ids, hoy, plantas=proys)
     comerciales = contacto_comercial_por_cliente(db, ids)
 
     filas = []
@@ -148,16 +146,17 @@ def create_cliente(
                     "candidato_nombre": duplicado.razon_social_nombre,
                 },
             )
-    payload = data.model_dump(exclude={"contactos", "servicios"})
+    payload = data.model_dump(exclude={"contactos"})
     cliente = Cliente(**payload)
     db.add(cliente)
-    db.flush()  # asigna cliente.id sin cerrar la transacción
+    try:
+        db.flush()  # asigna cliente.id sin cerrar la transacción -- el UNIQUE de nit_cedula se valida aquí
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Ya existe un cliente con ese NIT/cédula.")
     for c in data.contactos:
         db.add(Contacto(cliente_id=cliente.id, nombre=c.nombre, telefono=c.telefono,
                          email=c.email, tipo=c.tipo))
-    for s in data.servicios:
-        db.add(ClienteServicio(cliente_id=cliente.id, tipo=s.tipo,
-                                fecha_inicio=s.fecha_inicio, notas=s.notas))
     db.commit()
     return _get_cliente_or_404(cliente.id, db)
 
@@ -176,30 +175,57 @@ def update_cliente(id: int, data: ClienteUpdate, db: Session = Depends(get_db), 
     return _get_cliente_or_404(id, db)
 
 
+# Tablas con FK a clientes.id en NO ACTION (sin relationship de cascada en el
+# modelo) que de verdad deben BLOQUEAR el borrado -- representan una relación
+# de negocio real, no solo un log. auditoría de Clientes 2026-08-28: antes de
+# esto, el único mensaje posible asumía siempre "es inversionista de un
+# proyecto", aunque en realidad lo bloqueara una Oportunidad (mensaje
+# incorrecto para ese caso). email_envios (otro NO ACTION real, un log de
+# correos sin ninguna relación de negocio) se corrigió aparte a SET NULL
+# (migración 120) -- no debía bloquear nunca.
+_TABLAS_BLOQUEAN_BORRADO_CLIENTE = [
+    ("proyecto_inversionistas", "cliente_id", "es inversionista de uno o más proyectos"),
+    ("oportunidades", "cliente_id", "tiene una o más oportunidades comerciales registradas"),
+]
+
+
+def _motivo_bloqueo_borrado_cliente(db: Session, id: int) -> str | None:
+    for tabla, columna, motivo in _TABLAS_BLOQUEAN_BORRADO_CLIENTE:
+        existe = db.execute(
+            text(f"SELECT 1 FROM {tabla} WHERE {columna} = :id LIMIT 1"), {"id": id}
+        ).first()
+        if existe:
+            return motivo
+    return None
+
+
 @router.delete("/{id}", status_code=204)
 def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    cliente = db.query(Cliente).filter(Cliente.id == id).first()
+    # deleted_at IS NULL: un cliente ya borrado se ve como "no encontrado", igual
+    # que en el resto de la API (~14 sitios filtran por esto).
+    cliente = db.query(Cliente).filter(Cliente.id == id, Cliente.deleted_at.is_(None)).first()
     if not cliente:
         raise HTTPException(404, "Cliente no encontrado")
 
+    motivo = _motivo_bloqueo_borrado_cliente(db, id)
+    if motivo:
+        raise HTTPException(409, f"No se puede eliminar: este cliente {motivo}. Desvincúlalo primero.")
+
     # Vínculos inofensivos: punteros de contacto (CGM/operacional/liquidación)
-    # que un proyecto tenga apuntando a este cliente. Se borran en cascada --
-    # el proyecto simplemente vuelve a usar sus inversionistas por defecto.
-    # Contactos/servicios/documentos propios ya cascaden vía relationship().
-    # proyecto_inversionistas (participación real) NO se toca: si el cliente
-    # es inversionista de un proyecto, el borrado debe seguir bloqueado.
+    # que un proyecto tenga apuntando a este cliente. Se limpian igual que antes --
+    # el proyecto vuelve a usar sus inversionistas por defecto.
     db.query(ProyectoAreaContacto).filter(ProyectoAreaContacto.cliente_id == id).delete()
 
-    db.delete(cliente)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            409,
-            "No se puede eliminar: este cliente es inversionista de uno o más "
-            "proyectos. Desvincúlalo primero.",
-        )
+    # Soft-delete, nunca físico -- auditoría de Clientes 2026-08-28: era el único
+    # borrado físico de Cliente en toda la API, inconsistente con merge_clientes/
+    # dedup_clientes (documentan explícitamente "nunca borra físico") y con los
+    # ~14 sitios que ya filtran por deleted_at IS_(None). Por objeto (no raw SQL)
+    # para que audit.py sí lo vea -- ver tests/test_escrituras_masivas.py. Un
+    # efecto colateral bueno: contactos/servicios/documentos ya no se pierden
+    # (el cascade="all, delete-orphan" solo dispara con un delete físico), así
+    # que restaurar deleted_at a NULL deja al cliente exactamente como estaba.
+    cliente.deleted_at = datetime.now(timezone.utc)
+    db.commit()
 
 
 @router.post("/{id}/test-correo")
@@ -272,36 +298,6 @@ def eliminar_tasa_servicio(id: int, tasa_id: int,
     ).delete()
     db.commit()
     return {"ok": True}
-
-
-# ── Servicios ────────────────────────────────────────────────────────────────
-
-@router.get("/{id}/servicios", response_model=list[ClienteServicioOut])
-def list_servicios(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_cliente_or_404(id, db)
-    return db.query(ClienteServicio).filter(ClienteServicio.cliente_id == id).all()
-
-
-@router.post("/{id}/servicios", response_model=ClienteServicioOut, status_code=201)
-def add_servicio(id: int, data: ClienteServicioCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    _get_cliente_or_404(id, db)
-    existing = db.query(ClienteServicio).filter_by(cliente_id=id, tipo=data.tipo).first()
-    if existing:
-        raise HTTPException(400, f"El cliente ya tiene el servicio '{data.tipo}' registrado")
-    s = ClienteServicio(cliente_id=id, **data.model_dump())
-    db.add(s)
-    db.commit()
-    db.refresh(s)
-    return s
-
-
-@router.delete("/{id}/servicios/{servicio_id}", status_code=204)
-def remove_servicio(id: int, servicio_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    s = db.query(ClienteServicio).filter_by(id=servicio_id, cliente_id=id).first()
-    if not s:
-        raise HTTPException(404, "Servicio no encontrado")
-    db.delete(s)
-    db.commit()
 
 
 # ── Contactos ─────────────────────────────────────────────────────────────────
@@ -549,7 +545,7 @@ def list_client_servicios_contratos(
     hoy: date | None = None,  # inyectable en tests
 ):
     """Servicios que Unergy le presta a este cliente, DERIVADOS de los contratos
-    de servicio reales de sus plantas (no de la lista manual `cliente_servicios`).
+    de servicio reales de sus plantas.
 
     "Plantas del cliente" = misma unión que usa el panel 360 (inversionista +
     contratante de un contrato de servicio + comprador/vendedor de un PPA). Toma
@@ -576,8 +572,10 @@ def list_client_servicios_contratos(
     if plant_ids:
         condiciones.append(ContratoServicio.proyecto_id.in_(plant_ids))
     condiciones.append(ContratoServicio.contratante_id == id)  # por si contrata sin planta ligada
+    condiciones.append(ContratoServicio.prestador_id == id)  # por si presta sin planta ligada
     contratos = (
         db.query(ContratoServicio)
+        .options(selectinload(ContratoServicio.documentos_comerciales))  # lo lee `enlace_drive` abajo
         .filter(or_(*condiciones))
         .all()
     )
@@ -661,22 +659,32 @@ def get_cliente_panel(
     from app.models.contratos import ContratoServicio, PPAContrato
     from app.models.proyectos import Proyecto, ProyectoInversionista
     from app.services.clientes_panel import (
-        peor_semaforo, renovacion_combinada, semaforo_contrato,
+        peor_semaforo, proyectos_por_cliente, renovacion_combinada, semaforo_contrato,
     )
     from app.schemas.clientes import ClienteOut
 
     hoy = hoy or date.today()
     cliente = _get_cliente_or_404(id, db)
 
+    # contratante_id/prestador_id casi nunca se pobla en la práctica (el campo
+    # del wizard es texto libre); mismo fallback que list_client_servicios_contratos
+    # -- también por planta del cliente (inversionista/contratante/PPA), no solo
+    # por el ID directo en el contrato. Sin esto, "condiciones económicas" y
+    # buena parte de "contratos" del panel 360 quedaban vacíos siempre.
+    plant_ids = proyectos_por_cliente(db, {id}).get(id, set())
+    condiciones_filtro = [ContratoServicio.contratante_id == id, ContratoServicio.prestador_id == id]
+    if plant_ids:
+        condiciones_filtro.append(ContratoServicio.proyecto_id.in_(plant_ids))
     contratos_serv = (
         db.query(ContratoServicio)
-        .filter(or_(ContratoServicio.contratante_id == id,
-                    ContratoServicio.prestador_id == id))
+        .options(selectinload(ContratoServicio.documentos_comerciales))  # lo lee `enlace_drive` abajo
+        .filter(or_(*condiciones_filtro))
         .all()
     )
     ppas = (
         db.query(PPAContrato)
-        .options(selectinload(PPAContrato.proyectos))
+        .options(selectinload(PPAContrato.proyectos),
+                 selectinload(PPAContrato.documentos_comerciales))  # lo lee `carpeta_link` abajo
         .filter(PPAContrato.deleted_at.is_(None),
                 or_(PPAContrato.comprador_id == id, PPAContrato.vendedor_id == id))
         .all()
@@ -803,8 +811,7 @@ def get_cliente_panel(
     # ── KPIs ──
     activos = [x for x in contratos if x["semaforo"] != "vencido"]
     vencimientos = [x["fecha_fin"] for x in activos if x["fecha_fin"]]
-    servicios_kpi = sorted({x["tipo"] for x in contratos}
-                           | {_enum_val(s.tipo) for s in cliente.servicios})
+    servicios_kpi = sorted({x["tipo"] for x in contratos})
     kpis = {
         "num_plantas": len(plantas),
         "contratos_activos": len(activos),
@@ -831,7 +838,6 @@ def get_cliente_panel(
 _MERGE_CLIENTE_SIMPLE = ["cliente_documentos_comerciales", "oportunidades", "proyecto_area_contacto"]
 _MERGE_CLIENTE_COMPOSITE = [
     ("contactos", ["email", "tipo"]),                  # UNIQUE (cliente_id, email, tipo)
-    ("cliente_servicios", ["tipo"]),                    # unicidad de app: un servicio por tipo
     ("proyecto_inversionistas", ["proyecto_id"]),       # evita duplicar al cliente como inversionista del mismo proyecto
 ]
 # nit_cedula es UNIQUE en la BD -- necesita liberarse en el perdedor antes de
@@ -898,6 +904,21 @@ def merge_clientes(
     if ppa_compra or ppa_venta:
         movimientos.append({"tabla": "ppa_contratos", "a_mover": ppa_compra + ppa_venta, "descartadas_por_colision": 0})
 
+    # contratos_servicio: triple FK (contratante_id / prestador_id / inversionista_id),
+    # tampoco tiene unicidad por cliente -- varios contratos pueden compartir el mismo
+    # contratante/prestador/inversionista sin problema. Auditoria de Clientes 2026-08-27:
+    # faltaba aca, asi que fusionar un cliente que fuera parte de algun contrato de
+    # servicio lo dejaba apuntando al perdedor (ya dado de baja, invisible en la UI).
+    cs_contratante = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE contratante_id=:loser", p)
+    cs_prestador = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE prestador_id=:loser", p)
+    cs_inversionista = _scalar_cliente(db, "SELECT count(*) FROM contratos_servicio WHERE inversionista_id=:loser", p)
+    if cs_contratante or cs_prestador or cs_inversionista:
+        movimientos.append({
+            "tabla": "contratos_servicio",
+            "a_mover": cs_contratante + cs_prestador + cs_inversionista,
+            "descartadas_por_colision": 0,
+        })
+
     # Campos escalares vacíos en el ganador: qué se copiaría del perdedor.
     campos_copiados = []
     for f in _MERGE_CLIENTE_SCALAR_UNIQUE + _MERGE_CLIENTE_SCALAR_FILL_IF_EMPTY:
@@ -936,6 +957,11 @@ def merge_clientes(
         # 1) ppa_contratos: doble FK
         db.execute(text("UPDATE ppa_contratos SET comprador_id=:keeper WHERE comprador_id=:loser"), p)
         db.execute(text("UPDATE ppa_contratos SET vendedor_id=:keeper WHERE vendedor_id=:loser"), p)
+
+        # 1b) contratos_servicio: triple FK
+        db.execute(text("UPDATE contratos_servicio SET contratante_id=:keeper WHERE contratante_id=:loser"), p)
+        db.execute(text("UPDATE contratos_servicio SET prestador_id=:keeper WHERE prestador_id=:loser"), p)
+        db.execute(text("UPDATE contratos_servicio SET inversionista_id=:keeper WHERE inversionista_id=:loser"), p)
 
         # 2) Tablas con colisión por clave compuesta: descartar la del perdedor, mover el resto
         for t, keys in _MERGE_CLIENTE_COMPOSITE:

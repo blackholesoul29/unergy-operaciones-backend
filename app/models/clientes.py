@@ -1,6 +1,7 @@
 import enum
 from datetime import datetime, date
-from sqlalchemy import BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import (BigInteger, String, Numeric, Enum as SAEnum, DateTime, Date,
+                        ForeignKey, Text, UniqueConstraint, CheckConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -9,13 +10,6 @@ from app.models.base import Base
 class TipoPersonaEnum(str, enum.Enum):
     natural = "natural"
     juridica = "juridica"
-
-
-class TipoServicioClienteEnum(str, enum.Enum):
-    operacion = "operacion"
-    representacion = "representacion"
-    cgm = "cgm"
-    promotor = "promotor"
 
 
 class TipoDocumentoClienteEnum(str, enum.Enum):
@@ -45,16 +39,10 @@ class Cliente(Base):
     direccion: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
     departamento: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # Banking info
-    banco: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    tipo_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    numero_cuenta: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    titular_cuenta: Mapped[str | None] = mapped_column(String(255), nullable=True)
     iva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     retencion_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteica_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     reteiva_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    rut_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Origen comercial del cliente. VARCHAR (no enum de BD) a propósito:
     # la tabla ya existe y un tipo nuevo complicaría la migración; la
     # validación de valores vive en el schema Pydantic (OrigenClienteLiteral).
@@ -66,29 +54,40 @@ class Cliente(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     participaciones: Mapped[list["ProyectoInversionista"]] = relationship("ProyectoInversionista", back_populates="cliente", uselist=True)
-    servicios: Mapped[list["ClienteServicio"]] = relationship("ClienteServicio", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
     documentos_comerciales: Mapped[list["ClienteDocumentoComercial"]] = relationship("ClienteDocumentoComercial", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
     contactos: Mapped[list["Contacto"]] = relationship("Contacto", back_populates="cliente", cascade="all, delete-orphan", uselist=True)
 
 
-class ClienteServicio(Base):
-    __tablename__ = "cliente_servicios"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
-    tipo: Mapped[str] = mapped_column(SAEnum(TipoServicioClienteEnum, name="tipo_servicio_cliente_enum"), nullable=False)
-    fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
-    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="servicios")
-
-
 class ClienteDocumentoComercial(Base):
+    """Documento genérico con archivo/enlace (RUT, cámara de comercio, carpeta
+    de un contrato, etc.) -- pese al nombre (histórico, se conserva para no
+    romper referencias), NO es exclusiva de Cliente: generalización
+    2026-08-28 (auditoría de Clientes) para eliminar los campos sueltos
+    equivalentes que tenían Cliente.rut_url, ContratoServicio.enlace_drive y
+    PPAContrato.carpeta_link -- una sola tabla, un solo patrón de UI/API en
+    vez de tres campos de link ad-hoc sin historial ni estado.
+
+    Exactamente UNA de (cliente_id, contrato_servicio_id, ppa_contrato_id)
+    identifica al dueño (ver CheckConstraint); las demás quedan NULL."""
     __tablename__ = "cliente_documentos_comerciales"
+    __table_args__ = (
+        # CAST(...AS INTEGER) y no `::int`: el cast ANSI corre igual en Postgres
+        # (produccion) y SQLite (tests, create_all) -- el shorthand `::` es
+        # exclusivo de Postgres y create_all() revienta con "unrecognized token".
+        CheckConstraint(
+            "CAST(cliente_id IS NOT NULL AS INTEGER) "
+            "+ CAST(contrato_servicio_id IS NOT NULL AS INTEGER) "
+            "+ CAST(ppa_contrato_id IS NOT NULL AS INTEGER) = 1",
+            name="ck_documento_un_solo_dueno",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
+    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=True, index=True)
+    contrato_servicio_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("contratos_servicio.id", ondelete="CASCADE"), nullable=True, index=True)
+    ppa_contrato_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ppa_contratos.id", ondelete="CASCADE"), nullable=True, index=True)
     tipo: Mapped[str] = mapped_column(SAEnum(TipoDocumentoClienteEnum, name="tipo_documento_cliente_enum"), nullable=False)
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     numero: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -99,15 +98,17 @@ class ClienteDocumentoComercial(Base):
     )
     archivo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     archivo_nombre: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    servicio_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente_servicios.id", ondelete="SET NULL"), nullable=True, index=True)
     # Oportunidad del CRM a la que pertenece este documento (oferta/CC/RUT).
     oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="documentos_comerciales")
-    servicio: Mapped["ClienteServicio | None"] = relationship("ClienteServicio")
+    cliente: Mapped["Cliente | None"] = relationship("Cliente", back_populates="documentos_comerciales")
+    contrato_servicio: Mapped["ContratoServicio | None"] = relationship(
+        "ContratoServicio", back_populates="documentos_comerciales")
+    ppa_contrato: Mapped["PPAContrato | None"] = relationship(
+        "PPAContrato", back_populates="documentos_comerciales")
 
 
 class ClienteTasaServicio(Base):

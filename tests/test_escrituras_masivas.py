@@ -37,6 +37,7 @@ INVENTARIO_CONOCIDO: dict[tuple[str, str], tuple[int, str]] = {
     ("app/api/v1/proyectos.py", "proyectos"): (3, "merge: reasigna FKs y borra al perdedor"),
     ("app/api/v1/clientes.py", "clientes"): (3, "merge de clientes: limpia campos y soft-delete"),
     ("app/api/v1/clientes.py", "ppa_contratos"): (2, "merge de clientes: repunta comprador/vendedor"),
+    ("app/api/v1/clientes.py", "contratos_servicio"): (3, "merge de clientes: repunta contratante/prestador/inversionista"),
 
     # ── Reasignación en lote desde la UI ─────────────────────────────────────
     ("app/api/v1/comercial.py", "proyectos"): (2, "desvincula plantas de una oportunidad"),

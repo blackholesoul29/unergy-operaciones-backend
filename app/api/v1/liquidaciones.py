@@ -30,10 +30,10 @@ from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.contratos import (
     PPATarifa, PPAContrato, ppa_contrato_proyectos_table, ContratoServicio,
 )
-from app.models.clientes import Cliente, ClienteTasaServicio
+from app.models.clientes import Cliente
 from app.models.panel_contable import PanelContable
 from app.schemas.common import PaginatedResponse
-from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
+from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas, overrides_tasa_servicio
 
 router = APIRouter(prefix="/liquidaciones", tags=["Liquidaciones"])
 
@@ -412,7 +412,7 @@ def resumen_liquidaciones_desde_panel(
         if ln.proyecto_inversionista_id is not None
     }
     cliente_por_pi = _cliente_por_pi_con_tasas(db, pi_ids)
-    overrides = _overrides_tasa_servicio(db, {c.get("cliente_id") for c in cliente_por_pi.values()})
+    overrides = overrides_tasa_servicio(db, {c.get("cliente_id") for c in cliente_por_pi.values()})
 
     resultado = _construir_resumen_panel(
         paneles, periodo_norm, tipo, nombres, tipos, liq_por_proyecto, cliente_por_pi, overrides
@@ -507,7 +507,7 @@ def resumen_panel_rango(
         if ln.proyecto_inversionista_id is not None
     }
     cliente_por_pi = _cliente_por_pi_con_tasas(db, pi_ids)
-    overrides = _overrides_tasa_servicio(db, {c.get("cliente_id") for c in cliente_por_pi.values()})
+    overrides = overrides_tasa_servicio(db, {c.get("cliente_id") for c in cliente_por_pi.values()})
 
     # liquidacion_id por (proyecto, período) para navegar al detalle.
     liq_map: dict = {}
@@ -567,22 +567,6 @@ def _cliente_por_pi_con_tasas(db, pi_ids) -> dict:
             "retencion_pct": float(ret) if ret is not None else None,
             "reteiva_pct": float(rei) if rei is not None else None,
             "reteica_pct": float(ica) if ica is not None else None,
-        }
-    return out
-
-
-def _overrides_tasa_servicio(db, cliente_ids) -> dict:
-    """{(cliente_id, servicio): {proyecto_id_or_None: {rates}}} desde cliente_tasa_servicio."""
-    ids = {c for c in (cliente_ids or set()) if c}
-    out: dict = {}
-    if not ids:
-        return out
-    for row in db.query(ClienteTasaServicio).filter(ClienteTasaServicio.cliente_id.in_(ids)).all():
-        out.setdefault((row.cliente_id, row.servicio), {})[row.proyecto_id] = {
-            "iva_pct": float(row.iva_pct) if row.iva_pct is not None else None,
-            "retencion_pct": float(row.retencion_pct) if row.retencion_pct is not None else None,
-            "reteiva_pct": float(row.reteiva_pct) if row.reteiva_pct is not None else None,
-            "reteica_pct": float(row.reteica_pct) if row.reteica_pct is not None else None,
         }
     return out
 

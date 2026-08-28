@@ -15,9 +15,27 @@ Efecto neto en valor a pagar = base + IVA − retenciones (confirmado con la usu
 2026-07-15). Como valor a pagar = Σ líneas con signo, basta sumar estas líneas.
 """
 
+from app.models.clientes import ClienteTasaServicio
+
 SERVICIOS_FACTURA = ("Representación", "CGM", "Administración")
 _ABBR = {"Representación": "Rep", "CGM": "CGM", "Administración": "Adm"}
 RATE_KEYS = ("iva_pct", "retencion_pct", "reteiva_pct", "reteica_pct")
+
+
+def overrides_tasa_servicio(db, cliente_ids) -> dict:
+    """{(cliente_id, servicio): {proyecto_id_or_None: {rates}}} desde cliente_tasa_servicio."""
+    ids = {c for c in (cliente_ids or set()) if c}
+    out: dict = {}
+    if not ids:
+        return out
+    for row in db.query(ClienteTasaServicio).filter(ClienteTasaServicio.cliente_id.in_(ids)).all():
+        out.setdefault((row.cliente_id, row.servicio), {})[row.proyecto_id] = {
+            "iva_pct": float(row.iva_pct) if row.iva_pct is not None else None,
+            "retencion_pct": float(row.retencion_pct) if row.retencion_pct is not None else None,
+            "reteiva_pct": float(row.reteiva_pct) if row.reteiva_pct is not None else None,
+            "reteica_pct": float(row.reteica_pct) if row.reteica_pct is not None else None,
+        }
+    return out
 
 
 def tasas_efectivas(base_rates: dict | None, overrides_serv: dict | None,

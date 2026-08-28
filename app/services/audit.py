@@ -10,6 +10,7 @@ de la API**: ver la docstring de `set_audit_user`.
 from __future__ import annotations
 
 import json
+import re
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
@@ -65,6 +66,13 @@ def set_audit_user(
         session.info["audit_user"] = (user_id, user_name)
     else:
         _audit_user.set((user_id, user_name))
+
+
+def _autor(session: Session) -> tuple[int | None, str | None]:
+    """Quien esta escribiendo. La sesion primero: es la unica via que sobrevive
+    al threadpool de FastAPI (ver `set_audit_user`). El ContextVar queda para
+    los seeds de arranque y el scheduler."""
+    return session.info.get("audit_user") or _audit_user.get()
 
 
 def _table_name(obj: Any) -> str | None:
@@ -144,8 +152,7 @@ def _queue_audit(session: Session, action: str, obj: Any) -> None:
     if not hasattr(session, "_audit_queue"):
         session._audit_queue = []
 
-    # La sesion primero: es la unica via que sobrevive al threadpool de FastAPI.
-    user_id, user_name = session.info.get("audit_user") or _audit_user.get()
+    user_id, user_name = _autor(session)
 
     session._audit_queue.append({
         "tabla": table,
@@ -157,6 +164,86 @@ def _queue_audit(session: Session, action: str, obj: Any) -> None:
     })
 
 
+_INSERT_AUDIT_BASE = (
+    "INSERT INTO audit_log "
+    "(tabla, registro_id, accion, usuario_id, usuario_nombre, cambios) "
+    "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, {cambios})"
+)
+
+
+def _insert_audit(dialecto: str) -> str:
+    """El INSERT, con el CAST a jsonb solo donde existe jsonb.
+
+    En SQLite `CAST(x AS jsonb)` no falla: aplica afinidad numerica y guarda un
+    0 en vez del JSON, en silencio. Los tests del merge corren sobre SQLite, asi
+    que el CAST tiene que depender del dialecto y no del optimismo.
+    """
+    return _INSERT_AUDIT_BASE.format(
+        cambios="CAST(:cambios AS jsonb)" if dialecto == "postgresql" else ":cambios")
+
+# Nombre de tabla valido. `registrar_borrado` lo interpola en el SQL, asi que
+# no puede aceptar cualquier cosa aunque hoy solo lo llamen con literales.
+_NOMBRE_TABLA = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def registrar_borrado(
+    session: Session,
+    tabla: str,
+    registro_id: int,
+    *,
+    contexto: dict | None = None,
+    tipo: str = "hard",
+) -> bool:
+    """Deja constancia de un borrado que los hooks del ORM no van a ver.
+
+    Los borrados masivos --`DELETE FROM x WHERE ...`-- no pasan por el unit of
+    work, asi que `_queue_audit` nunca se entera. Los dos endpoints de fusion de
+    duplicados borran asi, y hasta el 2026-08-27 **borrar una planta no dejaba
+    ni una fila en `audit_log`**: la operacion mas destructiva de la app era la
+    unica sin rastro.
+
+    Guarda el **snapshot completo de la fila** antes de que desaparezca, que es
+    justo lo que un hook generico sobre `do_orm_execute` no podria dar: ese ve
+    la sentencia y el rowcount, no el contenido.
+
+    ⚠️ **Hay que llamarla ANTES de tocar la fila.** Los dos merges vacian campos
+    del perdedor antes de borrarlo (`UPDATE ... SET campo=NULL WHERE id=:loser`),
+    asi que llamarla al final guardaria una foto ya mutilada.
+
+    El `SELECT *` es deliberado: enumerar columnas a mano queda viejo en dias
+    --upstream lleva diez revisiones esta semana borrando columnas de
+    `proyectos`-- y ademas funciona en cualquier dialecto, que `row_to_json` no.
+
+    Devuelve False si la fila no existe: no hay nada que retratar.
+    """
+    if not _NOMBRE_TABLA.match(tabla):
+        raise ValueError(f"nombre de tabla no valido: {tabla!r}")
+
+    fila = session.execute(
+        text(f"SELECT * FROM {tabla} WHERE id = :id"), {"id": registro_id}
+    ).mappings().first()
+    if fila is None:
+        return False
+
+    cambios: dict[str, Any] = {
+        "snapshot": {k: _serialize(v) for k, v in fila.items()},
+        "tipo_borrado": tipo,
+    }
+    if contexto:
+        cambios["contexto"] = contexto
+
+    user_id, user_name = _autor(session)
+    session.execute(text(_insert_audit(session.get_bind().dialect.name)), {
+        "tabla": tabla,
+        "registro_id": registro_id,
+        "accion": "DELETE",
+        "usuario_id": user_id,
+        "usuario_nombre": user_name,
+        "cambios": json.dumps(cambios, ensure_ascii=False),
+    })
+    return True
+
+
 def _flush_audit(session: Session) -> None:
     queue = getattr(session, "_audit_queue", None)
     if not queue:
@@ -164,18 +251,119 @@ def _flush_audit(session: Session) -> None:
 
     conn = session.connection()
     for entry in queue:
-        conn.execute(
-            text(
-                "INSERT INTO audit_log "
-                "(tabla, registro_id, accion, usuario_id, usuario_nombre, cambios) "
-                "VALUES (:tabla, :registro_id, :accion, :usuario_id, :usuario_nombre, CAST(:cambios AS jsonb))"
-            ),
-            entry,
-        )
+        conn.execute(text(_insert_audit(conn.dialect.name)), entry)
     session._audit_queue.clear()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Escrituras masivas
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Cuanta sentencia SQL se guarda. Con esto alcanza para reconocer que corrio;
+# guardar un UPDATE gigante entero solo engorda la tabla.
+_MAX_SENTENCIA = 2000
+
+
+def _tabla_del_statement(state) -> str | None:
+    """La tabla que toca un UPDATE/DELETE del ORM, o None si no se puede saber."""
+    ent = getattr(state.statement, "entity_description", None)
+    if not ent:
+        return None
+    tabla = ent.get("table")
+    return getattr(tabla, "name", None)
+
+
+def _registrar_masivo(session: Session, tabla: str, accion: str,
+                      sentencia: str, filas: int | None) -> None:
+    cambios = {
+        "masiva": True,
+        "filas_afectadas": filas,
+        "sentencia": sentencia[:_MAX_SENTENCIA],
+    }
+    user_id, user_name = _autor(session)
+    session.execute(text(_insert_audit(session.get_bind().dialect.name)), {
+        "tabla": tabla,
+        # No hay UNA fila: la sentencia afecto a muchas. 0 es el centinela, y
+        # `cambios.masiva` es lo que hay que mirar para no confundirlo con la
+        # fila de id 0, que no existe en ninguna tabla de este esquema.
+        "registro_id": 0,
+        "accion": accion,
+        "usuario_id": user_id,
+        "usuario_nombre": user_name,
+        "cambios": json.dumps(cambios, ensure_ascii=False),
+    })
+
+
+def init_audit_masivo():
+    """Audita los UPDATE/DELETE masivos, que `before_flush` no puede ver.
+
+    Un `UPDATE ... WHERE` no crea objetos en `session.dirty`: el unit of work no
+    participa, asi que `_queue_audit` nunca se entera. Asi estuvo `tipo_migration`
+    reescribiendo 5.086 fallas en cada arranque durante 23 arranques sin dejar
+    una sola fila en `audit_log`.
+
+    Deja **una fila resumen por sentencia** -- no una por registro -- con la
+    tabla, la sentencia y cuantas filas toco. `registro_id` va en 0: no hay una
+    fila que senalar.
+
+    🛑 **LO QUE ESTO NO CUBRE, y es mucho:**
+
+    - **Las 32 escrituras de SQL crudo por `text()`.** Verificado: para esas,
+      `is_update` e `is_delete` son False y `is_orm_statement` tambien --
+      SQLAlchemy no las parsea, asi que no hay forma de saber si son un UPDATE
+      ni sobre que tabla caen. **De esas, 16 ni siquiera tienen el nombre de la
+      tabla escrito literal** (`UPDATE {t} SET ...`, el patron de los endpoints
+      de fusion): ni este hook ni el escaner estatico pueden atribuirlas. La
+      unica cobertura posible ahi es explicita, sitio por sitio, como hace
+      `registrar_borrado()` con el merge.
+    - **Lo que se escribe fuera de una `Session`**, por ejemplo con
+      `engine.execute()` o desde otro proceso.
+    - **El contenido.** Queda que N filas cambiaron y con que sentencia, no
+      cuales ni que valor tenian antes. Para eso hace falta capturar la fila,
+      que es lo que hace `registrar_borrado()`.
+
+    O sea: esto cierra el agujero de los 38 sitios que el ORM compila (34
+    `Query.update/delete` + 4 del estilo 2.0), no el de los 70 que hay.
+
+    Devuelve el listener para poder desengancharlo con `event.remove()`: los
+    tests lo necesitan, porque se registra sobre la clase `Session` y si no,
+    queda activo para todo el proceso.
+    """
+
+    @event.listens_for(Session, "do_orm_execute")
+    def _auditar_masivo(state):
+        if not (state.is_update or state.is_delete):
+            return None
+        if not state.is_orm_statement:
+            return None      # text() crudo: sin metadatos, no hay nada que decir
+        tabla = _tabla_del_statement(state)
+        if tabla not in _AUDITED_TABLES:
+            return None
+
+        # A partir de aca se toma el control de la ejecucion para poder leer el
+        # rowcount, que antes de ejecutar no existe.
+        resultado = state.invoke_statement()
+        try:
+            _registrar_masivo(
+                state.session, tabla,
+                "DELETE" if state.is_delete else "UPDATE",
+                str(state.statement), resultado.rowcount,
+            )
+        except Exception as exc:
+            # La escritura YA ocurrio. Tumbarla ahora por un fallo de auditoria
+            # seria peor que perder el registro, asi que se avisa fuerte y se
+            # sigue. Es lo contrario a `registrar_borrado()`, que corre ANTES de
+            # destruir y por eso ahi si conviene que reviente.
+            print(f"[audit] no se pudo registrar la escritura masiva sobre "
+                  f"{tabla}: {type(exc).__name__}: {exc}")
+        return resultado
+
+    return _auditar_masivo
+
+
 def init_audit() -> None:
+    init_audit_masivo()
+
     @event.listens_for(Session, "before_flush")
     def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
         for obj in session.new:

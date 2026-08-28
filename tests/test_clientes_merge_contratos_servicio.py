@@ -18,6 +18,7 @@ import app.models  # noqa: F401
 from app.models.clientes import Cliente
 from app.models.contratos import ContratoServicio
 from app.api.v1 import clientes as api
+from audit_sqlite import crear_audit_log
 
 ADMIN = None
 
@@ -43,6 +44,7 @@ def db():
         conn.create_function("NOW", 0, lambda: dt.datetime.now(dt.timezone.utc).isoformat())
 
     Base.metadata.create_all(engine)
+    crear_audit_log(engine)  # registrar_borrado() escribe ahi al dar de baja al perdedor
     s = sessionmaker(bind=engine)()
     yield s
     s.close()

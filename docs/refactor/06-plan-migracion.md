@@ -169,7 +169,7 @@ Cada migración es una tarea `*_seed` idempotente que loguea `procesadas / cread
 | `_run_equipos_inversores_seed` | `proyecto_inversores` → `equipos` tipo `inversor` | 715 | `potencia_nominal_kw` y `tipo` van a `especificaciones`. `activo=false` → `dado_de_baja`. `marca/modelo/numero_serie` están al 0 %: nada que copiar |
 | `_run_equipos_ficha_seed` | `proyecto_info_tecnica` (marcas y cantidades) → `equipos` + `fabricantes` | 110 | Crea fabricantes por nombre normalizado. **`equipo_modelo_id` queda NULL**: el modelo concreto no está en los datos. El texto original se preserva en `especificaciones.origen_texto` |
 | `_run_falla_proyectos_seed` | `fallas.proyecto_id` → `falla_proyectos` | 6 478 | Una fila por falla. Mecánico, sin pérdida |
-| `_run_falla_adjuntos_seed` | `fallas.fotos_urls` → `falla_adjuntos` | ~5 324 | Reusa `Falla.fotos_lista` (`app/models/fallas.py:198-218`), que ya maneja los 3 formatos legados incluida la doble codificación |
+| `_run_falla_adjuntos_seed` | `fallas.fotos_urls` → **`documentos`** (brazo `falla_id`) | ~5 324 | Reusa `Falla.fotos_lista` (`app/models/fallas.py:198-218`), que ya maneja los 3 formatos legados incluida la doble codificación |
 | `_run_falla_historial_seed` | `fallas_seguimientos` → `falla_estado_historial` | 1 134 | `estado_anterior_id` queda **NULL** en las filas históricas: nunca se guardó. Se documenta, no se infiere |
 | `_run_proyecto_estado_seed` | `proyectos.estado` → `proyecto_estado_historial` | 194 | Una fila por planta, vigencia desde `created_at`, sin fin, `motivo='migracion: estado inicial'`. **No se inventa el pasado** |
 
@@ -358,7 +358,7 @@ solo lo que se mueve.
 | `proyectos.py` | `PUT /{id}/info-tecnica` pasa a escribir equipos; `GET` sigue devolviendo la misma ficha, armada desde `equipos` | 4 |
 | `proyectos.py` | CRUD `/{id}/inversores` pasa a operar sobre `equipos` filtrando por tipo `inversor` | 4 |
 | `proyectos.py` | CRUD `/{id}/inversionistas` pasa a `proyecto_composiciones`. ⚠️ **Aquí sí cambia el comportamiento**: un PATCH ya no sobrescribe, crea una composición nueva. La respuesta se mantiene | 5 |
-| `fallas.py` | `proyecto_id` se lee de `falla_proyectos`; adjuntos de `falla_adjuntos`; historial de `falla_estado_historial` | 4 |
+| `fallas.py` | `proyecto_id` se lee de `falla_proyectos`; adjuntos de `documentos` (brazo `falla_id`); historial de `falla_estado_historial` | 4 |
 | `contratos_servicio.py`, `ppa.py`, `representacion.py` | leen de `contratos` con `tipo` filtrado | 6 |
 | `cumplimiento.py`, `liquidaciones.py`, `panel_contable.py`, `facturacion.py`, `asic.py` | **cero cambios de código**: sus satélites cambian de FK padre, no de columnas | 6 |
 | `mantenimiento_impacto.py` | pasa a `falla_impactos`. Tabla en 0 filas y **sin ningún consumidor en el front** | 3 |

@@ -12,6 +12,11 @@
 | `Backend Operaciones` | `feat/registros-proyecto-documentos` | `170e6c9` |
 | `unergy-operaciones-frontend` | `feat/registros-proyecto-documentos` | `b1ab43d` |
 
+**Sobre la cadena Alembic:** el repo tiene **tres heads** (`019`, `036` y la nueva) más un
+`down_revision` huérfano (`5650ccf73b5c`). Los tres preexisten en `origin/master`: esta rama
+agrega **una sola** revisión. Detalle y forma de medirlo en §10 de
+`docs/registros-proyecto-decisiones.md`.
+
 **Nada fue empujado a ningún remoto.** El commit del backend contiene la migración
 Alembic `120_registros_proyecto_expediente.py`, así que no debe empujarse sin revisión
 explícita.
@@ -47,9 +52,10 @@ Todo el alcance pedido, verificado:
 
 | | |
 |---|---|
-| Tests nuevos | 63 pasan |
+| Tests nuevos | 62 pasan (eran 60; la cifra original de 63 estaba mal contada) |
+| Tests de registros en total | 92 pasan (incluye `registros_cnd`) |
 | Suite completa del backend | 2302 pasan, 4 saltados |
-| Cadena Alembic | íntegra (120 sobre head 119) |
+| Cadena Alembic | la rama agrega **una** revisión; el repo tiene 3 heads, ver abajo |
 | Build del frontend | `npm run build` OK |
 
 ---
@@ -83,7 +89,7 @@ test que impide inventarles contenido:
 # Backend
 cd "Backend Operaciones"
 git checkout feat/registros-proyecto-documentos
-python -m pytest tests/test_registros_proyecto_*.py -q       # 63 tests
+python -m pytest tests/test_registros_proyecto_*.py -q       # 62 tests
 
 # Frontend
 cd ../unergy-operaciones-frontend

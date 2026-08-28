@@ -282,10 +282,15 @@ el mouse dice en cuáles — que es lo que explica al usuario por qué solo lo e
 
 | | |
 |---|---|
-| Tests nuevos | **63**, todos en verde |
-| Suite completa del backend | **2302 pasan, 4 saltados** — nada roto |
-| Integridad de la cadena Alembic | pasa (migración 120 sobre head 119) |
+| Tests nuevos | **62**, todos en verde |
+| Tests de registros en total (incluye `registros_cnd`) | **92**, todos en verde |
+| Suite completa del backend | ver §10 |
+| Cadena Alembic | ver §10 |
 | Build del frontend | `npm run build` OK, chunks generados |
+
+**Corrección (2026-08-28):** la primera versión de este documento decía **63 tests nuevos**.
+Eran **60**; conté tres de más en `test_registros_proyecto_catalogo.py` (28 reales, no 31).
+Con los dos que agregó D-18/D-16 el número hoy es **62**: catálogo 30, service 19, api 13.
 
 Lo que **no** pude verificar: no levanté el backend contra la base de producción ni probé la
 subida real a Google Drive (necesita `GOOGLE_SERVICE_ACCOUNT_JSON`). La subida reusa
@@ -529,3 +534,58 @@ vieja.
 | CND 9.5, 9.6, 9.8 | `PENDIENTE`, sin parámetros | Leer el Anexo 1 del Acuerdo CNO 1937. Hay un `Certificado de experiencia.pdf` sin numerar como candidato |
 
 Los demás ítems del expediente están `CONFIRMADO` contra la carpeta real.
+
+---
+
+## 10. Verificación: el estado real de la cadena Alembic
+
+La primera versión de este documento decía que la cadena estaba *"íntegra (120 sobre head
+119)"*. Es cierto **para la línea principal**, pero deja fuera algo que conviene saber
+antes de correr migraciones: **el repositorio tiene tres heads, no uno.**
+
+Contando las revisiones del árbol de trabajo:
+
+```
+revisiones totales:  123
+heads:               019, 036, 120
+down_revision huérfano:  5650ccf73b5c  (referenciado, pero ese archivo no existe)
+```
+
+**Nada de esto lo introdujo esta rama.** Lo mismo calculado sobre `origin/master`:
+
+```
+revisiones totales:  122
+heads:               019, 036, 119
+down_revision huérfano:  5650ccf73b5c
+```
+
+Es decir: `019`, `036` y el huérfano `5650ccf73b5c` **ya venían así en `origin/master`**.
+Esta rama agrega **exactamente una revisión** y mueve la punta de la línea principal de
+`119` a la nueva. Los otros dos heads y el huérfano quedan igual que estaban.
+
+**Qué significa en la práctica:** un `alembic upgrade head` puede fallar por ambigüedad de
+heads, y eso pasaría con o sin esta rama. Sanearlo (unir los heads con una revisión de
+merge y resolver el huérfano) es trabajo del módulo que los dejó así, no de este
+expediente. Se deja medido y documentado, no arreglado.
+
+**Cómo reproducir la medición** (sin Alembic instalado; el paquete queda ensombrecido por
+la carpeta `alembic/` del repo):
+
+```bash
+python - <<'PY'
+import re, glob, collections
+downs, revs = {}, collections.Counter()
+for p in glob.glob('alembic/versions/*.py'):
+    s = open(p, encoding='utf-8', errors='replace').read()
+    r = re.search(r'^revision\s*=\s*["\']([^"\']+)', s, re.M)
+    d = re.search(r'^down_revision\s*=\s*(?:["\']([^"\']+)|None)', s, re.M)
+    if r:
+        revs[r.group(1)] += 1
+        downs[r.group(1)] = d.group(1) if (d and d.group(1)) else None
+parents = {v for v in downs.values() if v}
+print('revisiones:', len(revs))
+print('ids duplicados:', [k for k, v in revs.items() if v > 1] or 'ninguno')
+print('heads:', sorted(r for r in revs if r not in parents))
+print('huérfanos:', [d for d in downs.values() if d and d not in revs] or 'ninguno')
+PY
+```

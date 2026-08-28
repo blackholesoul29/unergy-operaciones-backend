@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -205,7 +205,9 @@ def _motivo_bloqueo_borrado_cliente(db: Session, id: int) -> str | None:
 
 @router.delete("/{id}", status_code=204)
 def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    cliente = db.query(Cliente).filter(Cliente.id == id).first()
+    # deleted_at IS NULL: un cliente ya borrado se ve como "no encontrado", igual
+    # que en el resto de la API (~14 sitios filtran por esto).
+    cliente = db.query(Cliente).filter(Cliente.id == id, Cliente.deleted_at.is_(None)).first()
     if not cliente:
         raise HTTPException(404, "Cliente no encontrado")
 
@@ -214,18 +216,20 @@ def delete_cliente(id: int, db: Session = Depends(get_db), _=Depends(get_current
         raise HTTPException(409, f"No se puede eliminar: este cliente {motivo}. Desvincúlalo primero.")
 
     # Vínculos inofensivos: punteros de contacto (CGM/operacional/liquidación)
-    # que un proyecto tenga apuntando a este cliente. Se borran en cascada --
-    # el proyecto simplemente vuelve a usar sus inversionistas por defecto.
-    # Contactos/servicios/documentos propios ya cascaden vía relationship().
+    # que un proyecto tenga apuntando a este cliente. Se limpian igual que antes --
+    # el proyecto vuelve a usar sus inversionistas por defecto.
     db.query(ProyectoAreaContacto).filter(ProyectoAreaContacto.cliente_id == id).delete()
 
-    db.delete(cliente)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Backstop ante alguna otra relación no cubierta arriba.
-        db.rollback()
-        raise HTTPException(409, "No se puede eliminar: este cliente tiene registros asociados. Desvincúlalo primero.")
+    # Soft-delete, nunca físico -- auditoría de Clientes 2026-08-28: era el único
+    # borrado físico de Cliente en toda la API, inconsistente con merge_clientes/
+    # dedup_clientes (documentan explícitamente "nunca borra físico") y con los
+    # ~14 sitios que ya filtran por deleted_at IS_(None). Por objeto (no raw SQL)
+    # para que audit.py sí lo vea -- ver tests/test_escrituras_masivas.py. Un
+    # efecto colateral bueno: contactos/servicios/documentos ya no se pierden
+    # (el cascade="all, delete-orphan" solo dispara con un delete físico), así
+    # que restaurar deleted_at a NULL deja al cliente exactamente como estaba.
+    cliente.deleted_at = datetime.now(timezone.utc)
+    db.commit()
 
 
 @router.post("/{id}/test-correo")

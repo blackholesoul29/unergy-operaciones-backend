@@ -54,9 +54,22 @@ def _cliente(db, id=1):
 
 
 def test_sin_ningun_vinculo_se_puede_borrar(db):
+    """Soft-delete (nunca físico, auditoría de Clientes 2026-08-28): el
+    registro sigue existiendo con deleted_at poblado, no desaparece de la
+    tabla -- mismo patrón que merge_clientes/dedup_clientes."""
     _cliente(db)
     api.delete_cliente(1, db=db, _=ADMIN)
-    assert db.get(Cliente, 1) is None
+    cliente = db.get(Cliente, 1)
+    assert cliente is not None
+    assert cliente.deleted_at is not None
+
+
+def test_borrar_dos_veces_da_404_la_segunda_vez(db):
+    _cliente(db)
+    api.delete_cliente(1, db=db, _=ADMIN)
+    with pytest.raises(HTTPException) as exc:
+        api.delete_cliente(1, db=db, _=ADMIN)
+    assert exc.value.status_code == 404
 
 
 def test_inversionista_bloquea_con_mensaje_correcto(db):

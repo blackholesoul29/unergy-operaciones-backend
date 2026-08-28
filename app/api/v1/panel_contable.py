@@ -25,7 +25,7 @@ from app.api.v1.auth import get_current_user
 from app.models import Usuario
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.contratos import ContratoServicio
-from app.models.clientes import Cliente, ClienteTasaServicio
+from app.models.clientes import Cliente
 import json
 
 from app.models.panel_contable import (
@@ -36,7 +36,7 @@ from app.utils.er_loader import (
     recalcular_er, parsear_er, match_proyecto, extraer_proyecto_de_archivo,
     normalizar, leer_celda, _norm as _norm_concepto, _aplicar_signo, IVA, FEE_ADMIN,
 )
-from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas
+from app.utils.impuestos_factura import impuestos_de_factura, tasas_efectivas, overrides_tasa_servicio
 from app.services.costos_panel import valores_modulo_costos, valores_facturas_modulo, aplicar_costos_modulo
 from app.services import liquidaciones_api
 from app.services.panel_desde_api import construir_parsed
@@ -1056,7 +1056,7 @@ def listar(
                 "reteiva_pct": float(rei) if rei is not None else None,
                 "reteica_pct": float(ica) if ica is not None else None,
             }
-    overrides = _overrides_tasa_servicio(db, {r["cliente_id"] for r in rates_por_pi.values()})
+    overrides = overrides_tasa_servicio(db, {r["cliente_id"] for r in rates_por_pi.values()})
 
     # Consecutivos por partícipe del período, en una sola consulta.
     consec_map = {
@@ -1072,22 +1072,6 @@ def listar(
         "paneles": [_serializar_panel(p, nombres, sop_map, rates_por_pi, overrides, consec_map)
                     for p in paneles],
     }
-
-
-def _overrides_tasa_servicio(db, cliente_ids) -> dict:
-    """{(cliente_id, servicio): {proyecto_id_or_None: {rates}}} desde cliente_tasa_servicio."""
-    ids = {c for c in (cliente_ids or set()) if c}
-    out: dict = {}
-    if not ids:
-        return out
-    for row in db.query(ClienteTasaServicio).filter(ClienteTasaServicio.cliente_id.in_(ids)).all():
-        out.setdefault((row.cliente_id, row.servicio), {})[row.proyecto_id] = {
-            "iva_pct": float(row.iva_pct) if row.iva_pct is not None else None,
-            "retencion_pct": float(row.retencion_pct) if row.retencion_pct is not None else None,
-            "reteiva_pct": float(row.reteiva_pct) if row.reteiva_pct is not None else None,
-            "reteica_pct": float(row.reteica_pct) if row.reteica_pct is not None else None,
-        }
-    return out
 
 
 def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = None,

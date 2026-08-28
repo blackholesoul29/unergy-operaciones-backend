@@ -260,10 +260,14 @@ refactor: `estado_pipeline` (como campo de respuesta) y `oferta_vigente.estado`,
 
 ### Un dato que juega a favor
 
-**`GET /comercial/proyectos-operando` no lo consume el frontend propio.** Sus 5 apariciones en `src/` son
-texto de ayuda y comentarios (`views/Comercial/catalogos.js:18`, `OfertaDrawer.vue:162`,
-`ProyectoDesdeCRMDialog.vue:12,31`, `RegistrarOfertaWizard.vue:137`). Es superficie **exclusivamente
+**`GET /comercial/proyectos-operando` no lo consume el frontend propio.** Sus 5 apariciones son texto de
+ayuda y comentarios, hoy en `legacy/src/views/Comercial/` y en su copia `app/features/comercial/components/`
+(las líneas exactas de cada árbol, en `00-inventario-actual.md` §10.3). Es superficie **exclusivamente
 externa**: el riesgo está concentrado en un solo consumidor, con el que se puede hablar.
+
+> ✅ **Reverificado el 2026-08-28**, después de que el front migrara a Nuxt: **sigue sin haber un solo
+> consumidor en ninguno de los dos árboles**. Es la premisa que sostiene congelar esta API, y aguantó
+> el cambio de stack.
 
 Contra eso juegan dos cosas que hay que tener presentes: **no hay staging** (auto-deploy de `master` a
 Railway) y **los scopes de las API keys no se aplican** — una key marcada `["read"]` puede escribir y

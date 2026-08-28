@@ -12,7 +12,6 @@ from app.models.base import Base
 
 
 class ServicioAplicaEnum(str, enum.Enum):
-    operacion = "operacion"
     representacion = "representacion"
     cgm = "cgm"
     promotor = "promotor"

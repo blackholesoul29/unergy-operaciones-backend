@@ -397,9 +397,11 @@ contrato vivo. Es lo que me hizo perder tiempo reconstruyendo qué campos existe
 
 ## 5 · Estrategia para no romper el front
 
-El front es la parte frágil, por una razón concreta: **no tiene capa de servicios.** Las 177 vistas `.vue`
-llaman `api.get()` directo (`src/api/client.js`), así que un cambio de forma en una respuesta se busca en
-177 archivos, no en un módulo.
+El front es la parte frágil, por una razón concreta: **no tiene capa de servicios.** Las vistas `.vue`
+llaman `api.get()` directo (`legacy/src/api/client.js`, hoy duplicado en `app/core/client.ts`), así que un
+cambio de forma en una respuesta se busca archivo por archivo, no en un módulo — y desde la migración del
+front a Nuxt, el 2026-08-28, **hay que buscarlo en los dos árboles**: ~120 archivos en cada uno. Ver la
+nota «Los dos árboles del front» en `00-inventario-actual.md` §10.3.
 
 De ahí la estrategia, en cuatro capas:
 

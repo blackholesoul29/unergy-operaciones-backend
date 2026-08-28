@@ -450,10 +450,20 @@ tiene router, **no se consume desde el frontend en absoluto**.
 
 ### 10.2 Cómo depende el front
 
-Cliente único: `src/api/client.js:4-5` (axios, `baseURL = VITE_API_BASE_URL || '/api/v1'`).
-**No hay capa de servicios por dominio**: las 177 vistas `.vue` llaman `api.get()` directo. Solo existen
-3 módulos de servicio (`garantiasProyecciones.js`, `liquidacionesApi.js`, `xm.js`).
-Eso significa que **cambiar la forma de una respuesta obliga a buscar en 177 archivos**, no en una capa.
+> ⚠️ **Coordenadas revisadas el 2026-08-28.** El front migró a Nuxt y **cada vista vive hoy por
+> duplicado**. Toda ruta `src/…` de este documento hay que leerla como `legacy/src/…`. Ver la nota
+> «Los dos árboles del front» al final de §10.3.
+
+Cliente único: `legacy/src/api/client.js:4-5` (axios, `baseURL = VITE_API_BASE_URL || '/api/v1'`);
+en el árbol nuevo es `app/core/client.ts:28`, con el mismo fallback.
+**No hay capa de servicios por dominio**: las vistas `.vue` llaman `api.get()` directo, así que
+**cambiar la forma de una respuesta obliga a buscar archivo por archivo**, no en una capa.
+
+Medido el 2026-08-26, sobre el árbol único de entonces: 177 vistas y 3 módulos de servicio
+(`garantiasProyecciones.js`, `liquidacionesApi.js`, `xm.js`). Recontado el 2026-08-28 sobre los dos
+árboles: **124 archivos en `legacy/src` y 116 en `app/`** llaman `api.*` directo, y los módulos de
+servicio pasaron de 3 a 9+ (`app/features/*/services/*.ts`). Las cifras cambiaron; **la conclusión no**:
+sigue sin haber una capa por la que pase un cambio de forma.
 
 Vistas más acopladas al dominio central:
 
@@ -470,11 +480,41 @@ Vistas más acopladas al dominio central:
 
 ### 10.3 La API congelada no la consume el frontend
 
-`GET /comercial/proyectos-operando` **no tiene ni un consumidor en `src/`**: sus 5 apariciones son texto
-de ayuda y comentarios (`views/Comercial/catalogos.js:18`, `OfertaDrawer.vue:162`,
-`ProyectoDesdeCRMDialog.vue:12,31`, `RegistrarOfertaWizard.vue:137`).
+`GET /comercial/proyectos-operando` **no tiene ni un consumidor en el front**: sus 5 apariciones son
+texto de ayuda y comentarios. Reverificado el 2026-08-28 **en los dos árboles**, y sigue siendo cierto
+en ambos:
+
+| Árbol | Las 5 apariciones |
+|---|---|
+| legacy | `legacy/src/views/Comercial/`: `catalogos.js:18`, `OfertaDrawer.vue:258`, `ProyectoDesdeCRMDialog.vue:12,36`, `RegistrarOfertaWizard.vue:226` |
+| nuevo | `app/features/comercial/components/`: `catalogos.js:18`, `OfertaDrawer.vue:163`, `ProyectoDesdeCRMDialog.vue:12,31`, `RegistrarOfertaWizard.vue:140` |
+
 Es **superficie exclusivamente externa**, consumida por otra plataforma vía `X-API-Key`
 (`app/api/v1/auth.py:24-43`, tabla `api_keys` con 7 filas). Detalle completo en `05-impacto-campos-congelados.md`.
+
+#### Los dos árboles del front — nota del 2026-08-28
+
+El repositorio `unergy-operaciones-frontend` se migró a **Nuxt sobre Cloudflare Workers**. La carpeta
+vieja no se borró: quedó dentro del mismo repositorio, en `legacy/`. Y las vistas del legacy se
+**copiaron** a `app/features/…` como «páginas puente» —cada copia lo declara en su cabecera:
+*«MIGRACIÓN — Fase 1. La ruta la sirve Nuxt, la vista sigue siendo la del legacy sin tocar»*—, así que
+**hoy cada vista existe dos veces**.
+
+Cómo leer las rutas de estos documentos:
+
+| Escrito así | Dónde está hoy |
+|---|---|
+| `src/api/client.js` | `legacy/src/api/client.js`, y su copia `app/core/client.ts` |
+| `src/views/<Área>/<X>.vue` | `legacy/src/views/<Área>/<X>.vue`, y su copia `app/features/<área>/components/<X>.vue` |
+| `src/router/index.js` | `legacy/src/router/index.js`; el árbol nuevo usa rutas por archivo en `app/pages/` |
+| `src/utils/security.js` | `legacy/src/utils/security.js`, y su copia `app/core/security.ts` |
+
+Dos avisos para quien use este inventario:
+
+1. **Los números de línea de un `.vue` solo valen para el árbol legacy.** Las copias se reformatearon al
+   migrar: `RepresentacionView.vue`, por ejemplo, pasó de 1825 a 1008 líneas.
+2. **Un cambio en el front hay que buscarlo en los dos sitios** mientras dure la fase puente. Verificado
+   el 2026-08-28: los comportamientos que este inventario documenta siguen siendo idénticos en ambos.
 
 ---
 

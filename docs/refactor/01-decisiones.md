@@ -1222,9 +1222,16 @@ meses de historia real»: **la ventana existe, pero está vacía**.
 No es un script de reescritura masiva. Es un artefacto de comparación, y la cadena está verificada de
 punta a punta:
 
-1. `RepresentacionView.vue:458-473` arma el payload del `PATCH` con **las tres tarifas siempre incluidas**,
-   toque el usuario el campo o no. Además hace `tarifa_admin × 100` al abrir el diálogo y `÷ 100` al
-   guardar — el redondeo es limpio (`0.038*100/100 == 0.038`), así que **el valor que viaja es idéntico**.
+1. `RepresentacionView.vue`, en su función `guardar()`, arma el payload del `PATCH` con **las tres
+   tarifas siempre incluidas**, toque el usuario el campo o no. Además hace `tarifa_admin × 100` al
+   abrir el diálogo y `÷ 100` al guardar — el redondeo es limpio (`0.038*100/100 == 0.038`), así que
+   **el valor que viaja es idéntico**.
+
+   > **Coordenadas al 2026-08-28.** La cita original, `RepresentacionView.vue:458-473`, murió con la
+   > migración del front. Hoy la función está en `legacy/src/views/Servicios/RepresentacionView.vue:1398`
+   > y en su copia `app/features/contratos/components/RepresentacionView.vue:791`. El comportamiento se
+   > reverificó **idéntico en los dos árboles**: la cadena de aquí abajo sigue en pie.
+
 2. El esquema Pydantic las declara `Optional[float]` (`app/schemas/contratos_servicio.py:125-127`), así
    que llegan como `float`.
 3. `update_contrato` (`app/api/v1/contratos_servicio.py:278`) usa `exclude_unset=True` — pero el campo
@@ -1302,6 +1309,10 @@ de antigüedad que la fecha del contrato. No es una vigencia, es una cota.
 `RepresentacionView.vue` multiplica `tarifa_admin` por 100 para mostrarla y divide al guardar; a
 `tarifa_cgm` y `tarifa_representacion` no les hace nada. Es la confirmación en el código de lo que el
 🛑 dedujo de los datos: **administración es una fracción, las otras dos no.** `unidad` no es opcional.
+
+Al 2026-08-28, el `×100` y el `÷100` están en `legacy/src/views/Servicios/RepresentacionView.vue:1331`
+y `:1401`, y en el árbol nuevo en `app/features/contratos/components/RepresentacionView.vue:769` y
+`:795`.
 
 #### ✅ 2026-08-27 · Medido en producción: el bug de atribución, confirmado
 

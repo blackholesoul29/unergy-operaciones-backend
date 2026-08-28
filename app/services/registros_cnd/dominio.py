@@ -71,7 +71,12 @@ ETIQUETAS_ETAPA: dict[str, str] = {
     Etapa.CARTA_9_5: "Carta 9.5 (equipos a conectar)",
     Etapa.REQUISITO_9_6: "Requisito 9.6 (envio codigos FRT)",
     Etapa.PRUEBAS_GENERACION: "Pruebas de generacion",
-    Etapa.CARTA_9_9: "Carta 9.9 (inicio de operacion y cierre)",
+    # El rotulo decia "inicio de operacion y cierre". Las cartas reales del expediente
+    # dicen otra cosa: la 9.9 es la certificacion de cumplimiento que emite el
+    # transportador, y el inicio de operacion es la 9.10 (Acuerdo CNO 1899). Se corrige
+    # solo la etiqueta: el valor persistido sigue siendo CARTA_9_9. El modulo no tiene
+    # todavia una etapa propia para el 9.10 (ver D-19).
+    Etapa.CARTA_9_9: "Carta 9.9 (certificacion de cumplimiento de la reglamentacion)",
 }
 
 

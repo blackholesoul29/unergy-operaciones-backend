@@ -120,42 +120,42 @@ ITEMS_SIC: list[dict] = [
      "descripcion": "Parametros de procedimientos y politicas del Centro de Gestion "
                     "de Medida.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "17", "titulo": "Esquema de telemedida y comunicaciones",
-     "descripcion": "Esquema de la arquitectura de telemedida y comunicaciones.",
+     "descripcion": "Esquema de la arquitectura de telemedida y comunicaciones. Si trae datos por frontera son los del modem, que ya estan en el catalogo (modem.ip, modem.apn, modem.imei, modem.operador...) y se diligencian en el item 01: deben reusarse, no redeclararse.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "18", "titulo": "Condiciones de operacion del CGM",
      "descripcion": "Condiciones de operacion del Centro de Gestion de Medida.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "19", "titulo": "Documentacion de la critica de informacion",
      "descripcion": "Procedimiento de critica de la informacion de medida.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "20", "titulo": "Documentacion para la validacion de datos",
      "descripcion": "Procedimiento de validacion de datos de medida.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "21", "titulo": "Documentacion de mecanismos de proteccion",
      "descripcion": "Mecanismos de proteccion de la informacion de medida.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "22", "titulo": "Documentacion de politicas de seguridad fisica",
      "descripcion": "Politicas de seguridad fisica del sistema de medicion.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "23", "titulo": "Documentacion del procedimiento de transmision de datos",
      "descripcion": "Procedimiento de transmision de datos al ASIC.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "Carpeta vacia en el expediente de muestra: falta validar que contiene."},
+     "nota": "Documento de gobierno del CGM (Centro de Gestion de Medida), no del proyecto: el mismo texto aplica a todas las fronteras que ese CGM opera. Por eso no declara parametros propios. PENDIENTE DE VALIDAR CONTRA CARPETA REAL: la del expediente de muestra esta vacia, falta confirmar el juego exacto de archivos. Ver D-16."},
 
     {"codigo": "24", "titulo": "Consumo y generacion",
      "descripcion": "Informe de consumo y generacion del proyecto. Proviene de la "
@@ -177,7 +177,10 @@ ITEMS_SIC: list[dict] = [
      "descripcion": "Soporte del registro de la frontera en la plataforma del ASIC.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
      "nota": "No existe fisicamente en las carpetas actuales: hay que crearlo y "
-             "montarlo aparte. No bloquea el resto del expediente. Ver D-11."},
+             "montarlo aparte. No aporta datos nuevos: la identidad de la frontera "
+             "(frontera.nombre_frontera y los codigos FRT) ya se diligencia en el "
+             "item 01, aqui solo se adjunta el soporte. PENDIENTE DE VALIDAR CONTRA "
+             "CARPETA REAL. No bloquea el resto del expediente. Ver D-11 y D-17."},
 
     {"codigo": "28", "titulo": "Certificados de compra",
      "descripcion": "Ordenes de compra de los equipos del sistema de medicion.",
@@ -222,15 +225,17 @@ ITEMS_CND: list[dict] = [
     {"codigo": "9.5", "titulo": "Equipos a conectar",
      "descripcion": "Carta de equipos a conectar.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "No esta en el expediente de muestra. El titulo viene del enum del "
-             "modulo registros_cnd existente, no de un documento real: validar "
-             "contra el Acuerdo CNO 1937 antes de darlo por bueno."},
+     "nota": "PENDIENTE DE VALIDAR CONTRA CARPETA REAL. No esta en el expediente de "
+             "muestra. El titulo viene del enum de registros_cnd, que a su vez lo declara "
+             "como etapa 'futura' (prevista, sin logica ni UI): es una conjetura, no un "
+             "documento. Sin parametros hasta leer el Anexo 1 del Acuerdo CNO 1937. Ver D-18."},
 
     {"codigo": "9.6", "titulo": "Envio de codigos de frontera (FRT)",
      "descripcion": "Requisito de envio de los codigos FRT asignados.",
      "emisor": "UNERGY", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "No esta en el expediente de muestra. Titulo tomado del enum existente: "
-             "validar contra el Acuerdo CNO 1937."},
+     "nota": "PENDIENTE DE VALIDAR CONTRA CARPETA REAL. Mismo caso que el 9.5: el titulo "
+             "sale de una etapa 'futura' del enum de registros_cnd, sin respaldo "
+             "documental. Sin parametros hasta leer el Anexo 1 del Acuerdo CNO 1937. Ver D-18."},
 
     {"codigo": "9.7", "titulo": "Certificado de conexion y capacidad de transporte asignada",
      "descripcion": "El transportador del area certifica que aprueba la conexion del "
@@ -240,17 +245,22 @@ ITEMS_CND: list[dict] = [
     {"codigo": "9.8", "titulo": "Pendiente de identificar",
      "descripcion": "",
      "emisor": "", "multiple": False, "estado_base": "PENDIENTE",
-     "nota": "No esta en el expediente de muestra ni en el enum del modulo existente. "
-             "Hay que leer el Anexo 1 del Acuerdo CNO 1937 para saber que numeral es. "
-             "Se deja la casilla creada para no romper la numeracion."},
+     "nota": "PENDIENTE DE VALIDAR CONTRA CARPETA REAL. No esta en el expediente de muestra "
+             "ni en el enum del modulo existente. Hay que leer el Anexo 1 del Acuerdo CNO "
+             "1937 para saber que numeral es. Candidato: la carpeta CND trae un "
+             "'Certificado de experiencia.pdf' sin numerar que hoy no mapea a ningun "
+             "item; no se le asigna numeral por no inventar. Se deja la casilla creada "
+             "para no romper la numeracion. Ver D-18."},
 
     {"codigo": "9.9", "titulo": "Certificacion de cumplimiento de la reglamentacion vigente",
      "descripcion": "El transportador que entrega el punto de conexion certifica que "
                     "la conexion cumplio el procedimiento y la reglamentacion.",
      "emisor": "OR", "multiple": False, "estado_base": "CONFIRMADO",
-     "nota": "El enum del modulo registros_cnd rotula 9.9 como 'inicio de operacion y "
-             "cierre'. La carta real dice otra cosa: el inicio de operacion es el "
-             "9.10. Corregir el enum o dejarlo documentado. Ver D-10."},
+     "nota": "El enum de registros_cnd rotulaba 9.9 como 'inicio de operacion y cierre'; "
+             "la carta real dice que eso es el 9.10. Corregida la ETIQUETA en "
+             "registros_cnd/dominio.py (no el valor persistido, que sigue siendo "
+             "CARTA_9_9). El modulo del tramite sigue sin una etapa propia para el 9.10. "
+             "Ver D-10 y D-19."},
 
     {"codigo": "9.10", "titulo": "Declaracion de entrada en operacion",
      "descripcion": "El agente declara ante el CND la fecha y hora de entrada en "

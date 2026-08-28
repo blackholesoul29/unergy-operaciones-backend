@@ -131,10 +131,29 @@ def test_el_nombre_de_la_frontera_se_diligencia_una_vez_para_muchos_documentos()
 
 
 def test_items_sin_validar_no_declaran_parametros():
-    """No inventar contenido para las carpetas que estan vacias."""
+    """No inventar contenido para las carpetas que estan vacias.
+
+    Los 16-23 son documentos de gobierno del CGM (aplican igual a todas las fronteras
+    que ese CGM opera, no son dato del proyecto) y el 27 solo adjunta el soporte de un
+    registro cuya identidad ya vive en el item 01. Ninguno declara parametros propios:
+    si alguien les inventa contenido, este test lo detiene. Ver D-16 y D-17.
+    """
     for proceso, codigo in [(Proceso.SIC, c) for c in
                             ("16", "17", "18", "19", "20", "21", "22", "23", "27")]:
         assert mapa.parametros_de(proceso, codigo) == []
+
+
+def test_numerales_cnd_sin_respaldo_documental_no_declaran_parametros():
+    """9.5, 9.6 y 9.8 no tienen documento real: no se les inventa contenido. Ver D-18."""
+    for codigo in ("9.5", "9.6", "9.8"):
+        assert mapa.parametros_de(Proceso.CND, codigo) == []
+
+
+def test_los_items_pendientes_dicen_que_falta_validarlos_contra_carpeta_real():
+    """Un PENDIENTE sin nota es un pendiente que se pierde de vista."""
+    for item in ITEMS:
+        if item["estado_base"] == "PENDIENTE":
+            assert item.get("nota"), f"{item['proceso']} {item['codigo']} sin nota"
 
 
 # ---------------------------------------------------------------------------

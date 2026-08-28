@@ -293,7 +293,12 @@ subida real a Google Drive (necesita `GOOGLE_SERVICE_ACCOUNT_JSON`). La subida r
 
 ---
 
-## 7. Lo que queda pendiente (nada de esto bloquea el merge)
+## 7. Lo que quedaba pendiente
+
+**Los ocho se resolvieron el 2026-08-28: ver §9.** Se dejan aquí como estaban para
+que se entienda de dónde salió cada decisión.
+
+### 7.bis — el listado original
 
 1. **Ítems 16–23** — qué contienen. Carpetas vacías; están creados sin parámetros.
 2. **Ítem 27** (plataforma de registro de frontera) — hay que crear el documento.
@@ -335,3 +340,192 @@ npm run build
 
 **No hice commit a master ni push a ningún remoto.** Todo está en la rama
 `feat/registros-proyecto-documentos` de los dos repos, en local.
+
+---
+
+## 9. Resolución de los ocho pendientes (2026-08-28)
+
+Los ocho puntos del §7 quedaron decididos. El principio rector aplicado en todos es el
+mismo: **cada dato único se diligencia una vez y los documentos lo referencian**. Cuando
+la carpeta real no daba certeza **no se inventó contenido**: el ítem queda creado, sin
+parámetros, y con la nota `PENDIENTE DE VALIDAR CONTRA CARPETA REAL` en el catálogo.
+
+### D-16 — Los ítems SIC 16–23 no llevan parámetros: son documentos del CGM
+
+**Qué decidí:** los ocho quedan como casillas documentales sin ningún parámetro propio.
+
+**Por qué:** las carpetas están vacías, pero **sus nombres sí son informativos** y los ocho
+apuntan al mismo sujeto — el Centro de Gestión de Medida, no el proyecto:
+
+| | |
+|---|---|
+| 16 | Parámetros, procedimientos y políticas del CGM |
+| 17 | Esquema de telemedida y comunicaciones |
+| 18 | Condiciones de operación del CGM |
+| 19 | Documentación de la crítica de información |
+| 20 | Documentación para la validación de datos |
+| 21 | Documentación de mecanismos de protección |
+| 22 | Documentación de políticas de seguridad física |
+| 23 | Documentación del procedimiento de transmisión de datos |
+
+Son documentos de **gobierno del operador de medida**: el mismo texto aplica a todas las
+fronteras que ese CGM opera. Modelarlos como parámetros del proyecto sembraría el mismo
+contenido idéntico en cada proyecto — exactamente el patrón que este módulo existe para
+eliminar. El único dato específico del proyecto es *cuál* CGM lo opera, que ya se
+diligencia en la hoja de vida.
+
+Esto cambia el *motivo* respecto del §7 (allí decía "no sé qué contienen"), pero **no
+cambia el resultado**: cero parámetros, que es lo que el test
+`test_items_sin_validar_no_declaran_parametros` ya exigía.
+
+**Qué habría que cambiar si la carpeta real lo desmiente:** si algún ítem trae un dato que
+varía por frontera, se agrega al catálogo y se mapea a ese ítem. El candidato realista es
+el **17**: si el esquema de telemedida trae direccionamiento por frontera, esos datos ya
+existen (`modem.ip`, `modem.apn`, `modem.imei`, `modem.operador`, `modem.no_telefonico`) y
+deben **reusarse desde el ítem 01, no redeclararse**. Está anotado en el catálogo.
+
+### D-17 — El ítem 27 adjunta un soporte, no aporta datos
+
+**Qué decidí:** queda como casilla `PENDIENTE` sin parámetros; cuando exista, se monta como
+archivo.
+
+**Por qué:** el "registro de la frontera en la plataforma del ASIC" es la *evidencia* de un
+trámite cuya identidad ya está diligenciada: `frontera.nombre_frontera` y los códigos FRT
+salen del ítem 01. Crearle parámetros propios sería duplicar la identidad de la frontera.
+
+**Qué habría que cambiar si la carpeta real lo desmiente:** si el soporte trae un
+identificador que hoy no existe (un radicado o consecutivo propio de la plataforma), va
+como columna del documento —no como parámetro—, igual que se hizo en D-14.
+
+### D-18 — Los numerales CND 9.5, 9.6 y 9.8 siguen sin contenido, y ahora se sabe por qué
+
+**Qué decidí:** los tres quedan `PENDIENTE`, sin parámetros. Ninguno bloquea el merge.
+
+**Por qué:** la carpeta `Contexto_registros/CND/` tiene documento real para 9.1, 9.2, 9.3,
+9.4, 9.7, 9.9 y 9.10 — y nada para 9.5, 9.6 y 9.8. Los títulos del 9.5 y 9.6 venían del
+enum de `registros_cnd`, y al revisarlo se encontró que **ahí también son una conjetura**:
+están en el bloque rotulado *"Futuras (enum previsto, sin lógica ni UI)"* y no aparecen en
+`ETAPAS_ACTUALES`. Es decir, el catálogo estaba heredando una suposición de otra
+suposición. No hay de dónde sacar sus parámetros sin leer el Anexo 1 del Acuerdo CNO 1937.
+
+**Hallazgo suelto:** la carpeta CND trae un **`Certificado de experiencia.pdf` sin numerar**
+que hoy no mapea a ningún ítem. Es candidato natural a ser uno de los tres numerales que
+faltan, pero **no se le asignó ninguno**: sería justamente inventar. Queda anotado en el
+9.8. Cuando se lea el Anexo 1 se resuelven los tres de una vez.
+
+**Recomendación aparte (no implementada):** un expediente real siempre acumula documentos
+que no encajan en la numeración. Convendría una casilla `OTROS` por proceso para montarlos
+sin forzarles un numeral. No se hizo por no ampliar el alcance.
+
+**Qué habría que cambiar si la carpeta real lo desmiente:** al conocer los numerales
+verdaderos se corrigen título, emisor y descripción, y se les mapean parámetros si traen
+datos nuevos. Si alguno resulta no existir, se borra la casilla; la numeración no se
+reordena porque los códigos son del Acuerdo, no posicionales.
+
+### D-19 — D-10 resuelto: se corrige la etiqueta del 9.9, no el valor
+
+**Qué decidí:** corregir en `registros_cnd/dominio.py` **solo el rótulo** de `CARTA_9_9`:
+
+```
+antes:  "Carta 9.9 (inicio de operacion y cierre)"
+ahora:  "Carta 9.9 (certificacion de cumplimiento de la reglamentacion)"
+```
+
+**Por qué:** la carta real del expediente dice que la 9.9 es la certificación de
+cumplimiento que emite el transportador, y que el inicio de operación es la **9.10**
+(Acuerdo CNO 1899). El riesgo que frenó este cambio en su momento resultó ser nulo: el
+valor persistido sigue siendo la cadena `"CARTA_9_9"` —no se toca ningún dato guardado— y
+la etapa está en el bloque *"Futuras"*, sin lógica ni UI que la consuma.
+
+**Lo que queda abierto:** el módulo del trámite **sigue sin una etapa propia para el 9.10**.
+Agregarla sí toca la máquina de estados y es un cambio con impacto en ese módulo, ajeno a
+este expediente. Se deja señalado, no hecho.
+
+### D-20 — D-13 resuelto: el nombre de la planta y el de la frontera siguen unificados
+
+**Qué decidí:** mantener un solo parámetro `frontera.nombre_frontera` para los dos procesos.
+
+**Por qué:** se buscó la evidencia dura en el Anexo 4 real
+(`9.3_Anexo_4_Acuerdo_1816 (1)_Chiriguaná Norte 4.xlsx`, hoja `PLANTA_SOLAR`, fila 19):
+
+```
+NOMBRE DE LA PLANTA  →  "MGS 0077 - Chiriguaná Norte 4"
+```
+
+Es **exactamente la misma cadena** que el nombre de la frontera ante el ASIC, y trae
+incorporado el código `MGS 0077`, que es identificación de frontera. O sea: no es que
+coincidan por casualidad, es que la convención de nombres es deliberadamente compartida.
+
+En contra jugaba la definición que trae la propia hoja —*"nombre con el cual identificará
+la planta ante el CND y con la cual quedará registrada en sus aplicativos"*—, que describe
+un registro distinto del ASIC. Pero describe **para qué se usa** el nombre, no que deba
+ser otro. Con un dato real que los muestra idénticos y el principio rector a favor, se
+mantiene unificado.
+
+**Sigue siendo la deduplicación más riesgosa del catálogo.**
+
+**Qué habría que cambiar si la carpeta real lo desmiente:** el disparador concreto es
+encontrar **un solo proyecto** donde el Anexo 4 y la hoja de vida traigan cadenas
+distintas. La separación es una línea en `catalogo_parametros_cnd.py`: declarar
+`planta.nombre_cnd` y remapear el ítem 9.3 a ese parámetro. Los otros cinco datos
+compartidos entre procesos (departamento, municipio, latitud, longitud y voltaje de
+conexión) no tienen este riesgo. Y lo que **no** se dedujo como igual sigue separado:
+capacidad de transporte (MW) vs. capacidad instalada (kVA), y Operador ante el CND vs.
+Agente RF ante el ASIC —el Anexo 4 lista `UNERGY ENERGY DIGITAL S.A.S E.S.P - GENERADOR`
+en un rol que no tiene por qué coincidir con el otro—.
+
+### D-21 — La simulación no se conecta ahora; queda definido el contrato
+
+**Qué decidí:** el ítem 24 sigue montándose como archivo, sin parámetros propios.
+
+**Por qué:** conectar la simulación es integrar una fuente que hoy no existe en la
+plataforma, no una decisión de modelado. Crear parámetros "a la espera" sembraría casillas
+vacías en todos los proyectos.
+
+**Contrato para cuando exista:** el informe de consumo y generación aporta series, no datos
+puntuales. Cuando la fuente esté disponible, sus valores entran como parámetros nuevos
+mapeados al ítem 24 y con `documento_origen_id` apuntando a esa casilla —igual que
+cualquier otro dato—, sin tocar el resto del catálogo.
+
+### D-22 — Las bitácoras (secciones 13–15) se quedan fuera
+
+**Qué decidí:** no se implementan.
+
+**Por qué:** son eventos con fecha (accesos a nivel 2 del medidor, registro cronológico de
+novedades), no datos del proyecto. Un parámetro responde "cuánto vale X"; una bitácora
+responde "qué pasó y cuándo". Meterlas como parámetros rompería la unicidad
+`(proyecto, clave, equipo)`: por definición hay muchas filas por proyecto.
+
+**Forma que tendrían si se piden:** tabla hija `bitacora_proyecto` colgada de `proyectos`
+con `(proyecto_id, tipo, fecha, actor, descripcion)` y el ítem del expediente como origen.
+Es aditiva y no toca nada de lo entregado.
+
+### D-23 — `registro_parametros_93` no se amplía: se apunta al catálogo nuevo
+
+**Qué decidí:** no agregarle columnas a la tabla del módulo del trámite.
+
+**Por qué:** los campos que le faltan frente al Anexo 4 real (estatismos, banda muerta,
+capacidad de reactivos, tiempos de respuesta, ratas de toma de carga, altitud, barra
+STN/STR, potencia máxima, CEN, número de inversores, factor de eficiencia) **ya existen en
+el catálogo nuevo**. Duplicarlos sería crear dos lugares donde vive el mismo dato: el
+problema que este módulo resuelve, reintroducido por la puerta de atrás.
+
+**Cómo se conecta:** si el módulo del trámite los necesita, los lee de
+`parametros_proyecto` por su clave. La dirección natural de la dependencia es esa —el
+trámite consulta el expediente—, coherente con D-01.
+
+**Qué habría que cambiar si la carpeta real lo desmiente:** si aparece un campo del Anexo 4
+que no está en ninguno de los dos lados, se agrega **al catálogo nuevo**, nunca a la tabla
+vieja.
+
+---
+
+### Resumen: qué quedó marcado como pendiente de validar contra carpeta real
+
+| Ítems | Estado | Qué falta |
+|---|---|---|
+| SIC 16–23 | `PENDIENTE`, sin parámetros | Carpetas vacías: confirmar el juego de archivos. El 17 es el único que podría traer dato por frontera |
+| SIC 27 | `PENDIENTE`, sin parámetros | El documento no existe todavía; hay que crearlo |
+| CND 9.5, 9.6, 9.8 | `PENDIENTE`, sin parámetros | Leer el Anexo 1 del Acuerdo CNO 1937. Hay un `Certificado de experiencia.pdf` sin numerar como candidato |
+
+Los demás ítems del expediente están `CONFIRMADO` contra la carpeta real.

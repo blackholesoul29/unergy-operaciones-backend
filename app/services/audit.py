@@ -255,7 +255,115 @@ def _flush_audit(session: Session) -> None:
     session._audit_queue.clear()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Escrituras masivas
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Cuanta sentencia SQL se guarda. Con esto alcanza para reconocer que corrio;
+# guardar un UPDATE gigante entero solo engorda la tabla.
+_MAX_SENTENCIA = 2000
+
+
+def _tabla_del_statement(state) -> str | None:
+    """La tabla que toca un UPDATE/DELETE del ORM, o None si no se puede saber."""
+    ent = getattr(state.statement, "entity_description", None)
+    if not ent:
+        return None
+    tabla = ent.get("table")
+    return getattr(tabla, "name", None)
+
+
+def _registrar_masivo(session: Session, tabla: str, accion: str,
+                      sentencia: str, filas: int | None) -> None:
+    cambios = {
+        "masiva": True,
+        "filas_afectadas": filas,
+        "sentencia": sentencia[:_MAX_SENTENCIA],
+    }
+    user_id, user_name = _autor(session)
+    session.execute(text(_insert_audit(session.get_bind().dialect.name)), {
+        "tabla": tabla,
+        # No hay UNA fila: la sentencia afecto a muchas. 0 es el centinela, y
+        # `cambios.masiva` es lo que hay que mirar para no confundirlo con la
+        # fila de id 0, que no existe en ninguna tabla de este esquema.
+        "registro_id": 0,
+        "accion": accion,
+        "usuario_id": user_id,
+        "usuario_nombre": user_name,
+        "cambios": json.dumps(cambios, ensure_ascii=False),
+    })
+
+
+def init_audit_masivo():
+    """Audita los UPDATE/DELETE masivos, que `before_flush` no puede ver.
+
+    Un `UPDATE ... WHERE` no crea objetos en `session.dirty`: el unit of work no
+    participa, asi que `_queue_audit` nunca se entera. Asi estuvo `tipo_migration`
+    reescribiendo 5.086 fallas en cada arranque durante 23 arranques sin dejar
+    una sola fila en `audit_log`.
+
+    Deja **una fila resumen por sentencia** -- no una por registro -- con la
+    tabla, la sentencia y cuantas filas toco. `registro_id` va en 0: no hay una
+    fila que senalar.
+
+    🛑 **LO QUE ESTO NO CUBRE, y es mucho:**
+
+    - **Las 32 escrituras de SQL crudo por `text()`.** Verificado: para esas,
+      `is_update` e `is_delete` son False y `is_orm_statement` tambien --
+      SQLAlchemy no las parsea, asi que no hay forma de saber si son un UPDATE
+      ni sobre que tabla caen. **De esas, 16 ni siquiera tienen el nombre de la
+      tabla escrito literal** (`UPDATE {t} SET ...`, el patron de los endpoints
+      de fusion): ni este hook ni el escaner estatico pueden atribuirlas. La
+      unica cobertura posible ahi es explicita, sitio por sitio, como hace
+      `registrar_borrado()` con el merge.
+    - **Lo que se escribe fuera de una `Session`**, por ejemplo con
+      `engine.execute()` o desde otro proceso.
+    - **El contenido.** Queda que N filas cambiaron y con que sentencia, no
+      cuales ni que valor tenian antes. Para eso hace falta capturar la fila,
+      que es lo que hace `registrar_borrado()`.
+
+    O sea: esto cierra el agujero de los 38 sitios que el ORM compila (34
+    `Query.update/delete` + 4 del estilo 2.0), no el de los 70 que hay.
+
+    Devuelve el listener para poder desengancharlo con `event.remove()`: los
+    tests lo necesitan, porque se registra sobre la clase `Session` y si no,
+    queda activo para todo el proceso.
+    """
+
+    @event.listens_for(Session, "do_orm_execute")
+    def _auditar_masivo(state):
+        if not (state.is_update or state.is_delete):
+            return None
+        if not state.is_orm_statement:
+            return None      # text() crudo: sin metadatos, no hay nada que decir
+        tabla = _tabla_del_statement(state)
+        if tabla not in _AUDITED_TABLES:
+            return None
+
+        # A partir de aca se toma el control de la ejecucion para poder leer el
+        # rowcount, que antes de ejecutar no existe.
+        resultado = state.invoke_statement()
+        try:
+            _registrar_masivo(
+                state.session, tabla,
+                "DELETE" if state.is_delete else "UPDATE",
+                str(state.statement), resultado.rowcount,
+            )
+        except Exception as exc:
+            # La escritura YA ocurrio. Tumbarla ahora por un fallo de auditoria
+            # seria peor que perder el registro, asi que se avisa fuerte y se
+            # sigue. Es lo contrario a `registrar_borrado()`, que corre ANTES de
+            # destruir y por eso ahi si conviene que reviente.
+            print(f"[audit] no se pudo registrar la escritura masiva sobre "
+                  f"{tabla}: {type(exc).__name__}: {exc}")
+        return resultado
+
+    return _auditar_masivo
+
+
 def init_audit() -> None:
+    init_audit_masivo()
+
     @event.listens_for(Session, "before_flush")
     def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
         for obj in session.new:

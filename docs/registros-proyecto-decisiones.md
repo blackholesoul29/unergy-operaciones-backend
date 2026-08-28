@@ -609,3 +609,61 @@ rama no contenía todavía las revisiones 120–123 a las que apuntaba `down_rev
 un defecto de la migración sino de la rama estando atrasada, y se resolvió al actualizarla.
 En su momento se prefirió eso a apuntar `down_revision` a `119` —que habría dado verde en la
 rama y **dos heads** después del merge, que es cuando importa—.
+
+---
+
+## 11. Cómo cerrar los pendientes con una sola consulta
+
+Los 12 ítems abiertos (SIC 16–23, SIC 27, CND 9.5/9.6/9.8) más el certificado sin numerar
+**no requieren revisar carpeta por carpeta**. Se cierran con dos gestiones:
+
+### Gestión A — pedir UN expediente completo de una frontera ya aprobada
+
+> **Qué pedir, textual:** *"El expediente completo de una frontera comercial que el ASIC ya
+> nos haya aprobado — no el de Chiriguaná Norte 4, que está a medio armar. Necesito
+> específicamente las carpetas 16 a 23 y la 27."*
+
+**A quién:** quien opera el **CGM (Centro de Gestión de Medida)** y arma los registros de
+frontera ante el ASIC. Los ocho ítems figuran en el catálogo con `emisor: UNERGY`, así que
+son documentos propios, no de un tercero.
+
+Un solo expediente aprobado responde nueve preguntas de golpe:
+
+| Ítem | Qué mirar en cuanto llegue | Cierra si… |
+|---|---|---|
+| 16 | ¿Es un documento de políticas del CGM, igual para todas las fronteras? | Sí → queda sin parámetros, se pasa a `CONFIRMADO` |
+| 17 | ¿Trae IP / APN / IMEI / operador, o solo un diagrama? | Si trae datos → **mapear a los `modem.*` que ya existen**, no crear nuevos |
+| 18–23 | ¿Alguno tiene un campo que cambie de frontera a frontera? | Si ninguno → los seis quedan sin parámetros |
+| 27 | ¿Es un pantallazo/soporte, o trae un consecutivo propio de la plataforma? | Si trae consecutivo → va como **columna del documento**, no como parámetro (ver D-14) |
+
+**La pregunta de fondo, una sola:** *¿alguno de estos nueve documentos cambia de una
+frontera a otra, o son el mismo archivo que se adjunta siempre?* Si son el mismo archivo,
+los nueve quedan cerrados sin tocar el catálogo de parámetros.
+
+### Gestión B — bajar un documento público
+
+> **Qué buscar:** **Anexo 1 del Acuerdo CNO 1937**, en `cno.org.co` (sección de acuerdos).
+> Es público, no hay que pedírselo a nadie.
+
+Ir directo a la lista de numerales 9.1 a 9.10 y leer **qué son el 9.5, el 9.6 y el 9.8**.
+
+| Numeral | Qué se sabe hoy | Qué confirma el Anexo 1 |
+|---|---|---|
+| 9.5 | Título "equipos a conectar", tomado de una etapa marcada *"futura"* del enum — es conjetura | El título real y si aplica a generación solar |
+| 9.6 | Título "envío de códigos FRT", mismo origen y mismo problema | Ídem |
+| 9.8 | No hay ni conjetura: no aparece en ningún lado | Qué numeral es, o si el Anexo salta del 9.7 al 9.9 |
+
+**De paso se resuelve el suelto:** la carpeta CND trae un **`Certificado de experiencia.pdf`
+sin numerar**. Al tener la lista oficial de numerales se ve si corresponde a uno de los tres
+huecos —lo más probable, y candidato natural el 9.5 o el 9.6— o si es un anexo del registro
+del agente que no pertenece a la secuencia 9.x. **No se le asignó numeral por no inventar.**
+
+### Qué se hace con las respuestas
+
+Todo el impacto está en `catalogo_items.py` y, si algún documento resulta traer datos
+propios, en `catalogo_parametros_cnd.py` o el mapa de `mapa_documentos.py`. Ningún cambio
+toca la base ni la migración: **los ítems ya existen como casillas**, solo cambian título,
+emisor, `estado_base` y, en su caso, los parámetros mapeados. Los tests
+`test_items_sin_validar_no_declaran_parametros` y
+`test_numerales_cnd_sin_respaldo_documental_no_declaran_parametros` hay que actualizarlos
+al mismo tiempo: son los que hoy impiden inventarles contenido.

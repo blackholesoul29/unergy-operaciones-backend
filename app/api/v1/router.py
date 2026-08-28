@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, reconectadores, om, polizas, starlink, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, reporte_energia, facturacion, garantias_proyecciones, garantias_modelo, finanzas_mandatos, retos
+from app.api.v1 import auth, clientes, proyectos, fallas, generacion, monitoreo, liquidaciones, ppa, asic, fronteras, alertas, contratos_servicio, informes, cumplimiento, evo_proxy, dashboard, solar, generacion_solar, garantias_ajustes, notificaciones, api_keys, mapa, portafolios, proximos_energizar, reconectadores, om, polizas, starlink, informe_om, panel_contable, mandatos, arriendos, mantenimiento_impacto, clasificacion_energia, operadores_red, reporte_cgm, comercial, verificacion_costos, liquidaciones_proxy, estados_resultados, registros_cnd, registros_proyecto, reporte_energia, facturacion, garantias_proyecciones, garantias_modelo, finanzas_mandatos, retos
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -48,6 +48,7 @@ api_router.include_router(verificacion_costos.router)
 api_router.include_router(liquidaciones_proxy.router)
 api_router.include_router(estados_resultados.router)
 api_router.include_router(registros_cnd.router)
+api_router.include_router(registros_proyecto.router)
 api_router.include_router(garantias_proyecciones.router)
 api_router.include_router(garantias_modelo.router)
 api_router.include_router(retos.router)

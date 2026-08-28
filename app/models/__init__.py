@@ -93,6 +93,9 @@ from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,
     RegistroParametros93, RegistroEquipoFrontera, RegistroDocumento, RegistroAlerta,
 )
+from app.models.registros_proyecto import (  # noqa: F401
+    DocumentoProyecto, ArchivoDocumentoProyecto, ParametroProyecto,
+)
 from app.models.garantias_proyecciones import GarantiaSnapshot, GarantiaPagado, BalCttosNeto  # noqa: F401
 from app.models.garantias_modelo import (  # noqa: F401
     GarCalculo,

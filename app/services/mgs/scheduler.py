@@ -57,6 +57,10 @@ def poll_once():
             logger.warning("Quoia returned empty node list")
             return
 
+        # Snapshot pre-evaluate() para poder cerrar en BD (resolved_at) los tipos
+        # que el motor descarta internamente sin emitir una Alarm explícita
+        # (ver _resolver_alarmas_superadas).
+        prev_active = {k: set(v) for k, v in _engine.active_alarms.items()}
         alarms = _engine.evaluate(nodes)
         poll_time = datetime.now(pytz.timezone(settings.TIMEZONE))
 
@@ -78,7 +82,7 @@ def poll_once():
             _last_poll_time = poll_time
             _last_inverter_obs = inverter_obs
 
-        _persist_alarms(alarms)
+        _persist_alarms(alarms, prev_active)
 
         logger.info(
             "MGS poll complete: %d nodes, %d alarms, %d inverter observations",
@@ -100,17 +104,23 @@ def poll_once_async():
     return True
 
 
-def _persist_alarms(alarms: list[Alarm]):
-    if not alarms:
+def _persist_alarms(alarms: list[Alarm], prev_active: dict[str, set] | None = None):
+    if not alarms and not prev_active:
         return
     alarm_ids: list[tuple[Alarm, int]] = []
     db = SessionLocal()
     try:
         for alarm in alarms:
+            # RECUPERACION es un evento puntual ("volvió la conectividad"), no una
+            # condición en curso -- se guarda ya resuelta para que no cuente como
+            # "activa" en el conteo del dashboard (ver auditoría alarmas_monitoreo
+            # 2026-08-31: antes ninguna fila fijaba resolved_at, así que el conteo
+            # de "alarmas activas" solo crecía y nunca reflejaba el estado real).
+            resolved_at = alarm.timestamp if alarm.alarm_type == AlarmType.RECUPERACION else None
             result = db.execute(text("""
                 INSERT INTO alarmas_monitoreo
-                    (proyecto_nombre, severity, alarm_type, details, source_data, created_at)
-                VALUES (:nombre, :severity, :alarm_type, :details, :source_data, :ts)
+                    (proyecto_nombre, severity, alarm_type, details, source_data, created_at, resolved_at)
+                VALUES (:nombre, :severity, :alarm_type, :details, :source_data, :ts, :resolved_at)
                 RETURNING id
             """), {
                 "nombre": alarm.node_name,
@@ -119,10 +129,18 @@ def _persist_alarms(alarms: list[Alarm]):
                 "details": alarm.details,
                 "source_data": json.dumps(asdict(alarm), default=str),
                 "ts": alarm.timestamp,
+                "resolved_at": resolved_at,
             })
             alarm_db_id = result.scalar()
             alarm_ids.append((alarm, alarm_db_id))
         db.commit()
+
+        if prev_active is not None:
+            try:
+                _resolver_alarmas_superadas(db, prev_active, _engine.active_alarms, _engine.previous_states)
+            except Exception:
+                db.rollback()
+                logger.exception("Failed to resolve cleared alarms")
 
         _auto_create_fallas(db, alarm_ids)
         _auto_close_fallas(db, alarm_ids)
@@ -138,6 +156,58 @@ def _persist_alarms(alarms: list[Alarm]):
             _send_alarm_notifications_safe(alarm_ids)
         except Exception:
             logger.exception("Failed to send alarm notifications")
+
+
+def _tipos_superados(
+    prev_active: dict[str, set], curr_active: dict[str, set],
+) -> dict[str, set]:
+    """Función pura: para cada proyecto, qué tipos de alarma estaban activos
+    antes de evaluate() y ya no lo están después -- la condición se superó
+    aunque el motor no haya emitido una Alarm explícita para avisarlo (pasa
+    con SIN_GENERACION: el motor solo hace `proj_alarms.discard(...)` cuando
+    vuelve a generar, sin crear ningún evento de recuperación)."""
+    superados: dict[str, set] = {}
+    for key, before in prev_active.items():
+        cleared = before - curr_active.get(key, set())
+        if cleared:
+            superados[key] = cleared
+    return superados
+
+
+def _resolver_alarmas_superadas(
+    db, prev_active: dict[str, set], curr_active: dict[str, set], previous_states: dict[str, str],
+):
+    """Cierra en `alarmas_monitoreo` (resolved_at) las condiciones que ya no
+    están activas en el motor, para que el conteo de "alarmas activas" del
+    dashboard refleje el estado real y no solo crezca para siempre."""
+    now = datetime.now(pytz.timezone(settings.TIMEZONE))
+
+    for nombre, tipos in _tipos_superados(prev_active, curr_active).items():
+        db.execute(text("""
+            UPDATE alarmas_monitoreo
+            SET resolved_at = :now
+            WHERE proyecto_nombre = :nombre
+              AND alarm_type = ANY(:tipos)
+              AND resolved_at IS NULL
+        """), {"now": now, "nombre": nombre, "tipos": [t.value for t in tipos]})
+
+    # CORTE_ZONA no vive en active_alarms (es un evento derivado que agrupa
+    # varios proyectos a la vez, no el estado de uno solo) -- se cierra cuando
+    # ninguno de los proyectos listados en su nombre (join por coma, ver
+    # _detect_zone_outage) sigue en NO_DATA/ERROR.
+    abiertas_zona = db.execute(text("""
+        SELECT id, proyecto_nombre FROM alarmas_monitoreo
+        WHERE alarm_type = 'CORTE_ZONA' AND resolved_at IS NULL
+    """)).mappings().all()
+    for row in abiertas_zona:
+        miembros = [m.strip() for m in row["proyecto_nombre"].split(",")]
+        if any(previous_states.get(m) in ("NO_DATA", "ERROR") for m in miembros):
+            continue
+        db.execute(text(
+            "UPDATE alarmas_monitoreo SET resolved_at = :now WHERE id = :id"
+        ), {"now": now, "id": row["id"]})
+
+    db.commit()
 
 
 # Mapping alarm types to falla catalog tipo codes

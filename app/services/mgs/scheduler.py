@@ -12,27 +12,75 @@ from sqlalchemy import or_, text
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.models.fronteras import Frontera, TipoFronteraEnum
+from app.models.proyectos import Proyecto, TipoProyectoEnum
 from app.services.mgs.alarm_engine import AlarmEngine, Alarm, AlarmType, Severity
-from app.services.mgs.quoia_client import QuoiaClient
+from app.services.mgs.gaia_client import GaiaClient, build_db_proyecto_frt_map, find_gaia_node_pair
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.mgs.solenium_checker import SoleniumChecker
 
 logger = logging.getLogger("mgs.scheduler")
 
 _engine = AlarmEngine()
-_quoia = QuoiaClient()
 _solenium = SoleniumClient()
 _solenium_checker = SoleniumChecker(_solenium)
 
 _poll_running = False
 
 
+def _resolver_mapa_proyectos(gaia: GaiaClient) -> tuple[dict[int, int], dict[int, str]]:
+    """Resuelve, para cada minigranja/GD en operación, sus nodos Quoia reales
+    (Principal/Respaldo) vía fronteras.proyecto_id -> codigo_frontera -- la
+    misma fuente de verdad que ya usa desconexion.py (ver
+    gaia_client._resolve_frt_and_pair), en vez de adivinar por nombre
+    (project_name() + ILIKE contra proyectos.nombre_comercial), que fallaba
+    en silencio cuando el nombre del nodo no calzaba con el patrón esperado
+    (auditoría alarmas_monitoreo 2026-08-31).
+
+    Devuelve (node_id -> proyecto_id, proyecto_id -> nombre_comercial). Los
+    proyectos sin frontera de generación vinculada quedan fuera y se reportan
+    por separado (antes: sin ningún aviso)."""
+    db = SessionLocal()
+    try:
+        proyectos = db.query(Proyecto.id, Proyecto.nombre_comercial).filter(
+            Proyecto.estado == "en_operacion",
+            Proyecto.deleted_at.is_(None),
+            Proyecto.tipo_proyecto.in_([TipoProyectoEnum.minigranja, TipoProyectoEnum.gd]),
+        ).all()
+        fronteras = db.query(Frontera.proyecto_id, Frontera.codigo_frontera).filter(
+            Frontera.tipo_frontera.in_([TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo]),
+            Frontera.codigo_frontera.isnot(None),
+        ).all()
+        db_proyecto_frt_map = build_db_proyecto_frt_map(list(fronteras))
+
+        node_to_proyecto: dict[int, int] = {}
+        proyecto_nombres: dict[int, str] = {}
+        sin_vinculo: list[str] = []
+        for pid, nombre in proyectos:
+            node_p, node_r = find_gaia_node_pair(
+                gaia=gaia, proyecto_id=pid, db_proyecto_frt_map=db_proyecto_frt_map,
+            )
+            if node_p is None and node_r is None:
+                sin_vinculo.append(nombre)
+                continue
+            proyecto_nombres[pid] = nombre
+            for nid in (node_p, node_r):
+                if nid is not None:
+                    node_to_proyecto[nid] = pid
+
+        if sin_vinculo:
+            logger.warning(
+                "%d proyectos en_operacion sin frontera de generación vinculada -- "
+                "sin monitoreo MGS este ciclo: %s",
+                len(sin_vinculo), ", ".join(sin_vinculo),
+            )
+        return node_to_proyecto, proyecto_nombres
+    finally:
+        db.close()
+
+
 def poll_once():
     global _poll_running
-
-    if not _quoia.enabled:
-        logger.warning("QUOIA_API_TOKEN not set — MGS polling disabled")
-        return
 
     if _poll_running:
         logger.info("Poll already in progress — skipping")
@@ -47,18 +95,29 @@ def poll_once():
         except Exception:
             logger.exception("evaluar_desconexiones falló (no afecta MGS)")
 
-        nodes = _quoia.get_all_nodes()
+        gaia = GaiaClient()
+        if not gaia.enabled:
+            logger.warning("GAIA_USER/GAIA_PASS not set — MGS polling disabled")
+            return
+
+        node_to_proyecto, proyecto_nombres = _resolver_mapa_proyectos(gaia)
+        if not node_to_proyecto:
+            logger.warning("Sin proyectos resueltos a nodos Quoia — se omite el ciclo MGS")
+            return
+
+        nodes = gaia.get_all_nodes()
         if not nodes:
-            logger.warning("Quoia returned empty node list")
+            logger.warning("Gaia returned empty node list")
             return
 
         # Snapshot pre-evaluate() para poder cerrar en BD (resolved_at) los tipos
         # que el motor descarta internamente sin emitir una Alarm explícita
         # (ver _resolver_alarmas_superadas).
         prev_active = {k: set(v) for k, v in _engine.active_alarms.items()}
-        alarms = _engine.evaluate(nodes)
+        alarms = _engine.evaluate(nodes, node_to_proyecto, proyecto_nombres)
 
-        project_names = [p["name"] for p in _engine.get_summary(nodes).get("projects", [])]
+        summary = _engine.get_summary(nodes, node_to_proyecto, proyecto_nombres)
+        project_names = [p["name"] for p in summary.get("projects", [])]
         try:
             inverter_obs = _solenium_checker.get_inverter_observations(project_names)
         except Exception:
@@ -66,15 +125,15 @@ def poll_once():
             inverter_obs = {}
 
         for alarm in alarms:
-            inv_note = inverter_obs.get(alarm.node_name)
+            inv_note = inverter_obs.get(alarm.proyecto_nombre)
             if inv_note and alarm.alarm_type.value != "RECUPERACION":
                 alarm.details += f" | Inversores: {inv_note}"
 
-        _persist_alarms(alarms, prev_active)
+        _persist_alarms(alarms, prev_active, proyecto_nombres)
 
         logger.info(
-            "MGS poll complete: %d nodes, %d alarms, %d inverter observations",
-            len(nodes), len(alarms), len(inverter_obs),
+            "MGS poll complete: %d nodes, %d proyectos, %d alarms, %d inverter observations",
+            len(nodes), len(proyecto_nombres), len(alarms), len(inverter_obs),
         )
 
     except Exception:
@@ -92,7 +151,11 @@ def poll_once_async():
     return True
 
 
-def _persist_alarms(alarms: list[Alarm], prev_active: dict[str, set] | None = None):
+def _persist_alarms(
+    alarms: list[Alarm],
+    prev_active: dict[int, set] | None = None,
+    proyecto_nombres: dict[int, str] | None = None,
+):
     if not alarms and not prev_active:
         return
     alarm_ids: list[tuple[Alarm, int]] = []
@@ -111,7 +174,7 @@ def _persist_alarms(alarms: list[Alarm], prev_active: dict[str, set] | None = No
                 VALUES (:nombre, :severity, :alarm_type, :details, :source_data, :ts, :resolved_at)
                 RETURNING id
             """), {
-                "nombre": alarm.node_name,
+                "nombre": alarm.proyecto_nombre,
                 "severity": alarm.severity.value,
                 "alarm_type": alarm.alarm_type.value,
                 "details": alarm.details,
@@ -125,7 +188,10 @@ def _persist_alarms(alarms: list[Alarm], prev_active: dict[str, set] | None = No
 
         if prev_active is not None:
             try:
-                _resolver_alarmas_superadas(db, prev_active, _engine.active_alarms, _engine.previous_states)
+                _resolver_alarmas_superadas(
+                    db, prev_active, _engine.active_alarms, _engine.previous_states,
+                    proyecto_nombres or {},
+                )
             except Exception:
                 db.rollback()
                 logger.exception("Failed to resolve cleared alarms")
@@ -147,14 +213,15 @@ def _persist_alarms(alarms: list[Alarm], prev_active: dict[str, set] | None = No
 
 
 def _tipos_superados(
-    prev_active: dict[str, set], curr_active: dict[str, set],
-) -> dict[str, set]:
-    """Función pura: para cada proyecto, qué tipos de alarma estaban activos
-    antes de evaluate() y ya no lo están después -- la condición se superó
-    aunque el motor no haya emitido una Alarm explícita para avisarlo (pasa
-    con SIN_GENERACION: el motor solo hace `proj_alarms.discard(...)` cuando
-    vuelve a generar, sin crear ningún evento de recuperación)."""
-    superados: dict[str, set] = {}
+    prev_active: dict[int, set], curr_active: dict[int, set],
+) -> dict[int, set]:
+    """Función pura: para cada proyecto (por proyecto_id), qué tipos de
+    alarma estaban activos antes de evaluate() y ya no lo están después -- la
+    condición se superó aunque el motor no haya emitido una Alarm explícita
+    para avisarlo (pasa con SIN_GENERACION: el motor solo hace
+    `proj_alarms.discard(...)` cuando vuelve a generar, sin crear ningún
+    evento de recuperación)."""
+    superados: dict[int, set] = {}
     for key, before in prev_active.items():
         cleared = before - curr_active.get(key, set())
         if cleared:
@@ -163,14 +230,25 @@ def _tipos_superados(
 
 
 def _resolver_alarmas_superadas(
-    db, prev_active: dict[str, set], curr_active: dict[str, set], previous_states: dict[str, str],
+    db,
+    prev_active: dict[int, set],
+    curr_active: dict[int, set],
+    previous_states: dict[int, str],
+    proyecto_nombres: dict[int, str],
 ):
     """Cierra en `alarmas_monitoreo` (resolved_at) las condiciones que ya no
     están activas en el motor, para que el conteo de "alarmas activas" del
-    dashboard refleje el estado real y no solo crezca para siempre."""
+    dashboard refleje el estado real y no solo crezca para siempre.
+
+    `alarmas_monitoreo` solo guarda `proyecto_nombre` (no proyecto_id), así
+    que acá se traduce el proyecto_id que usa el motor de vuelta al nombre
+    con el que se persistió esa fila."""
     now = datetime.now(pytz.timezone(settings.TIMEZONE))
 
-    for nombre, tipos in _tipos_superados(prev_active, curr_active).items():
+    for pid, tipos in _tipos_superados(prev_active, curr_active).items():
+        nombre = proyecto_nombres.get(pid)
+        if nombre is None:
+            continue
         db.execute(text("""
             UPDATE alarmas_monitoreo
             SET resolved_at = :now
@@ -182,14 +260,19 @@ def _resolver_alarmas_superadas(
     # CORTE_ZONA no vive en active_alarms (es un evento derivado que agrupa
     # varios proyectos a la vez, no el estado de uno solo) -- se cierra cuando
     # ninguno de los proyectos listados en su nombre (join por coma, ver
-    # _detect_zone_outage) sigue en NO_DATA/ERROR.
+    # _detect_zone_outage) sigue en NO_DATA/ERROR. previous_states está
+    # indexado por proyecto_id, así que se arma un mapa por nombre acá.
+    estado_por_nombre = {
+        proyecto_nombres[pid]: previous_states.get(pid)
+        for pid in proyecto_nombres
+    }
     abiertas_zona = db.execute(text("""
         SELECT id, proyecto_nombre FROM alarmas_monitoreo
         WHERE alarm_type = 'CORTE_ZONA' AND resolved_at IS NULL
     """)).mappings().all()
     for row in abiertas_zona:
         miembros = [m.strip() for m in row["proyecto_nombre"].split(",")]
-        if any(previous_states.get(m) in ("NO_DATA", "ERROR") for m in miembros):
+        if any(estado_por_nombre.get(m) in ("NO_DATA", "ERROR") for m in miembros):
             continue
         db.execute(text(
             "UPDATE alarmas_monitoreo SET resolved_at = :now WHERE id = :id"
@@ -214,25 +297,11 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
     for alarm, alarm_db_id in alarm_ids:
         if alarm.alarm_type not in critical_types:
             continue
+        if alarm.proyecto_id is None:
+            continue
 
         try:
-            # Resolve project by name
-            proyecto = db.execute(text("""
-                SELECT id FROM proyectos
-                WHERE deleted_at IS NULL
-                  AND (nombre_comercial = :name
-                       OR nombre_comercial ILIKE :pattern)
-                LIMIT 1
-            """), {
-                "name": alarm.node_name,
-                "pattern": f"%{alarm.node_name}%",
-            }).mappings().first()
-
-            if not proyecto:
-                logger.debug("No project found for alarm node '%s' — skipping falla creation", alarm.node_name)
-                continue
-
-            proyecto_id = proyecto["id"]
+            proyecto_id = alarm.proyecto_id
 
             # Check for existing open falla with same alarm_type for this project
             existing = db.execute(text("""
@@ -319,7 +388,7 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
             })
             db.commit()
             logger.info("Auto-created falla %s for alarm %d (%s — %s)",
-                        codigo, alarm_db_id, alarm.node_name, alarm.alarm_type.value)
+                        codigo, alarm_db_id, alarm.proyecto_nombre, alarm.alarm_type.value)
 
         except Exception:
             db.rollback()
@@ -349,21 +418,10 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
     for alarm, alarm_db_id in alarm_ids:
         if alarm.alarm_type != AlarmType.RECUPERACION:
             continue
+        if alarm.proyecto_id is None:
+            continue
 
         try:
-            proyecto = db.execute(text("""
-                SELECT id FROM proyectos
-                WHERE deleted_at IS NULL
-                  AND (nombre_comercial = :name
-                       OR nombre_comercial ILIKE :pattern)
-                LIMIT 1
-            """), {
-                "name": alarm.node_name,
-                "pattern": f"%{alarm.node_name}%",
-            }).mappings().first()
-            if not proyecto:
-                continue
-
             filtro_tipo = or_(*[
                 Falla.descripcion.ilike(f"%[{t.value}]%") for t in _TIPOS_CONECTIVIDAD
             ])
@@ -371,7 +429,7 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 db.query(Falla)
                 .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
                 .filter(
-                    Falla.proyecto_id == proyecto["id"],
+                    Falla.proyecto_id == alarm.proyecto_id,
                     Falla.alarma_monitoreo_id.isnot(None),
                     FallaCatEstado.es_estado_final.is_(False),
                     Falla.deleted_at.is_(None),
@@ -403,7 +461,7 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 ))
                 db.commit()
                 logger.info("Auto-cerrada falla %s tras recuperación de alarma (%s)",
-                            falla.codigo_interno, alarm.node_name)
+                            falla.codigo_interno, alarm.proyecto_nombre)
                 try:
                     _enviar_notificacion(falla, accion="cerrada", usuario_nombre="Sistema (auto-cierre MGS)", db=db)
                 except Exception:
@@ -431,38 +489,24 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
     try:
         for alarm, alarm_db_id in to_notify:
             try:
-                # Resolver el proyecto real por nombre/alias (mismo criterio que
-                # _auto_create_fallas) en vez de emparejar directamente contra la
-                # tabla de contactos por nombre -- así get_contactos() resuelve
-                # correctamente el puntero de área / inversionistas por FK.
-                proyecto = db.execute(text("""
-                    SELECT id FROM proyectos
-                    WHERE deleted_at IS NULL
-                      AND (nombre_comercial = :name
-                           OR nombre_comercial ILIKE :pattern)
-                    LIMIT 1
-                """), {
-                    "name": alarm.node_name,
-                    "pattern": f"%{alarm.node_name}%",
-                }).mappings().first()
-
-                if not proyecto:
-                    logger.debug("No project found for alarm node '%s' — skipping notification", alarm.node_name)
+                # CORTE_ZONA abarca varios proyectos a la vez (sin un proyecto_id
+                # único) -- no se puede resolver un solo contacto operacional.
+                if alarm.proyecto_id is None:
                     continue
 
-                emails = get_contactos(db, "operacional", proyecto_id=proyecto["id"])
+                emails = get_contactos(db, "operacional", proyecto_id=alarm.proyecto_id)
                 if not emails:
                     continue
 
                 send_alarm_notification_email(
                     to_emails=emails,
-                    proyecto_nombre=alarm.node_name,
+                    proyecto_nombre=alarm.proyecto_nombre,
                     alarm_type=alarm.alarm_type.value,
                     severity=alarm.severity.value,
                     details=alarm.details,
                 )
             except Exception:
-                logger.exception("Failed to send alarm notification for '%s'", alarm.node_name)
+                logger.exception("Failed to send alarm notification for '%s'", alarm.proyecto_nombre)
     finally:
         db.close()
 

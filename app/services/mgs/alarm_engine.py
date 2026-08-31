@@ -20,26 +20,21 @@ tz = pytz.timezone(settings.TIMEZONE)
 SOLAR_START_HOUR = 6
 SOLAR_END_HOUR = 18
 
-_MGS_EXTRA_PREFIXES = (
-    "El Molino", "La Mesa", "Los Bongos", "Chiriguaná",
-    "La Catedral", "San Pelayo", "Sol y Cielo", "Yuan Solar",
-    "Agustín", "SIRIUS",
-)
-
 DEBOUNCE_POLLS = 4
 
-
-def is_minigranja(node: dict) -> bool:
-    cat = node.get("category", "")
-    if cat not in ("ELECTRICAL_GENERATION", "BORDER"):
-        return False
-    name = node.get("name", "")
-    if name.startswith("Minigranja") or name.startswith("MGS"):
-        return True
-    return any(name.startswith(p) for p in _MGS_EXTRA_PREFIXES)
+_NODE_CATEGORIAS = ("ELECTRICAL_GENERATION", "BORDER")
 
 
 def project_name(node_name: str) -> str:
+    """Limpia el nombre crudo de un nodo Quoia/Gaia a un nombre legible.
+
+    Usado hoy solo por solenium_checker.py (fuzzy match contra la API legacy
+    de Solenium, un sistema aparte) -- el agrupamiento por proyecto de este
+    motor ya NO pasa por esta función. Auditoría alarmas_monitoreo 2026-08-31:
+    agrupar/resolver proyectos por nombre (esta función + is_minigranja(),
+    ambas removidas de ese camino) causaba fallas silenciosas de vinculación
+    con `proyectos` -- ahora se resuelve por FK real vía
+    fronteras.proyecto_id, ver scheduler._resolver_mapa_proyectos."""
     name = node_name
     for prefix in ("Minigranja Solar ", "Minigranja ", "MGS "):
         name = name.replace(prefix, "")
@@ -70,8 +65,8 @@ class AlarmType(str, Enum):
 class Alarm:
     severity: Severity
     alarm_type: AlarmType
-    node_name: str
-    node_id: int
+    proyecto_id: int | None  # None solo en CORTE_ZONA (evento derivado de varios proyectos)
+    proyecto_nombre: str
     category: str
     details: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(tz))
@@ -80,16 +75,27 @@ class Alarm:
 _STATUS_PRIORITY = {"OK": 0, "WARNING": 1, "ERROR": 2, "NO_DATA": 3}
 
 
-def _group_by_project(nodes: list[dict]) -> list[dict]:
-    groups: dict[str, list[dict]] = {}
+def _group_by_project(
+    nodes: list[dict],
+    node_to_proyecto: dict[int, int],
+    proyecto_nombres: dict[int, str],
+) -> list[dict]:
+    """Agrupa nodos Quoia/Gaia por proyecto_id real, resuelto externamente
+    (ver scheduler._resolver_mapa_proyectos) vía fronteras.proyecto_id -- no
+    por texto. Un nodo sin proyecto_id resuelto se ignora (antes se adivinaba
+    por nombre; ahora un vínculo faltante se reporta explícitamente en el log
+    del scheduler en vez de fallar en silencio)."""
+    groups: dict[int, list[dict]] = {}
     for node in nodes:
-        if not is_minigranja(node):
+        if node.get("category") not in _NODE_CATEGORIAS:
             continue
-        proj = project_name(node.get("name", ""))
-        groups.setdefault(proj, []).append(node)
+        pid = node_to_proyecto.get(node.get("id"))
+        if pid is None:
+            continue
+        groups.setdefault(pid, []).append(node)
 
     virtual: list[dict] = []
-    for proj, members in groups.items():
+    for pid, members in groups.items():
         best_status = "UNKNOWN"
         best_priority = 999
         max_eae = 0
@@ -103,18 +109,20 @@ def _group_by_project(nodes: list[dict]) -> list[dict]:
             if eae > max_eae:
                 max_eae = eae
         virtual.append({
-            "name": proj, "id": 0, "status": best_status,
-            "category": "ELECTRICAL_GENERATION", "eae": max_eae,
-            "_project_key": proj, "_members": members,
+            "proyecto_id": pid,
+            "name": proyecto_nombres.get(pid, f"Proyecto {pid}"),
+            "status": best_status,
+            "category": "ELECTRICAL_GENERATION",
+            "eae": max_eae,
         })
     return virtual
 
 
 class AlarmEngine:
     def __init__(self):
-        self.previous_states: dict[str, str] = {}
-        self.bad_streak: dict[str, int] = {}
-        self.active_alarms: dict[str, set[AlarmType]] = {}
+        self.previous_states: dict[int, str] = {}
+        self.bad_streak: dict[int, int] = {}
+        self.active_alarms: dict[int, set[AlarmType]] = {}
         self.daily_stats: dict[str, int] = {
             "critical": 0, "warning": 0, "recoveries": 0,
         }
@@ -124,46 +132,51 @@ class AlarmEngine:
         self.daily_stats = {"critical": 0, "warning": 0, "recoveries": 0}
         self.no_gen_nodes.clear()
 
-    def evaluate(self, nodes: list[dict]) -> list[Alarm]:
+    def evaluate(
+        self,
+        nodes: list[dict],
+        node_to_proyecto: dict[int, int],
+        proyecto_nombres: dict[int, str],
+    ) -> list[Alarm]:
         alarms: list[Alarm] = []
         now = datetime.now(tz)
         is_solar = SOLAR_START_HOUR <= now.hour < SOLAR_END_HOUR
 
-        projects = _group_by_project(nodes)
+        projects = _group_by_project(nodes, node_to_proyecto, proyecto_nombres)
 
         if not is_solar:
             for proj in projects:
-                key = proj["_project_key"]
-                self.previous_states[key] = proj.get("status", "UNKNOWN")
-                self.bad_streak.pop(key, None)
+                pid = proj["proyecto_id"]
+                self.previous_states[pid] = proj.get("status", "UNKNOWN")
+                self.bad_streak.pop(pid, None)
             return alarms
 
         fell_this_poll: list[dict] = []
 
         for proj in projects:
-            key = proj["_project_key"]
+            pid = proj["proyecto_id"]
             name = proj["name"]
             status = proj.get("status", "UNKNOWN")
             category = proj.get("category", "")
-            prev = self.previous_states.get(key)
-            proj_alarms = self.active_alarms.setdefault(key, set())
+            prev = self.previous_states.get(pid)
+            proj_alarms = self.active_alarms.setdefault(pid, set())
             is_bad = status in ("NO_DATA", "ERROR")
 
             if is_bad:
-                self.bad_streak[key] = self.bad_streak.get(key, 0) + 1
+                self.bad_streak[pid] = self.bad_streak.get(pid, 0) + 1
             else:
-                self.bad_streak.pop(key, None)
+                self.bad_streak.pop(pid, None)
 
             # >= (no ==): si un sondeo se salta y el contador pasa de DEBOUNCE_POLLS
             # sin caer justo en el valor exacto, con == la alarma NUNCA dispararía
             # para una planta realmente caída. El guard `not in proj_alarms` de abajo
             # ya evita disparos duplicados, así que >= es seguro.
-            if is_bad and self.bad_streak.get(key, 0) >= DEBOUNCE_POLLS:
+            if is_bad and self.bad_streak.get(pid, 0) >= DEBOUNCE_POLLS:
                 if AlarmType.PLANTA_CAIDA not in proj_alarms:
                     alarms.append(Alarm(
                         severity=Severity.CRITICAL,
                         alarm_type=AlarmType.PLANTA_CAIDA,
-                        node_name=name, node_id=0, category=category,
+                        proyecto_id=pid, proyecto_nombre=name, category=category,
                         details=f"Proyecto sin datos hace ~30 min (estado: {status})",
                     ))
                     proj_alarms.add(AlarmType.PLANTA_CAIDA)
@@ -177,7 +190,7 @@ class AlarmEngine:
                     alarms.append(Alarm(
                         severity=Severity.WARNING,
                         alarm_type=AlarmType.SIN_GENERACION,
-                        node_name=name, node_id=0, category=category,
+                        proyecto_id=pid, proyecto_nombre=name, category=category,
                         details=f"Medidor conectado pero sin generacion a las {now.strftime('%I:%M %p')}",
                     ))
                     proj_alarms.add(AlarmType.SIN_GENERACION)
@@ -191,13 +204,13 @@ class AlarmEngine:
                     alarms.append(Alarm(
                         severity=Severity.INFO,
                         alarm_type=AlarmType.RECUPERACION,
-                        node_name=name, node_id=0, category=category,
+                        proyecto_id=pid, proyecto_nombre=name, category=category,
                         details=f"Nuevamente operativo ({prev} -> {status})",
                     ))
                     proj_alarms.discard(AlarmType.PLANTA_CAIDA)
                     self.daily_stats["recoveries"] += 1
 
-            self.previous_states[key] = status
+            self.previous_states[pid] = status
 
         if len(fell_this_poll) >= 2:
             self._detect_zone_outage(alarms, fell_this_poll, projects)
@@ -236,21 +249,29 @@ class AlarmEngine:
                     "or": "operador de red",
                 }[level]
 
+                # CORTE_ZONA abarca varios proyectos a la vez -- no tiene un
+                # proyecto_id único, se identifica por nombre (ver
+                # _resolver_alarmas_superadas en scheduler.py).
                 alarms[:] = [
                     a for a in alarms
-                    if a.alarm_type != AlarmType.PLANTA_CAIDA or a.node_name not in remaining
+                    if a.alarm_type != AlarmType.PLANTA_CAIDA or a.proyecto_nombre not in remaining
                 ]
                 alarms.append(Alarm(
                     severity=Severity.CRITICAL,
                     alarm_type=AlarmType.CORTE_ZONA,
-                    node_name=", ".join(remaining), node_id=0,
+                    proyecto_id=None, proyecto_nombre=", ".join(remaining),
                     category="ELECTRICAL_GENERATION",
                     details=f"Posible corte de {level_label} '{key}': {len(remaining)} proyectos fuera de operacion",
                 ))
                 already_grouped.update(remaining)
 
-    def get_summary(self, nodes: list[dict]) -> dict:
-        projects = _group_by_project(nodes)
+    def get_summary(
+        self,
+        nodes: list[dict],
+        node_to_proyecto: dict[int, int],
+        proyecto_nombres: dict[int, str],
+    ) -> dict:
+        projects = _group_by_project(nodes, node_to_proyecto, proyecto_nombres)
         counts = {"OK": 0, "WARNING": 0, "NO_DATA": 0, "ERROR": 0}
         project_list: list[dict] = []
         for proj in projects:

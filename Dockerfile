@@ -12,11 +12,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev gcc libreoffice-calc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# uv en vez de pip: instala desde uv.lock, asi la imagen tiene exactamente las
+# mismas versiones que se probaron en local y en CI.
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
+
+# El venv va FUERA de /app a proposito: el docker-compose monta el repo en /app y
+# taparia un /app/.venv de la imagen.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH=/opt/venv/bin:$PATH
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 
 COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "start.sh"]
+# Las migraciones (init_db.py + alembic) las corre el `command` del docker-compose.yml.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

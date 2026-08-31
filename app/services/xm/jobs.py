@@ -1,7 +1,7 @@
 """Job store en memoria para la Descarga de XM.
 
-El backend corre en un solo proceso uvicorn (sin --workers, ver
-start.sh), así que un dict en memoria protegido por un lock basta —
+El backend corre en un solo proceso uvicorn (WORKERS=1 en el
+docker-compose.yml), así que un dict en memoria protegido por un lock basta —
 no hace falta Redis ni tabla en BD para esto.
 """
 import threading

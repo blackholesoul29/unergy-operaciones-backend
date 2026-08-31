@@ -24,9 +24,27 @@ def test_las_rutas_son_get():
         assert "GET" in r.methods
 
 
+def _rutas(router, prefijo=""):
+    """Rutas de un router, entrando a los `include_router`.
+
+    Desde FastAPI 0.140 `include_router` no copia las rutas: deja un
+    `_IncludedRouter` y las resuelve al servir. Leer solo `.path` dejaba de ver
+    los 49 routers incluidos y esta prueba fallaba con AttributeError.
+    """
+    encontradas = set()
+    for r in router.routes:
+        ruta = getattr(r, "path", None)
+        if ruta is not None:
+            encontradas.add(prefijo + ruta)
+        else:
+            encontradas |= _rutas(r.original_router,
+                                  prefijo + r.include_context.prefix)
+    return encontradas
+
+
 def test_el_router_esta_registrado_en_la_api():
     """Registrar el módulo y olvidar el include_router deja los endpoints en 404."""
-    rutas = {r.path for r in api_router.routes}
+    rutas = _rutas(api_router)
     assert "/api/v1/garantias/modelo/plan" in rutas
     assert "/api/v1/garantias/modelo/detalle/{id}" in rutas
 

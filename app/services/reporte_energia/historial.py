@@ -59,9 +59,15 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
     """Retorna (fp_usado, fp_calculado) para una frontera de Generación.
 
     fp_calculado: mediana de los ratios diarios (E_med/E_inv) de los últimos
-    DIAS_VENTANA días ANTES de `fecha`, con medidor completo ese día y ambas
-    energías > 0 -- independiente de qué Caso ganó ese día (un día Caso 3 no
-    aporta, porque su 'energia_final_kwh' ya sale de invertir el propio FP).
+    DIAS_VENTANA días ANTES de `fecha`, con medidor completo ese día, ambas
+    energías > 0, Caso confiable (CASOS_CONFIABLES_GENERACION) y sin
+    revisión manual -- mismo criterio de "día confiable" que ya usan
+    get_mediana_generacion()/get_forma_generacion(). `completo` por sí solo
+    no alcanza: solo certifica continuidad de telemetría, no que la lectura
+    corresponda a generación real (ver dia_completo() en curvas.py) -- un
+    día Caso 3 (estimado vía FP, sería circular), Caso 6 (apagado) u otro
+    Caso no confiable podía tener completo=True y aun así colarse en la
+    mediana antes de este filtro.
 
     fp_usado: lo que realmente se aplica -- FP_FIJO si la frontera está ahí,
     un valor dentro de FP_FALLBACK_RANGO (variado por frontera+fecha, ver
@@ -79,6 +85,8 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
         .where(
             ReporteEnergiaGeneracion.frontera_id == frontera_id,
             ReporteEnergiaGeneracion.fecha < fecha,
+            ReporteEnergiaGeneracion.caso.in_(CASOS_CONFIABLES_GENERACION),
+            ReporteEnergiaGeneracion.revisar_manualmente.is_(False),
         )
         .order_by(ReporteEnergiaGeneracion.fecha.desc())
         .limit(DIAS_VENTANA)

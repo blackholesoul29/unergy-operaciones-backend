@@ -14,6 +14,8 @@ import app.models  # noqa: F401
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.models.proyectos import Proyecto
+from app.models.fronteras import Frontera
+from app.models.generacion import GeneracionDiaria
 from app.models.comercial import (
     Oportunidad, OportunidadOferta, OportunidadEstadoHistorial, OportunidadGestion,
 )
@@ -41,7 +43,8 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         Cliente.__table__, ClienteDocumentoComercial.__table__, Contacto.__table__,
-        Proyecto.__table__, Oportunidad.__table__, OportunidadOferta.__table__,
+        Proyecto.__table__, Frontera.__table__, GeneracionDiaria.__table__,
+        Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
         # Las plantas de la oferta viajan en cada respuesta desde 2026-08-19.
         Base.metadata.tables["oportunidad_oferta_proyectos"],
@@ -101,3 +104,24 @@ def test_filtro_tipo_servicio_por_oferta(db):
                                    q=None, solo_alerta=False, db=db, current=ADMIN)
     fila = next(r for r in todas if r["id"] == op["id"])
     assert fila["resumen_ofertas"] == {"compra_energia": 1}
+
+
+def test_listado_cuenta_los_proyectos_reales_de_las_ofertas(db):
+    """Bug real (auditoria de Proyectos 2026-08-28): num_proyectos/
+    capacidad_total_kwp salian de Proyecto.oportunidad_id, columna que nunca
+    llenaba nadie -- daban 0 para toda oportunidad del listado, aunque
+    tuviera plantas reales via sus ofertas. Ahora salen de la M2M real."""
+    cli = Cliente(razon_social_nombre="Gamma Solar S.A.S.")
+    db.add(cli); db.flush()
+    p1 = Proyecto(id=201, nombre_comercial="Planta A", potencia_instalada_kwp=500)
+    p2 = Proyecto(id=202, nombre_comercial="Planta B", potencia_instalada_kwp=300)
+    db.add_all([p1, p2]); db.flush()
+    op = _crear_oportunidad(db, cli)
+    api.create_oferta(op["id"], OfertaCreate(
+        tipo="servicios_operacionales", proyecto_ids=[201, 202]), db=db, current=ADMIN)
+
+    todas = api.list_oportunidades(estado=None, tipo_servicio=None, cliente_id=None,
+                                   q=None, solo_alerta=False, db=db, current=ADMIN)
+    fila = next(r for r in todas if r["id"] == op["id"])
+    assert fila["num_proyectos"] == 2
+    assert fila["capacidad_total_kwp"] == 800.0

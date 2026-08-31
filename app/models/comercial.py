@@ -107,9 +107,6 @@ class Oportunidad(Base):
     historial: Mapped[list["OportunidadEstadoHistorial"]] = relationship(
         "OportunidadEstadoHistorial", back_populates="oportunidad",
         cascade="all, delete-orphan", order_by="desc(OportunidadEstadoHistorial.created_at)")
-    proyectos: Mapped[list["Proyecto"]] = relationship(
-        "Proyecto", primaryjoin="Proyecto.oportunidad_id == Oportunidad.id",
-        foreign_keys="Proyecto.oportunidad_id", uselist=True, viewonly=True)
     documentos: Mapped[list["ClienteDocumentoComercial"]] = relationship(
         "ClienteDocumentoComercial",
         primaryjoin="ClienteDocumentoComercial.oportunidad_id == Oportunidad.id",

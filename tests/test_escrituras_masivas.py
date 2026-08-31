@@ -40,7 +40,10 @@ INVENTARIO_CONOCIDO: dict[tuple[str, str], tuple[int, str]] = {
     ("app/api/v1/clientes.py", "contratos_servicio"): (3, "merge de clientes: repunta contratante/prestador/inversionista"),
 
     # ── Reasignación en lote desde la UI ─────────────────────────────────────
-    ("app/api/v1/comercial.py", "proyectos"): (2, "desvincula plantas de una oportunidad"),
+    # ✅ Los 2 sitios declarados acá (delete_oportunidad + /comercial/backfill,
+    # ambos sobre Proyecto.oportunidad_id) desaparecieron el 2026-08-28: esa
+    # columna se eliminó (0/188 poblada, reemplazada por la M2M
+    # oportunidad_oferta_proyectos -- auditoría de Proyectos).
     ("app/api/v1/portafolios.py", "proyectos"): (1, "saca las plantas de un portafolio"),
     ("app/api/v1/ppa.py", "ppa_contratos"): (1, "asigna responsable a varios PPA de una"),
 

@@ -766,8 +766,6 @@ _PENDING_DDLS = [
     # migration — módulo CRM comercial (2026-07-10)
     # (operador_red_id ya se agrega arriba / vía alembic 046; no se repite aquí.)
     "ALTER TYPE rol_enum ADD VALUE IF NOT EXISTS 'comercial'",
-    "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
-    "CREATE INDEX IF NOT EXISTS ix_proyectos_oportunidad_id ON proyectos (oportunidad_id)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_tipo VARCHAR(30)",
     "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(255)",
     "ALTER TABLE cliente_documentos_comerciales ADD COLUMN IF NOT EXISTS oportunidad_id BIGINT REFERENCES oportunidades(id)",
@@ -2460,6 +2458,29 @@ def _scheduled_comercializacion_backfill():
         print(f"[comercializacion_backfill] Failed to get DB session: {e}")
 
 
+def _scheduled_comercial_backfill():
+    """Crea la Oportunidad que le falta a un cliente con relacion comercial
+    real (ContratoServicio o PPA) y sin Oportunidad -- el hueco que dejan los
+    clientes creados por el flujo directo (POST /clientes + contrato a mano)
+    en vez del pipeline de Comercial. Corre diariamente; idempotente. No migra
+    inversionistas puros (sin contrato/PPA): ver docstring de
+    _ejecutar_backfill en app/api/v1/comercial.py."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.api.v1.comercial import _ejecutar_backfill
+            res = _ejecutar_backfill(db, usuario_id=None, dry_run=False,
+                                     solo_con_relacion_comercial=True)
+            print(f"[comercial_backfill] OK — {res['clientes_a_migrar']} clientes migrados, "
+                  f"{res['proyectos_a_vincular']} proyectos vinculados")
+        except Exception as e:
+            print(f"[comercial_backfill] Failed: {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[comercial_backfill] Failed to get DB session: {e}")
+
+
 def _scheduled_reporte_energia():
     """Corre el clasificador de Reporte de Energía (Generación + Consumo)
     para el día anterior, hora Bogotá -- a esa hora el reporte CGM de Quoia
@@ -3524,6 +3545,17 @@ def _deferred_init():
                 CronTrigger(hour=3, minute=30, timezone=settings.TIMEZONE),
                 id="comercializacion_backfill",
                 name="Backfill fecha inicio comercializacion",
+            )
+
+            # Cierra el hueco de clientes con contrato/PPA real que quedaron
+            # sin Oportunidad (creados por el flujo directo, no por el
+            # pipeline de Comercial). Horario propio: no compite con los de
+            # arriba, que sí dependen de la API de generación de Unergy.
+            _mgs_scheduler.add_job(
+                _scheduled_comercial_backfill,
+                CronTrigger(hour=3, minute=35, timezone=settings.TIMEZONE),
+                id="comercial_backfill",
+                name="Backfill Oportunidad para clientes con relacion comercial",
             )
 
             # 10 min antes de comercializacion_backfill -- ambos leen la misma

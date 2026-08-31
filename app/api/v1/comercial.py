@@ -31,7 +31,7 @@ from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion, OportunidadOferta,
     oportunidad_oferta_proyectos_table,
 )
-from app.models.contratos import PPAContrato, PPATarifa
+from app.models.contratos import PPAContrato, PPATarifa, ContratoServicio
 from app.services.documentos import set_enlace_documento
 from app.schemas.comercial import (
     OportunidadCreate, OportunidadUpdate, EstadoChangeIn, GestionCreate, ProyectoDesdeCRMIn,
@@ -323,18 +323,10 @@ def list_oportunidades(
                  func.max(OportunidadGestion.fecha).label("ultima"))
         .group_by(OportunidadGestion.oportunidad_id).subquery()
     )
-    proy_sq = (
-        db.query(Proyecto.oportunidad_id.label("oid"),
-                 func.count(Proyecto.id).label("n"),
-                 func.coalesce(func.sum(Proyecto.potencia_instalada_kwp), 0).label("kwp"))
-        .filter(Proyecto.deleted_at.is_(None), Proyecto.oportunidad_id.isnot(None))
-        .group_by(Proyecto.oportunidad_id).subquery()
-    )
     qy = (
-        db.query(Oportunidad, Cliente, ult_sq.c.ultima, proy_sq.c.n, proy_sq.c.kwp)
+        db.query(Oportunidad, Cliente, ult_sq.c.ultima)
         .join(Cliente, Cliente.id == Oportunidad.cliente_id)
         .outerjoin(ult_sq, ult_sq.c.oid == Oportunidad.id)
-        .outerjoin(proy_sq, proy_sq.c.oid == Oportunidad.id)
         .filter(Oportunidad.deleted_at.is_(None), Cliente.deleted_at.is_(None))
     )
     if estado:
@@ -375,6 +367,8 @@ def list_oportunidades(
     lead_por_op: dict = {}
     num_ofertas_por_op: dict = {}
     estados_por_op: dict = {}
+    oferta_id_a_op: dict = {}
+    pid_fallback_por_oferta: dict = {}
     if op_ids:
         ofs = (
             db.query(OportunidadOferta.oportunidad_id, OportunidadOferta.numero_oferta,
@@ -387,6 +381,8 @@ def list_oportunidades(
         for oid, num, planta, tipo, pid, fecha, ofid, estado, estado_desde in ofs:
             num_ofertas_por_op[oid] = num_ofertas_por_op.get(oid, 0) + 1
             estados_por_op.setdefault(oid, []).append((_valor(estado), estado_desde))
+            oferta_id_a_op[ofid] = oid
+            pid_fallback_por_oferta[ofid] = pid
             # clave de "más reciente": fecha_oferta (date.min si falta) y luego id
             clave = (fecha or date.min, ofid)
             prev = lead_por_op.get(oid)
@@ -397,11 +393,40 @@ def list_oportunidades(
                     "tipo": tipo if isinstance(tipo, str) else tipo.value,
                     "proyecto_id": pid,
                 })
+    # Plantas vinculadas por oportunidad: union de las de todas sus ofertas (M2M
+    # via oferta, con el mismo fallback a proyecto_id que usa /firmar y el
+    # detalle de oportunidad -- ver _plantas_de_ofertas). Antes salia de
+    # Proyecto.oportunidad_id, una columna que nunca se llenaba (0/188): esto
+    # dejaba num_proyectos/capacidad_total_kwp en 0 para toda oportunidad.
+    proyectos_por_op: dict[int, set[int]] = {}
+    if oferta_id_a_op:
+        pares = db.execute(
+            oportunidad_oferta_proyectos_table.select().where(
+                oportunidad_oferta_proyectos_table.c.oferta_id.in_(oferta_id_a_op))
+        ).all()
+        ofertas_con_m2m = set()
+        for ofid, pid in pares:
+            ofertas_con_m2m.add(ofid)
+            oid = oferta_id_a_op.get(ofid)
+            if oid is not None and pid is not None:
+                proyectos_por_op.setdefault(oid, set()).add(pid)
+        for ofid, oid in oferta_id_a_op.items():
+            if ofid not in ofertas_con_m2m and pid_fallback_por_oferta.get(ofid):
+                proyectos_por_op.setdefault(oid, set()).add(pid_fallback_por_oferta[ofid])
+    todos_los_pid = {pid for s in proyectos_por_op.values() for pid in s}
+    kwp_por_pid: dict[int, float] = {}
+    if todos_los_pid:
+        for pid, kwp in (
+            db.query(Proyecto.id, Proyecto.potencia_instalada_kwp)
+            .filter(Proyecto.id.in_(todos_los_pid), Proyecto.deleted_at.is_(None)).all()
+        ):
+            kwp_por_pid[pid] = float(kwp) if kwp is not None else 0.0
     out = []
-    for op, cli, ultima, n_proy, kwp in filas:
+    for op, cli, ultima in filas:
         row = _op_base_out(op, cli, ultima, ahora, estados_por_op.get(op.id))
-        row["num_proyectos"] = int(n_proy or 0)
-        row["capacidad_total_kwp"] = float(kwp or 0)
+        pids_op = proyectos_por_op.get(op.id, set()) & kwp_por_pid.keys()
+        row["num_proyectos"] = len(pids_op)
+        row["capacidad_total_kwp"] = sum(kwp_por_pid[p] for p in pids_op)
         row["resumen_ofertas"] = resumen_por_op.get(op.id, {})
         row["num_ofertas"] = num_ofertas_por_op.get(op.id, 0)
         lead = lead_por_op.get(op.id)
@@ -824,9 +849,6 @@ def get_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario = D
         db.query(Oportunidad)
         .options(
             selectinload(Oportunidad.cliente).selectinload(Cliente.contactos),
-            selectinload(Oportunidad.proyectos).selectinload(Proyecto.operador),
-            selectinload(Oportunidad.proyectos)
-            .selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
             selectinload(Oportunidad.gestiones),
             selectinload(Oportunidad.historial),
             selectinload(Oportunidad.documentos),
@@ -854,7 +876,12 @@ def get_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario = D
             "origen_tipo": op.cliente.origen_tipo,
             "origen_detalle": op.cliente.origen_detalle,
         },
-        "proyectos": [_proyecto_out(p) for p in op.proyectos if p.deleted_at is None],
+        # Union de las plantas de todas las ofertas de esta oportunidad (M2M via
+        # oferta, deduplicadas por id) -- antes salia de Proyecto.oportunidad_id,
+        # una columna que nunca se llenaba (0/188): esta seccion siempre se veia
+        # "Sin proyectos vinculados" aunque la oportunidad si tuviera plantas
+        # reales colgadas de sus ofertas.
+        "proyectos": list({p["id"]: p for lista in plantas_op.values() for p in lista}.values()),
         "documentos": [
             {"id": d.id, "tipo": d.tipo if isinstance(d.tipo, str) else d.tipo.value,
              "nombre": d.nombre, "numero": d.numero,
@@ -900,8 +927,10 @@ def delete_oportunidad(id: int, db: Session = Depends(get_db), current: Usuario 
     if current.rol.value != "admin":
         raise HTTPException(403, "Solo admin puede eliminar oportunidades")
     op = _get_oportunidad_or_404(id, db)
-    # Los proyectos NO se borran: se desvinculan (spec §7).
-    db.query(Proyecto).filter(Proyecto.oportunidad_id == id).update({"oportunidad_id": None})
+    # Los proyectos NO se borran (spec §7): quedan vinculados a las ofertas via
+    # M2M, pero como todas las lecturas filtran Oportunidad.deleted_at IS NULL,
+    # dejan de aparecer en cuanto la oportunidad se marca borrada -- no hace
+    # falta un unlink explicito.
     op.deleted_at = col_now()
     db.commit()
 
@@ -1095,8 +1124,7 @@ def add_proyecto(
                 "candidato_nombre": duplicado.nombre_comercial,
             })
 
-    # El CRM manda estos dos, no el cliente: son de la creación, no del formulario.
-    payload["oportunidad_id"] = id
+    # El CRM manda esto, no el cliente: es de la creación, no del formulario.
     payload["origen"] = "manual"
 
     p = Proyecto(**payload)
@@ -1348,14 +1376,31 @@ def delete_oferta(oferta_id: int, db: Session = Depends(get_db), current: Usuari
 @router.post("/backfill")
 def backfill(
     dry_run: bool = Query(True),
+    solo_con_relacion_comercial: bool = Query(
+        False, description="true: solo clientes con ContratoServicio o PPA real "
+                           "(excluye inversionistas puros). Lo usa el job diario."),
     db: Session = Depends(get_db), current: Usuario = Depends(get_current_user),
 ):
     """Migración inicial: 1 oportunidad en 'operando' por cliente existente sin
     oportunidad, vinculando sus proyectos (vía ProyectoInversionista — la
-    misma relación que usa GET /clientes/{id}/proyectos). Idempotente."""
+    misma relación que usa GET /clientes/{id}/proyectos). Idempotente.
+
+    El vínculo a los proyectos se hace creando una Oferta "operando" para la
+    oportunidad y conectándola a sus proyectos por la M2M
+    (`oportunidad_oferta_proyectos`) -- el mismo mecanismo que usa el resto del
+    pipeline (ver `_plantas_de_ofertas`). Antes se escribía directo
+    `Proyecto.oportunidad_id`, una columna que nunca tuvo ningún otro lector
+    real y que se eliminó (0/188 poblada, auditoría de Proyectos 2026-08-28)."""
     if current.rol.value != "admin":
         raise HTTPException(403, "Solo admin")
+    return _ejecutar_backfill(db, current.id, dry_run=dry_run,
+                              solo_con_relacion_comercial=solo_con_relacion_comercial)
 
+
+def _ejecutar_backfill(db: Session, usuario_id: int, dry_run: bool = True,
+                       solo_con_relacion_comercial: bool = False) -> dict:
+    """Lógica del backfill, reusada por el endpoint admin y el job diario
+    (`_scheduled_comercial_backfill` en app/main.py)."""
     con_oportunidad = {
         cid for (cid,) in db.query(Oportunidad.cliente_id)
         .filter(Oportunidad.deleted_at.is_(None)).distinct().all()
@@ -1366,6 +1411,27 @@ def backfill(
     )
     a_migrar = [c for c in clientes if c.id not in con_oportunidad]
 
+    if solo_con_relacion_comercial:
+        # Oportunidad es el pipeline COMERCIAL: un inversionista puro (sin
+        # ContratoServicio ni PPA) nunca paso por una negociacion, asi que
+        # crearle una Oportunidad "operando" seria un registro sin sustento
+        # -- ensuciaria KPIs/dashboards del CRM. El job diario solo migra a
+        # quien de verdad tiene una relacion comercial.
+        con_contrato = {
+            cid for (cid,) in db.query(ContratoServicio.contratante_id)
+            .filter(ContratoServicio.contratante_id.isnot(None)).distinct().all()
+        } | {
+            cid for (cid,) in db.query(ContratoServicio.prestador_id)
+            .filter(ContratoServicio.prestador_id.isnot(None)).distinct().all()
+        } | {
+            cid for (cid,) in db.query(PPAContrato.comprador_id)
+            .filter(PPAContrato.comprador_id.isnot(None)).distinct().all()
+        } | {
+            cid for (cid,) in db.query(PPAContrato.vendedor_id)
+            .filter(PPAContrato.vendedor_id.isnot(None)).distinct().all()
+        }
+        a_migrar = [c for c in a_migrar if c.id in con_contrato]
+
     resumen = {"clientes_a_migrar": len(a_migrar), "proyectos_a_vincular": 0, "detalle": []}
     ahora = col_now()
     for c in a_migrar:
@@ -1374,8 +1440,7 @@ def backfill(
                 db.query(ProyectoInversionista.proyecto_id)
                 .join(Proyecto, Proyecto.id == ProyectoInversionista.proyecto_id)
                 .filter(ProyectoInversionista.cliente_id == c.id,
-                        Proyecto.deleted_at.is_(None),
-                        Proyecto.oportunidad_id.is_(None))
+                        Proyecto.deleted_at.is_(None))
                 .distinct().all()
             )
         ]
@@ -1384,15 +1449,22 @@ def backfill(
                                    "proyectos": len(proyecto_ids)})
         if not dry_run:
             op = Oportunidad(cliente_id=c.id, estado="operando", estado_desde=ahora,
-                             es_migrada=True, creado_por_usuario_id=current.id)
+                             es_migrada=True, creado_por_usuario_id=usuario_id)
             db.add(op)
             db.flush()
             db.add(OportunidadEstadoHistorial(
                 oportunidad_id=op.id, estado_anterior=None,
-                estado_nuevo="operando", usuario_id=current.id))
+                estado_nuevo="operando", usuario_id=usuario_id))
             if proyecto_ids:
-                db.query(Proyecto).filter(Proyecto.id.in_(proyecto_ids)).update(
-                    {"oportunidad_id": op.id}, synchronize_session=False)
+                oferta = OportunidadOferta(
+                    oportunidad_id=op.id, tipo="servicios_operacionales",
+                    estado="operando", estado_desde=ahora,
+                    resultado=estado_a_resultado("operando"),
+                    fecha_oferta=ahora.date())
+                db.add(oferta)
+                db.flush()
+                db.execute(oportunidad_oferta_proyectos_table.insert().values(
+                    [{"oferta_id": oferta.id, "proyecto_id": pid} for pid in proyecto_ids]))
     if not dry_run:
         db.commit()
     resumen["dry_run"] = dry_run

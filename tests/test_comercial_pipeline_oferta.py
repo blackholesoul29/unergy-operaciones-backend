@@ -19,6 +19,8 @@ import app.models  # noqa: F401
 from app.models.clientes import Cliente, ClienteDocumentoComercial
 from app.models.contactos import Contacto
 from app.models.proyectos import Proyecto
+from app.models.fronteras import Frontera
+from app.models.generacion import GeneracionDiaria
 from app.models.contratos import PPAContrato, PPATarifa, ContratoServicio
 from app.models.comercial import (
     Oportunidad, OportunidadOferta, OportunidadEstadoHistorial, OportunidadGestion,
@@ -50,7 +52,8 @@ def db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         Cliente.__table__, ClienteDocumentoComercial.__table__, Contacto.__table__,
-        Proyecto.__table__, Oportunidad.__table__, OportunidadOferta.__table__,
+        Proyecto.__table__, Frontera.__table__, GeneracionDiaria.__table__,
+        Oportunidad.__table__, OportunidadOferta.__table__,
         OportunidadEstadoHistorial.__table__, OportunidadGestion.__table__,
         PPAContrato.__table__, PPATarifa.__table__, ContratoServicio.__table__,
         Base.metadata.tables["ppa_contrato_proyectos"],
@@ -192,6 +195,27 @@ def test_la_ficha_del_cliente_desglosa_las_etapas_de_sus_ofertas(db):
     fila = api.get_oportunidad(op["id"], db=db, current=ADMIN)
     assert fila["etapas"] == {"firmado": 1, "oferta": 1}
     assert "estado" not in fila          # el cliente no tiene etapa propia
+
+
+def test_detalle_oportunidad_muestra_los_proyectos_de_sus_ofertas(db):
+    """Bug real (auditoria de Proyectos 2026-08-28): 'proyectos' salia de
+    Oportunidad.proyectos, una relacion armada sobre Proyecto.oportunidad_id
+    -- columna que ninguna Oferta llenaba nunca. Esta seccion del detalle
+    siempre se veia vacia ("Sin proyectos vinculados") aunque la oportunidad
+    tuviera plantas reales colgadas de sus ofertas via la M2M. Ahora sale de
+    plantas_op (mismo mecanismo que ya usaba /firmar y el resto del pipeline)."""
+    cli = Cliente(razon_social_nombre="Cliente Con Plantas")
+    db.add(cli); db.flush()
+    p1 = Proyecto(id=101, nombre_comercial="Planta Uno")
+    p2 = Proyecto(id=102, nombre_comercial="Planta Dos")
+    db.add_all([p1, p2]); db.flush()
+    op = api.create_oportunidad(OportunidadCreate(cliente_id=cli.id), db=db, current=ADMIN)
+    api.create_oferta(op["id"], OfertaCreate(
+        tipo="compra_energia", proyecto_ids=[101, 102],
+        numero_oferta="OP.COM No.0001-1-2026", estado="oferta"), db=db, current=ADMIN)
+
+    detalle = api.get_oportunidad(op["id"], db=db, current=ADMIN)
+    assert {p["id"] for p in detalle["proyectos"]} == {101, 102}
 
 
 def test_el_tablero_lista_cada_oferta_con_su_propia_etapa(db):

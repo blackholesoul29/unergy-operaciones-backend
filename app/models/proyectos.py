@@ -156,11 +156,6 @@ class Proyecto(Base):
     # la migración); los demás módulos siguen con project_id_solenium.
     project_id_solarview: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
 
-    # ── CRM comercial ────────────────────────────────────────────────────────
-    # Oportunidad (pipeline comercial) a la que pertenece este proyecto.
-    # NULL = proyecto fuera del CRM (histórico o creado por otro flujo).
-    # (operador_red_id ya existe arriba, vínculo al catálogo compartido.)
-    oportunidad_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("oportunidades.id"), nullable=True, index=True)
     # Etiqueta de comunidad energética (ortogonal a Rep/Energía: cualquier planta
     # puede o no pertenecer a una comunidad).
     es_comunidad_energetica: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")

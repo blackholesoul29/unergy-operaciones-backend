@@ -9,10 +9,11 @@ Los dos agujeros que cubren estos tests son la razon de que
    tipo, estado, clasificacion regulatoria, comunidad energetica, codigos -- se
    descartaba en silencio, asi que la planta nacia vacia.
 
-2. `add_proyecto` colgaba el proyecto de la OPORTUNIDAD (`Proyecto.oportunidad_id`)
-   y nunca de la OFERTA. Pero la API lee las plantas de la M2M
-   `oportunidad_oferta_proyectos` (o del `proyecto_id` de la oferta): crear la
-   planta desde el CRM la dejaba invisible para la integracion.
+2. `add_proyecto` colgaba el proyecto de la OPORTUNIDAD (`Proyecto.oportunidad_id`,
+   columna eliminada en la auditoria de Proyectos 2026-08-28) y nunca de la
+   OFERTA. Pero la API lee las plantas de la M2M `oportunidad_oferta_proyectos`
+   (o del `proyecto_id` de la oferta): crear la planta desde el CRM la dejaba
+   invisible para la integracion.
 """
 import types
 
@@ -140,7 +141,6 @@ def test_crear_proyecto_desde_crm_guarda_todos_los_campos(db, operador, negocio)
     # Y sigue valiendo lo que ya hacia.
     assert guardado.operador_red_id == operador.id
     assert guardado.operador_red_legal == "AFINIA S.A. E.S.P."
-    assert guardado.oportunidad_id == negocio["id"]
 
 
 def test_operador_de_red_sigue_siendo_obligatorio(db, negocio):

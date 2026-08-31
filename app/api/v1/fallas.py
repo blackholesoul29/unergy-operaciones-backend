@@ -765,7 +765,6 @@ def create_falla(
             tipo="accion",
             titulo="Nueva falla registrada",
             mensaje=f"{falla.codigo_interno} — {proyecto_nombre}: {(falla.descripcion or '')[:80]}",
-            link="/m/coordinador",
         )
     if coordinadores:
         db.commit()
@@ -1160,7 +1159,6 @@ def update_falla(
             tipo="accion",
             titulo="Falla asignada a ti",
             mensaje=f"{falla.codigo_interno} — {proyecto_nombre}: {(falla.descripcion or '')[:80]}",
-            link="/m/tecnico",
         )
         db.commit()
 

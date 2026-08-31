@@ -92,6 +92,6 @@ def usuarios_notificables(db) -> list[Usuario]:
 
 
 def notificar(db, usuarios: list[Usuario], tipo: TipoNotificacionEnum,
-              titulo: str, mensaje: str, link: str | None) -> None:
+              titulo: str, mensaje: str) -> None:
     for u in usuarios:
-        db.add(Notificacion(usuario_id=u.id, tipo=tipo, titulo=titulo, mensaje=mensaje, link=link))
+        db.add(Notificacion(usuario_id=u.id, tipo=tipo, titulo=titulo, mensaje=mensaje))

@@ -108,15 +108,14 @@ def _procesar(cache, pending_writes: list[dict], usuarios, db,
     if not notify:
         return
 
-    link = f"/proyectos/{proyecto.id}"
     nombre = proyecto.nombre_comercial or f"Proyecto {proyecto.id}"
     if recovery:
         notificar(db, usuarios, TipoNotificacionEnum.info, "Proyecto recuperado",
-                  f"{nombre} volvió a reportar normal.", link)
+                  f"{nombre} volvió a reportar normal.")
     else:
         tipo, titulo, plantilla = _MENSAJES[estado_nuevo]
         mensaje = plantilla.format(n=nombre, inv=ctx.get("inv", "—"), met=ctx.get("met", "—"))
-        notificar(db, usuarios, tipo, titulo, mensaje, link)
+        notificar(db, usuarios, tipo, titulo, mensaje)
 
 
 # ── Entrada principal ─────────────────────────────────────────────────────────

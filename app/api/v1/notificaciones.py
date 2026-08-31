@@ -20,7 +20,6 @@ def crear_notificacion(
     tipo: str,
     titulo: str,
     mensaje: str,
-    link: str | None = None,
 ) -> Notificacion:
     """Helper function for use by other modules to create notifications."""
     n = Notificacion(
@@ -28,7 +27,6 @@ def crear_notificacion(
         tipo=TipoNotificacionEnum(tipo),
         titulo=titulo,
         mensaje=mensaje,
-        link=link,
     )
     db.add(n)
     db.flush()

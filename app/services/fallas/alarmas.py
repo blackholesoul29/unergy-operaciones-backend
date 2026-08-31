@@ -122,7 +122,6 @@ def evaluar_alarmas_falla(db: Session, falla) -> list[str]:
     pending: list[dict] = []
     hoy = _col_today()
     nombre = falla.proyecto.nombre_comercial if getattr(falla, "proyecto", None) else f"Proyecto {proyecto_id}"
-    link = f"/proyectos/{proyecto_id}"
     usuarios = None  # perezoso -- solo se pide si de verdad hay algo que notificar
     emitidas: list[str] = []
 
@@ -142,10 +141,10 @@ def evaluar_alarmas_falla(db: Session, falla) -> list[str]:
             usuarios = usuarios_notificables(db)
         if recovery:
             notificar(db, usuarios, TipoNotificacionEnum.info, "✅ Comunicación recuperada",
-                      f"{nombre}: se restableció la comunicación ({_ETIQUETAS_RECUPERACION[cat]}).", link)
+                      f"{nombre}: se restableció la comunicación ({_ETIQUETAS_RECUPERACION[cat]}).")
         else:
             tipo, titulo, plantilla = _MENSAJES[cat]
-            notificar(db, usuarios, tipo, titulo, plantilla.format(n=nombre), link)
+            notificar(db, usuarios, tipo, titulo, plantilla.format(n=nombre))
         emitidas.append(cat)
 
     guardar_estados(db, pending)

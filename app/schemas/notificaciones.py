@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
@@ -8,7 +8,6 @@ class NotificacionCreate(BaseModel):
     tipo: Literal["alerta", "info", "accion"]
     titulo: str
     mensaje: str
-    link: Optional[str] = None
 
 
 class NotificacionOut(BaseModel):
@@ -20,5 +19,4 @@ class NotificacionOut(BaseModel):
     titulo: str
     mensaje: str
     leida: bool
-    link: Optional[str] = None
     created_at: datetime

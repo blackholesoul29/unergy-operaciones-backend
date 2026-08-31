@@ -1005,8 +1005,8 @@ _PENDING_DDLS = [
     "ALTER TYPE tipo_informe_enum ADD VALUE IF NOT EXISTS 'pm'",
     "CREATE INDEX IF NOT EXISTS ix_proyecto_informe_om_proyecto_id ON proyecto_informe_om (proyecto_id)",
     # ── Columnas del modelo que Alembic no alcanzo a provisionar (2026-08-25) ──
-    # Mismo caso que `sunfactory_project_id` mas arriba: `start.sh` corre
-    # `alembic upgrade head` dentro de un `if !`, asi que cuando una migracion
+    # Mismo caso que `sunfactory_project_id` mas arriba: el arranque corre
+    # `alembic upgrade head` con `|| echo`, asi que cuando una migracion
     # falla el arranque CONTINUA y la app queda pidiendo columnas que la base no
     # tiene. Cualquier SELECT sobre esas tablas responde 500 -- fue lo que tumbo
     # /proyectos y, con el, /ppa (que carga la relacion proyectos).

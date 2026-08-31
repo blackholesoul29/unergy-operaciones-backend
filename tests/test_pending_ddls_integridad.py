@@ -1,7 +1,7 @@
 """_PENDING_DDLS (app/main.py) e init_db.py::add_columns() -- los DOS corren
 en CADA arranque de la app, independiente de Alembic (ver
-_run_column_migrations() y start.sh: "Running DB init + seed..." corre
-init_db.py ANTES de "alembic upgrade head"). Si una columna se elimina vía
+_run_column_migrations() y el `command` de docker-compose.yml, que corre
+init_db.py ANTES de `alembic upgrade head`). Si una columna se elimina vía
 una migración Alembic pero su entrada original "ADD COLUMN IF NOT EXISTS"
 queda viva en cualquiera de los dos, el próximo reinicio la vuelve a crear
 (vacía) -- ya pasó una vez de verdad (fronteras, migración 097;

@@ -9,7 +9,7 @@ permite que `alembic/env.py` haga `from app.models import Base`), así que
 un módulo a este nivel se importa igual desde cualquier migración.
 
 Por qué existen estos helpers: `init_db.py` corre `Base.metadata.create_all()`
-ANTES de Alembic en cada boot (ver start.sh), y `app/main.py` tiene además
+ANTES de Alembic en cada boot (ver el `command` de docker-compose.yml), y `app/main.py` tiene además
 una lista paralela `_PENDING_DDLS` con `ALTER TABLE ... IF NOT EXISTS` que
 corre en cada arranque de la app. Cualquiera de esos dos caminos puede crear
 una tabla/columna/tipo que una migración de Alembic todavía no ha corrido --

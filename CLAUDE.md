@@ -1,7 +1,8 @@
 # unergy-operaciones-backend
 
 Backend FastAPI de la plataforma de Operaciones de Unergy. Base de datos `operations`
-en PostgreSQL (Railway), desplegado automáticamente desde `master`.
+en PostgreSQL, externa al despliegue (`POSTGRES_*`/`PG_*` en el `.env`). Se despliega con
+`docker compose up -d --build` en el servidor; cómo se construye está en `README.md`.
 
 ## Por dónde empezar según la tarea
 
@@ -11,6 +12,7 @@ en PostgreSQL (Railway), desplegado automáticamente desde `master`.
 | Cualquier base de datos de Unergy | `docs/UNERGY_DATABASE_ATLAS.md` (6 bases, 511 tablas) |
 | Integridad o higiene de datos | `docs/DB_REVIEW_TEAM.md` |
 | Un endpoint concreto | `docs/API_*.md` — hay uno por API |
+| El build, el compose o el despliegue | `README.md` |
 
 ## Cosas que cuesta descubrir solo
 
@@ -25,8 +27,8 @@ Si el segundo número no es 0, lo que estás leyendo no es lo que corre en produ
 **El working tree puede traer trabajo de otra persona.** Revisa `git status` y el
 conteo del diff antes de commitear, o desplegarás cambios ajenos.
 
-**Alembic SI se usa, y corre ultimo.** Un solo head, y `start.sh` aplica
-`alembic upgrade head` en cada deploy. Lo que confunde es el orden: `create_all()` y las
+**Alembic SI se usa, y corre ultimo.** Un solo head, y el `command` del
+`docker-compose.yml` aplica `alembic upgrade head` en cada arranque. Lo que confunde es el orden: `create_all()` y las
 ~518 sentencias de `_PENDING_DDLS` (`app/main.py`) corren **antes**, asi que pueden crear
 objetos que luego hagan fallar una revision — y como todo el `upgrade head` va en una
 transaccion, un `Duplicate*Error` hace rollback de **toda** la cadena. Por eso las
@@ -59,6 +61,26 @@ obliga a que la revision sea idempotente: escribila con los helpers de
 habia sentencias de datos nuevas ahi. Cada vez que se usa asi, la limpieza se deshace y el
 arranque se alarga para todos.
 
+**El despliegue aborta si la migración falla, y eso es a propósito.** El compose
+tiene dos servicios del mismo `Dockerfile`: `migrate` (one-shot,
+`init_db.py && alembic upgrade head`, sin `||`) y `operaciones` (solo uvicorn, con
+`depends_on: service_completed_successfully`). Si tu revisión falla, el servicio no
+levanta — antes toleraba el fallo y la app quedaba sirviendo 500 con el esquema
+atrasado. `tests/test_modelo_vs_ddl.py` vigila que no vuelva la tolerancia.
+
+**El código está montado, no copiado.** El compose monta el repo en `/app`, así que
+un cambio de Python entra con `docker compose restart operaciones`; solo hace falta
+`--build` si cambió `pyproject.toml`, `uv.lock` o el `Dockerfile`. Por eso el venv de
+la imagen vive en `/opt/venv` y no en `/app/.venv`: el bind mount lo taparía.
+
+**Dependencias con uv, y `uv.lock` se commitea.** El `Dockerfile` corre
+`uv sync --frozen`, que falla si el lock no cuadra con el `pyproject.toml`. `uv add
+<paquete>` actualiza los dos; van en el mismo commit o el build se cae.
+
+**`WORKERS=1` no es pereza.** El `BackgroundScheduler` (`app/main.py`) vive dentro del
+proceso web: con más de un worker de uvicorn cada uno arranca su propio scheduler y
+los jobs corren duplicados. Subirlo exige sacar el scheduler a su propio servicio.
+
 **Producción no se escribe desde local.** El `.env` local no apunta a producción. La
 única vía es una tarea `*_seed` en `_deferred_init`, que corre dentro del contenedor.
 
@@ -75,7 +97,8 @@ clave foránea, y sí la tiene.
 ## Pruebas
 
 ```bash
-python -m pytest -q
+uv sync
+uv run pytest -q
 ```
 
-Deben pasar todas antes de subir. Al 23 de agosto de 2026: 1 551 pruebas.
+Deben pasar todas antes de subir. Al 31 de agosto de 2026: 2 313 pruebas (4 skipped).

@@ -1,7 +1,7 @@
 """Toda columna nueva del modelo tiene que estar en el DDL que corre al arrancar.
 
-Por que existe esta prueba: `start.sh` ejecuta `alembic upgrade head` dentro de un
-`if !`, asi que cuando una migracion falla el arranque CONTINUA y la app queda
+Por que existe esta prueba: el arranque (`command` del docker-compose.yml) ejecuta
+`alembic upgrade head || echo`, asi que cuando una migracion falla el arranque CONTINUA y la app queda
 pidiendo columnas que la base no tiene. El sintoma no es un error de despliegue
 sino un 500 al abrir la pantalla, porque revienta cualquier SELECT sobre esa
 tabla.
@@ -124,7 +124,7 @@ def test_columnas_de_proyectos_provisionadas():
         f'ejecute al arrancar las crea: {nuevas}.\n'
         f'Agrega "ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS <col> <tipo>" a '
         f'_PENDING_DDLS en app/main.py. Una migracion de Alembic NO basta: '
-        f'start.sh la corre dentro de un `if !`, el arranque sigue aunque falle, '
+        f'el arranque la corre con `|| echo`, sigue aunque falle, '
         f'y la app queda devolviendo 500 en cada consulta a proyectos.'
     )
 
@@ -138,15 +138,21 @@ def test_columnas_del_incidente_2026_08_25():
     assert not faltan, f'sin ALTER en el DDL que corre: {faltan}'
 
 
-def test_el_arranque_no_se_detiene_si_alembic_falla():
-    """Fija el porque de esta prueba: mientras `start.sh` siga tolerando el fallo
-    de Alembic, el DDL de `_PENDING_DDLS` es la unica garantia real.
+def test_el_deploy_se_detiene_si_alembic_falla():
+    """Desde el 2026-08-31 el arranque SI aborta: el servicio `migrate` del
+    docker-compose.yml corre `alembic upgrade head` sin `||` y `operaciones`
+    espera `service_completed_successfully`.
 
-    Si algun dia el arranque pasa a abortar cuando la migracion falla, esta
-    prueba falla y toca revisar si el resto del archivo sigue teniendo sentido.
+    Esta prueba vigila las dos mitades. Si alguien vuelve a hacer el arranque
+    tolerante, falla aca y hay que revisar si el resto del archivo (que existe
+    para compensar esa tolerancia) sigue haciendo falta.
     """
-    start = io.open(RAIZ / 'start.sh', encoding='utf-8').read()
-    assert 'if ! alembic upgrade head' in start, (
-        'start.sh cambio: si ahora aborta cuando Alembic falla, revisa si estas '
-        'pruebas siguen haciendo falta.'
+    compose = io.open(RAIZ / 'docker-compose.yml', encoding='utf-8').read()
+    assert 'alembic upgrade head ||' not in compose, (
+        'el arranque volvio a tolerar el fallo de Alembic: si es a proposito, '
+        'estas pruebas siguen siendo la unica garantia del esquema.'
+    )
+    assert 'condition: service_completed_successfully' in compose, (
+        '`operaciones` ya no espera a que `migrate` termine bien: puede quedar '
+        'sirviendo 500 con el esquema atrasado.'
     )

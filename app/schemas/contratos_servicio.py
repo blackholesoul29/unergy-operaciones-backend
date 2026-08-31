@@ -108,8 +108,6 @@ class ContratoServicioCreate(BaseModel):
     # CGM
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
-    cgm_porcentaje_fncer: Optional[float] = None
-    cgm_tipo_asignacion: Optional[str] = None
     # REC
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
@@ -164,8 +162,6 @@ class ContratoServicioUpdate(BaseModel):
     ubicacion_lng: Optional[float] = None
     tiene_cgm: Optional[bool] = None
     cgm_codigo_sic: Optional[str] = None
-    cgm_porcentaje_fncer: Optional[float] = None
-    cgm_tipo_asignacion: Optional[str] = None
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
     rec_vintage: Optional[str] = None
@@ -233,8 +229,6 @@ class ContratoServicioOut(BaseModel):
     ubicacion_lng: Optional[float] = None
     tiene_cgm: bool = False
     cgm_codigo_sic: Optional[str] = None
-    cgm_porcentaje_fncer: Optional[float] = None
-    cgm_tipo_asignacion: Optional[str] = None
     rec_cantidad: Optional[float] = None
     rec_precio_unitario: Optional[float] = None
     rec_vintage: Optional[str] = None

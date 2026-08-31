@@ -53,8 +53,7 @@ CAMPOS = (
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
-    "tiene_cgm", "cgm_codigo_sic", "cgm_porcentaje_fncer",
-    "cgm_tipo_asignacion",
+    "tiene_cgm", "cgm_codigo_sic",
     "rec_cantidad", "rec_precio_unitario", "rec_vintage", "responsable_iva",
 )
 

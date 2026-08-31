@@ -73,8 +73,6 @@ class ContratoServicio(Base):
     inversionista_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("clientes.id", ondelete="SET NULL"), nullable=True, index=True)
     tiene_cgm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     cgm_codigo_sic: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    cgm_porcentaje_fncer: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    cgm_tipo_asignacion: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rec_cantidad: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     rec_precio_unitario: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     rec_vintage: Mapped[str | None] = mapped_column(String(20), nullable=True)

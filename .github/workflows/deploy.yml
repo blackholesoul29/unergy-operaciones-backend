@@ -1,0 +1,93 @@
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      migrar:
+        description: "auto = solo si cambio el esquema; siempre = correr migrate igual"
+        type: choice
+        options: [auto, siempre]
+        default: auto
+
+# El deploy toca un directorio compartido del servidor: dos corriendo a la vez se
+# pisan el `git reset` y el `docker compose`. En cola, y sin cancelar el que va.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  # La misma suite de tests.yml, llamada como reusable workflow para no tener dos
+  # copias que se desincronicen. Corre en runner de GitHub, no en el servidor.
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  deploy:
+    # Sin tests verdes no se despliega: ni el git pull ni el build ocurren.
+    needs: test
+    # Runner instalado en el servidor propio. No hay `checkout`: el repo ya vive
+    # en DEPLOY_DIR con su .env, sus uploads y su historia git — de esa historia
+    # sale el diff que decide si hay que migrar.
+    runs-on: self-hosted
+    steps:
+      - name: git pull + docker compose
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/srv/unergy-operaciones-backend' }}
+          MIGRAR: ${{ inputs.migrar || 'auto' }}
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_DIR"
+
+          antes=$(git rev-parse HEAD)
+          git fetch --prune origin master
+          git reset --hard origin/master
+          despues=$(git rev-parse HEAD)
+          cambios=$(git diff --name-only "$antes" "$despues")
+          echo "$antes -> $despues"
+          echo "$cambios" | sed 's/^/  /'
+
+          # Paths que aplican DDL. `alembic/` es el que importa, pero mientras
+          # `_PENDING_DDLS` (app/main.py) e `init_db.py::add_columns()` sigan
+          # creando esquema en cada arranque, filtrar solo por alembic/ se salta
+          # cambios de esquema reales.
+          if echo "$cambios" | grep -qE '^(alembic/|app/main\.py$|init_db\.py$)'; then
+              migrar=si; motivo="cambio el esquema"
+          elif [ "$MIGRAR" = siempre ]; then
+              migrar=si; motivo="pedido a mano"
+          elif [ -z "$(docker compose ps -q operaciones)" ]; then
+              # Arranque en frio: nunca se sabe en que revision quedo la base.
+              migrar=si; motivo="el servicio no estaba arriba"
+          else
+              migrar=no; motivo="sin cambios de esquema"
+          fi
+          echo "migrar=$migrar ($motivo)"
+
+          # Un solo build: los dos servicios usan la misma imagen.
+          docker compose build
+
+          if [ "$migrar" = si ]; then
+              # `run --rm` y no `up`: falla -> este step falla y el contenedor
+              # que esta sirviendo sigue con la version anterior.
+              docker compose run --rm migrate
+          fi
+
+          # --no-deps para no volver a evaluar `migrate`: quien decide si corre es
+          # el if de arriba, no el depends_on.
+          docker compose up -d --no-deps operaciones
+
+      - name: Esperar healthy
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/srv/unergy-operaciones-backend' }}
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_DIR"
+          for _ in $(seq 40); do
+              estado=$(docker compose ps --format '{{.Health}}' operaciones)
+              [ "$estado" = healthy ] && echo "healthy" && exit 0
+              sleep 3
+          done
+          echo "no quedo healthy en 120s:"
+          docker compose ps
+          docker compose logs --tail 80 operaciones
+          exit 1

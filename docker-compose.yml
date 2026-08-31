@@ -1,0 +1,76 @@
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: "${IMAGE}"
+  platform: linux/amd64
+  init: true                              # PID 1 que reapea los `soffice --headless`
+  restart: unless-stopped
+  env_file: .env
+  working_dir: /app                       # el Dockerfile usa WORKDIR /app
+  volumes:
+    - .:/app                              # codigo sincronizado: `git pull` + restart, sin rebuild
+    - ./uploads:/app/uploads              # STORAGE_LOCAL_PATH
+    - ../logs:/home/app/logs
+  # OJO: `<<: *app-base` no hace merge profundo. Si un servicio declara su propio
+  # `environment`, reemplaza este bloque entero — por eso las variables comunes
+  # viven aca y ningun servicio las redeclara.
+  environment:
+    PYTHONUNBUFFERED: 1
+    PYTHONDONTWRITEBYTECODE: 1            # sin .pyc root-owned dentro del repo montado
+    TZ: UTC                               # el codigo asume UTC (_hoy_col())
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  networks:
+    - operaciones_network
+
+services:
+  # One-shot: crea/actualiza el esquema y termina. Sin `||`: si falla, sale con
+  # codigo != 0 y `operaciones` NO arranca. Esa es la diferencia con el arranque
+  # viejo (start.sh toleraba el fallo y la app quedaba sirviendo 500 con el
+  # esquema atrasado, ver tests/test_modelo_vs_ddl.py).
+  migrate:
+    <<: *app-base
+    restart: "no"
+    command: >
+      sh -c "python init_db.py && alembic upgrade head && alembic current"
+
+  operaciones:
+    <<: *app-base
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # WORKERS>1 duplica el BackgroundScheduler de app/main.py.
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port ${PORT:-8000}
+      --workers ${WORKERS:-1}
+      --forwarded-allow-ips '*'
+    # PORT del .env manda en los tres lados: uvicorn, el puerto publicado y el
+    # healthcheck. Mismo numero dentro y fuera para no tener que recordar dos.
+    # Con proxy en el host: "127.0.0.1:${PORT:-8000}:…".
+    expose:
+      - "${PORT:-8000}"
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    networks:
+      - operaciones_network
+    healthcheck:
+      # $$PORT lo expande el shell del contenedor, no docker compose.
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; s=socket.socket(); s.settimeout(2); s.connect((''localhost'',$${PORT:-8000})); s.close()"',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s                   # las migraciones ya corrieron en `migrate`
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  operaciones_network:
+    driver: bridge

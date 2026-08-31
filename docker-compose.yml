@@ -26,14 +26,19 @@ x-app-base: &app-base
 
 services:
   # One-shot: crea/actualiza el esquema y termina. Sin `||`: si falla, sale con
-  # codigo != 0 y `operaciones` NO arranca. Esa es la diferencia con el arranque
+  # codigo != 0 y `operaciones` NO arranca. El ultimo paso compara los modelos
+  # contra la base: es lo que reemplaza a _PENDING_DDLS (retirada 2026-08-31),
+  # convirtiendo "columna del modelo sin revision de Alembic" en un deploy que
+  # falla, en vez de un 500 semanas despues. Esa es la diferencia con el arranque
   # viejo (start.sh toleraba el fallo y la app quedaba sirviendo 500 con el
   # esquema atrasado, ver tests/test_modelo_vs_ddl.py).
   migrate:
     <<: *app-base
     restart: "no"
     command: >
-      sh -c "python init_db.py && alembic upgrade head && alembic current"
+      sh -c "alembic upgrade head &&
+      alembic current &&
+      python scripts/verificar_esquema.py"
 
   operaciones:
     <<: *app-base

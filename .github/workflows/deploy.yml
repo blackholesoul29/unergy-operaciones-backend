@@ -59,8 +59,8 @@ jobs:
           # Los tres guardas existen porque el modo de fallo es CARO: con un
           # .env vacio o truncado, la app arranca con los defaults de
           # app/core/config.py -> apunta a postgres:postgres@localhost y
-          # `migrate` corre init_db.py (create_all + seed) contra lo que
-          # encuentre ahi. Mejor abortar el deploy.
+          # `migrate` correria las migraciones contra lo que encuentre ahi.
+          # Mejor abortar el deploy.
           if [ -z "${ENV_FILE:-}" ]; then
               echo "::error::falta el secret ENV_FILE. Crealo con: gh secret set ENV_FILE < .env.prod"
               exit 1
@@ -101,11 +101,10 @@ jobs:
           echo "$antes -> $despues"
           echo "$cambios" | sed 's/^/  /'
 
-          # Paths que aplican DDL. `alembic/` es el que importa, pero mientras
-          # `_PENDING_DDLS` (app/main.py) e `init_db.py::add_columns()` sigan
-          # creando esquema en cada arranque, filtrar solo por alembic/ se salta
-          # cambios de esquema reales.
-          if echo "$cambios" | grep -qE '^(alembic/|app/main\.py$|init_db\.py$)'; then
+          # Solo `alembic/`: desde el 2026-08-31 es el unico camino que aplica
+          # esquema. Antes habia que incluir app/main.py e init_db.py porque
+          # _PENDING_DDLS y add_columns() tambien creaban objetos en cada arranque.
+          if echo "$cambios" | grep -qE '^alembic/'; then
               migrar=si; motivo="cambio el esquema"
           elif [ "$MIGRAR" = siempre ]; then
               migrar=si; motivo="pedido a mano"

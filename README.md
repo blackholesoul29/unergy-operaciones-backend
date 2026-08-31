@@ -35,9 +35,9 @@ trae el `extra_hosts` que lo resuelve.
 ## Correr en local sin Docker
 
 ```bash
-uv sync                 # crea .venv desde uv.lock
-uv run python init_db.py
-uv run alembic upgrade head
+uv sync                          # crea .venv desde uv.lock
+uv run alembic upgrade head      # el esquema sale SOLO de aca
+uv run python scripts/verificar_esquema.py
 uv run uvicorn app.main:app --reload
 ```
 
@@ -84,7 +84,7 @@ Dos servicios, del mismo `Dockerfile` (ancla `x-app-base` en el
 
 | Servicio | Qué hace |
 |---|---|
-| `migrate` | One-shot: `init_db.py && alembic upgrade head && alembic current`, y termina. Sin `\|\|`: si falla, sale con código ≠ 0 |
+| `migrate` | One-shot: `alembic upgrade head && alembic current && python scripts/verificar_esquema.py`, y termina. Sin `\|\|`: si falla, sale con código ≠ 0 |
 | `operaciones` | Solo `uvicorn`. Espera con `service_completed_successfully` a que `migrate` haya terminado bien |
 
 O sea: **si la migración falla, el servicio no arranca**. Es deliberado — antes el
@@ -137,8 +137,8 @@ en `.env.anterior` por si el secret quedó mal.
 
 `migrate` **no** se levanta en todos los deploys. Corre si:
 
-1. el diff toca `alembic/`, `app/main.py` o `init_db.py` — los tres caminos que
-   aplican DDL hoy; filtrar solo por `alembic/` se saltaría los otros dos,
+1. el diff toca `alembic/` — el único camino que aplica esquema desde que se
+   retiraron `_PENDING_DDLS` e `init_db.py` (2026-08-31),
 2. se lanzó a mano con `workflow_dispatch` y `migrar=siempre`, o
 3. `operaciones` no estaba arriba (arranque en frío: no se sabe en qué revisión
    quedó la base).

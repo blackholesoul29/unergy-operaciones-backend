@@ -176,12 +176,6 @@ class Proyecto(Base):
     codigo_tsf: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # ── IDs de liquidación ──────────────────────────────────────────────────────
-    # ── IDs de Quoia ────────────────────────────────────────────────────────────
-    # IDs de la integración Quoia a nivel de proyecto: los reportes de generación
-    # y consumo, y el nodo. Editables desde la pestaña "ID Quoia" del detalle.
-    quoia_reporte_generacion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    quoia_reporte_consumo_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    quoia_nodo_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # ── Pipeline TSF / próximos a energizarse ───────────────────────────────────
     # Correlación con originabotdb.minifarm_project.name / base_name de Sun Factory.

@@ -992,9 +992,6 @@ def _identificacion(proyecto) -> dict:
         "origina_code": proyecto.origina_code,
         "project_id_solenium": proyecto.project_id_solenium,
         "sunfactory_project_id": proyecto.sunfactory_project_id,
-        "quoia_nodo_id": proyecto.quoia_nodo_id,
-        "quoia_reporte_generacion_id": proyecto.quoia_reporte_generacion_id,
-        "quoia_reporte_consumo_id": proyecto.quoia_reporte_consumo_id,
         "portafolio_id": proyecto.portafolio_id,
         "portafolio": proyecto.portafolio.nombre if proyecto.portafolio else None,
     }

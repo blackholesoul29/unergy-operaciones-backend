@@ -832,7 +832,6 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
                      sub_project="catedral", codigo_cnd="CND-0912",
                      codigo_tsf="TSF-77", project_id_solenium="SOL-45",
                      sunfactory_project_id=310, origina_code="MF-CAT",
-                     quoia_nodo_id=8, quoia_reporte_generacion_id=91,
                      portafolio_id=porta.id)
     _con_contrato(db, proy)
 
@@ -843,7 +842,6 @@ def test_la_ficha_trae_el_identificador_de_cada_sistema(db):
     assert ident["project_id_solenium"] == "SOL-45"
     assert ident["sunfactory_project_id"] == 310
     assert ident["codigo_cnd"] == "CND-0912"
-    assert ident["quoia_nodo_id"] == 8
     # El portafolio viaja con nombre y con id: el nombre para leerlo, el id para
     # agrupar sin depender de cómo esté escrito.
     assert ident["portafolio"] == "Portafolio Caribe"

@@ -13,7 +13,11 @@ if config.config_file_name is not None:
 # esa logica es justo lo que hace que Alembic apunte a otra base que la app.
 from app.core.config import settings  # noqa: E402
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# El `%%` no es adorno: set_main_option escribe en un configparser, que trata `%`
+# como interpolacion. Una contrasena con caracteres especiales llega aca
+# percent-encoded (quote_plus en config.py) y sin escapar revienta con
+# "invalid interpolation syntax". get_main_option lo desescapa al leerlo.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 from app.models import Base  # noqa: E402 — must import after path setup
 target_metadata = Base.metadata

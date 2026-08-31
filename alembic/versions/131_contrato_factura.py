@@ -15,6 +15,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic_idempotencia import crear_tabla_si_falta
+
 revision = "131"
 down_revision = "130"
 branch_labels = None
@@ -22,10 +24,20 @@ depends_on = None
 
 
 def upgrade():
-    tipo_factura_enum = postgresql.ENUM("solenium", "inversionista", name="tipo_factura_enum")
-    tipo_factura_enum.create(op.get_bind(), checkfirst=True)
+    bind = op.get_bind()
 
-    op.create_table(
+    # create_type=False es obligatorio: sin eso, op.create_table vuelve a emitir
+    # CREATE TYPE al construir la columna `tipo` (sin checkfirst) y revienta con
+    # DuplicateObject si el enum ya existe -- que es lo normal aca, porque
+    # `create_all()` corre ANTES que Alembic en cada arranque y ya lo creo.
+    tipo_factura_enum = postgresql.ENUM(
+        "solenium", "inversionista", name="tipo_factura_enum", create_type=False)
+    postgresql.ENUM(
+        "solenium", "inversionista", name="tipo_factura_enum"
+    ).create(bind, checkfirst=True)
+
+    crear_tabla_si_falta(
+        bind,
         "contrato_factura",
         sa.Column("id", sa.BigInteger, primary_key=True),
         sa.Column("contrato_id", sa.BigInteger,
@@ -38,8 +50,12 @@ def upgrade():
         sa.Column("enlace_soporte", sa.String(1000), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        migracion="131",
     )
-    op.create_index("ix_contrato_factura_contrato_id", "contrato_factura", ["contrato_id"])
+    # IF NOT EXISTS y no op.create_index: si la tabla ya existia, el indice
+    # tambien puede existir (lo declara el modelo, asi que lo crea create_all).
+    op.execute("CREATE INDEX IF NOT EXISTS ix_contrato_factura_contrato_id "
+               "ON contrato_factura (contrato_id)")
 
 
 def downgrade():

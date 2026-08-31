@@ -56,7 +56,9 @@ Qué hace el `Dockerfile`, en orden:
    inflaban la imagen cientos de MB y el build se quedaba sin disco.
 3. Copia el binario de `uv` desde `ghcr.io/astral-sh/uv:0.9`.
 4. `COPY pyproject.toml uv.lock` y `uv sync --frozen --no-dev`.
-5. 
+
+
+
 6. 
 7. 
 8.  Solo los dos

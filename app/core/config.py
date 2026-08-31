@@ -127,6 +127,14 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "operaciones@unergy.io"
     # Copia oculta (BCC) del Reporte CGM -- lista separada por comas.
     CORREO_SEGUIMIENTO: str = ""
+    # Aviso inmediato a UN solo correo cuando CUALQUIER envio (reset password,
+    # informe, alarma, falla, reporte CGM, prueba) falla -- mismo destinatario
+    # sin importar el tipo. Best effort via el mismo SMTP, asi que si la cuenta
+    # esta caida esta alerta puede fallar tambien (ver _alertar_fallo_envio).
+    # Deliberadamente NO reusa CORREO_SEGUIMIENTO/SMTP_FROM: debe ser un correo
+    # que alguien revise activamente, no la bandeja operativa que puede ser la
+    # que esta fallando.
+    ALERTA_FALLOS_EMAIL: str = ""
 
     # IMAP — lectura automática de correos entrantes (ej. Excel de terceros
     # que envía Cedillanos vía cgm@erco.energy, ver excel_terceros_email.py).

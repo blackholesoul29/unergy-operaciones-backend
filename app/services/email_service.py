@@ -84,6 +84,37 @@ _REPORTE_CGM_HTML = """\
 """
 
 
+def _alertar_fallo_envio(*, tipo: str, destinatario: str, error: str) -> None:
+    """Avisa por correo cuando un envío falla -- best effort: si la cuenta SMTP
+    está caída (la causa más común de fallo, ver incidente 2026-08-29/30), este
+    mismo aviso puede fallar también. En ese caso queda al menos en los logs
+    del servidor, que es lo único que sigue funcionando cuando Gmail rechaza
+    las credenciales."""
+    if not settings.ALERTA_FALLOS_EMAIL or not settings.SMTP_HOST:
+        return
+
+    subject = f"⚠️ Fallo de envío de correo — {tipo}"
+    body = (
+        f"Un envío de tipo '{tipo}' falló.\n\n"
+        f"Destinatario: {destinatario}\n"
+        f"Error: {error}\n\n"
+        "Revisa la tabla email_envios para el detalle completo."
+    )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = settings.ALERTA_FALLOS_EMAIL
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    try:
+        _smtp_send(msg, [settings.ALERTA_FALLOS_EMAIL])
+    except Exception as exc:
+        print(
+            f"[ALERTA_FALLO_ENVIO] No se pudo notificar el fallo de '{tipo}' "
+            f"hacia {destinatario} -- el envío de la alerta también falló: {exc}"
+        )
+
+
 def _log_send(
     *,
     to_email: str,
@@ -105,6 +136,9 @@ def _log_send(
     ya resolvía el id correspondiente antes de loguear. Solo uno (o ninguno)
     aplica según el tipo de envío -- no es un vínculo polimórfico real a
     nivel de BD, son tres columnas nullable independientes."""
+    if not success:
+        _alertar_fallo_envio(tipo=tipo, destinatario=to_email, error=error_msg or "error desconocido")
+
     try:
         from app.core.database import SessionLocal
         from sqlalchemy import text as sa_text

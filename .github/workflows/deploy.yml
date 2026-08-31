@@ -136,9 +136,17 @@ jobs:
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
+          # `docker inspect` y no `docker compose ps --format`: compose v2 solo
+          # acepta table|json ahi, un template Go falla con "parsing failed".
+          # El id se relee en cada vuelta porque un contenedor que se reinicia
+          # cambia de id.
           for _ in $(seq 40); do
-              estado=$(docker compose ps --format '{{.Health}}' operaciones)
-              [ "$estado" = healthy ] && echo "healthy" && exit 0
+              cid=$(docker compose ps -q operaciones || true)
+              if [ -n "$cid" ]; then
+                  estado=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo sin-healthcheck)
+                  echo "  estado: $estado"
+                  if [ "$estado" = healthy ]; then echo "healthy"; exit 0; fi
+              fi
               sleep 3
           done
           echo "no quedo healthy en 120s:"

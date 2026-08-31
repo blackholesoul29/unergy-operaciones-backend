@@ -18,20 +18,23 @@ calculada (equivalente exacto a SoleniumClient.get_availability()) -- a diferenc
 de la potencia instantánea, que SolarView solo expone por proyecto
 (GET /solarview/measurements/power/), así que esa parte sigue necesitando una
 llamada por proyecto (en paralelo, mismo patrón que ya usa Gaia acá abajo), y
-solo para los proyectos que de verdad la necesitan (de día + con medidor)."""
+solo para los proyectos que de verdad la necesitan (de día + con medidor).
+
+El anti-spam contra alarma_estado y el envío de notificaciones viven en
+app.services.alarmas.estado, compartido con fallas/alarmas.py."""
 from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone, timedelta
-
-from sqlalchemy import text
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import SessionLocal
 from app.models.proyectos import Proyecto, TipoProyectoEnum
 from app.models.fronteras import Frontera, TipoFronteraEnum
-from app.models.usuarios import Usuario, RolEnum
-from app.models.notificaciones import Notificacion, TipoNotificacionEnum
+from app.models.notificaciones import TipoNotificacionEnum
+from app.services.alarmas.estado import (
+    cargar_estados, decidir_notificar, guardar_estados, usuarios_notificables, notificar,
+)
 from app.services.mgs.solarview_client import SolarViewClient
 from app.services.mgs.gaia_client import GaiaClient, find_gaia_node_pair, build_db_proyecto_frt_map
 
@@ -41,7 +44,6 @@ logger = logging.getLogger("alarmas.desconexion")
 ZERO_KW = 0.5        # potencia <= esto se considera "en cero"
 DAY_START_H = 7      # ventana de día (Colombia) para evaluar desconexión
 DAY_END_H = 17
-ROLES_NOTIF = (RolEnum.admin, RolEnum.operaciones, RolEnum.monitoreo)
 
 
 def _col_now() -> datetime:
@@ -79,16 +81,6 @@ def _latest_inverter_kw(resp: dict | None) -> float | None:
     return abs(float(valor)) if valor is not None else None
 
 
-# ── Notificaciones in-app (campana) ───────────────────────────────────────────
-def _notificar(db, tipo: TipoNotificacionEnum, titulo: str, mensaje: str, link: str | None):
-    usuarios = db.query(Usuario).filter(
-        Usuario.activo == True,  # noqa: E712
-        Usuario.rol.in_(list(ROLES_NOTIF)),
-    ).all()
-    for u in usuarios:
-        db.add(Notificacion(usuario_id=u.id, tipo=tipo, titulo=titulo, mensaje=mensaje, link=link))
-
-
 _MENSAJES = {
     "fuente_unica": (
         TipoNotificacionEnum.alerta, "Fuente única de medición",
@@ -105,68 +97,26 @@ _MENSAJES = {
 }
 
 
-def _procesar(
-    estado_cache: dict[tuple[int, str], tuple[str, date | None]],
-    pending_writes: list[dict],
-    db, proyecto: Proyecto, categoria: str, estado_nuevo: str, ctx: dict,
-):
-    """Compara con el estado cacheado (precargado en un solo SELECT por
-    evaluar_desconexiones(), ver ahí) y notifica según cambios + re-aviso
-    diario. No escribe en alarma_estado de una vez -- acumula en
-    `pending_writes` para un solo UPSERT masivo al final del ciclo, en vez de
-    hasta 2 idas y vueltas a la BD por proyecto (una por categoría) que
-    tenía antes."""
-    today = _col_now().date()
-    row = estado_cache.get((proyecto.id, categoria))
-
-    notify = False
-    recovery = False
-    if row is None:
-        notify = estado_nuevo != "ok"
-    elif row[0] != estado_nuevo:
-        notify = True
-        recovery = estado_nuevo == "ok"
-    elif estado_nuevo != "ok" and (row[1] is None or row[1] < today):
-        notify = True  # re-aviso diario
-
+def _procesar(cache, pending_writes: list[dict], usuarios, db,
+              proyecto: Proyecto, categoria: str, estado_nuevo: str, ctx: dict):
+    """Envoltorio delgado sobre estado.decidir_notificar(): sabe qué mensaje
+    corresponde a cada estado de desconexión (`_MENSAJES`) y arma el texto;
+    la decisión de si toca notificar y el UPSERT masivo viven en el módulo
+    compartido (ver import)."""
+    hoy = _col_now().date()
+    notify, recovery = decidir_notificar(cache, pending_writes, proyecto.id, categoria, estado_nuevo, hoy)
     if not notify:
         return
-
-    dia_val = today if estado_nuevo != "ok" else None
-    pending_writes.append({"p": proyecto.id, "c": categoria, "e": estado_nuevo, "d": dia_val})
-    estado_cache[(proyecto.id, categoria)] = (estado_nuevo, dia_val)
 
     link = f"/proyectos/{proyecto.id}"
     nombre = proyecto.nombre_comercial or f"Proyecto {proyecto.id}"
     if recovery:
-        _notificar(db, TipoNotificacionEnum.info, "Proyecto recuperado",
-                   f"{nombre} volvió a reportar normal.", link)
+        notificar(db, usuarios, TipoNotificacionEnum.info, "Proyecto recuperado",
+                  f"{nombre} volvió a reportar normal.", link)
     else:
         tipo, titulo, plantilla = _MENSAJES[estado_nuevo]
         mensaje = plantilla.format(n=nombre, inv=ctx.get("inv", "—"), met=ctx.get("met", "—"))
-        _notificar(db, tipo, titulo, mensaje, link)
-
-
-def _guardar_estados(db, pending_writes: list[dict]) -> None:
-    """UPSERT masivo de todas las filas que cambiaron en este ciclo -- una
-    sola sentencia con VALUES múltiples en vez de un INSERT por fila."""
-    if not pending_writes:
-        return
-    valores = ", ".join(
-        f"(:p{i}, :c{i}, :e{i}, :d{i}, now())" for i in range(len(pending_writes))
-    )
-    params: dict = {}
-    for i, w in enumerate(pending_writes):
-        params[f"p{i}"] = w["p"]
-        params[f"c{i}"] = w["c"]
-        params[f"e{i}"] = w["e"]
-        params[f"d{i}"] = w["d"]
-    db.execute(text(f"""
-        INSERT INTO alarma_estado (proyecto_id, categoria, estado, dia, updated_at)
-        VALUES {valores}
-        ON CONFLICT (proyecto_id, categoria)
-        DO UPDATE SET estado = EXCLUDED.estado, dia = EXCLUDED.dia, updated_at = now()
-    """), params)
+        notificar(db, usuarios, tipo, titulo, mensaje, link)
 
 
 # ── Entrada principal ─────────────────────────────────────────────────────────
@@ -189,17 +139,11 @@ def evaluar_desconexiones():
             return
 
         # Precarga de alarma_estado: un solo SELECT para todos los proyectos
-        # de este ciclo en vez de uno por (proyecto, categoria) dentro de
-        # _procesar() -- ver docstring de _procesar()/_guardar_estados().
-        estado_cache: dict[tuple[int, str], tuple[str, date | None]] = {}
-        _rows_estado = db.execute(
-            text("SELECT proyecto_id, categoria, estado, dia FROM alarma_estado "
-                 "WHERE proyecto_id = ANY(:ids)"),
-            {"ids": [p.id for p in proyectos]},
-        ).fetchall()
-        for r in _rows_estado:
-            estado_cache[(r.proyecto_id, r.categoria)] = (r.estado, r.dia)
+        # de este ciclo (ver app.services.alarmas.estado) en vez de uno por
+        # (proyecto, categoria) dentro de _procesar().
+        cache = cargar_estados(db, [p.id for p in proyectos])
         pending_writes: list[dict] = []
+        usuarios = usuarios_notificables(db)
 
         # Inversores: disponibilidad de TODA la flota en una sola llamada
         # (GET /solarview/kpis/availability/, ya trae la categoria
@@ -274,7 +218,7 @@ def evaluar_desconexiones():
                 meter_present = bool(node_p or node_r)
 
                 # ── Dimensión config: fuente única ──────────────────────────────
-                _procesar(estado_cache, pending_writes, db, p,
+                _procesar(cache, pending_writes, usuarios, db, p,
                           "fuente", "fuente_unica" if not meter_present else "ok", {})
 
                 # ── Dimensión runtime: solo de día y con ambas fuentes ──────────
@@ -303,14 +247,14 @@ def evaluar_desconexiones():
                 else:
                     estado = "ok"
 
-                _procesar(estado_cache, pending_writes, db, p, "runtime", estado, {
+                _procesar(cache, pending_writes, usuarios, db, p, "runtime", estado, {
                     "inv": round(inv_power, 1),
                     "met": round(met_kw, 1) if met_kw is not None else 0,
                 })
             except Exception:
                 logger.exception("Error evaluando proyecto %s", p.id)
 
-        _guardar_estados(db, pending_writes)
+        guardar_estados(db, pending_writes)
         db.commit()
         logger.info("Alarmas de desconexión evaluadas: %d proyectos", len(proyectos))
     except Exception:

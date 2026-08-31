@@ -9,23 +9,29 @@ Reglas (extensibles sin tocar la clasificación de fallas):
 
 Entrega: notificaciones in-app (campana) a roles admin/operaciones/monitoreo, con
 anti-spam vía la tabla ``alarma_estado(proyecto_id, categoria)`` (mismo mecanismo que
-las alarmas de desconexión MGS). El hook en ``POST /fallas`` va envuelto en try/except:
-nunca debe romper la creación de la falla.
+las alarmas de desconexión MGS, ver app.services.alarmas.estado). El hook en
+``POST /fallas`` va envuelto en try/except: nunca debe romper la creación de la falla.
+
+Evalúa las 3 categorías en CADA llamada (activas y ya resueltas), no solo las que
+están activas ahora mismo -- necesario para poder escribir el estado 'ok' de vuelta
+cuando una alarma se resuelve. Sin eso (versión anterior, hasta 2026-08-31), una
+alarma que se resolvía y volvía a activarse el mismo día quedaba en silencio: la
+fila en alarma_estado seguía diciendo estado='activa', dia=hoy de la primera vez,
+y el re-aviso diario no dispara dos veces el mismo día.
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models.usuarios import Usuario, RolEnum
-from app.models.notificaciones import Notificacion, TipoNotificacionEnum
+from app.models.notificaciones import TipoNotificacionEnum
+from app.services.alarmas.estado import (
+    cargar_estados, decidir_notificar, guardar_estados, usuarios_notificables, notificar,
+)
 
-logger = logging.getLogger("alarmas.fallas")
-
-ROLES_NOTIF = (RolEnum.admin, RolEnum.operaciones, RolEnum.monitoreo)
+CATEGORIAS_COMUNICACION = ("comunicacion_frontera", "comunicacion_inversores", "comunicacion_total")
 
 
 def decidir_alarmas(frontera_com: bool, inversores_com: bool) -> list[str]:
@@ -68,50 +74,15 @@ _MENSAJES = {
     ),
 }
 
+_ETIQUETAS_RECUPERACION = {
+    "comunicacion_frontera": "frontera",
+    "comunicacion_inversores": "inversores",
+    "comunicacion_total": "frontera e inversores",
+}
+
 
 def _col_today():
     return (datetime.now(timezone.utc) - timedelta(hours=5)).date()
-
-
-def _notificar(db: Session, categoria: str, nombre: str, link: str):
-    tipo, titulo, plantilla = _MENSAJES[categoria]
-    usuarios = db.query(Usuario).filter(
-        Usuario.activo == True,  # noqa: E712
-        Usuario.rol.in_(list(ROLES_NOTIF)),
-    ).all()
-    mensaje = plantilla.format(n=nombre)
-    for u in usuarios:
-        db.add(Notificacion(usuario_id=u.id, tipo=tipo, titulo=titulo, mensaje=mensaje, link=link))
-
-
-def _emitir_con_antispam(db: Session, proyecto_id: int, categoria: str, nombre: str, link: str):
-    """Emite la alarma `categoria` para el proyecto solo si cambió de estado o
-    si persiste y no se ha avisado hoy. Reusa la tabla alarma_estado."""
-    today = _col_today()
-    row = db.execute(
-        text("SELECT estado, dia FROM alarma_estado WHERE proyecto_id=:p AND categoria=:c"),
-        {"p": proyecto_id, "c": categoria},
-    ).fetchone()
-
-    notify = False
-    if row is None:
-        notify = True
-    elif row.estado != "activa":
-        notify = True
-    elif row.dia is None or row.dia < today:
-        notify = True  # re-aviso diario mientras persista
-
-    if not notify:
-        return False
-
-    db.execute(text("""
-        INSERT INTO alarma_estado (proyecto_id, categoria, estado, dia, updated_at)
-        VALUES (:p, :c, 'activa', :d, now())
-        ON CONFLICT (proyecto_id, categoria)
-        DO UPDATE SET estado='activa', dia=:d, updated_at=now()
-    """), {"p": proyecto_id, "c": categoria, "d": today})
-    _notificar(db, categoria, nombre, link)
-    return True
 
 
 def _proyecto_comunicacion_state(db: Session, proyecto_id: int) -> tuple[bool, bool]:
@@ -136,21 +107,46 @@ def _proyecto_comunicacion_state(db: Session, proyecto_id: int) -> tuple[bool, b
 
 
 def evaluar_alarmas_falla(db: Session, falla) -> list[str]:
-    """Tras crear/actualizar una falla, evalúa y emite las alarmas de comunicación
-    del proyecto. Devuelve la lista de categorías efectivamente notificadas.
+    """Tras crear/actualizar una falla, evalúa las 3 categorías de alarma de
+    comunicación del proyecto (activas y resueltas) y emite/actualiza según
+    corresponda. Devuelve la lista de categorías efectivamente notificadas
+    (incluye recuperaciones).
 
     Envolver en try/except en el caller: nunca debe romper el flujo de la falla.
     """
     proyecto_id = falla.proyecto_id
     frontera_com, inversores_com = _proyecto_comunicacion_state(db, proyecto_id)
-    categorias = decidir_alarmas(frontera_com, inversores_com)
-    if not categorias:
-        return []
+    activas = set(decidir_alarmas(frontera_com, inversores_com))
 
+    cache = cargar_estados(db, [proyecto_id])
+    pending: list[dict] = []
+    hoy = _col_today()
     nombre = falla.proyecto.nombre_comercial if getattr(falla, "proyecto", None) else f"Proyecto {proyecto_id}"
     link = f"/proyectos/{proyecto_id}"
-    emitidas = []
-    for cat in categorias:
-        if _emitir_con_antispam(db, proyecto_id, cat, nombre, link):
-            emitidas.append(cat)
+    usuarios = None  # perezoso -- solo se pide si de verdad hay algo que notificar
+    emitidas: list[str] = []
+
+    for cat in CATEGORIAS_COMUNICACION:
+        row = cache.get((proyecto_id, cat))
+        if cat in activas:
+            estado_nuevo = "activa"
+        elif row is not None and row[0] == "activa":
+            estado_nuevo = "ok"  # se resolvió -- avisar recuperación
+        else:
+            continue  # nunca estuvo activa, nada que evaluar
+
+        notify, recovery = decidir_notificar(cache, pending, proyecto_id, cat, estado_nuevo, hoy)
+        if not notify:
+            continue
+        if usuarios is None:
+            usuarios = usuarios_notificables(db)
+        if recovery:
+            notificar(db, usuarios, TipoNotificacionEnum.info, "✅ Comunicación recuperada",
+                      f"{nombre}: se restableció la comunicación ({_ETIQUETAS_RECUPERACION[cat]}).", link)
+        else:
+            tipo, titulo, plantilla = _MENSAJES[cat]
+            notificar(db, usuarios, tipo, titulo, plantilla.format(n=nombre), link)
+        emitidas.append(cat)
+
+    guardar_estados(db, pending)
     return emitidas

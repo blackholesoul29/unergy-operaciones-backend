@@ -55,7 +55,11 @@ Qué hace el `Dockerfile`, en orden:
    `--no-install-recommends` a propósito: los recommends (JRE, fuentes, ayuda)
    inflaban la imagen cientos de MB y el build se quedaba sin disco.
 3. Copia el binario de `uv` desde `ghcr.io/astral-sh/uv:0.9`.
-4. `COPY pyproject.toml uv.lock` y `uv sync --frozen --no-dev`. Solo los dos
+4. `COPY pyproject.toml uv.lock` y `uv sync --frozen --no-dev`.
+5. 
+6. 
+7. 
+8.  Solo los dos
    archivos, antes del código, para que el layer de dependencias se cachee y un
    cambio en un `.py` no reinstale nada.
 5. `COPY . .` y `CMD uvicorn app.main:app`.

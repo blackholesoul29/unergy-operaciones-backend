@@ -87,7 +87,7 @@ __all__ = [
 from app.models.clasificacion_energia import ClasificacionEnergiaMensual, CATEGORIAS_ENERGIA
 from app.models.comercial import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadGestion,
-    EstadoOportunidadEnum, TipoServicioOportunidadEnum, TipoGestionEnum,
+    EstadoOportunidadEnum, TipoGestionEnum,
 )
 from app.models.registros_cnd import (
     RegistroConexion, RegistroEtapa, RegistroTransicion, RegistroHito,

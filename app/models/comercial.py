@@ -39,11 +39,6 @@ class EstadoComercialEnum(str, enum.Enum):
 EstadoOportunidadEnum = EstadoComercialEnum
 
 
-class TipoServicioOportunidadEnum(str, enum.Enum):
-    representacion = "representacion"
-    comunidad_energetica = "comunidad_energetica"
-
-
 class TipoOfertaComercialEnum(str, enum.Enum):
     """Tipo de sub-oferta dentro de una oportunidad-cliente."""
     servicios_operacionales = "servicios_operacionales"
@@ -76,8 +71,6 @@ class Oportunidad(Base):
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clientes.id"), nullable=False, index=True)
     # Etiqueta del negocio; si NULL la UI muestra la razón social del cliente.
     nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tipo_servicio: Mapped[str | None] = mapped_column(
-        SAEnum(TipoServicioOportunidadEnum, name="tipo_servicio_oportunidad_enum"), nullable=True)
     # DEPRECADO (2026-08-02): el estado del pipeline se mudó a la oferta. La
     # columna sigue aquí porque borrarla rompería los históricos y no aporta
     # nada; la API ya no la lee, deriva el estado del cliente de sus ofertas

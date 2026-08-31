@@ -11,7 +11,6 @@ EstadoComercialLiteral = Literal[
     "oportunidad", "oferta", "contrato", "firmado", "operando", "terminado", "declinado"
 ]
 EstadoOportunidadLiteral = EstadoComercialLiteral  # alias de compatibilidad
-TipoServicioLiteral = Literal["representacion", "comunidad_energetica"]
 TipoOfertaLiteral = Literal["servicios_operacionales", "compra_energia", "comunidad_energetica"]
 ResultadoOfertaLiteral = Literal["pendiente", "aceptado", "declinado"]
 TipoGestionLiteral = Literal["llamada", "correo", "reunion", "whatsapp", "nota"]
@@ -46,7 +45,6 @@ class OportunidadCreate(BaseModel):
     cliente_id: Optional[int] = None
     cliente_nuevo: Optional[ClienteNuevoIn] = None
     nombre: Optional[str] = None
-    tipo_servicio: Optional[TipoServicioLiteral] = None
     notas: Optional[str] = None
     forzar_cliente_duplicado: bool = Field(
         False, description="true: crear cliente_nuevo igual aunque exista uno con nombre muy parecido"
@@ -62,7 +60,6 @@ class OportunidadCreate(BaseModel):
 class OportunidadUpdate(BaseModel):
     # `estado` NO es editable por PATCH (usar POST /{id}/estado).
     nombre: Optional[str] = None
-    tipo_servicio: Optional[TipoServicioLiteral] = None
     numero_oferta: Optional[str] = None
     fecha_tentativa_inicio_representacion: Optional[date] = None
     fecha_tentativa_inicio_compra_energia: Optional[date] = None

@@ -291,7 +291,6 @@ def _op_base_out(op: Oportunidad, cliente: Cliente, ultima_gestion, ahora: datet
         "cliente_id": op.cliente_id,
         "cliente_razon_social": cliente.razon_social_nombre,
         "cliente_nit": cliente.nit_cedula,
-        "tipo_servicio": op.tipo_servicio if isinstance(op.tipo_servicio, (str, type(None))) else op.tipo_servicio.value,
         "numero_oferta": op.numero_oferta,
         "es_migrada": op.es_migrada,
         "dias_sin_respuesta": dias,
@@ -770,13 +769,12 @@ def _resolver_cliente(db: Session, cliente_id: int | None, cliente_nuevo,
 
 
 def _nueva_oportunidad(db: Session, cliente: Cliente, nombre: str | None,
-                       tipo_servicio, notas: str | None,
+                       notas: str | None,
                        current: Usuario) -> Oportunidad:
     """La oportunidad y su fila de histórico, sin commit."""
     op = Oportunidad(
         cliente_id=cliente.id,
         nombre=nombre,
-        tipo_servicio=tipo_servicio,
         notas=notas,
         estado="oportunidad",          # SIEMPRE server-side (spec §3.1)
         estado_desde=col_now(),
@@ -802,8 +800,7 @@ def create_oportunidad(
     _check_comercial(current)
     cliente = _resolver_cliente(db, data.cliente_id, data.cliente_nuevo,
                                 data.forzar_cliente_duplicado)
-    op = _nueva_oportunidad(db, cliente, data.nombre, data.tipo_servicio,
-                            data.notas, current)
+    op = _nueva_oportunidad(db, cliente, data.nombre, data.notas, current)
     db.commit()
     db.refresh(op)
     return _op_base_out(op, cliente, None, col_now()) | {"num_proyectos": 0, "capacidad_total_kwp": 0.0}
@@ -825,7 +822,7 @@ def registrar(
     _check_comercial(current)
     cliente = _resolver_cliente(db, data.cliente_id, data.cliente_nuevo,
                                 data.forzar_cliente_duplicado)
-    op = _nueva_oportunidad(db, cliente, data.nombre, None, data.notas, current)
+    op = _nueva_oportunidad(db, cliente, data.nombre, data.notas, current)
     ofertas = [_nueva_oferta(db, op.id, oferta, current) for oferta in data.ofertas]
     db.commit()
     db.refresh(op)

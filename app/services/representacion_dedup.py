@@ -49,7 +49,7 @@ CAMPOS = (
     "inversionista_nombre", "portafolio", "codigo_sun_factory", "nombre_proyecto_ref",
     "fecha_inicio", "fecha_fin", "fecha_firma_contrato", "fecha_indexacion",
     "fecha_inicio_om", "renovacion_automatica", "periodicidad_pago",
-    "indice_indexacion", "tarifa_base", "tarifa_mensual", "canones_otros",
+    "indice_indexacion", "tarifa_base", "tarifa_mensual",
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",

@@ -81,7 +81,6 @@ class ContratoServicio(Base):
     tarifa_base: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     periodicidad_pago: Mapped[str | None] = mapped_column(SAEnum(PeriodicidadEnum, name="periodicidad_enum"), nullable=True)
     indice_indexacion: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    canones_otros: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     estado: Mapped[str] = mapped_column(SAEnum(EstadoContratoEnum, name="estado_contrato_enum"), nullable=False, default="vigente")
     fecha_firma_contrato: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_inicio_om: Mapped[date | None] = mapped_column(Date, nullable=True)  # inicio de operación real (para indexación O&M)

@@ -87,7 +87,6 @@ class ContratoServicioCreate(BaseModel):
     periodicidad_pago: Optional[str] = None
     responsable_iva: Optional[bool] = None
     indice_indexacion: Optional[str] = None
-    canones_otros: Optional[float] = None
     estado: Optional[str] = "vigente"
     fecha_firma_contrato: Optional[date] = None
     renovacion_automatica: Optional[bool] = None
@@ -142,7 +141,6 @@ class ContratoServicioUpdate(BaseModel):
     periodicidad_pago: Optional[str] = None
     responsable_iva: Optional[bool] = None
     indice_indexacion: Optional[str] = None
-    canones_otros: Optional[float] = None
     estado: Optional[str] = None
     fecha_firma_contrato: Optional[date] = None
     renovacion_automatica: Optional[bool] = None
@@ -209,7 +207,6 @@ class ContratoServicioOut(BaseModel):
     periodicidad_pago: Optional[str] = None
     responsable_iva: Optional[bool] = None
     indice_indexacion: Optional[str] = None
-    canones_otros: Optional[float] = None
     estado: str
     fecha_firma_contrato: Optional[date] = None
     renovacion_automatica: Optional[bool] = None

@@ -18,7 +18,7 @@ def reg(id, inv=None, pid=None, ref=None, sf=None, numero=None, **kw):
         portafolio=None, fecha_inicio=None, fecha_fin=None,
         fecha_firma_contrato=None, fecha_indexacion=None, fecha_inicio_om=None,
         renovacion_automatica=None, periodicidad_pago=None, indice_indexacion=None,
-        tarifa_base=None, tarifa_mensual=None, canones_otros=None,
+        tarifa_base=None, tarifa_mensual=None,
         tarifa_admin=None, tarifa_cgm=None, tarifa_representacion=None,
         indexacion_cgm=None, indexacion_representacion=None,
         enlace_drive=None, estado_pago=None, estado="vigente",

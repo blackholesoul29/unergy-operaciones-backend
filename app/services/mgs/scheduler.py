@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
-from threading import Lock, Thread
+from threading import Thread
 
 import pytz
 from sqlalchemy import or_, text
@@ -23,17 +23,12 @@ _engine = AlarmEngine()
 _quoia = QuoiaClient()
 _solenium = SoleniumClient()
 _solenium_checker = SoleniumChecker(_solenium)
-_write_lock = Lock()
 
-_last_nodes: list[dict] = []
-_last_alarms: list[Alarm] = []
-_last_poll_time: datetime | None = None
-_last_inverter_obs: dict[str, str] = {}
 _poll_running = False
 
 
 def poll_once():
-    global _last_nodes, _last_alarms, _last_poll_time, _last_inverter_obs, _poll_running
+    global _poll_running
 
     if not _quoia.enabled:
         logger.warning("QUOIA_API_TOKEN not set — MGS polling disabled")
@@ -62,7 +57,6 @@ def poll_once():
         # (ver _resolver_alarmas_superadas).
         prev_active = {k: set(v) for k, v in _engine.active_alarms.items()}
         alarms = _engine.evaluate(nodes)
-        poll_time = datetime.now(pytz.timezone(settings.TIMEZONE))
 
         project_names = [p["name"] for p in _engine.get_summary(nodes).get("projects", [])]
         try:
@@ -75,12 +69,6 @@ def poll_once():
             inv_note = inverter_obs.get(alarm.node_name)
             if inv_note and alarm.alarm_type.value != "RECUPERACION":
                 alarm.details += f" | Inversores: {inv_note}"
-
-        with _write_lock:
-            _last_nodes = nodes
-            _last_alarms = alarms
-            _last_poll_time = poll_time
-            _last_inverter_obs = inverter_obs
 
         _persist_alarms(alarms, prev_active)
 
@@ -478,41 +466,3 @@ def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
     finally:
         db.close()
 
-
-def get_status() -> dict:
-    nodes = _last_nodes
-    alarms = _last_alarms
-    poll_time = _last_poll_time
-    inv_obs = _last_inverter_obs
-
-    summary = _engine.get_summary(nodes) if nodes else {}
-    active = [
-        {
-            "severity": a.severity.value,
-            "alarm_type": a.alarm_type.value,
-            "node_name": a.node_name,
-            "details": a.details,
-            "timestamp": a.timestamp.isoformat(),
-        }
-        for a in alarms
-    ]
-    return {
-        "last_poll": poll_time.isoformat() if poll_time else None,
-        "poll_running": _poll_running,
-        "summary": summary,
-        "active_alarms": active,
-        "inverter_observations": inv_obs,
-    }
-
-
-def get_plants() -> list[dict]:
-    nodes = _last_nodes
-    inv_obs = _last_inverter_obs
-
-    if not nodes:
-        return []
-    summary = _engine.get_summary(nodes)
-    plants = summary.get("projects", [])
-    for p in plants:
-        p["inverter_obs"] = inv_obs.get(p["name"])
-    return plants

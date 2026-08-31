@@ -39,6 +39,31 @@ def test_get_power_pide_total_power_1():
     assert params["project_id"] == 7
 
 
+def test_get_company_projects_pide_la_ruta_correcta_y_parsea_results():
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (
+        llamados.append((url, params)) or {
+            "message": "OK", "error": None, "success": True,
+            "results": [{"id": 103, "name": "Minigranja Solar El Prado"}],
+        }
+    )
+
+    proyectos = client.get_company_projects()
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/config/company-projects/")
+    assert params is None
+    assert proyectos == [{"id": 103, "name": "Minigranja Solar El Prado"}]
+
+
+def test_get_company_projects_vacio_si_falla_la_consulta():
+    client = _cliente()
+    client._get = lambda url, params=None: None
+
+    assert client.get_company_projects() == []
+
+
 def test_get_relay_historical_usa_recloser_como_nombre_de_parametro():
     """El parámetro se llama 'recloser' pero recibe el project_id (mismo
     gotcha que ya existía en la API vieja) -- ver plan de migración."""

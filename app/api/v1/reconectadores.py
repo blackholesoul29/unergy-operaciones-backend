@@ -57,8 +57,7 @@ class RelayEstado(BaseModel):
     active:      bool | None   # True=ON, False=OFF, None=sin dato
 
     # Telemetría en vivo del relay — las mismas columnas del panel
-    # "Reconectadores" de Solenium. Nombres alineados con
-    # `inicio_operacion._reconectador_live` para que móvil y escritorio hablen igual.
+    # "Reconectadores" de Solenium.
     corriente_a:          float | None = None   # I_A
     corriente_b:          float | None = None   # I_B
     corriente_c:          float | None = None   # I_C

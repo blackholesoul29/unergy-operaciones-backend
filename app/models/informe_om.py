@@ -1,22 +1,36 @@
-from datetime import datetime
-from sqlalchemy import BigInteger, String, Text, DateTime, ForeignKey
+import enum
+from datetime import date, datetime
+from sqlalchemy import BigInteger, String, Text, Date, DateTime, ForeignKey, Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
 
 
-class ProyectoInformeOM(Base):
-    """Informe de Puesta en Marcha / O&M de un proyecto (pestaña "Informe" en
-    Costos Variables, junto a Inicio de Operación).
+class EstadoInformeOMEnum(str, enum.Enum):
+    borrador = "borrador"
+    en_revision = "en_revision"
+    aprobado = "aprobado"
 
-    Una fila por proyecto. Solo guarda lo que Inicio de Operación NO captura
-    (protocolo de pruebas, eventos operativos, inventario de equipos,
-    arquitectura de comunicación, configuración de notificaciones/alarmas,
-    narrativa). El resto (inversores, fechas, frontera, reconectador,
-    estación meteo, monitoreo, pendientes) se lee en vivo de
-    ProyectoInicioOperacion/Solenium/Gaia al servir el detalle -- no se
-    duplica aquí.
+
+class ProyectoInformeOM(Base):
+    """Ficha de Puesta en Marcha / O&M de un proyecto -- fusiona lo que antes
+    eran dos pestañas y dos tablas separadas (Inicio de Operación +
+    Informe de Puesta en Marcha) en un solo modelo (2026-08-31).
+
+    `proyecto_inicio_operacion` perdió su único editor el 2026-08-21 y quedó
+    con 2 filas de prototipo, sin ningún endpoint que las pudiera seguir
+    escribiendo -- un proyecto nuevo no tenía forma de completar fechas,
+    checklist ni pendientes. Esta tabla fusiona esos campos acá, donde sí
+    hay un PUT real, en vez de mantener dos tablas donde una está muerta.
+
+    Una fila por proyecto. Los 4 `checklist_*` cubren solo las categorías que
+    ya se resumían en un semáforo (Fusion Solar, Frontera, Estación meteo,
+    Reconectador) -- el resto del catálogo viejo (CCTV, cableado MT/BT,
+    transformadores, tableros, shelter, obras civiles, paneles, trackers,
+    checklist detallado por inversor) no se revive, nunca tuvo lector real.
+    Inversores/frontera en vivo siguen viniendo de Solenium/Gaia al servir
+    el detalle -- no se duplican acá.
     """
     __tablename__ = "proyecto_informe_om"
 
@@ -28,6 +42,31 @@ class ProyectoInformeOM(Base):
     version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     elaborado_por: Mapped[str | None] = mapped_column(String(255), nullable=True)
     actividad: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # borrador -> en_revision -> aprobado. Reemplaza el envío a
+    # InformeGuardado/app/api/v1/informes.py (sistema genérico compartido con
+    # Mensuales/Portafolio/Ranking, revisor hardcodeado por email,
+    # desconectado de esta ficha): acá el estado vive en la propia fila y el
+    # PDF siempre se arma desde el contenido actual, nunca una foto vieja.
+    estado: Mapped[str] = mapped_column(
+        SAEnum(EstadoInformeOMEnum, name="estado_informe_om_enum"),
+        nullable=False, server_default="borrador",
+    )
+
+    # Fusionados desde proyecto_inicio_operacion (ver docstring de la clase):
+    empresa_contratista: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fecha_energizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_inicio_operacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # [ { descripcion, responsable, fecha_compromiso, clasificacion, estado, observaciones } ]
+    pendientes = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
+    # Checklist de comisionamiento -- solo las 4 categorías con semáforo real,
+    # cada una con su propio schema Pydantic en app/schemas/informe_om.py
+    # (no dict[str, Any] suelto como el `checklist` viejo sin esquema).
+    checklist_fusion_solar = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    checklist_frontera = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    checklist_estacion_meteo = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    checklist_reconectador = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     # { objetivo, alcance_items: [] }
     objetivo_alcance = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")

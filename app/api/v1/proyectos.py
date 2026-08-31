@@ -30,6 +30,7 @@ from app.services.proyectos_backfill_unergy import sincronizar_datos_unergy_si_a
 from app.services.tsf_sync import sincronizar_ubicacion_tsf_si_aplica
 from app.services.audit import registrar_borrado
 from app.services.proyectos_backfill_solenium import sincronizar_info_tecnica_solenium_si_aplica
+from app.services.proyectos_backfill_solarview import sincronizar_project_id_solarview_si_aplica
 
 router = APIRouter(prefix="/proyectos", tags=["Proyectos"])
 
@@ -176,6 +177,7 @@ def create_proyecto(
     sincronizar_datos_unergy_si_aplica(proyecto, db)
     sincronizar_ubicacion_tsf_si_aplica(proyecto, db)
     sincronizar_info_tecnica_solenium_si_aplica(proyecto, db)
+    sincronizar_project_id_solarview_si_aplica(proyecto, db)
     return _get_proyecto_or_404(proyecto.id, db)
 
 
@@ -277,6 +279,7 @@ def confirmar_proyecto_pendiente(
     sincronizar_datos_unergy_si_aplica(proyecto, db)
     sincronizar_ubicacion_tsf_si_aplica(proyecto, db)
     sincronizar_info_tecnica_solenium_si_aplica(proyecto, db)
+    sincronizar_project_id_solarview_si_aplica(proyecto, db)
 
     if potencia_ac_kw is not None or capacidad_instalada_kwp is not None:
         it = db.query(ProyectoInfoTecnica).filter_by(proyecto_id=proyecto_id).first()
@@ -699,10 +702,11 @@ def vincular_sunfactory(
 # generacion_diaria (SÍ tiene relationship: Proyecto.generaciones, chequeada
 # abajo con el resto).
 #
-# proyecto_inicio_operacion/proyecto_informe_om (agregadas 2026-08-27, revisión
-# de esas tablas): FK en NO ACTION, no CASCADE -- el riesgo no es perder el
-# dato en silencio, sino un IntegrityError sin capturar (500 crudo) al borrar
-# un proyecto que ya tiene ficha de Inicio de Operación o Informe O&M.
+# proyecto_informe_om (agregada 2026-08-27, revisión de esa tabla; fusionó
+# con proyecto_inicio_operacion el 2026-08-31): FK en NO ACTION, no CASCADE
+# -- el riesgo no es perder el dato en silencio, sino un IntegrityError sin
+# capturar (500 crudo) al borrar un proyecto que ya tiene ficha de Puesta en
+# Marcha.
 _TABLAS_CASCADE_SIN_RELATIONSHIP = [
     ("panel_contable", "proyecto_id"),
     ("panel_consecutivo", "proyecto_id"),
@@ -710,7 +714,6 @@ _TABLAS_CASCADE_SIN_RELATIONSHIP = [
     ("clasificacion_liquidacion", "proyecto_id"),
     ("registro_conexion", "proyecto_id"),
     ("arr_documento", "proyecto_id"),
-    ("proyecto_inicio_operacion", "proyecto_id"),
     ("proyecto_informe_om", "proyecto_id"),
 ]
 
@@ -792,7 +795,7 @@ _MERGE_COMPOSITE = [
     ("proyecto_area_contacto", ["tipo"]),
 ]
 _MERGE_ONE_TO_ONE = [
-    "proyecto_info_tecnica", "proyecto_inicio_operacion", "proyecto_informe_om",
+    "proyecto_info_tecnica", "proyecto_informe_om",
 ]
 _MERGE_SCALAR_UNIQUE = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
 # Campos no-unicos que, si el ganador los tiene vacios, se rellenan con el

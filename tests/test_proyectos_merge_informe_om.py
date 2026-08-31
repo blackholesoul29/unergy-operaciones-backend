@@ -1,13 +1,9 @@
-"""merge_proyectos() -- auditoría de Proyectos 2026-08-27.
+"""merge_proyectos() -- auditoría de Proyectos 2026-08-27, actualizado 2026-08-31
+tras fusionar proyecto_inicio_operacion en proyecto_informe_om.
 
-`proyecto_informe_om` es la tabla hermana de `proyecto_inicio_operacion`
-(misma pestaña "Informe" en Costos Variables) pero se quedó fuera de
-`_MERGE_ONE_TO_ONE` cuando se agregó ese mecanismo. Con 0 filas en
-producción nunca se notó, pero el día que un proyecto con Informe O&M
-necesite fusionarse con otro, el DELETE final del perdedor reventaría
-contra el FK (NO ACTION) -- la transacción entera se revierte (no hay
-pérdida de datos), pero la fusión falla con un IntegrityError crudo en
-vez de mover el informe al ganador como ya hace proyecto_inicio_operacion.
+`proyecto_informe_om` está en `_MERGE_ONE_TO_ONE`: si un proyecto con ficha
+de Puesta en Marcha se fusiona con otro, el informe se mueve al ganador en
+vez de reventar el DELETE final del perdedor contra el FK (NO ACTION).
 """
 import pytest
 from sqlalchemy import create_engine, event, BigInteger

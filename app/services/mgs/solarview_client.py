@@ -64,6 +64,46 @@ class SolarViewClient:
                     return None
         return None
 
+    def get_availability(self) -> dict[int, dict]:
+        """Disponibilidad de toda la flota en una sola llamada, agrupada por
+        categoria (`high`/`medium`/`disconnect`) -- GET /solarview/kpis/availability/.
+
+        Mismo shape de salida que SoleniumClient.get_availability()
+        ({project_id: {name, availability, category}}) a proposito: permite
+        que un llamador (ej. alarmas de desconexion) trate ambas fuentes
+        igual sin ramas por proveedor."""
+        url = f"{self._base_url}/solarview/kpis/availability/"
+        data = self._get(url)
+        if not isinstance(data, dict):
+            return {}
+        result: dict[int, dict] = {}
+        for cat in (data.get("results") or {}).get("categories", []):
+            cat_id = cat.get("id", "unknown")
+            for item in cat.get("items", []):
+                pid = item.get("project")
+                if pid is not None:
+                    result[pid] = {
+                        "name": (item.get("name") or "").strip(),
+                        "availability": item.get("availability"),
+                        "category": cat_id,
+                    }
+        return result
+
+    def get_company_projects(self) -> list[dict]:
+        """Proyectos en operación disponibles para este cliente -- cada item
+        trae {id, name, lon, lat, plant_code, is_minifarm}. Es el listado que
+        se usa para emparejar por nombre y asignar project_id_solarview (ver
+        app/services/proyectos_backfill_solarview.py), igual que
+        SoleniumClient.get_projects() para project_id_solenium -- los dos
+        esquemas de id NO coinciden entre sí, no se puede derivar uno del otro.
+        """
+        url = f"{self._base_url}/solarview/config/company-projects/"
+        data = self._get(url)
+        if not isinstance(data, dict):
+            return []
+        results = data.get("results")
+        return results if isinstance(results, list) else []
+
     def get_generation(self, project_id: int, start_date: str, end_date: str) -> dict | None:
         url = f"{self._base_url}/solarview/measurements/generation/"
         return self._get(url, params={

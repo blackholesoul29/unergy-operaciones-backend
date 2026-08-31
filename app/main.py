@@ -1596,13 +1596,17 @@ def _scheduled_evo_forecast_ingest():
         print(f"[evo_forecast_ingest] Failed: {e}")
 
 
-_ALERTA_EMAILS = ["adhara@unergy.io", "jessica@unergy.io"]
+def _alerta_emails() -> list[str]:
+    """Destinatarios de las alertas de vencimiento (PPA y Representacion/CGM
+    comparten el mismo grupo -- ver settings.PPA_ALERT_EMAILS)."""
+    from app.jobs.ppa_expiration_checker import _parse_alert_emails
+    return _parse_alert_emails(settings.PPA_ALERT_EMAILS)
 
 
 def _scheduled_representacion_alertas():
     """
     Revisa aniversarios de contratos CGM/Representación.
-    Envía email 30 y 15 días antes del aniversario a _ALERTA_EMAILS.
+    Envía email 30 y 15 días antes del aniversario a _alerta_emails().
     Corre diariamente a las 08:00.
     """
     from datetime import date, timedelta
@@ -1723,17 +1727,18 @@ def _scheduled_representacion_alertas():
 </body>
 </html>"""
 
+                destinatarios = _alerta_emails()
                 msg = MIMEMultipart("alternative")
                 msg["Subject"] = subject
                 msg["From"] = _s.SMTP_FROM
-                msg["To"] = ", ".join(_ALERTA_EMAILS)
+                msg["To"] = ", ".join(destinatarios)
                 msg.attach(MIMEText(body_html, "html", "utf-8"))
 
                 try:
-                    _smtp_send(msg, _ALERTA_EMAILS)
+                    _smtp_send(msg, destinatarios)
                     _log_send(
-                        to_email=_ALERTA_EMAILS[0],
-                        cc=_ALERTA_EMAILS[1:],
+                        to_email=destinatarios[0],
+                        cc=destinatarios[1:],
                         subject=subject,
                         tipo="alerta_cgm",
                         success=True,
@@ -1741,8 +1746,8 @@ def _scheduled_representacion_alertas():
                     alertas_enviadas += 1
                 except Exception as exc:
                     _log_send(
-                        to_email=_ALERTA_EMAILS[0],
-                        cc=_ALERTA_EMAILS[1:],
+                        to_email=destinatarios[0],
+                        cc=destinatarios[1:],
                         subject=subject,
                         tipo="alerta_cgm",
                         success=False,

@@ -162,7 +162,7 @@ def test_envio_de_correo_exitoso_llama_a_smtp_send(db, monkeypatch):
 
     assert len(llamadas) == 1
     _, destinatarios = llamadas[0]
-    assert destinatarios == job._ALERTA_EMAILS_PPA
+    assert destinatarios == job._parse_alert_emails(job.settings.PPA_ALERT_EMAILS)
 
 
 def test_get_alerta_by_ppa_and_days_es_el_chequeo_de_idempotencia(db):
@@ -174,3 +174,63 @@ def test_get_alerta_by_ppa_and_days_es_el_chequeo_de_idempotencia(db):
     encontrada = crud_alertas.get_alerta_by_ppa_and_days(db, ppa.id, 60)
     assert encontrada is not None
     assert encontrada.days_to_expiration == 60
+
+
+def test_sin_proyecto_vinculado_avisa_por_log(db, caplog):
+    """Auditoria tabla alertas 2026-08-31: project_id NULL antes quedaba
+    completamente en silencio -- ahora se loguea para poder detectarlo."""
+    _ppa(db, dias_para_vencer=45)
+    with caplog.at_level("WARNING", logger="jobs.ppa_expiration_checker"):
+        job.check_ppa_expirations(db)
+    assert "sin ningun proyecto vinculado" in caplog.text
+
+
+# ── Endpoint /alertas/ppa-vencimiento (lectura + cambio de estado) ───────────
+
+from app.api.v1 import alertas as alertas_api  # noqa: E402
+from app.api.v1.alertas import ActualizarEstadoAlertaIn  # noqa: E402
+
+
+def test_listar_alertas_ppa_vencimiento_devuelve_lo_persistido(db):
+    ppa = _ppa(db, dias_para_vencer=45)
+    job.check_ppa_expirations(db)
+
+    resultado = alertas_api.listar_alertas_ppa_vencimiento(status=None, db=db, _=None)
+
+    assert len(resultado) == 1
+    assert resultado[0].ppa_id == ppa.id
+    assert resultado[0].days_to_expiration == 60
+    assert resultado[0].status == "new"
+
+
+def test_listar_alertas_ppa_vencimiento_filtra_por_status(db):
+    _ppa(db, dias_para_vencer=45)
+    job.check_ppa_expirations(db)
+
+    assert len(alertas_api.listar_alertas_ppa_vencimiento(status="new", db=db, _=None)) == 1
+    assert alertas_api.listar_alertas_ppa_vencimiento(status="revisada", db=db, _=None) == []
+
+
+def test_actualizar_estado_alerta_ppa_reactiva_update_alerta_status(db):
+    """crud_alertas.update_alerta_status() no tenia ningun llamador real
+    antes de este endpoint -- status quedaba congelado en 'new' para siempre."""
+    ppa = _ppa(db, dias_para_vencer=45)
+    job.check_ppa_expirations(db)
+    alerta_id = crud_alertas.get_alerta_by_ppa_and_days(db, ppa.id, 60).id
+
+    actualizada = alertas_api.actualizar_estado_alerta_ppa(
+        alerta_id, ActualizarEstadoAlertaIn(status="revisada"), db=db, _=None,
+    )
+
+    assert actualizada.status == "revisada"
+    assert crud_alertas.get_alerta_by_ppa_and_days(db, ppa.id, 60).status == "revisada"
+
+
+def test_actualizar_estado_alerta_inexistente_da_404(db):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        alertas_api.actualizar_estado_alerta_ppa(
+            999999, ActualizarEstadoAlertaIn(status="revisada"), db=db, _=None,
+        )
+    assert exc_info.value.status_code == 404

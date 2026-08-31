@@ -14,18 +14,59 @@ planta reubicada de contrato aparecía "activa en 2+ contratos a la vez".)
 """
 from datetime import date
 from collections import defaultdict
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.crud import crud_alertas
+from app.models.alerta import Alerta
 from app.models.proyectos import Proyecto
 from app.models.asic import AsicSolicitud, TipoSolicitudAsicEnum, EstadoSolicitudAsicEnum
 from app.models.cumplimiento import CumplimientoMensual
 from app.models.contratos import PPAContrato
+from app.schemas.alerta import Alerta as AlertaOut
 from app.utils.gescon_vigencia import resolver_vigencias
 
 router = APIRouter(prefix="/alertas", tags=["Alertas"])
+
+
+@router.get("/ppa-vencimiento", response_model=list[AlertaOut])
+def listar_alertas_ppa_vencimiento(
+    status: str | None = Query(None, description="Filtra por estado (ej. 'new')"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Alertas PERSISTIDAS por app/jobs/ppa_expiration_checker.py (vencimiento
+    de contratos PPA a 90/60/30 dias, tabla `alertas`) -- a diferencia de
+    /contratos-ppa y /cumplimiento-ppa de este mismo router, que se calculan
+    al vuelo en cada request y no tienen tabla propia. Hasta esta auditoria
+    (2026-08-31) la tabla se escribia pero ningun endpoint la leia."""
+    query = db.query(Alerta).order_by(Alerta.trigger_date.desc(), Alerta.id.desc())
+    if status is not None:
+        query = query.filter(Alerta.status == status)
+    return query.all()
+
+
+class ActualizarEstadoAlertaIn(BaseModel):
+    status: str
+
+
+@router.patch("/ppa-vencimiento/{alerta_id}", response_model=AlertaOut)
+def actualizar_estado_alerta_ppa(
+    alerta_id: int,
+    data: ActualizarEstadoAlertaIn,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Marca una alerta de vencimiento PPA con el estado que se le pase (ej.
+    'revisada', 'descartada') -- no hay un vocabulario cerrado de estados
+    todavia, solo 'new' se emite hoy desde el job."""
+    alerta = crud_alertas.update_alerta_status(db, alerta_id, data.status)
+    if alerta is None:
+        raise HTTPException(404, "Alerta no encontrada")
+    return alerta
 
 
 @router.get("/contratos-ppa")

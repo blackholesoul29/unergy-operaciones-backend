@@ -135,6 +135,12 @@ class Settings(BaseSettings):
     # Lista separada por comas de dias de antelacion en que se dispara una alerta
     # (ej. "90,60,30" -> alerta a 90, 60 y 30 dias del fin del contrato).
     PPA_ALERT_DAYS: str = "90,60,30"
+    # Destinatarios (separados por coma) de las alertas de vencimiento de
+    # contratos -- PPA (app/jobs/ppa_expiration_checker.py) y Representacion/CGM
+    # (app/main.py._scheduled_representacion_alertas) comparten el mismo grupo
+    # a proposito (confirmado con Sara, 2026-08-25). Antes hardcodeado por
+    # duplicado en ambos archivos.
+    PPA_ALERT_EMAILS: str = "adhara@unergy.io,jessica@unergy.io"
 
     # EVO Energy API (DailySpot + Clima via Tailscale)
     EVO_API_URL: str = ""

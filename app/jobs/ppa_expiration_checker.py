@@ -24,6 +24,7 @@ el proyecto y el correo ya funciona sin infraestructura nueva.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -38,11 +39,14 @@ from app.models.contratos import PPAContrato
 from app.schemas.alerta import AlertaCreate
 from app.services.email_service import _smtp_send, _log_send
 
+logger = logging.getLogger("jobs.ppa_expiration_checker")
+
 ALERT_TYPE_PPA_EXPIRING = "PPA_EXPIRING"
 
-# Mismos destinatarios que las alertas de vencimiento de Representacion/CGM
-# (_ALERTA_EMAILS en app/main.py) -- confirmado con Sara, 2026-08-25.
-_ALERTA_EMAILS_PPA = ["adhara@unergy.io", "jessica@unergy.io"]
+
+def _parse_alert_emails(raw: str) -> list[str]:
+    """'a@x.com, b@x.com' -> ['a@x.com', 'b@x.com']; ignora tokens vacios."""
+    return [tok.strip() for tok in (raw or "").split(",") if tok.strip()]
 
 
 def _parse_alert_days(raw: str) -> list[int]:
@@ -96,24 +100,25 @@ def _build_message(ppa: PPAContrato, project_name: Optional[str], dias: int) -> 
 def _enviar_correo(mensaje: str, dias: int) -> bool:
     """Envia la alerta por correo. Best-effort: una falla de envio NO debe
     tumbar el job -- la alerta ya quedo persistida antes de llegar aca."""
-    if not settings.SMTP_HOST:
+    destinatarios = _parse_alert_emails(settings.PPA_ALERT_EMAILS)
+    if not settings.SMTP_HOST or not destinatarios:
         return False
     subject = f"Contrato PPA por vencer en {dias} dia{'s' if dias != 1 else ''}"
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_FROM
-    msg["To"] = ", ".join(_ALERTA_EMAILS_PPA)
+    msg["To"] = ", ".join(destinatarios)
     msg.attach(MIMEText(mensaje, "plain", "utf-8"))
     try:
-        _smtp_send(msg, _ALERTA_EMAILS_PPA)
+        _smtp_send(msg, destinatarios)
         _log_send(
-            to_email=_ALERTA_EMAILS_PPA[0], cc=_ALERTA_EMAILS_PPA[1:],
+            to_email=destinatarios[0], cc=destinatarios[1:],
             subject=subject, tipo="alerta_ppa_vencimiento", success=True,
         )
         return True
     except Exception as exc:
         _log_send(
-            to_email=_ALERTA_EMAILS_PPA[0], cc=_ALERTA_EMAILS_PPA[1:],
+            to_email=destinatarios[0], cc=destinatarios[1:],
             subject=subject, tipo="alerta_ppa_vencimiento", success=False,
             error_msg=str(exc),
         )
@@ -162,6 +167,12 @@ def check_ppa_expirations(db: Optional[Session] = None) -> list[int]:
             proyectos = ppa.proyectos or []
             project_id = proyectos[0].id if proyectos else None
             project_name = proyectos[0].nombre_comercial if proyectos else None
+            if project_id is None:
+                logger.warning(
+                    "PPA %s (%s) sin ningun proyecto vinculado -- la alerta de "
+                    "vencimiento se crea con project_id=NULL",
+                    ppa.id, _ppa_label(ppa),
+                )
 
             mensaje = _build_message(ppa, project_name, dias)
             alerta = crud_alertas.create_alerta(

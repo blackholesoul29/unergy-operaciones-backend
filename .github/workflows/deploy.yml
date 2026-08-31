@@ -2,7 +2,7 @@ name: deploy
 
 on:
   push:
-    branches: [test]
+    branches: [master]
   workflow_dispatch:
     inputs:
       migrar:
@@ -26,11 +26,11 @@ jobs:
   deploy:
     # Sin tests verdes no se despliega: ni el git pull ni el build ocurren.
     needs: test
-    # `test` es la rama de produccion. La guarda es por workflow_dispatch: el
+    # `master` es la rama de produccion. La guarda es por workflow_dispatch: el
     # step despliega `github.ref_name`, asi que un dispatch con --ref otra-rama
     # publicaria esa rama en el servidor de produccion. El trigger de push ya
     # esta limitado, esto cubre el disparo a mano.
-    if: github.ref == 'refs/heads/test'
+    if: github.ref == 'refs/heads/master'
     # Runner instalado en el servidor propio (nombre `operations`, etiqueta
     # `prod`). Se pide la etiqueta y no solo `self-hosted`: esa la tiene TODO
     # runner propio, asi que un segundo runner en este repo podria robarse el

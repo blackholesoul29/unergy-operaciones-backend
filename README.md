@@ -104,8 +104,8 @@ sin reconstruir la imagen.
 
 ### Deploy automático (runner self-hosted)
 
-`.github/workflows/deploy.yml` corre en cada push a `test`, que es la rama de
-producción del servidor propio. Primero llama a
+`.github/workflows/deploy.yml` corre en cada push a `master`, la rama de
+producción. Primero llama a
 `tests.yml` como reusable workflow en un runner de GitHub: **si un test falla, el
 job `deploy` ni siquiera empieza** — no hay `git pull` ni build en el servidor.
 Con la suite verde, el job `deploy` corre en un runner instalado en el mismo

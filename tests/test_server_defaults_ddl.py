@@ -49,11 +49,10 @@ def test_los_defaults_jsonb_compilan_a_sql_valido():
     un `@compiles(JSONB, "sqlite")` propio. Con `::jsonb` el `::` se emite tal
     cual y SQLite lo rechaza con "unrecognized token".
     """
-    from app.models.mandatos import MandatoCorreo, MandatoInversionista
+    from app.models.mandatos import MandatoCorreo
 
     for modelo, esperado in (
         (MandatoCorreo, "detalle JSONB DEFAULT '{}' NOT NULL"),
-        (MandatoInversionista, "correos JSONB DEFAULT '[]' NOT NULL"),
     ):
         ddl = str(CreateTable(modelo.__table__).compile(dialect=postgresql.dialect()))
         assert esperado in ddl, f"esperaba {esperado!r} en el DDL de {modelo.__tablename__}"

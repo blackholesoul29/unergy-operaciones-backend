@@ -98,9 +98,6 @@ class GarCalculo(Base):
     base_sem_ini: Mapped[date | None] = mapped_column(Date, nullable=True)
     base_sem_fin: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    procedencia: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    discrepancias: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-
 
 class GarComponenteReal(Base):
     """Target: lo que XM publicó, por componente."""
@@ -136,6 +133,5 @@ class GarComponentePred(Base):
     cuantil: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)
     valor: Mapped[float] = mapped_column(Numeric(22, 2), nullable=False)
     modelo_version: Mapped[str] = mapped_column(String(40), nullable=False)
-    insumos: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     calculado_en: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now())

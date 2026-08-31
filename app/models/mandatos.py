@@ -21,13 +21,14 @@ class EstadoMandatoCostoEnum(str, enum.Enum):
 
 
 class MandatoInversionista(Base):
-    """Tabla maestra: inversionista → correos → proyectos."""
+    """Tabla maestra de inversionistas. El matching de correo entrante a
+    inversionista se hace solo por `nombre` (fuzzy match, ver
+    mandatos_service.match_inversionista) -- nunca se implementó una vía real
+    para asociar correos o proyectos a un inversionista de este catálogo."""
     __tablename__ = "mandato_inversionistas"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
-    correos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
-    proyectos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

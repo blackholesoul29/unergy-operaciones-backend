@@ -26,8 +26,6 @@ class MandatoActualizar(BaseModel):
 class InversionistaOut(BaseModel):
     id: int
     nombre: str
-    correos: list[str]
-    proyectos: list[str]
     activo: bool
 
     model_config = {"from_attributes": True}

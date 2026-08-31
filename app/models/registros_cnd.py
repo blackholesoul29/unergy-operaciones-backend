@@ -18,7 +18,6 @@ from sqlalchemy import (
     BigInteger, String, Boolean, Date, DateTime, Integer, Float, Text,
     ForeignKey, UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -171,8 +170,6 @@ class RegistroParametros93(Base):
     icc_estado_estable_ka: Mapped[float | None] = mapped_column(Float, nullable=True)
     in_eq_ka: Mapped[float | None] = mapped_column(Float, nullable=True)
     coef_derrateo_altura: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    # Protecciones (9.4, futuro): lista {funcion_ansi, etapa, ajuste, unidad, temporizacion_s}
-    ajustes_protecciones: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     registro: Mapped["RegistroConexion"] = relationship("RegistroConexion", back_populates="parametros_93")

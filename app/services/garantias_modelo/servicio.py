@@ -56,13 +56,12 @@ def construir_plan(db: Session, *, agente: str, esquema: str,
                 GarComponentePred.componente == _EXPOSICION,
                 GarComponentePred.horizonte_dias == HORIZONTE_FIRME)
         ).scalar()
-        procedencia = (c.procedencia or {}).get("ventana", "observada")
         base = {
             "id": _id_calculo(c),
             "estado": "firme",
             "central": None,
             "p90": float(pred) if pred is not None else None,
-            "procedencia_ventana": procedencia,
+            "procedencia_ventana": "observada",
         }
         if c.esquema == "semanal":
             semanales.append({

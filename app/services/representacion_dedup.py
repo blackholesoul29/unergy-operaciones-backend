@@ -53,8 +53,8 @@ CAMPOS = (
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
-    "tiene_cgm", "tiene_promotor", "cgm_codigo_sic", "cgm_porcentaje_fncer",
-    "cgm_tipo_asignacion", "promotor_tarifa", "promotor_condiciones",
+    "tiene_cgm", "cgm_codigo_sic", "cgm_porcentaje_fncer",
+    "cgm_tipo_asignacion",
     "rec_cantidad", "rec_precio_unitario", "rec_vintage", "responsable_iva",
 )
 
@@ -62,7 +62,7 @@ CAMPOS = (
 # 'vigente' y los booleanos en False sin que nadie lo haya decidido, asi que una
 # diferencia ahi no es un conflicto real que deba bloquear la fusion.
 CAMPOS_BLANDOS = frozenset({
-    "estado", "tiene_cgm", "tiene_promotor", "responsable_iva",
+    "estado", "tiene_cgm", "responsable_iva",
 })
 
 

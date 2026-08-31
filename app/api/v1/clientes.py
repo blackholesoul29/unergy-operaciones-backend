@@ -604,8 +604,6 @@ def list_client_servicios_contratos(
             return _num(c.tarifa_representacion)
         if serv == "cgm":
             return _num(c.tarifa_cgm)
-        if serv == "promotor":
-            return _num(c.promotor_tarifa)
         return _num(c.tarifa_base)
 
     grupos: dict[str, list] = defaultdict(list)

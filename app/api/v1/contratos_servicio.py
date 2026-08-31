@@ -3,13 +3,14 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models.contratos import ContratoServicio, PagoServicio
+from app.models.contratos import ContratoServicio, PagoServicio, ContratoFactura
 from app.models.clientes import Cliente
 from app.models.fronteras import Frontera
 from app.schemas.contratos_servicio import (
     ContratoServicioCreate, ContratoServicioUpdate, ContratoServicioOut,
     PagoServicioCreate, PagoServicioUpdate, PagoServicioOut,
-    ImportarIndexacionEntry, FilaFactura,
+    ImportarIndexacionEntry,
+    ContratoFacturaCreate, ContratoFacturaUpdate, ContratoFacturaOut,
 )
 from app.utils.proyecto_matching import find_proyecto_by_name
 from app.utils.nombre_matching import mejor_candidato, core_tokens
@@ -354,33 +355,68 @@ def delete_contrato(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
 
 # ── Facturas Solenium / Inversionistas ────────────────────────────────────────
+# Reemplaza los JSONB facturas_solenium/facturas_inversionistas (auditoria de
+# "JSON suelto" 2026-08-30) -- mismo patron CRUD que /pagos.
 
-@router.patch("/{id}/facturas-solenium", response_model=ContratoServicioOut)
-def update_facturas_solenium(
+@router.get("/{id}/facturas", response_model=list[ContratoFacturaOut])
+def list_facturas(
     id: int,
-    facturas: list[FilaFactura] = Body(...),
+    tipo: str | None = Query(None, description="'solenium' o 'inversionista'"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    contrato = _get_or_404(id, db)
-    contrato.facturas_solenium = [f.model_dump() for f in facturas]
-    flag_modified(contrato, "facturas_solenium")
-    db.commit()
-    return _get_or_404(id, db)
+    _get_or_404(id, db)
+    q = db.query(ContratoFactura).filter(ContratoFactura.contrato_id == id)
+    if tipo:
+        q = q.filter(ContratoFactura.tipo == tipo)
+    return q.order_by(ContratoFactura.fecha.desc()).all()
 
 
-@router.patch("/{id}/facturas-inversionistas", response_model=ContratoServicioOut)
-def update_facturas_inversionistas(
+@router.post("/{id}/facturas", response_model=ContratoFacturaOut, status_code=201)
+def create_factura(
     id: int,
-    facturas: list[FilaFactura] = Body(...),
+    data: ContratoFacturaCreate,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    contrato = _get_or_404(id, db)
-    contrato.facturas_inversionistas = [f.model_dump() for f in facturas]
-    flag_modified(contrato, "facturas_inversionistas")
+    _get_or_404(id, db)
+    factura = ContratoFactura(contrato_id=id, **data.model_dump())
+    db.add(factura)
     db.commit()
-    return _get_or_404(id, db)
+    db.refresh(factura)
+    return factura
+
+
+@router.patch("/{id}/facturas/{factura_id}", response_model=ContratoFacturaOut)
+def update_factura(
+    id: int,
+    factura_id: int,
+    data: ContratoFacturaUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    factura = db.query(ContratoFactura).filter(ContratoFactura.id == factura_id, ContratoFactura.contrato_id == id).first()
+    if not factura:
+        raise HTTPException(404, "Factura no encontrada")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(factura, k, v)
+    db.commit()
+    db.refresh(factura)
+    return factura
+
+
+@router.delete("/{id}/facturas/{factura_id}", status_code=204)
+def delete_factura(
+    id: int,
+    factura_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    factura = db.query(ContratoFactura).filter(ContratoFactura.id == factura_id, ContratoFactura.contrato_id == id).first()
+    if not factura:
+        raise HTTPException(404, "Factura no encontrada")
+    db.delete(factura)
+    db.commit()
 
 
 # ── Pagos de servicio ──────────────────────────────────────────────────────────

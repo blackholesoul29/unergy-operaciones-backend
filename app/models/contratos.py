@@ -104,8 +104,6 @@ class ContratoServicio(Base):
     tarifa_mensual: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     indexacion_anual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     indexacion_mensual: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    facturas_solenium: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    facturas_inversionistas: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Campos específicos de contratos CGM / Representación
     inversionista_nombre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     portafolio: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -124,6 +122,7 @@ class ContratoServicio(Base):
     prestador: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[prestador_id])
     inversionista: Mapped[Optional["Cliente"]] = relationship("Cliente", foreign_keys=[inversionista_id])
     pagos: Mapped[list["PagoServicio"]] = relationship("PagoServicio", back_populates="contrato", cascade="all, delete-orphan")
+    facturas: Mapped[list["ContratoFactura"]] = relationship("ContratoFactura", back_populates="contrato", cascade="all, delete-orphan")
     # Puntos de medida especificos que cubre este contrato -- proyecto_id
     # vincula al proyecto completo, esto permite granularidad cuando dos
     # contratos (ej. operacion y representacion) aplican a fronteras
@@ -442,5 +441,36 @@ class PagoServicio(Base):
         CheckConstraint("mes >= 1 AND mes <= 12", name="ck_pago_servicio_mes_rango"),
         UniqueConstraint("contrato_id", "mes", "año", name="uq_pago_servicio_contrato_periodo"),
     )
+
+
+class TipoFacturaEnum(str, enum.Enum):
+    solenium = "solenium"
+    inversionista = "inversionista"
+
+
+class ContratoFactura(Base):
+    """Reemplaza los JSONB facturas_solenium/facturas_inversionistas de
+    ContratoServicio (auditoria de "JSON suelto" 2026-08-30) -- eran listas de
+    dicts de forma fija, el antipatron clasico de tabla disfrazada de JSON.
+    `fecha` se conserva como texto "YYYY-MM" (no Date) para no tener que
+    reescribir el filtrado por año/mes del frontend, que ya trabaja con ese
+    formato."""
+    __tablename__ = "contrato_factura"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    contrato_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("contratos_servicio.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(SAEnum(TipoFacturaEnum, name="tipo_factura_enum"), nullable=False)
+    fecha: Mapped[str] = mapped_column(String(7), nullable=False)
+    # Solo aplica a tipo='inversionista' -- a quien se le factura. En
+    # 'solenium' siempre es null (le factura Solenium a Unergy, no hay
+    # inversionista de por medio).
+    inversionista: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    numero_factura: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    monto: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    enlace_soporte: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contrato: Mapped["ContratoServicio"] = relationship("ContratoServicio", back_populates="facturas")
 
 

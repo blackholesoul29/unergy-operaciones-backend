@@ -20,13 +20,33 @@ class FilaIndexacionCGM(BaseModel):
     esBase: Optional[bool] = None
 
 
-class FilaFactura(BaseModel):
-    id: str                               # ID generado en cliente (str timestamp)
+class ContratoFacturaCreate(BaseModel):
+    tipo: str                             # 'solenium' | 'inversionista'
     fecha: str                            # formato YYYY-MM
     inversionista: Optional[str] = None
     numero_factura: Optional[str] = None
     monto: Optional[float] = None
     enlace_soporte: Optional[str] = None
+
+
+class ContratoFacturaUpdate(BaseModel):
+    fecha: Optional[str] = None
+    inversionista: Optional[str] = None
+    numero_factura: Optional[str] = None
+    monto: Optional[float] = None
+    enlace_soporte: Optional[str] = None
+
+
+class ContratoFacturaOut(BaseModel):
+    id: int
+    contrato_id: int
+    tipo: str
+    fecha: str
+    inversionista: Optional[str] = None
+    numero_factura: Optional[str] = None
+    monto: Optional[float] = None
+    enlace_soporte: Optional[str] = None
+    model_config = {"from_attributes": True}
 
 
 class ImportarIndexacionEntry(BaseModel):

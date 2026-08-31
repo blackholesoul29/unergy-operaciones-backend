@@ -26,22 +26,76 @@ jobs:
   deploy:
     # Sin tests verdes no se despliega: ni el git pull ni el build ocurren.
     needs: test
-    # Runner instalado en el servidor propio. No hay `checkout`: el repo ya vive
-    # en DEPLOY_DIR con su .env, sus uploads y su historia git — de esa historia
-    # sale el diff que decide si hay que migrar.
-    runs-on: self-hosted
+    # `test` es la rama de produccion. La guarda es por workflow_dispatch: el
+    # step despliega `github.ref_name`, asi que un dispatch con --ref otra-rama
+    # publicaria esa rama en el servidor de produccion. El trigger de push ya
+    # esta limitado, esto cubre el disparo a mano.
+    if: github.ref == 'refs/heads/test'
+    # Runner instalado en el servidor propio (nombre `operations`, etiqueta
+    # `prod`). Se pide la etiqueta y no solo `self-hosted`: esa la tiene TODO
+    # runner propio, asi que un segundo runner en este repo podria robarse el
+    # job. No hay `checkout`: el repo ya vive en DEPLOY_DIR con su .env, sus
+    # uploads y su historia git — de esa historia sale el diff que decide si
+    # hay que migrar.
+    runs-on: [self-hosted, prod]
     steps:
+      # El .env del servidor se REESCRIBE desde el secret ENV_FILE en cada
+      # deploy: la configuracion se cambia en GitHub, no entrando por SSH.
+      # Consecuencia: editarlo a mano en el servidor no sirve de nada, el
+      # proximo deploy lo pisa. Un solo secret con el archivo entero (y no 60
+      # sueltos) para que agregar una variable no obligue a tocar el workflow.
+      #
+      # El contenido del secret es el `.env.prod` local, que NO va al repo:
+      #   gh secret set ENV_FILE < .env.prod
+      - name: Escribir .env
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_DIR"
+          umask 077                      # 600: solo el usuario del runner lo lee
+
+          # Los tres guardas existen porque el modo de fallo es CARO: con un
+          # .env vacio o truncado, la app arranca con los defaults de
+          # app/core/config.py -> apunta a postgres:postgres@localhost y
+          # `migrate` corre init_db.py (create_all + seed) contra lo que
+          # encuentre ahi. Mejor abortar el deploy.
+          if [ -z "${ENV_FILE:-}" ]; then
+              echo "::error::falta el secret ENV_FILE. Crealo con: gh secret set ENV_FILE < .env.prod"
+              exit 1
+          fi
+          printf '%s' "$ENV_FILE" > .env.nuevo
+          for requerida in SECRET_KEY IMAGE; do
+              grep -qE "^${requerida}=." .env.nuevo || {
+                  echo "::error::ENV_FILE no trae ${requerida} con valor"; exit 1; }
+          done
+          grep -qE '^(DATABASE_URL=.|POSTGRES_DB=.)' .env.nuevo || {
+              echo "::error::ENV_FILE no trae ni DATABASE_URL ni POSTGRES_DB"; exit 1; }
+
+          # Copia del anterior antes de pisarlo: si el secret quedo mal, el
+          # rollback es `cp .env.anterior .env` sin buscar el valor bueno.
+          # Con `if` y no `[ -f .env ] && cp ...`: bajo `set -e`, ese && falla el
+          # step entero la primera vez, cuando todavia no hay .env.
+          if [ -f .env ]; then cp -p .env .env.anterior; fi
+          mv .env.nuevo .env
+          chmod 600 .env
+          echo "$(grep -cE '^[A-Z]' .env) variables escritas en $DEPLOY_DIR/.env"
+
       - name: git pull + docker compose
         env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/srv/unergy-operaciones-backend' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
           MIGRAR: ${{ inputs.migrar || 'auto' }}
+          # La rama que disparo el workflow, no `master` fijo: asi cambiar el
+          # trigger de arriba no deja el servidor desplegando otra rama.
+          RAMA: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"
 
           antes=$(git rev-parse HEAD)
-          git fetch --prune origin master
-          git reset --hard origin/master
+          git fetch --prune origin "$RAMA"
+          git reset --hard "origin/$RAMA"
           despues=$(git rev-parse HEAD)
           cambios=$(git diff --name-only "$antes" "$despues")
           echo "$antes -> $despues"
@@ -78,7 +132,7 @@ jobs:
 
       - name: Esperar healthy
         env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/srv/unergy-operaciones-backend' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"

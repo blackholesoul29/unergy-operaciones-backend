@@ -2,7 +2,8 @@
 
 Backend FastAPI de la plataforma de Operaciones de Unergy. Base de datos `operations`
 en PostgreSQL, externa al despliegue (`POSTGRES_*`/`PG_*` en el `.env`). Se despliega con
-`docker compose up -d --build` en el servidor; cómo se construye está en `README.md`.
+`docker compose up -d --build` en el servidor, y automáticamente en cada push a la
+rama **`test`** (la de producción, no `master`). Cómo se construye: `README.md`.
 
 ## Por dónde empezar según la tarea
 

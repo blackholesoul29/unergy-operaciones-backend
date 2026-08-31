@@ -104,13 +104,36 @@ sin reconstruir la imagen.
 
 ### Deploy automático (runner self-hosted)
 
-`.github/workflows/deploy.yml` corre en cada push a `master`. Primero llama a
+`.github/workflows/deploy.yml` corre en cada push a `test`, que es la rama de
+producción del servidor propio. Primero llama a
 `tests.yml` como reusable workflow en un runner de GitHub: **si un test falla, el
 job `deploy` ni siquiera empieza** — no hay `git pull` ni build en el servidor.
 Con la suite verde, el job `deploy` corre en un runner instalado en el mismo
 servidor. No hace `checkout`: entra a `DEPLOY_DIR` (variable
-de repo, default `/srv/unergy-operaciones-backend`), hace `git reset --hard
-origin/master` y usa el diff entre el HEAD viejo y el nuevo para decidir.
+de repo, hoy `/home/originabot/unergy-operaciones-backend`), hace
+`git reset --hard origin/<rama>` y usa el diff entre el HEAD viejo y el nuevo
+para decidir.
+
+**El `.env` del servidor se reescribe en cada deploy** desde el secret
+`ENV_FILE`, así que la configuración se cambia en GitHub y no entrando por SSH.
+Corolario: editarlo a mano en el servidor no sirve, el próximo deploy lo pisa.
+
+Para crearlo o actualizarlo, con el `.env` bueno en la mano:
+
+```bash
+gh secret set ENV_FILE < .env.prod    # el archivo completo, en un solo secret
+```
+
+`.env.prod` es la copia de la configuración de producción; vive en local (o en el
+gestor de secretos que usen), nunca en el repo — `.gitignore` bloquea todo
+`.env.*` salvo `.env.example`. El `.env` de la raíz sigue siendo el de desarrollo.
+
+Un solo secret en vez de 60 sueltos: agregar una variable no obliga a tocar el
+workflow. Antes de escribirlo, el step exige que traiga `SECRET_KEY`, `IMAGE` y
+alguna de `DATABASE_URL`/`POSTGRES_DB`, y aborta el deploy si no — con un `.env`
+vacío la app arrancaría con los defaults de `app/core/config.py`, apuntando a
+`postgres:postgres@localhost`, y `migrate` sembraría ahí. El `.env` anterior queda
+en `.env.anterior` por si el secret quedó mal.
 
 `migrate` **no** se levanta en todos los deploys. Corre si:
 

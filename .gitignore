@@ -1,4 +1,9 @@
+# Todos los .env quedan fuera (.env, .env.prod, .env.test...): el unico que se
+# commitea es el ejemplo sin valores. `.env.prod` es el que se sube a los
+# ambientes (gh secret set ENV_FILE < .env.prod), no al repo.
 .env
+.env.*
+!.env.example
 .claude/
 __pycache__/
 *.pyc

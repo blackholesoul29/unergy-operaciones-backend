@@ -110,7 +110,7 @@ producción del servidor propio. Primero llama a
 job `deploy` ni siquiera empieza** — no hay `git pull` ni build en el servidor.
 Con la suite verde, el job `deploy` corre en un runner instalado en el mismo
 servidor. No hace `checkout`: entra a `DEPLOY_DIR` (variable
-de repo, hoy `/home/originabot/unergy-operaciones-backend`), hace
+de repo, hoy `/home/originabot/unergy-operations/unergy-operaciones-backend`), hace
 `git reset --hard origin/<rama>` y usa el diff entre el HEAD viejo y el nuevo
 para decidir.
 

@@ -49,7 +49,7 @@ jobs:
       #   gh secret set ENV_FILE < .env.prod
       - name: Escribir .env
         env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operations/unergy-operaciones-backend' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
           set -euo pipefail
@@ -84,7 +84,7 @@ jobs:
 
       - name: git pull + docker compose
         env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operations/unergy-operaciones-backend' }}
           MIGRAR: ${{ inputs.migrar || 'auto' }}
           # La rama que disparo el workflow, no `master` fijo: asi cambiar el
           # trigger de arriba no deja el servidor desplegando otra rama.
@@ -132,7 +132,7 @@ jobs:
 
       - name: Esperar healthy
         env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operaciones-backend' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operations/unergy-operaciones-backend' }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"

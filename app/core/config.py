@@ -1,4 +1,6 @@
-from pydantic import field_validator
+from urllib.parse import quote_plus
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +12,26 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:5173"
 
-    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/operaciones"
+    # Credenciales de la base en piezas, como el resto de los servicios de la
+    # casa (originabot). Es la forma preferida: se leen mejor en el .env y rotar
+    # la contraseña no obliga a rearmar una URL a mano.
+    POSTGRES_DB: str = "operaciones"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    PG_HOST: str = "localhost"
+    PG_PORT: int = 5432
+
+    # Si se define, GANA sobre las piezas de arriba. Sirve para las URLs que
+    # entregan los proveedores gestionados de un solo pegue (y es lo que estaba
+    # antes, asi que los .env viejos siguen funcionando sin tocarlos).
+    DATABASE_URL: str = ""
+
+    # Bases de OTROS servicios de Unergy, solo lectura, para el mapa
+    # (`app/api/v1/mapa.py`). Vacias = ese endpoint responde sin esos datos.
+    # Estaban en el .env y en el codigo, pero no declaradas aca: `settings.
+    # ORIGINA_DATABASE_URL` lanzaba AttributeError y /mapa/* devolvia 500.
+    ORIGINA_DATABASE_URL: str = ""
+    REQUESTSDB_DATABASE_URL: str = ""
 
     SECRET_KEY: str = ""
     JWT_EXPIRE_MINUTES: int = 480
@@ -158,10 +179,25 @@ class Settings(BaseSettings):
     MANDATOS_IMAP_USER_2: str = ""
     MANDATOS_IMAP_PASSWORD_2: str = ""
 
+    @model_validator(mode="after")
+    def armar_database_url(self):
+        # Sin DATABASE_URL, la URL se arma con las piezas POSTGRES_*/PG_*. Se
+        # hace aca y no en cada consumidor para que la app, Alembic y los
+        # scripts vean exactamente la misma cadena.
+        if not self.DATABASE_URL:
+            usuario = quote_plus(self.POSTGRES_USER)
+            clave = quote_plus(self.POSTGRES_PASSWORD)
+            self.DATABASE_URL = (
+                f"postgresql+psycopg://{usuario}:{clave}"
+                f"@{self.PG_HOST}:{self.PG_PORT}/{self.POSTGRES_DB}"
+            )
+        return self
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_db_url(cls, v: str) -> str:
-        # Railway entrega postgres:// o postgresql://, psycopg3 necesita postgresql+psycopg://
+        # Los proveedores gestionados entregan postgres:// o postgresql://,
+        # psycopg3 necesita postgresql+psycopg://
         if v.startswith("postgres://"):
             return v.replace("postgres://", "postgresql+psycopg://", 1)
         if v.startswith("postgresql://") and "+psycopg" not in v:

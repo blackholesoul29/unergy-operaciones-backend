@@ -1,4 +1,3 @@
-import os
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
@@ -8,18 +7,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override sqlalchemy.url from environment if available
-db_url = os.getenv("DATABASE_URL")
-if not db_url:
-    pg_user = os.getenv("POSTGRES_USER")
-    pg_pass = os.getenv("POSTGRES_PASSWORD")
-    pg_host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-    pg_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "5432")
-    pg_db   = os.getenv("POSTGRES_DB")
-    if pg_user and pg_pass and pg_host and pg_db:
-        db_url = f"postgresql+psycopg://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+# La URL sale de Settings, no de alembic.ini: ahi vive el armado a partir de
+# POSTGRES_*/PG_* y la normalizacion a postgresql+psycopg://. Antes esto tenia su
+# propia copia del armado (con las variables RAILWAY_TCP_PROXY_*), y una copia de
+# esa logica es justo lo que hace que Alembic apunte a otra base que la app.
+from app.core.config import settings  # noqa: E402
+
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 from app.models import Base  # noqa: E402 — must import after path setup
 target_metadata = Base.metadata

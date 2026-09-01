@@ -166,6 +166,20 @@ def test_auto_create_si_crea_para_alarma_de_otro_tipo(db, base):
     assert len(fallas) == 2
 
 
+def test_auto_create_codigo_interno_usa_el_id_real_asignado(db, base):
+    """Regresión: antes, codigo_interno se armaba con MAX(id)+1 calculado
+    ANTES del insert -- si dos fallas se creaban casi al mismo tiempo, ambas
+    podían calcular el mismo número y chocar contra el unique=True de
+    codigo_interno. El fix inserta con un placeholder, deja que la BD asigne
+    el id real (RETURNING), y recién ahí arma el código -- igual que
+    create_falla() en api/v1/fallas.py (auditoría 2026-09-02)."""
+    _auto_create_fallas(db, [(_alarm(AlarmType.PLANTA_CAIDA), 1)])
+
+    falla = db.query(Falla).filter(Falla.proyecto_id == 10).one()
+    assert falla.codigo_interno == f"FAL-{HOY.year}-{falla.id:05d}"
+    assert not falla.codigo_interno.startswith("TMP-")
+
+
 def test_auto_close_cierra_pese_a_descripcion_editada(db, base):
     """Regresión: antes del fix, _auto_close_fallas buscaba '[PLANTA_CAIDA]'
     en descripcion para saber qué falla cerrar tras una RECUPERACION -- si

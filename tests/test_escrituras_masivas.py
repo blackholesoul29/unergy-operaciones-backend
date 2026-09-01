@@ -51,6 +51,16 @@ INVENTARIO_CONOCIDO: dict[tuple[str, str], tuple[int, str]] = {
     ("app/main.py", "fallas"): (1, "tipo_migration; el bug del 2026-08-27 salió de acá"),
     ("app/main.py", "contratos_servicio"): (1, "cgm_seed repara proyecto_id cuando está NULL"),
     ("app/services/tsf_sync.py", "proyectos"): (1, "sync TSF: COALESCE masivo sobre la ficha"),
+
+    # ── Auto-creación de fallas por el motor MGS ─────────────────────────────
+    # No es una escritura masiva sobre filas viejas -- es un UPDATE de una sola
+    # fila, la que se acaba de insertar en la misma llamada, para ponerle su
+    # codigo_interno real una vez que la BD le asignó el id (mismo patrón que
+    # create_falla() en api/v1/fallas.py, que sí escribe por objeto ORM y por
+    # eso no aparece acá). Reemplazó a un cálculo de MAX(id)+1 hecho ANTES del
+    # insert, que podía chocar si dos fallas se creaban casi al mismo tiempo
+    # (auditoría 2026-09-02).
+    ("app/services/mgs/scheduler.py", "fallas"): (1, "_auto_create_fallas: renombra codigo_interno tras el INSERT con el id real"),
 }
 
 

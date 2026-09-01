@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import func, extract
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -228,6 +229,25 @@ def _get_or_404(id: int, db: Session) -> Falla:
     if not falla:
         raise HTTPException(404, "Falla no encontrada")
     return falla
+
+
+def _integrity_error_a_http(e: IntegrityError) -> HTTPException:
+    """Traduce un IntegrityError crudo de la BD a un error HTTP legible.
+
+    Antes, un codigo_legado repetido o un FK inexistente (proyecto_id,
+    tipo_id, estado_id, prioridad_id, resolucion_id, asignado_a_id) volaba
+    hasta el cliente como un 500 de Postgres sin mensaje claro -- ya
+    documentado como deuda conocida en docs/API_FALLAS.md para los
+    integradores externos de la API. Detecta el tipo de violación por texto
+    del mensaje (portable entre Postgres y SQLite, útil para tests) en vez
+    de por nombre de constraint (auditoría 2026-09-02)."""
+    mensaje = str(e).lower()
+    if "codigo_legado" in mensaje:
+        return HTTPException(409, "Ya existe una falla con ese codigo_legado (llave de idempotencia duplicada)")
+    if "foreign key" in mensaje:
+        return HTTPException(422, "Uno de los IDs enviados (proyecto_id/tipo_id/estado_id/prioridad_id/"
+                                   "resolucion_id/asignado_a_id) no existe")
+    return HTTPException(422, "No se pudo guardar la falla: violación de integridad en los datos enviados")
 
 
 def _sincronizar_resolucion(falla: Falla, nuevo_estado: "FallaCatEstado | None") -> None:
@@ -743,7 +763,11 @@ def create_falla(
         fotos_urls=fotos if fotos else None,
     )
     db.add(falla)
-    db.flush()  # asigna falla.id por autoincremento (evita colisiones de código)
+    try:
+        db.flush()  # asigna falla.id por autoincremento (evita colisiones de código)
+    except IntegrityError as e:
+        db.rollback()
+        raise _integrity_error_a_http(e)
     falla.codigo_interno = f"FAL-{datetime.now(timezone.utc).year}-{falla.id:05d}"
     _sync_intervalos(falla, intervalos, db)
     if categoria_codigo:
@@ -1148,7 +1172,11 @@ def update_falla(
         nuevo_estado = db.get(FallaCatEstado, dump["estado_id"])
         _sincronizar_resolucion(falla, nuevo_estado)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise _integrity_error_a_http(e)
 
     if notificar_asignacion:
         from app.api.v1.notificaciones import crear_notificacion

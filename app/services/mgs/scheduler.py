@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import asdict
 from datetime import datetime
 from threading import Thread
@@ -367,11 +368,6 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 logger.warning("Missing falla catalog data — cannot auto-create falla for alarm %d", alarm_db_id)
                 continue
 
-            # Generate codigo_interno
-            max_id = db.execute(text("SELECT COALESCE(MAX(id), 0) FROM fallas")).scalar()
-            year = alarm.timestamp.year
-            codigo = f"FAL-{year}-{max_id + 1:05d}"
-
             # Find the first admin/operaciones user as registrado_por
             registrado_por = db.execute(text(
                 "SELECT id FROM usuarios WHERE activo = TRUE AND rol IN ('admin', 'operaciones') ORDER BY id LIMIT 1"
@@ -388,7 +384,15 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
             # Set SLA based on severity
             sla_hours = 8 if alarm.severity == Severity.CRITICAL else 24
 
-            db.execute(text("""
+            # codigo_interno: placeholder -> INSERT -> renombrar con el id real
+            # asignado por la BD (RETURNING id), igual que create_falla() en
+            # api/v1/fallas.py. Antes se adivinaba con MAX(id)+1 calculado
+            # ANTES del insert -- si dos fallas se crean casi al mismo tiempo,
+            # ambas podian calcular el mismo numero y chocar contra el
+            # unique=True de codigo_interno, tumbando el INSERT entero
+            # (auditoria 2026-09-02).
+            placeholder = f"TMP-{uuid.uuid4().hex[:12]}"
+            nuevo_id = db.execute(text("""
                 INSERT INTO fallas
                     (codigo_interno, proyecto_id, tipo_id, estado_id, prioridad_id,
                      registrado_por_id, descripcion, fecha_identificacion,
@@ -396,8 +400,9 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 VALUES
                     (:codigo, :pid, :tipo_id, :estado_id, :prioridad_id,
                      :reg_id, :desc, :fecha, :sla, :alarm_id, 'MGS_AUTO')
+                RETURNING id
             """), {
-                "codigo": codigo,
+                "codigo": placeholder,
                 "pid": proyecto_id,
                 "tipo_id": tipo_row["id"],
                 "estado_id": estado_row["id"],
@@ -407,7 +412,11 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 "fecha": alarm.timestamp.date(),
                 "sla": sla_hours,
                 "alarm_id": alarm_db_id,
-            })
+            }).scalar()
+
+            codigo = f"FAL-{alarm.timestamp.year}-{nuevo_id:05d}"
+            db.execute(text("UPDATE fallas SET codigo_interno = :codigo WHERE id = :id"),
+                       {"codigo": codigo, "id": nuevo_id})
             db.commit()
             logger.info("Auto-created falla %s for alarm %d (%s — %s)",
                         codigo, alarm_db_id, alarm.proyecto_nombre, alarm.alarm_type.value)

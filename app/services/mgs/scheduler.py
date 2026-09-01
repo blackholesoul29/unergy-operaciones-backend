@@ -8,7 +8,7 @@ from datetime import datetime
 from threading import Thread
 
 import pytz
-from sqlalchemy import or_, text
+from sqlalchemy import bindparam, text
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -314,19 +314,25 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
         try:
             proyecto_id = alarm.proyecto_id
 
-            # Check for existing open falla with same alarm_type for this project
+            # Check for existing open falla with same alarm_type for this project.
+            # Se compara contra alarmas_monitoreo.alarm_type (la alarma original
+            # que la creó, vía alarma_monitoreo_id) en vez de parsear el prefijo
+            # "[TIPO] ..." de descripcion -- si alguien edita la descripcion a
+            # mano (soportado por PATCH /fallas/{id}), el match por ILIKE se
+            # rompe en silencio y este guard dejaba de encontrar la falla
+            # abierta, creando duplicados (auditoría 2026-09-01).
             existing = db.execute(text("""
                 SELECT f.id FROM fallas f
                 JOIN fallas_cat_estados e ON f.estado_id = e.id
+                JOIN alarmas_monitoreo am ON am.id = f.alarma_monitoreo_id
                 WHERE f.proyecto_id = :pid
-                  AND f.alarma_monitoreo_id IS NOT NULL
                   AND e.es_estado_final = FALSE
                   AND f.deleted_at IS NULL
-                  AND f.descripcion ILIKE :alarm_pattern
+                  AND am.alarm_type = :alarm_type
                 LIMIT 1
             """), {
                 "pid": proyecto_id,
-                "alarm_pattern": f"%{alarm.alarm_type.value}%",
+                "alarm_type": alarm.alarm_type.value,
             }).mappings().first()
 
             if existing:
@@ -415,8 +421,13 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
     de NO_DATA/ERROR a OK/WARNING) -- NO significa "ya está generando
     normal", así que NO toca las fallas de SIN_GENERACION (conectado pero
     sin generar, ej. un inversor dañado): esas requieren su propia
-    verificación y deben seguir abiertas. Se identifican por el mismo prefijo
-    que ya usa _auto_create_fallas al crearlas (descripcion = "[TIPO] ...").
+    verificación y deben seguir abiertas. Se identifican por el alarm_type de
+    la alarma original que las creó (alarmas_monitoreo, vía
+    Falla.alarma_monitoreo_id) -- NO por el prefijo "[TIPO] ..." que
+    _auto_create_fallas escribe en descripcion, porque ese texto es editable
+    a mano (PATCH /fallas/{id}) y si alguien lo borra, el match por ILIKE
+    dejaba la falla abierta para siempre pese a que el sistema sí detectó la
+    recuperación (auditoría 2026-09-01).
     Se cierran (no se borran ni se ocultan): quedan con una nota automática,
     editable -- el correo automático a los contactos operacionales del
     cliente se apagó 2026-09-01 (mismo criterio que el envío por alarma
@@ -435,18 +446,21 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
             continue
 
         try:
-            filtro_tipo = or_(*[
-                Falla.descripcion.ilike(f"%[{t.value}]%") for t in _TIPOS_CONECTIVIDAD
-            ])
+            ids_conectividad = db.execute(
+                text("SELECT id FROM alarmas_monitoreo WHERE alarm_type IN :tipos").bindparams(
+                    bindparam("tipos", expanding=True)
+                ),
+                {"tipos": [t.value for t in _TIPOS_CONECTIVIDAD]},
+            ).scalars().all()
+
             abiertas = (
                 db.query(Falla)
                 .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
                 .filter(
                     Falla.proyecto_id == alarm.proyecto_id,
-                    Falla.alarma_monitoreo_id.isnot(None),
+                    Falla.alarma_monitoreo_id.in_(ids_conectividad),
                     FallaCatEstado.es_estado_final.is_(False),
                     Falla.deleted_at.is_(None),
-                    filtro_tipo,
                 )
                 .all()
             )

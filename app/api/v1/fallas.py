@@ -234,16 +234,19 @@ def _get_or_404(id: int, db: Session) -> Falla:
 def _integrity_error_a_http(e: IntegrityError) -> HTTPException:
     """Traduce un IntegrityError crudo de la BD a un error HTTP legible.
 
-    Antes, un codigo_legado repetido o un FK inexistente (proyecto_id,
-    tipo_id, estado_id, prioridad_id, resolucion_id, asignado_a_id) volaba
-    hasta el cliente como un 500 de Postgres sin mensaje claro -- ya
-    documentado como deuda conocida en docs/API_FALLAS.md para los
-    integradores externos de la API. Detecta el tipo de violación por texto
-    del mensaje (portable entre Postgres y SQLite, útil para tests) en vez
-    de por nombre de constraint (auditoría 2026-09-02)."""
+    Antes, un FK inexistente (proyecto_id, tipo_id, estado_id, prioridad_id,
+    resolucion_id, asignado_a_id) volaba hasta el cliente como un 500 de
+    Postgres sin mensaje claro -- ya documentado como deuda conocida en
+    docs/API_FALLAS.md para los integradores externos de la API. Detecta el
+    tipo de violación por texto del mensaje (portable entre Postgres y
+    SQLite, útil para tests) en vez de por nombre de constraint (auditoría
+    2026-09-02).
+
+    codigo_legado se eliminó (auditoría 2026-09-02, era la llave de
+    idempotencia de una migración puntual desde Apps Script; sin evidencia
+    de uso activo hoy) -- si vuelve a existir un campo de idempotencia,
+    agregar su rama acá de nuevo."""
     mensaje = str(e).lower()
-    if "codigo_legado" in mensaje:
-        return HTTPException(409, "Ya existe una falla con ese codigo_legado (llave de idempotencia duplicada)")
     if "foreign key" in mensaje:
         return HTTPException(422, "Uno de los IDs enviados (proyecto_id/tipo_id/estado_id/prioridad_id/"
                                    "resolucion_id/asignado_a_id) no existe")
@@ -586,7 +589,6 @@ def list_fallas(
     proyecto_id: int | None = None,
     cliente_id: int | None = None,
     asignado_a_id: int | None = None,
-    codigo_legado: str | None = None,
     solo_alerta: bool = False,
     solo_activas: bool = False,
     activa_en_fecha: date | None = None,
@@ -634,8 +636,6 @@ def list_fallas(
         query = query.filter(Falla.proyecto_id.in_(client_project_ids))
     if asignado_a_id:
         query = query.filter(Falla.asignado_a_id == asignado_a_id)
-    if codigo_legado:
-        query = query.filter(Falla.codigo_legado == codigo_legado)
     if activa_en_fecha:
         # "Activa a la fecha X" (no "activa ahora mismo") -- para mostrar,
         # en el detalle de un día ya clasificado, las fallas que estaban

@@ -1,12 +1,16 @@
 """POST/PATCH /fallas -- errores de integridad legibles en vez de un 500 crudo.
 
 Regresión de un problema ya documentado como deuda conocida en
-docs/API_FALLAS.md para los integradores externos: un codigo_legado
-repetido (llave de idempotencia) o un FK inexistente (proyecto_id, tipo_id,
-estado_id, prioridad_id, resolucion_id, asignado_a_id) volaban como un 500
-de Postgres sin mensaje claro. El fix (`_integrity_error_a_http` en
-app/api/v1/fallas.py) los traduce a 409/422 con un mensaje legible
-(auditoría 2026-09-02)."""
+docs/API_FALLAS.md para los integradores externos: un FK inexistente
+(proyecto_id, tipo_id, estado_id, prioridad_id, resolucion_id,
+asignado_a_id) volaba como un 500 de Postgres sin mensaje claro. El fix
+(`_integrity_error_a_http` en app/api/v1/fallas.py) lo traduce a 422 con un
+mensaje legible (auditoría 2026-09-02).
+
+codigo_legado (la otra rama que originalmente cubría este archivo, un 409
+por llave de idempotencia duplicada) se eliminó el mismo día -- era la
+llave de una migración puntual desde Apps Script, sin evidencia de uso
+activo hoy."""
 import datetime as dt
 import types
 
@@ -95,15 +99,6 @@ def _payload(**overrides):
     return base
 
 
-def test_codigo_legado_repetido_da_409_no_500(cliente, base):
-    r1 = cliente.post("/api/v1/fallas", json=_payload(codigo_legado="EXT-0001"))
-    assert r1.status_code == 201
-
-    r2 = cliente.post("/api/v1/fallas", json=_payload(codigo_legado="EXT-0001"))
-    assert r2.status_code == 409
-    assert "codigo_legado" in r2.json()["detail"]
-
-
 def test_creacion_valida_sigue_devolviendo_201(cliente, base):
     r = cliente.post("/api/v1/fallas", json=_payload())
     assert r.status_code == 201
@@ -133,19 +128,6 @@ def test_integrity_error_fk_inexistente_da_422(monkeypatch):
     http = _integrity_error_a_http(_Fake())
     assert http.status_code == 422
     assert "no existe" in http.detail
-
-
-def test_integrity_error_codigo_legado_da_409():
-    from app.api.v1.fallas import _integrity_error_a_http
-
-    class _Fake(Exception):
-        def __str__(self):
-            return ('duplicate key value violates unique constraint '
-                     '"uq_fallas_codigo_legado"\nDETAIL:  Key (codigo_legado)=(EXT-0001) already exists.')
-
-    http = _integrity_error_a_http(_Fake())
-    assert http.status_code == 409
-    assert "codigo_legado" in http.detail
 
 
 def test_integrity_error_sqlite_fk_da_422():

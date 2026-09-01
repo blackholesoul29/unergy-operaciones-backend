@@ -102,7 +102,6 @@ def falla_publica(falla) -> dict:
     return {
         "id": falla.id,
         "codigo": falla.codigo_interno,
-        "codigo_legado": falla.codigo_legado,
         "estado": {
             "codigo": estado.codigo if estado else None,
             "etiqueta": estado.etiqueta if estado else None,

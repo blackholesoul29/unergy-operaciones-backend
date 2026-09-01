@@ -116,7 +116,6 @@ class FallaCreate(BaseModel):
     fecha_ocurrencia: Optional[datetime] = None
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
-    codigo_legado: Optional[str] = None
     fotos_urls: Optional[list[str]] = None
     centinela: Optional[str] = None
     notificacion: bool = False
@@ -196,7 +195,6 @@ class FallaListOut(BaseModel):
     completo se pide aparte con GET /fallas/{id} (FallaOut)."""
     id: int
     codigo_interno: str
-    codigo_legado: Optional[str]
     proyecto_id: int
     proyecto: ProyectoResumen
     tipo: Optional[FallaCatTipoOut]
@@ -256,7 +254,6 @@ class FallaListOut(BaseModel):
 class FallaOut(BaseModel):
     id: int
     codigo_interno: str
-    codigo_legado: Optional[str]
     proyecto_id: int
     proyecto: ProyectoResumen
     tipo: Optional[FallaCatTipoOut]

@@ -256,8 +256,7 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 | Campo | Tipo | Req. | Descripción |
 |---|---|:---:|---|
 | `centinela` | `string(200)` | — | **Origen de la falla.** Úsenlo con `"API_TEST"`. El scheduler de monitoreo usa `"MGS_AUTO"`. La plataforma lo muestra como "Origen de la falla" |
-| `codigo_legado` | `string(30)` | — | Código externo. Tiene **índice único**, así que sirve como llave de idempotencia: si reintentan con el mismo valor, la segunda inserción falla en vez de duplicar (ver nota de errores) |
-| `alarma_monitoreo_id` | `int` | — | ID de la alarma de monitoreo que originó la falla. Sin FK, es referencia suelta. Déjenlo vacío |
+| `alarma_monitoreo_id` | `int` | — | ID de la alarma de monitoreo que originó la falla, con FK real hacia `alarmas_monitoreo`. Déjenlo vacío — es de uso interno del motor MGS |
 | `notificacion` | `bool` | — | Default `false`. **Bandera únicamente — no envía ningún correo.** El correo sale solo con `POST /fallas/{id}/notificar` |
 | `fotos_urls` | `string[]` | — | Lista de URLs. Para subir archivos de verdad usen `POST /fallas/{id}/archivos` |
 
@@ -523,7 +522,6 @@ Orden fijo: `fecha_identificacion` descendente. Las fallas borradas nunca salen.
     {
       "id": 4,
       "codigo": "FAL-2026-00004",
-      "codigo_legado": null,
       "estado":    { "codigo": "programado", "etiqueta": "Programado",
                      "grupo": "programado", "es_estado_final": false },
       "prioridad": { "codigo": "alta", "etiqueta": "Alta", "nivel": 3 },
@@ -615,12 +613,11 @@ Respuesta: `{ "items": [...], "total": 137, "page": 1, "size": 20, "pages": 7 }`
 | `proyecto_id` | `int` | |
 | `cliente_id` | `int` | Fallas de los proyectos donde ese cliente es inversionista vigente |
 | `asignado_a_id` | `int` | |
-| `codigo_legado` | `string` | Coincidencia exacta. Útil para verificar idempotencia |
 | `solo_alerta` | `bool` | Solo fallas no cerradas identificadas hace más de 7 días |
 | `fecha_programada_desde` / `_hasta` | `date` | Rango sobre `fecha_programada` |
 | `con_fecha_programada` | `bool` | Solo las que tienen `fecha_programada` |
 
-> **No hay filtro por `centinela`.** Para encontrar sus fallas de prueba, usen `codigo_legado` con un prefijo propio, o fíltrenlas del lado del cliente leyendo el campo `centinela` de cada ítem.
+> **No hay filtro por `centinela`.** Para encontrar sus fallas de prueba, fíltrenlas del lado del cliente leyendo el campo `centinela` de cada ítem.
 
 ### `GET /api/v1/fallas/{id}` — detalle
 
@@ -707,11 +704,9 @@ Razones de "Clasificación inválida" que van a ver:
 - `debe indicar al menos un tipo de falla de inversor`
 - `tipos de falla de inversor inválidos: [...]`
 
-### ⚠️ Limitación conocida: IDs inexistentes devuelven 500
+### IDs inexistentes: 422, no 500
 
-`proyecto_id`, `estado_id`, `prioridad_id`, `resolucion_id` y `asignado_a_id` son foreign keys que **hoy no se validan antes de insertar**. Si mandan un ID que no existe, la restricción salta en la base de datos y la respuesta es un **`500`** con un error de Postgres, no un `404` con mensaje claro. Lo mismo si repiten un `codigo_legado` (índice único).
-
-Mientras se corrige: resuelvan los IDs desde `/catalogos` y `/proyectos`, y si les llega un 500 en un create, sospechen primero de un ID inválido o de un `codigo_legado` repetido.
+`proyecto_id`, `estado_id`, `prioridad_id`, `resolucion_id` y `asignado_a_id` son foreign keys. Si mandan un ID que no existe, la API responde **`422`** con un mensaje indicando cuál de esos campos falló (antes del 2026-09-02 esto volaba como un `500` crudo de Postgres — ya corregido).
 
 ---
 
@@ -737,10 +732,7 @@ def crear_falla(payload: dict) -> dict:
     payload.setdefault("centinela", "API_TEST")
     r = SESSION.post(f"{BASE}/fallas", json=payload, timeout=30)
     if r.status_code == 422:
-        raise ValueError(f"Payload inválido: {r.json()['detail']}")
-    if r.status_code == 500:
-        # Ver sección 9: casi siempre es un FK inexistente o codigo_legado repetido.
-        raise RuntimeError(f"Revisar IDs del payload: {r.text[:200]}")
+        raise ValueError(f"Payload inválido o ID inexistente: {r.json()['detail']}")
     r.raise_for_status()
     return r.json()
 
@@ -758,7 +750,6 @@ def main():
         "fecha_identificacion": "2026-07-28",
         "categoria_codigo": "red",
         "subtipo_codigo": "baja_tension",
-        "codigo_legado": "APITEST-0001",  # llave de idempotencia
     })
     print(falla["codigo_interno"], "→", falla["clasificacion"])
 

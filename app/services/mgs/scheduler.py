@@ -46,6 +46,11 @@ def _resolver_mapa_proyectos(gaia: GaiaClient) -> tuple[dict[int, int], dict[int
             Proyecto.estado == "en_operacion",
             Proyecto.deleted_at.is_(None),
             Proyecto.tipo_proyecto.in_([TipoProyectoEnum.minigranja, TipoProyectoEnum.gd]),
+            # Solo plantas con servicio de operación contratado -- decision de
+            # negocio 2026-09-01: antes entraba cualquier minigranja/GD activa
+            # sin importar si Unergy la opera, generando alarmas/fallas para
+            # plantas fuera de alcance.
+            Proyecto.srv_operacion.is_(True),
         ).all()
         fronteras = db.query(Frontera.proyecto_id, Frontera.codigo_frontera).filter(
             Frontera.tipo_frontera.in_([TipoFronteraEnum.generacion, TipoFronteraEnum.generacion_consumo]),
@@ -205,11 +210,17 @@ def _persist_alarms(
     finally:
         db.close()
 
-    if alarm_ids:
-        try:
-            _send_alarm_notifications_safe(alarm_ids)
-        except Exception:
-            logger.exception("Failed to send alarm notifications")
+    # Envío automático a clientes DESACTIVADO (2026-09-01, pedido explícito de
+    # negocio: "no quiero que se haga el envío automático de clientes, no
+    # tengo control"). Se disparaba sin ningún filtro para toda alarma
+    # CRITICAL/WARNING -- expuesto recién hoy porque `_resolver_mapa_proyectos`
+    # (c6577fb) amplió el monitoreo a proyectos que antes quedaban fuera por
+    # matching de nombre, mandando correos a clientes de plantas que nunca
+    # antes habían disparado una alarma. Las alarmas/fallas se siguen
+    # creando y viendo en Gestión de Fallas -- solo se apagó el correo
+    # automático a los contactos operacionales del cliente. Ver
+    # _send_alarm_notifications_safe() más abajo si se retoma con un control
+    # real (ej. opt-in por proyecto o un digest en vez de correo por alarma).
 
 
 def _tipos_superados(

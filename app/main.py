@@ -383,28 +383,18 @@ def _run_tipo_migration() -> None:
         db.close()
 
 
-def _run_srv_operacion_sync() -> None:
-    """Marca srv_operacion=True para proyectos de tipo autoconsumo/minigranja
-    que están en operación. Idempotente — solo actualiza filas que aún
-    tienen el campo en False/NULL.
-    """
-    stmts = [
-        """
-        UPDATE proyectos SET srv_operacion = TRUE
-        WHERE estado = 'en_operacion'
-          AND tipo_proyecto IN ('autoconsumo', 'minigranja')
-          AND (srv_operacion IS NULL OR srv_operacion = FALSE)
-        """,
-    ]
-    for stmt in stmts:
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(stmt))
-                conn.commit()
-                if result.rowcount:
-                    print(f"[srv_operacion sync] {result.rowcount} proyectos actualizados")
-        except Exception as e:
-            print(f"[srv_operacion sync] skipped: {e}")
+# _run_srv_operacion_sync() vivió acá -- eliminada 2026-09-01 (bug real,
+# reportado en producción). Corría en CADA arranque del servidor, no una
+# sola vez pese al docstring ("idempotente"): forzaba srv_operacion=TRUE
+# para toda minigranja/autoconsumo en operación que lo tuviera en
+# False/NULL, sin ninguna excepción -- pisando en silencio cualquier
+# desactivación manual hecha vía PATCH /proyectos/{id}/servicios (ver
+# `allowed` en app/api/v1/proyectos.py::toggle_servicios, que expone
+# srv_operacion justamente para editarlo a mano). Caso real: un proyecto
+# (Bayunca) al que se le quitó el servicio manualmente volvió a aparecer
+# con servicio al reiniciar el contenedor. Era un backfill de una sola vez
+# (poblar el campo cuando se creó la columna) que quedó enganchado a la
+# lista de tareas de arranque en vez de correr una única vez y retirarse.
 
 
 def _run_mandatos_maestra_seed() -> None:
@@ -2413,7 +2403,6 @@ def _deferred_init():
         # si alguna vez vuelve a haber dos escritores, la ventana de datos
         # inconsistentes servidos por la API dura una tarea y no trece.
         ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
-        ("srv_operacion_sync", _run_srv_operacion_sync),
         ("cgm_seed", _run_cgm_seed),
         # Va DESPUES del seed CGM: vincula y cierra sobre lo que ese ya sembro.
         ("repr_inversionista_sync", _run_representacion_inversionista_sync),

@@ -1612,7 +1612,7 @@ def _scheduled_representacion_alertas():
     from datetime import date, timedelta
 
     try:
-        from app.services.email_service import _smtp_send, _log_send
+        from app.services.email_service import _smtp_send, _log_envio
         from app.core.config import settings as _s
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
@@ -1736,18 +1736,16 @@ def _scheduled_representacion_alertas():
 
                 try:
                     _smtp_send(msg, destinatarios)
-                    _log_send(
-                        to_email=destinatarios[0],
-                        cc=destinatarios[1:],
+                    _log_envio(
+                        destinatarios=[{"email": e, "tipo": "to"} for e in destinatarios],
                         subject=subject,
                         tipo="alerta_cgm",
                         success=True,
                     )
                     alertas_enviadas += 1
                 except Exception as exc:
-                    _log_send(
-                        to_email=destinatarios[0],
-                        cc=destinatarios[1:],
+                    _log_envio(
+                        destinatarios=[{"email": e, "tipo": "to"} for e in destinatarios],
                         subject=subject,
                         tipo="alerta_cgm",
                         success=False,

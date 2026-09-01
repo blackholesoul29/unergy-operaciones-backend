@@ -20,7 +20,7 @@ def test_adjunto_con_tildes_conserva_nombre_de_archivo(monkeypatch):
         capturado["msg"] = msg
 
     monkeypatch.setattr(email_service, "_smtp_send", _fake_smtp_send)
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: None)
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: None)
 
     # El slug real conserva tildes/ñ (str.isalnum() las trata como alfanuméricas
     # en Python) -- reproducir eso aquí, no un nombre ya "limpio" a mano.

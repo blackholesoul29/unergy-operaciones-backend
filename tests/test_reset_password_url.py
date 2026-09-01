@@ -26,7 +26,7 @@ def _html_del_envio(monkeypatch) -> str:
     """Dispara el envio con SMTP simulado y devuelve el cuerpo HTML."""
     monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(settings, "FRONTEND_URL", "https://front.example.com")
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: None)
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: None)
 
     capturados: list[Message] = []
     monkeypatch.setattr(email_service, "_smtp_send",

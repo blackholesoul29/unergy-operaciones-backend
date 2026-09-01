@@ -37,7 +37,7 @@ from app.core.database import SessionLocal
 from app.crud import crud_alertas
 from app.models.contratos import PPAContrato
 from app.schemas.alerta import AlertaCreate
-from app.services.email_service import _smtp_send, _log_send
+from app.services.email_service import _smtp_send, _log_envio
 
 logger = logging.getLogger("jobs.ppa_expiration_checker")
 
@@ -111,14 +111,14 @@ def _enviar_correo(mensaje: str, dias: int) -> bool:
     msg.attach(MIMEText(mensaje, "plain", "utf-8"))
     try:
         _smtp_send(msg, destinatarios)
-        _log_send(
-            to_email=destinatarios[0], cc=destinatarios[1:],
+        _log_envio(
+            destinatarios=[{"email": e, "tipo": "to"} for e in destinatarios],
             subject=subject, tipo="alerta_ppa_vencimiento", success=True,
         )
         return True
     except Exception as exc:
-        _log_send(
-            to_email=destinatarios[0], cc=destinatarios[1:],
+        _log_envio(
+            destinatarios=[{"email": e, "tipo": "to"} for e in destinatarios],
             subject=subject, tipo="alerta_ppa_vencimiento", success=False,
             error_msg=str(exc),
         )

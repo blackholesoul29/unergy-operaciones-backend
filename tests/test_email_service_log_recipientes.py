@@ -1,55 +1,63 @@
-"""email_service.py -- cada _log_send() debe reflejar TODOS los destinatarios
-reales, no solo to_emails[0], y las funciones que ya conocen un id real
-(cliente/operador/proyecto) deben pasarlo a _log_send() -- auditoría de
-envío de correos 2026-08-26. Antes, send_informe_email/send_alarm_
-notification_email/send_reporte_cgm_email solo dejaban en email_envios el
-primer destinatario; el resto se perdía sin dejar rastro."""
-from app.core.config import settings
+"""email_service.py -- normalización email_envios (evento) + email_envio_
+destinatarios (auditoría 2026-09-01). `_log_envio()` reemplaza a `_log_send()`:
+antes cada función loopeaba `for to_email in to_emails: _log_send(...)`,
+insertando una fila COMPLETA en email_envios por cada destinatario -- si un
+operador tenía 3 contactos configurados, el historial mostraba 3 "Enviado"
+idénticos aunque el correo real por SMTP se mandó una sola vez (Reporte CGM).
+Ahora cada función llama a `_log_envio()` UNA SOLA VEZ por evento, con la
+lista completa de destinatarios reales -- 1 fila en email_envios + N filas en
+email_envio_destinatarios."""
 from app.services import email_service
 
 
 def _sin_smtp_real(monkeypatch):
+    from app.core.config import settings
     monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(email_service, "_smtp_send", lambda msg, recipients: None)
 
 
-def test_send_informe_email_loguea_todos_los_destinatarios_y_proyecto_id(monkeypatch):
+def test_send_informe_email_loguea_un_solo_evento_con_todos_los_destinatarios(monkeypatch):
     _sin_smtp_real(monkeypatch)
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     email_service.send_informe_email(
         to_emails=["a@test.com", "b@test.com"],
+        cc=["c@test.com"],
         proyecto_nombre="Test", periodo_display="Agosto 2026",
         aprobado_por="Alguien", html_content="<p>hola</p>",
         proyecto_id=42,
     )
 
-    assert len(llamadas) == 2
-    assert {c["to_email"] for c in llamadas} == {"a@test.com", "b@test.com"}
-    assert all(c["proyecto_id"] == 42 and c["success"] is True for c in llamadas)
+    assert len(llamadas) == 1
+    destinatarios = llamadas[0]["destinatarios"]
+    assert {d["email"] for d in destinatarios} == {"a@test.com", "b@test.com", "c@test.com"}
+    assert {d["email"]: d["tipo"] for d in destinatarios} == {
+        "a@test.com": "to", "b@test.com": "to", "c@test.com": "cc",
+    }
+    assert llamadas[0]["proyecto_id"] == 42
+    assert llamadas[0]["success"] is True
 
 
-def test_send_alarm_notification_email_loguea_todos_los_destinatarios(monkeypatch):
+def test_send_alarm_notification_email_loguea_un_solo_evento(monkeypatch):
     _sin_smtp_real(monkeypatch)
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     email_service.send_alarm_notification_email(
         to_emails=["a@test.com", "b@test.com", "c@test.com"],
         proyecto_nombre="Test", alarm_type="Falla", severity="CRITICAL", details="detalle",
     )
 
-    assert len(llamadas) == 3
-    assert {c["to_email"] for c in llamadas} == {"a@test.com", "b@test.com", "c@test.com"}
-    # antes, b y c quedaban metidos en "cc" del primero -- ahora cada uno es su propia fila
-    assert all(c["cc"] is None for c in llamadas)
+    assert len(llamadas) == 1
+    assert {d["email"] for d in llamadas[0]["destinatarios"]} == {"a@test.com", "b@test.com", "c@test.com"}
+    assert all(d["tipo"] == "to" for d in llamadas[0]["destinatarios"])
 
 
-def test_send_reporte_cgm_email_loguea_todos_los_destinatarios_y_fks(monkeypatch):
+def test_send_reporte_cgm_email_loguea_un_solo_evento_con_fks(monkeypatch):
     _sin_smtp_real(monkeypatch)
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     email_service.send_reporte_cgm_email(
         to_emails=["a@test.com", "b@test.com"],
@@ -57,15 +65,54 @@ def test_send_reporte_cgm_email_loguea_todos_los_destinatarios_y_fks(monkeypatch
         destinatario_nombre="Cliente Test", cliente_id=99, operador_red_id=None,
     )
 
-    assert len(llamadas) == 2
-    assert {c["to_email"] for c in llamadas} == {"a@test.com", "b@test.com"}
-    assert all(c["cliente_id"] == 99 and c["operador_red_id"] is None for c in llamadas)
+    assert len(llamadas) == 1
+    destinatarios = llamadas[0]["destinatarios"]
+    assert {d["email"] for d in destinatarios if d["tipo"] == "to"} == {"a@test.com", "b@test.com"}
+    assert llamadas[0]["cliente_id"] == 99
+    assert llamadas[0]["operador_red_id"] is None
 
 
-def test_send_falla_notification_email_pasa_proyecto_id(monkeypatch):
+def test_send_falla_notification_email_loguea_un_evento_con_resultado_por_destinatario(monkeypatch):
+    """A diferencia de informe/alarma/reporte_cgm, cada destinatario de falla
+    recibe un SMTP separado -- puede fallar independiente. El evento sigue
+    siendo UNO (una llamada a _log_envio), pero cada destinatario trae su
+    propio 'exitoso'."""
     _sin_smtp_real(monkeypatch)
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
+
+    envios_smtp = {"a@test.com": True, "b@test.com": False}
+
+    def _smtp_parcial(msg, recipients):
+        destino = recipients[0]
+        if not envios_smtp[destino]:
+            raise RuntimeError("buzón lleno")
+
+    monkeypatch.setattr(email_service, "_smtp_send", _smtp_parcial)
+
+    resultado = email_service.send_falla_notification_email(
+        to_emails=["a@test.com", "b@test.com"], codigo_falla="F-001", proyecto_nombre="Test",
+        descripcion="desc", estado_etiqueta="Abierta", prioridad_etiqueta="Alta",
+        fecha_identificacion="2026-08-25", asignado_a=None, registrado_por="Alguien",
+        proyecto_id=7,
+    )
+
+    assert resultado["enviados"] == ["a@test.com"]
+    assert len(resultado["errores"]) == 1
+
+    assert len(llamadas) == 1  # un solo evento, no uno por destinatario
+    destinatarios = {d["email"]: d for d in llamadas[0]["destinatarios"]}
+    assert destinatarios["a@test.com"]["exitoso"] is True
+    assert destinatarios["b@test.com"]["exitoso"] is False
+    assert "buzón lleno" in destinatarios["b@test.com"]["error"]
+    assert llamadas[0]["proyecto_id"] == 7
+    assert llamadas[0]["success"] is False  # no todos los destinatarios tuvieron éxito
+
+
+def test_send_falla_notification_email_evento_exitoso_si_todos_los_destinatarios_llegan(monkeypatch):
+    _sin_smtp_real(monkeypatch)
+    llamadas = []
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     email_service.send_falla_notification_email(
         to_emails=["a@test.com"], codigo_falla="F-001", proyecto_nombre="Test",
@@ -75,21 +122,21 @@ def test_send_falla_notification_email_pasa_proyecto_id(monkeypatch):
     )
 
     assert len(llamadas) == 1
-    assert llamadas[0]["proyecto_id"] == 7
+    assert llamadas[0]["success"] is True
 
 
 def test_send_reset_password_email_ahora_si_loguea(monkeypatch):
-    """Finding #1 de la auditoría -- era la única función de las 8 que no
-    llamaba a _log_send(), un flujo sensible (reset de contraseña) sin
-    ningún rastro en email_envios."""
+    """Finding #1 de la auditoría original -- era la única función de las 8
+    que no llamaba a _log_envio()/_log_send(), un flujo sensible (reset de
+    contraseña) sin ningún rastro en email_envios."""
     _sin_smtp_real(monkeypatch)
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     email_service.send_reset_password_email(to_email="a@test.com", token="tok123")
 
     assert len(llamadas) == 1
-    assert llamadas[0]["to_email"] == "a@test.com"
+    assert llamadas[0]["destinatarios"] == [{"email": "a@test.com", "tipo": "to"}]
     assert llamadas[0]["tipo"] == "reset_password"
     assert llamadas[0]["success"] is True
 
@@ -98,7 +145,7 @@ def test_send_reset_password_email_loguea_el_fallo_tambien(monkeypatch):
     _sin_smtp_real(monkeypatch)
     monkeypatch.setattr(email_service, "_smtp_send", lambda msg, recipients: (_ for _ in ()).throw(RuntimeError("smtp caído")))
     llamadas = []
-    monkeypatch.setattr(email_service, "_log_send", lambda **kw: llamadas.append(kw))
+    monkeypatch.setattr(email_service, "_log_envio", lambda **kw: llamadas.append(kw))
 
     try:
         email_service.send_reset_password_email(to_email="a@test.com", token="tok123")

@@ -115,10 +115,9 @@ def _alertar_fallo_envio(*, tipo: str, destinatario: str, error: str) -> None:
         )
 
 
-def _log_send(
+def _log_envio(
     *,
-    to_email: str,
-    cc: list[str] | None,
+    destinatarios: list[dict],
     subject: str,
     tipo: str,
     success: bool,
@@ -129,30 +128,48 @@ def _log_send(
     operador_red_id: int | None = None,
     proyecto_id: int | None = None,
 ) -> None:
-    """Log email send to database (fire-and-forget).
+    """Log an email send EVENT to the database (fire-and-forget): una fila en
+    email_envios (el evento) + una fila por destinatario real en
+    email_envio_destinatarios (auditoría 2026-09-01).
+
+    Antes, `_log_send()` insertaba una fila completa en email_envios POR CADA
+    destinatario -- si un operador tenía 3 contactos configurados, el
+    historial mostraba 3 "Enviado" idénticos aunque el correo real por SMTP
+    se mandó una sola vez (ver Reporte CGM). Ahora el evento es una sola fila
+    y los destinatarios reales viven en la tabla hija.
+
+    destinatarios: [{"email": str, "tipo": "to"|"cc"|"cco", "exitoso"?: bool,
+    "error"?: str}] -- "exitoso"/"error" ausentes heredan success/error_msg
+    del evento (caso normal: un solo envío SMTP para todos). Se pueden pasar
+    con su propio resultado cuando el envío real no fue uno solo para todos
+    (ver send_falla_notification_email, que manda un SMTP separado por
+    persona y cada uno puede fallar independiente).
 
     cliente_id/operador_red_id/proyecto_id: FKs reales opcionales (auditoría
     2026-08-26) -- antes email_envios no tenía ninguna, aunque cada llamador
     ya resolvía el id correspondiente antes de loguear. Solo uno (o ninguno)
     aplica según el tipo de envío -- no es un vínculo polimórfico real a
     nivel de BD, son tres columnas nullable independientes."""
-    if not success:
-        _alertar_fallo_envio(tipo=tipo, destinatario=to_email, error=error_msg or "error desconocido")
+    for d in destinatarios:
+        if not d.get("exitoso", success):
+            _alertar_fallo_envio(
+                tipo=tipo, destinatario=d["email"],
+                error=d.get("error") or error_msg or "error desconocido",
+            )
 
     try:
         from app.core.database import SessionLocal
         from sqlalchemy import text as sa_text
         db = SessionLocal()
         try:
-            db.execute(sa_text("""
+            envio_id = db.execute(sa_text("""
                 INSERT INTO email_envios
-                    (destinatario, cc, asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total,
+                    (asunto, tipo, exitoso, error, enviado_at, proyectos, proyectos_total,
                      cliente_id, operador_red_id, proyecto_id)
-                VALUES (:to, :cc, :subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total,
+                VALUES (:subject, :tipo, :ok, :err, :ts, :proyectos, :proyectos_total,
                         :cliente_id, :operador_red_id, :proyecto_id)
+                RETURNING id
             """), {
-                "to": to_email,
-                "cc": ",".join(cc) if cc else None,
                 "subject": subject,
                 "tipo": tipo,
                 "ok": success,
@@ -163,7 +180,19 @@ def _log_send(
                 "cliente_id": cliente_id,
                 "operador_red_id": operador_red_id,
                 "proyecto_id": proyecto_id,
-            })
+            }).scalar_one()
+
+            for d in destinatarios:
+                db.execute(sa_text("""
+                    INSERT INTO email_envio_destinatarios (envio_id, email, tipo_destinatario, exitoso, error)
+                    VALUES (:envio_id, :email, :tipo_dest, :ok, :err)
+                """), {
+                    "envio_id": envio_id,
+                    "email": d["email"],
+                    "tipo_dest": d.get("tipo", "to"),
+                    "ok": d.get("exitoso", success),
+                    "err": d.get("error", error_msg),
+                })
             db.commit()
         except Exception as e:
             db.rollback()
@@ -235,10 +264,10 @@ def send_reset_password_email(*, to_email: str, token: str) -> None:
 
     try:
         _smtp_send(msg, [to_email])
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="reset_password", success=True)
+        _log_envio(destinatarios=[{"email": to_email, "tipo": "to"}], subject=subject, tipo="reset_password", success=True)
     except Exception as exc:
         print(f"[RESET] Error enviando email a {to_email}: {exc}")
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="reset_password", success=False, error_msg=str(exc))
+        _log_envio(destinatarios=[{"email": to_email, "tipo": "to"}], subject=subject, tipo="reset_password", success=False, error_msg=str(exc))
         raise RuntimeError(f"No se pudo enviar el email: {exc}") from exc
 
 
@@ -306,14 +335,14 @@ def send_informe_email(
     if cc:
         recipients.extend(cc)
 
+    destinatarios = [{"email": e, "tipo": "to"} for e in to_emails] + [{"email": e, "tipo": "cc"} for e in (cc or [])]
+
     try:
         _smtp_send(msg, recipients)
-        for to_email in to_emails:
-            _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=True, proyecto_id=proyecto_id)
+        _log_envio(destinatarios=destinatarios, subject=subject, tipo="informe", success=True, proyecto_id=proyecto_id)
     except Exception as exc:
-        for to_email in to_emails:
-            _log_send(to_email=to_email, cc=cc, subject=subject, tipo="informe", success=False,
-                       error_msg=str(exc), proyecto_id=proyecto_id)
+        _log_envio(destinatarios=destinatarios, subject=subject, tipo="informe", success=False,
+                   error_msg=str(exc), proyecto_id=proyecto_id)
         raise
 
 
@@ -369,14 +398,14 @@ def send_alarm_notification_email(
     msg["To"] = ", ".join(to_emails)
     msg.attach(MIMEText(body_html, "html", "utf-8"))
 
+    destinatarios = [{"email": e, "tipo": "to"} for e in to_emails]
+
     try:
         _smtp_send(msg, to_emails)
-        for to_email in to_emails:
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="alarma", success=True)
+        _log_envio(destinatarios=destinatarios, subject=subject, tipo="alarma", success=True)
         print(f"[ALARM_EMAIL] Sent to {to_emails} for {proyecto_nombre}")
     except Exception as exc:
-        for to_email in to_emails:
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="alarma", success=False, error_msg=str(exc))
+        _log_envio(destinatarios=destinatarios, subject=subject, tipo="alarma", success=False, error_msg=str(exc))
         print(f"[ALARM_EMAIL] Failed to send to {to_emails}: {exc}")
 
 
@@ -580,6 +609,8 @@ def send_falla_notification_email(
 
     enviados = []
     errores  = []
+    resultados = []  # un SMTP separado por persona -- cada uno puede fallar
+                      # independiente, a diferencia de informe/alarma/reporte_cgm
 
     for to_email in to_emails:
         try:
@@ -589,16 +620,20 @@ def send_falla_notification_email(
             msg["To"]      = to_email
             msg.attach(MIMEText(body_html, "html", "utf-8"))
             _smtp_send(msg, [to_email])
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=True, proyecto_id=proyecto_id)
+            resultados.append({"email": to_email, "tipo": "to", "exitoso": True})
             enviados.append(to_email)
             logger.info("[FALLA_EMAIL] Sent to %s for %s", to_email, codigo_falla)
         except Exception as exc:
             err_msg = str(exc)
-            _log_send(to_email=to_email, cc=None, subject=subject, tipo="falla", success=False,
-                       error_msg=err_msg, proyecto_id=proyecto_id)
+            resultados.append({"email": to_email, "tipo": "to", "exitoso": False, "error": err_msg})
             errores.append(f"{to_email}: {err_msg}")
             logger.error("[FALLA_EMAIL] Failed to send to %s for %s: %s", to_email, codigo_falla, exc)
 
+    _log_envio(
+        destinatarios=resultados, subject=subject, tipo="falla",
+        success=not errores, error_msg="; ".join(errores) if errores else None,
+        proyecto_id=proyecto_id,
+    )
     return {"ok": len(enviados) > 0, "enviados": enviados, "errores": errores}
 
 
@@ -623,7 +658,7 @@ def send_reporte_cgm_email(
 
     cliente_id/operador_red_id: exactamente uno de los dos debería venir
     poblado (según el tipo de destinatario que resolvió el llamador) -- se
-    pasan tal cual a _log_send() para dar trazabilidad real en email_envios
+    pasan tal cual a _log_envio() para dar trazabilidad real en email_envios
     (auditoría 2026-08-26, antes no había ninguna FK, solo el nombre en texto
     libre de destinatario_nombre/proyectos).
 
@@ -706,21 +741,21 @@ def send_reporte_cgm_email(
     cco = [d.strip() for d in settings.CORREO_SEGUIMIENTO.split(",") if d.strip()]
     sobres = to_emails + [c for c in cco if c not in to_emails]
 
+    destinatarios = [{"email": e, "tipo": "to"} for e in to_emails] + [{"email": e, "tipo": "cco"} for e in cco]
+
     try:
         _smtp_send(msg, sobres)
-        for to_email in to_emails:
-            _log_send(
-                to_email=to_email, cc=cco or None, subject=subject, tipo="reporte_cgm", success=True,
-                proyectos=proyectos, proyectos_total=proyectos_total,
-                cliente_id=cliente_id, operador_red_id=operador_red_id,
-            )
+        _log_envio(
+            destinatarios=destinatarios, subject=subject, tipo="reporte_cgm", success=True,
+            proyectos=proyectos, proyectos_total=proyectos_total,
+            cliente_id=cliente_id, operador_red_id=operador_red_id,
+        )
     except Exception as exc:
-        for to_email in to_emails:
-            _log_send(
-                to_email=to_email, cc=cco or None, subject=subject, tipo="reporte_cgm", success=False,
-                error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
-                cliente_id=cliente_id, operador_red_id=operador_red_id,
-            )
+        _log_envio(
+            destinatarios=destinatarios, subject=subject, tipo="reporte_cgm", success=False,
+            error_msg=str(exc), proyectos=proyectos, proyectos_total=proyectos_total,
+            cliente_id=cliente_id, operador_red_id=operador_red_id,
+        )
         raise RuntimeError(f"No se pudo enviar el reporte CGM: {exc}") from exc
 
 
@@ -764,8 +799,8 @@ def send_test_email(*, to_email: str, cliente_nombre: str) -> None:
 
     try:
         _smtp_send(msg, [to_email])
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="prueba", success=True)
+        _log_envio(destinatarios=[{"email": to_email, "tipo": "to"}], subject=subject, tipo="prueba", success=True)
         logger.info("[TEST_EMAIL] Sent to %s for cliente %s", to_email, cliente_nombre)
     except Exception as exc:
-        _log_send(to_email=to_email, cc=None, subject=subject, tipo="prueba", success=False, error_msg=str(exc))
+        _log_envio(destinatarios=[{"email": to_email, "tipo": "to"}], subject=subject, tipo="prueba", success=False, error_msg=str(exc))
         raise RuntimeError(f"No se pudo enviar el correo de prueba: {exc}") from exc

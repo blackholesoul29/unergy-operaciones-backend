@@ -140,7 +140,7 @@ def test_envio_de_correo_best_effort_no_pierde_la_alerta_persistida(db, monkeypa
     def _falla(*a, **kw):
         raise RuntimeError("SMTP no disponible")
     monkeypatch.setattr(job, "_smtp_send", _falla)
-    monkeypatch.setattr(job, "_log_send", lambda **kw: None)
+    monkeypatch.setattr(job, "_log_envio", lambda **kw: None)
 
     _ppa(db, dias_para_vencer=45)
     creadas = job.check_ppa_expirations(db)
@@ -155,7 +155,7 @@ def test_envio_de_correo_exitoso_llama_a_smtp_send(db, monkeypatch):
 
     llamadas = []
     monkeypatch.setattr(job, "_smtp_send", lambda msg, dest: llamadas.append((msg, dest)))
-    monkeypatch.setattr(job, "_log_send", lambda **kw: None)
+    monkeypatch.setattr(job, "_log_envio", lambda **kw: None)
 
     _ppa(db, dias_para_vencer=45)
     job.check_ppa_expirations(db)

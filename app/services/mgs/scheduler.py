@@ -218,9 +218,14 @@ def _persist_alarms(
     # matching de nombre, mandando correos a clientes de plantas que nunca
     # antes habían disparado una alarma. Las alarmas/fallas se siguen
     # creando y viendo en Gestión de Fallas -- solo se apagó el correo
-    # automático a los contactos operacionales del cliente. Ver
-    # _send_alarm_notifications_safe() más abajo si se retoma con un control
-    # real (ej. opt-in por proyecto o un digest en vez de correo por alarma).
+    # automático a los contactos operacionales del cliente. El wrapper que
+    # hacía este envío (`_send_alarm_notifications_safe`) se eliminó de este
+    # archivo el mismo día (quedaba como código muerto, riesgo de reactivarse
+    # sin este contexto) -- si se retoma con un control real (ej. opt-in por
+    # proyecto o un digest en vez de correo por alarma), reconstruir sobre
+    # `send_alarm_notification_email` (app/services/email_service.py) y
+    # `get_contactos(db, "operacional", proyecto_id=...)`
+    # (app/services/contactos.py), que siguen disponibles.
 
 
 def _tipos_superados(
@@ -493,43 +498,4 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
         except Exception:
             db.rollback()
             logger.exception("Failed to auto-close fallas for recovery alarm %d", alarm_db_id)
-
-
-def _send_alarm_notifications_safe(alarm_ids: list[tuple[Alarm, int]]):
-    """Send email notifications in a separate DB session so failures don't affect persistence."""
-    from app.services.email_service import send_alarm_notification_email
-    from app.services.contactos import get_contactos
-
-    notifiable_severities = {Severity.CRITICAL, Severity.WARNING}
-    to_notify = [
-        (alarm, aid) for alarm, aid in alarm_ids
-        if alarm.severity in notifiable_severities and alarm.alarm_type != AlarmType.RECUPERACION
-    ]
-    if not to_notify:
-        return
-
-    db = SessionLocal()
-    try:
-        for alarm, alarm_db_id in to_notify:
-            try:
-                # CORTE_ZONA abarca varios proyectos a la vez (sin un proyecto_id
-                # único) -- no se puede resolver un solo contacto operacional.
-                if alarm.proyecto_id is None:
-                    continue
-
-                emails = get_contactos(db, "operacional", proyecto_id=alarm.proyecto_id)
-                if not emails:
-                    continue
-
-                send_alarm_notification_email(
-                    to_emails=emails,
-                    proyecto_nombre=alarm.proyecto_nombre,
-                    alarm_type=alarm.alarm_type.value,
-                    severity=alarm.severity.value,
-                    details=alarm.details,
-                )
-            except Exception:
-                logger.exception("Failed to send alarm notification for '%s'", alarm.proyecto_nombre)
-    finally:
-        db.close()
 

@@ -105,7 +105,6 @@ class FallaInversorOut(BaseModel):
 class FallaCreate(BaseModel):
     proyecto_id: int
     tipo_id: Optional[int] = None
-    tipo_libre: Optional[str] = None
     estado_id: int
     prioridad_id: int
     resolucion_id: Optional[int] = None
@@ -140,7 +139,6 @@ class FallaCreate(BaseModel):
 
 class FallaUpdate(BaseModel):
     tipo_id: Optional[int] = None
-    tipo_libre: Optional[str] = None
     estado_id: Optional[int] = None
     prioridad_id: Optional[int] = None
     resolucion_id: Optional[int] = None
@@ -198,7 +196,6 @@ class FallaListOut(BaseModel):
     proyecto_id: int
     proyecto: ProyectoResumen
     tipo: Optional[FallaCatTipoOut]
-    tipo_libre: Optional[str] = None
     estado: FallaCatEstadoOut
     prioridad: FallaCatPrioridadOut
     resolucion: Optional[FallaCatResolucionOut]
@@ -257,7 +254,6 @@ class FallaOut(BaseModel):
     proyecto_id: int
     proyecto: ProyectoResumen
     tipo: Optional[FallaCatTipoOut]
-    tipo_libre: Optional[str] = None
     estado: FallaCatEstadoOut
     prioridad: FallaCatPrioridadOut
     resolucion: Optional[FallaCatResolucionOut]

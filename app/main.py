@@ -2034,22 +2034,13 @@ def _run_arr_limpiar_canon_archivo() -> None:
         db.close()
 
 
-def _run_fallas_tipo_backfill() -> None:
-    """Corrige el tipo/título de las fallas estructuradas cuyo tipo_id había quedado
-    apuntando a un tipo legacy contradictorio (p.ej. 'Fusible de string quemado' en
-    fallas de red). Corre después del seed de estructura para que los tipos ya
-    existan. Idempotente. Ver [[project_reporte_fallas_estructurado]]."""
-    from sqlalchemy.orm import sessionmaker
-    from app.api.v1.fallas import backfill_tipos_estructurados
-
-    Session = sessionmaker(bind=engine)
-    db = Session()
-    try:
-        rep = backfill_tipos_estructurados(db, dry_run=False)
-        print(f"[startup] fallas_tipo_backfill: {rep['corregidas']} corregidas "
-              f"de {rep['total_estructuradas']} fallas estructuradas")
-    finally:
-        db.close()
+# _run_fallas_tipo_backfill() vivió acá -- eliminada 2026-09-02 junto con
+# tipo_libre y backfill_tipos_estructurados() (app/api/v1/fallas.py). Corría
+# en cada arranque para corregir tipo_id/tipo_libre de fallas estructuradas;
+# una verificación real contra producción (dry-run) mostró 0 correcciones
+# sobre 5.086 fallas -- ya no tenía nada que hacer. Si `_aplicar_clasificacion()`
+# vuelve a desincronizar tipo_id, el fix es una migración de Alembic puntual,
+# no un job permanente.
 
 
 def _run_arr_backfill_contratos() -> None:
@@ -2398,11 +2389,6 @@ def _deferred_init():
         ("catalog_seed", _run_catalog_seed),
         ("estructura_fallas_seed", _run_estructura_fallas_seed),
         ("tipo_migration", _run_tipo_migration),
-        # Pegado a tipo_migration a proposito. Con el regex arreglado la pelea
-        # por `fallas.tipo_id` ya no puede pasar; esto es la red de seguridad:
-        # si alguna vez vuelve a haber dos escritores, la ventana de datos
-        # inconsistentes servidos por la API dura una tarea y no trece.
-        ("fallas_tipo_backfill", _run_fallas_tipo_backfill),
         ("cgm_seed", _run_cgm_seed),
         # Va DESPUES del seed CGM: vincula y cierra sobre lo que ese ya sembro.
         ("repr_inversionista_sync", _run_representacion_inversionista_sync),

@@ -29,6 +29,7 @@ from app.services.fallas.estructura import (
     ESTRUCTURA_FALLAS, get_categoria, validar_clasificacion, tipo_codigo,
     etiqueta_subtipo, es_subtipo_pendiente,
 )
+from app.services.fallas.titulo import titulo_falla
 from app.schemas.common import PaginatedResponse
 
 router = APIRouter(prefix="/fallas", tags=["Fallas"])
@@ -151,21 +152,18 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
     # debe quedar apuntando a un tipo legacy que contradiga la clasificación. Dejar
     # el valor previo era la causa de títulos como "Fusible de string quemado" en
     # fallas de red. Si el tipo estructurado no existe en el catálogo, tipo_id=None
-    # y el título se toma de tipo_libre / clasificacion.
+    # y el título se arma al vuelo desde `clasificacion` (ver services/fallas/titulo.py).
     falla.tipo_id = nuevo_tipo_id
 
-    # Snapshot estructurado (fuente para mostrar/auditar)
+    # Snapshot estructurado (fuente para mostrar/auditar Y para armar el título
+    # legible al vuelo -- reemplaza a tipo_libre, eliminado 2026-09-02 junto con
+    # el backfill permanente que hacía falta para mantenerlo sincronizado).
     clasif = {"categoria": categoria, "categoria_etiqueta": cat["etiqueta"]}
     if falla.subtipo_codigo:
         clasif["subtipo"] = falla.subtipo_codigo
         clasif["subtipo_etiqueta"] = etiqueta_subtipo(categoria, falla.subtipo_codigo)
     if falla.subtipo_detalle:
         clasif["detalle"] = falla.subtipo_detalle
-    # tipo_libre legible (respaldo para listados/emails/analytics legacy) en las
-    # categorías de opción/equipo; para inversores se arma más abajo.
-    if cat["tipo"] in ("opcion", "equipo"):
-        _et = clasif.get("subtipo_etiqueta") or cat["etiqueta"]
-        falla.tipo_libre = (f"{_et}: {falla.subtipo_detalle}" if falla.subtipo_detalle else _et)[:255]
     if categoria == "frontera":
         clasif["afecta_medicion"] = bool(falla.frontera_afecta_medicion)
         clasif["perdida_comunicacion"] = bool(falla.frontera_perdida_comunicacion)
@@ -180,12 +178,6 @@ def _aplicar_clasificacion(falla: Falla, inversores: list | None, db: Session) -
             }
             for inv in inv_source
         ]
-        # tipo_libre legible para las listas/tablas legacy
-        nombres = ", ".join(
-            [(_inv_get(inv, "nombre") or f"Inv {_inv_get(inv, 'proyecto_inversor_id')}") for inv in inv_source]
-        ) or "Inversores"
-        tlabels = ", ".join([etiqueta_subtipo("inversores", t) or t for t in inv_tipos_all])
-        falla.tipo_libre = (f"Inversores: {nombres} — {tlabels}")[:255]
     falla.clasificacion = clasif
 
     # Reemplaza filas de inversores afectados solo si vino input nuevo.
@@ -712,7 +704,7 @@ def _enviar_notificacion(
         estado_codigo=falla.estado.codigo if falla.estado else "",
         estado_etiqueta=falla.estado.etiqueta if falla.estado else "",
         prioridad_etiqueta=falla.prioridad.etiqueta if falla.prioridad else "",
-        tipo_nombre=falla.tipo.etiqueta if falla.tipo else (falla.tipo_libre or ""),
+        tipo_nombre=titulo_falla(falla),
         fecha_identificacion=str(falla.fecha_identificacion or ""),
         hora_identificacion=str(falla.hora_identificacion or ""),
         fecha_programada=str(falla.fecha_programada or ""),
@@ -857,54 +849,16 @@ def _generar_impacto_mantenimiento(falla: Falla, current_user, db: Session) -> N
         )
 
 
-def backfill_tipos_estructurados(db: Session, dry_run: bool = False) -> dict:
-    """Recalcula tipo_id/tipo_libre/clasificacion de las fallas con clasificación
-    estructurada (categoria_codigo no nulo). Corrige las fallas cuyo tipo_id quedó
-    apuntando a un tipo legacy que contradice la clasificación (mostraban p.ej.
-    'Fusible de string quemado' en fallas de red). Idempotente: solo cuenta como
-    corregida si algo cambia. NO toca los inversores afectados (inversores=None)."""
-    fallas = (
-        db.query(Falla)
-        .filter(Falla.deleted_at.is_(None), Falla.categoria_codigo.isnot(None))
-        .all()
-    )
-    cambiadas = []
-    for f in fallas:
-        old_tipo, old_libre = f.tipo_id, f.tipo_libre
-        try:
-            _aplicar_clasificacion(f, None, db)
-        except Exception:
-            continue
-        if f.tipo_id != old_tipo or f.tipo_libre != old_libre:
-            cambiadas.append({
-                "codigo": f.codigo_interno,
-                "categoria": f.categoria_codigo,
-                "subtipo": f.subtipo_codigo,
-                "tipo_id_anterior": old_tipo,
-                "tipo_id_nuevo": f.tipo_id,
-                "tipo_libre_nuevo": f.tipo_libre,
-            })
-    if dry_run:
-        db.rollback()
-    elif cambiadas:
-        db.commit()
-    return {
-        "dry_run": dry_run,
-        "total_estructuradas": len(fallas),
-        "corregidas": len(cambiadas),
-        "detalle": cambiadas[:200],
-    }
-
-
-@router.post("/backfill-tipos")
-def backfill_tipos_endpoint(
-    dry_run: bool = Query(True, description="Solo previsualizar sin escribir"),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Corrige el tipo/título de las fallas estructuradas cuyo tipo_id quedó legacy
-    (p.ej. 'Fusible de string quemado' en fallas de red). Con dry_run=true solo reporta."""
-    return backfill_tipos_estructurados(db, dry_run=dry_run)
+# backfill_tipos_estructurados() / POST /backfill-tipos vivieron acá --
+# eliminados 2026-09-02 junto con tipo_libre. Existían para mantener
+# tipo_id/tipo_libre sincronizados con la clasificación estructurada; una
+# verificación real contra producción (dry-run) mostró 0 correcciones sobre
+# 5.086 fallas estructuradas -- ya no había nada que corregir, así que
+# escanear la tabla completa en cada arranque (_run_fallas_tipo_backfill en
+# main.py) dejó de tener sentido. Si `_aplicar_clasificacion()` cambia de
+# forma que vuelva a desincronizar tipo_id, el fix es una migración de
+# Alembic puntual (mismo criterio que ya se aplicó para el propio
+# tipo_migration), no un job permanente "por si acaso".
 
 
 def backfill_sla_cumplido(db: Session, dry_run: bool = False) -> dict:

@@ -16,6 +16,8 @@ según `es_estado_final` — nunca queda invisible. Ver `grupo_de_estado`.
 """
 from datetime import date
 
+from app.services.fallas.titulo import titulo_falla
+
 # El único estado agendado. Todo lo demás se decide por `es_estado_final`,
 # para que un estado nuevo en el catálogo nunca desaparezca de las respuestas.
 ESTADO_PROGRAMADO = "programado"
@@ -114,7 +116,7 @@ def falla_publica(falla) -> dict:
             "nivel": prioridad.nivel if prioridad else None,
         },
         "descripcion": falla.descripcion,
-        "tipo": (falla.tipo.etiqueta if falla.tipo else falla.tipo_libre),
+        "tipo": titulo_falla(falla),
         "clasificacion": _clasificacion_legible(falla),
         "resolucion": (falla.resolucion.etiqueta if falla.resolucion else None),
         "causa_raiz": falla.causa_raiz,

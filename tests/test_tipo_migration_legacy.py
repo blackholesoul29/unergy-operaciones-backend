@@ -79,21 +79,3 @@ def test_codigo_vacio_o_nulo_no_es_legacy(estructurados):
     """Un tipo sin código no se re-apunta a ciegas."""
     assert es_tipo_legacy(None, estructurados) is False
     assert es_tipo_legacy("", estructurados) is False
-
-
-# ── El orden de las tareas de arranque ───────────────────────────────────────
-
-def test_el_backfill_corre_pegado_a_tipo_migration():
-    """Red de seguridad: si vuelve a haber dos escritores de `fallas.tipo_id`,
-    la ventana de datos inconsistentes servidos por la API dura una tarea."""
-    import inspect
-
-    from app.main import _deferred_init
-
-    fuente = inspect.getsource(_deferred_init)
-    i = fuente.index('("tipo_migration"')
-    j = fuente.index('("fallas_tipo_backfill"')
-
-    assert j > i, "fallas_tipo_backfill tiene que ir DESPUÉS de tipo_migration"
-    entre = fuente[i:j].count('("')
-    assert entre == 1, f"hay {entre - 1} tareas entre las dos; deben ir pegadas"

@@ -143,7 +143,6 @@ Respuesta `201 Created` con la falla completa, incluido el `codigo_interno` que 
   "codigo_interno": "FAL-2026-05831",
   "proyecto": { "id": 147, "nombre_comercial": "La Reserva", "…": "…" },
   "estado": { "id": 1, "codigo": "abierta", "etiqueta": "Abierta", "…": "…" },
-  "tipo_libre": "Baja tensión",
   "clasificacion": {
     "categoria": "red",
     "categoria_etiqueta": "Red",
@@ -219,9 +218,8 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 | Campo | Tipo | Req. | Descripción |
 |---|---|:---:|---|
 | `tipo_id` | `int` | — | ID de `fallas_cat_tipos`. Esquema plano anterior |
-| `tipo_libre` | `string` | — | Etiqueta libre, máx. 255 caracteres |
 
-> **Importante:** si mandan `categoria_codigo`, el servidor **sobrescribe** `tipo_id` y `tipo_libre` con los valores derivados de la clasificación. No intenten controlarlos manualmente en el camino estructurado — se pierde lo que manden. (Esto es a propósito: evita títulos que contradigan la clasificación.)
+> **Importante:** si mandan `categoria_codigo`, el servidor **sobrescribe** `tipo_id` con el valor derivado de la clasificación. No intenten controlarlo manualmente en el camino estructurado — se pierde lo que manden. (Esto es a propósito: evita títulos que contradigan la clasificación.) `tipo_libre` existió como campo plano hasta 2026-09-02; se eliminó — el campo `"tipo"` en las respuestas de lectura ahora se arma siempre a partir de `clasificacion` (o de `tipo_id` para fallas legacy sin clasificación).
 
 ### 3.6 Ventana temporal
 
@@ -445,9 +443,8 @@ Cuando mandan `categoria_codigo`, el servidor calcula y sobrescribe estos campos
 |---|---|
 | `codigo_interno` | `FAL-{año}-{id:05d}`, con el `id` autoincremental. Siempre |
 | `registrado_por_id` | El usuario dueño de la API Key. No se puede suplantar |
-| `tipo_id` | Se busca el tipo de catálogo con código `"{categoria}.{subtipo}"`. En `inversores` usa el primer tipo alfabéticamente. Si no existe, queda `null` |
-| `tipo_libre` | Etiqueta legible. `"Baja tensión"`, o `"Baja tensión: <detalle>"` si hay detalle. En inversores: `"Inversores: <nombres> — <tipos>"`. Truncado a 255 |
-| `clasificacion` | Snapshot JSON de la clasificación (categoría, subtipo, etiquetas, flags, e inversores con sus etiquetas). Es la fuente que usan las vistas para el título |
+| `tipo_id` | Se busca el tipo de catálogo con código `"{categoria}.{subtipo}"`. En `inversores` usa el primer tipo alfabéticamente. Si no existe, queda `null` — solo sirve como compatibilidad con vistas legacy, ya no arma el título |
+| `clasificacion` | Snapshot JSON de la clasificación (categoría, subtipo, etiquetas, flags, e inversores con sus etiquetas). Es la única fuente que usan las vistas y el campo `"tipo"` de las respuestas para armar el título — reemplaza a `tipo_libre` (eliminado 2026-09-02) |
 | `pendiente_reclasificar` | `true` solo si el subtipo lo marca (hoy: `red.desconexion_sin_identificar`) |
 | `inversores_perdida_comunicacion` | `true` si algún inversor trae el tipo `perdida_comunicacion`. `null` si la categoría no es `inversores` |
 | `frontera_afecta_medicion`, `frontera_perdida_comunicacion` | Se fuerzan a `null` si la categoría **no** es `frontera` |
@@ -767,7 +764,7 @@ if __name__ == "__main__":
 
 - ❌ Llamar `POST /fallas/{id}/notificar` — le manda correo a clientes reales
 - ❌ Hardcodear `estado_id` / `prioridad_id` / `tipo_id` — resuélvanlos desde `/catalogos`
-- ❌ Mandar `tipo_id` o `tipo_libre` junto con `categoria_codigo` — se sobrescriben
+- ❌ Mandar `tipo_id` junto con `categoria_codigo` — se sobrescribe
 - ❌ Poner `generar_impacto: true` en pruebas — crea registros de mantenimiento
 - ❌ Poner los flags `perdida_comunicacion` en `true` sin querer generar alarmas
 - ❌ Reasignar `asignado_a_id` en pruebas — le notifica a una persona real

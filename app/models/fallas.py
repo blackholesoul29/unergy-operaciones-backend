@@ -100,7 +100,6 @@ class Falla(Base):
     codigo_interno: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
     proyecto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("proyectos.id"), nullable=False, index=True)
     tipo_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_tipos.id"), nullable=True, index=True)
-    tipo_libre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     estado_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_estados.id"), nullable=False, index=True)
     prioridad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_prioridades.id"), nullable=False, index=True)
     resolucion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_resoluciones.id"), nullable=True, index=True)
@@ -132,7 +131,7 @@ class Falla(Base):
     # Feature 6: programado state — scheduled date for intervention
     fecha_programada: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     # ── Reporte estructurado (jerárquico por activo) — solo fallas nuevas ─────
-    # Las fallas viejas dejan estos campos en NULL y siguen usando tipo_id/tipo_libre.
+    # Las fallas viejas dejan estos campos en NULL y siguen usando tipo_id.
     categoria_codigo: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     subtipo_codigo: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     subtipo_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)

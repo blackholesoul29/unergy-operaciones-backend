@@ -145,6 +145,26 @@ def test_recuperacion_tras_caida():
     assert AlarmType.PLANTA_CAIDA not in engine.active_alarms.get(7, set())
 
 
+def test_no_recuperacion_sin_planta_caida_confirmada():
+    """Regresión: una fluctuación ERROR->OK que nunca llegó a superar el
+    debounce (DEBOUNCE_POLLS=4) y por lo tanto nunca disparó PLANTA_CAIDA no
+    debe generar una alarma de RECUPERACION -- antes del fix, la condición
+    `AlarmType.RECUPERACION not in proj_alarms` era siempre True (RECUPERACION
+    nunca se agrega a ese set), así que cualquier fluctuación corta generaba
+    ruido de recuperación sin que hubiera una caída real que "recuperar"
+    (auditoría 2026-09-01)."""
+    engine = _EngineEnHorarioSolar()
+    node_to_proyecto = {1: 7}
+    proyecto_nombres = {7: "Proyecto Siete"}
+
+    engine.evaluate([_node(1, status="ERROR")], node_to_proyecto, proyecto_nombres)
+
+    alarmas = engine.evaluate([_node(1, status="OK", eae=10)], node_to_proyecto, proyecto_nombres)
+    tipos = [a.alarm_type for a in alarmas]
+    assert AlarmType.RECUPERACION not in tipos
+    assert AlarmType.PLANTA_CAIDA not in tipos
+
+
 def test_evaluate_de_noche_no_genera_alarmas():
     class _EngineDeNoche(AlarmEngine):
         def evaluate(self, nodes, node_to_proyecto, proyecto_nombres):

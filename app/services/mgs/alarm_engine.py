@@ -161,6 +161,10 @@ class AlarmEngine:
             prev = self.previous_states.get(pid)
             proj_alarms = self.active_alarms.setdefault(pid, set())
             is_bad = status in ("NO_DATA", "ERROR")
+            # Capturado ANTES de que el bloque de abajo descarte PLANTA_CAIDA
+            # de proj_alarms en el mismo poll en que se recupera -- si no, el
+            # chequeo de recuperación más abajo nunca lo encontraría.
+            habia_planta_caida = AlarmType.PLANTA_CAIDA in proj_alarms
 
             if is_bad:
                 self.bad_streak[pid] = self.bad_streak.get(pid, 0) + 1
@@ -199,8 +203,15 @@ class AlarmEngine:
             else:
                 proj_alarms.discard(AlarmType.SIN_GENERACION)
 
+            # Solo cuenta como recuperación si de verdad hubo una caída
+            # confirmada (PLANTA_CAIDA, tras superar el debounce) -- sin este
+            # guard, `AlarmType.RECUPERACION not in proj_alarms` era siempre
+            # True (RECUPERACION nunca se agrega a proj_alarms), así que
+            # CUALQUIER fluctuación NO_DATA/ERROR -> OK/WARNING generaba una
+            # alarma de recuperación, incluso cuando el debounce nunca llegó
+            # a disparar PLANTA_CAIDA (bug encontrado en auditoría 2026-09-01).
             if prev in ("NO_DATA", "ERROR") and status in ("OK", "WARNING"):
-                if AlarmType.PLANTA_CAIDA in proj_alarms or AlarmType.RECUPERACION not in proj_alarms:
+                if habia_planta_caida:
                     alarms.append(Alarm(
                         severity=Severity.INFO,
                         alarm_type=AlarmType.RECUPERACION,

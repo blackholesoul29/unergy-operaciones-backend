@@ -1108,7 +1108,25 @@ def update_falla(
             "frontera_afecta_medicion", "frontera_perdida_comunicacion",
         ))
     )
-    if estructura_touched and falla.categoria_codigo:
+    if "categoria_codigo" in dump and dump["categoria_codigo"] is None:
+        # Limpiar la clasificación estructurada explícitamente (categoria_codigo: null).
+        # El setattr de arriba ya puso falla.categoria_codigo en None -- sin este bloque,
+        # el guard de abajo (`estructura_touched and falla.categoria_codigo`) nunca es
+        # cierto para este caso y todo lo derivado (clasificacion, subtipo_codigo,
+        # banderas, pendiente_reclasificar) quedaba congelado con el valor viejo,
+        # contradiciendo el categoria_codigo=null recién guardado (auditoría 2026-09-02).
+        falla.subtipo_codigo = None
+        falla.subtipo_detalle = None
+        falla.pendiente_reclasificar = False
+        falla.frontera_afecta_medicion = None
+        falla.frontera_perdida_comunicacion = None
+        falla.inversores_perdida_comunicacion = None
+        falla.clasificacion = None
+        if "tipo_id" not in dump:
+            falla.tipo_id = None
+        db.flush()
+        db.query(FallaInversor).filter(FallaInversor.falla_id == falla.id).delete(synchronize_session=False)
+    elif estructura_touched and falla.categoria_codigo:
         db.flush()  # asegura falla.id para sincronizar inversores
         # Validar: para inversores solo si llegó lista nueva (si no, los datos
         # existentes ya eran válidos). Para red/frontera/eventos validar subtipo.

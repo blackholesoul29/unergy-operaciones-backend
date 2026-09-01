@@ -46,6 +46,8 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
             selectinload(Proyecto.ppa_contratos),
             selectinload(Proyecto.operador),
             selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+            selectinload(Proyecto.padre),
+            selectinload(Proyecto.subproyectos),
         )
         .filter(Proyecto.id == id)
         .first()
@@ -53,6 +55,44 @@ def _get_proyecto_or_404(id: int, db: Session) -> Proyecto:
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
     return p
+
+
+def _verificar_padre(db: Session, hijo_id: int, padre_id: int | None) -> None:
+    """La jerarquía de subproyectos es de UN solo nivel: padre -> conexiones.
+
+    Rechaza los tres errores posibles al asignarla: colgarse de sí mismo, de un
+    proyecto que no existe, y de otro subproyecto (que crearía un nieto). Lo
+    último es la restricción de diseño: en Unergy un `subproject` no tiene
+    subproyectos, así que un tercer nivel no representaría nada real.
+    """
+    if padre_id is None:
+        return
+    if padre_id == hijo_id:
+        raise HTTPException(400, "Un proyecto no puede ser su propio padre.")
+    padre = (
+        db.query(Proyecto)
+        .filter(Proyecto.id == padre_id, Proyecto.deleted_at.is_(None))
+        .first()
+    )
+    if not padre:
+        raise HTTPException(400, f"El proyecto padre {padre_id} no existe.")
+    if padre.proyecto_padre_id is not None:
+        raise HTTPException(
+            400,
+            f"'{padre.nombre_comercial}' ya es un subproyecto: no puede tener "
+            "subproyectos a su vez.",
+        )
+    tiene_hijos = (
+        db.query(Proyecto.id)
+        .filter(Proyecto.proyecto_padre_id == hijo_id, Proyecto.deleted_at.is_(None))
+        .first()
+    )
+    if tiene_hijos:
+        raise HTTPException(
+            400,
+            "Este proyecto ya tiene subproyectos colgando, así que no puede "
+            "volverse subproyecto de otro.",
+        )
 
 
 # ── Proyectos ─────────────────────────────────────────────────────────────────
@@ -76,9 +116,15 @@ def list_proyectos(
     tipo_proyecto: str | None = None,
     portafolio_id: int | None = None,
     servicio: str | None = None,
+    solo_padres: bool = False,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    """`solo_padres=true` deja fuera los subproyectos y devuelve únicamente los
+    proyectos de primer nivel, cada uno con sus hijos en `subproyectos`. Sin
+    eso la paginación partiría la jerarquía: un padre podría caer en una página
+    y sus conexiones en la siguiente. Por omisión está apagado, para no cambiar
+    lo que ya reciben quienes consumen este listado hoy."""
     query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None)).options(
         selectinload(Proyecto.inversionistas).selectinload(ProyectoInversionista.cliente),
         selectinload(Proyecto.info_tecnica),
@@ -87,6 +133,8 @@ def list_proyectos(
         selectinload(Proyecto.ppa_contratos),
         selectinload(Proyecto.operador),
         selectinload(Proyecto.fronteras).selectinload(Frontera.operador),
+        selectinload(Proyecto.padre),
+        selectinload(Proyecto.subproyectos),
     )
     if q:
         query = query.filter(Proyecto.nombre_comercial.ilike(f"%{q}%"))
@@ -98,6 +146,8 @@ def list_proyectos(
         query = query.filter(Proyecto.portafolio_id == portafolio_id)
     if servicio and servicio in SERVICIO_FILTER_MAP:
         query = query.filter(SERVICIO_FILTER_MAP[servicio] == True)
+    if solo_padres:
+        query = query.filter(Proyecto.proyecto_padre_id.is_(None))
     total = query.count()
     items = query.order_by(Proyecto.nombre_comercial).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
@@ -140,6 +190,10 @@ def create_proyecto(
 ):
     payload = data.model_dump()
     _verificar_unicos(db, payload)
+    if payload.get("proyecto_padre_id") is not None:
+        # hijo_id = 0: el proyecto todavía no existe, así que no hay riesgo de
+        # que el padre sea él mismo ni de que ya tenga hijos.
+        _verificar_padre(db, 0, payload["proyecto_padre_id"])
 
     if not forzar:
         duplicado = _buscar_duplicado_por_nombre(db, payload.get("nombre_comercial"), payload.get("tipo_proyecto"))
@@ -628,6 +682,8 @@ def update_proyecto(id: int, data: ProyectoUpdate, db: Session = Depends(get_db)
 
     payload = data.model_dump(exclude_unset=True)
     _verificar_unicos(db, payload, excluir_id=id)
+    if "proyecto_padre_id" in payload:
+        _verificar_padre(db, id, payload["proyecto_padre_id"])
 
     # Si el usuario edita la fecha de inicio de comercialización a mano, marca el
     # flag para que el backfill/job diario no la vuelva a pisar (salvo que él mismo

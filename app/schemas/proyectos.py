@@ -198,11 +198,32 @@ class ProyectoPPAResumenOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SubproyectoResumenOut(BaseModel):
+    """Un subproyecto visto desde su padre: lo justo para listarlo y saltar a él.
+
+    Deliberadamente plano -- si se anidara ProyectoOut, el detalle de un padre
+    con 5 conexiones traería cinco fichas completas con todas sus relaciones.
+    """
+
+    id: int
+    nombre_comercial: str
+    estado: str
+    # La conexión en la API de generación de Unergy. Los ids de Quoia NO van
+    # aquí: viven por subproyecto en la API de Liquidaciones (ver migración 136,
+    # que borró las columnas quoia_* de `proyectos` justamente por eso).
+    sub_project: Optional[str] = None
+    potencia_instalada_kwp: Optional[float] = None
+    model_config = {"from_attributes": True}
+
+
 # ── Proyecto principal ────────────────────────────────────────────────────────
 
 class ProyectoCreate(BaseModel):
     nombre_comercial: str
     portafolio_id: Optional[int] = None
+    # Padre del que cuelga este proyecto, cuando es un subproyecto (una de las
+    # varias conexiones de un mismo autoconsumo). NULL = proyecto suelto.
+    proyecto_padre_id: Optional[int] = None
     sub_project: Optional[str] = None
     # Tópico en la API de Liquidaciones cuando difiere del de generación.
     topico_liquidaciones: Optional[str] = None
@@ -276,6 +297,12 @@ class ProyectoOut(BaseModel):
     id: int
     nombre_comercial: str
     portafolio_id: Optional[int]
+    # Jerarquía de subproyectos. `proyecto_padre_id` y `padre_nombre` van
+    # llenos solo en un hijo; `subproyectos` solo en un padre. Los dos vacíos =
+    # proyecto suelto, el caso normal.
+    proyecto_padre_id: Optional[int] = None
+    padre_nombre: Optional[str] = None
+    subproyectos: list[SubproyectoResumenOut] = []
     sub_project: Optional[str]
     topico_liquidaciones: Optional[str] = None
     clasificacion_regulatoria: Optional[str]
@@ -357,6 +384,16 @@ class ProyectoOut(BaseModel):
             return []
         items = v if isinstance(v, list) else (list(v) if hasattr(v, "__iter__") else [v])
         return [c for c in items if getattr(c, "deleted_at", None) is None]
+
+    @field_validator("subproyectos", mode="before")
+    @classmethod
+    def solo_subproyectos_vivos(cls, v):
+        """La relación Proyecto.subproyectos no conoce el borrado lógico, así que
+        un subproyecto eliminado seguiría apareciendo colgado de su padre."""
+        if v is None:
+            return []
+        items = v if isinstance(v, list) else (list(v) if hasattr(v, "__iter__") else [v])
+        return [s for s in items if getattr(s, "deleted_at", None) is None]
 
     @field_validator("p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", mode="before")
     @classmethod

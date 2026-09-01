@@ -92,6 +92,22 @@ class Proyecto(Base):
     # de la prorrata del reparto. Vacío = se usa `sub_project`.
     topico_liquidaciones: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # ── Subproyectos ─────────────────────────────────────────────────────────
+    # Un proyecto de autoconsumo puede repartirse en varias conexiones -- en
+    # Unergy son los `subprojects` del proyecto. Cada hijo cuelga del padre por
+    # aquí y lleva SU propia conexión en `sub_project`; el padre no tiene
+    # ninguna, porque consultar generación con el tópico del padre
+    # (`laurelescampestre`, `iml`, `somer`) devuelve cero registros: los datos
+    # solo existen a nivel de subproyecto. El padre sí lleva
+    # `topico_liquidaciones`, porque en Unergy la liquidación es a nivel de
+    # padre (es ahí donde viven `sic_gen`/`sic_con`/`ac_power`).
+    #
+    # NULL = proyecto suelto (ni padre ni hijo), que es el caso de la enorme
+    # mayoría. Solo se usa donde Unergy realmente parte el proyecto.
+    proyecto_padre_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("proyectos.id"), nullable=True, index=True,
+    )
+
     clasificacion_regulatoria: Mapped[str | None] = mapped_column(SAEnum(ClasificacionRegulatoriaEnum, name="clasificacion_regulatoria_enum"), nullable=True)
     tipo_tecnologia: Mapped[str | None] = mapped_column(SAEnum(TipoTecnologiaEnum, name="tipo_tecnologia_enum"), nullable=True)
     tipo_proyecto: Mapped[str | None] = mapped_column(SAEnum(TipoProyectoEnum, name="tipo_proyecto_enum"), nullable=True)
@@ -204,6 +220,14 @@ class Proyecto(Base):
 
     # Relaciones
     portafolio: Mapped["Portafolio | None"] = relationship("Portafolio", back_populates="proyectos")
+    # Auto-referencia padre/hijos. `remote_side` es lo que le dice a SQLAlchemy
+    # cuál extremo es el padre en una FK que apunta a la misma tabla.
+    padre: Mapped["Proyecto | None"] = relationship(
+        "Proyecto", remote_side=[id], back_populates="subproyectos", uselist=False,
+    )
+    subproyectos: Mapped[list["Proyecto"]] = relationship(
+        "Proyecto", back_populates="padre", uselist=True,
+    )
     info_tecnica: Mapped["ProyectoInfoTecnica | None"] = relationship("ProyectoInfoTecnica", back_populates="proyecto", uselist=False)
     inversores: Mapped[list["ProyectoInversor"]] = relationship("ProyectoInversor", back_populates="proyecto", uselist=True)
     area_contactos: Mapped[list["ProyectoAreaContacto"]] = relationship("ProyectoAreaContacto", back_populates="proyecto", cascade="all, delete-orphan", uselist=True)
@@ -219,6 +243,12 @@ class Proyecto(Base):
     promotor_seguimientos: Mapped[list["PromoterSeguimiento"]] = relationship("PromoterSeguimiento", back_populates="proyecto", uselist=True)
     contratos_servicio: Mapped[list["ContratoServicio"]] = relationship("ContratoServicio", back_populates="proyecto", uselist=True)
     ppa_contratos: Mapped[list["PPAContrato"]] = relationship("PPAContrato", secondary="ppa_contrato_proyectos", uselist=True, viewonly=True)
+
+    @property
+    def padre_nombre(self) -> str | None:
+        """Nombre del padre, para que la API lo entregue sin que quien consuma
+        tenga que pedir el proyecto padre aparte."""
+        return self.padre.nombre_comercial if self.padre else None
 
     @property
     def operador_red_legal(self) -> str | None:

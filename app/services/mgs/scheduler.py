@@ -418,11 +418,13 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
     verificación y deben seguir abiertas. Se identifican por el mismo prefijo
     que ya usa _auto_create_fallas al crearlas (descripcion = "[TIPO] ...").
     Se cierran (no se borran ni se ocultan): quedan con una nota automática,
-    editable, y se notifica por correo a los contactos operacionales del
-    proyecto para que no pase desapercibido -- cualquiera puede entrar
-    después a comentar o documentar la causa raíz."""
+    editable -- el correo automático a los contactos operacionales del
+    cliente se apagó 2026-09-01 (mismo criterio que el envío por alarma
+    nueva, ver _persist_alarms más abajo: "no quiero que se haga el envío
+    automático de clientes, no tengo control"). El cierre sigue siendo
+    visible en Gestión de Fallas; el aviso manual sigue disponible desde ahí."""
     from app.models import Falla, FallaCatEstado, FallaSeguimiento
-    from app.api.v1.fallas import _sincronizar_resolucion, _enviar_notificacion
+    from app.api.v1.fallas import _sincronizar_resolucion
 
     _TIPOS_CONECTIVIDAD = (AlarmType.PLANTA_CAIDA, AlarmType.CORTE_ZONA)
 
@@ -473,10 +475,6 @@ def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 db.commit()
                 logger.info("Auto-cerrada falla %s tras recuperación de alarma (%s)",
                             falla.codigo_interno, alarm.proyecto_nombre)
-                try:
-                    _enviar_notificacion(falla, accion="cerrada", usuario_nombre="Sistema (auto-cierre MGS)", db=db)
-                except Exception:
-                    logger.exception("No se pudo notificar el auto-cierre de %s", falla.codigo_interno)
 
         except Exception:
             db.rollback()

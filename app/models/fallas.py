@@ -2,11 +2,31 @@ import enum
 import json
 from datetime import datetime, date, time, timezone, timedelta
 from sqlalchemy import (BigInteger, String, Boolean, Date, Time,
-                        DateTime, Integer, Numeric, ForeignKey, Enum as SAEnum, Text)
+                        DateTime, Integer, Numeric, ForeignKey, Enum as SAEnum, Text,
+                        Column, Table)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+
+# alarmas_monitoreo: tabla del motor MGS (app/services/mgs/scheduler.py),
+# creada via SQL crudo (migracion 135) -- se declara acá como Table de
+# SQLAlchemy Core, SIN clase ORM mapeada (nadie hace queries por objeto
+# contra ella, todo el código que la usa sigue con text() a propósito), solo
+# para que Falla.alarma_monitoreo_id pueda tener una ForeignKey real que
+# SQLAlchemy sepa resolver (ver migracion 138, auditoria 2026-09-02).
+alarmas_monitoreo = Table(
+    "alarmas_monitoreo",
+    Base.metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("proyecto_nombre", String(255), nullable=False),
+    Column("severity", String(20), nullable=False),
+    Column("alarm_type", String(50), nullable=False),
+    Column("details", Text, nullable=False),
+    Column("source_data", JSONB, nullable=True),
+    Column("resolved_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
 
 
 class FallaCatCategoria(Base):
@@ -97,8 +117,13 @@ class Falla(Base):
     fotos_urls: Mapped[str | None] = mapped_column(JSONB, nullable=True)
     centinela: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
-    # Feature 2: link to MGS alarm that auto-created this falla
-    alarma_monitoreo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    # Feature 2: link to MGS alarm that auto-created this falla.
+    # alarmas_monitoreo no tiene modelo ORM (tabla creada via SQL crudo en
+    # la migracion 135) -- la FK se declara igual, contra el nombre de
+    # tabla, para que SQLAlchemy la conozca aunque no exista una relacion
+    # ORM del otro lado (ver migracion 138, auditoria 2026-09-02).
+    alarma_monitoreo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("alarmas_monitoreo.id", ondelete="SET NULL"), nullable=True, index=True)
     # Feature 4: impact on generation
     kwh_perdidos_estimado: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     impacto_economico_cop: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)

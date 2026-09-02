@@ -389,9 +389,16 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 logger.warning("No active user found — cannot auto-create falla")
                 continue
 
-            # Set SLA based on severity
-            sla_hours = 8 if alarm.severity == Severity.CRITICAL else 24
-
+            # sla_limite_horas se deja NULL a propósito -- no se calcula acá.
+            # Falla.sla_limite_horas_efectivo (app/models/fallas.py) ya resuelve
+            # el default por prioridad desde un único lugar (DEFAULT_SLA_HOURS);
+            # antes esta función tenía su propio cálculo hardcodeado (8h/24h
+            # según severidad) que coincidía por casualidad con crítica/grave de
+            # esa tabla, pero se desincronizaría en silencio si esos defaults
+            # cambiaran. Además, guardar acá un valor calculado le quitaba a
+            # sla_limite_horas su significado real: "alguien puso un plazo
+            # especial", no "el motor puso un número" (auditoría 2026-09-02).
+            #
             # codigo_interno: placeholder -> INSERT -> renombrar con el id real
             # asignado por la BD (RETURNING id), igual que create_falla() en
             # api/v1/fallas.py. Antes se adivinaba con MAX(id)+1 calculado
@@ -404,10 +411,10 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 INSERT INTO fallas
                     (codigo_interno, proyecto_id, tipo_id, estado_id, prioridad_id,
                      registrado_por_id, descripcion, fecha_identificacion,
-                     sla_limite_horas, alarma_monitoreo_id)
+                     alarma_monitoreo_id)
                 VALUES
                     (:codigo, :pid, :tipo_id, :estado_id, :prioridad_id,
-                     :reg_id, :desc, :fecha, :sla, :alarm_id)
+                     :reg_id, :desc, :fecha, :alarm_id)
                 RETURNING id
             """), {
                 "codigo": placeholder,
@@ -418,7 +425,6 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 "reg_id": registrado_por["id"],
                 "desc": f"[{alarm.alarm_type.value}] {alarm.details}",
                 "fecha": alarm.timestamp.date(),
-                "sla": sla_hours,
                 "alarm_id": alarm_db_id,
             }).scalar()
 

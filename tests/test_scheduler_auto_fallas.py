@@ -23,6 +23,7 @@ import app.models  # noqa: F401
 from app.models.fallas import (
     Falla, FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria,
     FallaCatResolucion, FallaSeguimiento, FallaIntervalo, FallaInversor,
+    DEFAULT_SLA_HOURS,
 )
 from app.models.proyectos import Proyecto
 from app.models.usuarios import Usuario
@@ -175,13 +176,17 @@ def test_auto_create_alarma_no_critica_usa_prioridad_grave_real(db, base):
     código que no existe en fallas_cat_prioridades (real: critica/grave/media/
     leve) -- la búsqueda nunca encontraba fila, y `continue` se comía la
     creación en silencio para toda alarma no-crítica. Confirma que ahora sí
-    se crea, con la prioridad real "grave" y su SLA correspondiente
-    (auditoría 2026-09-02)."""
+    se crea, con la prioridad real "grave" (auditoría 2026-09-02).
+
+    sla_limite_horas queda NULL a propósito -- ya no se calcula acá (ver
+    comentario en _auto_create_fallas). El default por prioridad lo resuelve
+    Falla.sla_limite_horas_efectivo, no esta función."""
     _auto_create_fallas(db, [(_alarm(AlarmType.PLANTA_CAIDA, severity=Severity.WARNING), 1)])
 
     falla = db.query(Falla).filter(Falla.proyecto_id == 10).one()
     assert falla.prioridad_id == 2  # "grave", ver fixture `base`
-    assert falla.sla_limite_horas == 24
+    assert falla.sla_limite_horas is None
+    assert falla.sla_limite_horas_efectivo == DEFAULT_SLA_HOURS[2]
 
 
 def test_auto_create_codigo_interno_usa_el_id_real_asignado(db, base):

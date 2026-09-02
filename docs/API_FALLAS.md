@@ -613,6 +613,7 @@ Respuesta: `{ "items": [...], "total": 137, "page": 1, "size": 20, "pages": 7 }`
 | `solo_alerta` | `bool` | Solo fallas no cerradas identificadas hace más de 7 días |
 | `fecha_programada_desde` / `_hasta` | `date` | Rango sobre `fecha_programada` |
 | `con_fecha_programada` | `bool` | Solo las que tienen `fecha_programada` |
+| `pendiente_reclasificar` | `bool` | Con `true`: solo las que de verdad necesitan que alguien confirme la causa a mano — excluye automáticamente el patrón de reportes de un integrador externo que quedan atascados en el subtipo genérico "sin identificar" sin `alarma_monitoreo_id` (2026-09-02) |
 
 > **No hay filtro por `centinela`.** Para encontrar sus fallas de prueba, fíltrenlas del lado del cliente leyendo el campo `centinela` de cada ítem.
 

@@ -587,6 +587,7 @@ def list_fallas(
     fecha_programada_desde: date | None = None,
     fecha_programada_hasta: date | None = None,
     con_fecha_programada: bool = False,
+    pendiente_reclasificar: bool | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -661,6 +662,24 @@ def list_fallas(
         query = query.filter(Falla.fecha_programada <= fecha_programada_hasta)
     if con_fecha_programada:
         query = query.filter(Falla.fecha_programada.isnot(None))
+    if pendiente_reclasificar is not None:
+        query = query.filter(Falla.pendiente_reclasificar == pendiente_reclasificar)
+        if pendiente_reclasificar:
+            # Cola de pendientes REALES: excluye el patrón de un bot externo
+            # (no vive en este repo, no se puede tocar su lógica) que reporta
+            # diagnósticos eléctricos específicos -- desbalance de tensión,
+            # reconectador en cero, frontera/inversores sin datos -- pero
+            # siempre bajo el subtipo genérico red.desconexion_sin_identificar,
+            # así que nunca se resuelve solo vía el flujo normal de
+            # reclasificación (verificado: 833 de 851 casos reales, todas sin
+            # alarma_monitoreo_id -- ese campo solo lo llena el motor MGS
+            # interno, ver _auto_create_fallas en services/mgs/scheduler.py).
+            # Auditoría 2026-09-02.
+            query = query.filter(~(
+                Falla.alarma_monitoreo_id.is_(None)
+                & (Falla.categoria_codigo == "red")
+                & (Falla.subtipo_codigo == "desconexion_sin_identificar")
+            ))
 
     total = query.count()
     items = query.order_by(Falla.created_at.desc()).offset((page - 1) * effective_size).limit(effective_size).all()

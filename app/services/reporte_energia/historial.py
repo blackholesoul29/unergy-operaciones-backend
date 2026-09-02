@@ -28,19 +28,32 @@ DIAS_VENTANA     = 30
 # parciales) quedan fuera a propósito, igual que Caso 6 (apagado) y 0 (externo).
 CASOS_CONFIABLES_GENERACION = {1, 2, 4, 5, 7}
 
-# Fronteras con FP fijo (decidido, no calculado del histórico) -- para
-# medidores crónicamente inestables donde el ratio E_med/E_inv no refleja
-# pérdida física real. Clave: frontera_id. Confirmar el id real contra la
-# BD antes de usar en producción (0.99 para "MGS 0028 COX - Chiriguaná
-# Norte 1" en el pipeline original, Reporte-Energia).
-FP_FIJO: dict[int, float] = {}
-
-UMBRAL_FP_MUY_BAJO  = 0.9
-# Sin FP calculable del histórico, se reporta un valor variado día a día
-# dentro de este rango en vez de repetir siempre el mismo número fijo
-# (decisión de negocio, 2026-08-19) -- determinístico por frontera+fecha
-# (ver _fp_fallback) para que no cambie si se re-consulta o se re-corre el
-# mismo día.
+# Rango de FP calculado que se considera físicamente plausible -- fuera de
+# él no se confía en el número y se usa _fp_fallback() en su lugar.
+# Reemplaza al override manual FP_FIJO por frontera que existía acá antes
+# (eliminado 2026-09-02; nunca se activó en producción -- diccionario vacío,
+# pendiente de confirmar el frontera_id real de "MGS 0028 COX - Chiriguaná
+# Norte 1" del pipeline original, Reporte-Energia): con el umbral ya acotado
+# por ambos lados, un histórico inestable cae solo en este rechazo, sin
+# necesitar un override manual por proyecto.
+#
+# Piso -- ninguna conexión de generación distribuida a baja/media tensión
+# pierde tanto (pérdidas técnicas de transformador/cable normalmente rondan
+# 1-3%, ver regulación CREG de conexión). Subido de 0.9 a 0.95 (2026-09-02,
+# decisión del usuario): 0.9 dejaba pasar como "plausible" hasta un 10% de
+# pérdida, más de lo esperable en este tipo de conexión.
+UMBRAL_FP_MUY_BAJO  = 0.95
+# Techo -- FP = E_medidor/E_inversor es un factor de PÉRDIDA: el medidor
+# debería leer igual o menos que el inversor, nunca más. Un ratio por
+# encima de 1 no es una pérdida más chica, es señal de que algo más anda
+# mal (doble conteo, calibración) y tampoco se confía en él (decisión del
+# usuario, 2026-09-02).
+UMBRAL_FP_MUY_ALTO  = 1.0
+# Sin FP calculable del histórico, o fuera del rango plausible de arriba, se
+# reporta un valor variado día a día dentro de este rango en vez de repetir
+# siempre el mismo número fijo (decisión de negocio, 2026-08-19) --
+# determinístico por frontera+fecha (ver _fp_fallback) para que no cambie si
+# se re-consulta o se re-corre el mismo día.
 FP_FALLBACK_RANGO = (0.990, 0.995)
 
 
@@ -69,10 +82,10 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
     Caso no confiable podía tener completo=True y aun así colarse en la
     mediana antes de este filtro.
 
-    fp_usado: lo que realmente se aplica -- FP_FIJO si la frontera está ahí,
-    un valor dentro de FP_FALLBACK_RANGO (variado por frontera+fecha, ver
-    _fp_fallback) si fp_calculado < UMBRAL_FP_MUY_BAJO o no hay histórico
-    suficiente, o fp_calculado tal cual en el resto de los casos.
+    fp_usado: lo que realmente se aplica -- un valor dentro de
+    FP_FALLBACK_RANGO (variado por frontera+fecha, ver _fp_fallback) si
+    fp_calculado está fuera de [UMBRAL_FP_MUY_BAJO, UMBRAL_FP_MUY_ALTO] o no
+    hay histórico suficiente, o fp_calculado tal cual en el resto de los casos.
     """
     filas = db.execute(
         select(
@@ -105,13 +118,10 @@ def get_factor_perdida_detalle(db: Session, frontera_id: int, fecha: date) -> tu
 
     fp_calculado = float(pd.Series(ratios).median()) if len(ratios) >= MIN_DIAS_FP else None
 
-    if frontera_id in FP_FIJO:
-        return FP_FIJO[frontera_id], fp_calculado
-
     if fp_calculado is None:
         return _fp_fallback(frontera_id, fecha), None
 
-    if fp_calculado < UMBRAL_FP_MUY_BAJO:
+    if fp_calculado < UMBRAL_FP_MUY_BAJO or fp_calculado > UMBRAL_FP_MUY_ALTO:
         return _fp_fallback(frontera_id, fecha), fp_calculado
 
     return fp_calculado, fp_calculado

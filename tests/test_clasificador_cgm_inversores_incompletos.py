@@ -34,6 +34,7 @@ def _decidir(reporte_valido, e_inv_incompleto, curva_solarview, curva_cgm):
     return clasificador._decidir_caso(
         db=None, frontera_id=1, fecha=FECHA, fecha_str=FECHA_STR,
         e_cgm=e_cgm, curva_cgm=curva_cgm, reporte_valido=reporte_valido,
+        cgm_tiene_dato=True,
         curva_ppal=curva_vacia, curva_resp=curva_vacia,
         completo_ppal=False, completo_resp=False,
         e_inv=0.0, e_inv_incompleto=e_inv_incompleto, curva_solarview=curva_solarview,

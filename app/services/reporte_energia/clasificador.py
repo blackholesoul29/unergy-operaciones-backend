@@ -120,6 +120,7 @@ def _decidir_caso(
     e_cgm: float,
     curva_cgm: pd.Series,
     reporte_valido: bool,
+    cgm_tiene_dato: bool,
     curva_ppal: pd.Series,
     curva_resp: pd.Series,
     completo_ppal: bool,
@@ -263,6 +264,18 @@ def _decidir_caso(
     # ya lo maneja el bloque de arriba. Si el medidor TAMBIÉN está caído, no
     # se hace nada acá y sigue cayendo a la cadena de crudos de siempre.
     if e_cgm <= 0:
+        # CGM reportó genuinamente 0 (24 horas reales, no ausencia de dato)
+        # en un reporte automático válido para hoy -- confiar directo en ese
+        # cero, igual que se confiaría en cualquier otro valor de CGM, en
+        # vez de caer al medidor de nodo solo porque la suma dio 0
+        # (encontrado 2026-09-02 con GD Garza). 'cgm_tiene_dato' distingue
+        # esto de "Quoia nunca respondió", que sí debe seguir cayendo al
+        # medidor más abajo. No aplica si 'reporte_valido' es False -- un
+        # estado administrativo "válido" no garantiza que el canal CGM haya
+        # traído algo real detrás.
+        if reporte_valido and cgm_tiene_dato:
+            return {"caso": 5, "energia_final_kwh": 0.0, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+
         curva = _principal_o_respaldo(curva_ppal, curva_resp)
         if _tiene_dato(curva):
             # Mismo blindaje que ya tiene el camino de CGM válido más arriba
@@ -457,7 +470,15 @@ def clasificar_generacion(
     reporte = gaia.get_border_report_status(int(border_id), fecha_str) if border_id else None
     reporte_valido = bool(reporte) and str(reporte.get("status", "")).upper() in ESTADOS_AUTOMATICO
     estado_reporte = str(reporte.get("status")).upper() if reporte else None
-    if reporte and reporte.get("reported_data_main"):
+    # 'cgm_tiene_dato' distingue "Quoia trajo 24 horas reales (aunque sumen 0)"
+    # de "no hay reported_data_main en absoluto" -- ambos casos colapsan al
+    # mismo curva_cgm (CURVA_CERO) más abajo, así que hay que guardar la
+    # distinción ANTES de ese colapso para que _decidir_caso() pueda confiar
+    # en un CGM que reportó genuinamente 0 en vez de caer al medidor solo
+    # porque la suma dio 0 (ver Caso 5 sin CGM, encontrado 2026-09-02 con GD
+    # Garza -- mismo fix portado de Reporte-Energia::clasificador.py).
+    cgm_tiene_dato = bool(reporte and reporte.get("reported_data_main"))
+    if cgm_tiene_dato:
         curva_cgm = pd.Series(reporte["reported_data_main"][:24], index=HORAS, dtype=float)
         # Mismo criterio que medidor/SolarView/reconectador (ver
         # limite_plausible_kwh() en utils.py) -- el reporte oficial de
@@ -474,6 +495,7 @@ def clasificar_generacion(
         if limite is not None and (curva_cgm.abs() > limite).any():
             curva_cgm = CURVA_CERO.copy()
             reporte_valido = False
+            cgm_tiene_dato = False  # descartado por implausible, no es un cero confiable
     else:
         curva_cgm = CURVA_CERO.copy()
     e_cgm = float(curva_cgm.fillna(0).sum())
@@ -533,7 +555,7 @@ def clasificar_generacion(
 
     resultado = _decidir_caso(
         db, frontera_id, fecha, fecha_str,
-        e_cgm, curva_cgm, reporte_valido,
+        e_cgm, curva_cgm, reporte_valido, cgm_tiene_dato,
         curva_ppal, curva_resp, completo_ppal, completo_resp,
         e_inv, e_inv_incompleto, curva_solarview,
         project_id_solarview, c["node_ppal"], gaia, sv,

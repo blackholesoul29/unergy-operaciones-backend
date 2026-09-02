@@ -136,7 +136,6 @@ def falla_publica(falla) -> dict:
         "frontera_afecta_medicion": falla.frontera_afecta_medicion,
         "frontera_perdida_comunicacion": falla.frontera_perdida_comunicacion,
         "inversores_perdida_comunicacion": falla.inversores_perdida_comunicacion,
-        "origen": falla.centinela,
         "creada_en": falla.created_at,
         "actualizada_en": falla.updated_at,
     }

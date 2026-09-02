@@ -84,6 +84,7 @@ def cliente(db):
 @pytest.fixture
 def base(db):
     db.add(FallaCatEstado(id=1, codigo="abierta", etiqueta="Abierta", orden=1, es_estado_final=False))
+    db.add(FallaCatEstado(id=2, codigo="cerrada", etiqueta="Cerrada", orden=2, es_estado_final=True))
     db.add(FallaCatPrioridad(id=1, codigo="alta", etiqueta="Alta", nivel=2))
     db.add(Usuario(id=1, nombre="Admin", email="admin@unergy.io",
                    password_hash="x", rol="admin", activo=True))
@@ -156,3 +157,62 @@ def test_sin_filtro_trae_todas(cliente, db, base):
     r = cliente.get("/api/v1/fallas")
     assert r.status_code == 200
     assert r.json()["total"] == 2
+
+
+# ── Bloqueo de cierre (PATCH /fallas/{id}, POST /fallas/{id}/seguimientos) ──
+
+def test_patch_bloquea_cierre_de_pendiente_real(cliente, db, base):
+    db.add(_falla(7, "generando_sin_datos", "incertidumbre"))
+    db.commit()
+
+    r = cliente.patch("/api/v1/fallas/7", json={"estado_id": 2})
+    assert r.status_code == 409
+    assert "pendiente" in r.json()["detail"].lower()
+
+    # La falla no quedó cerrada.
+    falla = db.get(Falla, 7)
+    assert falla.estado_id == 1
+
+
+def test_patch_no_bloquea_el_patron_del_bot(cliente, db, base):
+    db.add(_falla(8, "red", "desconexion_sin_identificar"))
+    db.commit()
+
+    r = cliente.patch("/api/v1/fallas/8", json={"estado_id": 2})
+    assert r.status_code == 200
+    assert r.json()["estado"]["codigo"] == "cerrada"
+
+
+def test_patch_permite_cerrar_si_se_reclasifica_en_el_mismo_request(cliente, db, base):
+    """Reclasificar y cerrar en un solo PATCH está permitido -- pendiente_reclasificar
+    ya queda en False antes de que se evalúe el bloqueo."""
+    tipo = FallaCatTipo(id=1, categoria_id=1, codigo="red.alta_tension", etiqueta="Alta tensión", activa=True)
+    categoria = FallaCatCategoria(id=1, codigo="red", etiqueta="Red", activa=True)
+    db.add_all([categoria, tipo])
+    db.add(_falla(9, "red", "desconexion_sin_identificar"))
+    db.commit()
+
+    r = cliente.patch("/api/v1/fallas/9", json={"subtipo_codigo": "alta_tension", "estado_id": 2})
+    assert r.status_code == 200
+    assert r.json()["pendiente_reclasificar"] is False
+    assert r.json()["estado"]["codigo"] == "cerrada"
+
+
+def test_no_bloquea_reabrir_ni_moverse_a_estado_no_final(cliente, db, base):
+    db.add(FallaCatEstado(id=3, codigo="en_gestion", etiqueta="En gestión", orden=1, es_estado_final=False))
+    db.add(_falla(10, "generando_sin_datos", "incertidumbre"))
+    db.commit()
+
+    r = cliente.patch("/api/v1/fallas/10", json={"estado_id": 3})
+    assert r.status_code == 200
+
+
+def test_seguimiento_bloquea_cierre_de_pendiente_real(cliente, db, base):
+    db.add(_falla(11, "generando_sin_datos", "incertidumbre"))
+    db.commit()
+
+    r = cliente.post("/api/v1/fallas/11/seguimientos", json={"nota": "cerrando", "estado_nuevo_id": 2})
+    assert r.status_code == 409
+
+    falla = db.get(Falla, 11)
+    assert falla.estado_id == 1

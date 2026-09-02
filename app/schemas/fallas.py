@@ -114,7 +114,6 @@ class FallaCreate(BaseModel):
     fecha_resolucion: Optional[datetime] = None
     sla_limite_horas: Optional[int] = None
     fotos_urls: Optional[list[str]] = None
-    centinela: Optional[str] = None
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
     kwh_perdidos_estimado: Optional[float] = None
@@ -150,7 +149,6 @@ class FallaUpdate(BaseModel):
     # sla_cumplido NO es editable -- es siempre calculado (ver
     # _sincronizar_resolucion en app/api/v1/fallas.py), nunca manual.
     fotos_urls: Optional[list[str]] = None
-    centinela: Optional[str] = None
     notificacion: Optional[bool] = None
     kwh_perdidos_estimado: Optional[float] = None
     impacto_economico_cop: Optional[float] = None
@@ -208,7 +206,6 @@ class FallaListOut(BaseModel):
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
     fotos_lista: list[Any] = []
-    centinela: Optional[str] = None
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
     kwh_perdidos_estimado: Optional[float] = None
@@ -266,7 +263,6 @@ class FallaOut(BaseModel):
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
     fotos_lista: list[Any] = []
-    centinela: Optional[str] = None
     notificacion: bool = False
     alarma_monitoreo_id: Optional[int] = None
     kwh_perdidos_estimado: Optional[float] = None

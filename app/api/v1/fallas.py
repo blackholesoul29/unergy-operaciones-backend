@@ -245,6 +245,50 @@ def _integrity_error_a_http(e: IntegrityError) -> HTTPException:
     return HTTPException(422, "No se pudo guardar la falla: violación de integridad en los datos enviados")
 
 
+# Huella del integrador externo que reporta desbalances de tensión/reconectador
+# en cero bajo el subtipo genérico "sin identificar" -- no vive en este repo, no
+# se puede tocar su lógica (auditoría 2026-09-02). Usado tanto en el filtro
+# ?pendiente_reclasificar=true de GET /fallas como en _bloquear_cierre_si_pendiente.
+# Límite conocido: es indistinguible de una persona reportando ese mismo subtipo
+# a mano -- hoy no hay ningún caso así en producción.
+_BOT_DESCONEXION_CATEGORIA = "red"
+_BOT_DESCONEXION_SUBTIPO = "desconexion_sin_identificar"
+
+
+def _es_patron_bot_externo_desconexion(falla: Falla) -> bool:
+    return (
+        falla.alarma_monitoreo_id is None
+        and falla.categoria_codigo == _BOT_DESCONEXION_CATEGORIA
+        and falla.subtipo_codigo == _BOT_DESCONEXION_SUBTIPO
+    )
+
+
+def _bloquear_cierre_si_pendiente(falla: Falla, nuevo_estado: "FallaCatEstado | None", db: Session) -> None:
+    """Impide cerrar una falla que sigue pendiente de reclasificar (causa sin
+    confirmar) -- decisión de negocio 2026-09-02: mejor bloquear que dejar
+    que se cierre y la causa real nunca se confirme (pasó con 840 de 851
+    casos históricos). No aplica al patrón del bot externo -- bloquearlo
+    ahí rompería su flujo de cierre automático, que no controlamos.
+
+    Recibe `db` para revertir explícitamente el `setattr` en memoria que ya
+    corrió sobre `falla` antes de este chequeo (update_falla/add_seguimiento
+    aplican los cambios del payload al objeto ANTES de validar) -- sin el
+    rollback, la sesión sigue viendo el estado nuevo en memoria aunque nunca
+    se haya comiteado."""
+    if not nuevo_estado or not nuevo_estado.es_estado_final:
+        return
+    if not falla.pendiente_reclasificar:
+        return
+    if _es_patron_bot_externo_desconexion(falla):
+        return
+    db.rollback()
+    raise HTTPException(
+        409,
+        "Esta falla sigue pendiente de reclasificar (la causa real no está confirmada). "
+        "Elegí el subtipo definitivo antes de cerrarla.",
+    )
+
+
 def _sincronizar_resolucion(falla: Falla, nuevo_estado: "FallaCatEstado | None") -> None:
     """Único punto que sincroniza fecha_resolucion + sla_cumplido con el estado
     de una falla. Antes esta regla estaba copiada por separado en update_falla
@@ -674,11 +718,11 @@ def list_fallas(
             # reclasificación (verificado: 833 de 851 casos reales, todas sin
             # alarma_monitoreo_id -- ese campo solo lo llena el motor MGS
             # interno, ver _auto_create_fallas en services/mgs/scheduler.py).
-            # Auditoría 2026-09-02.
+            # Auditoría 2026-09-02. Mismas constantes que _bloquear_cierre_si_pendiente.
             query = query.filter(~(
                 Falla.alarma_monitoreo_id.is_(None)
-                & (Falla.categoria_codigo == "red")
-                & (Falla.subtipo_codigo == "desconexion_sin_identificar")
+                & (Falla.categoria_codigo == _BOT_DESCONEXION_CATEGORIA)
+                & (Falla.subtipo_codigo == _BOT_DESCONEXION_SUBTIPO)
             ))
 
     total = query.count()
@@ -1161,6 +1205,7 @@ def update_falla(
     # _sincronizar_resolucion -- único punto de esta regla.
     if "estado_id" in dump and dump["estado_id"] is not None:
         nuevo_estado = db.get(FallaCatEstado, dump["estado_id"])
+        _bloquear_cierre_si_pendiente(falla, nuevo_estado, db)
         _sincronizar_resolucion(falla, nuevo_estado)
 
     try:
@@ -1235,8 +1280,9 @@ def add_seguimiento(
         estado_nuevo_id=data.estado_nuevo_id,
     )
     if data.estado_nuevo_id:
-        falla.estado_id = data.estado_nuevo_id
         nuevo_estado = db.get(FallaCatEstado, data.estado_nuevo_id)
+        _bloquear_cierre_si_pendiente(falla, nuevo_estado, db)
+        falla.estado_id = data.estado_nuevo_id
         _sincronizar_resolucion(falla, nuevo_estado)
 
     db.add(seg)

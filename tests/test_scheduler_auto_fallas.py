@@ -132,7 +132,7 @@ def test_auto_create_no_duplica_si_descripcion_fue_editada(db, base):
         id=1, codigo_interno="FAL-2026-00001", proyecto_id=10,
         estado_id=1, prioridad_id=1, registrado_por_id=1,
         descripcion="Se cayó el breaker principal, cuadrilla en sitio",  # editada a mano
-        fecha_identificacion=HOY, alarma_monitoreo_id=1, centinela="MGS_AUTO",
+        fecha_identificacion=HOY, alarma_monitoreo_id=1,
     ))
     db.commit()
 
@@ -156,7 +156,7 @@ def test_auto_create_si_crea_para_alarma_de_otro_tipo(db, base):
         id=1, codigo_interno="FAL-2026-00001", proyecto_id=10,
         estado_id=1, prioridad_id=1, registrado_por_id=1,
         descripcion="cualquier cosa", fecha_identificacion=HOY,
-        alarma_monitoreo_id=1, centinela="MGS_AUTO",
+        alarma_monitoreo_id=1,
     ))
     db.commit()
 
@@ -190,7 +190,7 @@ def test_auto_close_cierra_pese_a_descripcion_editada(db, base):
         id=1, codigo_interno="FAL-2026-00001", proyecto_id=10,
         estado_id=1, prioridad_id=1, registrado_por_id=1,
         descripcion="Se cayó el breaker principal, cuadrilla en sitio",  # editada a mano
-        fecha_identificacion=HOY, alarma_monitoreo_id=1, centinela="MGS_AUTO",
+        fecha_identificacion=HOY, alarma_monitoreo_id=1,
     ))
     db.commit()
 
@@ -210,7 +210,7 @@ def test_auto_close_no_toca_fallas_de_otro_proyecto(db, base):
         id=1, codigo_interno="FAL-2026-00001", proyecto_id=11,
         estado_id=1, prioridad_id=1, registrado_por_id=1,
         descripcion="falla de la otra planta", fecha_identificacion=HOY,
-        alarma_monitoreo_id=1, centinela="MGS_AUTO",
+        alarma_monitoreo_id=1,
     ))
     db.commit()
 

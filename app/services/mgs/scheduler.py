@@ -396,10 +396,10 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                 INSERT INTO fallas
                     (codigo_interno, proyecto_id, tipo_id, estado_id, prioridad_id,
                      registrado_por_id, descripcion, fecha_identificacion,
-                     sla_limite_horas, alarma_monitoreo_id, centinela)
+                     sla_limite_horas, alarma_monitoreo_id)
                 VALUES
                     (:codigo, :pid, :tipo_id, :estado_id, :prioridad_id,
-                     :reg_id, :desc, :fecha, :sla, :alarm_id, 'MGS_AUTO')
+                     :reg_id, :desc, :fecha, :sla, :alarm_id)
                 RETURNING id
             """), {
                 "codigo": placeholder,

@@ -111,7 +111,6 @@ class Falla(Base):
     sla_limite_horas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sla_cumplido: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fotos_urls: Mapped[str | None] = mapped_column(JSONB, nullable=True)
-    centinela: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     # Feature 2: link to MGS alarm that auto-created this falla.
     # alarmas_monitoreo no tiene modelo ORM (tabla creada via SQL crudo en

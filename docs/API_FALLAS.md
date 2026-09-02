@@ -25,7 +25,7 @@ Guía para crear y consultar fallas de forma programática.
 **Las dos reglas que les pedimos:**
 
 1. **No llamen `POST /fallas/{id}/notificar`.** Ese es el único endpoint que le manda correo a un cliente externo. El campo `notificacion: true` en el payload **no** envía nada por sí solo — es solo una bandera que queda guardada en la fila. El correo sale exclusivamente con esa llamada explícita.
-2. **Marquen sus fallas con `centinela: "API_TEST"`.** Es el campo de origen (el scheduler de monitoreo usa `"MGS_AUTO"`). La plataforma lo muestra como "Origen de la falla", así que operaciones sabe de inmediato que es una prueba y ustedes pueden encontrarlas y borrarlas después.
+2. **Marquen sus fallas de prueba con un prefijo reconocible en `descripcion`** (p. ej. `"[PRUEBA API] ..."`). El campo `centinela` que se usaba para esto se eliminó (2026-09-02) — era texto libre sin validación, cualquiera podía escribir `"MGS_AUTO"` sin serlo, así que dejó de ser una señal confiable. Con el prefijo pueden encontrar sus pruebas después vía `GET /fallas?q=PRUEBA API` y borrarlas.
 
 Para borrar lo que creen: `DELETE /api/v1/fallas/{id}` (es borrado lógico, marca `deleted_at`).
 
@@ -127,11 +127,10 @@ curl -X POST https://backend-production-63d8.up.railway.app/api/v1/fallas \
     "proyecto_id": 147,
     "estado_id": 1,
     "prioridad_id": 3,
-    "descripcion": "Prueba de integración API — ignorar",
+    "descripcion": "[PRUEBA API] Prueba de integración — ignorar",
     "fecha_identificacion": "2026-07-28",
     "categoria_codigo": "red",
-    "subtipo_codigo": "baja_tension",
-    "centinela": "API_TEST"
+    "subtipo_codigo": "baja_tension"
   }'
 ```
 
@@ -149,7 +148,6 @@ Respuesta `201 Created` con la falla completa, incluido el `codigo_interno` que 
     "subtipo": "baja_tension",
     "subtipo_etiqueta": "Baja tensión"
   },
-  "centinela": "API_TEST",
   "pendiente_reclasificar": false,
   "…": "…"
 }
@@ -253,7 +251,6 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 
 | Campo | Tipo | Req. | Descripción |
 |---|---|:---:|---|
-| `centinela` | `string(200)` | — | **Origen de la falla.** Úsenlo con `"API_TEST"`. El scheduler de monitoreo usa `"MGS_AUTO"`. La plataforma lo muestra como "Origen de la falla" |
 | `alarma_monitoreo_id` | `int` | — | ID de la alarma de monitoreo que originó la falla, con FK real hacia `alarmas_monitoreo`. Déjenlo vacío — es de uso interno del motor MGS |
 | `notificacion` | `bool` | — | Default `false`. **Bandera únicamente — no envía ningún correo.** El correo sale solo con `POST /fallas/{id}/notificar` |
 | `fotos_urls` | `string[]` | — | Lista de URLs. Para subir archivos de verdad usen `POST /fallas/{id}/archivos` |
@@ -359,8 +356,7 @@ Todos asumen `proyecto_id: 147` y `estado_id: 1` (abierta); la prioridad varía 
   "fecha_ocurrencia": "2026-07-28T08:10:00-05:00",
   "categoria_codigo": "red",
   "subtipo_codigo": "mantenimiento_red",
-  "subtipo_detalle": "Poda de árbol sobre la línea de MT",
-  "centinela": "API_TEST"
+  "subtipo_detalle": "Poda de árbol sobre la línea de MT"
 }
 ```
 
@@ -378,8 +374,7 @@ Todos asumen `proyecto_id: 147` y `estado_id: 1` (abierta); la prioridad varía 
   "categoria_codigo": "frontera",
   "subtipo_codigo": "modem_comunicaciones",
   "frontera_afecta_medicion": false,
-  "frontera_perdida_comunicacion": true,
-  "centinela": "API_TEST"
+  "frontera_perdida_comunicacion": true
 }
 ```
 
@@ -406,8 +401,7 @@ Todos asumen `proyecto_id: 147` y `estado_id: 1` (abierta); la prioridad varía 
       "potencia_kw": 300,
       "tipos": ["sobre_temperatura"]
     }
-  ],
-  "centinela": "API_TEST"
+  ]
 }
 ```
 
@@ -428,8 +422,7 @@ Todos asumen `proyecto_id: 147` y `estado_id: 1` (abierta); la prioridad varía 
   "intervalos": [
     { "inicio": "2026-07-27T06:00:00-05:00", "fin": "2026-07-27T09:00:00-05:00", "nota": "Nubosidad alta" },
     { "inicio": "2026-07-27T10:15:00-05:00", "fin": "2026-07-27T11:30:00-05:00", "nota": "Lluvia" }
-  ],
-  "centinela": "API_TEST"
+  ]
 }
 ```
 
@@ -615,7 +608,7 @@ Respuesta: `{ "items": [...], "total": 137, "page": 1, "size": 20, "pages": 7 }`
 | `con_fecha_programada` | `bool` | Solo las que tienen `fecha_programada` |
 | `pendiente_reclasificar` | `bool` | Con `true`: solo las que de verdad necesitan que alguien confirme la causa a mano — excluye automáticamente el patrón de reportes de un integrador externo que quedan atascados en el subtipo genérico "sin identificar" sin `alarma_monitoreo_id` (2026-09-02) |
 
-> **No hay filtro por `centinela`.** Para encontrar sus fallas de prueba, fíltrenlas del lado del cliente leyendo el campo `centinela` de cada ítem.
+> Para encontrar sus fallas de prueba, usen `?q=` con el prefijo que le hayan puesto a `descripcion` (`centinela` ya no existe, ver sección 2).
 
 ### `GET /api/v1/fallas/{id}` — detalle
 
@@ -726,8 +719,8 @@ def catalogos():
 
 
 def crear_falla(payload: dict) -> dict:
-    # Marcamos siempre el origen para que operaciones distinga las pruebas.
-    payload.setdefault("centinela", "API_TEST")
+    # Marcamos siempre la descripción para que operaciones distinga las pruebas.
+    payload["descripcion"] = f"[PRUEBA API] {payload.get('descripcion', '')}"
     r = SESSION.post(f"{BASE}/fallas", json=payload, timeout=30)
     if r.status_code == 422:
         raise ValueError(f"Payload inválido o ID inexistente: {r.json()['detail']}")

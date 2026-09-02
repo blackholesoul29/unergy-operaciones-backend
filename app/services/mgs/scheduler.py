@@ -359,7 +359,15 @@ def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
                     "SELECT id FROM fallas_cat_estados WHERE es_estado_final = FALSE ORDER BY orden LIMIT 1"
                 )).mappings().first()
 
-            prioridad_code = "critica" if alarm.severity == Severity.CRITICAL else "alta"
+            # Códigos reales de fallas_cat_prioridades: critica/grave/media/leve
+            # (ver app/seeds/seed_data.py). Antes decía "alta", que no existe en
+            # el catálogo real -- la búsqueda nunca encontraba fila para ninguna
+            # alarma no-crítica, y el `continue` de abajo se comía la creación en
+            # silencio (solo quedaba un warning en el log). Confirmado que esto
+            # no se detectaba en tests porque el fixture sembraba a mano un
+            # catálogo falso con codigo="alta" que no existe en producción
+            # (auditoría 2026-09-02).
+            prioridad_code = "critica" if alarm.severity == Severity.CRITICAL else "grave"
             prioridad_row = db.execute(text(
                 "SELECT id FROM fallas_cat_prioridades WHERE codigo = :c LIMIT 1"
             ), {"c": prioridad_code}).mappings().first()

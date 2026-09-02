@@ -94,8 +94,12 @@ def base(db):
                         etiqueta="Sin Suministro Electrico", activa=True)
     db.add(tipo)
 
+    # Códigos reales de fallas_cat_prioridades (ver app/seeds/seed_data.py) --
+    # antes este fixture sembraba "alta", que no existe en producción, y eso
+    # tapó durante un tiempo el bug real de _auto_create_fallas() usando ese
+    # mismo código inexistente (auditoría 2026-09-02).
     db.add(FallaCatPrioridad(id=1, codigo="critica", etiqueta="Critica", nivel=1))
-    db.add(FallaCatPrioridad(id=2, codigo="alta", etiqueta="Alta", nivel=2))
+    db.add(FallaCatPrioridad(id=2, codigo="grave", etiqueta="Grave", nivel=2))
 
     db.add(Usuario(id=1, nombre="Admin", email="admin@unergy.io",
                    password_hash="x", rol="admin", activo=True))
@@ -164,6 +168,20 @@ def test_auto_create_si_crea_para_alarma_de_otro_tipo(db, base):
 
     fallas = db.query(Falla).filter(Falla.proyecto_id == 10, Falla.deleted_at.is_(None)).all()
     assert len(fallas) == 2
+
+
+def test_auto_create_alarma_no_critica_usa_prioridad_grave_real(db, base):
+    """Regresión: prioridad_code usaba "alta" para severidad no-CRITICAL, un
+    código que no existe en fallas_cat_prioridades (real: critica/grave/media/
+    leve) -- la búsqueda nunca encontraba fila, y `continue` se comía la
+    creación en silencio para toda alarma no-crítica. Confirma que ahora sí
+    se crea, con la prioridad real "grave" y su SLA correspondiente
+    (auditoría 2026-09-02)."""
+    _auto_create_fallas(db, [(_alarm(AlarmType.PLANTA_CAIDA, severity=Severity.WARNING), 1)])
+
+    falla = db.query(Falla).filter(Falla.proyecto_id == 10).one()
+    assert falla.prioridad_id == 2  # "grave", ver fixture `base`
+    assert falla.sla_limite_horas == 24
 
 
 def test_auto_create_codigo_interno_usa_el_id_real_asignado(db, base):

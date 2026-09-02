@@ -2,8 +2,8 @@
 
 Regresión de un problema ya documentado como deuda conocida en
 docs/API_FALLAS.md para los integradores externos: un FK inexistente
-(proyecto_id, tipo_id, estado_id, prioridad_id, resolucion_id,
-asignado_a_id) volaba como un 500 de Postgres sin mensaje claro. El fix
+(proyecto_id, tipo_id, estado_id, prioridad_id, resolucion_id)
+volaba como un 500 de Postgres sin mensaje claro. El fix
 (`_integrity_error_a_http` en app/api/v1/fallas.py) lo traduce a 422 con un
 mensaje legible (auditoría 2026-09-02).
 

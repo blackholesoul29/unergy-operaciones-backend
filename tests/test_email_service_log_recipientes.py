@@ -93,7 +93,7 @@ def test_send_falla_notification_email_loguea_un_evento_con_resultado_por_destin
     resultado = email_service.send_falla_notification_email(
         to_emails=["a@test.com", "b@test.com"], codigo_falla="F-001", proyecto_nombre="Test",
         descripcion="desc", estado_etiqueta="Abierta", prioridad_etiqueta="Alta",
-        fecha_identificacion="2026-08-25", asignado_a=None, registrado_por="Alguien",
+        fecha_identificacion="2026-08-25", registrado_por="Alguien",
         proyecto_id=7,
     )
 
@@ -117,7 +117,7 @@ def test_send_falla_notification_email_evento_exitoso_si_todos_los_destinatarios
     email_service.send_falla_notification_email(
         to_emails=["a@test.com"], codigo_falla="F-001", proyecto_nombre="Test",
         descripcion="desc", estado_etiqueta="Abierta", prioridad_etiqueta="Alta",
-        fecha_identificacion="2026-08-25", asignado_a=None, registrado_por="Alguien",
+        fecha_identificacion="2026-08-25", registrado_por="Alguien",
         proyecto_id=7,
     )
 

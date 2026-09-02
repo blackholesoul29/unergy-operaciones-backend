@@ -34,7 +34,6 @@ class Usuario(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     fallas_registradas: Mapped[list["Falla"]] = relationship("Falla", foreign_keys="Falla.registrado_por_id", back_populates="registrado_por")
-    fallas_asignadas: Mapped[list["Falla"]] = relationship("Falla", foreign_keys="Falla.asignado_a_id", back_populates="asignado_a")
     seguimientos_falla: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="usuario")
     mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="registrado_por")
     liquidaciones: Mapped[list["Liquidacion"]] = relationship("Liquidacion", back_populates="generado_por")

@@ -106,7 +106,6 @@ class FallaCreate(BaseModel):
     estado_id: int
     prioridad_id: int
     resolucion_id: Optional[int] = None
-    asignado_a_id: Optional[int] = None
     descripcion: str
     fecha_identificacion: date
     hora_identificacion: Optional[time] = None
@@ -139,7 +138,6 @@ class FallaUpdate(BaseModel):
     estado_id: Optional[int] = None
     prioridad_id: Optional[int] = None
     resolucion_id: Optional[int] = None
-    asignado_a_id: Optional[int] = None
     descripcion: Optional[str] = None
     fecha_identificacion: Optional[date] = None
     hora_identificacion: Optional[time] = None
@@ -196,7 +194,6 @@ class FallaListOut(BaseModel):
     prioridad: FallaCatPrioridadOut
     resolucion: Optional[FallaCatResolucionOut]
     registrado_por: UsuarioResumen
-    asignado_a: Optional[UsuarioResumen]
     descripcion: str
     fecha_identificacion: date
     hora_identificacion: Optional[time]
@@ -253,7 +250,6 @@ class FallaOut(BaseModel):
     prioridad: FallaCatPrioridadOut
     resolucion: Optional[FallaCatResolucionOut]
     registrado_por: UsuarioResumen
-    asignado_a: Optional[UsuarioResumen]
     descripcion: str
     fecha_identificacion: date
     hora_identificacion: Optional[time]

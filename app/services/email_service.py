@@ -421,7 +421,6 @@ def send_falla_notification_email(
     fecha_identificacion: str,
     hora_identificacion: str = "",
     fecha_programada: str = "",
-    asignado_a: str | None,
     registrado_por: str,
     accion: str = "creada",
     frontend_url: str = "",
@@ -567,7 +566,7 @@ def send_falla_notification_email(
         </td>
         <td style="width:33%;vertical-align:top;padding-left:8px">
           <div style="font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#A89EC0;margin-bottom:4px">RESPONSABLE</div>
-          <div style="font-size:12px;font-weight:700;color:#1A0F2E">{asignado_a or registrado_por}</div>
+          <div style="font-size:12px;font-weight:700;color:#1A0F2E">{registrado_por}</div>
         </td>
       </tr>
     </table>

@@ -102,7 +102,6 @@ class Falla(Base):
     prioridad_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fallas_cat_prioridades.id"), nullable=False, index=True)
     resolucion_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fallas_cat_resoluciones.id"), nullable=True, index=True)
     registrado_por_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=False, index=True)
-    asignado_a_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuarios.id"), nullable=True, index=True)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     fecha_identificacion: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     hora_identificacion: Mapped[time | None] = mapped_column(Time, nullable=True)
@@ -147,7 +146,6 @@ class Falla(Base):
     prioridad: Mapped["FallaCatPrioridad"] = relationship("FallaCatPrioridad", back_populates="fallas")
     resolucion: Mapped["FallaCatResolucion | None"] = relationship("FallaCatResolucion", back_populates="fallas")
     registrado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[registrado_por_id], back_populates="fallas_registradas")
-    asignado_a: Mapped["Usuario | None"] = relationship("Usuario", foreign_keys=[asignado_a_id], back_populates="fallas_asignadas")
     seguimientos: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="falla")
     intervalos: Mapped[list["FallaIntervalo"]] = relationship(
         "FallaIntervalo", back_populates="falla",

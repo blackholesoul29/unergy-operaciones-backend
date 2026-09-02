@@ -50,7 +50,6 @@ _FALLA_LOAD_LISTA = [
     selectinload(Falla.prioridad),
     selectinload(Falla.resolucion),
     selectinload(Falla.registrado_por),
-    selectinload(Falla.asignado_a),
 ]
 
 _FALLA_LOAD = [
@@ -227,7 +226,7 @@ def _integrity_error_a_http(e: IntegrityError) -> HTTPException:
     """Traduce un IntegrityError crudo de la BD a un error HTTP legible.
 
     Antes, un FK inexistente (proyecto_id, tipo_id, estado_id, prioridad_id,
-    resolucion_id, asignado_a_id) volaba hasta el cliente como un 500 de
+    resolucion_id) volaba hasta el cliente como un 500 de
     Postgres sin mensaje claro -- ya documentado como deuda conocida en
     docs/API_FALLAS.md para los integradores externos de la API. Detecta el
     tipo de violación por texto del mensaje (portable entre Postgres y
@@ -241,7 +240,7 @@ def _integrity_error_a_http(e: IntegrityError) -> HTTPException:
     mensaje = str(e).lower()
     if "foreign key" in mensaje:
         return HTTPException(422, "Uno de los IDs enviados (proyecto_id/tipo_id/estado_id/prioridad_id/"
-                                   "resolucion_id/asignado_a_id) no existe")
+                                   "resolucion_id) no existe")
     return HTTPException(422, "No se pudo guardar la falla: violación de integridad en los datos enviados")
 
 
@@ -624,7 +623,6 @@ def list_fallas(
     tipo_codigo: str | None = None,
     proyecto_id: int | None = None,
     cliente_id: int | None = None,
-    asignado_a_id: int | None = None,
     solo_alerta: bool = False,
     solo_activas: bool = False,
     activa_en_fecha: date | None = None,
@@ -671,8 +669,6 @@ def list_fallas(
             .subquery()
         )
         query = query.filter(Falla.proyecto_id.in_(client_project_ids))
-    if asignado_a_id:
-        query = query.filter(Falla.asignado_a_id == asignado_a_id)
     if activa_en_fecha:
         # "Activa a la fecha X" (no "activa ahora mismo") -- para mostrar,
         # en el detalle de un día ya clasificado, las fallas que estaban
@@ -771,7 +767,6 @@ def _enviar_notificacion(
         fecha_identificacion=str(falla.fecha_identificacion or ""),
         hora_identificacion=str(falla.hora_identificacion or ""),
         fecha_programada=str(falla.fecha_programada or ""),
-        asignado_a=falla.asignado_a.nombre if falla.asignado_a else None,
         registrado_por=usuario_nombre,
         accion=accion,
         frontend_url=settings.FRONTEND_URL,
@@ -1149,13 +1144,6 @@ def update_falla(
     inversores_touched = "inversores" in dump
     inversores = dump.pop("inversores", None)
 
-    nuevo_asignado_id = dump.get("asignado_a_id")
-    notificar_asignacion = (
-        "asignado_a_id" in dump
-        and nuevo_asignado_id is not None
-        and nuevo_asignado_id != falla.asignado_a_id
-    )
-
     for k, v in dump.items():
         setattr(falla, k, v)
 
@@ -1213,18 +1201,6 @@ def update_falla(
     except IntegrityError as e:
         db.rollback()
         raise _integrity_error_a_http(e)
-
-    if notificar_asignacion:
-        from app.api.v1.notificaciones import crear_notificacion
-        proyecto_nombre = falla.proyecto.nombre_comercial if falla.proyecto else f"Proyecto {falla.proyecto_id}"
-        crear_notificacion(
-            db=db,
-            usuario_id=nuevo_asignado_id,
-            tipo="accion",
-            titulo="Falla asignada a ti",
-            mensaje=f"{falla.codigo_interno} — {proyecto_nombre}: {(falla.descripcion or '')[:80]}",
-        )
-        db.commit()
 
     # Reevaluar alarmas de comunicación tras el cambio — no bloqueante
     _alarmas_post_guardado(id, db)

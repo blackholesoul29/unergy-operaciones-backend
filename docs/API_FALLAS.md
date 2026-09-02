@@ -16,7 +16,6 @@ Guía para crear y consultar fallas de forma programática.
 | Efecto | Cuándo ocurre | Qué pasa |
 |---|---|---|
 | **Notificación a coordinadores** | En **toda** creación de falla, sin excepción | Se crea una notificación in-app para cada usuario con rol `coordinador` activo |
-| **Notificación al asignado** | Si en un `PATCH` cambian `asignado_a_id` a un usuario distinto | Notificación in-app a esa persona ("Falla asignada a ti") |
 | **Alarmas de comunicación** | Si mandan `frontera_perdida_comunicacion: true`, o un inversor con el tipo `perdida_comunicacion` | Notificaciones a los roles `admin`, `operaciones` y `monitoreo`. Si en el mismo proyecto coinciden pérdida de frontera **y** de inversores, se genera la alarma crítica `comunicacion_total`. Se reevalúa tanto en `POST` como en `PATCH` |
 | **Aparece en las vistas de operación** | Siempre | La falla sale en `/fallas`, `/operaciones/gestion-fallas`, la app móvil y el resumen del día |
 | **Consume un código real** | Siempre | Los `FAL-2026-#####` son una secuencia compartida |
@@ -179,7 +178,6 @@ Todo lo demás es opcional. Los campos que el servidor asigna solo (y que **no**
 | `estado_id` | `int` | ✅ | ID de `fallas_cat_estados`. Ver `GET /fallas/catalogos` |
 | `prioridad_id` | `int` | ✅ | ID de `fallas_cat_prioridades`. Ver `GET /fallas/catalogos` |
 | `resolucion_id` | `int` | — | ID de `fallas_cat_resoluciones`. Solo tiene sentido al cerrar |
-| `asignado_a_id` | `int` | — | ID del usuario responsable (FK a `usuarios`) |
 | `sla_limite_horas` | `int` | — | Horas de SLA. La respuesta expone `sla_limite_dias` derivado (división entera por 24) |
 | `fecha_programada` | `date` | — | `"YYYY-MM-DD"`. Fecha de la intervención programada. Se usa con el estado `programado` |
 
@@ -523,7 +521,6 @@ Orden fijo: `fecha_identificacion` descendente. Las fallas borradas nunca salen.
       "resolucion": null,
       "causa_raiz": null,
       "acciones_correctivas": null,
-      "asignado_a": "Laura",
       "fecha_identificacion": "2026-08-21",
       "hora_identificacion": null,
       "fecha_ocurrencia": null,
@@ -560,7 +557,7 @@ Los dos sirven; este es más cómodo para integrar:
 | Estados | Los seis internos, por código o ID | Tres cubetas estables |
 | Identificar la planta | Solo `proyecto_id` | `proyecto_id`, `api_id_unergy` o `nombre` |
 | Conteos | Hay que pedirlos aparte | `resumen` viene en la misma respuesta |
-| Datos de usuarios internos | Incluye nombre y **correo** | Solo el nombre del asignado |
+| Datos de usuarios internos | Incluye nombre y **correo** | No incluye ningún dato de usuarios internos |
 | Estabilidad | Expone IDs de catálogo, que **no** son estables entre entornos | No expone IDs de catálogo |
 
 #### Errores
@@ -602,7 +599,6 @@ Respuesta: `{ "items": [...], "total": 137, "page": 1, "size": 20, "pages": 7 }`
 | `tipo_codigo` | `string` | Código del tipo de catálogo, p. ej. `red.baja_tension` |
 | `proyecto_id` | `int` | |
 | `cliente_id` | `int` | Fallas de los proyectos donde ese cliente es inversionista vigente |
-| `asignado_a_id` | `int` | |
 | `solo_alerta` | `bool` | Solo fallas no cerradas identificadas hace más de 7 días |
 | `fecha_programada_desde` / `_hasta` | `date` | Rango sobre `fecha_programada` |
 | `con_fecha_programada` | `bool` | Solo las que tienen `fecha_programada` |
@@ -648,7 +644,6 @@ curl -X PATCH https://backend-production-63d8.up.railway.app/api/v1/fallas/5831 
 **Dos efectos automáticos del `PATCH` que conviene tener presentes:**
 
 1. **Sellado de `fecha_resolucion`.** Si cambian `estado_id` a un estado con `es_estado_final: true` y la falla no tiene `fecha_resolucion`, el servidor la pone en el instante actual. Y si la mueven a un estado **no** final sin mandar `fecha_resolucion` explícitamente, el servidor la **borra** (`null`). Si necesitan controlar esa fecha, mándenla en el mismo request.
-2. **Notificación por reasignación.** Cambiar `asignado_a_id` a un usuario distinto del actual le genera una notificación in-app a esa persona. En pruebas, o no toquen el campo, o déjenlo apuntando al usuario de su propia API Key.
 
 La recalculación de la clasificación solo ocurre si tocan alguno de `categoria_codigo`, `subtipo_codigo`, `subtipo_detalle`, `frontera_afecta_medicion`, `frontera_perdida_comunicacion` o `inversores`, **y** la falla tiene `categoria_codigo`. Un `PATCH` que solo cambia, por ejemplo, `descripcion` no toca nada de la clasificación.
 
@@ -697,7 +692,7 @@ Razones de "Clasificación inválida" que van a ver:
 
 ### IDs inexistentes: 422, no 500
 
-`proyecto_id`, `estado_id`, `prioridad_id`, `resolucion_id` y `asignado_a_id` son foreign keys. Si mandan un ID que no existe, la API responde **`422`** con un mensaje indicando cuál de esos campos falló (antes del 2026-09-02 esto volaba como un `500` crudo de Postgres — ya corregido).
+`proyecto_id`, `estado_id`, `prioridad_id` y `resolucion_id` son foreign keys. Si mandan un ID que no existe, la API responde **`422`** con un mensaje indicando cuál de esos campos falló (antes del 2026-09-02 esto volaba como un `500` crudo de Postgres — ya corregido).
 
 ---
 
@@ -761,7 +756,6 @@ if __name__ == "__main__":
 - ❌ Mandar `tipo_id` junto con `categoria_codigo` — se sobrescribe
 - ❌ Poner `generar_impacto: true` en pruebas — crea registros de mantenimiento
 - ❌ Poner los flags `perdida_comunicacion` en `true` sin querer generar alarmas
-- ❌ Reasignar `asignado_a_id` en pruebas — le notifica a una persona real
 - ❌ Exponer la API Key en un frontend o commitearla
 
 Dudas o para pedir la key: **Juan José** — juanjose@unergy.io

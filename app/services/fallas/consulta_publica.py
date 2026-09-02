@@ -11,6 +11,9 @@ Por qué existe aparte de `GET /fallas`:
     catálogo completo. La ficha pública deja fuera los correos y aplana lo que
     de verdad le sirve a un tercero.
 
+Ya no incluye `asignado_a`: campo eliminado del modelo (auditoría 2026-09-02,
+sin adopción real -- ver docs/API_FALLAS.md).
+
 Si mañana se agrega un estado al catálogo, cae en `vigente` o en `terminado`
 según `es_estado_final` — nunca queda invisible. Ver `grupo_de_estado`.
 """
@@ -121,7 +124,6 @@ def falla_publica(falla) -> dict:
         "resolucion": (falla.resolucion.etiqueta if falla.resolucion else None),
         "causa_raiz": falla.causa_raiz,
         "acciones_correctivas": falla.acciones_correctivas,
-        "asignado_a": (falla.asignado_a.nombre if falla.asignado_a else None),
         "fecha_identificacion": falla.fecha_identificacion,
         "hora_identificacion": falla.hora_identificacion,
         "fecha_ocurrencia": falla.fecha_ocurrencia,

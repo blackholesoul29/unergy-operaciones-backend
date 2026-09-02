@@ -44,6 +44,14 @@ class DetalleFronteraReporte(BaseModel):
     medidor_usado: str | None
     energia_final_kwh: float | None
     curva_final: list[float | None]
+    # Se calcula y persiste SIEMPRE al clasificar (ver
+    # orquestador._upsert_generacion), no solo cuando el Caso ganador lo usó
+    # -- así 'Reportar con otra fuente' puede ofrecer "Inversores × FP" en
+    # cualquier Caso mientras Solenium tenga dato completo (pedido
+    # 2026-09-02). Que 'fp' tenga valor NO implica que influyó en
+    # 'energia_final_kwh' de hoy -- el front decide si mostrarlo como "el FP
+    # de hoy" mirando 'medidor_usado'/'horas_rellenadas_solenium' (ver
+    # ReporteEnergiaDetalleTab.vue).
     fp: float | None = None
     fp_calculada: float | None = None
     error_final_pct: float | None = None

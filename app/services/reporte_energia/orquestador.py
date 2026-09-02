@@ -30,7 +30,7 @@ from app.models.proyectos import Proyecto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo, ReporteEnergiaExclusion
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solarview_client import SolarViewClient
-from app.services.reporte_energia import curvas, clasificador, clasificador_consumo
+from app.services.reporte_energia import curvas, clasificador, clasificador_consumo, historial
 from app.services.reporte_energia.utils import curva_a_lista, actualizar_respaldo_final
 
 TIPOS_GENERACION = {TipoFronteraEnum.generacion}
@@ -120,8 +120,19 @@ def _upsert_generacion(db: Session, frontera_id: int, fecha: date, resultado: di
     fila.medidor_usado = resultado.get("medidor_usado")
     fila.energia_final_kwh = resultado.get("energia_final_kwh")
     fila.curva_final = curva_a_lista(resultado.get("curva_final"))
-    fila.fp = resultado.get("fp")
-    fila.fp_calculada = resultado.get("fp_calculada")
+    # Se calcula y persiste SIEMPRE (no solo cuando el Caso ganador lo usó
+    # para 'energia_final_kwh') -- para que 'Reportar con otra fuente' en el
+    # front pueda ofrecer "Inversores × FP" sin importar el Caso del día,
+    # mientras Solenium tenga dato completo (pedido 2026-09-02). Que 'fp'
+    # tenga valor NO implica que influyó en el número de hoy -- el front
+    # decide si mostrarlo como "el FP de hoy" mirando medidor_usado/
+    # horas_rellenadas_solenium (ver ReporteEnergiaDetalleTab.vue). No
+    # aplica a Caso 0 (tercero) -- no hay nada que "perder por FP" ahí.
+    fp, fp_calc = resultado.get("fp"), resultado.get("fp_calculada")
+    if fp is None and resultado.get("caso") != 0:
+        fp, fp_calc = historial.get_factor_perdida_detalle(db, frontera_id, fecha)
+    fila.fp = fp
+    fila.fp_calculada = fp_calc
     fila.error_final_pct = resultado.get("error_final_pct")
     fila.energia_cgm_kwh = resultado.get("energia_cgm_kwh")
     fila.estado_reporte = resultado.get("estado_reporte")

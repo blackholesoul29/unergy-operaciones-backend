@@ -7,7 +7,6 @@ class FallaCatEstadoOut(BaseModel):
     id: int
     codigo: str
     etiqueta: str
-    color_hex: Optional[str]
     orden: int
     es_estado_final: bool
     model_config = {"from_attributes": True}
@@ -17,7 +16,6 @@ class FallaCatPrioridadOut(BaseModel):
     id: int
     codigo: str
     etiqueta: str
-    color_hex: Optional[str]
     nivel: int
     model_config = {"from_attributes": True}
 

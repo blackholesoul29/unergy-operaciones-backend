@@ -69,19 +69,23 @@ TIPOS_FALLA = [
 ]
 
 ESTADOS_FALLA = [
-    {"codigo": "programado",   "etiqueta": "Programado",    "color_hex": "#3B82F6", "orden": 0, "es_estado_final": False},
-    {"codigo": "abierta",      "etiqueta": "Abierta",       "color_hex": "#EF4444", "orden": 1, "es_estado_final": False},
-    {"codigo": "en_gestion",   "etiqueta": "En gestión",    "color_hex": "#F97316", "orden": 2, "es_estado_final": False},
-    {"codigo": "en_espera",    "etiqueta": "En espera",     "color_hex": "#EAB308", "orden": 3, "es_estado_final": False},
-    {"codigo": "cerrada",      "etiqueta": "Cerrada",       "color_hex": "#22C55E", "orden": 4, "es_estado_final": True},
-    {"codigo": "sin_solucion", "etiqueta": "Sin solución",  "color_hex": "#6B7280", "orden": 5, "es_estado_final": True},
+    {"codigo": "programado",   "etiqueta": "Programado",    "orden": 0, "es_estado_final": False},
+    {"codigo": "abierta",      "etiqueta": "Abierta",       "orden": 1, "es_estado_final": False},
+    {"codigo": "en_gestion",   "etiqueta": "En gestión",    "orden": 2, "es_estado_final": False},
+    {"codigo": "en_espera",    "etiqueta": "En espera",     "orden": 3, "es_estado_final": False},
+    {"codigo": "cerrada",      "etiqueta": "Cerrada",       "orden": 4, "es_estado_final": True},
+    {"codigo": "sin_solucion", "etiqueta": "Sin solución",  "orden": 5, "es_estado_final": True},
 ]
 
+# Códigos deben calzar con COLOR_ESTADO/COLOR_PRIORIDAD en
+# unergy-operaciones-frontend/app/features/fallas/utils/colores.ts -- el
+# color de estos dos catálogos se homologó ahí (auditoría 2026-09-02,
+# color_hex salió de fallas_cat_estados/fallas_cat_prioridades).
 PRIORIDADES = [
-    {"codigo": "critica", "etiqueta": "Crítica", "color_hex": "#DC2626", "nivel": 1},
-    {"codigo": "grave",   "etiqueta": "Grave",   "color_hex": "#EA580C", "nivel": 2},
-    {"codigo": "media",   "etiqueta": "Media",   "color_hex": "#CA8A04", "nivel": 3},
-    {"codigo": "leve",    "etiqueta": "Leve",    "color_hex": "#16A34A", "nivel": 4},
+    {"codigo": "critica", "etiqueta": "Crítica", "nivel": 1},
+    {"codigo": "grave",   "etiqueta": "Grave",   "nivel": 2},
+    {"codigo": "media",   "etiqueta": "Media",   "nivel": 3},
+    {"codigo": "leve",    "etiqueta": "Leve",    "nivel": 4},
 ]
 
 RESOLUCIONES = [

@@ -539,7 +539,7 @@ def actividad_hoy(db: Session = Depends(get_db), _=Depends(get_current_user)):
         def _estado_dict(estado):
             if not estado:
                 return None
-            return {"etiqueta": estado.etiqueta, "color_hex": estado.color_hex}
+            return {"codigo": estado.codigo, "etiqueta": estado.etiqueta}
 
         for fid, segs in por_falla.items():
             falla = fallas_map.get(fid)

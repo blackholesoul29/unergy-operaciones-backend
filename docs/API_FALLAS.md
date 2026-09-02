@@ -88,11 +88,11 @@ curl https://backend-production-63d8.up.railway.app/api/v1/fallas/catalogos \
 ```json
 {
   "estados": [
-    { "id": 1, "codigo": "abierta", "etiqueta": "Abierta", "color_hex": "#EF4444",
+    { "id": 1, "codigo": "abierta", "etiqueta": "Abierta",
       "orden": 1, "es_estado_final": false }
   ],
   "prioridades": [
-    { "id": 4, "codigo": "critica", "etiqueta": "Crítica", "color_hex": "#DC2626", "nivel": 4 }
+    { "id": 4, "codigo": "critica", "etiqueta": "Crítica", "nivel": 4 }
   ],
   "tipos": [
     { "id": 12, "codigo": "red.baja_tension", "etiqueta": "Baja tensión",

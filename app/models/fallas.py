@@ -63,7 +63,6 @@ class FallaCatEstado(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
-    color_hex: Mapped[str | None] = mapped_column(String(7), nullable=True)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     es_estado_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -77,7 +76,6 @@ class FallaCatPrioridad(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     etiqueta: Mapped[str] = mapped_column(String(255), nullable=False)
-    color_hex: Mapped[str | None] = mapped_column(String(7), nullable=True)
     nivel: Mapped[int] = mapped_column(Integer, nullable=False)
 
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="prioridad")

@@ -178,7 +178,7 @@ Todo lo demás es opcional. Los campos que el servidor asigna solo (y que **no**
 | `estado_id` | `int` | ✅ | ID de `fallas_cat_estados`. Ver `GET /fallas/catalogos` |
 | `prioridad_id` | `int` | ✅ | ID de `fallas_cat_prioridades`. Ver `GET /fallas/catalogos` |
 | `resolucion_id` | `int` | — | ID de `fallas_cat_resoluciones`. Solo tiene sentido al cerrar |
-| `sla_limite_horas` | `int` | — | Horas de SLA. La respuesta expone `sla_limite_dias` derivado (división entera por 24) |
+| `sla_limite_horas` | `int` | — | Horas de SLA personalizadas para esta falla puntual, si se sale del default de su prioridad. Si no se manda, la respuesta calcula el default solo (crítica=8h, grave=24h, media=72h, leve=168h) y lo expone en `sla_limite_horas_efectivo` -- `sla_limite_horas` (este campo) queda `null` a menos que ustedes lo hayan mandado explícitamente. La respuesta también expone `sla_limite_dias` derivado del efectivo (división entera por 24) |
 | `fecha_programada` | `date` | — | `"YYYY-MM-DD"`. Fecha de la intervención programada. Se usa con el estado `programado` |
 
 ### 3.3 Clasificación estructurada — recomendado

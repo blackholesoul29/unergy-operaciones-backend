@@ -91,6 +91,18 @@ class FallaCatResolucion(Base):
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="resolucion")
 
 
+# Límite de SLA por nivel de prioridad, cuando la falla no trae uno propio en
+# sla_limite_horas. Único lugar donde vive esta regla -- Falla.sla_limite_horas_efectivo
+# y app/api/v1/fallas.py la comparten desde acá (auditoría 2026-09-02: antes
+# vivía duplicada como constante local en fallas.py).
+DEFAULT_SLA_HOURS = {
+    1: 8,     # critica
+    2: 24,    # grave
+    3: 72,    # media
+    4: 168,   # leve (7 dias)
+}
+
+
 class Falla(Base):
     __tablename__ = "fallas"
 
@@ -214,8 +226,26 @@ class Falla(Base):
         return round(max(0.0, horas), 2)
 
     @property
-    def sla_limite_dias(self) -> int | None:
-        return self.sla_limite_horas // 24 if self.sla_limite_horas else None
+    def sla_limite_dias(self) -> int:
+        """División entera de sla_limite_horas_efectivo por 24 -- ver ese
+        property. Antes se calculaba sobre sla_limite_horas crudo, así que
+        quedaba en None para el 99.94% de las fallas que no tienen override
+        (auditoría 2026-09-02)."""
+        return self.sla_limite_horas_efectivo // 24
+
+    @property
+    def sla_limite_horas_efectivo(self) -> int:
+        """El límite que realmente aplica: sla_limite_horas si alguien lo
+        personalizó para este caso puntual, si no, el default de su prioridad.
+
+        Mismo cálculo que usa _sincronizar_resolucion() para sellar
+        sla_cumplido al cerrar -- se expone acá para que el frontend siempre
+        tenga un número real que mostrar, sin duplicar la regla ni adivinar
+        el default (auditoría 2026-09-02: sla_limite_horas está poblado en
+        el 0.06% de las fallas, así que sin esto la UI mostraba "Sin límite"
+        casi siempre aunque el cálculo de SLA sí funcionaba por debajo)."""
+        nivel = self.prioridad.nivel if self.prioridad else None
+        return self.sla_limite_horas or DEFAULT_SLA_HOURS.get(nivel, 72)
 
     @property
     def tiene_fotos(self) -> bool:

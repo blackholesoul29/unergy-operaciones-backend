@@ -13,6 +13,7 @@ from app.models import (
     Falla, FallaSeguimiento, FallaIntervalo, FallaInversor,
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
+from app.models.fallas import DEFAULT_SLA_HOURS
 from app.models.proyectos import Proyecto, ProyectoInversionista
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
@@ -295,16 +296,15 @@ def _sincronizar_resolucion(falla: Falla, nuevo_estado: "FallaCatEstado | None")
     quedaban desincronizadas. Se llama siempre que estado_id cambia: al pasar
     a un estado final sella fecha_resolucion (si no la tenía) y calcula
     sla_cumplido contra el mismo límite que ya usa sla_dashboard
-    (sla_limite_horas o el default por prioridad, ver _DEFAULT_SLA_HOURS); al
-    reabrir (estado no final) limpia ambos. sla_cumplido es siempre calculado,
-    nunca manual -- ver FallaUpdate."""
+    (Falla.sla_limite_horas_efectivo: sla_limite_horas o el default por
+    prioridad); al reabrir (estado no final) limpia ambos. sla_cumplido es
+    siempre calculado, nunca manual -- ver FallaUpdate."""
     if not nuevo_estado:
         return
     if nuevo_estado.es_estado_final:
         if not falla.fecha_resolucion:
             falla.fecha_resolucion = datetime.now(timezone.utc)
-        nivel = falla.prioridad.nivel if falla.prioridad else None
-        sla_hours = falla.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        sla_hours = falla.sla_limite_horas_efectivo
         deadline = datetime(
             falla.fecha_identificacion.year,
             falla.fecha_identificacion.month,
@@ -356,15 +356,6 @@ def _get_or_create_folder(service, name: str, parent_id: str) -> str:
     ).execute()
     return folder["id"]
 
-# ── SLA defaults ─────────────────────────────────────────────────────────────
-# Default SLA hours by priority level (used when sla_limite_horas is not set)
-_DEFAULT_SLA_HOURS = {
-    1: 8,     # critica
-    2: 24,    # alta
-    3: 72,    # media
-    4: 168,   # baja (7 days)
-}
-
 # Average energy price COP/kWh for economic impact estimation
 _PRECIO_ENERGIA_COP_KWH = 800.0
 
@@ -400,7 +391,10 @@ def sla_dashboard(db: Session = Depends(get_db), _=Depends(get_current_user)):
     en_riesgo = 0
     vencido = 0
     for falla, nivel in open_fallas:
-        sla_hours = falla.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        # nivel viene del join (no de falla.prioridad, no eager-loaded acá) --
+        # mismo cálculo que Falla.sla_limite_horas_efectivo, inline para no
+        # forzar un lazy-load de prioridad por fila.
+        sla_hours = falla.sla_limite_horas or DEFAULT_SLA_HOURS.get(nivel, 72)
         sla_deadline = datetime(
             falla.fecha_identificacion.year,
             falla.fecha_identificacion.month,
@@ -939,8 +933,7 @@ def backfill_sla_cumplido(db: Session, dry_run: bool = False) -> dict:
     cambiadas = []
     for f in fallas:
         anterior = f.sla_cumplido
-        nivel = f.prioridad.nivel if f.prioridad else None
-        sla_hours = f.sla_limite_horas or _DEFAULT_SLA_HOURS.get(nivel, 72)
+        sla_hours = f.sla_limite_horas_efectivo
         deadline = datetime(
             f.fecha_identificacion.year, f.fecha_identificacion.month, f.fecha_identificacion.day,
             tzinfo=_COL_TZ,

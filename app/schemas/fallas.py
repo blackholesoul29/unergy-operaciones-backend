@@ -200,6 +200,7 @@ class FallaListOut(BaseModel):
     fecha_ocurrencia: Optional[datetime]
     fecha_resolucion: Optional[datetime]
     sla_limite_horas: Optional[int]
+    sla_limite_horas_efectivo: Optional[int] = None
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
     fotos_lista: list[Any] = []
@@ -256,6 +257,7 @@ class FallaOut(BaseModel):
     fecha_ocurrencia: Optional[datetime]
     fecha_resolucion: Optional[datetime]
     sla_limite_horas: Optional[int]
+    sla_limite_horas_efectivo: Optional[int] = None
     sla_cumplido: Optional[bool]
     tiene_fotos: bool = False
     fotos_lista: list[Any] = []

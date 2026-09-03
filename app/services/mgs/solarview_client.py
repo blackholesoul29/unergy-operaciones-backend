@@ -1,8 +1,27 @@
-"""Sync HTTP client for SolarView API (reemplazo de Solenium, Fase 1: solo
-los métodos que usa Reporte de Energía -- ver plan de migración).
+"""Sync HTTP client for SolarView API (reemplazo de Solenium -- ver plan de
+migración).
 
 Auth: token estático por header, sin login/refresh (a diferencia de
 SoleniumClient, que usa JWT con /token/ + /token/refresh/).
+
+Cobertura: 7 de los 18 endpoints que expone la API.
+  · Fase 1 -- lo que usa Reporte de Energía: get_generation, get_power,
+    get_relay_historical.
+  · Fase 2 (2026-09-03) -- lo que falta para portar app/api/v1/
+    generacion_solar.py, hoy 100% Solenium: get_project_detail,
+    get_project_inverters, get_inverter_detail, get_energy. Más
+    get_availability y get_company_projects, que ya estaban.
+
+Dos avisos sobre la paridad con SoleniumClient, porque no es 1:1:
+  · `get_inverter_detail` tiene OTRA firma (solo el id del inversor, sin el
+    proyecto) y no devuelve datos de string/MPPT.
+  · No hay equivalente de `get_project_summary` (el lote de potencia de toda
+    la flota); se compone con get_availability + get_power.
+
+Y una limitación de la API entera, no de este cliente: **los 18 endpoints son
+de solo lectura**. No existe ninguno de escritura, así que el ON/OFF del
+reconectador -- que en Solenium viejo es un POST a /relay/set-status/ -- no
+tiene equivalente y bloquea la migración de app/api/v1/reconectadores.py.
 """
 from __future__ import annotations
 
@@ -104,6 +123,24 @@ class SolarViewClient:
         results = data.get("results")
         return results if isinstance(results, list) else []
 
+    def get_project_detail(self, project_id: int) -> dict | None:
+        """Info general del proyecto + generación acumulada del día --
+        GET /solarview/config/project-detail/{id}/.
+
+        Equivalente a `SoleniumClient.get_project_detail()`. Devuelve la
+        envoltura cruda `{message, error, results, success}` y el llamador
+        desenvuelve, igual que get_generation/get_power acá.
+
+        Contrato verificado en vivo el 2026-09-03 (project_id=12):
+          · `results.generation` = {time, value, unit, complete} -- trae su
+            PROPIA unidad, que puede ser kWh o MWh. Hay que leerla, no
+            asumirla (mismo patrón que ya normaliza /generacion-hoy).
+          · `results.installed_capacity` puede venir como el string
+            "Desconocida" en vez de un número -- no hacerle float() a ciegas.
+        """
+        url = f"{self._base_url}/solarview/config/project-detail/{project_id}/"
+        return self._get(url)
+
     def get_generation(self, project_id: int, start_date: str, end_date: str) -> dict | None:
         url = f"{self._base_url}/solarview/measurements/generation/"
         return self._get(url, params={
@@ -111,6 +148,90 @@ class SolarViewClient:
             "start_date": start_date,
             "end_date": end_date,
         })
+
+    def get_project_inverters(self, project_id: int) -> list[dict]:
+        """Inversores activos del proyecto con su última lectura --
+        GET /solarview/measurements/inverters-list/?project_id=X.
+
+        Equivalente a `SoleniumClient.get_project_inverters()`, misma firma y
+        mismo tipo de retorno (lista, vacía si no hay dato).
+
+        Contrato verificado en vivo el 2026-09-03 (project_id=12, 11
+        inversores): cada item trae {id, dev_name, state, power, efficiency,
+        temperature, time}. NO trae datos de strings/MPPT -- para eso están
+        /measurements/dc/ (por string) y /kpis/availability/detail/.
+        """
+        url = f"{self._base_url}/solarview/measurements/inverters-list/"
+        data = self._get(url, params={"project_id": project_id})
+        if not isinstance(data, dict):
+            return []
+        results = data.get("results")
+        return results if isinstance(results, list) else []
+
+    def get_inverter_detail(self, inverter_id: int) -> dict | None:
+        """Estado y última lectura de UN inversor --
+        GET /solarview/measurements/inverter-detail/?id=X.
+
+        OJO con la firma: `SoleniumClient.get_inverter_detail()` recibe
+        (project_id, inverter_id); acá el inversor se pide solo por su id, sin
+        el proyecto. No son intercambiables por posición.
+
+        Y la forma tampoco es equivalente: el de Solenium incluye datos de
+        string/MPPT, este devuelve lo mismo que un item de
+        get_project_inverters() ({id, dev_name, state, power, efficiency,
+        temperature, time}) -- verificado en vivo el 2026-09-03 con el
+        inversor 722. Quien necesite strings tiene que ir a
+        /measurements/dc/ o a /kpis/availability/detail/.
+        """
+        url = f"{self._base_url}/solarview/measurements/inverter-detail/"
+        return self._get(url, params={"id": inverter_id})
+
+    def get_energy(self, project_id: int, granularity: str = "day",
+                   date_from: str = "", date_to: str = "") -> dict | None:
+        """Energía por granularidad (hour|day|month) --
+        GET /solarview/measurements/energy/?project_id=X&granularity=Y.
+
+        Equivalente a `SoleniumClient.get_energy()`, misma firma.
+
+        **`date_from` y `date_to` son obligatorios en la práctica**: sin ellos
+        la respuesta trae `points: []` aunque igual eche un rango en
+        date_from/date_to (verificado en vivo el 2026-09-03 con tres
+        proyectos distintos).
+
+        Este método NO es un pasa-manos: normaliza la unidad a kWh. El
+        endpoint devuelve los puntos con la clave literalmente llamada `kwh`
+        pero declara `unit: "MWh"` en el mismo `results` -- o sea que el
+        nombre de la clave miente por un factor de 1000. Verificado en vivo
+        el 2026-09-03 (project_id=11, Baraya): `unit: "MWh"` con puntos como
+        {"time": "2026-08-01", "kwh": 7.7266}, que son 7.726,6 kWh reales
+        (coherente con su P90 de ~7.291 kWh/día).
+
+        Se absorbe acá a propósito, en vez de dejar que cada llamador lo
+        resuelva: esa clase de error ya costó caro dos veces en este
+        repositorio -- ver `eae_wh` en gaia_client.py, que contiene kWh y que
+        informe_om.py divide entre 1000 creyendo el nombre. Al salir de este
+        método `unit` siempre dice "kWh" y los valores están en kWh.
+        """
+        url = f"{self._base_url}/solarview/measurements/energy/"
+        params: dict = {"project_id": project_id, "granularity": granularity}
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
+
+        data = self._get(url, params=params)
+        if not isinstance(data, dict):
+            return data
+        resultados = data.get("results")
+        if isinstance(resultados, dict) and str(resultados.get("unit") or "").strip().lower() == "mwh":
+            for punto in resultados.get("points") or []:
+                if isinstance(punto, dict) and punto.get("kwh") is not None:
+                    try:
+                        punto["kwh"] = round(float(punto["kwh"]) * 1000, 3)
+                    except (TypeError, ValueError):
+                        pass
+            resultados["unit"] = "kWh"
+        return data
 
     def get_power(self, project_id: int, date_from: str = "", date_to: str = "") -> dict | None:
         url = f"{self._base_url}/solarview/measurements/power/"

@@ -179,3 +179,131 @@ def test_429_sin_retry_after_usa_pausa_fija(monkeypatch):
     client._get("https://api.sole.tech/solarview/measurements/generation/")
 
     assert esperas == [sv_client_module.BACKOFF_SECONDS]
+
+
+# ── Fase 2: los cuatro metodos que faltaban para poder portar
+# app/api/v1/generacion_solar.py de Solenium a SolarView. Los contratos se
+# verificaron en vivo contra api.sole.tech el 2026-09-03 (ver docstrings).
+
+def test_get_project_detail_pide_la_ruta_con_el_id_en_el_path():
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_project_detail(12)
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/config/project-detail/12/"), (
+        "el project_id va en el path, no como parametro"
+    )
+    assert params is None
+
+
+def test_get_project_inverters_desenvuelve_results_a_lista():
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (
+        llamados.append((url, params)) or {
+            "message": "OK", "error": None, "success": True,
+            "results": [
+                {"id": 722, "dev_name": "INV-01", "state": 1, "power": 84.3,
+                 "efficiency": 97.1, "temperature": 41.0, "time": "2026-09-03 15:30:00"},
+                {"id": 723, "dev_name": "INV-02", "state": 1, "power": 81.9,
+                 "efficiency": 96.8, "temperature": 40.2, "time": "2026-09-03 15:30:00"},
+            ],
+        }
+    )
+
+    inversores = client.get_project_inverters(12)
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/measurements/inverters-list/")
+    assert params == {"project_id": 12}
+    assert [i["id"] for i in inversores] == [722, 723]
+
+
+def test_get_project_inverters_devuelve_lista_vacia_si_la_forma_no_es_la_esperada():
+    client = _cliente()
+    client._get = lambda url, params=None: None
+    assert client.get_project_inverters(12) == []
+
+    client._get = lambda url, params=None: {"results": "no soy una lista"}
+    assert client.get_project_inverters(12) == []
+
+
+def test_get_inverter_detail_pide_solo_el_id_del_inversor():
+    """La firma NO coincide con la de Solenium, que pide (project_id,
+    inverter_id) -- aca el inversor se identifica solo por su id."""
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_inverter_detail(722)
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/measurements/inverter-detail/")
+    assert params == {"id": 722}
+
+
+def test_get_energy_convierte_mwh_a_kwh_aunque_la_clave_se_llame_kwh():
+    """El endpoint declara unit "MWh" y aun asi nombra la clave `kwh` -- el
+    nombre miente por un factor de 1000. Caso real verificado en vivo
+    (project_id=11, Baraya): 7.7266 "kwh" con unit MWh son 7.726,6 kWh.
+    """
+    client = _cliente()
+    client._get = lambda url, params=None: {
+        "message": "OK", "error": None, "success": True,
+        "results": {
+            "project_id": 11, "granularity": "day",
+            "date_from": "2026-08-01", "date_to": "2026-09-03",
+            "unit": "MWh",
+            "points": [
+                {"time": "2026-08-01", "kwh": 7.7266200000000005},
+                {"time": "2026-08-02", "kwh": 6.92509875},
+                {"time": "2026-08-03", "kwh": None},
+            ],
+        },
+    }
+
+    r = (client.get_energy(11, date_from="2026-08-01", date_to="2026-09-03") or {})["results"]
+
+    assert r["unit"] == "kWh", "al salir del cliente la unidad siempre es kWh"
+    assert r["points"][0]["kwh"] == 7726.62
+    assert r["points"][1]["kwh"] == 6925.099
+    assert r["points"][2]["kwh"] is None, "un punto sin dato se deja como esta, no se convierte a 0"
+
+
+def test_get_energy_no_toca_los_valores_si_ya_vienen_en_kwh():
+    client = _cliente()
+    client._get = lambda url, params=None: {
+        "results": {"unit": "kWh", "points": [{"time": "2026-08-01", "kwh": 7726.62}]},
+    }
+
+    r = (client.get_energy(11, date_from="2026-08-01", date_to="2026-08-01") or {})["results"]
+
+    assert r["unit"] == "kWh"
+    assert r["points"][0]["kwh"] == 7726.62, "no se debe multiplicar dos veces"
+
+
+def test_get_energy_pasa_las_fechas_que_el_endpoint_exige():
+    """Sin date_from/date_to la API responde points vacio -- verificado en
+    vivo con tres proyectos distintos."""
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_energy(11, granularity="day", date_from="2026-08-01", date_to="2026-09-03")
+
+    url, params = llamados[0]
+    assert url.endswith("/solarview/measurements/energy/")
+    assert params == {"project_id": 11, "granularity": "day",
+                      "date_from": "2026-08-01", "date_to": "2026-09-03"}
+
+
+def test_get_energy_tolera_una_respuesta_inesperada():
+    client = _cliente()
+    client._get = lambda url, params=None: None
+    assert client.get_energy(11) is None
+
+    client._get = lambda url, params=None: {"results": None}
+    assert client.get_energy(11) == {"results": None}

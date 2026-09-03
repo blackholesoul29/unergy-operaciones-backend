@@ -64,8 +64,10 @@ def _decidir(*, e_cgm, e_inv, e_inv_incompleto, curva_ppal, completo_ppal,
 
 
 # ── El caso real que motivo el cambio ────────────────────────────────────────
-# MGS 0017-Esmeralda, 2026-09-02: CGM 8.207,5 kWh igual al medidor principal al
-# decimal, mientras los inversores reportaban 7.570,8 con 14h faltantes.
+# Chiriguana Norte 1, 2026-09-02: CGM automatico 8.207,5 kWh, identico al
+# medidor principal al decimal (respaldo 8.205,7, +0,02%), mientras los
+# inversores reportaban 7.570,8 con 14h faltantes -- un 7,8% por debajo, apenas
+# fuera del +-6%, que era justo lo que la mandaba a revisar a mano.
 def test_inversores_incompletos_pero_medidor_confirma_el_cgm():
     resultado = _decidir(
         e_cgm=8207.5, e_inv=0.0, e_inv_incompleto=7570.8,

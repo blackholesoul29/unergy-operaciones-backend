@@ -3,19 +3,18 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from dataclasses import asdict
 from datetime import datetime
 from threading import Thread
 
 import pytz
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.proyectos import Proyecto, TipoProyectoEnum
-from app.services.mgs.alarm_engine import AlarmEngine, Alarm, AlarmType, Severity
+from app.services.mgs.alarm_engine import AlarmEngine, Alarm, AlarmType
 from app.services.mgs.gaia_client import GaiaClient, build_db_proyecto_frt_map, find_gaia_node_pair
 from app.services.mgs.solenium_client import SoleniumClient
 from app.services.mgs.solenium_checker import SoleniumChecker
@@ -202,8 +201,9 @@ def _persist_alarms(
                 db.rollback()
                 logger.exception("Failed to resolve cleared alarms")
 
-        _auto_create_fallas(db, alarm_ids)
-        _auto_close_fallas(db, alarm_ids)
+        # Acá se llamaba a _auto_create_fallas/_auto_close_fallas -- eliminados
+        # 2026-09-02 (ver el comentario al final del archivo). Las alarmas se
+        # siguen guardando y resolviendo; ya no generan ni cierran fallas.
 
     except Exception:
         db.rollback()
@@ -298,227 +298,32 @@ def _resolver_alarmas_superadas(
     db.commit()
 
 
-# Mapping alarm types to falla catalog tipo codes
-_ALARM_TYPE_TO_FALLA_TIPO = {
-    AlarmType.PLANTA_CAIDA: "9.1",       # Sin Suministro Electrico
-    AlarmType.SIN_GENERACION: "4.6",     # Inversor con derating o eficiencia reducida
-    AlarmType.CORTE_ZONA: "9.1",         # Sin Suministro Electrico
-}
-
-
-def _auto_create_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
-    """Auto-create Falla records for critical/warning alarms (PLANTA_CAIDA, SIN_GENERACION).
-    Skips if an open falla already exists for the same project+alarm_type."""
-    critical_types = {AlarmType.PLANTA_CAIDA, AlarmType.SIN_GENERACION}
-
-    for alarm, alarm_db_id in alarm_ids:
-        if alarm.alarm_type not in critical_types:
-            continue
-        if alarm.proyecto_id is None:
-            continue
-
-        try:
-            proyecto_id = alarm.proyecto_id
-
-            # Check for existing open falla with same alarm_type for this project.
-            # Se compara contra alarmas_monitoreo.alarm_type (la alarma original
-            # que la creó, vía alarma_monitoreo_id) en vez de parsear el prefijo
-            # "[TIPO] ..." de descripcion -- si alguien edita la descripcion a
-            # mano (soportado por PATCH /fallas/{id}), el match por ILIKE se
-            # rompe en silencio y este guard dejaba de encontrar la falla
-            # abierta, creando duplicados (auditoría 2026-09-01).
-            existing = db.execute(text("""
-                SELECT f.id FROM fallas f
-                JOIN fallas_cat_estados e ON f.estado_id = e.id
-                JOIN alarmas_monitoreo am ON am.id = f.alarma_monitoreo_id
-                WHERE f.proyecto_id = :pid
-                  AND e.es_estado_final = FALSE
-                  AND f.deleted_at IS NULL
-                  AND am.alarm_type = :alarm_type
-                LIMIT 1
-            """), {
-                "pid": proyecto_id,
-                "alarm_type": alarm.alarm_type.value,
-            }).mappings().first()
-
-            if existing:
-                logger.debug("Open falla already exists for project %d alarm %s — skipping", proyecto_id, alarm.alarm_type.value)
-                continue
-
-            # Look up catalog IDs
-            tipo_code = _ALARM_TYPE_TO_FALLA_TIPO.get(alarm.alarm_type, "9.1")
-            tipo_row = db.execute(text(
-                "SELECT id FROM fallas_cat_tipos WHERE codigo = :c AND activa = TRUE LIMIT 1"
-            ), {"c": tipo_code}).mappings().first()
-
-            estado_row = db.execute(text(
-                "SELECT id FROM fallas_cat_estados WHERE codigo = 'abierta' LIMIT 1"
-            )).mappings().first()
-            if not estado_row:
-                estado_row = db.execute(text(
-                    "SELECT id FROM fallas_cat_estados WHERE es_estado_final = FALSE ORDER BY orden LIMIT 1"
-                )).mappings().first()
-
-            # Códigos reales de fallas_cat_prioridades: critica/grave/media/leve
-            # (ver app/seeds/seed_data.py). Antes decía "alta", que no existe en
-            # el catálogo real -- la búsqueda nunca encontraba fila para ninguna
-            # alarma no-crítica, y el `continue` de abajo se comía la creación en
-            # silencio (solo quedaba un warning en el log). Confirmado que esto
-            # no se detectaba en tests porque el fixture sembraba a mano un
-            # catálogo falso con codigo="alta" que no existe en producción
-            # (auditoría 2026-09-02).
-            prioridad_code = "critica" if alarm.severity == Severity.CRITICAL else "grave"
-            prioridad_row = db.execute(text(
-                "SELECT id FROM fallas_cat_prioridades WHERE codigo = :c LIMIT 1"
-            ), {"c": prioridad_code}).mappings().first()
-
-            if not tipo_row or not estado_row or not prioridad_row:
-                logger.warning("Missing falla catalog data — cannot auto-create falla for alarm %d", alarm_db_id)
-                continue
-
-            # Find the first admin/operaciones user as registrado_por
-            registrado_por = db.execute(text(
-                "SELECT id FROM usuarios WHERE activo = TRUE AND rol IN ('admin', 'operaciones') ORDER BY id LIMIT 1"
-            )).mappings().first()
-            if not registrado_por:
-                registrado_por = db.execute(text(
-                    "SELECT id FROM usuarios WHERE activo = TRUE ORDER BY id LIMIT 1"
-                )).mappings().first()
-
-            if not registrado_por:
-                logger.warning("No active user found — cannot auto-create falla")
-                continue
-
-            # sla_limite_horas se deja NULL a propósito -- no se calcula acá.
-            # Falla.sla_limite_horas_efectivo (app/models/fallas.py) ya resuelve
-            # el default por prioridad desde un único lugar (DEFAULT_SLA_HOURS);
-            # antes esta función tenía su propio cálculo hardcodeado (8h/24h
-            # según severidad) que coincidía por casualidad con crítica/grave de
-            # esa tabla, pero se desincronizaría en silencio si esos defaults
-            # cambiaran. Además, guardar acá un valor calculado le quitaba a
-            # sla_limite_horas su significado real: "alguien puso un plazo
-            # especial", no "el motor puso un número" (auditoría 2026-09-02).
-            #
-            # codigo_interno: placeholder -> INSERT -> renombrar con el id real
-            # asignado por la BD (RETURNING id), igual que create_falla() en
-            # api/v1/fallas.py. Antes se adivinaba con MAX(id)+1 calculado
-            # ANTES del insert -- si dos fallas se crean casi al mismo tiempo,
-            # ambas podian calcular el mismo numero y chocar contra el
-            # unique=True de codigo_interno, tumbando el INSERT entero
-            # (auditoria 2026-09-02).
-            placeholder = f"TMP-{uuid.uuid4().hex[:12]}"
-            nuevo_id = db.execute(text("""
-                INSERT INTO fallas
-                    (codigo_interno, proyecto_id, tipo_id, estado_id, prioridad_id,
-                     registrado_por_id, descripcion, fecha_identificacion,
-                     alarma_monitoreo_id)
-                VALUES
-                    (:codigo, :pid, :tipo_id, :estado_id, :prioridad_id,
-                     :reg_id, :desc, :fecha, :alarm_id)
-                RETURNING id
-            """), {
-                "codigo": placeholder,
-                "pid": proyecto_id,
-                "tipo_id": tipo_row["id"],
-                "estado_id": estado_row["id"],
-                "prioridad_id": prioridad_row["id"],
-                "reg_id": registrado_por["id"],
-                "desc": f"[{alarm.alarm_type.value}] {alarm.details}",
-                "fecha": alarm.timestamp.date(),
-                "alarm_id": alarm_db_id,
-            }).scalar()
-
-            codigo = f"FAL-{alarm.timestamp.year}-{nuevo_id:05d}"
-            db.execute(text("UPDATE fallas SET codigo_interno = :codigo WHERE id = :id"),
-                       {"codigo": codigo, "id": nuevo_id})
-            db.commit()
-            logger.info("Auto-created falla %s for alarm %d (%s — %s)",
-                        codigo, alarm_db_id, alarm.proyecto_nombre, alarm.alarm_type.value)
-
-        except Exception:
-            db.rollback()
-            logger.exception("Failed to auto-create falla for alarm %d", alarm_db_id)
-
-
-def _auto_close_fallas(db, alarm_ids: list[tuple[Alarm, int]]):
-    """Cuando llega una alarma de RECUPERACION, cierra las fallas que el
-    propio sistema creó por pérdida de conectividad (PLANTA_CAIDA/CORTE_ZONA)
-    para ese proyecto -- si no, quedan abiertas para siempre aunque el
-    problema físico ya se resolvió solo. RECUPERACION solo significa "volvió
-    la conectividad" (ver alarm_engine.py: se dispara cuando el estado pasa
-    de NO_DATA/ERROR a OK/WARNING) -- NO significa "ya está generando
-    normal", así que NO toca las fallas de SIN_GENERACION (conectado pero
-    sin generar, ej. un inversor dañado): esas requieren su propia
-    verificación y deben seguir abiertas. Se identifican por el alarm_type de
-    la alarma original que las creó (alarmas_monitoreo, vía
-    Falla.alarma_monitoreo_id) -- NO por el prefijo "[TIPO] ..." que
-    _auto_create_fallas escribe en descripcion, porque ese texto es editable
-    a mano (PATCH /fallas/{id}) y si alguien lo borra, el match por ILIKE
-    dejaba la falla abierta para siempre pese a que el sistema sí detectó la
-    recuperación (auditoría 2026-09-01).
-    Se cierran (no se borran ni se ocultan): quedan con una nota automática,
-    editable -- el correo automático a los contactos operacionales del
-    cliente se apagó 2026-09-01 (mismo criterio que el envío por alarma
-    nueva, ver _persist_alarms más abajo: "no quiero que se haga el envío
-    automático de clientes, no tengo control"). El cierre sigue siendo
-    visible en Gestión de Fallas; el aviso manual sigue disponible desde ahí."""
-    from app.models import Falla, FallaCatEstado, FallaSeguimiento
-    from app.api.v1.fallas import _sincronizar_resolucion
-
-    _TIPOS_CONECTIVIDAD = (AlarmType.PLANTA_CAIDA, AlarmType.CORTE_ZONA)
-
-    for alarm, alarm_db_id in alarm_ids:
-        if alarm.alarm_type != AlarmType.RECUPERACION:
-            continue
-        if alarm.proyecto_id is None:
-            continue
-
-        try:
-            ids_conectividad = db.execute(
-                text("SELECT id FROM alarmas_monitoreo WHERE alarm_type IN :tipos").bindparams(
-                    bindparam("tipos", expanding=True)
-                ),
-                {"tipos": [t.value for t in _TIPOS_CONECTIVIDAD]},
-            ).scalars().all()
-
-            abiertas = (
-                db.query(Falla)
-                .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
-                .filter(
-                    Falla.proyecto_id == alarm.proyecto_id,
-                    Falla.alarma_monitoreo_id.in_(ids_conectividad),
-                    FallaCatEstado.es_estado_final.is_(False),
-                    Falla.deleted_at.is_(None),
-                )
-                .all()
-            )
-            if not abiertas:
-                continue
-
-            estado_final = (
-                db.query(FallaCatEstado)
-                .filter(FallaCatEstado.es_estado_final.is_(True))
-                .order_by(FallaCatEstado.orden)
-                .first()
-            )
-            if not estado_final:
-                logger.warning("No hay estado final en el catálogo — no se puede auto-cerrar")
-                continue
-
-            for falla in abiertas:
-                _sincronizar_resolucion(falla, estado_final)
-                falla.estado_id = estado_final.id
-                db.add(FallaSeguimiento(
-                    falla_id=falla.id,
-                    usuario_id=falla.registrado_por_id,
-                    nota="Cerrada automáticamente: el proyecto volvió a reportar (recuperación de alarma MGS).",
-                    estado_nuevo_id=estado_final.id,
-                ))
-                db.commit()
-                logger.info("Auto-cerrada falla %s tras recuperación de alarma (%s)",
-                            falla.codigo_interno, alarm.proyecto_nombre)
-
-        except Exception:
-            db.rollback()
-            logger.exception("Failed to auto-close fallas for recovery alarm %d", alarm_db_id)
-
+# ── Creación/cierre automático de fallas: ELIMINADO (2026-09-02) ─────────────
+# Decisión de negocio de Laura: las fallas se registran solo de dos formas --
+# a mano desde la plataforma, o por el integrador externo vía POST /fallas.
+# El motor de monitoreo ya no las crea ni las cierra solo.
+#
+# Lo que había acá y se quitó:
+#   · `_auto_create_fallas()` -- creaba una falla por cada alarma PLANTA_CAIDA
+#     o SIN_GENERACION (una por proyecto+tipo, sin duplicar si ya había una
+#     abierta), con prioridad crítica/grave según severidad y ligada a la
+#     alarma que la originó (`fallas.alarma_monitoreo_id`).
+#   · `_auto_close_fallas()` -- al llegar una alarma RECUPERACION, cerraba las
+#     fallas de conectividad (PLANTA_CAIDA/CORTE_ZONA) que ese mismo motor
+#     había creado para el proyecto, sellando fecha_resolucion/sla_cumplido y
+#     dejando una nota de seguimiento automática.
+#   · `_ALARM_TYPE_TO_FALLA_TIPO` -- el mapeo alarma -> tipo de catálogo que
+#     usaba la creación.
+#
+# El monitoreo NO se tocó: las alarmas se siguen detectando, guardando en
+# `alarmas_monitoreo`, resolviendo (`resolved_at`) y mostrando en el dashboard.
+# Lo único que se cortó es el puente alarma -> falla.
+#
+# `fallas.alarma_monitoreo_id` se conserva: es el dato que distingue las fallas
+# históricas creadas por este motor (y la única señal no falsificable de
+# "origen automático", ver la auditoría de `centinela`). Las fallas
+# auto-creadas que quedaron abiertas hay que cerrarlas a mano -- ya no se
+# cierran solas.
+#
+# Si algún día se retoma, el punto de enganche era `_persist_alarms()`, que ya
+# tiene a mano la lista `(Alarm, id_en_alarmas_monitoreo)` de cada ciclo.

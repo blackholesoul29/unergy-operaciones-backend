@@ -123,7 +123,12 @@ class Falla(Base):
     sla_cumplido: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fotos_urls: Mapped[str | None] = mapped_column(JSONB, nullable=True)
     notificacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
-    # Feature 2: link to MGS alarm that auto-created this falla.
+    # Alarma del motor MGS que creo esta falla. La creacion automatica se
+    # elimino el 2026-09-02 (decision de Laura: solo registro manual y el
+    # integrador externo), asi que ninguna falla NUEVA lo trae -- se conserva
+    # como la marca de las historicas que ese motor si creo, y sigue siendo la
+    # unica senal no falsificable de "origen automatico" (ver la auditoria de
+    # `centinela`).
     # alarmas_monitoreo no tiene modelo ORM (tabla creada via SQL crudo en
     # la migracion 135) -- la FK se declara igual, contra el nombre de
     # tabla, para que SQLAlchemy la conozca aunque no exista una relacion

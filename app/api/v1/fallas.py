@@ -706,8 +706,9 @@ def list_fallas(
             # siempre bajo el subtipo genérico red.desconexion_sin_identificar,
             # así que nunca se resuelve solo vía el flujo normal de
             # reclasificación (verificado: 833 de 851 casos reales, todas sin
-            # alarma_monitoreo_id -- ese campo solo lo llena el motor MGS
-            # interno, ver _auto_create_fallas en services/mgs/scheduler.py).
+            # alarma_monitoreo_id -- ese campo solo lo llenaba el motor MGS
+            # interno, cuya creación automática de fallas se eliminó el
+            # 2026-09-02; queda como marca de las fallas históricas que creó).
             # Auditoría 2026-09-02. Mismas constantes que _bloquear_cierre_si_pendiente.
             query = query.filter(~(
                 Falla.alarma_monitoreo_id.is_(None)

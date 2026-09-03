@@ -312,8 +312,13 @@ def _resolver_alarmas_superadas(
 #     fallas de conectividad (PLANTA_CAIDA/CORTE_ZONA) que ese mismo motor
 #     había creado para el proyecto, sellando fecha_resolucion/sla_cumplido y
 #     dejando una nota de seguimiento automática.
-#   · `_ALARM_TYPE_TO_FALLA_TIPO` -- el mapeo alarma -> tipo de catálogo que
-#     usaba la creación.
+#   · `_ALARM_TYPE_TO_FALLA_TIPO` -- el mapeo alarma -> código de
+#     `fallas_cat_tipos` que usaba la creación. Se deja registrado acá porque
+#     es conocimiento de negocio, no solo código:
+#         PLANTA_CAIDA    -> "9.1"  (Sin Suministro Electrico)
+#         SIN_GENERACION  -> "4.6"  (Inversor con derating o eficiencia reducida)
+#         CORTE_ZONA      -> "9.1"  (Sin Suministro Electrico)
+#     Default para cualquier otro tipo: "9.1".
 #
 # El monitoreo NO se tocó: las alarmas se siguen detectando, guardando en
 # `alarmas_monitoreo`, resolviendo (`resolved_at`) y mostrando en el dashboard.

@@ -212,9 +212,9 @@ def get_mediana_consumo(db: Session, frontera_id: int, fecha: date) -> tuple[flo
     Sara: lo que importa es si la FUENTE fue real -- caso 'Medidor'/'CGM' --
     no si ese día puntual quedó marcado para revisar por otro motivo, ej.
     alejarse de la mediana). Antes esto también bloqueaba por completo el
-    histórico de fronteras en FRONTERAS_VALIDAR_CGM_VS_MEDIDOR (ej. Paso
-    Norte, siempre revisar_manualmente=True) -- decisión consciente de
-    dejarlas alimentar su histórico igual que el resto; la mediana (sobre
+    histórico de las fronteras que una lista de excepción dejaba siempre
+    marcadas para revisar (ej. Paso Norte) -- esas listas se eliminaron el
+    2026-09-02, pero la decisión de no filtrar sigue en pie: la mediana (sobre
     hasta 30 días) sigue siendo robusta a un outlier puntual aunque se
     cuele sin revisar.
 

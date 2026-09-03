@@ -20,6 +20,16 @@ válido para ese día ('reporte_valido'), se valida/reporta con e_cgm (Casos 1,
 5). Si no, e_cgm deja de ser la referencia -- se valida con e_nodo vs
 inversores (Casos 2/3/4, 5).
 
+Corroboración del medidor (2026-09-02): si el reporte automático no cuadra
+contra inversores, antes de bajar a Casos 2/3/4 se le da al CGM una segunda
+oportunidad contra el MEDIDOR (fuente física independiente): si CGM y un
+medidor completo coinciden dentro del rango Y el CGM es mayor que los
+inversores -- la firma de un SolarView desactualizado --, se resuelve como
+Caso 1 (se confía en el reporte que Quoia ya envió, sin matriz ni revisión
+manual). Motivo: los inversores son hoy la fuente menos confiable, y hacerlos
+el único validador del CGM mandaba a revisión casos sin evidencia real contra
+el CGM.
+
 TEMPORAL (2026-09-02): todo lo que termine con 'medidor_usado' == 'inversores'
 (el "Inversores × FP" de la plataforma) sale con 'revisar_manualmente' = True,
 sin importar el Caso. Motivo: la generación de Solenium a veces llega
@@ -148,6 +158,49 @@ def _decidir_caso(
     # --- Caso 1: reporte ASIC válido hoy y error en rango ---
     if reporte_valido and e_inv > 0 and e_cgm > 0 and _en_rango(_error_con_curva(e_inv, curva_cgm)):
         return {"caso": 1, "energia_final_kwh": e_cgm, "curva_final": curva_cgm, "medidor_usado": "cgm"}
+
+    # --- Caso 1 por corroboración del MEDIDOR (2026-09-02) ---------------------
+    # El CGM automático no cuadró contra inversores, pero los inversores son hoy
+    # la fuente menos confiable (SolarView/Solenium llega desactualizado aunque
+    # el día figure completo). Antes esto mandaba a revisar a mano un CGM que
+    # probablemente estaba bien, sin evidencia real en su contra.
+    #
+    # El medidor de nodo es una fuente FÍSICAMENTE INDEPENDIENTE del CGM (otro
+    # canal de telecomunicaciones, ver la nota de e_cgm vs e_nodo arriba): si
+    # coinciden, la discrepancia se le atribuye a los inversores. Se exige
+    # además que el CGM sea MAYOR que los inversores -- la firma de un SolarView
+    # desactualizado/parcial; si los inversores reportaran MÁS, eso sí sugeriría
+    # que el CGM subreporta (el riesgo real para el ASIC) y se mantiene la
+    # cautela. Decisión de la usuaria, 2026-09-02.
+    #
+    # Se resuelve como Caso 1 con medidor_usado="cgm" a propósito: mismo
+    # desenlace (se confía en el reporte que Quoia ya envió), no se manda matriz
+    # de generación, y queda exento de la marca por hueco de SolarView de más
+    # abajo. Se exige medidor COMPLETO: uno incompleto que "cuadra" es
+    # coincidencia, no validación (mismo criterio que Caso 2).
+    #
+    # `e_inv` llega en 0 cuando SolarView vino incompleto (el total parcial va en
+    # e_inv_incompleto, ver el caller), así que acá se usa el que haya.
+    e_inv_ref = e_inv or e_inv_incompleto or 0.0
+    if reporte_valido and e_cgm > 0 and e_inv_ref > 0 and e_cgm > e_inv_ref:
+        error_cgm_ppal = _error_con_curva(e_cgm, curva_ppal) if _tiene_dato(curva_ppal) else None
+        error_cgm_resp = _error_con_curva(e_cgm, curva_resp) if _tiene_dato(curva_resp) else None
+        if (_en_rango(error_cgm_ppal) and completo_ppal) or (_en_rango(error_cgm_resp) and completo_resp):
+            # El error que se expone es el de CGM vs inversores (el que no
+            # cuadró): es lo que explica por qué esta fila necesitó
+            # corroboración. Con inversores incompletos se usa la ventana solar,
+            # igual que el camino de Caso 5, porque el total del día completo
+            # contra un total parcial siempre se vería mal.
+            error_vs_inv = (
+                _error_ventana_solar(curva_cgm, curva_solarview)
+                if e_inv == 0 and isinstance(curva_solarview, pd.Series)
+                else _error_con_curva(e_inv_ref, curva_cgm)
+            )
+            return {
+                "caso": 1, "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
+                "medidor_usado": "cgm", "error_final_pct": error_vs_inv,
+                "revisar_manualmente": False,
+            }
 
     # --- Casos 2/3/4: reporte no válido, o CGM no valida contra inversores ---
     if e_inv > 0:

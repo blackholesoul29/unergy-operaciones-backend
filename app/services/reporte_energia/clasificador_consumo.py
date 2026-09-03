@@ -30,6 +30,11 @@ corto, solo dos niveles:
                      "mayor valor" -- un hueco de telemetría puede acumular
                      horas sin reportar en un pico artificial, y "mayor
                      valor" elegiría sistemáticamente el más inflado.
+                     Sin mediana con qué validar (frontera nueva) se marcaba
+                     revisión siempre; desde el 2026-09-03 se le pregunta
+                     primero al CGM del día (_corroborado_por_cgm): si ese
+                     valor existe y coincide con el medidor, dos canales
+                     independientes concuerdan y no hace falta revisar.
   Caso 'Histórico' -- ni CGM ni medidor creíble, pero hay historial propio
                      -- mediana × forma horaria. Marca Revisar Manualmente:
                      ningún dato real de ese día respalda la curva
@@ -139,20 +144,61 @@ def _veredicto_medidor_vs_cgm(e_cgm: float, c: dict) -> str:
     definición, así que su diferencia contra el CGM no dice nada.
     """
     hubo_completo = False
-    for clave_curva, clave_completo in (
-        ("consumo_ppal", "consumo_ppal_completo"),
-        ("consumo_resp", "consumo_resp_completo"),
-    ):
+    for clave_curva in ("consumo_ppal", "consumo_resp"):
         curva = c.get(clave_curva)
-        if not _tiene_dato(curva) or not c.get(clave_completo):
-            continue
-        total = float(curva.fillna(0).sum())
-        if total <= 0:
+        if not _completa(curva) or float(curva.fillna(0).sum()) <= 0:
             continue
         hubo_completo = True
-        if abs(e_cgm - total) / total <= RANGO_CORROBORACION_CONSUMO:
+        if _coinciden(e_cgm, curva):
             return "corrobora"
     return "contradice" if hubo_completo else "sin_dato"
+
+
+def _completa(curva: pd.Series | None) -> bool:
+    """Las 24 horas presentes -- el requisito para que una curva pueda opinar
+    sobre otra fuente, en cualquiera de las dos direcciones.
+
+    A propósito NO se usa el flag 'consumo_*_completo' que trae
+    curvas_de_frontera(): ese sale de medidores.dia_completo(), un chequeo
+    pensado para GENERACIÓN -- mira la ventana solar y tolera huecos fuera de
+    ella, donde no hay sol y por lo tanto no falta ningún dato. El consumo
+    corre las 24 horas, así que un hueco nocturno sí es un hueco, y una curva
+    a la que le faltan horas suma de menos: coincidir con otra fuente sería
+    casualidad, no confirmación. Este criterio además queda idéntico al de
+    process/src/internals/clasificador_consumo.py, donde el flag no sirve
+    porque _recuperar_si_incompleto no devuelve la completitud recalculada.
+    """
+    return isinstance(curva, pd.Series) and bool(curva.notna().all())
+
+
+def _coinciden(e_cgm: float, curva: pd.Series) -> bool:
+    """True si el total del CGM y el de esta curva de medidor caen dentro de
+    RANGO_CORROBORACION_CONSUMO uno del otro."""
+    total = float(curva.fillna(0).sum())
+    if total <= 0 or e_cgm <= 0:
+        return False
+    return abs(e_cgm - total) / total <= RANGO_CORROBORACION_CONSUMO
+
+
+def _corroborado_por_cgm(e_cgm: float, curva: pd.Series | None) -> bool:
+    """El mismo cruce que _veredicto_medidor_vs_cgm pero en la dirección
+    contraria: acá la lectura a respaldar es la del MEDIDOR y el testigo es el
+    CGM.
+
+    Aplica en las ramas del Caso 'Medidor' que no tienen mediana histórica con
+    qué validar (frontera nueva). Se llega ahí porque el CGM no servía como
+    FUENTE -- status no automático, o e_cgm en 0 -- pero un status no
+    automático no quiere decir que el valor esté mal: solo que el trámite de
+    Quoia hacia el ASIC no se completó (mismo razonamiento que los Casos 9/10
+    de Generación). Si ese valor existe y coincide con el medidor, dos canales
+    independientes dicen lo mismo y no hace falta que nadie lo revise a mano.
+
+    Solo una curva COMPLETA se puede respaldar así: una con huecos suma de
+    menos, y coincidir con el CGM sería casualidad, no confirmación.
+    """
+    if not _completa(curva):
+        return False
+    return _coinciden(e_cgm, curva)
 
 
 def _curvas_medidor(
@@ -399,7 +445,7 @@ def _decidir_medidor_o_historico(
                 return {
                     "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
                     "medidor_usado": "principal_sin_historico" if curva is curva_ppal else "respaldo_sin_historico",
-                    "revisar_manualmente": True,
+                    "revisar_manualmente": not _corroborado_por_cgm(e_cgm, curva),
                     "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                     "recuperacion_datos": recuperacion_datos,
                 }
@@ -413,7 +459,8 @@ def _decidir_medidor_o_historico(
             # porque nadie confirmó que el nivel sea el correcto.
             return {
                 "caso": "Medidor", "energia_final_kwh": total_ppal, "curva_final": curva_ppal,
-                "medidor_usado": "principal_sin_historico", "revisar_manualmente": True,
+                "medidor_usado": "principal_sin_historico",
+                "revisar_manualmente": not _corroborado_por_cgm(e_cgm, curva_ppal),
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,
             }
@@ -425,7 +472,7 @@ def _decidir_medidor_o_historico(
             return {
                 "caso": "Medidor", "energia_final_kwh": float(curva.fillna(0).sum()), "curva_final": curva,
                 "medidor_usado": "principal_sin_historico" if tiene_ppal else "respaldo_sin_historico",
-                "revisar_manualmente": True,
+                "revisar_manualmente": not _corroborado_por_cgm(e_cgm, curva),
                 "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
                 "recuperacion_datos": recuperacion_datos,
             }

@@ -1,5 +1,6 @@
 """clasificar_consumo() -- segunda validación del CGM contra el medidor del
-día cuando el cruce contra la mediana histórica falla.
+día cuando el histórico no alcanza para respaldarlo solo: el total se salió
+del rango, o no hay mediana todavía (frontera nueva).
 
 El cruce contra el histórico detecta que el día se salió de lo normal, pero
 no sabe si el raro es el día (consumo real distinto) o el dato (glitch de
@@ -17,6 +18,10 @@ Los dos casos reales que motivan la regla, con lados opuestos:
     además envía matriz de corrección a Quoia, algo que el Caso 'CGM' no
     hace. Esto reemplaza la lista VALIDAR_CGM_VS_MEDIDOR = {111} que
     existía por frontera.
+
+Sin mediana el 'contradice' NO descarta el CGM, solo lo marca: no hay
+tercero que arbitre cuál de los dos canales es el roto, y un medidor
+"completo" puede venir doblado igual que el CGM (MGS 0032 El Paso Norte).
 
 Un medidor INCOMPLETO no opina en ninguna dirección: lee de menos por
 definición (le faltan horas), así que su diferencia contra el CGM no dice
@@ -93,13 +98,38 @@ def test_cgm_en_rango_no_pide_los_medidores(espia, monkeypatch):
     assert espia.llamadas == [], "dentro del ±30% la segunda validación no debe dispararse"
 
 
-def test_sin_mediana_no_pide_los_medidores(espia, monkeypatch):
-    """Arranque desde cero: sin historial no hay nada que disparar."""
+def test_sin_mediana_tambien_pregunta_al_medidor(espia, monkeypatch):
+    """Frontera nueva: sin historial, el status de Quoia era el único
+    respaldo del CGM -- y es justo lo que falla en los casos que motivaron la
+    regla. El medidor del día sí puede respaldarlo."""
+    espia.curvas = _curvas(ppal=_curva(26.0), resp=_curva(26.0))
+    resultado = _clasificar(_GaiaFake(26.0), None, monkeypatch)
+
+    assert resultado["caso"] == "CGM"
+    assert not resultado.get("revisar_manualmente"), "el medidor completo lo respalda"
+    assert espia.llamadas == [None], "sin mediana no hay valor de referencia que pasar"
+
+
+def test_sin_mediana_contradice_marca_pero_no_descarta_el_cgm(espia, monkeypatch):
+    """Sin histórico no hay tercero que arbitre: un medidor 'completo' puede
+    venir doblado igual que el CGM (MGS 0032 El Paso Norte). Se conserva el
+    canal oficial y decide una persona."""
+    espia.curvas = _curvas(ppal=_curva(13.0), resp=_curva(13.0))
+    resultado = _clasificar(_GaiaFake(26.0), None, monkeypatch)
+
+    assert resultado["caso"] == "CGM", "sin mediana no se puede preferir el medidor sin evidencia"
+    assert resultado["energia_final_kwh"] == pytest.approx(26.0)
+    assert resultado["revisar_manualmente"] is True, "dos canales independientes en desacuerdo y nadie arbitra"
+
+
+def test_sin_mediana_sin_medidor_no_marca_nada(espia, monkeypatch):
+    """Frontera nueva sin telemetría de nodo: marcar todo lo que arranca sin
+    historial es justo lo que se quitó el 2026-09-02."""
+    espia.curvas = _curvas()
     resultado = _clasificar(_GaiaFake(26.0), None, monkeypatch)
 
     assert resultado["caso"] == "CGM"
     assert not resultado.get("revisar_manualmente")
-    assert espia.llamadas == []
 
 
 def test_medidor_completo_corrobora_cgm_desviado_pasa_sin_revision(espia, monkeypatch):

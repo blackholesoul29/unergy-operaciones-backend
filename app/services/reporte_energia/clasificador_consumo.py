@@ -14,13 +14,16 @@ corto, solo dos niveles:
 
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
                      dato real -- se confía en él, cruzándolo contra la
-                     mediana histórica si ya existe. Si se sale del rango,
+                     mediana histórica si ya existe. Si se sale del rango --
+                     o si no hay mediana todavía, frontera nueva --
                      una SEGUNDA validación pide los medidores del día y
                      desempata (_veredicto_medidor_vs_cgm): si un medidor
                      completo coincide con el CGM se confía sin revisión (el
                      día de verdad fue distinto), si lo contradice se
                      descarta el CGM y se sigue por 'Medidor', y si ninguno
-                     puede opinar queda para revisar.
+                     puede opinar queda para revisar. Sin mediana el
+                     'contradice' no descarta el CGM (no hay tercero que
+                     arbitre cuál canal es el roto) -- solo lo marca.
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO) en vez de tomar
@@ -254,19 +257,38 @@ def clasificar_consumo(
         # 'Medidor' -- mientras no haya mediana (arranque desde cero), se
         # confía solo en el status de Quoia.
         mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
-        if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
-            # Segunda validación: el histórico solo detecta que el día se
-            # salió de lo normal, no si la culpa es del día o del dato. Acá
-            # -- y solo acá, en el día desviado -- se piden los medidores
-            # para que desempaten (ver _veredicto_medidor_vs_cgm). Las
-            # fronteras cuyo CGM cae dentro del rango nunca llegan a este
-            # fetch, así que no agrega llamadas a Quoia en el día normal.
+        fuera_de_rango = mediana is not None and not _en_rango_historico(curva_cgm, mediana)
+
+        # Segunda validación, en los dos escenarios donde el histórico no
+        # alcanza para respaldar el CGM por sí solo:
+        #   · fuera de rango -- el histórico detecta que el día se salió de
+        #     lo normal, pero no sabe si la culpa es del día o del dato.
+        #   · sin mediana (frontera nueva, <MIN_DIAS_CONSUMO días) -- no hay
+        #     histórico con qué cruzar nada, así que el único respaldo era el
+        #     status de Quoia, que es justo lo que falla en los casos que
+        #     motivaron esta regla.
+        # Las fronteras con mediana y CGM dentro del rango -- el día normal,
+        # ~85% de las filas -- nunca llegan a este fetch.
+        if mediana is None or fuera_de_rango:
             curvas_medidor = _curvas_medidor(gaia, border_meta, mapa_medidor_nodo, fecha_str, frt_code, mediana)
             veredicto = _veredicto_medidor_vs_cgm(e_cgm, curvas_medidor)
-            if veredicto == "contradice":
+            if veredicto == "contradice" and fuera_de_rango:
                 cgm_ok = False  # se descarta el CGM -- sigue por el Camino 2
-            elif veredicto == "sin_dato":
+            elif veredicto == "contradice":
+                # Sin mediana no hay tercero que arbitre: un medidor
+                # "completo" puede venir doblado igual que el CGM (ver MGS
+                # 0032 El Paso Norte en curvas.py -- 24 horas presentes y aun
+                # así 2x su valor normal), y sin histórico no hay forma de
+                # saber cuál de los dos canales es el roto. Se conserva el
+                # valor del canal oficial y decide una persona: descartarlo a
+                # favor del medidor sería elegir sin evidencia, y el Camino 2
+                # tampoco podría validarlo contra nada.
                 resultado_cgm["revisar_manualmente"] = True
+            elif veredicto == "sin_dato" and fuera_de_rango:
+                resultado_cgm["revisar_manualmente"] = True
+            # 'sin_dato' sin mediana no marca nada: es la frontera nueva que
+            # todavía no tiene telemetría de nodo, y marcar todo lo que
+            # arranca sin historial es justo lo que se quitó el 2026-09-02.
         if cgm_ok:
             return resultado_cgm
 

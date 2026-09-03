@@ -14,8 +14,13 @@ corto, solo dos niveles:
 
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
                      dato real -- se confía en él, cruzándolo contra la
-                     mediana histórica si ya existe (si se sale del rango se
-                     reporta igual, pero queda para revisar).
+                     mediana histórica si ya existe. Si se sale del rango,
+                     una SEGUNDA validación pide los medidores del día y
+                     desempata (_veredicto_medidor_vs_cgm): si un medidor
+                     completo coincide con el CGM se confía sin revisión (el
+                     día de verdad fue distinto), si lo contradice se
+                     descarta el CGM y se sigue por 'Medidor', y si ninguno
+                     puede opinar queda para revisar.
   Caso 'Medidor'  -- CGM no válido/no disponible. Cada medidor con dato se
                      valida contra la MEDIANA histórica propia
                      (TOLERANCIA_HISTORICO_CONSUMO) en vez de tomar
@@ -70,6 +75,11 @@ TOLERANCIA_HISTORICO_CONSUMO = 0.30
 #     del consumo real (2026-08-03: CGM 69,23 kWh vs medidor 34,615, 2x
 #     exacto) con el estado en OK/WARNING. Se cruzaba CGM contra el medidor
 #     antes de aceptarlo, y quedaba siempre para revisar.
+#     ESTE caso ya NO necesita lista: _veredicto_medidor_vs_cgm cruza CGM
+#     contra el medidor para TODAS las fronteras (disparado por el histórico
+#     fuera de rango), así que el CGM doblado se descarta solo -- y cuando el
+#     día de verdad fue distinto, el mismo cruce lo deja pasar sin revisión,
+#     que la lista no sabía hacer.
 #   · SIEMPRE_REVISAR {78} -- La Catedral Consumo, patrón atípico donde
 #     ninguna validación automática decidía bien sola.
 #   · VECINO_HISTORICO_CONSUMO -- permitía que el Caso 'Histórico' usara la
@@ -88,6 +98,74 @@ TOLERANCIA_HISTORICO_CONSUMO = 0.30
 # (una lectura de más se explica más fácil -- medidor caído/mal ubicado --
 # que una lectura de menos).
 DIFERENCIA_MEDIDORES_ALTA = 0.50
+
+# %: qué tan cerca tiene que estar un medidor COMPLETO del total del CGM para
+# que cuente como opinión sobre él (segunda validación, ver
+# _veredicto_medidor_vs_cgm). Mucho más estrecho que
+# TOLERANCIA_HISTORICO_CONSUMO a propósito: acá no se compara contra una
+# estimación (la mediana de otros días) sino contra una lectura del MISMO día
+# del mismo medidor físico por otro canal -- si los dos canales miden bien,
+# tienen que dar casi lo mismo, y un ±2% no deja pasar ni la mitad ni el doble.
+RANGO_CORROBORACION_CONSUMO = 0.02
+
+
+def _veredicto_medidor_vs_cgm(e_cgm: float, c: dict) -> str:
+    """Segunda validación del CGM: qué opina el medidor del día.
+
+    Se llama SOLO cuando el total del CGM ya se salió del rango histórico --
+    ahí el histórico dice "este día es raro" pero no sabe si el raro es el
+    día (consumo real distinto) o el dato (glitch de Quoia). El medidor sí lo
+    sabe: es el mismo medidor físico leído por el canal de monitoreo, un
+    camino de telecomunicaciones independiente del canal CGM.
+
+      'corrobora'  -- un medidor completo coincide con el CGM (±2%): el día
+                      de verdad fue distinto. Se confía en el CGM y NO se
+                      marca revisión (ver Valencia Oriente Consumo).
+      'contradice' -- hay medidor completo y ninguno coincide: el dato del
+                      CGM está mal. Se descarta y se sigue por el Camino 2
+                      (medidor validado contra la mediana), que además SÍ
+                      envía matriz de corrección a Quoia -- ver Paso Norte
+                      Consumo, cuyo CGM reporta intermitentemente el doble
+                      del consumo real con el estado en OK/WARNING (esto
+                      reemplaza la lista VALIDAR_CGM_VS_MEDIDOR que había
+                      por frontera, ahora vale para todas).
+      'sin_dato'   -- ningún medidor completo con dato: nadie puede opinar,
+                      queda la revisión manual de siempre.
+
+    Solo un medidor COMPLETO opina: uno con huecos lee de menos por
+    definición, así que su diferencia contra el CGM no dice nada.
+    """
+    hubo_completo = False
+    for clave_curva, clave_completo in (
+        ("consumo_ppal", "consumo_ppal_completo"),
+        ("consumo_resp", "consumo_resp_completo"),
+    ):
+        curva = c.get(clave_curva)
+        if not _tiene_dato(curva) or not c.get(clave_completo):
+            continue
+        total = float(curva.fillna(0).sum())
+        if total <= 0:
+            continue
+        hubo_completo = True
+        if abs(e_cgm - total) / total <= RANGO_CORROBORACION_CONSUMO:
+            return "corrobora"
+    return "contradice" if hubo_completo else "sin_dato"
+
+
+def _curvas_medidor(
+    gaia: GaiaClient, border_meta: dict | None, mapa_medidor_nodo: dict[int, int],
+    fecha_str: str, frt_code: str, mediana: float | None = None,
+) -> dict:
+    """Lecturas del medidor por el canal de monitoreo. `mediana` (cuando se
+    tiene) habilita la recuperación activa por valor sospechoso -- si el
+    medidor mismo viene con un glitch, se re-interroga ANTES de usarlo para
+    juzgar al CGM."""
+    return curvas.curvas_de_frontera(
+        gaia, mapa_medidor_nodo,
+        border_meta.get("main_meter") if border_meta else None,
+        border_meta.get("backup_meter") if border_meta else None,
+        fecha_str, frt_code, mediana_referencia=mediana,
+    )
 
 
 def _tiene_dato(curva: pd.Series | None) -> bool:
@@ -159,6 +237,9 @@ def clasificar_consumo(
     e_cgm = float(curva_cgm.fillna(0).sum())
 
     cgm_ok = reporte_valido and e_cgm > 0
+    # Se llenan una sola vez: si la segunda validación las pidió para juzgar
+    # al CGM, el Camino 2 las reusa en vez de volver a pedirlas.
+    curvas_medidor: dict | None = None
 
     if cgm_ok:
         resultado_cgm = {
@@ -174,11 +255,24 @@ def clasificar_consumo(
         # confía solo en el status de Quoia.
         mediana, _ = historial.get_mediana_consumo(db, frontera_id, fecha)
         if mediana is not None and not _en_rango_historico(curva_cgm, mediana):
-            resultado_cgm["revisar_manualmente"] = True
-        return resultado_cgm
+            # Segunda validación: el histórico solo detecta que el día se
+            # salió de lo normal, no si la culpa es del día o del dato. Acá
+            # -- y solo acá, en el día desviado -- se piden los medidores
+            # para que desempaten (ver _veredicto_medidor_vs_cgm). Las
+            # fronteras cuyo CGM cae dentro del rango nunca llegan a este
+            # fetch, así que no agrega llamadas a Quoia en el día normal.
+            curvas_medidor = _curvas_medidor(gaia, border_meta, mapa_medidor_nodo, fecha_str, frt_code, mediana)
+            veredicto = _veredicto_medidor_vs_cgm(e_cgm, curvas_medidor)
+            if veredicto == "contradice":
+                cgm_ok = False  # se descarta el CGM -- sigue por el Camino 2
+            elif veredicto == "sin_dato":
+                resultado_cgm["revisar_manualmente"] = True
+        if cgm_ok:
+            return resultado_cgm
 
     resultado = _clasificar_por_medidor_o_historico(
         db, gaia, frontera_id, frt_code, border_meta, mapa_medidor_nodo, fecha, fecha_str, e_cgm, estado_reporte,
+        c=curvas_medidor,
     )
 
     # Relleno horario (2026-08-12): solo el cero directo se aplica
@@ -220,10 +314,10 @@ def clasificar_consumo(
 def _clasificar_por_medidor_o_historico(
     db: Session, gaia: GaiaClient, frontera_id: int, frt_code: str, border_meta: dict | None,
     mapa_medidor_nodo: dict[int, int], fecha: date, fecha_str: str, e_cgm: float, estado_reporte: str | None,
+    c: dict | None = None,
 ) -> dict:
-    main_meter = border_meta.get("main_meter") if border_meta else None
-    backup_meter = border_meta.get("backup_meter") if border_meta else None
-    c = curvas.curvas_de_frontera(gaia, mapa_medidor_nodo, main_meter, backup_meter, fecha_str, frt_code)
+    if c is None:
+        c = _curvas_medidor(gaia, border_meta, mapa_medidor_nodo, fecha_str, frt_code)
     resultado = _decidir_medidor_o_historico(db, frontera_id, fecha, e_cgm, estado_reporte, c)
     # Curvas de referencia tal como estaban al momento de clasificar -- ya se
     # tenían que pedir de todas formas para esta rama, así que persistirlas

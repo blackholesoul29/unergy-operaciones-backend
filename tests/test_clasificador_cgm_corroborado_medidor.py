@@ -127,6 +127,20 @@ def test_no_aplica_si_el_medidor_no_coincide_con_el_cgm():
     assert resultado["caso"] != 1
 
 
+def test_no_aplica_si_el_medidor_esta_casi_empatado_con_los_inversores():
+    """El hueco que cerro RANGO_CORROBORACION: con la tolerancia normal (+-6%)
+    un medidor a -5,5% "cuadraba" con el CGM aunque los inversores estuvieran a
+    -7%, o sea medidor e inversores coincidiendo ENTRE SI contra el CGM. Eso no
+    es corroborar el CGM, es lo contrario -- dos fuentes diciendo que el CGM
+    sobrereporta. Con la tolerancia estricta ya no aplica."""
+    resultado = _decidir(
+        e_cgm=100.0, e_inv=93.0, e_inv_incompleto=None,   # inversores -7%
+        curva_ppal=_curva(94.5), completo_ppal=True,      # medidor    -5,5%
+    )
+
+    assert resultado["caso"] != 1
+
+
 def test_no_aplica_si_el_medidor_esta_incompleto():
     """Un medidor incompleto que 'cuadra' es coincidencia, no validacion."""
     resultado = _decidir(

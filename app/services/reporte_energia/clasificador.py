@@ -57,6 +57,19 @@ HORAS = list(range(24))
 
 CASOS_CON_RELLENO_HORARIO = {2, 3, 4, 5, 7, 8}
 RANGO_ERROR         = 6.0               # %: error aceptable [-6%, +6%]
+# Tolerancia para que el MEDIDOR corrobore un CGM que no cuadró contra
+# inversores (ver la corroboración en _decidir_caso). Más estricta que
+# RANGO_ERROR a propósito, por dos motivos:
+#   · CGM y medidor de nodo son el MISMO aparato leído por dos canales, así que
+#     deben coincidir mucho mejor que dos fuentes independientes (en el caso que
+#     motivó la regla, Chiriguaná Norte 1, coincidían al decimal: 0,00%).
+#   · Al ser más estricta que RANGO_ERROR, garantiza separación: si se llega a
+#     la corroboración es porque los inversores están a MÁS de 6%, así que el
+#     medidor queda al menos 4 puntos más cerca del CGM. Con la tolerancia de
+#     6% podían quedar casi empatados (medidor -5,9% vs inversores -7%), que es
+#     medidor e inversores coincidiendo ENTRE SÍ contra el CGM -- lo contrario
+#     de una corroboración (2026-09-02).
+RANGO_CORROBORACION = 2.0               # %: CGM vs medidor para confiar en el CGM
 ESTADOS_AUTOMATICO  = {"OK", "WARNING"}  # estados en que el reporte ASIC de hoy es válido
 
 # frontera_id de proyectos sin inversores (nunca registrados en Solenium)
@@ -77,6 +90,11 @@ FRONTERAS_TERCEROS: set[int] = {79}
 
 def _en_rango(error: float | None) -> bool:
     return error is not None and abs(error) <= RANGO_ERROR
+
+
+def _corrobora(error: float | None) -> bool:
+    """El medidor confirma el CGM (tolerancia estricta, ver RANGO_CORROBORACION)."""
+    return error is not None and abs(error) <= RANGO_CORROBORACION
 
 
 def _error_con_curva(e_inv: float, curva: pd.Series) -> float | None:
@@ -177,7 +195,10 @@ def _decidir_caso(
     # desenlace (se confía en el reporte que Quoia ya envió), no se manda matriz
     # de generación, y queda exento de la marca por hueco de SolarView de más
     # abajo. Se exige medidor COMPLETO: uno incompleto que "cuadra" es
-    # coincidencia, no validación (mismo criterio que Caso 2).
+    # coincidencia, no validación (mismo criterio que Caso 2). Y la coincidencia
+    # se mide con RANGO_CORROBORACION (más estricto que RANGO_ERROR) para que el
+    # medidor de verdad respalde al CGM, en vez de estar empatado con los
+    # inversores -- ver la nota de esa constante.
     #
     # `e_inv` llega en 0 cuando SolarView vino incompleto (el total parcial va en
     # e_inv_incompleto, ver el caller), así que acá se usa el que haya.
@@ -185,7 +206,7 @@ def _decidir_caso(
     if reporte_valido and e_cgm > 0 and e_inv_ref > 0 and e_cgm > e_inv_ref:
         error_cgm_ppal = _error_con_curva(e_cgm, curva_ppal) if _tiene_dato(curva_ppal) else None
         error_cgm_resp = _error_con_curva(e_cgm, curva_resp) if _tiene_dato(curva_resp) else None
-        if (_en_rango(error_cgm_ppal) and completo_ppal) or (_en_rango(error_cgm_resp) and completo_resp):
+        if (_corrobora(error_cgm_ppal) and completo_ppal) or (_corrobora(error_cgm_resp) and completo_resp):
             # El error que se expone es el de CGM vs inversores (el que no
             # cuadró): es lo que explica por qué esta fila necesitó
             # corroboración. Con inversores incompletos se usa la ventana solar,

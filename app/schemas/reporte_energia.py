@@ -67,6 +67,13 @@ class DetalleFronteraReporte(BaseModel):
     # Generación y Consumo -- dato real de un medidor, no una estimación.
     horas_rellenadas_medidor_cruzado: list[int] | None = None
     recuperacion_datos: str | None = None
+    # Mediana histórica de la frontera y cuántos días la sostienen, calculadas
+    # al vuelo al abrir el detalle (no se persisten). Es contra esto que se
+    # compara el día para decidir la marca de revisión, así que sin exponerlo
+    # había que entrar a "Curva Típica" de la corrección manual solo para
+    # entender por qué algo quedó marcado (2026-09-02).
+    mediana_historica_kwh: float | None = None
+    dias_historial: int | None = None
     revisar_manualmente: bool
     editado_manualmente: bool
     error_clasificacion: str | None = None

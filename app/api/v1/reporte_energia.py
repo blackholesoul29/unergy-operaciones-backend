@@ -3,6 +3,7 @@ placeholder ReporteEnergiaAutomatizacionView.vue del frontend.
 """
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
@@ -38,6 +39,8 @@ from app.services.reporte_energia.utils import (
 from app.services.reporte_cgm import resolver_borders
 from app.services.mgs.gaia_client import GaiaClient
 from app.services.mgs.solarview_client import SolarViewClient
+
+logger = logging.getLogger("reporte_energia.api")
 
 router = APIRouter(prefix="/reporte-energia", tags=["Reporte de Energía"])
 
@@ -466,6 +469,22 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         if curva_respaldo_reportada is None:
             curva_respaldo_reportada, respaldo_reportado_origen = curva_respaldo_a_reportar(rep)
 
+    # Mediana histórica de la frontera -- el clasificador compara el día
+    # contra esto para decidir la marca de revisión, así que exponerlo es lo
+    # que permite entender POR QUÉ algo quedó marcado sin tener que abrir
+    # "Curva Típica" de la corrección manual (2026-09-02). Se calcula al
+    # vuelo, no se persiste: es una consulta sobre las filas ya guardadas.
+    try:
+        if es_generacion:
+            mediana_historica, dias_historial = historial.get_mediana_generacion(db, frontera_id, fecha)
+        else:
+            mediana_historica, dias_historial = historial.get_mediana_consumo(db, frontera_id, fecha)
+        mediana_historica = float(mediana_historica) if mediana_historica is not None else None
+    except Exception:
+        # Nunca debe tumbar el detalle -- es informativo.
+        logger.exception("No se pudo calcular la mediana histórica de la frontera %s", frontera_id)
+        mediana_historica = dias_historial = None
+
     return DetalleFronteraReporte(
         frontera_id=front.id, proyecto_id=front.proyecto_id, nombre_proyecto=_nombre_frontera(front),
         tipo="generacion" if es_generacion else "consumo", fecha=fecha,
@@ -485,6 +504,8 @@ def _construir_detalle(db: Session, frontera_id: int, fecha: date) -> DetalleFro
         horas_rellenadas_historico=rep.horas_rellenadas_historico,
         horas_rellenadas_medidor_cruzado=rep.horas_rellenadas_medidor_cruzado,
         recuperacion_datos=rep.recuperacion_datos,
+        mediana_historica_kwh=mediana_historica,
+        dias_historial=dias_historial,
         revisar_manualmente=rep.revisar_manualmente, editado_manualmente=rep.editado_manualmente,
         error_clasificacion=rep.error_clasificacion,
         enviado_quoia_en=rep.enviado_quoia_en, enviado_quoia_ok=rep.enviado_quoia_ok,

@@ -13,7 +13,11 @@ validar cruzado (no existe un "inversores" de consumo) -- el árbol es más
 corto, solo dos niveles:
 
   Caso 'CGM'      -- reporte automático válido y el canal CGM (iae) trae
-                     dato real -- se confía en él, cruzándolo contra la
+                     dato real -- incluido un 0 genuino, o sea horas reales
+                     que suman 0 (ver _veredicto_cero_del_cgm): eso es un
+                     dato, no ausencia de dato, y antes terminaba en Caso
+                     'Histórico' reportando la estimación en un día que el
+                     CGM decía 0. Se confía en él, cruzándolo contra la
                      mediana histórica si ya existe. Si se sale del rango --
                      o si no hay mediana todavía, frontera nueva --
                      una SEGUNDA validación pide los medidores del día y
@@ -115,6 +119,41 @@ DIFERENCIA_MEDIDORES_ALTA = 0.50
 # del mismo medidor físico por otro canal -- si los dos canales miden bien,
 # tienen que dar casi lo mismo, y un ±2% no deja pasar ni la mitad ni el doble.
 RANGO_CORROBORACION_CONSUMO = 0.02
+
+# kWh: por debajo de este total en un día entero, una curva se considera un
+# cero. Una frontera de Consumo que normalmente importa 20-40 kWh/día y
+# aparece con 0,2 kWh no está "consumiendo poquísimo", está apagada -- exigir
+# el 0,0 exacto haría que un residuo de medición rompiera la corroboración.
+UMBRAL_CERO_CONSUMO_KWH = 0.5
+
+
+def _es_cero(curva: pd.Series | None) -> bool:
+    return isinstance(curva, pd.Series) and float(curva.fillna(0).sum()) <= UMBRAL_CERO_CONSUMO_KWH
+
+
+def _veredicto_cero_del_cgm(c: dict) -> str:
+    """Qué opinan los medidores de un CGM que reportó genuinamente 0.
+
+    Un 0 de Consumo es una afirmación fuerte: dice que el sitio no tomó nada
+    de la red en 24 horas, ni de madrugada, o sea que estuvo apagado. Vale la
+    pena cruzarlo antes de aceptarlo (a diferencia de Generación, donde un 0
+    diario es normal -- un día nublado o la planta detenida).
+
+      'corrobora'  -- un medidor completo también está en ~0: el sitio
+                      efectivamente estuvo apagado.
+      'contradice' -- un medidor completo midió consumo real: el 0 del CGM es
+                      un hueco disfrazado de dato, no un cero.
+      'sin_dato'   -- ningún medidor completo con qué opinar.
+    """
+    hubo_completo = False
+    for clave_curva in ("consumo_ppal", "consumo_resp"):
+        curva = c.get(clave_curva)
+        if not _completa(curva):
+            continue
+        hubo_completo = True
+        if _es_cero(curva):
+            return "corrobora"
+    return "contradice" if hubo_completo else "sin_dato"
 
 
 def _veredicto_medidor_vs_cgm(e_cgm: float, c: dict) -> str:
@@ -284,11 +323,39 @@ def clasificar_consumo(
         if reporte and reporte.get("reported_data_main") else CURVA_CERO.copy()
     )
     e_cgm = float(curva_cgm.fillna(0).sum())
+    # Distingue "el canal CGM trajo 24 horas reales" de "Quoia no respondió /
+    # no hay reported_data_main": ambos colapsan a e_cgm = 0, pero solo el
+    # primero es un dato. Mismo mecanismo que el Caso 5 de Generación
+    # (clasificador.py, encontrado 2026-09-02 con GD Garza).
+    cgm_tiene_dato = bool(reporte and reporte.get("reported_data_main"))
 
     cgm_ok = reporte_valido and e_cgm > 0
-    # Se llenan una sola vez: si la segunda validación las pidió para juzgar
-    # al CGM, el Camino 2 las reusa en vez de volver a pedirlas.
-    curvas_medidor: dict | None = None
+    # Cero genuino del CGM (2026-09-03): el canal oficial trajo las 24 horas y
+    # suman 0 en un reporte automático. Antes esto no podía ser Caso 'CGM' por
+    # el `e_cgm > 0` de cgm_ok, y caer al Camino 2 con un 0 real terminaba, si
+    # la mediana era distinta de 0, en Caso 'Histórico': se reportaba una
+    # estimación de 20-37 kWh en días en los que el CGM decía 0 (3 filas en
+    # agosto 2026: LA PAZ VALLENATA 08-15 y 08-28, El Copey Occidente 08-24),
+    # o en 'Sin dato' sin reportar nada (GD Garza 08-28/29/30). Es el mismo
+    # agujero que Generación cerró con su Caso 5.
+    if reporte_valido and cgm_tiene_dato and e_cgm <= 0:
+        curvas_medidor = _curvas_medidor(gaia, border_meta, mapa_medidor_nodo, fecha_str, frt_code)
+        veredicto_cero = _veredicto_cero_del_cgm(curvas_medidor)
+        if veredicto_cero != "contradice":
+            return {
+                "caso": "CGM", "energia_final_kwh": 0.0, "curva_final": curva_cgm,
+                "medidor_usado": "cgm", "energia_cgm_kwh": 0.0, "estado_reporte": estado_reporte,
+                "horas_rellenadas_historico": None, "recuperacion_datos": None,
+                # Sin un medidor que confirme el apagado, se reporta el 0 (es
+                # el dato del canal oficial, no una invención) pero se marca:
+                # nadie corroboró que el sitio estuviera sin consumir en 24
+                # horas. Con medidor en ~0 no hace falta revisar nada.
+                "revisar_manualmente": veredicto_cero == "sin_dato",
+            }
+        # 'contradice' -- el 0 del CGM es un hueco disfrazado de dato. Sigue
+        # por el Camino 2, que reusa estas curvas.
+    else:
+        curvas_medidor = None
 
     if cgm_ok:
         resultado_cgm = {

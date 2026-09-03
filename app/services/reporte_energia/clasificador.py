@@ -19,6 +19,14 @@ pueden no coincidir en el tiempo. Si el reporte automático de Quoia es
 válido para ese día ('reporte_valido'), se valida/reporta con e_cgm (Casos 1,
 5). Si no, e_cgm deja de ser la referencia -- se valida con e_nodo vs
 inversores (Casos 2/3/4, 5).
+
+TEMPORAL (2026-09-02): todo lo que termine con 'medidor_usado' == 'inversores'
+(el "Inversores × FP" de la plataforma) sale con 'revisar_manualmente' = True,
+sin importar el Caso. Motivo: la generación de Solenium a veces llega
+desactualizada aunque el día figure completo, y el total de inversores es justo
+la base de ese reporte. Aplica a Caso 3 y al fallback de Caso 5 (que ya lo
+marcaba por su propio motivo). QUITAR cuando Solenium se normalice -- es
+contención, no una regla del árbol.
 """
 from __future__ import annotations
 
@@ -170,6 +178,14 @@ def _decidir_caso(
                 "caso": 3, "energia_final_kwh": e_fp, "curva_final": curva_inv,
                 "fp": fp_val, "fp_calculada": fp_calc, "medidor_usado": "inversores",
                 "error_final_pct": error_ref,
+                # TEMPORAL (2026-09-02, pedido de la usuaria): todo lo que reporte
+                # con inversores × FP se marca para revisión manual. La generación
+                # de Solenium a veces llega desactualizada aunque el día figure
+                # completo, y el total de inversores es justo la base de este Caso.
+                # QUITAR cuando Solenium se normalice -- es contención, no una
+                # regla del árbol de Casos. Portado de Reporte-Energia
+                # (process/src/internals/clasificador.py, mismo cambio).
+                "revisar_manualmente": True,
             }
         else:
             # Caso 4: medidores sobrereportan -> medidor de mayor valor

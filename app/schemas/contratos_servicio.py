@@ -251,8 +251,10 @@ class ContratoServicioOut(BaseModel):
     rec_vintage: Optional[str] = None
     indexacion_anual: Optional[List[FilaIndexacion]] = None
     indexacion_mensual: Optional[List[FilaIndexacion]] = None
-    facturas_solenium: Optional[List[FilaFactura]] = None
-    facturas_inversionistas: Optional[List[FilaFactura]] = None
+    # facturas_solenium/facturas_inversionistas se quitaron: eran JSONB en
+    # ContratoServicio y las reemplazo la tabla contrato_factura (64fbfc3,
+    # 2026-08-30). El modelo ya no mapea esas columnas y las facturas se
+    # piden por su propio CRUD, GET /contratos-servicio/{id}/facturas.
     # CGM / Representación
     inversionista_nombre: Optional[str] = None
     portafolio: Optional[str] = None

@@ -1,5 +1,8 @@
 """Lectura del medidor de frontera para la vista de Generación Solar.
 
+De los dos medidores de la frontera (principal y respaldo) se muestra el que
+tenga el día más completo -- ver elegir_medidor().
+
 Se piden dos variables al nodo, por el mismo método que usa el pipeline del
 ASIC (`GaiaClient.get_node_measurements`):
 
@@ -102,34 +105,49 @@ def snapshot_medidor(
     }
 
 
-def _tiene_dato(snap: dict) -> bool:
-    """Reporto algo, por cualquiera de las dos vias.
+def _horas_cubiertas(snap: dict | None) -> int:
+    """Horas distintas del dia con lectura de potencia.
 
-    Las dos variables se caen por separado: un medidor puede tener la
-    telemetria de potencia muerta y el contador de energia sano. Mirar solo la
-    curva descartaria un medidor que si trae el acumulado -- que es justamente
-    el numero principal de la tarjeta.
+    Se cuentan HORAS y no puntos porque los dos medidores pueden reportar a
+    intervalos distintos, y ahi comparar cantidades no diria nada.
     """
-    return bool(snap.get("curva")) or snap.get("energia_kwh") is not None
+    if not snap:
+        return 0
+    return len({p["time"][11:13] for p in snap.get("curva") or []})
 
 
 def elegir_medidor(principal: dict | None, respaldo: dict | None) -> tuple[dict | None, str | None]:
-    """El principal, y si no trajo dato, el respaldo.
+    """El medidor con el dia mas completo. En empate, el principal.
 
-    La decisión vive SOLO acá: el frontend la recibe resuelta. Antes el mismo
-    criterio estaba escrito también en SolarLiveView.vue y podían
-    desincronizarse en silencio -- la gráfica mostrando un medidor y el resto
+    La decision vive SOLO aca: el frontend la recibe resuelta. Antes el mismo
+    criterio estaba escrito tambien en SolarLiveView.vue y podian
+    desincronizarse en silencio -- la grafica mostrando un medidor y el resto
     de la tarjeta hablando de otro.
 
-    A propósito no se compara cuál midió más: preferir "el de mayor valor" es
-    lo que el clasificador de Consumo tuvo que descartar en julio, porque un
-    hueco de telemetría acumula horas sin reportar en un pico artificial y el
-    medidor inflado gana siempre (Chiriguaná Norte 1).
+    "Completitud" NO es "mayor valor", que es lo que el clasificador de
+    Consumo tuvo que descartar en julio. Al contrario: son criterios opuestos.
+    Un hueco de telemetria acumula horas sin reportar en un solo pico
+    artificial, asi que con "mayor valor" el medidor averiado GANABA
+    (Chiriguana Norte 1); contando horas cubiertas, ese mismo hueco lo hace
+    PERDER, que es lo que uno espera.
+
+    El empate se rompe hacia el principal porque es el medidor de
+    liquidacion: sin una razon para preferir el otro, ese.
     """
-    if principal and _tiene_dato(principal):
+    if not principal and not respaldo:
+        return None, None
+
+    hp, hr = _horas_cubiertas(principal), _horas_cubiertas(respaldo)
+    if hp or hr:
+        return (respaldo, "respaldo") if hr > hp else (principal, "principal")
+
+    # Ninguno trajo curva. Puede que igual haya contador: las dos variables se
+    # caen por separado, y el acumulado es el numero principal de la tarjeta.
+    if principal and principal.get("energia_kwh") is not None:
         return principal, "principal"
-    if respaldo and _tiene_dato(respaldo):
+    if respaldo and respaldo.get("energia_kwh") is not None:
         return respaldo, "respaldo"
-    if principal:
-        return principal, "principal"
-    return (respaldo, "respaldo") if respaldo else (None, None)
+
+    # Los dos mudos: se devuelve el principal igual, para poder decir "no
+    # reporto" en vez de "no hay medidor".
+    return (principal, "principal") if principal else (respaldo, "respaldo")

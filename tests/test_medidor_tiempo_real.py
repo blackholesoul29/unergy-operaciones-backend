@@ -125,67 +125,62 @@ def test_sin_nodo_devuelve_none_pero_sin_dato_devuelve_estructura():
     assert s["curva"] == []
 
 
-def test_elige_el_principal_cuando_tiene_dato():
-    """Regla simple: principal, y si no trajo dato, respaldo. A propósito NO se
-    compara cuál midió más -- "mayor valor" es lo que el clasificador de
-    Consumo tuvo que descartar (Chiriguaná Norte 1: un hueco de telemetría
-    infla un medidor y lo hace ganar siempre)."""
-    principal = {"curva": [{"time": "t", "kw": 5.0}], "energia_kwh": 100.0}
-    respaldo = {"curva": [{"time": "t", "kw": 9.0}], "energia_kwh": 9000.0}
-
-    snap, tipo = elegir_medidor(principal, respaldo)
-
-    assert tipo == "principal", "aunque el respaldo marque mucho más"
-    assert snap is principal
+def _snap(horas, energia=None):
+    """Snapshot con una lectura por cada hora indicada."""
+    return {"curva": [{"time": f"2026-09-03T{h:02d}:00:00-05:00", "kw": 100.0} for h in horas],
+            "energia_kwh": energia}
 
 
-def test_cae_al_respaldo_cuando_el_principal_no_reporto():
-    principal = {"curva": [], "energia_kwh": None}
-    respaldo = {"curva": [{"time": "t", "kw": 9.0}], "energia_kwh": 90.0}
+def test_gana_el_medidor_con_el_dia_mas_completo():
+    principal = _snap([9, 10])            # dos horas sueltas
+    respaldo = _snap(range(6, 19))        # trece horas
 
     _, tipo = elegir_medidor(principal, respaldo)
 
     assert tipo == "respaldo"
 
 
-def test_si_ninguno_reporto_igual_se_devuelve_el_principal():
-    """Para poder decir "el medidor no reportó" en vez de "no hay medidor"."""
-    snap, tipo = elegir_medidor({"curva": []}, {"curva": []})
+def test_el_hueco_de_telemetria_hace_PERDER_no_ganar():
+    """Es la diferencia con "mayor valor", el criterio que el clasificador de
+    Consumo descarto: alla un hueco acumulaba horas en un pico artificial y el
+    medidor averiado ganaba (Chiriguana Norte 1). Contando horas cubiertas, el
+    mismo hueco lo hace perder."""
+    averiado = {"curva": [{"time": "2026-09-03T13:00:00-05:00", "kw": 9000.0}], "energia_kwh": 9000.0}
+    sano = _snap(range(6, 19), energia=5900.0)
+
+    snap, tipo = elegir_medidor(averiado, sano)
+
+    assert tipo == "respaldo", "una hora con un pico enorme no le gana a trece horas reales"
+    assert snap is sano
+
+
+def test_en_empate_de_completitud_gana_el_principal():
+    """Es el medidor de liquidacion: sin razon para preferir el otro, ese."""
+    _, tipo = elegir_medidor(_snap(range(6, 19)), _snap(range(6, 19)))
+    assert tipo == "principal"
+
+
+def test_se_prefiere_el_que_tenga_curva_sobre_el_que_solo_tiene_contador():
+    _, tipo = elegir_medidor({"curva": [], "energia_kwh": 5968.3}, _snap([10, 11]))
+    assert tipo == "respaldo"
+
+
+def test_sin_curva_en_ninguno_decide_el_contador():
+    """Las dos variables se caen por separado: si `ap` esta muerto en los dos
+    pero uno trae el acumulado, ese es el que sirve."""
+    _, tipo = elegir_medidor({"curva": [], "energia_kwh": None},
+                             {"curva": [], "energia_kwh": 5968.3})
+    assert tipo == "respaldo"
+
+
+def test_los_dos_mudos_devuelve_el_principal():
+    """Para poder decir "el medidor no reporto" en vez de "no hay medidor"."""
+    snap, tipo = elegir_medidor({"curva": [], "energia_kwh": None},
+                                {"curva": [], "energia_kwh": None})
     assert tipo == "principal" and snap is not None
 
 
 def test_elegir_medidor_tolera_que_falte_alguno():
     assert elegir_medidor(None, None) == (None, None)
-    assert elegir_medidor({"curva": [{"time": "t", "kw": 1}]}, None)[1] == "principal"
-    assert elegir_medidor(None, {"curva": [{"time": "t", "kw": 1}]})[1] == "respaldo"
-
-
-def test_expone_hasta_cuando_cubre_el_acumulado():
-    """El contador se reporta en intervalos mas largos que la potencia, asi que
-    el acumulado puede ir hasta media hora por detras del numero de "ahora".
-    Se muestra su hora para no dar a entender que es del ultimo instante."""
-    gaia = _GaiaFake(
-        ap=[_ap("15:37:00", 846.2)],
-        eae=[_eae("14:30:00", 3000.0), _eae("15:00:00", 2995.0)],
-    )
-    s = snapshot_medidor(gaia, 1731, "2026-09-03")
-
-    assert s["energia_kwh"] == pytest.approx(5995.0)
-    assert s["energia_hasta"] == "2026-09-03T15:00:00-05:00"
-
-
-def test_sin_lecturas_del_contador_no_hay_hora_del_acumulado():
-    s = snapshot_medidor(_GaiaFake(ap=[_ap("10:00:00", 500)]), 1731, "2026-09-03")
-    assert s["energia_kwh"] is None and s["energia_hasta"] is None
-
-
-def test_el_principal_gana_aunque_solo_traiga_el_contador():
-    """Las dos variables se caen por separado: si `ap` esta muerto pero `eae`
-    reporto, ese medidor si tiene el numero principal de la tarjeta y no hay
-    que descartarlo."""
-    principal = {"curva": [], "energia_kwh": 5968.3}
-    respaldo = {"curva": [{"time": "t", "kw": 1.0}], "energia_kwh": 12.0}
-
-    _, tipo = elegir_medidor(principal, respaldo)
-
-    assert tipo == "principal"
+    assert elegir_medidor(_snap([10]), None)[1] == "principal"
+    assert elegir_medidor(None, _snap([10]))[1] == "respaldo"

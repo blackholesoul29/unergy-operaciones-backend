@@ -184,3 +184,28 @@ def test_elegir_medidor_tolera_que_falte_alguno():
     assert elegir_medidor(None, None) == (None, None)
     assert elegir_medidor(_snap([10]), None)[1] == "principal"
     assert elegir_medidor(None, _snap([10]))[1] == "respaldo"
+
+
+def test_un_medidor_pegado_en_cero_no_le_gana_a_uno_con_generacion_real():
+    """Verificado el 2026-09-03 en el nodo 1693: 89 filas de `ap` TODAS en cero
+    mientras su `eae` acumulaba de verdad. Sin exigir generacion, ese medidor
+    "cubria" 23 horas y le ganaba a uno con lecturas reales pero dispersas."""
+    pegado_en_cero = {"curva": [{"time": f"2026-09-03T{h:02d}:00:00-05:00", "kw": 0.0}
+                                for h in range(23)], "energia_kwh": 5420.8}
+    con_generacion = _snap([9, 10, 11, 12], energia=4800.0)
+
+    _, tipo = elegir_medidor(pegado_en_cero, con_generacion)
+
+    assert tipo == "respaldo", "4 horas generando le ganan a 23 horas de ceros"
+
+
+def test_de_noche_los_dos_en_cero_decide_la_cobertura():
+    """Si ninguno genero -- de noche, o los dos con el canal caido -- se cae a
+    contar horas con cualquier lectura."""
+    principal = {"curva": [{"time": "2026-09-03T01:00:00-05:00", "kw": 0.0}], "energia_kwh": None}
+    respaldo = {"curva": [{"time": f"2026-09-03T{h:02d}:00:00-05:00", "kw": 0.0}
+                          for h in range(20)], "energia_kwh": None}
+
+    _, tipo = elegir_medidor(principal, respaldo)
+
+    assert tipo == "respaldo"

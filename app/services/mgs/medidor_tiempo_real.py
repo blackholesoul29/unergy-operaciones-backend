@@ -124,19 +124,34 @@ def snapshot_medidor(
     }
 
 
-def _horas_cubiertas(snap: dict | None) -> int:
+def _horas_cubiertas(snap: dict | None, con_generacion: bool = True) -> int:
     """Horas distintas del dia con lectura de potencia.
 
     Se cuentan HORAS y no puntos porque los dos medidores pueden reportar a
     intervalos distintos, y ahi comparar cantidades no diria nada.
+
+    `con_generacion` exige ademas que la lectura sea > 0. Hay medidores que
+    pasan el dia entero reportando 0,0 kW en el canal de potencia mientras su
+    contador de energia si acumula -- verificado el 2026-09-03 en el nodo 1693:
+    89 filas de `ap` TODAS en cero, contra 47 filas de `eae` con valor real
+    (11 kWh a las 06:15, 19,8 a las 06:30...). Fisicamente no se acumula
+    energia sin potencia, asi que ese canal esta roto y devuelve ceros en vez
+    de no devolver nada.
+
+    Sin esta condicion, un medidor pegado en cero "cubre" mas horas que uno con
+    lecturas reales pero dispersas, y le gana la eleccion.
     """
     if not snap:
         return 0
-    return len({p["time"][11:13] for p in snap.get("curva") or []})
+    puntos = snap.get("curva") or []
+    if con_generacion:
+        puntos = [p for p in puntos if p.get("kw")]
+    return len({p["time"][11:13] for p in puntos})
 
 
 def elegir_medidor(principal: dict | None, respaldo: dict | None) -> tuple[dict | None, str | None]:
-    """El medidor con el dia mas completo. En empate, el principal.
+    """El medidor con el dia mas completo -- horas con generacion real, y si
+    ninguno genero, horas con cualquier lectura. En empate, el principal.
 
     La decision vive SOLO aca: el frontend la recibe resuelta. Antes el mismo
     criterio estaba escrito tambien en SolarLiveView.vue y podian
@@ -156,9 +171,13 @@ def elegir_medidor(principal: dict | None, respaldo: dict | None) -> tuple[dict 
     if not principal and not respaldo:
         return None, None
 
-    hp, hr = _horas_cubiertas(principal), _horas_cubiertas(respaldo)
-    if hp or hr:
-        return (respaldo, "respaldo") if hr > hp else (principal, "principal")
+    # Primero por horas con generacion real; si ninguno genero (de noche, o los
+    # dos con el canal de potencia caido), por horas con cualquier lectura.
+    for con_generacion in (True, False):
+        hp = _horas_cubiertas(principal, con_generacion)
+        hr = _horas_cubiertas(respaldo, con_generacion)
+        if hp or hr:
+            return (respaldo, "respaldo") if hr > hp else (principal, "principal")
 
     # Ninguno trajo curva. Puede que igual haya contador: las dos variables se
     # caen por separado, y el acumulado es el numero principal de la tarjeta.

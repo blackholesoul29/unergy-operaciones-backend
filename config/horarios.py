@@ -63,12 +63,48 @@ HORARIOS = {
         "schedule": crontab(hour=3, minute=35),
     },
 
+    # ── Ingesta de fuentes externas ──────────────────────────────────────────
+    "gen-sync-am": {
+        "task": "proyectos.sincronizar_generacion_solenium",
+        "schedule": crontab(hour=7, minute=0),
+    },
+    "gen-sync-pm": {
+        "task": "proyectos.sincronizar_generacion_solenium",
+        "schedule": crontab(hour=19, minute=0),
+    },
+    "bolsa-ingest": {
+        "task": "mercado_xm.ingesta_bolsa",
+        "schedule": crontab(hour=11, minute=0),
+    },
+    "evo-forecast-ingest": {
+        "task": "mercado_xm.ingesta_pronostico_clima",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    # Cada 6 h. Es el unico con intervalo y no franja fija: no depende de que
+    # una fuente publique a cierta hora, solo de no quedarse atras.
+    "tsf-sync": {
+        "task": "proyectos.sincronizar_tsf",
+        "schedule": crontab(hour="*/6", minute=10),
+    },
+
     # ── Monitoreo ────────────────────────────────────────────────────────────
     # Cada 15 min, como el ciclo de MGS de siempre. `MGS_POLL_INTERVAL_MINUTES`
     # dejo de leerse al pasar a Celery: la franja vive aca, no en el .env.
     "sondeo-mgs": {
         "task": "monitoreo.sondeo_mgs",
         "schedule": crontab(minute="*/15"),
+    },
+
+    # ── Alertas de vencimiento ───────────────────────────────────────────────
+    # Las dos salen por el mismo SMTP; 15 min de separacion para no competir por
+    # la misma franja exacta. Comparten destinatarios a proposito.
+    "alertas-representacion": {
+        "task": "contratos.alertas_representacion",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "alertas-vencimiento-ppa": {
+        "task": "ppa.alertas_vencimiento",
+        "schedule": crontab(hour=8, minute=15),
     },
 
     # ── Comercial ────────────────────────────────────────────────────────────

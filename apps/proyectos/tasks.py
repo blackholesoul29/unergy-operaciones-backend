@@ -31,3 +31,40 @@ def recalcular_gen_promedio() -> str:
                f"{res['n_saltados']} saltados, {res['n_fallidos']} fallidos")
     logger.info("recálculo de generación promedio: %s", resumen)
     return resumen
+
+
+@shared_task(name="proyectos.sincronizar_tsf")
+def sincronizar_tsf() -> str:
+    """Trae el pipeline de TSF a la tabla `proyectos`. Cada 6 horas.
+
+    `enrich_dates=True` porque acá sí se pueden pagar las ~99 llamadas HTTP que
+    consultan los hitos de cada proyecto: no hay un request esperando del otro
+    lado. El botón on-demand corre la versión barata.
+    """
+    from apps.proyectos.services.tsf_sync import sync_tsf_projects
+
+    stats = sync_tsf_projects(enrich_dates=True)
+    resumen = (f"creados={stats.get('creados', 0)} "
+               f"actualizados={stats.get('actualizados', 0)} "
+               f"errores={stats.get('errores', 0)}")
+    logger.info("sincronización de TSF: %s", resumen)
+    return resumen
+
+
+@shared_task(name="proyectos.sincronizar_generacion_solenium")
+def sincronizar_generacion_solenium() -> str:
+    """Trae de Solenium la generación diaria de los últimos 8 días.
+
+    Ventana móvil y no solo ayer: Solenium corrige hacia atrás, y un día que
+    llegó incompleto se completa en una corrida posterior sin intervención.
+
+    El UPSERT solo pisa filas cuya `fuente` ya es 'solenium': un valor cargado a
+    mano o traído de otra fuente manda sobre este, que es el criterio de toda la
+    tabla.
+    """
+    from apps.proyectos.services.generacion_solenium import sincronizar
+
+    stats = sincronizar()
+    resumen = (f"{stats['filas']} días de {stats['proyectos']} proyectos")
+    logger.info("sincronización de generación desde Solenium: %s", resumen)
+    return resumen

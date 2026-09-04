@@ -21,6 +21,11 @@ Uso:
     python scripts/verificar_esquema_django.py            # falla si falta algo
     python scripts/verificar_esquema_django.py --extra    # ademas, lo que sobra
 
+Comprueba dos cosas distintas: que exista en la base todo lo que el modelo
+declara, y que el modelo declare un `default=` por cada columna NOT NULL que la
+base rellena sola (ver `_sin_default` -- Django manda TODAS las columnas en un
+INSERT, así que el DEFAULT de la base nunca llega a aplicarse).
+
 `--extra` lista las columnas que la base tiene y el modelo no declara. No es un
 error -- Django ignora una columna que no conoce, y con `null=True` o un default
 en la base ni siquiera estorba en un INSERT -- pero SI importa el dia del corte:
@@ -77,9 +82,55 @@ def _columnas_del_modelo(modelo) -> set[str]:
     }
 
 
+def _defaults_de_la_base() -> dict[str, dict[str, str]]:
+    """`{tabla: {columna: default}}` de las columnas NOT NULL que la base rellena
+    sola."""
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name, column_default "
+            "FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND is_nullable = 'NO' "
+            "AND column_default IS NOT NULL"
+        )
+        salida: dict[str, dict[str, str]] = {}
+        for tabla, columna, defecto in cur.fetchall():
+            salida.setdefault(tabla, {})[columna] = defecto
+    return salida
+
+
+def _sin_default(modelo, defaults: dict[str, str]) -> list[str]:
+    """Columnas NOT NULL que la base rellena sola pero el modelo no.
+
+    **Django manda TODAS las columnas en un INSERT.** Un `DEFAULT` de la base
+    solo se aplica cuando la columna se omite, y Django nunca la omite: manda
+    NULL explícito y el INSERT muere contra el NOT NULL. Por eso un default de
+    la base tiene que estar ADEMÁS en el modelo.
+
+    No falla con un `Alembic` detrás que lo tape ni en un SELECT: solo la
+    primera vez que alguien intenta crear una fila desde Django. Se encontró así
+    el 2026-09-04, al portar el job de alertas de PPA — `alertas.trigger_date`
+    es `NOT NULL DEFAULT CURRENT_DATE` y el modelo no lo declaraba, junto con 18
+    columnas JSONB más.
+    """
+    problemas = []
+    for campo in modelo._meta.local_fields:
+        defecto = defaults.get(campo.column)
+        if not defecto or "nextval" in defecto:
+            continue   # las secuencias las resuelve el AutoField
+        if (campo.has_default() or getattr(campo, "auto_now", False)
+                or getattr(campo, "auto_now_add", False)):
+            continue
+        problemas.append(
+            f"{modelo._meta.db_table}.{campo.column}: la base la rellena con "
+            f"{defecto} y el modelo no declara `default=`"
+        )
+    return problemas
+
+
 def revisar() -> tuple[list[str], list[str], int]:
     """`(faltantes, sobrantes, modelos revisados)`."""
     en_db = _columnas_de_la_base()
+    defaults = _defaults_de_la_base()
     faltan: list[str] = []
     sobran: list[str] = []
     revisados = 0
@@ -95,6 +146,7 @@ def revisar() -> tuple[list[str], list[str], int]:
         declaradas = _columnas_del_modelo(modelo)
         for columna in sorted(declaradas - en_db[tabla]):
             faltan.append(f"{tabla}.{columna}: la columna no existe")
+        faltan.extend(_sin_default(modelo, defaults.get(tabla, {})))
         for columna in sorted(en_db[tabla] - declaradas):
             sobran.append(f"{tabla}.{columna}")
 
@@ -117,12 +169,13 @@ def main() -> int:
               "estan en la base")
         return 0
 
-    print("[esquema-django] La base NO tiene lo que el modelo de Django declara:")
+    print("[esquema-django] El modelo y la base no coinciden:")
     for f in faltan:
         print(f"  - {f}")
-    print("\nMientras Alembic sea el dueno del esquema, falta la revision que lo")
-    print("provisiona: declarar el campo en `apps/` no crea nada (los modelos son")
-    print("`managed = False`, asi que `makemigrations` genera un no-op).")
+    print("\nDjango posee el esquema desde el 2026-09-04: una columna que falta es")
+    print("una migracion sin generar (`makemigrations`) o sin aplicar (`migrate`).")
+    print("Un `default=` que falta no es DDL -- es que el modelo no sabe lo que la")
+    print("base ya hace, y Django manda NULL en el INSERT.")
     return 1
 
 

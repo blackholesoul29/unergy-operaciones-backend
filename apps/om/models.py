@@ -104,24 +104,24 @@ class ProyectoInformeOm(Timer):
     empresa_contratista = models.CharField(max_length=255, null=True, blank=True)
     fecha_energizacion = models.DateField(null=True, blank=True)
     fecha_inicio_operacion = models.DateField(null=True, blank=True)
-    pendientes = models.JSONField()
-    checklist_fusion_solar = models.JSONField()
-    checklist_frontera = models.JSONField()
-    checklist_estacion_meteo = models.JSONField()
-    checklist_reconectador = models.JSONField()
-    objetivo_alcance = models.JSONField()
-    datos_generales = models.JSONField()
-    arquitectura_comunicacion = models.JSONField()
-    equipos = models.JSONField()
-    variables_monitoreadas = models.JSONField()
-    configuracion_monitoreo = models.JSONField()
-    protocolo_pruebas = models.JSONField()
-    eventos_operativos = models.JSONField()
-    observaciones = models.JSONField()
-    recomendaciones = models.JSONField()
+    pendientes = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    checklist_fusion_solar = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    checklist_frontera = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    checklist_estacion_meteo = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    checklist_reconectador = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    objetivo_alcance = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    datos_generales = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    arquitectura_comunicacion = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    equipos = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    variables_monitoreadas = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    configuracion_monitoreo = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    protocolo_pruebas = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    eventos_operativos = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    observaciones = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
+    recomendaciones = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
     conclusion = models.TextField(null=True, blank=True)
-    firmas = models.JSONField()
-    evidencia_arquitectura = models.JSONField()
+    firmas = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
+    evidencia_arquitectura = models.JSONField(default=list)  # la base ya trae '[]'::jsonb
 
     class Meta:
         db_table = "proyecto_informe_om"

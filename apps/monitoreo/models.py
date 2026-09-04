@@ -10,6 +10,8 @@ Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
 Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
+from datetime import date
+
 from django.db import models
 from django.utils import timezone
 
@@ -158,7 +160,7 @@ class Alerta(Timer):
     alert_type = models.CharField(max_length=50)
     description = models.TextField(null=True, blank=True)
     due_date = models.DateField()
-    trigger_date = models.DateField()
+    trigger_date = models.DateField(default=date.today)  # la base ya trae CURRENT_DATE
     days_to_expiration = models.IntegerField()
     status = models.CharField(max_length=20, default="new")
 

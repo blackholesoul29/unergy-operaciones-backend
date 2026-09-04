@@ -57,7 +57,7 @@ class MandatoCorreo(models.Model):
     clasificacion = models.CharField(max_length=20)
     resultado = models.CharField(max_length=20)
     requiere_revision = models.BooleanField(db_index=True, default=False)
-    detalle = models.JSONField()
+    detalle = models.JSONField(default=dict)  # la base ya trae '{}'::jsonb
     revertido = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
 

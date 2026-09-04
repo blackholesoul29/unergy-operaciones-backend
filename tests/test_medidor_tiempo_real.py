@@ -159,3 +159,23 @@ def test_elegir_medidor_tolera_que_falte_alguno():
     assert elegir_medidor(None, None) == (None, None)
     assert elegir_medidor({"curva": [{"time": "t", "kw": 1}]}, None)[1] == "principal"
     assert elegir_medidor(None, {"curva": [{"time": "t", "kw": 1}]})[1] == "respaldo"
+
+
+def test_expone_hasta_cuando_cubre_el_acumulado():
+    """El contador se reporta en intervalos mas largos que la potencia, asi que
+    el acumulado puede ir hasta media hora por detras del numero de "ahora".
+    Se muestra su hora para no dar a entender que es del ultimo instante."""
+    gaia = _GaiaFake(
+        ap=[_ap("15:37:00", 846.2)],
+        eae=[_eae("14:30:00", 3000.0), _eae("15:00:00", 2995.0)],
+    )
+    s = snapshot_medidor(gaia, 1731, "2026-09-03")
+
+    assert s["energia_kwh"] == pytest.approx(5995.0)
+    assert s["energia_hasta"] == "2026-09-03T15:00:00-05:00"
+    assert s["ultima_lectura"] == "2026-09-03T15:37:00-05:00", "la potencia si es del ultimo instante"
+
+
+def test_sin_lecturas_del_contador_no_hay_hora_del_acumulado():
+    s = snapshot_medidor(_GaiaFake(ap=[_ap("10:00:00", 500)]), 1731, "2026-09-03")
+    assert s["energia_kwh"] is None and s["energia_hasta"] is None

@@ -89,12 +89,18 @@ def snapshot_medidor(
         key=lambda p: p["time"],
     )
     energia = sum(_suma(f, _FASES_EAE) for f in filas_eae) if filas_eae else None
+    # El contador se reporta en intervalos mas largos que la potencia, asi que
+    # el acumulado puede ir hasta media hora por detras del numero de "ahora".
+    # Se expone hasta cuando cubre para poder decirlo, en vez de dar a entender
+    # que es del ultimo instante.
+    energia_hasta = max((f["time"] for f in filas_eae if f.get("time")), default=None)
 
     return {
         "node_id": node_id,
         "potencia_kw": curva[-1]["kw"] if curva else None,
         "ultima_lectura": curva[-1]["time"] if curva else None,
         "energia_kwh": round(energia, 3) if energia is not None else None,
+        "energia_hasta": energia_hasta,
         "curva": curva,
     }
 

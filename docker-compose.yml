@@ -56,10 +56,20 @@ services:
   # de intentar crearlas y morir con "relation already exists". Sin el, el primer
   # deploy contra produccion falla en el primer CREATE TABLE.
   #
-  # Se queda puesto y no solo la primera vez: una vez registradas las iniciales,
-  # el flag no hace nada. Y si algun dia se agrega una app nueva cuya tabla NO
-  # existe, Django la crea normalmente -- el flag solo cambia el comportamiento
-  # cuando la tabla ya esta.
+  # ⚠️ QUITAR `--fake-initial` DESPUES DEL PRIMER DEPLOY. Sirve exactamente una
+  # vez: adoptar una base que ya tiene las tablas. Dejarlo puesto cambia un fallo
+  # ruidoso por uno callado -- si algun dia una migracion `initial` nueva choca
+  # con una tabla que ya existe, con el flag Django la marca aplicada SIN crear
+  # nada y el modelo queda sin sus columnas, en silencio; sin el flag revienta
+  # con "relation already exists" en el deploy, que es donde uno quiere enterarse.
+  #
+  # Antes de quitarlo, confirmar que la adopcion quedo registrada:
+  #     docker compose exec operaciones python manage.py showmigrations | grep -c "\[X\]"
+  # Tiene que dar 29 o mas.
+  #
+  # Para adoptar OTRA base ya poblada (montar un staging desde un dump), el flag
+  # se pasa a mano esa vez, sin tocar este archivo:
+  #     docker compose run --rm operaciones python manage.py migrate --fake-initial
   migrate:
     <<: *app-base
     restart: "no"

@@ -50,11 +50,21 @@ services:
   # `manage.py migrate` reemplazo a `alembic upgrade head` el 2026-09-04: Django
   # posee el esquema desde entonces y Alembic quedo congelado en la revision 143
   # (su historial se conserva como bitacora, ya no se ejecuta).
+  #
+  # `--fake-initial` es lo que permite adoptar una base que YA tiene las 119
+  # tablas: marca aplicada cada migracion `initial` cuyas tablas existen, en vez
+  # de intentar crearlas y morir con "relation already exists". Sin el, el primer
+  # deploy contra produccion falla en el primer CREATE TABLE.
+  #
+  # Se queda puesto y no solo la primera vez: una vez registradas las iniciales,
+  # el flag no hace nada. Y si algun dia se agrega una app nueva cuya tabla NO
+  # existe, Django la crea normalmente -- el flag solo cambia el comportamiento
+  # cuando la tabla ya esta.
   migrate:
     <<: *app-base
     restart: "no"
     command: >
-      sh -c "python manage.py migrate --no-input &&
+      sh -c "python manage.py migrate --fake-initial --no-input &&
       python manage.py showmigrations --plan | tail -5 &&
       python scripts/verificar_esquema_django.py"
 

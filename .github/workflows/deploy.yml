@@ -101,10 +101,12 @@ jobs:
           echo "$antes -> $despues"
           echo "$cambios" | sed 's/^/  /'
 
-          # Solo `alembic/`: desde el 2026-08-31 es el unico camino que aplica
-          # esquema. Antes habia que incluir app/main.py e init_db.py porque
-          # _PENDING_DDLS y add_columns() tambien creaban objetos en cada arranque.
-          if echo "$cambios" | grep -qE '^alembic/'; then
+          # `apps/*/migrations/`: desde el 2026-09-04 Django posee el esquema y
+          # Alembic quedo congelado en la revision 143 (su historial se conserva
+          # como bitacora, ya no se ejecuta). Se sigue mirando `alembic/` por si
+          # alguien toca esa carpeta -- deberia ser imposible, y si pasa es mejor
+          # que dispare la migracion y falle a la vista.
+          if echo "$cambios" | grep -qE '^(apps/[a-z_]+/migrations/|alembic/)'; then
               migrar=si; motivo="cambio el esquema"
           elif [ "$MIGRAR" = siempre ]; then
               migrar=si; motivo="pedido a mano"
@@ -125,9 +127,16 @@ jobs:
               docker compose run --rm migrate
           fi
 
+          # Los cuatro servicios de larga vida, no solo el web: `worker` corre los
+          # 19 jobs programados y `beat` es quien los dispara. Levantar solo
+          # `operaciones` deja la API sirviendo con el sondeo de MGS, las alertas
+          # de vencimiento y el reporte de energia APAGADOS, sin ningun error.
+          #
           # --no-deps para no volver a evaluar `migrate`: quien decide si corre es
-          # el if de arriba, no el depends_on.
-          docker compose up -d --no-deps operaciones
+          # el if de arriba, no el depends_on. `redis` no lo lleva porque es
+          # dependencia de worker/beat y no del web.
+          docker compose up -d redis
+          docker compose up -d --no-deps operaciones worker beat
 
       - name: Esperar healthy
         env:

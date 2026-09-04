@@ -17,6 +17,7 @@ from app.api.v1.auth import get_current_user
 from app.core.database import SessionLocal, get_db
 from app.models.fronteras import Frontera, TipoFronteraEnum
 from app.models.proyectos import Proyecto, TipoProyectoEnum
+from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 from app.services.mgs.gaia_client import (
     GaiaClient, build_db_proyecto_frt_map,
     find_gaia_node_id, find_gaia_node_pair,
@@ -1244,8 +1245,11 @@ def project_monitoring_detail(
     p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    if not p.project_id_solenium:
-        raise HTTPException(422, "Proyecto sin ID Solenium")
+    # Sin id de Solenium NO se corta: los inversores quedan sin dato, pero el
+    # medidor se resuelve por find_gaia_node_pair desde fronteras.proyecto_id,
+    # un camino que no depende de ningun proveedor externo. Antes esto era un
+    # 422 que dejaba la tarjeta entera vacia, incluida la mitad que si tenia
+    # con que llenarse (2026-09-03).
 
     # Caché de detalle por proyecto (evita 21-30 llamadas externas por cada tarjeta)
     _detail_key = f"detail:{proyecto_id}:{_hoy_col().isoformat()}"
@@ -1253,7 +1257,7 @@ def project_monitoring_detail(
     if cached:
         return cached
 
-    sol_id = int(p.project_id_solenium)
+    sol_id = int(p.project_id_solenium) if p.project_id_solenium else None
     client = _get_client()
 
     today   = _hoy_col()
@@ -1273,37 +1277,36 @@ def project_monitoring_detail(
     )
 
     hoy = today.isoformat()
+    capacidad_mw = float(p.potencia_instalada_kwp or 0) / 1000 or None
     with ThreadPoolExecutor(max_workers=6) as ex:
-        inv_f      = ex.submit(client.get_project_inverters, sol_id)
-        pow_f      = ex.submit(client.get_power, sol_id, hoy, hoy)
-        gen_f      = ex.submit(client.get_energy, sol_id,
-                               granularity="day", date_from=start30, date_to=today.isoformat())
-        gen_hoy_f  = ex.submit(client.get_generation, sol_id, hoy, hoy)
-        snap_p_f   = ex.submit(gaia.get_node_electrical_snapshot, node_principal) \
-                     if (gaia and node_principal) else None
-        snap_r_f   = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) \
-                     if (gaia and node_respaldo) else None
+        inv_f      = ex.submit(client.get_project_inverters, sol_id) if sol_id else None
+        pow_f      = ex.submit(client.get_power, sol_id, hoy, hoy) if sol_id else None
+        gen_f      = ex.submit(client.get_energy, sol_id, granularity="day",
+                               date_from=start30, date_to=today.isoformat()) if sol_id else None
+        gen_hoy_f  = ex.submit(client.get_generation, sol_id, hoy, hoy) if sol_id else None
+        # Medidor: `ap` + `eae` por el mismo metodo que usa el pipeline del
+        # ASIC, en vez del compuesto de 8 familias de variables (que para dos
+        # nodos eran hasta 16 llamadas externas por tarjeta). Ver
+        # services/mgs/medidor_tiempo_real.py.
+        med_p_f    = ex.submit(snapshot_medidor, gaia, node_principal, hoy, capacidad_mw) if (gaia and node_principal) else None
+        med_r_f    = ex.submit(snapshot_medidor, gaia, node_respaldo, hoy, capacidad_mw) if (gaia and node_respaldo) else None
 
-    inverters  = inv_f.result() or []
-    power_data = pow_f.result() or {}
-    gen_raw    = gen_f.result() or {}
-    gen_hoy    = gen_hoy_f.result() or {}
+    inverters  = (inv_f.result() or []) if inv_f else []
+    power_data = (pow_f.result() or {}) if pow_f else {}
+    gen_raw    = (gen_f.result() or {}) if gen_f else {}
+    gen_hoy    = (gen_hoy_f.result() or {}) if gen_hoy_f else {}
     # Total real de hoy calculado por Solenium (endpoint /generation/, más preciso
     # que integrar nosotros la curva de potencia de 5 min por trapecios).
     generation_today_kwh = gen_hoy.get("total_generation_kwh")
 
-    snap_p = snap_p_f.result() if snap_p_f else None
-    snap_r = snap_r_f.result() if snap_r_f else None
+    med_p = med_p_f.result() if med_p_f else None
+    med_r = med_r_f.result() if med_r_f else None
 
-    # Best node = whichever has more exported energy today
-    eae_p = float((snap_p or {}).get("eae_wh") or 0)
-    eae_r = float((snap_r or {}).get("eae_wh") or 0)
-    if node_principal and node_respaldo:
-        best_node = node_principal if eae_p >= eae_r else node_respaldo
-    else:
-        best_node = node_principal or node_respaldo
-
-    gaia_snap = snap_p if best_node == node_principal else snap_r
+    # La eleccion vive SOLO aca. Antes el mismo criterio ("mayor energia")
+    # estaba escrito tambien en SolarLiveView.vue, y podian desincronizarse en
+    # silencio: la grafica mostrando un medidor y el resto de la tarjeta otro.
+    medidor, medidor_tipo = elegir_medidor(med_p, med_r)
+    best_node = medidor["node_id"] if medidor else (node_principal or node_respaldo)
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
     def _fetch_detail(inv):
@@ -1412,9 +1415,11 @@ def project_monitoring_detail(
         "generation_30d":         generation_30d,
         "total_30d_kwh":          round(sum(d["kwh"] for d in generation_30d), 1),
         "has_strings":            has_strings,
-        "gaia_snapshot":          gaia_snap,
-        "gaia_snapshot_principal": snap_p,
-        "gaia_snapshot_respaldo":  snap_r,
+        # Medidor ya elegido y resuelto -- el frontend lo dibuja, no lo decide.
+        "medidor":                medidor,
+        "medidor_tipo":           medidor_tipo,
+        "medidor_principal":      med_p,
+        "medidor_respaldo":       med_r,
     }
     _cache_set(_detail_key, CACHE_TTL_DETAIL, result)
     return result

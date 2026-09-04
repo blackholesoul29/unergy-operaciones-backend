@@ -49,24 +49,16 @@ def test_la_potencia_de_ahora_es_la_ultima_lectura_real():
 
     assert s["potencia_kw"] == pytest.approx(846.2)
     assert s["ultima_lectura"] == "2026-09-03T11:00:00-05:00", "sirve para mostrar la frescura"
-    assert s["lecturas"] == 3
 
 
-def test_descarta_los_marcadores_sinteticos_de_quoia():
-    """Filas `recovered`: 0.0 insertados justo antes de la lectura real. El
-    compuesto NO los filtra; el pipeline del ASIC sí (ver datos_crudos.py,
-    donde no filtrarlos multiplicaba la energía por ~70x en un intervalo)."""
-    gaia = _GaiaFake(ap=[
-        _ap("09:45:00", 700),
-        _ap("10:00:00", 0, recovered=True),
-        _ap("10:00:05", 720),
-    ])
+def test_no_se_filtran_las_filas_recovered():
+    """El pipeline del ASIC sí las filtra, porque integra la curva por Riemann
+    y un cero sintético le distorsiona la energía. Acá solo se dibujan
+    puntos, así que esa razón no aplica y no se importa la defensa."""
+    gaia = _GaiaFake(ap=[_ap("09:45:00", 700), _ap("10:00:00", 0, recovered=True)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03")
 
-    assert s["lecturas"] == 2
-    assert s["descartadas"] == 1
-    assert all(p["kw"] > 0 for p in s["curva"]), "no debe quedar ningún cero sintético"
-    assert s["potencia_kw"] == pytest.approx(720)
+    assert len(s["curva"]) == 2
 
 
 def test_corrige_el_signo_de_medidores_con_polaridad_invertida():
@@ -112,7 +104,7 @@ def test_la_energia_del_dia_sale_del_contador_no_de_integrar_la_curva():
     s = snapshot_medidor(gaia, 1731, "2026-09-03")
 
     assert s["energia_kwh"] == pytest.approx(5995.0)
-    assert s["lecturas"] == 1, "una sola lectura de potencia y aun así la energía está completa"
+    assert len(s["curva"]) == 1, "una sola lectura de potencia y aun así la energía está completa"
 
 
 def test_no_se_rellenan_los_huecos():
@@ -131,37 +123,39 @@ def test_sin_nodo_devuelve_none_pero_sin_dato_devuelve_estructura():
 
     s = snapshot_medidor(_GaiaFake(), 1731, "2026-09-03")
     assert s is not None
-    assert s["curva"] == [] and s["potencia_kw"] is None and s["lecturas"] == 0
+    assert s["curva"] == [] and s["potencia_kw"] is None
 
 
-def test_elige_el_medidor_que_reporta_mejor_no_el_de_mayor_energia():
-    """'Mayor valor' es el criterio que el clasificador de Consumo descartó en
-    julio: un hueco de telemetría infla un medidor y lo hace ganar siempre."""
-    principal = {"lecturas": 80, "energia_kwh": 5000.0}
-    respaldo = {"lecturas": 6, "energia_kwh": 9000.0}
+def test_elige_el_principal_cuando_tiene_dato():
+    """Regla simple: principal, y si no trajo dato, respaldo. A propósito NO se
+    compara cuál midió más -- "mayor valor" es lo que el clasificador de
+    Consumo tuvo que descartar (Chiriguaná Norte 1: un hueco de telemetría
+    infla un medidor y lo hace ganar siempre)."""
+    principal = {"curva": [{"time": "t", "kw": 5.0}], "energia_kwh": 100.0}
+    respaldo = {"curva": [{"time": "t", "kw": 9.0}], "energia_kwh": 9000.0}
 
     snap, tipo = elegir_medidor(principal, respaldo)
 
-    assert tipo == "principal", "80 lecturas reales le ganan a 6 con más energía acumulada"
+    assert tipo == "principal", "aunque el respaldo marque mucho más"
     assert snap is principal
 
 
-def test_elige_el_respaldo_cuando_el_principal_esta_caido():
-    principal = {"lecturas": 2, "energia_kwh": 100.0}
-    respaldo = {"lecturas": 77, "energia_kwh": 90.0}
+def test_cae_al_respaldo_cuando_el_principal_no_reporto():
+    principal = {"curva": [], "energia_kwh": None}
+    respaldo = {"curva": [{"time": "t", "kw": 9.0}], "energia_kwh": 90.0}
 
     _, tipo = elegir_medidor(principal, respaldo)
 
     assert tipo == "respaldo"
 
 
-def test_en_empate_gana_el_principal():
-    """Es el medidor de liquidación: sin razón para preferir el otro, ese."""
-    _, tipo = elegir_medidor({"lecturas": 77}, {"lecturas": 77})
-    assert tipo == "principal"
+def test_si_ninguno_reporto_igual_se_devuelve_el_principal():
+    """Para poder decir "el medidor no reportó" en vez de "no hay medidor"."""
+    snap, tipo = elegir_medidor({"curva": []}, {"curva": []})
+    assert tipo == "principal" and snap is not None
 
 
 def test_elegir_medidor_tolera_que_falte_alguno():
     assert elegir_medidor(None, None) == (None, None)
-    assert elegir_medidor({"lecturas": 3}, None)[1] == "principal"
-    assert elegir_medidor(None, {"lecturas": 3})[1] == "respaldo"
+    assert elegir_medidor({"curva": [{"time": "t", "kw": 1}]}, None)[1] == "principal"
+    assert elegir_medidor(None, {"curva": [{"time": "t", "kw": 1}]})[1] == "respaldo"

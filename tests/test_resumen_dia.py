@@ -64,3 +64,46 @@ def test_meter_kwh_tolera_mayusculas_raras_en_la_unidad():
 ])
 def test_meter_kwh_sin_dato_o_ilegible_devuelve_none(d):
     assert gs._meter_kwh_from_detail(d) is None
+
+
+# ── Picos espurios de SolarView ──────────────────────────────────────────────
+# SolarView calcula la generacion POR DIFERENCIA DE ACUMULADOS, asi que cuando
+# el acumulador se reinicia la diferencia es el acumulado historico entero.
+# Verificado en vivo el 2026-09-03 con San Pedro (996 kWp): dos horas del dia
+# marcaban 4.682.690,23 kWh cada una junto a valores normales de 87,52. Sin
+# filtro, el total del dia daba 4,7 GWh y el de la flota 98 GWh.
+
+def test_descarta_las_horas_fisicamente_imposibles():
+    mapa = {
+        "2026-09-03 00:00": 4682690.23,   # glitch
+        "2026-09-03 03:00": 4682690.23,   # glitch
+        "2026-09-03 06:00": 87.52,
+        "2026-09-03 12:00": 640.0,
+    }
+    total = gs._sum_today_inverter_kwh(mapa, "2026-09-03", capacidad_kwp=996.0)
+
+    assert total == pytest.approx(727.52), "solo las dos horas plausibles"
+
+
+def test_sin_capacidad_no_se_filtra_nada():
+    """No hay contra que comparar: se prefiere no inventar un techo."""
+    mapa = {"2026-09-03 00:00": 4682690.23, "2026-09-03 06:00": 87.52}
+    total = gs._sum_today_inverter_kwh(mapa, "2026-09-03", capacidad_kwp=None)
+
+    assert total == pytest.approx(4682777.75)
+
+
+def test_una_planta_grande_no_pierde_sus_horas_buenas():
+    """El techo sale de la capacidad de CADA planta, no de un numero fijo."""
+    mapa = {"2026-09-03 12:00": 6800.0}
+    assert gs._sum_today_inverter_kwh(mapa, "2026-09-03", capacidad_kwp=8000.0) == pytest.approx(6800.0)
+
+
+def test_solo_se_suman_las_horas_de_hoy_con_el_filtro_puesto():
+    mapa = {"2026-09-02 12:00": 500.0, "2026-09-03 12:00": 640.0}
+    assert gs._sum_today_inverter_kwh(mapa, "2026-09-03", capacidad_kwp=996.0) == pytest.approx(640.0)
+
+
+def test_limite_hora_sin_capacidad_es_none():
+    assert gs._limite_hora_kwh(None) is None
+    assert gs._limite_hora_kwh(0) is None

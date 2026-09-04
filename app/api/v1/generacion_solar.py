@@ -38,6 +38,7 @@ from app.services.mgs.gaia_client import (
     find_gaia_node_id, find_gaia_node_pair,
 )
 from app.services.mgs.solarview_client import SolarViewClient
+from app.services.reporte_energia.utils import limite_plausible_kwh
 
 logger = logging.getLogger("generacion_solar")
 router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar"])
@@ -111,20 +112,46 @@ def _get_gaia() -> GaiaClient | None:
     return _gaia_client if _gaia_client.enabled else None
 
 
-def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str) -> float:
-    """Suma las entradas de HOY de un mapa generation_kwh de Solenium.
+def _limite_hora_kwh(capacidad_kwp: float | None) -> float | None:
+    """Techo de kWh en una hora para una planta, o None si no se sabe su
+    capacidad. Reusa el mismo criterio del pipeline del ASIC."""
+    if not capacidad_kwp or capacidad_kwp <= 0:
+        return None
+    return limite_plausible_kwh(float(capacidad_kwp) / 1000)
+
+
+def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str,
+                            capacidad_kwp: float | None = None) -> float:
+    """Suma las entradas de HOY de un mapa generation_kwh de SolarView.
 
     `get_generation(ayer, hoy)` devuelve valores incrementales por franja horaria
-    con claves tipo "2026-06-09 08:00"; nos quedamos solo con las de hoy."""
+    con claves tipo "2026-06-09 08:00"; nos quedamos solo con las de hoy.
+
+    Se descartan las horas fisicamente imposibles. SolarView calcula la
+    generacion POR DIFERENCIA DE ACUMULADOS, asi que cuando el acumulador se
+    reinicia o falla, la diferencia es el acumulado historico entero. Verificado
+    en vivo el 2026-09-03 con San Pedro (996 kWp): dos horas del dia marcaban
+    4.682.690,23 kWh cada una, junto a valores normales de 87,52 kWh. Sin este
+    filtro el total del dia daba 4,7 GWh y el de la flota 98 GWh.
+
+    Es el mismo glitch y el mismo guardia que ya usa
+    reporte_energia/solarview.py::curva_generacion (ver MGS 0010 Villanueva
+    2026-08-26, ~48.090 kWh en una hora para 0,99 MW)."""
     if not gen_kwh_map:
         return 0.0
+    limite = _limite_hora_kwh(capacidad_kwp)
     total = 0.0
     for k, v in gen_kwh_map.items():
-        if str(k).startswith(today_str):
-            try:
-                total += float(v)
-            except (ValueError, TypeError):
-                continue
+        if not str(k).startswith(today_str):
+            continue
+        try:
+            val = float(v)
+        except (ValueError, TypeError):
+            continue
+        if limite is not None and abs(val) > limite:
+            logger.warning("hora implausible descartada: %s = %.1f kWh (techo %.1f)", k, val, limite)
+            continue
+        total += val
     return total
 
 
@@ -279,11 +306,8 @@ def generacion_hoy(
             gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
             if "results" in gen:
                 gen = gen["results"]
-            gen_kwh_map = gen.get("generation_kwh") or {}
-            kwh = sum(
-                float(v or 0) for k, v in gen_kwh_map.items()
-                if str(k).startswith(today_str)
-            )
+            kwh = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str,
+                                          p.potencia_instalada_kwp)
             if kwh > 0:
                 fuente = "inversor"
         except Exception as exc:
@@ -372,7 +396,8 @@ def resumen_dia(
             gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
             if "results" in gen:
                 gen = gen["results"]
-            kwh_inv = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str)
+            kwh_inv = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str,
+                                              p.potencia_instalada_kwp)
         except Exception as exc:
             logger.warning("resumen-dia inversor sol_id=%s: %s", sol_id, exc)
         try:
@@ -586,7 +611,12 @@ def project_monitoring_detail(
     gen_hoy    = (gen_hoy_f.result() or {}) if gen_hoy_f else {}
     # Total real de hoy calculado por Solenium (endpoint /generation/, más preciso
     # que integrar nosotros la curva de potencia de 5 min por trapecios).
-    generation_today_kwh = gen_hoy.get("total_generation_kwh")
+    # No se usa `total_generation_kwh` de la respuesta: viene con los picos
+    # espurios adentro. Se recalcula sumando solo las horas plausibles.
+    _gen_hoy_res = gen_hoy.get("results", gen_hoy) if isinstance(gen_hoy, dict) else {}
+    generation_today_kwh = _sum_today_inverter_kwh(
+        (_gen_hoy_res or {}).get("generation_kwh") or {}, hoy, p.potencia_instalada_kwp,
+    ) or None
 
     med_p = med_p_f.result() if med_p_f else None
     med_r = med_r_f.result() if med_r_f else None
@@ -617,10 +647,16 @@ def project_monitoring_detail(
         raw_power = (power_data.get("power")
                      or power_data.get("results", {}).get("power")
                      or {})
-    for timeseries in raw_power.values():
-        if isinstance(timeseries, dict):
-            for ts, val in timeseries.items():
-                power_total[ts] = power_total.get(ts, 0.0) + float(val or 0)
+    # Con total_power=1 (ver SolarViewClient.get_power) la API ya entrega la
+    # potencia SUMADA entre todos los inversores, o sea un {ts: kw} plano. La
+    # API vieja de Solenium devolvia {inversor: {ts: kw}} y habia que sumar
+    # aca; ese loop anidado descartaba en silencio la respuesta nueva, porque
+    # los valores son numeros y no dicts.
+    for ts, val in raw_power.items():
+        try:
+            power_total[ts] = float(val or 0)
+        except (TypeError, ValueError):
+            continue
 
     power_curve = [
         {"time": ts, "kw": round(v, 2)}

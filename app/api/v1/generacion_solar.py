@@ -1,4 +1,19 @@
-"""Real-time solar generation from Solenium inverter API."""
+"""Generación solar en tiempo real, desde la API de inversores de SolarView.
+
+Migrado de Solenium el 2026-09-03. Los ids de los dos proveedores son
+esquemas DISTINTOS que no se derivan uno del otro, así que la resolución va
+por `Proyecto.project_id_solarview`, reconciliado por el equipo y poblado por
+services/proyectos_backfill_solarview.py.
+
+A propósito NO se empareja por nombre. Antes, si a un proyecto le faltaba el
+id, se buscaba en el catálogo del proveedor por coincidencia de nombre --
+exacta primero y luego por subcadena de ≥ 5 caracteres-- y el resultado se
+persistía como efecto secundario de un GET. Eso es una adivinanza silenciosa
+que se recalcula en cada request y puede cambiar de respuesta si el proveedor
+renombra algo. El mismo criterio que sigue Reporte de Energía: un proyecto sin
+id reconciliado no tiene inversores, y el hueco queda visible para que lo
+resuelva el backfill.
+"""
 from __future__ import annotations
 
 import calendar
@@ -22,10 +37,10 @@ from app.services.mgs.gaia_client import (
     GaiaClient, build_db_proyecto_frt_map,
     find_gaia_node_id, find_gaia_node_pair,
 )
-from app.services.mgs.solenium_client import SoleniumClient
+from app.services.mgs.solarview_client import SolarViewClient
 
 logger = logging.getLogger("generacion_solar")
-router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar (Solenium)"])
+router = APIRouter(prefix="/generacion-solar", tags=["Generación Solar"])
 
 # Colombia opera en America/Bogota = UTC-5 (sin horario de verano). El servidor
 # de producción (Railway) corre en UTC, por lo que `_hoy_col()` devuelve la
@@ -41,7 +56,7 @@ def _hoy_col() -> date:
     """Fecha actual en hora de Colombia (Bogotá, UTC-5), independiente del TZ del servidor."""
     return datetime.now(_COL_TZ).date()
 
-_client: SoleniumClient | None = None
+_client: SolarViewClient | None = None
 _gaia_client: GaiaClient | None = None
 
 # ── TTL cache en memoria ───────────────────────────────────────────────────────
@@ -64,13 +79,28 @@ def _cache_set(key: str, ttl: int, data: object) -> None:
     _cache[key] = (time.monotonic(), (ttl, data))
 
 
-def _get_client() -> SoleniumClient:
+def _get_client() -> SolarViewClient:
     global _client
     if _client is None:
-        _client = SoleniumClient()
+        _client = SolarViewClient()
     if not _client.enabled:
-        raise HTTPException(503, "Solenium credentials not configured")
+        raise HTTPException(503, "SolarView credentials not configured")
     return _client
+
+
+def _sv_id(p: Proyecto) -> int | None:
+    """El id de SolarView del proyecto, o None si no está reconciliado.
+
+    Sin fallback por nombre a propósito -- ver el docstring del módulo.
+    """
+    if not p.project_id_solarview:
+        return None
+    try:
+        return int(p.project_id_solarview)
+    except (TypeError, ValueError):
+        logger.warning("project_id_solarview inválido proyecto_id=%s valor=%r",
+                       p.id, p.project_id_solarview)
+        return None
 
 
 def _get_gaia() -> GaiaClient | None:
@@ -79,179 +109,6 @@ def _get_gaia() -> GaiaClient | None:
     if _gaia_client is None:
         _gaia_client = GaiaClient()
     return _gaia_client if _gaia_client.enabled else None
-
-
-def _normalize_name(s: str) -> str:
-    """Normaliza nombre para comparación fuzzy: sin tildes, minúsculas, solo alfanumérico."""
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    s = re.sub(r"[^a-z0-9]", " ", s.lower())
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def _find_solenium_id(p: Proyecto, sol_name_map: dict[str, int]) -> int | None:
-    """Encuentra el Solenium project_id para un proyecto interno.
-
-    Prioridad:
-    1. Campo project_id_solenium (ID explícito).
-    2. Coincidencia exacta de nombre normalizado.
-    3. Coincidencia por subcadena (mínimo 5 chars).
-    """
-    # 1. ID explícito
-    if p.project_id_solenium:
-        try:
-            return int(p.project_id_solenium)
-        except (ValueError, TypeError):
-            pass
-
-    # 2/3. Matching por nombre
-    candidates = [p.nombre_comercial]
-    for name in candidates:
-        norm = _normalize_name(name or "")
-        if not norm:
-            continue
-        # Exacto
-        if norm in sol_name_map:
-            return sol_name_map[norm]
-        # Subcadena (bidireccional)
-        if len(norm) >= 5:
-            for sol_norm, sol_id in sol_name_map.items():
-                if len(sol_norm) >= 5 and (norm in sol_norm or sol_norm in norm):
-                    return sol_id
-    return None
-
-
-def _extract_strings(detail: dict) -> list[dict]:
-    """Extract DC string data from a raw Solenium inverter-detail response.
-
-    Tries multiple naming conventions:
-    • vpv1/ipv1 … vpvN/ipvN  (most common)
-    • pv{N}vol / pv{N}cur
-    • u_pv{N} / i_pv{N}
-    • mppt{N}_vpv / mppt{N}_ipv
-    • nested list under key "pv" or "strings"
-    """
-    raw = detail
-    if isinstance(detail, dict):
-        raw = detail.get("results") or detail
-    if not isinstance(raw, dict):
-        return []
-
-    strings: list[dict] = []
-
-    # ── Pattern 1: numbered flat keys ─────────────────────────────────────────
-    for i in range(1, 25):
-        vpv = None
-        ipv = None
-
-        for key in (f"vpv{i}", f"pv{i}vol", f"pv{i}_vol",
-                    f"u_pv{i}", f"mppt{i}_vpv", f"string{i}_v"):
-            v = raw.get(key)
-            if v is not None:
-                try:
-                    vpv = float(v)
-                    break
-                except (ValueError, TypeError):
-                    pass
-
-        for key in (f"ipv{i}", f"pv{i}cur", f"pv{i}_cur",
-                    f"i_pv{i}", f"mppt{i}_ipv", f"string{i}_i"):
-            v = raw.get(key)
-            if v is not None:
-                try:
-                    ipv = float(v)
-                    break
-                except (ValueError, TypeError):
-                    pass
-
-        if vpv is None and ipv is None:
-            break
-
-        ppv = round(vpv * ipv / 1000, 3) if (vpv is not None and ipv is not None) else None
-        strings.append({
-            "string": i,
-            "label": f"S{i}",
-            "voltage_v": round(vpv, 1) if vpv is not None else None,
-            "current_a": round(ipv, 2) if ipv is not None else None,
-            "power_kw": ppv,
-        })
-
-    if strings:
-        return strings
-
-    # ── Pattern 2: list under "pv" or "strings" key ───────────────────────────
-    for list_key in ("pv", "strings", "mppt"):
-        items = raw.get(list_key)
-        if isinstance(items, list):
-            for j, item in enumerate(items, 1):
-                if not isinstance(item, dict):
-                    continue
-                vpv_raw = item.get("vpv") or item.get("voltage") or item.get("vol")
-                ipv_raw = item.get("ipv") or item.get("current") or item.get("cur")
-                vpv = float(vpv_raw) if vpv_raw is not None else None
-                ipv = float(ipv_raw) if ipv_raw is not None else None
-                ppv = round(vpv * ipv / 1000, 3) if (vpv is not None and ipv is not None) else None
-                strings.append({
-                    "string": j,
-                    "label": f"S{j}",
-                    "voltage_v": round(vpv, 1) if vpv is not None else None,
-                    "current_a": round(ipv, 2) if ipv is not None else None,
-                    "power_kw": ppv,
-                })
-            if strings:
-                return strings
-
-    return strings
-
-
-def _extract_ac_metrics(detail: dict) -> dict:
-    """Extract AC/electrical metrics from a raw Solenium inverter-detail response.
-
-    Returns a dict with normalized keys. Values are floats or None when absent.
-    pac_kw and qac_kvar are converted from W/VAr if the value seems to be in those units.
-    """
-    raw = detail
-    if isinstance(detail, dict):
-        raw = detail.get("results") or detail
-    if not isinstance(raw, dict):
-        return {}
-
-    def _get(*keys):
-        for k in keys:
-            v = raw.get(k)
-            if v is not None:
-                try:
-                    return float(v)
-                except (ValueError, TypeError):
-                    pass
-        return None
-
-    pac_raw = _get("pac", "active_power", "p_ac", "pac_w", "power_ac")
-    qac_raw = _get("qac", "reactive_power", "q_ac", "qac_w", "reactive_ac")
-
-    # Heuristic: if value > 500, it is probably in W → convert to kW
-    def _to_kw(v):
-        if v is None:
-            return None
-        return round(v / 1000, 3) if abs(v) > 500 else round(v, 3)
-
-    return {
-        "vac_a":        _get("vac_a", "ua", "voltage_a", "v_a", "u_a", "u1", "uac_a"),
-        "vac_b":        _get("vac_b", "ub", "voltage_b", "v_b", "u_b", "u2", "uac_b"),
-        "vac_c":        _get("vac_c", "uc", "voltage_c", "v_c", "u_c", "u3", "uac_c"),
-        "iac_a":        _get("iac_a", "ia", "current_a", "i_a", "i1", "iac_l1"),
-        "iac_b":        _get("iac_b", "ib", "current_b", "i_b", "i2", "iac_l2"),
-        "iac_c":        _get("iac_c", "ic", "current_c", "i_c", "i3", "iac_l3"),
-        "power_factor": _get("pf", "power_factor", "cos_phi", "pf_total", "power_factor_total"),
-        "pac_kw":       _to_kw(pac_raw),
-        "qac_kvar":     _to_kw(qac_raw),
-        "efficiency_pct": _get("efficiency", "eff", "efficiency_pct", "total_efficiency"),
-        "e_day_kwh":    _get("eday", "e_day", "daily_energy", "today_energy",
-                             "daily_gen", "generation_today", "etotal_today"),
-        "temperature_c": _get("temperature", "temp", "t_inner", "inner_temp", "module_temp"),
-    }
 
 
 def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str) -> float:
@@ -271,17 +128,27 @@ def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str) -> float:
     return total
 
 
-def _meter_kwh_from_summary(summary: dict | None) -> float | None:
-    """Energía del día del medidor (frontera) desde un item de project_summary."""
-    if not summary:
+def _meter_kwh_from_detail(detail: dict | None) -> float | None:
+    """Energía del día del medidor (frontera) desde /config/project-detail/.
+
+    Reemplaza al `frontier_generation_kwh` del lote de summary de Solenium, que
+    SolarView no tiene. La unidad viene DECLARADA en el propio bloque y puede
+    ser kWh o MWh -- verificado en vivo el 2026-09-03: {"time":..., "value":...,
+    "unit":"kWh", "complete":...}. Se lee, nunca se asume.
+    """
+    if not detail:
         return None
-    raw = summary.get("frontier_generation_kwh")
-    if raw is None:
+    if "results" in detail:
+        detail = detail["results"]
+    gen = (detail or {}).get("generation") or {}
+    if not gen.get("value"):
         return None
     try:
-        return float(raw)
+        val = float(gen["value"])
     except (ValueError, TypeError):
         return None
+    unit = (gen.get("unit") or "kWh").strip().lower()
+    return val * 1000 if unit == "mwh" else val
 
 
 @router.get("/proyecto/{proyecto_id}/historial")
@@ -297,7 +164,7 @@ def proyecto_historial(
     Generación histórica de un proyecto desde Solenium.
 
     Acepta el ID interno de nuestra BD y resuelve el Solenium project_id
-    usando project_id_solenium.  Devuelve puntos diarios u horarios.
+    usando project_id_solarview. Devuelve puntos diarios u horarios.
 
     Respuesta:
       {
@@ -312,25 +179,16 @@ def proyecto_historial(
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
 
-    # 2. Resolver Solenium ID
-    sol_id: int | None = None
-    if p.project_id_solenium:
-        try:
-            sol_id = int(p.project_id_solenium)
-        except (ValueError, TypeError):
-            pass
-
+    # 2. Resolver el id de SolarView
+    sol_id = _sv_id(p)
     if sol_id is None:
-        # Fallback: matching por nombre (por si la migración no corrió aún)
-        client = _get_client()
-        sol_projects = client.get_projects()
-        sol_name_map = {_normalize_name(sp.get("name", "")): int(sp["id"]) for sp in sol_projects if sp.get("id")}
-        sol_id = _find_solenium_id(p, sol_name_map)
+        raise HTTPException(
+            404,
+            "Este proyecto no tiene ID en SolarView. Se asigna con el backfill "
+            "(services/proyectos_backfill_solarview.py) o a mano en project_id_solarview.",
+        )
 
-    if sol_id is None:
-        raise HTTPException(404, "Este proyecto no tiene ID en Solenium. Agrega project_id_solenium en la BD.")
-
-    # 3. Llamar al endpoint de generación de Solenium
+    # 3. Generación desde SolarView
     client = _get_client()
     raw = client.get_generation(sol_id, fecha_inicio, fecha_fin) or {}
 
@@ -372,8 +230,8 @@ def generacion_hoy(
     _=Depends(get_current_user),
 ):
     """
-    Generación real de HOY por proyecto, desde Solenium.
-    Empareja proyectos por project_id_solenium (explícito) o por nombre (fuzzy).
+    Generación real de HOY por proyecto, desde SolarView.
+    Resuelve por project_id_solarview; un proyecto sin ese id no aparece.
     Devuelve proyecto_id, nombre y kwh_real para los gráficos de Monitoreo.
     """
     _GENHOY_KEY = f"genhoy:{_hoy_col().isoformat()}"
@@ -383,40 +241,22 @@ def generacion_hoy(
 
     client = _get_client()
 
-    # 1. Todos los proyectos Solenium → nombre_normalizado → sol_id
-    sol_projects = client.get_projects()
-    sol_name_map: dict[str, int] = {}
-    for sp in sol_projects:
-        pid = sp.get("id")
-        name = sp.get("name") or ""
-        if pid is not None:
-            sol_name_map[_normalize_name(name)] = int(pid)
-    logger.info("solenium projects loaded: %d", len(sol_projects))
-
-    # 2. Summary batch (campo puede ser project_id o id según versión de la API)
-    summary_list = client.get_project_summary()
-    summary_map: dict[int, dict] = {}
-    for s in summary_list:
-        pid = s.get("project_id") or s.get("id")
-        if pid is not None:
-            summary_map[int(pid)] = s
-    logger.info("solenium summary loaded: %d entries", len(summary_map))
-
-    # 3. Todos nuestros proyectos en operación
     proyectos_db = db.query(Proyecto).filter(
         Proyecto.estado == "en_operacion",
     ).all()
 
-    # 4. Emparejar proyectos con Solenium
-    matched: list[tuple] = []   # (proyecto, sol_id, summary_or_None)
+    # (proyecto, sol_id). Ya no hay `summary`: SolarView no tiene un lote de
+    # potencia de flota, y `power_kw` no lo lee nadie -- su unico consumidor era
+    # GeneracionSolarView.vue, que se borro por estar muerta (2026-09-03).
+    matched: list[tuple] = []
     for p in proyectos_db:
-        sol_id = _find_solenium_id(p, sol_name_map)
+        sol_id = _sv_id(p)
         if sol_id is None:
-            logger.debug("sin match solenium: proyecto_id=%d nombre='%s'", p.id, p.nombre_comercial)
+            logger.debug("sin id de solarview: proyecto_id=%d nombre='%s'", p.id, p.nombre_comercial)
             continue
-        matched.append((p, sol_id, summary_map.get(sol_id)))
+        matched.append((p, sol_id))
 
-    logger.info("proyectos emparejados: %d / %d", len(matched), len(proyectos_db))
+    logger.info("proyectos con id de solarview: %d / %d", len(matched), len(proyectos_db))
 
     # 5. Obtener kwh_real e indicador de fuente por proyecto
     #    Fuentes posibles:
@@ -426,9 +266,8 @@ def generacion_hoy(
     today_str = _hoy_col().isoformat()
 
     def _fetch_kwh(item: tuple) -> tuple:
-        p, sol_id, s = item
+        p, sol_id = item
         kwh = 0.0
-        power_kw = float((s or {}).get("power_kw") or 0)
         fuente = "sin_dato"
 
         # Fuente 1: get_generation(ayer, hoy) → filtramos solo entradas de hoy.
@@ -458,9 +297,11 @@ def generacion_hoy(
                     detail = detail["results"]
                 gen_detail = detail.get("generation") or {}
                 if gen_detail and gen_detail.get("value"):
-                    # Normalizar la unidad: Solenium puede devolver "MWh"/"Mwh"/"mwh".
-                    # Comparar con == "MWh" exacto dejaba un valor en MWh sin escalar
-                    # (1000× menos) si la etiqueta variaba de mayúsculas.
+                    # La unidad viene declarada en el propio bloque y puede ser
+                    # kWh o MWh -- verificado en vivo contra SolarView el
+                    # 2026-09-03: {"time":..., "value":..., "unit":"kWh",
+                    # "complete":...}. Se lee, no se asume, y la comparacion es
+                    # en minusculas porque la etiqueta varia de mayusculas.
                     unit = (gen_detail.get("unit") or "kWh").strip().lower()
                     val = float(gen_detail["value"])
                     kwh = val * 1000 if unit == "mwh" else val
@@ -469,17 +310,16 @@ def generacion_hoy(
             except Exception as exc:
                 logger.warning("project_detail fallo sol_id=%d: %s", sol_id, exc)
 
-        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), round(power_kw, 2), fuente)
+        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), fuente)
 
     result = []
     with ThreadPoolExecutor(max_workers=8) as executor:
-        for pid, nombre, sol_id, kwh_real, power_kw, fuente in executor.map(_fetch_kwh, matched):
+        for pid, nombre, sol_id, kwh_real, fuente in executor.map(_fetch_kwh, matched):
             result.append({
                 "proyecto_id": pid,
                 "nombre":      nombre,
                 "sol_id":      sol_id,
                 "kwh_real":    kwh_real,
-                "power_kw":    power_kw,
                 "fuente":      fuente,
             })
 
@@ -500,9 +340,11 @@ def resumen_dia(
 ):
     """Resumen del día: top de generación por medidores y por inversores.
 
-    - Medidor: `frontier_generation_kwh` del summary de Solenium (1 batch).
-    - Inversor: `get_generation(ayer, hoy)` por proyecto, sumando las entradas de hoy
-      (paralelo). Ambas listas ordenadas desc. Cacheado en memoria (TTL corto).
+    - Medidor: `generation` de /config/project-detail/ por proyecto.
+    - Inversor: `get_generation(ayer, hoy)` por proyecto, sumando las entradas de hoy.
+
+    Las dos van en la misma pasada paralela. Ambas listas ordenadas desc.
+    Cacheado en memoria (TTL corto).
     """
     _KEY = f"resumendia:{_hoy_col().isoformat()}"
     cached = _cache_get(_KEY)
@@ -513,54 +355,41 @@ def resumen_dia(
     today_str = _hoy_col().isoformat()
     yesterday_str = (_hoy_col() - timedelta(days=1)).isoformat()
 
-    # Matching proyectos ↔ Solenium (mismo criterio que generacion-hoy)
-    sol_projects = client.get_projects()
-    sol_name_map: dict[str, int] = {}
-    for sp in sol_projects:
-        pid = sp.get("id")
-        if pid is not None:
-            sol_name_map[_normalize_name(sp.get("name") or "")] = int(pid)
-
-    summary_list = client.get_project_summary()
-    summary_map: dict[int, dict] = {}
-    for s in summary_list:
-        pid = s.get("project_id") or s.get("id")
-        if pid is not None:
-            summary_map[int(pid)] = s
-
     proyectos_db = db.query(Proyecto).filter(Proyecto.estado == "en_operacion").all()
-    matched: list[tuple] = []
-    for p in proyectos_db:
-        sol_id = _find_solenium_id(p, sol_name_map)
-        if sol_id is not None:
-            matched.append((p, sol_id))
+    matched = [(p, sid) for p in proyectos_db if (sid := _sv_id(p)) is not None]
 
-    # Medidor (frontera) desde el batch de summary — sin llamadas extra.
     medidor: list[dict] = []
-    for p, sol_id in matched:
-        kwh = _meter_kwh_from_summary(summary_map.get(sol_id))
-        if kwh and kwh > 0:
-            medidor.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "kwh": round(kwh, 1)})
 
-    # Inversores desde get_generation (paralelo, como generacion-hoy).
-    def _inv(item: tuple) -> tuple:
+    # Las dos lecturas del proyecto en la misma pasada paralela. Antes el
+    # medidor salia del lote de summary de Solenium (una sola llamada para toda
+    # la flota); SolarView no tiene ese lote, asi que va por project-detail, una
+    # por proyecto -- pero aprovechando el mismo worker que ya pedia la
+    # generacion de inversores.
+    def _lecturas(item: tuple) -> tuple:
         p, sol_id = item
+        kwh_inv = 0.0
         try:
             gen = client.get_generation(sol_id, yesterday_str, today_str) or {}
             if "results" in gen:
                 gen = gen["results"]
-            kwh = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str)
+            kwh_inv = _sum_today_inverter_kwh(gen.get("generation_kwh") or {}, today_str)
         except Exception as exc:
             logger.warning("resumen-dia inversor sol_id=%s: %s", sol_id, exc)
-            kwh = 0.0
-        return (p.id, p.nombre_comercial, round(kwh, 1))
+        try:
+            kwh_med = _meter_kwh_from_detail(client.get_project_detail(sol_id))
+        except Exception as exc:
+            logger.warning("resumen-dia medidor sol_id=%s: %s", sol_id, exc)
+            kwh_med = None
+        return (p.id, p.nombre_comercial, round(kwh_inv, 1), kwh_med)
 
     inversor: list[dict] = []
     if matched:
         with ThreadPoolExecutor(max_workers=8) as ex:
-            for pid, nombre, kwh in ex.map(_inv, matched):
-                if kwh > 0:
-                    inversor.append({"proyecto_id": pid, "nombre": nombre, "kwh": kwh})
+            for pid, nombre, kwh_inv, kwh_med in ex.map(_lecturas, matched):
+                if kwh_inv > 0:
+                    inversor.append({"proyecto_id": pid, "nombre": nombre, "kwh": kwh_inv})
+                if kwh_med and kwh_med > 0:
+                    medidor.append({"proyecto_id": pid, "nombre": nombre, "kwh": round(kwh_med, 1)})
 
     medidor.sort(key=lambda x: x["kwh"], reverse=True)
     inversor.sort(key=lambda x: x["kwh"], reverse=True)
@@ -581,12 +410,11 @@ def fleet_monitoring(
 ):
     """
     Fleet monitoring: DB projects en operación, minigranja y con servicio de
-    operación. Si a alguno le falta project_id_solenium, se resuelve por
-    coincidencia de nombre contra Solenium (igual que en /generacion-hoy) y se
-    persiste en la BD, para no depender de asignarlo a mano cada vez que se
-    activa un proyecto nuevo.
-    Returns status (online/caido/degradado/sin_comunicacion) per project.
-    Status determined by Solenium availability category:
+    operación. Un proyecto sin project_id_solarview igual aparece, con status
+    "sin_datos": sus medidores no dependen del proveedor y la tarjeta tiene que
+    poder mostrarlos.
+    Returns status (online/caido/degradado/sin_comunicacion/sin_datos) per project.
+    Status determined by SolarView availability category:
       disconnect → sin_comunicacion
       critical   → caido
       low/medium → degradado
@@ -604,8 +432,7 @@ def fleet_monitoring(
         return {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "fleet": {"total": 0, "online": 0, "caido": 0, "degradado": 0,
-                      "sin_comunicacion": 0, "total_power_kw": 0,
-                      "total_capacity_kwp": 0, "utilization_pct": 0},
+                      "sin_comunicacion": 0, "sin_datos": 0, "total_capacity_kwp": 0},
             "projects": [],
         }
 
@@ -615,59 +442,15 @@ def fleet_monitoring(
     if cached:
         return cached
 
-    sin_id = [p for p in proyectos if not p.project_id_solenium]
-
-    # Paralelizar las llamadas Solenium que antes eran seriales. Solo se pide
-    # get_projects() (para el matching por nombre) si hay algún proyecto sin
-    # project_id_solenium asignado.
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        avail_f    = ex.submit(client.get_availability)
-        summary_f  = ex.submit(client.get_project_summary)
-        projects_f = ex.submit(client.get_projects) if sin_id else None
-    avail_map    = avail_f.result() or {}
-    summary_list = summary_f.result() or []
-
-    summary_map: dict[int, dict] = {}
-    for s in summary_list:
-        pid = s.get("project_id") or s.get("id")
-        if pid is not None:
-            summary_map[int(pid)] = s
-
-    if sin_id:
-        sol_name_map: dict[str, int] = {}
-        for sp in (projects_f.result() or []):
-            pid = sp.get("id")
-            if pid is not None:
-                sol_name_map[_normalize_name(sp.get("name") or "")] = int(pid)
-
-        # project_id_solenium es único en la tabla: un mismo sol_id puede matchear
-        # por nombre a dos proyectos internos distintos (ej. planta principal vs.
-        # su proyecto de "excedentes"). Sin este chequeo, ese conflicto revienta
-        # el UPDATE de TODOS los proyectos de este lote (misma transacción) y
-        # ninguno queda asignado, aunque su match individual fuera correcto.
-        used_ids = {
-            v for (v,) in db.query(Proyecto.project_id_solenium)
-                            .filter(Proyecto.project_id_solenium.isnot(None)).all()
-        }
-
-        for p in sin_id:
-            sol_id = _find_solenium_id(p, sol_name_map)
-            if sol_id is None:
-                logger.warning("sin match solenium al auto-asignar: proyecto_id=%d nombre='%s'",
-                                p.id, p.nombre_comercial)
-                continue
-            if str(sol_id) in used_ids:
-                logger.warning(
-                    "match ambiguo al auto-asignar: proyecto_id=%d nombre='%s' -> sol_id=%d "
-                    "ya asignado a otro proyecto, requiere revisión manual",
-                    p.id, p.nombre_comercial, sol_id)
-                continue
-            logger.info("auto-asignando project_id_solenium=%d a proyecto_id=%d nombre='%s'",
-                        sol_id, p.id, p.nombre_comercial)
-            p.project_id_solenium = str(sol_id)
-            db.add(p)
-            used_ids.add(str(sol_id))
-        db.commit()
+    # Una sola llamada para toda la flota: /kpis/availability/ devuelve el mismo
+    # shape que el de Solenium a proposito, asi que el mapeo de status no cambia.
+    #
+    # Ya no se piden get_project_summary (SolarView no tiene ese lote) ni
+    # get_projects: el catalogo del proveedor solo servia para emparejar por
+    # nombre, y eso se elimino -- ver el docstring del modulo. Con eso tambien
+    # desaparece la escritura en BD que hacia este GET como efecto secundario,
+    # persistiendo un id adivinado.
+    avail_map = client.get_availability() or {}
 
     today_str = _hoy_col().isoformat()
     today_rows = db.execute(
@@ -678,26 +461,26 @@ def fleet_monitoring(
     today_gen_map = {int(r.proyecto_id): float(r.kwh_real) for r in today_rows}
 
     projects_result = []
-    total_power = 0.0
     total_capacity = 0.0
     counts = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0}
 
     for p in proyectos:
-        try:
-            sol_id = int(p.project_id_solenium)
-        except (TypeError, ValueError):
-            logger.warning("project_id_solenium inválido proyecto_id=%s valor=%r",
-                            p.id, p.project_id_solenium)
-            continue
-        avail   = avail_map.get(sol_id, {})
-        summary = summary_map.get(sol_id, {})
+        sol_id = _sv_id(p)
+        # Un proyecto sin id reconciliado NO se excluye: la tarjeta igual tiene
+        # que salir, porque sus medidores no dependen de ningun proveedor (se
+        # resuelven por fronteras.proyecto_id). Antes se hacia `continue` y el
+        # proyecto desaparecia entero de la vista.
+        avail = avail_map.get(sol_id, {}) if sol_id else {}
 
-        availability_cat = avail.get("category", "disconnect")
-        power_kw     = float(summary.get("power_kw") or 0)
+        availability_cat = avail.get("category")
         capacity_kwp = float(p.potencia_instalada_kwp or 0)
-        energy_today = today_gen_map.get(p.id)
 
-        if availability_cat == "disconnect":
+        if availability_cat is None:
+            # Ni id ni respuesta del proveedor: no es que la comunicacion este
+            # caida, es que no sabemos. El frontend pinta gris cualquier status
+            # que no reconozca.
+            status = "sin_datos"
+        elif availability_cat == "disconnect":
             status = "sin_comunicacion"
         elif availability_cat == "critical":
             status = "caido"
@@ -706,8 +489,7 @@ def fleet_monitoring(
         else:
             status = "online"
 
-        counts[status] += 1
-        total_power    += power_kw
+        counts[status] = counts.get(status, 0) + 1
         total_capacity += capacity_kwp
 
         projects_result.append({
@@ -717,15 +499,12 @@ def fleet_monitoring(
             "status":                status,
             "availability_category": availability_cat,
             "availability_pct":      avail.get("availability"),
-            "power_kw":              round(power_kw, 2),
             "capacity_kwp":          round(capacity_kwp, 1),
-            "utilization_pct":       round(power_kw / capacity_kwp * 100, 1) if capacity_kwp > 0 else 0,
-            "energy_today_kwh":      energy_today,
-            "last_update":           summary.get("power_time"),
+            "energy_today_kwh":      today_gen_map.get(p.id),
         })
 
-    _order = {"caido": 0, "sin_comunicacion": 1, "degradado": 2, "online": 3}
-    projects_result.sort(key=lambda x: (_order.get(x["status"], 4), -(x["power_kw"] or 0)))
+    _order = {"caido": 0, "sin_comunicacion": 1, "degradado": 2, "online": 3, "sin_datos": 4}
+    projects_result.sort(key=lambda x: (_order.get(x["status"], 5), x["nombre"] or ""))
 
     result = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -735,9 +514,8 @@ def fleet_monitoring(
             "caido":              counts["caido"],
             "degradado":          counts["degradado"],
             "sin_comunicacion":   counts["sin_comunicacion"],
-            "total_power_kw":     round(total_power, 1),
+            "sin_datos":          counts.get("sin_datos", 0),
             "total_capacity_kwp": round(total_capacity, 1),
-            "utilization_pct":    round(total_power / total_capacity * 100, 1) if total_capacity > 0 else 0,
         },
         "projects": projects_result,
     }
@@ -753,12 +531,12 @@ def project_monitoring_detail(
 ):
     """
     Detail monitoring for one project: inverter status + power curve today + 30d generation.
-    Uses our internal proyecto_id, resolves to Solenium ID via project_id_solenium.
+    Uses our internal proyecto_id, resolves to SolarView ID via project_id_solarview.
     """
     p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    # Sin id de Solenium NO se corta: los inversores quedan sin dato, pero el
+    # Sin id de SolarView NO se corta: los inversores quedan sin dato, pero el
     # medidor se resuelve por find_gaia_node_pair desde fronteras.proyecto_id,
     # un camino que no depende de ningun proveedor externo. Antes esto era un
     # 422 que dejaba la tarjeta entera vacia, incluida la mitad que si tenia
@@ -770,7 +548,7 @@ def project_monitoring_detail(
     if cached:
         return cached
 
-    sol_id = int(p.project_id_solenium) if p.project_id_solenium else None
+    sol_id = _sv_id(p)
     client = _get_client()
 
     today   = _hoy_col()
@@ -792,7 +570,6 @@ def project_monitoring_detail(
     hoy = today.isoformat()
     capacidad_mw = float(p.potencia_instalada_kwp or 0) / 1000 or None
     with ThreadPoolExecutor(max_workers=6) as ex:
-        inv_f      = ex.submit(client.get_project_inverters, sol_id) if sol_id else None
         pow_f      = ex.submit(client.get_power, sol_id, hoy, hoy) if sol_id else None
         gen_f      = ex.submit(client.get_energy, sol_id, granularity="day",
                                date_from=start30, date_to=today.isoformat()) if sol_id else None
@@ -804,7 +581,6 @@ def project_monitoring_detail(
         med_p_f    = ex.submit(snapshot_medidor, gaia, node_principal, hoy, capacidad_mw) if (gaia and node_principal) else None
         med_r_f    = ex.submit(snapshot_medidor, gaia, node_respaldo, hoy, capacidad_mw) if (gaia and node_respaldo) else None
 
-    inverters  = (inv_f.result() or []) if inv_f else []
     power_data = (pow_f.result() or {}) if pow_f else {}
     gen_raw    = (gen_f.result() or {}) if gen_f else {}
     gen_hoy    = (gen_hoy_f.result() or {}) if gen_hoy_f else {}
@@ -822,55 +598,17 @@ def project_monitoring_detail(
     best_node = medidor["node_id"] if medidor else (node_principal or node_respaldo)
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
-    def _fetch_detail(inv):
-        inv_id = inv.get("id")
-        if not inv_id:
-            return inv_id, [], {}
-        try:
-            detail = client.get_inverter_detail(sol_id, inv_id) or {}
-        except Exception as exc:
-            logger.warning("inverter_detail failed sol=%d inv=%s: %s", sol_id, inv_id, exc)
-            detail = {}
-        return inv_id, _extract_strings(detail), _extract_ac_metrics(detail)
-
-    detail_map: dict[int, dict] = {}
-    if inverters:
-        with ThreadPoolExecutor(max_workers=min(len(inverters), 10)) as ex:
-            for inv_id, strings, ac in ex.map(_fetch_detail, inverters):
-                if inv_id is not None:
-                    detail_map[inv_id] = {"strings": strings, "ac_metrics": ac}
-
-    # ── Inverter status ──────────────────────────────────────────────────────
-    inv_powers = [float(inv.get("power") or inv.get("pac") or 0) for inv in inverters]
-    avg_power  = sum(inv_powers) / len(inv_powers) if inv_powers else 0
-
-    processed_inverters = []
-    for inv, pwr in zip(inverters, inv_powers):
-        state = (inv.get("state") or inv.get("status") or "").lower()
-        if "disconnect" in state or "off" in state:
-            inv_status = "sin_comunicacion"
-        elif "fault" in state or "error" in state:
-            inv_status = "caido"
-        elif avg_power > 0 and pwr == 0:
-            inv_status = "caido"
-        elif avg_power > 0 and pwr < avg_power * 0.6:
-            inv_status = "degradado"
-        elif pwr > 0:
-            inv_status = "online"
-        else:
-            inv_status = "offline"
-
-        inv_id  = inv.get("id")
-        detail  = detail_map.get(inv_id, {})
-        processed_inverters.append({
-            "id":         inv_id,
-            "name":       inv.get("dev_name") or inv.get("name") or f"INV-{inv_id or '?'}",
-            "state":      inv.get("state") or inv.get("status") or "—",
-            "power_kw":   round(pwr, 2),
-            "inv_status": inv_status,
-            "strings":    detail.get("strings", []),
-            "ac_metrics": detail.get("ac_metrics", {}),
-        })
+    # El array `inverters` del detalle no lo consume nadie: la vista movil que
+    # muestra inversores (InvertersSheet.vue) los saca de
+    # /monitoring/{id}/inverters-power, que es otro endpoint. Y `strings` /
+    # `ac_metrics` tampoco se leen en ninguna parte.
+    #
+    # Por eso se dejo de pedir get_project_inverters y, sobre todo, el detalle
+    # POR INVERSOR: eran hasta 11 llamadas externas mas por tarjeta (San Pedro
+    # tiene 11 inversores) para llenar campos que nadie mira. Si algun dia hace
+    # falta el detalle de strings, en SolarView vive en /measurements/dc/, no en
+    # inverter-detail.
+    processed_inverters: list[dict] = []
 
     # ── Power curve today: sum all inverters per timestamp ────────────────
     power_total: dict[str, float] = {}
@@ -958,10 +696,10 @@ def project_inverters_power(
     p = db.query(Proyecto).filter(Proyecto.id == proyecto_id).first()
     if not p:
         raise HTTPException(404, "Proyecto no encontrado")
-    if not p.project_id_solenium:
-        raise HTTPException(422, "Proyecto sin ID Solenium")
+    if not p.project_id_solarview:
+        raise HTTPException(422, "Proyecto sin ID SolarView")
 
-    sol_id = int(p.project_id_solenium)
+    sol_id = _sv_id(p)
     today = date.today().isoformat()
     df = date_from or today
     dt = date_to or today

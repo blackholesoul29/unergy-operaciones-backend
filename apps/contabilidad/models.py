@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -36,7 +37,6 @@ class PanelContable(Timer):
     generado_por = models.ForeignKey("plataforma.Usuario", on_delete=models.DO_NOTHING, db_column="generado_por_id", null=True, blank=True, related_name="panel_contable_por_generado_por_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "panel_contable"
         unique_together = [("periodo", "proyecto", "tipo")]
 
@@ -57,7 +57,6 @@ class PanelContableLinea(models.Model):
     orden = models.IntegerField(default=0)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "panel_contable_linea"
 
 
@@ -68,7 +67,6 @@ class ClasificacionLiquidacion(Timer):
     tipo = models.CharField(max_length=10, default="normal")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "clasificacion_liquidacion"
         unique_together = [("periodo", "proyecto")]
 
@@ -82,7 +80,6 @@ class MapeoCeldaConcepto(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mapeo_celda_concepto"
         unique_together = [("concepto", "proyecto")]
 
@@ -96,7 +93,6 @@ class AliasFuenteIngreso(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "alias_fuente_ingreso"
         unique_together = [("columna_origen", "proyecto")]
 
@@ -114,7 +110,6 @@ class PanelSoporte(Timer):
     created_by_id = models.BigIntegerField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "panel_soporte"
         unique_together = [("concepto", "grupo", "periodo", "proyecto", "tipo")]
 
@@ -130,6 +125,5 @@ class PanelConsecutivo(Timer):
     consecutivo_costos = models.IntegerField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "panel_consecutivo"
         unique_together = [("inversionista_nombre", "periodo", "proyecto", "tipo")]

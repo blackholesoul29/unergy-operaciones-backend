@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -24,7 +25,6 @@ class FallaCatCategoria(models.Model):
     activa = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_cat_categorias"
         unique_together = [("codigo",)]
 
@@ -38,7 +38,6 @@ class FallaCatTipo(models.Model):
     activa = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_cat_tipos"
         unique_together = [("codigo",)]
 
@@ -51,7 +50,6 @@ class FallaCatEstado(models.Model):
     es_estado_final = models.BooleanField(default=False)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_cat_estados"
         unique_together = [("codigo",)]
 
@@ -63,7 +61,6 @@ class FallaCatPrioridad(models.Model):
     nivel = models.IntegerField()
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_cat_prioridades"
         unique_together = [("codigo",)]
 
@@ -74,7 +71,6 @@ class FallaCatResolucion(models.Model):
     etiqueta = models.CharField(max_length=255)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_cat_resoluciones"
         unique_together = [("codigo",)]
 
@@ -114,7 +110,6 @@ class Falla(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas"
         unique_together = [("codigo_interno",)]
 
@@ -128,7 +123,6 @@ class FallaSeguimiento(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_seguimientos"
 
 
@@ -141,7 +135,6 @@ class FallaIntervalo(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "fallas_intervalos"
 
 
@@ -155,7 +148,6 @@ class FallaInversor(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "falla_inversores"
 
 
@@ -171,7 +163,6 @@ class Alerta(Timer):
     status = models.CharField(max_length=20, default="new")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "alertas"
         unique_together = [("days_to_expiration", "ppa")]
 
@@ -187,7 +178,6 @@ class Mantenimiento(Timer):
     observaciones = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mantenimientos"
 
 
@@ -206,7 +196,6 @@ class MantenimientoImpacto(Timer):
     created_by = models.ForeignKey("plataforma.Usuario", on_delete=models.DO_NOTHING, db_column="created_by", null=True, blank=True, related_name="mantenimiento_impacto_por_created_by")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mantenimiento_impacto"
 
 
@@ -219,7 +208,6 @@ class StarlinkFactura(Timer):
     suma_items = models.DecimalField(max_digits=15, decimal_places=2)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "starlink_facturas"
 
 
@@ -231,7 +219,6 @@ class StarlinkMapeoSitio(Timer):
     excluido = models.BooleanField(default=False)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "starlink_mapeo_sitio"
 
 
@@ -246,7 +233,6 @@ class StarlinkFacturaLinea(Timer):
     monto_total = models.DecimalField(max_digits=15, decimal_places=2)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "starlink_factura_linea"
 
 
@@ -261,5 +247,4 @@ class AlarmaMonitoreo(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "alarmas_monitoreo"

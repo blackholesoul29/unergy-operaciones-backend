@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -22,7 +23,6 @@ class OmIpcTasa(Timer):
     fuente = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "om_ipc_tasas"
         unique_together = [("año",)]
 
@@ -38,7 +38,6 @@ class OmSeleccionMensual(Timer):
     motivo_exclusion = models.CharField(max_length=500, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "om_seleccion_mensual"
         unique_together = [("contrato", "periodo")]
 
@@ -53,7 +52,6 @@ class OmFacturaMensual(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "om_factura_mensual"
 
 
@@ -73,7 +71,6 @@ class OmPaginaSinMatch(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "om_pagina_sin_match"
         unique_together = [("pagina", "periodo")]
 
@@ -93,7 +90,6 @@ class OmDocumentoProyecto(models.Model):
     procesado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "om_documento_proyecto"
         unique_together = [("contrato", "periodo")]
 
@@ -128,5 +124,4 @@ class ProyectoInformeOm(Timer):
     evidencia_arquitectura = models.JSONField()
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyecto_informe_om"

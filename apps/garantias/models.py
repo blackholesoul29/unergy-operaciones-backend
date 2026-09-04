@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -29,7 +30,6 @@ class GarCalculo(models.Model):
     base_sem_fin = models.DateField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "gar_calculo"
         unique_together = [("agente", "esquema", "fecha_vencimiento", "periodo_fin", "periodo_ini")]
 
@@ -41,7 +41,6 @@ class GarComponenteReal(models.Model):
     valor = models.DecimalField(max_digits=22, decimal_places=2)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "gar_componente_real"
         unique_together = [("calculo", "componente")]
 
@@ -57,7 +56,6 @@ class GarComponentePred(models.Model):
     calculado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "gar_componente_pred"
         unique_together = [("calculo", "componente", "cuantil", "horizonte_dias", "modelo_version")]
 
@@ -79,7 +77,6 @@ class XmArchivo(models.Model):
     ingerido_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "xm_archivo"
         unique_together = [("sha256",)]
 
@@ -97,7 +94,6 @@ class XmMedida(models.Model):
     version = models.CharField(max_length=10, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "xm_medida"
         unique_together = [("concepto", "entidad", "fecha_documento", "hora", "tipo", "version")]
 
@@ -121,7 +117,6 @@ class GarantiaAjuste(Timer):
     snapshot = models.JSONField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "garantias_ajustes"
 
 
@@ -145,7 +140,6 @@ class GarantiaSnapshot(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "garantia_snapshot"
 
 
@@ -157,7 +151,6 @@ class GarantiaPagado(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "garantia_pagado"
         unique_together = [("anio", "mes")]
 
@@ -171,6 +164,5 @@ class BalcttosNeto(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "balcttos_neto"
         unique_together = [("anio", "mes")]

@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -68,7 +69,6 @@ class Proyecto(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyectos"
         unique_together = [("sub_project",)]
         unique_together = [("project_id_solarview",)]
@@ -82,7 +82,6 @@ class Portafolio(Timer):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "portafolios"
         unique_together = [("nombre",)]
 
@@ -116,7 +115,6 @@ class ProyectoInfoTecnica(Timer):
     tiene_internet = models.BooleanField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyecto_info_tecnica"
 
 
@@ -129,7 +127,6 @@ class ProyectoInversor(Timer):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyecto_inversores"
         unique_together = [("nombre", "proyecto")]
 
@@ -144,7 +141,6 @@ class ProyectoInversionista(Timer):
     fecha_fin = models.DateField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyecto_inversionistas"
 
 
@@ -155,7 +151,6 @@ class ProyectoPendienteIgnorado(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyectos_pendientes_ignorados"
         unique_together = [("clave",)]
 
@@ -169,7 +164,6 @@ class GestionRegistro(Timer):
     created_by = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "gestion_registros"
 
 
@@ -193,7 +187,6 @@ class CostoVariable(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "costos_variables"
 
 
@@ -205,7 +198,6 @@ class VerificacionCosto(Timer):
     ac_power = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "verificacion_costos"
 
 
@@ -216,7 +208,6 @@ class PromotorCatalogoRequisito(models.Model):
     descripcion = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "promotor_catalogo_requisitos"
 
 
@@ -233,7 +224,6 @@ class PromotorSeguimiento(Timer):
     fecha_ultima_actualizacion = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "promotor_seguimientos"
         unique_together = [("proyecto", "requisito")]
 
@@ -249,6 +239,5 @@ class GeneracionDiaria(Timer):
     notas = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "generacion_diaria"
         unique_together = [("fecha", "proyecto")]

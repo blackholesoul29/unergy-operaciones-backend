@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -23,7 +24,6 @@ class ArrProyecto(Timer):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "arr_proyectos"
         unique_together = [("codigo",)]
 
@@ -40,7 +40,6 @@ class ArrArrendador(Timer):
     observaciones = models.CharField(max_length=1000, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "arr_arrendador"
 
 
@@ -52,7 +51,6 @@ class ArrIpcTasa(Timer):
     fuente = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "arr_ipc_tasas"
         unique_together = [("año",)]
 
@@ -78,7 +76,6 @@ class ArrDocumento(models.Model):
     fecha_subida = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "arr_documento"
         unique_together = [("arr_arrendador", "arr_proyecto", "pago_id", "periodo")]
 
@@ -94,6 +91,5 @@ class ArrSeleccionMensual(Timer):
     motivo_exclusion = models.CharField(max_length=500, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "arr_seleccion_mensual"
         unique_together = [("arr_arrendador", "periodo")]

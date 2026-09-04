@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -22,7 +23,6 @@ class FacturaAgrupacion(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "factura_agrupacion"
         unique_together = [("codigo_sic_contrato",)]
 
@@ -34,7 +34,6 @@ class FacturaOrden(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "factura_orden"
         unique_together = [("nombre",)]
 
@@ -48,7 +47,6 @@ class FacturaEmitida(models.Model):
     emitida_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "factura_emitida"
         unique_together = [("nombre", "periodo")]
 
@@ -64,5 +62,4 @@ class ContratoFactura(Timer):
     enlace_soporte = models.CharField(max_length=1000, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "contrato_factura"

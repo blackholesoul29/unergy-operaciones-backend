@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -30,7 +31,6 @@ class RegistroConexion(Timer):
     notas = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_conexion"
 
 
@@ -45,7 +45,6 @@ class RegistroEtapa(models.Model):
     responsable_actual = models.CharField(max_length=30, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_etapa"
         unique_together = [("etapa", "registro")]
 
@@ -61,7 +60,6 @@ class RegistroTransicion(models.Model):
     evidencia_documento = models.ForeignKey("RegistroDocumento", on_delete=models.SET_NULL, db_column="evidencia_documento_id", null=True, blank=True, related_name="registro_transicion_por_evidencia_documento_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_transicion"
 
 
@@ -75,7 +73,6 @@ class RegistroHito(models.Model):
     evidencia_documento = models.ForeignKey("RegistroDocumento", on_delete=models.SET_NULL, db_column="evidencia_documento_id", null=True, blank=True, related_name="registro_hito_por_evidencia_documento_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_hito"
         unique_together = [("hito", "registro")]
 
@@ -104,7 +101,6 @@ class RegistroParametros93(models.Model):
     notas = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_parametros_93"
 
 
@@ -122,7 +118,6 @@ class RegistroEquipoFrontera(models.Model):
     fecha_vencimiento_calibracion = models.DateField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_equipo_frontera"
 
 
@@ -139,7 +134,6 @@ class RegistroDocumento(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_documento"
 
 
@@ -154,6 +148,5 @@ class RegistroAlerta(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "registro_alerta"
         unique_together = [("dedupe_key",)]

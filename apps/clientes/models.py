@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -31,7 +32,6 @@ class Cliente(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "clientes"
         unique_together = [("nit_cedula",)]
 
@@ -52,7 +52,6 @@ class ClienteDocumentoComercial(Timer):
     notas = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "cliente_documentos_comerciales"
 
 
@@ -67,7 +66,6 @@ class ClienteTasaServicio(Timer):
     reteica_pct = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "cliente_tasa_servicio"
         unique_together = [("cliente", "proyecto", "servicio")]
 
@@ -82,7 +80,6 @@ class Contacto(Timer):
     recibe_notificaciones = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "contactos"
         unique_together = [("cliente", "email", "tipo")]
 
@@ -94,6 +91,5 @@ class ProyectoAreaContacto(Timer):
     cliente = models.ForeignKey("Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", related_name="proyecto_area_contacto_por_cliente_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "proyecto_area_contacto"
         unique_together = [("proyecto", "tipo")]

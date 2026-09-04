@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -33,7 +34,6 @@ class Mandato(Timer):
     correo_ref_envio = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mandatos"
         unique_together = [("cmu", "periodo")]
 
@@ -44,7 +44,6 @@ class MandatoInversionista(Timer):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mandato_inversionistas"
 
 
@@ -63,7 +62,6 @@ class MandatoCorreo(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "mandato_correos"
         unique_together = [("message_id",)]
 
@@ -86,7 +84,6 @@ class FinanzasMandato(Timer):
     correo_ref = models.CharField(max_length=500, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "finanzas_mandatos"
         unique_together = [("periodo", "proyecto", "tercero", "tipo")]
 
@@ -116,7 +113,6 @@ class LiquidacionMandato(Timer):
     observaciones = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "liquidacion_mandatos"
 
 
@@ -133,5 +129,4 @@ class LiquidacionMandatoLinea(Timer):
     orden = models.IntegerField(default=0)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "liquidacion_mandato_lineas"

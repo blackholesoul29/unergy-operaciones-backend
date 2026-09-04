@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -22,7 +23,6 @@ class DespachoContratoDia(models.Model):
     kwh = models.DecimalField(max_digits=18, decimal_places=4, default=0)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "despacho_contrato_dia"
         unique_together = [("codigo_sic_contrato", "fecha", "periodo")]
 
@@ -42,7 +42,6 @@ class DespachoContratoMensual(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "despacho_contrato_mensual"
         unique_together = [("codigo_sic_contrato", "periodo")]
 
@@ -55,7 +54,6 @@ class PrecioBolsaMensual(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "precio_bolsa_mensual"
         unique_together = [("año", "mes")]
 
@@ -94,7 +92,6 @@ class AsicSolicitud(Timer):
     contrato_ppa = models.ForeignKey("ppa.PpaContrato", on_delete=models.DO_NOTHING, db_column="contrato_ppa_id", null=True, blank=True, related_name="asic_solicitudes_por_contrato_ppa_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "asic_solicitudes"
 
 
@@ -114,7 +111,6 @@ class AsicCambioContrato(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "asic_cambios_contratos"
 
 
@@ -125,7 +121,6 @@ class GesconDiccionarioContrato(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "gescon_diccionario_contratos"
         unique_together = [("codigo_contrato",)]
 
@@ -149,7 +144,6 @@ class CumplimientoMensual(Timer):
     liquidacion = models.ForeignKey("liquidaciones.Liquidacion", on_delete=models.SET_NULL, db_column="liquidacion_id", null=True, blank=True, related_name="cumplimiento_mensual_por_liquidacion_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "cumplimiento_mensual"
         unique_together = [("anio", "contrato_ppa", "mes")]
 
@@ -168,7 +162,6 @@ class ClasificacionEnergiaMensual(models.Model):
     calculado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "clasificacion_energia_mensual"
 
 
@@ -192,5 +185,4 @@ class RecProceso(Timer):
     observaciones_ente = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "rec_procesos"

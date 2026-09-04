@@ -3,10 +3,9 @@
 14 modulos importan este modelo hoy; es, junto con `proyectos`, lo primero que
 tiene que existir en Django para que cualquier otra rebanada se pueda portar.
 
-**`managed = False` en todos los modelos del proyecto.** Alembic sigue siendo el
-unico dueno del esquema mientras FastAPI siga leyendo estas tablas: dos
-frameworks emitiendo DDL sobre la misma base es como se pierde una columna un
-viernes. Ver `apps/README.md` para el momento en que se invierte.
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 
 Este archivo se mantiene A MANO: `Timer` y `Rol` no salen de ningun metadato y
 el generador los borraria. Por eso no lleva la marca "GENERADO por" — es lo que
@@ -60,7 +59,6 @@ class Usuario(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        managed = False
         db_table = "usuarios"
         verbose_name = "Usuario"
         verbose_name_plural = "Usuarios"
@@ -79,7 +77,6 @@ class Notificacion(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "notificaciones"
 
 
@@ -111,7 +108,6 @@ class InformeGuardado(models.Model):
     enviado_por_nombre = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "informes_guardados"
 
 
@@ -145,7 +141,6 @@ class ApiKey(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        managed = False
         db_table = "api_keys"
         verbose_name = "API Key"
         verbose_name_plural = "API Keys"

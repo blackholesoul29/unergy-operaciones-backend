@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -30,7 +31,6 @@ class Oportunidad(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "oportunidades"
 
 
@@ -44,7 +44,6 @@ class OportunidadEstadoHistorial(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "oportunidad_estado_historial"
 
 
@@ -59,7 +58,6 @@ class OportunidadGestion(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "oportunidad_gestiones"
 
 
@@ -92,7 +90,6 @@ class OportunidadOferta(Timer):
     notas = models.TextField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "oportunidad_ofertas"
 
 
@@ -102,5 +99,4 @@ class OportunidadOfertaProyecto(models.Model):
     pk = models.CompositePrimaryKey("oferta_id", "proyecto_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "oportunidad_oferta_proyectos"

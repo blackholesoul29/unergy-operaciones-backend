@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -38,7 +39,6 @@ class Liquidacion(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "liquidaciones"
         unique_together = [("periodo", "proyecto")]
 
@@ -54,7 +54,6 @@ class LiquidacionCosto(Timer):
     valor_cop = models.DecimalField(max_digits=18, decimal_places=2)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "liquidacion_costos"
 
 
@@ -72,5 +71,4 @@ class LiquidacionFactura(Timer):
     estado = models.CharField(max_length=7, choices=[("emitida", "emitida"), ("pagada", "pagada"), ("vencida", "vencida")], default="emitida")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "liquidacion_facturas"

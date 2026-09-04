@@ -5,8 +5,9 @@ SQLAlchemy. Es un BORRADOR: falta el verbose_name en español, los
 TextChoices de las columnas de estado y los docstrings que explican el
 modelo de datos. Revisar antes de portar la API del recurso.
 
-`managed = False` en todos: mientras FastAPI siga leyendo estas tablas,
-el único dueño del esquema es Alembic (ver apps/README.md).
+Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
+`managed` (el default): `makemigrations` genera DDL real y `migrate` lo aplica.
+Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
@@ -49,7 +50,6 @@ class PpaContrato(Timer):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ppa_contratos"
 
 
@@ -59,7 +59,6 @@ class PpaResponsable(Timer):
     incluir_en_cumplimiento = models.BooleanField(default=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ppa_responsables"
         unique_together = [("nombre",)]
 
@@ -72,7 +71,6 @@ class PpaTarifa(models.Model):
     tarifa = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ppa_tarifas"
         unique_together = [("año", "contrato", "mes")]
 
@@ -87,7 +85,6 @@ class PpaCompromisoEnergia(models.Model):
     cantidad_proyectos = models.IntegerField(null=True, blank=True, default=0)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ppa_compromisos_energia"
         unique_together = [("año", "contrato", "mes")]
 
@@ -100,7 +97,6 @@ class IppMensual(models.Model):
     updated_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ipp_mensual"
         unique_together = [("año", "mes")]
 
@@ -111,5 +107,4 @@ class PpaContratoProyecto(models.Model):
     pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
 
     class Meta:
-        managed = False        # el esquema lo posee Alembic
         db_table = "ppa_contrato_proyectos"

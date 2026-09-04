@@ -6,14 +6,22 @@ el servidor ya esta en el dia siguiente. `date.today()` en ese rango adelanta un
 dia todo lo que dependa de "hoy" (CLAUDE.md).
 
 Vive en `plataforma` porque no es de ningun dominio: es del reloj. Las copias de
-`garantias/services/calculo.py` y `energia/services/solenium_monitoreo.py` son
-anteriores a este modulo y deberian converger aca.
+`garantias/services/calculo.py` es anterior a este modulo y deberia converger
+aca. La de `energia/services/solenium_monitoreo.py` murio con ese archivo al
+migrar generacion solar a SolarView.
 """
 
 from datetime import date, datetime, timedelta, timezone
 
-_COL_TZ = timezone(timedelta(hours=-5))
+COL_TZ = timezone(timedelta(hours=-5))
+_COL_TZ = COL_TZ   # nombre anterior; se conserva porque ya hay quien lo importa
 
 
 def hoy_col() -> date:
-    return datetime.now(_COL_TZ).date()
+    return datetime.now(COL_TZ).date()
+
+
+def ahora_col() -> datetime:
+    """El instante actual CON zona. Para sellar un `resolved_at` o comparar
+    contra una columna `timestamptz`, donde la fecha sola no alcanza."""
+    return datetime.now(COL_TZ)

@@ -63,6 +63,14 @@ HORARIOS = {
         "schedule": crontab(hour=3, minute=35),
     },
 
+    # ── Monitoreo ────────────────────────────────────────────────────────────
+    # Cada 15 min, como el ciclo de MGS de siempre. `MGS_POLL_INTERVAL_MINUTES`
+    # dejo de leerse al pasar a Celery: la franja vive aca, no en el .env.
+    "sondeo-mgs": {
+        "task": "monitoreo.sondeo_mgs",
+        "schedule": crontab(minute="*/15"),
+    },
+
     # ── Comercial ────────────────────────────────────────────────────────────
     # Justo después del cambio de día, para que el tablero amanezca correcto.
     "comercial-cierres": {

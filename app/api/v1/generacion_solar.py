@@ -120,6 +120,15 @@ def _limite_hora_kwh(capacidad_kwp: float | None) -> float | None:
     return limite_plausible_kwh(float(capacidad_kwp) / 1000)
 
 
+def _es_hora_plausible(valor, limite: float | None) -> bool:
+    """Si esa hora de generacion es fisicamente posible para la planta."""
+    try:
+        val = float(valor)
+    except (TypeError, ValueError):
+        return False
+    return limite is None or abs(val) <= limite
+
+
 def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str,
                             capacidad_kwp: float | None = None) -> float:
     """Suma las entradas de HOY de un mapa generation_kwh de SolarView.
@@ -144,14 +153,10 @@ def _sum_today_inverter_kwh(gen_kwh_map: dict, today_str: str,
     for k, v in gen_kwh_map.items():
         if not str(k).startswith(today_str):
             continue
-        try:
-            val = float(v)
-        except (ValueError, TypeError):
+        if not _es_hora_plausible(v, limite):
+            logger.warning("hora descartada: %s = %r (techo %s)", k, v, limite)
             continue
-        if limite is not None and abs(val) > limite:
-            logger.warning("hora implausible descartada: %s = %.1f kWh (techo %.1f)", k, val, limite)
-            continue
-        total += val
+        total += float(v)
     return total
 
 
@@ -614,9 +619,18 @@ def project_monitoring_detail(
     # No se usa `total_generation_kwh` de la respuesta: viene con los picos
     # espurios adentro. Se recalcula sumando solo las horas plausibles.
     _gen_hoy_res = gen_hoy.get("results", gen_hoy) if isinstance(gen_hoy, dict) else {}
-    generation_today_kwh = _sum_today_inverter_kwh(
-        (_gen_hoy_res or {}).get("generation_kwh") or {}, hoy, p.potencia_instalada_kwp,
-    ) or None
+    _gen_map = (_gen_hoy_res or {}).get("generation_kwh") or {}
+    generation_today_kwh = _sum_today_inverter_kwh(_gen_map, hoy, p.potencia_instalada_kwp) or None
+
+    # Hasta que hora cubre ese total, para poder decirlo igual que el medidor:
+    # son horas sumadas, no una lectura del ultimo instante. Solo se miran las
+    # horas que sobrevivieron el filtro de plausibilidad.
+    _limite = _limite_hora_kwh(p.potencia_instalada_kwp)
+    _horas_ok = [
+        k for k, v in _gen_map.items()
+        if str(k).startswith(hoy) and _es_hora_plausible(v, _limite)
+    ]
+    generation_today_hasta = max(_horas_ok)[11:16] if _horas_ok else None
 
     med_p = med_p_f.result() if med_p_f else None
     med_r = med_r_f.result() if med_r_f else None
@@ -699,6 +713,7 @@ def project_monitoring_detail(
         "inverters":              processed_inverters,
         "power_curve":            power_curve,
         "generation_today_kwh":   round(generation_today_kwh, 1) if generation_today_kwh is not None else None,
+        "generation_today_hasta": generation_today_hasta,
         "generation_30d":         generation_30d,
         "total_30d_kwh":          round(sum(d["kwh"] for d in generation_30d), 1),
         "has_strings":            has_strings,

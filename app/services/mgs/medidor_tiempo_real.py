@@ -3,8 +3,7 @@
 Se piden dos variables al nodo, por el mismo método que usa el pipeline del
 ASIC (`GaiaClient.get_node_measurements`):
 
-  · `ap`  -- potencia activa. Es la curva del día y, su última lectura, la
-             potencia de ahora.
+  · `ap`  -- potencia activa. Es la curva del día.
   · `eae` -- energía activa exportada. Sumada, es el total del día.
 
 Reemplaza a `GaiaClient.get_node_electrical_snapshot()` en este uso, que pedía
@@ -97,12 +96,21 @@ def snapshot_medidor(
 
     return {
         "node_id": node_id,
-        "potencia_kw": curva[-1]["kw"] if curva else None,
-        "ultima_lectura": curva[-1]["time"] if curva else None,
         "energia_kwh": round(energia, 3) if energia is not None else None,
         "energia_hasta": energia_hasta,
         "curva": curva,
     }
+
+
+def _tiene_dato(snap: dict) -> bool:
+    """Reporto algo, por cualquiera de las dos vias.
+
+    Las dos variables se caen por separado: un medidor puede tener la
+    telemetria de potencia muerta y el contador de energia sano. Mirar solo la
+    curva descartaria un medidor que si trae el acumulado -- que es justamente
+    el numero principal de la tarjeta.
+    """
+    return bool(snap.get("curva")) or snap.get("energia_kwh") is not None
 
 
 def elegir_medidor(principal: dict | None, respaldo: dict | None) -> tuple[dict | None, str | None]:
@@ -118,9 +126,9 @@ def elegir_medidor(principal: dict | None, respaldo: dict | None) -> tuple[dict 
     hueco de telemetría acumula horas sin reportar en un pico artificial y el
     medidor inflado gana siempre (Chiriguaná Norte 1).
     """
-    if principal and principal["curva"]:
+    if principal and _tiene_dato(principal):
         return principal, "principal"
-    if respaldo and respaldo["curva"]:
+    if respaldo and _tiene_dato(respaldo):
         return respaldo, "respaldo"
     if principal:
         return principal, "principal"

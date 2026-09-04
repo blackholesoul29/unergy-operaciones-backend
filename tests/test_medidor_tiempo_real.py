@@ -47,8 +47,7 @@ def test_la_potencia_de_ahora_es_la_ultima_lectura_real():
     gaia = _GaiaFake(ap=[_ap("09:00:00", 300), _ap("10:00:00", 500), _ap("11:00:00", 846.2)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03")
 
-    assert s["potencia_kw"] == pytest.approx(846.2)
-    assert s["ultima_lectura"] == "2026-09-03T11:00:00-05:00", "sirve para mostrar la frescura"
+    assert [p["kw"] for p in s["curva"]] == pytest.approx([300, 500, 846.2])
 
 
 def test_no_se_filtran_las_filas_recovered():
@@ -66,7 +65,7 @@ def test_corrige_el_signo_de_medidores_con_polaridad_invertida():
     gaia = _GaiaFake(ap=[_ap("09:45:00", -721.7)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03")
 
-    assert s["potencia_kw"] == pytest.approx(721.7)
+    assert s["curva"][0]["kw"] == pytest.approx(721.7)
 
 
 def test_detecta_vatios_comparando_contra_la_capacidad_instalada():
@@ -74,14 +73,14 @@ def test_detecta_vatios_comparando_contra_la_capacidad_instalada():
     gaia = _GaiaFake(ap=[_ap("10:00:00", 846_200)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03", capacidad_efectiva_mw=1.0)
 
-    assert s["potencia_kw"] == pytest.approx(846.2)
+    assert s["curva"][0]["kw"] == pytest.approx(846.2)
 
 
 def test_no_divide_cuando_los_valores_ya_estan_en_kilovatios():
     gaia = _GaiaFake(ap=[_ap("10:00:00", 846.2)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03", capacidad_efectiva_mw=1.0)
 
-    assert s["potencia_kw"] == pytest.approx(846.2)
+    assert s["curva"][0]["kw"] == pytest.approx(846.2)
 
 
 def test_una_planta_de_mas_de_5_mw_no_se_divide_por_error():
@@ -91,7 +90,7 @@ def test_una_planta_de_mas_de_5_mw_no_se_divide_por_error():
     gaia = _GaiaFake(ap=[_ap("12:00:00", 7_400)])
     s = snapshot_medidor(gaia, 1731, "2026-09-03", capacidad_efectiva_mw=8.0)
 
-    assert s["potencia_kw"] == pytest.approx(7_400), "7.400 kW es plausible para 8 MW"
+    assert s["curva"][0]["kw"] == pytest.approx(7_400), "7.400 kW es plausible para 8 MW"
 
 
 def test_la_energia_del_dia_sale_del_contador_no_de_integrar_la_curva():
@@ -123,7 +122,7 @@ def test_sin_nodo_devuelve_none_pero_sin_dato_devuelve_estructura():
 
     s = snapshot_medidor(_GaiaFake(), 1731, "2026-09-03")
     assert s is not None
-    assert s["curva"] == [] and s["potencia_kw"] is None
+    assert s["curva"] == []
 
 
 def test_elige_el_principal_cuando_tiene_dato():
@@ -173,9 +172,20 @@ def test_expone_hasta_cuando_cubre_el_acumulado():
 
     assert s["energia_kwh"] == pytest.approx(5995.0)
     assert s["energia_hasta"] == "2026-09-03T15:00:00-05:00"
-    assert s["ultima_lectura"] == "2026-09-03T15:37:00-05:00", "la potencia si es del ultimo instante"
 
 
 def test_sin_lecturas_del_contador_no_hay_hora_del_acumulado():
     s = snapshot_medidor(_GaiaFake(ap=[_ap("10:00:00", 500)]), 1731, "2026-09-03")
     assert s["energia_kwh"] is None and s["energia_hasta"] is None
+
+
+def test_el_principal_gana_aunque_solo_traiga_el_contador():
+    """Las dos variables se caen por separado: si `ap` esta muerto pero `eae`
+    reporto, ese medidor si tiene el numero principal de la tarjeta y no hay
+    que descartarlo."""
+    principal = {"curva": [], "energia_kwh": 5968.3}
+    respaldo = {"curva": [{"time": "t", "kw": 1.0}], "energia_kwh": 12.0}
+
+    _, tipo = elegir_medidor(principal, respaldo)
+
+    assert tipo == "principal"

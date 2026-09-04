@@ -107,6 +107,23 @@ HORARIOS = {
         "schedule": crontab(hour=8, minute=15),
     },
 
+    # ── Mandatos ─────────────────────────────────────────────────────────────
+    # Cada hora de 7am a 7pm: la revisoria y los envios a inversionistas van en
+    # horario laboral. Sin correos nuevos es solo un IMAP SEARCH.
+    "correos-mandatos": {
+        "task": "mandatos.revisar_correos",
+        "schedule": crontab(hour="7-19", minute=5),
+    },
+
+    # ── Anual ────────────────────────────────────────────────────────────────
+    # 1 de enero. El DANE publica el IPC a principios de enero, asi que esto no
+    # trae el numero: deja la fila abierta para que el anio aparezca esperando el
+    # dato en vez de faltar en silencio.
+    "om-ipc-del-anio": {
+        "task": "om.revisar_ipc_del_anio",
+        "schedule": crontab(month_of_year=1, day_of_month=1, hour=9, minute=0),
+    },
+
     # ── Comercial ────────────────────────────────────────────────────────────
     # Justo después del cambio de día, para que el tablero amanezca correcto.
     "comercial-cierres": {

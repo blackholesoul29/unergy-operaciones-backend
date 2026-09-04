@@ -240,8 +240,8 @@ class MandatoViewSet(viewsets.GenericViewSet):
         del que sale el botón de revertir. Pide fecha explícita en vez de un
         `todo=true` para que sea imposible vaciar la tabla por descuido.
         """
-        from app.services.mandatos.finanzas_sync import (
-            ingesta_en_curso, revisar_correos_finanzas_async,
+        from apps.mandatos.services.correo_sync import (
+            ingesta_en_curso, revisar_correos_async,
         )
 
         if ingesta_en_curso():
@@ -277,7 +277,7 @@ class MandatoViewSet(viewsets.GenericViewSet):
         # sigue corriendo.
         def corriendo():
             try:
-                revisar_correos_finanzas_async(int(dias))
+                revisar_correos_async(int(dias))
             finally:
                 close_old_connections()
 

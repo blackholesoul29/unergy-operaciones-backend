@@ -34,7 +34,13 @@ class _Config:
     """
 
     def __getattr__(self, nombre: str) -> str:
-        return os.environ.get(nombre, "")
+        # Delegado en `apps.comun.config`, que es donde viven los defaults que
+        # traía pydantic y que el `.env` nunca necesitó declarar. Leer
+        # `os.environ` a secas devolvía "" para `UNERGY_API_URL` y armaba una
+        # URL relativa contra la que ninguna petición podía salir.
+        from apps.comun.config import settings as compartido
+
+        return getattr(compartido, nombre)
 
 
 settings = _Config()

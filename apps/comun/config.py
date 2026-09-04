@@ -9,6 +9,14 @@ No es `django.conf.settings` a propósito: son credenciales de terceros que solo
 usan dos o tres módulos, y meterlas en `config/settings.py` obliga a declarar
 cada variable nueva en dos sitios.
 
+**Los defaults de abajo NO son decoración.** `app/core/config.py` los declaraba
+como valores por defecto de pydantic, así que el `.env` nunca necesitó traerlos
+y de hecho no los trae. Un shim que devolviera `""` para todo dejaba, por
+ejemplo, `UNERGY_API_URL` vacío en producción: las diez llamadas que arman su
+URL con ese prefijo pedirían contra una ruta relativa y fallarían sin que el
+`.env` tuviera nada raro a la vista. Cada entrada acá es un default que existía
+en FastAPI y que este objeto tiene que seguir dando.
+
 `apps/liquidaciones/services/api_externa.py` y
 `apps/energia/services/unergy_api.py` tienen su propia copia de esto, anterior a
 este módulo; deberían converger acá.
@@ -16,10 +24,38 @@ este módulo; deberían converger acá.
 
 import os
 
+# Los valores por defecto que traía `Settings` de pydantic. Solo los que NO son
+# la cadena vacía: para el resto, ausente y vacío significan lo mismo.
+DEFECTOS = {
+    "UNERGY_API_URL": "https://api.unergy.io",
+    "FRONTEND_URL": "http://localhost:5173",
+    "COMERCIAL_ALERTA_DIAS": "5",
+    "IMAP_HOST": "imap.gmail.com",
+    "IMAP_PORT": "993",
+    "SMTP_PORT": "587",
+    "SMTP_FROM": "operaciones@unergy.io",
+    "TIMEZONE": "America/Bogota",
+    "PPA_ALERT_DAYS": "90,60,30",
+    "PPA_ALERT_EMAILS": "adhara@unergy.io,jessica@unergy.io",
+    "SUNFACTORY_API_URL": "https://sunfactory.solenium.co/api",
+    "SUNFACTORY_AUTH_URL": "https://auth.solenium.co/api/token/",
+    "SOLENIUM_AUTH_URL": "https://auth.solenium.co/api",
+    "SOLENIUM_DATA_URL": "https://data.solenium.co/api",
+    "SOLARVIEW_BASE_URL": "https://api.sole.tech",
+    "QUOIA_BASE_URL": "https://gaia.quoia.energy/api",
+    "GAIA_BASE_URL": "https://gaia.quoia.energy",
+    "STORAGE_BACKEND": "local",
+    "STORAGE_LOCAL_PATH": "./uploads",
+    "APP_NAME": "Plataforma Operaciones Unergy",
+}
+
 
 class _Entorno:
     def __getattr__(self, nombre: str) -> str:
-        return os.environ.get(nombre, "")
+        # El entorno manda; el default solo cubre la ausencia. Una variable
+        # puesta a propósito en vacío sigue siendo vacío.
+        valor = os.environ.get(nombre)
+        return valor if valor is not None else DEFECTOS.get(nombre, "")
 
 
 settings = _Entorno()

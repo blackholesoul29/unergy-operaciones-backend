@@ -32,7 +32,12 @@ _token: dict = {"valor": "", "expira": 0.0}
 
 
 def _env(nombre: str) -> str:
-    return os.environ.get(nombre, "")
+    """Del shim compartido, no de `os.environ` a secas: ahí viven los defaults
+    que traía pydantic y que el `.env` nunca necesitó declarar (`UNERGY_API_URL`
+    entre ellos). Leerlo directo devolvía "" y armaba una URL relativa."""
+    from apps.comun.config import settings
+
+    return getattr(settings, nombre)
 
 
 def token() -> str:

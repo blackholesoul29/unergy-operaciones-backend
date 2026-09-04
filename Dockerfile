@@ -30,5 +30,11 @@ COPY . .
 
 EXPOSE 8000
 
-# Las migraciones (init_db.py + alembic) las corre el `command` del docker-compose.yml.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Las migraciones las corre el servicio `migrate` del docker-compose.yml, no
+# esto. El CMD es solo el default para `docker run` suelto: en el compose cada
+# servicio (web, worker, beat) trae su propio `command`.
+#
+# `config.wsgi` y no `app.main`: Django reemplazo a FastAPI el 2026-09-04. El
+# paquete `app/` sigue en la imagen porque `apps/` le importa clientes puros
+# (MGS, SMTP, los parsers de correo de mandatos), pero ya no se sirve.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]

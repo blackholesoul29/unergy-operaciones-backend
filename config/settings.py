@@ -156,3 +156,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# Los cron de las tareas estan en hora de Bogota, no en la del contenedor (UTC),
+# igual que en el BackgroundScheduler de FastAPI. Sin esto la clasificacion de
+# las 3:30am correria a las 10:30pm del dia anterior.
+CELERY_TIMEZONE = os.getenv("TIMEZONE", "America/Bogota")
+CELERY_ENABLE_UTC = False
+
+from config.horarios import HORARIOS  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = HORARIOS

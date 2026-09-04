@@ -33,8 +33,8 @@ class OmSeleccionMensual(Timer):
     periodo = models.CharField(max_length=7, db_index=True)
     incluido = models.BooleanField(default=True)
     facturado = models.BooleanField(default=False)
-    valor_manual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    valor_facturado_congelado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    valor_manual = models.DecimalField(max_digits=14, decimal_places=0, null=True, blank=True)  # numeric(14,0): pesos sin centavos
+    valor_facturado_congelado = models.DecimalField(max_digits=14, decimal_places=0, null=True, blank=True)  # numeric(14,0)
     motivo_exclusion = models.CharField(max_length=500, null=True, blank=True)
 
     class Meta:

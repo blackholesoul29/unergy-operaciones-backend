@@ -21,10 +21,15 @@ Uso:
     python scripts/verificar_esquema_django.py            # falla si falta algo
     python scripts/verificar_esquema_django.py --extra    # ademas, lo que sobra
 
-Comprueba dos cosas distintas: que exista en la base todo lo que el modelo
-declara, y que el modelo declare un `default=` por cada columna NOT NULL que la
-base rellena sola (ver `_sin_default` -- Django manda TODAS las columnas en un
-INSERT, así que el DEFAULT de la base nunca llega a aplicarse).
+Comprueba tres cosas distintas:
+
+1. Que exista en la base todo lo que el modelo declara.
+2. Que el modelo declare un `default=` por cada columna NOT NULL que la base
+   rellena sola (ver `_sin_default`): Django manda TODAS las columnas en un
+   INSERT, así que el DEFAULT de la base nunca llega a aplicarse.
+3. Que el TIPO declarado coincida con el real -- nullability, `max_length`,
+   precision decimal (ver `_forma_divergente`). Es lo que decide qué DDL emite
+   Django la próxima vez que alguien toque ese campo.
 
 `--extra` lista las columnas que la base tiene y el modelo no declara. No es un
 error -- Django ignora una columna que no conoce, y con `null=True` o un default
@@ -50,6 +55,68 @@ from django.db import connection  # noqa: E402
 # La isla de Django: sus tablas las crea `manage.py migrate`, no Alembic, asi
 # que aca no se revisan. Es la misma lista de `tests/test_frontera_esquema.py`.
 APPS_DE_LA_ISLA = {"contenttypes", "django_celery_beat"}
+
+
+def _forma_de_la_base() -> dict[str, dict[str, tuple]]:
+    """`{tabla: {columna: (acepta_null, max_length, precision, escala)}}`.
+
+    Es la forma REAL de cada columna, contra la que se compara lo que el modelo
+    dice de ella.
+    """
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name, is_nullable, character_maximum_length, "
+            "numeric_precision, numeric_scale FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+        salida: dict[str, dict[str, tuple]] = {}
+        for tabla, col, nulo, largo, precision, escala in cur.fetchall():
+            salida.setdefault(tabla, {})[col] = (nulo == "YES", largo, precision, escala)
+    return salida
+
+
+def _forma_divergente(modelo, forma: dict[str, tuple]) -> list[str]:
+    """Campos cuyo tipo declarado NO coincide con la columna real.
+
+    **Este es el riesgo de haber adoptado el esquema con `--fake-initial`.** El
+    autodetector de Django compara el estado de las migraciones contra los
+    modelos; nunca mira la base. Así que cuando alguien edita un campo, el ALTER
+    se calcula desde lo que Django CREE que es la columna hoy.
+
+    Si esa creencia está mal, el ALTER hace algo distinto de lo que uno lee. El
+    caso real: `informes_guardados.tipo` es `varchar(20)` en la base y el
+    generador declaró `max_length=7` (dedujo el largo del valor más largo del
+    enum). Cambiar ese campo a 10 habría emitido `TYPE varchar(10)` y ENCOGIDO
+    una columna de 20 sin que nadie lo pidiera. Se encontraron 7 así el
+    2026-09-04, todos alineados hacia lo que dice la base.
+    """
+    problemas = []
+    for campo in modelo._meta.local_fields:
+        real = forma.get(campo.column)
+        if not real:
+            continue
+        acepta_null, largo, precision, escala = real
+        tabla = modelo._meta.db_table
+
+        if campo.null != acepta_null and not campo.primary_key:
+            problemas.append(
+                f"{tabla}.{campo.column}: el modelo dice null={campo.null} y la "
+                f"base null={acepta_null}"
+            )
+        maximo = getattr(campo, "max_length", None)
+        if maximo and largo and maximo != largo:
+            problemas.append(
+                f"{tabla}.{campo.column}: el modelo dice varchar({maximo}) y la "
+                f"base es varchar({largo})"
+            )
+        digitos = getattr(campo, "max_digits", None)
+        decimales = getattr(campo, "decimal_places", None)
+        if digitos and precision and (digitos != precision or decimales != escala):
+            problemas.append(
+                f"{tabla}.{campo.column}: el modelo dice numeric({digitos},{decimales}) "
+                f"y la base es numeric({precision},{escala})"
+            )
+    return problemas
 
 
 def _columnas_de_la_base() -> dict[str, set[str]]:
@@ -131,6 +198,7 @@ def revisar() -> tuple[list[str], list[str], int]:
     """`(faltantes, sobrantes, modelos revisados)`."""
     en_db = _columnas_de_la_base()
     defaults = _defaults_de_la_base()
+    formas = _forma_de_la_base()
     faltan: list[str] = []
     sobran: list[str] = []
     revisados = 0
@@ -147,6 +215,7 @@ def revisar() -> tuple[list[str], list[str], int]:
         for columna in sorted(declaradas - en_db[tabla]):
             faltan.append(f"{tabla}.{columna}: la columna no existe")
         faltan.extend(_sin_default(modelo, defaults.get(tabla, {})))
+        faltan.extend(_forma_divergente(modelo, formas.get(tabla, {})))
         for columna in sorted(en_db[tabla] - declaradas):
             sobran.append(f"{tabla}.{columna}")
 

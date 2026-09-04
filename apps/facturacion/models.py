@@ -17,7 +17,7 @@ from apps.plataforma.models import Timer
 
 class FacturaAgrupacion(models.Model):
     id = models.BigAutoField(primary_key=True)
-    codigo_sic_contrato = models.CharField(max_length=40)
+    codigo_sic_contrato = models.CharField(max_length=40, null=True, blank=True)  # la base la acepta nula
     nombre = models.CharField(max_length=120)
     porcentaje = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     updated_at = models.DateTimeField(default=timezone.now)

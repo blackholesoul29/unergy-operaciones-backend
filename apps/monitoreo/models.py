@@ -134,7 +134,7 @@ class FallaIntervalo(models.Model):
     inicio = models.DateTimeField()
     fin = models.DateTimeField(null=True, blank=True)
     nota = models.TextField(null=True, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(default=timezone.now, null=True, blank=True)  # la base la acepta nula
 
     class Meta:
         db_table = "fallas_intervalos"

@@ -158,7 +158,7 @@ class ProyectoPendienteIgnorado(models.Model):
 class GestionRegistro(Timer):
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.CASCADE, db_column="proyecto_id", related_name="gestion_registros_por_proyecto_id")
-    tipo = models.CharField(max_length=10, choices=[("pqr", "pqr"), ("preventivo", "preventivo"), ("correctivo", "correctivo")])
+    tipo = models.CharField(max_length=50, choices=[("pqr", "pqr"), ("preventivo", "preventivo"), ("correctivo", "correctivo")])  # la columna es varchar(50)
     titulo = models.CharField(max_length=500)
     descripcion = models.TextField(null=True, blank=True)
     created_by = models.CharField(max_length=255, null=True, blank=True)

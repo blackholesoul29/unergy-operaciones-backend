@@ -82,7 +82,7 @@ class Notificacion(models.Model):
 
 class InformeGuardado(models.Model):
     id = models.BigAutoField(primary_key=True)
-    tipo = models.CharField(max_length=7, choices=[("op", "op"), ("fmo", "fmo"), ("port", "port"), ("ranking", "ranking"), ("pm", "pm")])
+    tipo = models.CharField(max_length=20, choices=[("op", "op"), ("fmo", "fmo"), ("port", "port"), ("ranking", "ranking"), ("pm", "pm")])  # la columna es varchar(20)
     sub_project = models.CharField(max_length=200)
     periodo_desde = models.CharField(max_length=10)
     periodo_hasta = models.CharField(max_length=10)
@@ -90,7 +90,7 @@ class InformeGuardado(models.Model):
     proyecto_nombre = models.CharField(max_length=300, null=True, blank=True)
     html_content = models.TextField()
     charts_data = models.JSONField(null=True, blank=True)
-    estado = models.CharField(max_length=8, choices=[("borrador", "borrador"), ("revisado", "revisado"), ("aprobado", "aprobado")])
+    estado = models.CharField(max_length=20, choices=[("borrador", "borrador"), ("revisado", "revisado"), ("aprobado", "aprobado")])  # la columna es varchar(20)
     creado_por = models.ForeignKey("Usuario", on_delete=models.SET_NULL, db_column="creado_por_id", null=True, blank=True, related_name="informes_guardados_por_creado_por_id")
     editado_por = models.ForeignKey("Usuario", on_delete=models.SET_NULL, db_column="editado_por_id", null=True, blank=True, related_name="informes_guardados_por_editado_por_id")
     aprobado_por = models.ForeignKey("Usuario", on_delete=models.SET_NULL, db_column="aprobado_por_id", null=True, blank=True, related_name="informes_guardados_por_aprobado_por_id")

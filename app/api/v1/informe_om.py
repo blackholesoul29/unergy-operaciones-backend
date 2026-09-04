@@ -15,6 +15,7 @@ from app.schemas.informe_om import (
     InformeOMListItem, InformeOMProyecto,
 )
 from app.services.drive_evidencia import eliminar_archivo, subir_archivo
+from app.services.mgs.medidor_tiempo_real import divisor_a_kw
 from app.services.mgs.gaia_client import (
     GaiaClient, build_db_proyecto_frt_map, find_gaia_node_pair,
 )
@@ -196,14 +197,36 @@ def _frontera_live(p: Proyecto, db: Session) -> dict:
             return None
         if not s:
             return None
-        eae_wh = s.get("eae_wh")
+        # La clave se llama `eae_wh` pero CONTIENE kWh: quien la produce la deja
+        # ya normalizada (gaia_client.py, "Cumulative energy today [kWh] --
+        # unit-normalized", con la variable llamada _eae_kwh). Aca se dividia
+        # entre 1000 creyendo el nombre, asi que un dia de 5.995 kWh se
+        # reportaba como 6,0 (2026-09-03).
+        energia_kwh = s.get("eae_wh")
+
+        # `ap_total` SI viene crudo: gaia_client lo suma tal cual de la API
+        # ("Active power [W]") y solo normaliza la unidad en su serie temporal,
+        # no en este escalar. Los nodos no coinciden entre si -- unos entregan
+        # vatios y otros kilovatios -- asi que exponerlo directo como
+        # `potencia_activa_kw` estaba 1000x alto en la mitad de los medidores.
+        ap_total = s.get("ap_total")
+        potencia_kw = None
+        if ap_total is not None:
+            try:
+                bruto = float(ap_total)
+                potencia_kw = round(
+                    bruto / divisor_a_kw(abs(bruto), float(p.potencia_instalada_kwp or 0) or None), 2
+                )
+            except (TypeError, ValueError):
+                potencia_kw = None
+
         return {
             "voltaje_v": [s.get("vp1"), s.get("vp2"), s.get("vp3")],
             "corriente_a": [s.get("cp1"), s.get("cp2"), s.get("cp3")],
-            "potencia_activa_kw": s.get("ap_total"),
+            "potencia_activa_kw": potencia_kw,
             "potencia_reactiva_kvar": s.get("rp_total"),
             "factor_potencia": s.get("pf_avg"),
-            "energia_exportada_hoy_kwh": round(eae_wh / 1000, 2) if eae_wh is not None else None,
+            "energia_exportada_hoy_kwh": round(energia_kwh, 2) if energia_kwh is not None else None,
             "ultima_actualizacion": s.get("last_time"),
         }
 

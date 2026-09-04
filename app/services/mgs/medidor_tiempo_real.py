@@ -64,6 +64,24 @@ def _suma(fila: dict, fases: tuple[str, ...]) -> float:
     return sum(float(fila.get(f) or 0) for f in fases)
 
 
+def divisor_a_kw(maximo: float, capacidad_kwp: float | None) -> float:
+    """1000 si las lecturas vienen en vatios, 1 si ya vienen en kilovatios.
+
+    Quoia no declara la unidad de la potencia activa y los nodos no coinciden
+    entre si: verificado el 2026-09-03, los nodos 603 y 883 rondaban 1.050.000
+    (vatios) mientras 1731 marcaba 726,6 (kilovatios). Se deduce comparando
+    contra la capacidad instalada, que es un dato propio y confiable -- un
+    medidor no entrega 10x lo que su planta puede producir.
+
+    Publica a proposito: es el unico lugar donde vive este criterio. Antes
+    estaba escrito tambien en gaia_client (heuristica de "si pasa de 5000 es
+    W", que divide por error una planta de mas de 5 MW) y faltaba por completo
+    en informe_om, que exponia ap_total crudo como si fuera kW.
+    """
+    techo = capacidad_kwp * _FACTOR_VATIOS if capacidad_kwp else _TECHO_KW_SIN_CAPACIDAD
+    return 1000.0 if maximo > techo else 1.0
+
+
 def snapshot_medidor(
     gaia,
     node_id: int | None,
@@ -82,9 +100,10 @@ def snapshot_medidor(
     filas_eae = gaia.get_node_measurements(node_id, fecha_str, "eae") or []
 
     crudos = [(f["time"], abs(_suma(f, _FASES_AP))) for f in filas_ap if f.get("time")]
-    techo = (capacidad_efectiva_mw * 1000 * _FACTOR_VATIOS
-             if capacidad_efectiva_mw else _TECHO_KW_SIN_CAPACIDAD)
-    divisor = 1000.0 if max((kw for _, kw in crudos), default=0.0) > techo else 1.0
+    divisor = divisor_a_kw(
+        max((kw for _, kw in crudos), default=0.0),
+        (capacidad_efectiva_mw * 1000) if capacidad_efectiva_mw else None,
+    )
 
     curva = sorted(
         ({"time": t, "kw": round(kw / divisor, 3)} for t, kw in crudos),

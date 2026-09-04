@@ -59,6 +59,23 @@ def _usuario_activo(usuario) -> UsuarioAutenticado:
 class ApiKeyAuthentication(authentication.BaseAuthentication):
     """Cabecera `X-API-Key`. La clave viaja en claro y se compara por su hash."""
 
+    def authenticate_header(self, request):
+        """Devolver algo acá es lo que hace que un no autenticado sea 401.
+
+        DRF degrada `NotAuthenticated` a **403** cuando el PRIMER autenticador de
+        la vista no ofrece cabecera `WWW-Authenticate` (ver
+        `APIView.handle_exception`). FastAPI devuelve 401, y el frontend
+        distingue los dos: con 403 mostraría "no tienes permiso" en vez de
+        mandar a iniciar sesión. Verificado contra los dos backends el
+        2026-09-04; `tests/test_codigos_de_auth.py` lo vigila.
+
+        Se declara acá y no en `JWTAuthentication` porque el orden de
+        `DEFAULT_AUTHENTICATION_CLASSES` pone esta primera, y DRF solo mira la
+        primera. `Bearer` y no `Basic`: `Basic` haría que el navegador abra su
+        propio diálogo de usuario y contraseña.
+        """
+        return "Bearer"
+
     def authenticate(self, request):
         clave = request.headers.get("X-API-Key")
         if not clave:
@@ -81,6 +98,12 @@ class ApiKeyAuthentication(authentication.BaseAuthentication):
 
 class JWTAuthentication(authentication.BaseAuthentication):
     keyword = "Bearer"
+
+    def authenticate_header(self, request):
+        # Ver el docstring de ApiKeyAuthentication.authenticate_header: DRF solo
+        # consulta el primero de la lista, pero declararlo en los dos evita que
+        # reordenarlos convierta todos los 401 en 403 sin que nadie lo note.
+        return self.keyword
 
     def authenticate(self, request):
         cabecera = authentication.get_authorization_header(request).split()

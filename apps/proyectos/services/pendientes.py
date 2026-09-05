@@ -25,6 +25,14 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from apps.fronteras.models import Frontera
+
+# Sun Factory usa este listado para el propio edificio de Solenium y para
+# proyectos ya dados de baja -- nunca son candidatos reales. Vienen de
+# app/services/proyectos_pendientes.py (lineas 44-45); el port conservo el
+# filtro que las usa pero no las constantes, asi que listar pendientes
+# moria con NameError.
+_EXCLUIR_NOMBRES = ("solenium piso",)
+_EXCLUIR_PREFIJOS = ("deprecated",)
 from apps.proyectos.models import Proyecto, ProyectoPendienteIgnorado
 from apps.proyectos.services.tsf_sync import (
     _SF_IMPORT_STATES, _STATUS_TO_FASE, _core, _derive_commercial_name,

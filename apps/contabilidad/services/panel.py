@@ -41,7 +41,7 @@ from apps.contabilidad.services.er_loader import (
 )
 from apps.contabilidad.services.desde_api import construir_parsed
 from apps.contabilidad.services.reparto import (
-    _construir_lineas_base, _inversionistas_de,
+    _construir_lineas_base, _inversionistas_de, _inversionistas_de_batch,
 )
 from apps.clientes.models import Cliente
 from apps.contabilidad.services.impuestos import (

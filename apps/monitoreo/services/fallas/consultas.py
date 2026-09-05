@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from django.db.models import Count, Q
+from django.db.models import Count, Q, QuerySet
 
 from apps.monitoreo.models import (
     Falla, FallaCatEstado, FallaSeguimiento,
@@ -180,7 +180,7 @@ def actividad_hoy() -> tuple[str, list[Falla], list[dict], dict[int, Falla]]:
     return hoy_str, creadas, cambios, fallas_map
 
 
-def filtrar(params) -> "django.db.models.QuerySet":
+def filtrar(params) -> QuerySet:
     """Aplica los filtros de `GET /fallas` sobre el listado base."""
     qs = base_lista()
 

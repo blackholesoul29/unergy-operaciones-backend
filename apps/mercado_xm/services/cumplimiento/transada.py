@@ -24,6 +24,7 @@ from apps.energia.services.comercializacion import identificador_monitoreo as _m
 from apps.plataforma.services.fechas import hoy_col
 
 from .consultas import _contratos_vigentes, _resolve_gescon
+from .periodos import _gen_vigencia_mwh, _vigencia_window
 from .piscinas import _plantas_del_mes
 from .xm_api import _fetch_month, _fetch_range, _unergy_token
 

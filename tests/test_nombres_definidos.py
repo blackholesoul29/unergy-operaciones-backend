@@ -21,11 +21,11 @@ encuentra sin importar el modulo, sin base de datos y sin red.
 proyecto no tiene `pytest-django`, asi que la capa Django no tiene ni un test
 que la ejecute. Este archivo es la red que si corre en cada `pytest`.
 
-El BASELINE de abajo es deuda conocida, no una excepcion permanente: son
-modulos que ya estaban rotos antes de este test y que nadie ha reportado
-todavia. Cada uno es un `NameError` esperando a que alguien abra esa vista. La
-lista solo puede ENCOGER -- si un modulo aparece con mas nombres rotos de los
-que declara, o aparece uno nuevo, el test falla.
+El BASELINE de abajo esta VACIO: los 26 casos que quedaban en otros dominios
+(cumplimiento, contabilidad, proyectos) se arreglaron el mismo dia. Existe
+como mecanismo por si alguna vez hace falta declarar deuda a proposito, pero
+cada entrada seria un `NameError` en produccion esperando a que alguien abra
+esa vista, asi que lo normal es que siga vacio.
 """
 import subprocess
 import sys
@@ -39,19 +39,15 @@ PAQUETES = ["apps", "api", "config"]
 
 # Modulo -> cuantos nombres indefinidos tiene hoy. Al arreglar uno, BAJAR el
 # numero (o borrar la linea): el test exige que no suba.
-BASELINE = {
-    # Ninguno de estos lo ha reportado nadie todavia. Cada linea es una vista
-    # que responde 500 --o una tarea que muere-- en cuanto alguien la use.
-    "apps/mercado_xm/services/cumplimiento/simulador.py": 12,
-    "apps/mercado_xm/services/cumplimiento/cierre.py": 6,
-    "apps/mercado_xm/services/cumplimiento/transada.py": 2,
-    "apps/mercado_xm/services/cumplimiento/panel.py": 2,
-    "apps/proyectos/services/pendientes.py": 2,
-    "apps/contabilidad/services/panel.py": 1,
-    # Anotacion de tipo en texto (`-> "django.db.models.QuerySet"`): nunca se
-    # evalua en tiempo de ejecucion, asi que no rompe nada. Se deja declarada
-    # para que el conteo cuadre.
-    "apps/monitoreo/services/fallas/consultas.py": 1,
+BASELINE: dict[str, int] = {
+    # VACIO, y asi tiene que quedarse. Los 26 que existian el 2026-09-05 --12 en
+    # el simulador de cumplimiento, 6 en su cierre, 2 en transada, 2 en su
+    # panel, 2 en pendientes de proyectos, 1 en el panel de contabilidad y 1
+    # anotacion de tipo en fallas-- se arreglaron todos ese mismo dia.
+    #
+    # Si alguna vez hay que volver a poner algo aca, que sea con fecha y con la
+    # razon: una entrada en este diccionario es un NameError en produccion
+    # esperando a que alguien abra esa vista.
 }
 
 _SEPARADOR = "\n  "

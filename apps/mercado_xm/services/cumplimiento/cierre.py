@@ -32,6 +32,17 @@ from .consultas import _contratos_vigentes, _get_bolsa_avg, _resolve_gescon
 from .periodos import _build_cumplimiento_out
 from .xm_api import _fetch_month, _fetch_recent_avg, _unergy_token
 
+# Los campos que el cierre recalcula, en un solo lugar. El `bulk_update`
+# los tomaba de la ultima vuelta del bucle (`list(campos)`): funcionaba de
+# casualidad porque todas las vueltas arman las mismas claves, y se caia si
+# alguna dejaba de armarlas.
+_CAMPOS_CIERRE = (
+    "gen_total_mwh", "compromiso_mwh", "compras_bolsa_mwh",
+    "excedentes_bolsa_mwh", "precio_bolsa_promedio", "compras_bolsa_cop",
+    "excedentes_bolsa_cop", "tarifa_ppa_cop_mwh", "valoracion_contrato_cop",
+    "estado",
+)
+
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
@@ -117,6 +128,11 @@ def cerrar_periodo(anio: int, mes: int) -> dict:
 
     # ── 6. Calculo y persistencia por contrato ────────────────────────────────
     registros: list[dict] = []
+    # Se acumulan durante el bucle y se escriben en un solo bulk al final.
+    # Faltaba inicializarlos: cerrar cualquier mes con al menos un contrato
+    # moria con NameError antes de guardar nada.
+    a_actualizar: list[CumplimientoMensual] = []
+    a_crear: list[CumplimientoMensual] = []
     n_deficit = 0
     n_cumplidos = 0
 
@@ -204,7 +220,7 @@ def cerrar_periodo(anio: int, mes: int) -> dict:
 
     with transaction.atomic():
         if a_actualizar:
-            CumplimientoMensual.objects.bulk_update(a_actualizar, list(campos))
+            CumplimientoMensual.objects.bulk_update(a_actualizar, _CAMPOS_CIERRE)
         if a_crear:
             CumplimientoMensual.objects.bulk_create(a_crear)
 

@@ -24,9 +24,19 @@ from .consultas import (
     _clasificar_remanente_bolsa, _contratos_vigentes, _query_contratos_venta,
     _resolve_gescon,
 )
-from .periodos import _responsable_payload
+from .periodos import _gen_vigencia_mwh, _responsable_payload, _vigencia_window
 from .piscinas import _plantas_del_mes, _proyectos_por_contrato_ppa
-from .xm_api import _fetch_month, _fetch_recent_avg, _unergy_token
+from .xm_api import (
+    _fetch_month,
+    _fetch_range,
+    _fetch_recent_avg,
+    _unergy_token,
+)
+# Alias historico: en el arbol de FastAPI se importaba asi
+# (app/api/v1/cumplimiento.py:28) y el port conservo los usos, no el import.
+from apps.energia.services.comercializacion import (
+    identificador_monitoreo as _mon_id,
+)
 
 logger = logging.getLogger("operaciones.cumplimiento")
 

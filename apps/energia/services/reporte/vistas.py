@@ -303,11 +303,17 @@ def resumen_historico(desde: date, hasta: date) -> dict:
         "detalle_fuente_generacion": detalle_gen,
         "detalle_fuente_consumo": detalle_con,
         "incompletos": incompletos,
+        # El segundo callout solo se manda si el rango tiene mas de un dia. Con
+        # un solo dia, "mas del 30% de sus dias afectados" es lo mismo que "al
+        # menos un dia afectado" -- los dos numeros salian identicos (65 y 65 el
+        # 2026-09-04) y el segundo no aportaba nada, solo daba a entender que
+        # median cosas distintas.
         "incompletos_callouts": [
             {"valor": str(len(incompletos)),
              "etiqueta": "fronteras con al menos un día de datos incompletos"},
-            {"valor": str(len(graves)),
-             "etiqueta": "con más del 30% de sus días afectados"},
+            *([{"valor": str(len(graves)),
+                "etiqueta": "con más del 30% de sus días afectados"}]
+              if (hasta - desde).days >= 1 else []),
         ],
     }
 

@@ -333,3 +333,52 @@ def test_get_power_suma_el_proyecto_por_defecto():
     client.get_power(11, "2026-09-03", "2026-09-03")
 
     assert llamados[0][1]["total_power"] == 1
+
+
+# ── Aviso de forma inesperada ────────────────────────────────────────────────
+# `total_power` decide la ESTRUCTURA de la respuesta, y leer la que no es no
+# lanza ninguna excepcion: el llamador descarta todo y devuelve vacio. Eso paso
+# dos veces en la migracion (la curva del detalle y /inverters-power) y tardo
+# dias en verse. El warning convierte el fallo silencioso en una senal.
+
+def _power(payload):
+    return {"results": {"unit": "kW", "power": payload}}
+
+
+def test_avisa_si_pidio_sumado_y_llego_por_inversor(caplog):
+    client = _cliente()
+    client._get = lambda url, params=None: _power({"INV-1": {"08:00": 110.0}})
+
+    client.get_power(11, total_power=1)
+
+    assert "forma contraria" in caplog.text
+
+
+def test_avisa_si_pidio_por_inversor_y_llego_sumado(caplog):
+    client = _cliente()
+    client._get = lambda url, params=None: _power({"08:00": 218.0})
+
+    client.get_power(11, total_power=0)
+
+    assert "forma contraria" in caplog.text
+
+
+def test_no_avisa_cuando_la_forma_es_la_correcta(caplog):
+    client = _cliente()
+    client._get = lambda url, params=None: _power({"08:00": 218.0})
+    client.get_power(11, total_power=1)
+
+    client._get = lambda url, params=None: _power({"INV-1": {"08:00": 110.0}})
+    client.get_power(11, total_power=0)
+
+    assert "forma contraria" not in caplog.text
+
+
+def test_no_avisa_ante_una_respuesta_vacia_o_rara(caplog):
+    """Sin datos no hay forma que validar -- eso ya lo maneja el llamador."""
+    client = _cliente()
+    for payload in (None, {}, {"results": None}, _power({})):
+        client._get = lambda url, params=None, p=payload: p
+        client.get_power(11, total_power=1)
+
+    assert "forma contraria" not in caplog.text

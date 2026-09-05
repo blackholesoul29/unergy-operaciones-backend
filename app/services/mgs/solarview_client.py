@@ -39,6 +39,35 @@ TIMEOUT = 30.0
 BACKOFF_SECONDS = 2.0
 
 
+def _avisar_si_la_forma_no_es_la_esperada(data, total_power: int, project_id: int) -> None:
+    """Grita si /power/ devolvio una forma distinta a la que se pidio.
+
+    `total_power` decide la ESTRUCTURA: 1 da {ts: kw} y 0 da {inversor: {ts:
+    kw}}. Leer la que no es no lanza ninguna excepcion -- el llamador
+    simplemente descarta todo y devuelve una lista vacia o una curva sin
+    puntos, que es como el proveedor no tuviera datos.
+
+    Eso paso dos veces en la migracion de Solenium (2026-09-03/05): la curva
+    del detalle quedo vacia y /inverters-power devolvio cero inversores. Los
+    dos tardaron dias en verse, porque nada fallaba. Un warning aca los habria
+    delatado el primer dia.
+    """
+    if not isinstance(data, dict):
+        return
+    power = (data.get("results") or {}).get("power") if isinstance(data.get("results"), dict) else None
+    if not isinstance(power, dict) or not power:
+        return
+    primero = next(iter(power.values()))
+    anidado = isinstance(primero, dict)
+    if anidado is bool(total_power):
+        logger.warning(
+            "solarview /power/ devolvio la forma contraria a la pedida "
+            "(project_id=%s total_power=%s, valores %s). El llamador la va a "
+            "descartar en silencio.",
+            project_id, total_power, "anidados" if anidado else "planos",
+        )
+
+
 class SolarViewClient:
     def __init__(self):
         self._base_url = settings.SOLARVIEW_BASE_URL.rstrip("/")
@@ -259,7 +288,9 @@ class SolarViewClient:
             params["date_from"] = date_from
         if date_to:
             params["date_to"] = date_to
-        return self._get(url, params=params)
+        data = self._get(url, params=params)
+        _avisar_si_la_forma_no_es_la_esperada(data, total_power, project_id)
+        return data
 
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
                               variables: str = "kw") -> dict | None:

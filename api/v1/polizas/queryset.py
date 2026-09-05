@@ -17,19 +17,20 @@ def proyectos_con_poliza(search=None, tipo_proyecto=None, poliza_om=None):
     """Proyectos vivos con su info técnica, operador y póliza precargados.
 
     Los `select_related`/`prefetch_related` no son opcionales: el serializer lee
-    `info_tecnica`, `operador` y las fronteras con SU operador para resolver el
+    `info_tecnica`, `operador_red` y las fronteras con SU operador de red para
+    resolver el
     operador de red, y sin precargar son cuatro consultas por fila.
     """
     consulta = (
         py_models.Proyecto.objects.filter(deleted_at__isnull=True)
-        .select_related("operador")
+        .select_related("operador_red")
         .prefetch_related(
             "info_tecnica",
             Prefetch(
                 "fronteras",
                 queryset=fr_models.Frontera.objects.filter(
                     deleted_at__isnull=True
-                ).select_related("operador"),
+                ).select_related("operador_red"),
                 to_attr="fronteras_vivas",
             ),
             Prefetch(

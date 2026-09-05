@@ -16,8 +16,8 @@ def con_relaciones():
     return (
         fr_models.Frontera.objects
         .filter(deleted_at__isnull=True)
-        .select_related("proyecto", "operador")
-        .prefetch_related("operador__contactos")
+        .select_related("proyecto", "operador_red")
+        .prefetch_related("operador_red__contactos")
     )
 
 

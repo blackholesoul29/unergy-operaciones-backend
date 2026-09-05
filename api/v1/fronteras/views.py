@@ -174,7 +174,7 @@ class FronteraViewSet(viewsets.GenericViewSet):
         datos = entrada.validated_data
         self._validar_fks(
             datos.get("proyecto").id if datos.get("proyecto") else None,
-            datos.get("operador").id if datos.get("operador") else None,
+            datos.get("operador_red").id if datos.get("operador_red") else None,
         )
 
         codigo = datos.get("codigo_frontera")
@@ -218,7 +218,7 @@ class FronteraViewSet(viewsets.GenericViewSet):
 
         self._validar_fks(
             cambios["proyecto"].id if cambios.get("proyecto") else None,
-            cambios["operador"].id if cambios.get("operador") else None,
+            cambios["operador_red"].id if cambios.get("operador_red") else None,
         )
 
         nuevo_codigo = cambios.get("codigo_frontera")

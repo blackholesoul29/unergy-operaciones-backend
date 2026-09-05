@@ -32,7 +32,7 @@ class FronteraSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = fr_models.Frontera
-        exclude = ["proyecto", "operador"]
+        exclude = ["proyecto", "operador_red"]
 
     def _proyecto(self, obj, campo, transformar=None):
         proyecto = obj.proyecto
@@ -75,14 +75,16 @@ class FronteraSerializer(serializers.ModelSerializer):
         return self._proyecto(obj, "altitud_msnm")
 
     def get_operador_comercial(self, obj):
-        if obj.operador is None:
+        # El campo del modelo es `operador_red` (db_column operador_red_id), no
+        # `operador`: con el nombre corto el listado entero devolvia 500.
+        if obj.operador_red is None:
             return None
-        return obj.operador.nombre_comercial or obj.operador.nombre_legal
+        return obj.operador_red.nombre_comercial or obj.operador_red.nombre_legal
 
     def get_operador_correos(self, obj) -> list:
-        if obj.operador is None:
+        if obj.operador_red is None:
             return []
-        return [c.email for c in obj.operador.contactos.all()]
+        return [c.email for c in obj.operador_red.contactos.all()]
 
 
 class FronteraEscrituraSerializer(serializers.ModelSerializer):

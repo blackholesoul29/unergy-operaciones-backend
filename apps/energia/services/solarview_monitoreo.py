@@ -527,19 +527,26 @@ def _generacion_30d(crudo: dict | None) -> list[dict]:
     return [{"date": d, "kwh": round(v, 1)} for d, v in sorted(diario.items())]
 
 
-def monitoreo_detalle(proyecto_id: int) -> dict:
+def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
     """Detalle de un proyecto: curva de potencia de hoy, 30 días y medidores.
 
     Sin id de SolarView NO se corta: los inversores quedan sin dato, pero el
     medidor se resuelve por `fronteras.proyecto_id`. Antes esto era un 422 que
     dejaba la tarjeta entera vacía, incluida la mitad que sí tenía con qué
     llenarse (2026-09-03).
+
+    `incluir_snapshot` agrega el snapshot ELÉCTRICO del medidor (voltaje,
+    corriente y potencia por fase). Es lo que necesita el diagrama fasorial, y
+    lo único para lo que sigue haciendo falta el compuesto de 8 familias de
+    variables del nodo. Va detrás de un flag porque cuesta una llamada por
+    nodo: las ~47 tarjetas no lo usan y el fasorial se abre de a uno
+    (2026-09-05 -- sin esto FasorialButton.vue quedó sin datos).
     """
     from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 
     p = _proyecto_o_404(proyecto_id)
 
-    clave = f"detail:{proyecto_id}:{hoy_col().isoformat()}"
+    clave = f"detail:{proyecto_id}:{hoy_col().isoformat()}:{int(incluir_snapshot)}"
     if (cacheado := _cache_get(clave)) is not None:
         return cacheado
 
@@ -591,6 +598,15 @@ def monitoreo_detalle(proyecto_id: int) -> dict:
     # estaba escrito también en SolarLiveView.vue, y podían desincronizarse en
     # silencio: la gráfica mostrando un medidor y el resto de la tarjeta otro.
     medidor, medidor_tipo = elegir_medidor(med_p, med_r)
+
+    # Snapshot eléctrico completo, solo si lo piden (ver el docstring).
+    snap_p = snap_r = None
+    if incluir_snapshot and gaia:
+        with ThreadPoolExecutor(max_workers=2) as pool_snap:
+            f_sp = pool_snap.submit(gaia.get_node_electrical_snapshot, node_principal)                 if node_principal else None
+            f_sr = pool_snap.submit(gaia.get_node_electrical_snapshot, node_respaldo)                 if node_respaldo else None
+        snap_p = f_sp.result() if f_sp else None
+        snap_r = f_sr.result() if f_sr else None
     mejor_nodo = medidor["node_id"] if medidor else (node_principal or node_respaldo)
 
     generacion_30d = _generacion_30d((f_gen.result() or {}) if f_gen else {})
@@ -619,6 +635,10 @@ def monitoreo_detalle(proyecto_id: int) -> dict:
         "medidor_tipo": medidor_tipo,
         "medidor_principal": med_p,
         "medidor_respaldo": med_r,
+        # Solo con incluir_snapshot=True; si no, van en None.
+        "gaia_snapshot": snap_p if medidor_tipo == "principal" else snap_r,
+        "gaia_snapshot_principal": snap_p,
+        "gaia_snapshot_respaldo": snap_r,
     }
     _cache_set(clave, CACHE_TTL_DETALLE, datos)
     return datos
@@ -628,7 +648,9 @@ def potencia_inversores(proyecto_id: int, date_from: str | None = None,
                         date_to: str | None = None) -> dict:
     """Potencia por inversor (serie temporal) en un rango de fechas.
 
-    SolarView devuelve `power` como dict llaveado por `dev_name`. Acá se
+    SolarView devuelve `power` como dict llaveado por `dev_name` **solo si se
+    pide con total_power=0** -- ver SolarViewClient.get_power, donde ese
+    parametro decide la FORMA de la respuesta y no solo su contenido. Acá se
     normaliza a una lista de series —una por inversor— que el front usa tanto
     para la gráfica comparativa como para la individual.
 
@@ -649,7 +671,12 @@ def potencia_inversores(proyecto_id: int, date_from: str | None = None,
     hasta = date_to or hoy
 
     cliente = _get_cliente()
-    crudo = cliente.get_power(sol_id, desde, hasta) or {}
+    # total_power=0 -> series POR INVERSOR ({dev_name: {ts: kw}}), que es lo que
+    # esta funcion arma. Con el default (1) la API entrega la potencia YA SUMADA
+    # del proyecto en un {ts: kw} plano, y el loop de abajo -- que salta lo que
+    # no sea dict -- descartaba la respuesta entera: cero inversores, sin
+    # ningun error. La hoja de inversores de la app movil quedaba vacia.
+    crudo = cliente.get_power(sol_id, desde, hasta, total_power=0) or {}
     potencia = crudo.get("power") or (crudo.get("results") or {}).get("power") or {}
 
     varios_dias = desde != hasta

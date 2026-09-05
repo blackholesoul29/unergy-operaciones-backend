@@ -75,7 +75,14 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
         url_path=r"monitoring/(?P<proyecto_id>[0-9]+)",
     )
     def monitoring_detalle(self, request, proyecto_id=None):
-        return Response(sv.monitoreo_detalle(int(proyecto_id)))
+        # `incluir_snapshot` agrega el snapshot electrico del medidor (voltaje,
+        # corriente y potencia por fase), que necesita el diagrama fasorial.
+        # Cuesta una llamada por nodo, asi que las tarjetas no lo piden.
+        incluir = (request.query_params.get("incluir_snapshot") or "").strip().lower()
+        return Response(sv.monitoreo_detalle(
+            int(proyecto_id),
+            incluir_snapshot=incluir in ("1", "true", "yes"),
+        ))
 
     @action(
         detail=False, methods=["get"],

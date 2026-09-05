@@ -10,12 +10,14 @@ Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
 Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
-from datetime import date
+from datetime import date, timedelta, timezone as tz_std
 
 from django.db import models
 from django.utils import timezone
 
 from apps.plataforma.models import Timer
+
+_COL_TZ = tz_std(timedelta(hours=-5))  # Colombia (UTC-5), sin horario de verano
 
 class FallaCatCategoria(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -199,6 +201,33 @@ class MantenimientoImpacto(Timer):
 
     class Meta:
         db_table = "mantenimiento_impacto"
+
+    @property
+    def duration_hours(self) -> float | None:
+        """Duracion del evento (end - start) en horas. None si falta un extremo.
+
+        No es una columna: se calcula. En SQLAlchemy era un `@hybrid_property`
+        (app/models/mantenimiento_impacto.py) y `scripts/generar_modelos_django.py`
+        no la trajo, porque lee los metadatos de las COLUMNAS -- una propiedad de
+        Python no aparece ahi. `ImpactoSerializer` la siguio pidiendo en
+        `Meta.fields`, asi que el serializer no se podia ni construir y los cuatro
+        endpoints de `mantenimiento-impacto` respondian 500 en cada peticion.
+
+        Se repone como propiedad del modelo y no como campo del serializer para
+        que siga siendo la misma definicion para todo el que la consulte, igual
+        que antes.
+        """
+        if not self.start_time or not self.end_time:
+            return None
+        inicio, fin = self.start_time, self.end_time
+        # Con USE_TZ=True Django las devuelve aware, pero una instancia armada a
+        # mano (un test, un script) puede traerlas naive: se asume Colombia,
+        # mismo criterio que tenia el hybrid_property.
+        if inicio.tzinfo is None:
+            inicio = inicio.replace(tzinfo=_COL_TZ)
+        if fin.tzinfo is None:
+            fin = fin.replace(tzinfo=_COL_TZ)
+        return round(max(0.0, (fin - inicio).total_seconds() / 3600), 2)
 
 
 class StarlinkFactura(Timer):

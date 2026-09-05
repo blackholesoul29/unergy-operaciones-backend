@@ -141,6 +141,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "api.pagination.BasePagination",
     "PAGE_SIZE": 50,
     "UNAUTHENTICATED_USER": None,
+    # Repone el cuerpo dict bajo `detail`: DRF lo devuelve crudo en la raiz
+    # y el frontend lee `e.data.detail`. Ver api/exceptions.py.
+    "EXCEPTION_HANDLER": "api.exceptions.manejador_de_excepciones",
 }
 
 # El contenedor corre en UTC y el codigo asume UTC (ver _hoy_col()).

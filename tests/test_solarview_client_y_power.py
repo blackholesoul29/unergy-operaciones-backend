@@ -307,3 +307,29 @@ def test_get_energy_tolera_una_respuesta_inesperada():
 
     client._get = lambda url, params=None: {"results": None}
     assert client.get_energy(11) == {"results": None}
+
+
+def test_get_power_por_inversor_con_total_power_cero():
+    """`total_power` cambia la FORMA de la respuesta, no solo su contenido:
+    con 1 la API entrega {ts: kw} ya sumado, con 0 entrega
+    {nombre_inversor: {ts: kw}}. Verificado en vivo el 2026-09-03.
+
+    Pedir el default cuando se querian series por inversor devolvia numeros
+    donde el llamador esperaba diccionarios -- y una lista vacia sin error."""
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_power(11, "2026-09-03", "2026-09-03", total_power=0)
+
+    assert llamados[0][1]["total_power"] == 0
+
+
+def test_get_power_suma_el_proyecto_por_defecto():
+    client = _cliente()
+    llamados = []
+    client._get = lambda url, params=None: (llamados.append((url, params)) or {"results": {}})
+
+    client.get_power(11, "2026-09-03", "2026-09-03")
+
+    assert llamados[0][1]["total_power"] == 1

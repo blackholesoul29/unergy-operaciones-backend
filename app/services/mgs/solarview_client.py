@@ -233,9 +233,28 @@ class SolarViewClient:
             resultados["unit"] = "kWh"
         return data
 
-    def get_power(self, project_id: int, date_from: str = "", date_to: str = "") -> dict | None:
+    def get_power(self, project_id: int, date_from: str = "", date_to: str = "",
+                  total_power: int = 1) -> dict | None:
+        """Potencia activa del proyecto -- GET /solarview/measurements/power/.
+
+        `total_power` cambia la FORMA de la respuesta, no solo su contenido
+        (verificado en vivo el 2026-09-03 con project_id=11):
+
+          · 1 (por defecto) -> `results.power` es un {timestamp: kw} plano, ya
+            sumado entre todos los inversores. Es lo que quiere una curva del
+            proyecto, y evita el loop de suma manual que hacia falta con la API
+            vieja de Solenium.
+          · 0 -> `results.power` es un {nombre_inversor: {timestamp: kw}}, o
+            sea la serie de CADA inversor. Es lo que necesita la vista de
+            inversores (movil) y es la forma que devolvia Solenium siempre.
+
+        Pedir el default cuando se querian series por inversor devuelve numeros
+        donde el llamador espera diccionarios, y el resultado es una lista
+        vacia sin ningun error.
+        """
         url = f"{self._base_url}/solarview/measurements/power/"
-        params: dict = {"project_id": project_id, "power": "active_power", "total_power": 1}
+        params: dict = {"project_id": project_id, "power": "active_power",
+                        "total_power": total_power}
         if date_from:
             params["date_from"] = date_from
         if date_to:

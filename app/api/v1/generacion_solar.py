@@ -756,7 +756,11 @@ def project_inverters_power(
     dt = date_to or today
 
     client = _get_client()
-    raw = client.get_power(sol_id, df, dt) or {}
+    # total_power=0 -> series POR INVERSOR ({nombre: {ts: kw}}), que es lo que
+    # este endpoint arma. Con el default (1) la API entrega la suma del proyecto
+    # en un dict plano y el loop de abajo lo descartaba entero, devolviendo cero
+    # inversores sin ningun error.
+    raw = client.get_power(sol_id, df, dt, total_power=0) or {}
     power = raw.get("power") or (raw.get("results") or {}).get("power") or {}
 
     multiday = df != dt

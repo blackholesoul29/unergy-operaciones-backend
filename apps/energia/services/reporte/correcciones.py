@@ -24,6 +24,9 @@ from django.db import transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
 from api.exceptions import NoProcesable, ServicioNoDisponible
+# Igual que en vistas.py: el esquema quedo en el arbol de FastAPI y el port
+# lo usaba sin importarlo, asi que validar una frontera moria con NameError.
+from app.schemas.reporte_energia import ValidarResponse
 from apps.energia.models import (
     ReporteEnergiaConsumo, ReporteEnergiaExclusion, ReporteEnergiaGeneracion,
 )

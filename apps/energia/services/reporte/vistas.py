@@ -37,6 +37,14 @@ from apps.energia.services.reporte.utils import (
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
 from app.services.mgs.gaia_client import GaiaClient
+# Los esquemas de respuesta siguen viviendo en el arbol de FastAPI: el port los
+# usaba sin importarlos, asi que armar la distribucion por fuente moria con
+# `NameError` (detectado por ruff F821 el 2026-09-05).
+from app.schemas.reporte_energia import (
+    DesgloseFuenteItem,
+    DetalleFuenteFronteraItem,
+    DistribucionFuenteItem,
+)
 
 logger = logging.getLogger("operaciones.reporte_energia")
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion

@@ -29,6 +29,18 @@ import pandas as pd
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion
 from apps.energia.services.reporte.utils import lista_a_curva
 
+# Cuantos dias con dato hacen falta antes de confiar en una mediana. Con menos
+# que esto no se estima: se deja sin valor y la frontera queda para revisar.
+#
+# Se quedaron atras en el port desde `app/services/reporte_energia/historial.py`
+# (lineas 21-23), donde estan definidas con estos mismos valores. Al no existir,
+# CADA frontera moria con `NameError: name 'MIN_DIAS_FORMA' is not defined` y la
+# corrida entera terminaba con todo en "Error de clasificacion" -- verificado el
+# 2026-09-05 corriendo el clasificador a mano para el 2026-09-04.
+MIN_DIAS_FP      = 3    # minimo de dias con datos para calcular el factor de perdida
+MIN_DIAS_FORMA   = 3    # minimo de dias con reporte confiable antes de usar mediana/forma
+MIN_DIAS_CONSUMO = 3
+
 DIAS_VENTANA     = 30
 
 # Casos de Generación cuya curva se considera dato real y completo, apto

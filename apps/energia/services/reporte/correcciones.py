@@ -24,9 +24,6 @@ from django.db import transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
 from api.exceptions import NoProcesable, ServicioNoDisponible
-# Igual que en vistas.py: el esquema quedo en el arbol de FastAPI y el port
-# lo usaba sin importarlo, asi que validar una frontera moria con NameError.
-from app.schemas.reporte_energia import ValidarResponse
 from apps.energia.models import (
     ReporteEnergiaConsumo, ReporteEnergiaExclusion, ReporteEnergiaGeneracion,
 )
@@ -565,9 +562,12 @@ def validar(frontera_id: int, fecha: date, usuario) -> dict:
     front, rep, _Modelo = _fila_por_id(frontera_id, fecha)
     rep.revisar_manualmente = False
     rep.save(update_fields=["revisar_manualmente"])
-    return ValidarResponse(
-        frontera_id=frontera_id, fecha=fecha, revisar_manualmente=False,
-    )
+    # dict plano y no ValidarResponse: DRF recorre un modelo Pydantic como
+    # pares (clave, valor) y el cuerpo sale como lista de listas. Mismo contrato
+    # que app/schemas/reporte_energia.py:ValidarResponse.
+    return {
+        "frontera_id": frontera_id, "fecha": fecha, "revisar_manualmente": False,
+    }
 
 
 # ── Exclusiones temporales ───────────────────────────────────────────────────

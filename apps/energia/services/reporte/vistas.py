@@ -37,14 +37,18 @@ from apps.energia.services.reporte.utils import (
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
 from app.services.mgs.gaia_client import GaiaClient
-# Los esquemas de respuesta siguen viviendo en el arbol de FastAPI: el port los
-# usaba sin importarlos, asi que armar la distribucion por fuente moria con
-# `NameError` (detectado por ruff F821 el 2026-09-05).
-from app.schemas.reporte_energia import (
-    DesgloseFuenteItem,
-    DetalleFuenteFronteraItem,
-    DistribucionFuenteItem,
-)
+
+# Las respuestas de este modulo son dicts planos, NO modelos Pydantic.
+#
+# DRF no serializa un modelo Pydantic como objeto: lo RECORRE, y como un
+# BaseModel itera dando pares (clave, valor), el cuerpo sale como
+# `[[["etiqueta","CGM"],["total",7]]]` en vez de `[{"etiqueta":"CGM","total":7}]`.
+# El frontend leia `d.total` -> undefined, y el Resumen mostraba
+# "NaN dias-frontera" con las barras vacias (2026-09-05).
+#
+# La forma de la respuesta es la misma que documentan DistribucionFuenteItem,
+# DesgloseFuenteItem y DetalleFuenteFronteraItem en app/schemas/reporte_energia.py
+# (contrato de FastAPI); lo que se quita es la dependencia, no el contrato.
 
 logger = logging.getLogger("operaciones.reporte_energia")
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion
@@ -124,7 +128,7 @@ _ETIQUETA_FUENTE_CRUDA_GENERACION = {
 def _distribucion_y_detalle(
     filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
     etiquetas_legibles: dict[str, str] | None = None,
-) -> tuple[list[DistribucionFuenteItem], list[DetalleFuenteFronteraItem]]:
+) -> tuple[list[dict], list[dict]]:
     """A partir de (frontera_id, nombre_frontera, etiqueta_cruda, n) --
     devuelve (a) el total agrupado global (para las tarjetas KPI) y (b) el
     detalle por frontera+grupo con desglose de fuentes crudas (para el
@@ -152,18 +156,21 @@ def _distribucion_y_detalle(
         g["desglose"][etq_legible] = g["desglose"].get(etq_legible, 0) + n
 
     global_dist = [
-        DistribucionFuenteItem(etiqueta=_ETIQUETA_GRUPO_FUENTE[g], total=conteos_globales[g])
+        {"etiqueta": _ETIQUETA_GRUPO_FUENTE[g], "total": conteos_globales[g]}
         for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales
     ]
     detalle = [
-        DetalleFuenteFronteraItem(
-            frontera_id=fid, nombre_proyecto=info["nombre"], grupo=_ETIQUETA_GRUPO_FUENTE[grupo],
-            dias_totales=info["dias_totales"], dias_grupo=g["dias"],
-            desglose=[
-                DesgloseFuenteItem(etiqueta=e, dias=n)
+        {
+            "frontera_id": fid,
+            "nombre_proyecto": info["nombre"],
+            "grupo": _ETIQUETA_GRUPO_FUENTE[grupo],
+            "dias_totales": info["dias_totales"],
+            "dias_grupo": g["dias"],
+            "desglose": [
+                {"etiqueta": e, "dias": n}
                 for e, n in sorted(g["desglose"].items(), key=lambda kv: -kv[1])
             ],
-        )
+        }
         for fid, info in por_frontera.items()
         for grupo, g in info["grupos"].items()
     ]

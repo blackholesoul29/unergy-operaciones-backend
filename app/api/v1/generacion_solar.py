@@ -556,6 +556,12 @@ def fleet_monitoring(
 @router.get("/monitoring/{proyecto_id}")
 def project_monitoring_detail(
     proyecto_id: int,
+    incluir_snapshot: bool = Query(
+        False,
+        description="Agrega el snapshot electrico completo del medidor (voltaje, "
+                    "corriente y potencia por fase). Cuesta una llamada extra por "
+                    "nodo, asi que solo lo pide quien lo necesita.",
+    ),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -573,7 +579,7 @@ def project_monitoring_detail(
     # con que llenarse (2026-09-03).
 
     # Caché de detalle por proyecto (evita 21-30 llamadas externas por cada tarjeta)
-    _detail_key = f"detail:{proyecto_id}:{_hoy_col().isoformat()}"
+    _detail_key = f"detail:{proyecto_id}:{_hoy_col().isoformat()}:{int(incluir_snapshot)}"
     cached = _cache_get(_detail_key)
     if cached:
         return cached
@@ -639,6 +645,19 @@ def project_monitoring_detail(
     # estaba escrito tambien en SolarLiveView.vue, y podian desincronizarse en
     # silencio: la grafica mostrando un medidor y el resto de la tarjeta otro.
     medidor, medidor_tipo = elegir_medidor(med_p, med_r)
+
+    # Snapshot electrico completo (voltaje, corriente y potencia por fase). Es
+    # lo que necesita el diagrama fasorial, y lo unico para lo que sigue
+    # haciendo falta el compuesto de 8 familias de variables. Va detras de un
+    # flag porque cuesta una llamada por nodo: las 47 tarjetas no lo usan, y el
+    # fasorial se abre de a uno.
+    snap_p = snap_r = None
+    if incluir_snapshot and gaia:
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_p = ex.submit(gaia.get_node_electrical_snapshot, node_principal) if node_principal else None
+            f_r = ex.submit(gaia.get_node_electrical_snapshot, node_respaldo) if node_respaldo else None
+        snap_p = f_p.result() if f_p else None
+        snap_r = f_r.result() if f_r else None
     best_node = medidor["node_id"] if medidor else (node_principal or node_respaldo)
 
     # ── Fetch per-inverter detail in parallel (strings + AC metrics) ─────────
@@ -722,6 +741,10 @@ def project_monitoring_detail(
         "medidor_tipo":           medidor_tipo,
         "medidor_principal":      med_p,
         "medidor_respaldo":       med_r,
+        # Solo con incluir_snapshot=true; si no, van en None.
+        "gaia_snapshot":          snap_p if medidor_tipo == "principal" else snap_r,
+        "gaia_snapshot_principal": snap_p,
+        "gaia_snapshot_respaldo":  snap_r,
     }
     _cache_set(_detail_key, CACHE_TTL_DETAIL, result)
     return result

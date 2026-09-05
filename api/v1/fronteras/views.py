@@ -328,9 +328,20 @@ class FronteraViewSet(viewsets.GenericViewSet):
 
         # Solo las fronteras VIVAS cuentan como registradas: una borrada libera
         # su código y su border vuelve a aparecer acá.
+        #
+        # Se reconoce por DOS identificadores, y el border de Quoia manda: es
+        # único y no se repite, mientras que `codigo_frontera` es editable y
+        # opcional en el modelo. Si a una frontera ya registrada le cambian o le
+        # borran el código, con solo el código volvería a aparecer acá como
+        # «nueva» y confirmarla crearía una fila duplicada.
+        vivas = fr_models.Frontera.objects.filter(deleted_at__isnull=True)
+        borders_registrados = set(
+            vivas.filter(quoia_border_id__isnull=False)
+            .values_list("quoia_border_id", flat=True)
+        )
         registrados = {
-            c.lower() for c in fr_models.Frontera.objects
-            .filter(codigo_frontera__isnull=False, deleted_at__isnull=True)
+            c.lower() for c in vivas
+            .filter(codigo_frontera__isnull=False)
             .values_list("codigo_frontera", flat=True)
         }
         ignorados = {
@@ -352,7 +363,11 @@ class FronteraViewSet(viewsets.GenericViewSet):
         for codigo, categoria, nombre_quoia, _frt in quoia_service.iterar_frt(
             resultado
         ):
-            if codigo in registrados or codigo in ignorados or codigo in vistos:
+            if codigo in ignorados or codigo in vistos:
+                continue
+            if quoia_service.ya_registrada(
+                codigo, _frt.get("id"), registrados, borders_registrados
+            ):
                 continue
             vistos.add(codigo)
             sugerido = por_numero.get(_mgs_number(nombre_quoia))
@@ -421,6 +436,25 @@ class FronteraViewSet(viewsets.GenericViewSet):
             "generacion" if categoria == "generacion" else "consumo"
         )
 
+        # Dos capas, y hacen cosas distintas:
+        #
+        #   · por id (el `frt_code` de arriba y el `quoia_border_id` de acá):
+        #     duro, no se puede forzar. El border de Quoia es único y no se
+        #     repite, así que resuelve la identidad sin ambigüedad.
+        #   · por nombre parecido (`_avisar_duplicado`, más abajo): blando, se
+        #     puede forzar. Cubre lo que los ids NO ven -- una frontera creada
+        #     a mano no recibe `quoia_border_id` (solo se escribe acá), y si
+        #     además quedó sin `codigo_frontera` (`null=True` en el modelo) no
+        #     tiene ningún id con qué reconocerse. Confirmar su border crearía
+        #     una segunda fila para el mismo punto físico.
+        border_id = frt.get("id")
+        if border_id is not None and fr_models.Frontera.objects.filter(
+            quoia_border_id=border_id, deleted_at__isnull=True
+        ).exists():
+            raise Conflict(
+                "Ese border de Quoia ya está registrado en otra frontera"
+            )
+
         self._avisar_duplicado(request, nombre, tipo)
 
         with transaction.atomic():
@@ -438,7 +472,7 @@ class FronteraViewSet(viewsets.GenericViewSet):
             frontera.nombre_frontera = nombre
             frontera.tipo_frontera = tipo
             frontera.estado = "activa"
-            frontera.quoia_border_id = frt.get("id")
+            frontera.quoia_border_id = border_id
             frontera.fecha_registro_asic = self._fecha(frt.get("init_date"))
             quoia_service.fijar_medidores(
                 frontera, *quoia_service.info_de_medidores(codigo)

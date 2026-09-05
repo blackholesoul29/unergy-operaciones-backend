@@ -119,3 +119,28 @@ def fijar_medidores(frontera, principal, respaldo) -> None:
         setattr(frontera, f"marca_med_{sufijo}", info.get("marca"))
         setattr(frontera, f"modelo_med_{sufijo}", info.get("modelo"))
         setattr(frontera, f"nro_serie_med_{sufijo}", info.get("serie"))
+
+
+def ya_registrada(codigo, border_id, codigos_vivos: set, borders_vivos: set) -> bool:
+    """¿Este border de Quoia ya tiene fila viva acá?
+
+    Se pregunta por DOS identificadores, y el border de Quoia manda: es único
+    y no se repite. `codigo_frontera`, en cambio, es editable y opcional en el
+    modelo (`null=True`), así que preguntando solo por él una frontera a la que
+    le cambiaron o le borraron el código reaparecía como «nueva» en pendientes,
+    y confirmarla creaba una segunda fila para el mismo punto físico.
+
+    Hasta el 2026-09-05 ese hueco lo tapaba un aviso difuso por parecido de
+    nombre. Con la identidad resuelta por id, ese aviso no aporta: solo obliga a
+    confirmar algo que nunca puede ser correcto, y como el frontend no cableaba
+    el `?forzar=true` que el backend siempre aceptó, dejaba al usuario sin
+    salida (reportado al agregar la minigranja de San Luis de Sincé).
+
+    Ojo con lo que NO cubre: una frontera creada a mano no recibe
+    `quoia_border_id` -- solo se escribe al confirmar desde acá -- así que si
+    además quedó sin código, no tiene ninguno de los dos ids y sigue siendo
+    invisible para esta pregunta.
+    """
+    if border_id is not None and border_id in borders_vivos:
+        return True
+    return bool(codigo) and codigo.lower() in codigos_vivos
